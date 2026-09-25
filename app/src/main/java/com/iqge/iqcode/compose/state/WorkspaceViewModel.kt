@@ -7,6 +7,7 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.iqge.iqcode.compose.data.MockWorkspaceRepository
+import com.iqge.iqcode.compose.data.SessionReader
 import com.iqge.iqcode.compose.data.WorkspaceRepository
 import com.iqge.iqcode.compose.engine.EngineEvents
 import com.iqge.iqcode.compose.engine.EngineOverrides
@@ -53,6 +54,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -122,26 +124,37 @@ class WorkspaceViewModel(
 
     private var pendingQuestions: PendingQuestions? = null
 
+    /**
+     * 会话操作的目标。
+     *
+     * `showSessionActions(session)` 只负责弹选择器，真正的动作在选择器回调里执行；
+     * 那时只能拿到选项文案，拿不到是哪条会话。所以必须把目标记住 ——
+     * 否则会出现"想删 A 结果删了当前会话"这类错删。
+     */
+    private var pendingSessionAction: SessionSummary? = null
 
-    private val initialSessions = repo.sessions()
+
     private val _state = MutableStateFlow(
         WorkspaceUiState(
             projectName = repo.projectName(),
             projectPath = repo.projectPath(),
-            sessions = initialSessions,
-            activeSessionId = initialSessions.firstOrNull()?.id ?: "",
-            transcript = repo.transcript(initialSessions.firstOrNull()?.id ?: ""),
-            contextTokens = 41_200,
+            // 会话列表 / 对话历史 / 任务清单都来自磁盘，这里先给空值，
+            // 由 [initSessionState] 在 IO 线程读好后填上。
+            // 不在构造器里同步读盘：会话 JSONL 可能有几千行，会拖慢启动。
+            sessions = emptyList(),
+            activeSessionId = "",
+            transcript = emptyList(),
+            tasks = emptyList(),
+            contextTokens = 0,
             contextWindow = 200_000,
             deviceStatus = clockLabel(),
             diff = repo.changes(),
             terminalLines = repo.terminalBanner(repo.projectPath()),
             filePath = repo.projectPath(),
             fileEntries = repo.rootFiles(),
-            busySessionIds = initialSessions.filter { it.busy }.map { it.id }.toSet(),
+            busySessionIds = emptySet(),
             composerBusy = false,
             workingStatus = null,
-            tasks = repo.tasks(),
             sidebarOpen = false,
             // 真实探测，不再是写死的 true
             runtimeReady = installer.isInstalled(),
@@ -149,6 +162,24 @@ class WorkspaceViewModel(
     )
 
     val state: StateFlow<WorkspaceUiState> = _state.asStateFlow()
+
+    init {
+        initSessionState()
+    }
+
+    /**
+     * 首次载入：列出磁盘上的真实会话，有历史就把最近一条打开。
+     *
+     * 「自动打开最近一条」是刻意保留的行为：否则用户每次启动都看到空对话流，
+     * 会以为历史丢了（历史其实在侧栏里，但要自己去点）。
+     */
+    private fun initSessionState() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val sessions = SessionReader.list(_state.value.projectPath)
+            _state.update { it.copy(sessions = sessions) }
+            sessions.firstOrNull()?.let { openSession(it) }
+        }
+    }
 
     private var idCounter = 0L
 
@@ -775,6 +806,31 @@ class WorkspaceViewModel(
                 },
             )
         }
+        // 第一轮结束后会话文件才真正落盘（引擎在 sendPrompt 里创建 SessionStore），
+        // 所以这里必须重读列表，否则新会话在侧栏里不存在。
+        syncActiveSessionFromDisk()
+    }
+
+    /**
+     * 回合结束后把当前会话对齐到磁盘状态。
+     *
+     * 做两件事：
+     * 1. 重读会话列表 —— 让刚创建的会话出现、让标题/消息数/时间刷新；
+     * 2. 如果当前还没有 activeSessionId（刚 /new 过），把引擎刚写出的文件认领为当前会话。
+     */
+    private fun syncActiveSessionFromDisk() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val sessions = SessionReader.list(_state.value.projectPath)
+            val sessionFile = engine.sessionFile()
+            _state.update { s ->
+                val activeId = when {
+                    s.activeSessionId.isNotEmpty() -> s.activeSessionId
+                    sessionFile != null -> sessionFile.absolutePath
+                    else -> ""
+                }
+                s.copy(sessions = sessions, activeSessionId = activeId)
+            }
+        }
     }
 
     override fun onEngineError(message: String, error: Throwable?) {
@@ -1100,6 +1156,9 @@ class WorkspaceViewModel(
     }
 
     fun showSessionActions(session: SessionSummary) {
+        // 记住操作对象：动作是在**选择器回调**里执行的，那时只能拿到选项文案，
+        // 拿不到是哪条会话 —— 不记住就会出现"删掉了当前会话"这种错删。
+        pendingSessionAction = session
         val options = if (session.note.isEmpty()) listOf("编辑备注", "恢复会话", "删除会话")
         else listOf("编辑备注", "清除备注", "恢复会话", "删除会话")
         _state.update {
@@ -1110,6 +1169,42 @@ class WorkspaceViewModel(
                     options = options.map { ChoiceOption(it) },
                 )
             )
+        }
+    }
+
+    /** 打开备注编辑：没有选项，只靠自由输入提交。 */
+    private fun editSessionNote(session: SessionSummary) {
+        _state.update {
+            it.copy(
+                choicePicker = ChoicePickerState(
+                    title = "会话备注",
+                    intent = ChoiceIntent.SESSION_NOTE,
+                    prompt = "给这条会话写一句备注，方便以后在侧栏里认出来。",
+                    options = emptyList(),
+                    allowFreeForm = true,
+                    freeFormHint = if (session.note.isEmpty()) "例如：修好了相册崩溃" else session.note,
+                ),
+            )
+        }
+    }
+
+    /** 写入备注到磁盘。空字符串表示清除。 */
+    private fun saveSessionNote(session: SessionSummary, note: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = File(session.id)
+            // titleOverride 传空串 = 不覆盖标题，只改备注。
+            val ok = SessionReader.updateMetadata(file, note, "")
+            val sessions = SessionReader.list(_state.value.projectPath)
+            _state.update {
+                it.copy(
+                    sessions = sessions,
+                    message = if (ok) {
+                        if (note.isEmpty()) "已清除备注" else "备注已保存"
+                    } else {
+                        "备注保存失败"
+                    },
+                )
+            }
         }
     }
 
@@ -1169,12 +1264,23 @@ class WorkspaceViewModel(
                 it.copy(choicePicker = null, message = "${option.label}（Mock）")
             }
             ChoiceIntent.SESSION_ACTION -> {
+                val target = pendingSessionAction
+                pendingSessionAction = null
                 _state.update { it.copy(choicePicker = null) }
-                when (option.label) {
-                    "删除会话" -> deleteSession(_state.value.activeSessionId)
-                    "恢复会话" -> _state.update { it.copy(sidebarOpen = false, message = "已恢复会话（Mock）") }
-                    else -> _state.update { it.copy(message = "${option.label}（Mock）") }
+                if (target == null) {
+                    // 拿不到操作对象就什么都不做。宁可无反应，也不能猜一条会话删掉。
+                    _state.update { it.copy(message = "找不到目标会话，操作已取消") }
+                } else when (option.label) {
+                    "删除会话" -> deleteSession(target.id)
+                    "恢复会话" -> openSession(target)
+                    "编辑备注" -> editSessionNote(target)
+                    "清除备注" -> saveSessionNote(target, "")
+                    else -> _state.update { it.copy(message = "${option.label}（未接线）") }
                 }
+            }
+            ChoiceIntent.SESSION_NOTE -> {
+                // 这个分支正常不会走到（备注靠自由输入提交），留作兜底。
+                _state.update { it.copy(choicePicker = null) }
             }
             ChoiceIntent.QUESTION -> {
                 // 提问流程正常走 onSubmitSelection / dismissChoicePicker；
@@ -1196,16 +1302,30 @@ class WorkspaceViewModel(
 
     /**
      * 选择窗口里的「其他回答…」提交：不走选项，直接把这段自由文本当作输入。
-     * 在计划模式下它等价于"自定义目标"，会作为提示词发给引擎。
+     * 在计划模式下它等价于"自定义目标"，会作为提示词发给引擎；
+     * 在会话备注中它是备注正文。
      */
     fun onSubmitFreeForm(text: String) {
         val trimmed = text.trim()
+        val picker = _state.value.choicePicker
+        if (picker == null) return
+        // 备注可以提交空字符串（= 清除），所以不能和"空输入就关闭"混在一起。
+        if (picker.intent == ChoiceIntent.SESSION_NOTE) {
+            val target = pendingSessionAction
+            pendingSessionAction = null
+            _state.update { it.copy(choicePicker = null) }
+            if (target == null) {
+                _state.update { it.copy(message = "找不到目标会话，备注未保存") }
+            } else {
+                saveSessionNote(target, trimmed)
+            }
+            return
+        }
         if (trimmed.isEmpty()) {
             dismissChoicePicker()
             return
         }
-        val picker = _state.value.choicePicker
-        if (picker?.intent == ChoiceIntent.PLAN_GOAL) {
+        if (picker.intent == ChoiceIntent.PLAN_GOAL) {
             _state.update { it.copy(choicePicker = null, composerText = trimmed) }
             send()
             return
@@ -1223,31 +1343,56 @@ class WorkspaceViewModel(
 
     // ---------- 会话 ----------
 
+    /**
+     * 新建会话。
+     *
+     * 这里只重置引擎的对话上下文（新 workflowId），**不**立即建文件：
+     * 引擎的 `SessionStore` 是在第一轮发消息时才创建的，提前建会留下
+     * 一堆"0 条消息"的空会话文件，侧栏会很快被垃圾填满。
+     * 所以界面上先插入一个占位条目，等第一轮结束后 [refreshSessions] 会用真实文件替换它。
+     */
     fun newSession() {
-        val id = nextId("s")
-        val summary = SessionSummary(
-            id = id,
-            title = "新会话",
-            project = _state.value.projectName,
-            messageCount = 0,
-            updatedAtLabel = "刚刚",
-        )
+        engine.resetConversation()
+        discardStreamingAssistant()
+        currentGroupId = null
+        liveTools.clear()
+        progressBuffers.clear()
+        progressLastFlush.clear()
+        pendingPermissionId = null
         _state.update {
             it.copy(
-                sessions = listOf(summary) + it.sessions,
-                activeSessionId = id,
+                // 占位条目的 id 用空串而不是伪造 id：它不是真实文件，
+                // 若被当成路径去打开会失败，空串能让"打不开"这件事显式化。
+                activeSessionId = "",
                 transcript = emptyList(),
+                tasks = emptyList(),
                 contextTokens = 0,
                 composerBusy = false,
                 workingStatus = null,
                 tab = WorkspaceTab.CHAT,
                 sidebarOpen = false,
-                message = "已创建新会话",
+                message = "已开始新会话，第一条消息会创建会话文件",
             )
         }
     }
 
+    /**
+     * 打开一条历史会话。
+     *
+     * 两件事都要做，缺一不可：
+     * 1. `engine.resumeConversation(file)` —— 让**引擎**把历史装回 provider 上下文，
+     *    否则界面上看得到历史、模型却不知道，追问会答非所问；
+     * 2. 从同一个 JSONL 重建界面 transcript。
+     *
+     * 文件读取放 IO 线程：一个长会话的 JSONL 可能有几千行，在主线程读会卡住界面。
+     */
     fun openSession(session: SessionSummary) {
+        val file = File(session.id)
+        if (!file.isFile) {
+            _state.update { it.copy(message = "会话文件不存在：${session.id}") }
+            refreshSessions()
+            return
+        }
         // 切会话必须先把引擎这一轮停掉：否则旧会话的回调还会继续往新的
         // transcript 里写（引擎的 cancel 会连带取消三个门控）。
         engine.cancel()
@@ -1257,32 +1402,88 @@ class WorkspaceViewModel(
         progressBuffers.clear()
         progressLastFlush.clear()
         pendingPermissionId = null
-        _state.update {
-            it.copy(
-                activeSessionId = session.id,
-                transcript = repo.transcript(session.id),
-                sidebarOpen = false,
-                tab = WorkspaceTab.CHAT,
-                composerBusy = session.busy,
-                workingStatus = if (session.busy) "正在执行工具…" else null,
-                contextTokens = 28_400,
-            )
+
+        _state.update { it.copy(sidebarOpen = false, tab = WorkspaceTab.CHAT, workingStatus = "正在载入会话…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            val transcript = SessionReader.transcript(file)
+            val tasks = SessionReader.tasks(file)
+            // 引擎必须先配置好才有 config 可用，否则 resumeConversation 不会恢复项目/工作流。
+            val resumed = runCatching {
+                engine.configure(engineOverrides())
+                engine.resumeConversation(file)
+            }
+            _state.update {
+                it.copy(
+                    activeSessionId = session.id,
+                    transcript = transcript,
+                    tasks = tasks,
+                    contextTokens = engine.estimateContextTokens(),
+                    contextWindow = engine.contextWindowTokens().takeIf { w -> w > 0 } ?: it.contextWindow,
+                    composerBusy = false,
+                    workingStatus = null,
+                    message = resumed.exceptionOrNull()?.let { error ->
+                        "会话历史已显示，但引擎恢复失败：" + (error.message ?: "未知原因")
+                    },
+                )
+            }
         }
     }
 
+    /**
+     * 删除会话。
+     *
+     * 删除的是**磁盘上的文件**，不是列表里的一项 —— 只从列表移除的话，
+     * 下次启动它又会回来，用户会以为删除没生效。
+     */
     fun deleteSession(id: String) {
-        val remaining = _state.value.sessions.filterNot { it.id == id }
-        _state.update {
-            it.copy(
-                sessions = remaining,
-                activeSessionId = if (it.activeSessionId == id) (remaining.firstOrNull()?.id ?: "") else it.activeSessionId,
-                transcript = if (it.activeSessionId == id) repo.transcript(remaining.firstOrNull()?.id ?: "") else it.transcript,
-                message = "会话已删除",
-            )
+        if (id.isEmpty()) {
+            // 尚未落盘的占位会话：直接清掉当前视图即可。
+            _state.update { it.copy(activeSessionId = "", transcript = emptyList(), tasks = emptyList(), message = "会话已清空") }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val removed = SessionReader.delete(File(id))
+            val wasActive = _state.value.activeSessionId == id
+            if (wasActive) {
+                engine.resetConversation()
+                discardStreamingAssistant()
+            }
+            val sessions = SessionReader.list(_state.value.projectPath)
+            val next = sessions.firstOrNull()
+            _state.update {
+                it.copy(
+                    sessions = sessions,
+                    activeSessionId = if (wasActive) "" else it.activeSessionId,
+                    transcript = if (wasActive) emptyList() else it.transcript,
+                    tasks = if (wasActive) emptyList() else it.tasks,
+                    message = if (removed) "会话已删除" else "删除失败：文件可能已被移除",
+                )
+            }
+            // 删除后仍留历史时，顺手把最近一条打开，避免出现"删完一片空白"。
+            if (wasActive && next != null) openSession(next)
         }
     }
 
-    fun openSidebar() = _state.update { it.copy(sidebarOpen = true) }
+    /** 从磁盘重新读取会话列表（新建/发消息/删除之后调用）。 */
+    fun refreshSessions() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val sessions = SessionReader.list(_state.value.projectPath)
+            _state.update { state ->
+                // 保留"尚未落盘的新会话"这一状态：此刻 activeSessionId 为空且
+                // 列表里还没有对应文件，不能被列表刷新覆盖掉。
+                state.copy(sessions = sessions)
+            }
+        }
+    }
+
+
+
+    fun openSidebar() {
+        // 每次拉开侧栏都重读一次文件列表：新会话是在**第一轮消息之后**才落盘的，
+        // 不刷新的话"刚聊完的会话"在侧栏里看不到。
+        refreshSessions()
+        _state.update { it.copy(sidebarOpen = true) }
+    }
     fun closeSidebar() = _state.update { it.copy(sidebarOpen = false) }
 
     // ---------- 工作区 ----------

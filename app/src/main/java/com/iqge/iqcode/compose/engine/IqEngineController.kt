@@ -21,6 +21,7 @@ import com.termux.app.iqcode.storage.ApiSettingsStore
 import com.termux.app.iqcode.tasks.TaskStore
 import com.termux.app.iqcode.tools.IQTool
 import org.json.JSONObject
+import java.io.File
 
 /**
  * 界面侧覆盖项。
@@ -218,6 +219,16 @@ internal class IqEngineController(
         runCatching { engine?.cancel() }
     }
 
+    fun resumeConversation(file: File) {
+        generation++
+        synchronized(deltaLock) {
+            pendingText.setLength(0)
+            flushPosted = false
+        }
+        main.removeCallbacks(flushDelta)
+        engine().resumeConversation(file)
+    }
+
     fun resetConversation() {
         generation++
         synchronized(deltaLock) {
@@ -260,6 +271,9 @@ internal class IqEngineController(
     // ------------------------------------------------------------------
 
     fun estimateContextTokens(): Int = runCatching { engine?.estimateContextTokens() ?: 0 }.getOrDefault(0)
+
+    /** 当前会话的 JSONL 文件。引擎尚未配置或还没写过内容时为 null。 */
+    fun sessionFile(): File? = runCatching { engine?.sessionFile }.getOrNull()
 
     fun hasMeasuredContextUsage(): Boolean =
         runCatching { engine?.hasMeasuredContextUsage() ?: false }.getOrDefault(false)

@@ -1,33 +1,29 @@
 package com.iqge.iqcode.compose.data
 
-import com.iqge.iqcode.compose.model.AgentTask
-import com.iqge.iqcode.compose.model.ChatItem
+
+
 import com.iqge.iqcode.compose.model.DiffState
 import com.iqge.iqcode.compose.model.FileEntry
 import com.iqge.iqcode.compose.model.OpenFile
-import com.iqge.iqcode.compose.model.SessionSummary
+
 import com.iqge.iqcode.compose.model.TerminalLine
 
 /**
- * 数据来源抽象。
+ * 尚未真实化的数据来源。
  *
- * 现状：**对话已经接到真实引擎**（见 `engine/IqEngineController`），
- * 所以这里只剩「会话列表 / 变更 / 文件 / 终端横幅」这些尚未真实化的部分。
+ * 现状：**会话列表 / 对话历史 / 任务清单已接真实存储**（见 [SessionReader] 与
+ * `engine/IqEngineController`），所以它们**不再**出现在这个接口里。
  *
- * `assistantReply` / `toolSequence` 这两个模拟流式回复与模拟工具序列的接口
- * 已经随接入真实引擎一并删除 —— 留着它们会让人误以为对话仍走 Mock，
- * 一旦被误接回去就会出现"界面像在正常工作、其实没调用模型"这种最难查的问题。
+ * 留在这里的是还没真实化的部分：变更面板（git diff）、文件面板、终端。
+ * 它们会在后续 Phase 逐项换成真实实现，届时这个接口的方法会一个个减少，
+ * 而不是被整体替换。
  *
- * 后续 Phase 会逐项把剩下的方法换成真实实现（文件系统 / git diff / 真实 PTY / 会话持久化），
- * 届时这里的方法会一个个减少，而不是被整体替换。
+ * ⚠️ 刻意不保留"返回假会话列表 / 假对话历史"的方法：那类方法一旦存在，
+ * 就很容易被误接回去，表现为"界面像在工作、其实数据是假的"。
  */
 interface WorkspaceRepository {
     fun projectName(): String
     fun projectPath(): String
-    fun sessions(): List<SessionSummary>
-    /** 当前会话的 Agent 任务清单（悬浮卡显示"当前窗口"，详情窗口显示全部）。 */
-    fun tasks(): List<AgentTask>
-    fun transcript(sessionId: String): List<ChatItem>
     fun changes(): DiffState
     fun rootFiles(): List<FileEntry>
     fun childrenOf(path: String): List<FileEntry>

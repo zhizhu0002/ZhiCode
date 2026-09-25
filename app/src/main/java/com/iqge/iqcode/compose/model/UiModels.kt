@@ -137,6 +137,9 @@ enum class ChoiceIntent {
 
     /** 引擎 `AskUserQuestion` 发起的分步提问。 */
     QUESTION,
+
+    /** 会话备注：没有选项，只靠自由输入提交（允许空串表示清除）。 */
+    SESSION_NOTE,
 }
 
 data class DiffFile(
