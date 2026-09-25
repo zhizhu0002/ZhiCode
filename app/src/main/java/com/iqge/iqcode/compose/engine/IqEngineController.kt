@@ -13,6 +13,8 @@ import com.termux.app.iqcode.core.PermissionGate
 import com.termux.app.iqcode.core.PermissionModePolicy
 import com.termux.app.iqcode.core.PlanApprovalGate
 import com.termux.app.iqcode.core.QuestionGate
+import com.termux.app.iqcode.tools.WebFetchTool
+import com.termux.app.iqcode.tools.WebSearchTool
 import com.termux.app.iqcode.model.PlanWorkflowState
 import com.termux.app.iqcode.model.SessionConfig
 import com.termux.app.iqcode.model.ToolCall
@@ -308,6 +310,15 @@ internal class IqEngineController(
     fun configuredSystemPrompt(): String = sessionConfig?.customSystemPrompt.orEmpty()
 
     /**
+     * 引擎侧当前是否允许联网搜索。
+     *
+     * 设置页那个开关改的是界面状态与 `SessionConfig`，中间隔了一次 `configure`，
+     * 而 `/web on|off` 最容易出的问题正是"开关变了但没下发"。
+     * 有这个读取口就能直接对照，而不是靠界面自己声明。
+     */
+    fun configuredWebSearchEnabled(): Boolean = sessionConfig?.webSearchEnabled == true
+
+    /**
      * 手动触发一次上下文压缩（`/compact`）。
      *
      * 引擎的 [IQCodeEngine.compactContext] 是**同步阻塞**的：它要调用模型生成语义摘要，
@@ -322,6 +333,44 @@ internal class IqEngineController(
         val engine = engine ?: error("引擎尚未初始化")
         engine.compactContext(instructions.trim())
     }
+
+    /**
+     * 手动联网搜索（`/web 关键词`）。
+     *
+     * 直接执行 [WebSearchTool]，**不经过模型**：原版 `runManualWebSearch` 就是这么做的，
+     * 好处是用户输入后立刻拿到结果，不需要一次模型往返（也就不会消耗上下文）。
+     *
+     * 同步阻塞（走网络），调用方需放 IO 线程。
+     */
+    fun manualWebSearch(query: String): Result<String> = runCatching {
+        val config = currentConfig()
+        check(config.webSearchEnabled) { "联网搜索已关闭，可输入 /web on 开启" }
+        val result = WebSearchTool().execute(config, JSONObject().put("query", query.trim()))
+        if (result.isError) throw IllegalStateException(result.content)
+        result.content
+    }
+
+    /**
+     * 手动读取网页（`/web fetch <url>`）。
+     *
+     * 与 [manualWebSearch] 同理，直接执行 [WebFetchTool]。
+     */
+    fun manualWebFetch(url: String): Result<String> = runCatching {
+        val config = currentConfig()
+        check(config.webSearchEnabled) { "联网搜索已关闭，可输入 /web on 开启" }
+        val result = WebFetchTool().execute(config, JSONObject().put("url", url.trim()))
+        if (result.isError) throw IllegalStateException(result.content)
+        result.content
+    }
+
+    /**
+     * 取当前生效的会话配置。
+     *
+     * 优先用已经 `configure` 过的那份（它带着界面覆盖项，例如界面里刚改的搜索条数）；
+     * 没有则直接从存储读——手动搜索可能在还没发过任何消息时就触发。
+     */
+    private fun currentConfig(): SessionConfig =
+        sessionConfig ?: ApiSettingsStore(appContext).load()
 
     fun contextPercent(): Int = runCatching { engine?.contextPercent() ?: 0 }.getOrDefault(0)
 

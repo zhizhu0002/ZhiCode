@@ -1177,6 +1177,8 @@ class WorkspaceViewModel(
 
             "/tasks" -> openTaskList()
 
+            "/web" -> handleWebSlash(arg)
+
             "/context" -> {
                 if (arg.isEmpty()) {
                     showContextInfo()
@@ -1268,6 +1270,79 @@ class WorkspaceViewModel(
         }
         _state.update { it.copy(composerText = lastUser.body) }
         send()
+    }
+
+    /**
+     * `/web`：联网搜索。
+     *
+     * 四种形态（与原版 `handleWebSlash` 一致）：
+     * - 无参数 → 打开联网设置
+     * - `on` / `off` → 开关，**真的写进设置并重配引擎**（否则下一轮请求还按旧值走）
+     * - `fetch <url>` → 直接读网页
+     * - 其它 → 当作搜索词直接搜
+     *
+     * 后两种走 [IqEngineController.manualWebSearch]，**不经过模型**：
+     * 用户输入后立刻拿到结果，省掉一次模型往返与相应的上下文消耗。
+     */
+    private fun handleWebSlash(arg: String) {
+        when {
+            arg.isEmpty() -> {
+                openSettings()
+                _state.update { it.copy(settingsDraft = it.settingsDraft?.copy(category = SettingsCategory.NETWORK)) }
+            }
+            arg.equals("on", ignoreCase = true) || arg == "开启" -> setWebSearch(true)
+            arg.equals("off", ignoreCase = true) || arg == "关闭" -> setWebSearch(false)
+            arg.startsWith("fetch ", ignoreCase = true) -> {
+                val url = arg.substring(6).trim()
+                if (url.isEmpty()) appendInfo("网页读取", "用法：`/web fetch https://example.com`")
+                else runWebAction("网页读取", url) { engine.manualWebFetch(url) }
+            }
+            else -> runWebAction("联网搜索", arg) { engine.manualWebSearch(arg) }
+        }
+    }
+
+    private fun setWebSearch(enabled: Boolean) {
+        _state.update { s ->
+            s.copy(
+                settings = s.settings.copy(webSearchEnabled = enabled),
+                settingsDraft = s.settingsDraft?.copy(webSearchEnabled = enabled),
+                message = if (enabled) "联网搜索已开启" else "联网搜索已关闭",
+            )
+        }
+        // 立刻下发：这一步容易漏，漏了就会"开关看起来变了，但下一轮请求还用旧值"。
+        runCatching { engine.configure(engineOverrides()) }
+    }
+
+    /**
+     * 执行一次手动联网动作，并把文本结果落成一张助手卡片。
+     *
+     * 先放一张"进行中"的卡片：网络请求可能要几秒，没有反馈用户会以为没反应。
+     * 结果出来后**原地替换**那张卡片，而不是追加一条——否则对话流里会留下
+     * 一个永远停在"正在搜索…"的死卡片。
+     */
+    private fun runWebAction(title: String, subject: String, action: suspend () -> Result<String>) {
+        val cardId = nextId("web")
+        _state.update {
+            it.copy(
+                transcript = it.transcript + ChatItem(
+                    id = cardId,
+                    kind = ChatKind.ASSISTANT,
+                    title = title,
+                    body = "正在处理：`$subject` …",
+                ),
+            )
+        }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { action() }
+            _state.update { s ->
+                val body = result.getOrElse { error -> (error.message ?: "未知原因") }
+                s.copy(
+                    transcript = s.transcript.map { item ->
+                        if (item.id != cardId) item else item.copy(body = body, streaming = false)
+                    },
+                )
+            }
+        }
     }
 
     /** `/context`（无参数）与 `/usage`、`/stats`、`/status` 共用。 */    private fun showContextInfo() {
