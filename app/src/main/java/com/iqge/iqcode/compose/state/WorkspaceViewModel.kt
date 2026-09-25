@@ -1680,6 +1680,16 @@ class WorkspaceViewModel(
         }
     }
 
+    /**
+     * 把 **Compose 树之外**发生的事件写进对话流。
+     *
+     * 目前唯一的来源是 `MainActivity.onResume`：`AndroidIntentBridge.resumePendingApkInstall`
+     * 在用户从「安装未知应用」权限页返回后会继续 APK 安装，并可能返回错误
+     * （例如 APK 已损坏、系统安装器不可用）。这类结果必须落进对话流，
+     * 因为一次性的 Toast 很容易被漏掉，而失败恰恰是最不能漏的。
+     */
+    fun reportExternalEvent(title: String, body: String) = appendInfo(title, body)
+
     // ---------- 选择器 ----------
 
     fun showPermissionPicker() {

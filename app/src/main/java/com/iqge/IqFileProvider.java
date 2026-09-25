@@ -3,9 +3,11 @@ package com.iqge;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.res.AssetFileDescriptor;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
+import android.os.Bundle;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
@@ -61,6 +63,32 @@ public final class IqFileProvider extends ContentProvider {
         }
         File file = resolve(uri, true);
         return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+    }
+
+    /**
+     * 带类型地打开文件。
+     *
+     * ## 为什么必须重写
+     *
+     * 不重写的话会走父类的默认实现，而它在类型不匹配时直接抛
+     * `FileNotFoundException("Can't open ... as type ...")`。问题在于
+     * `ContentResolver.openAssetFileDescriptor(uri, "r")` 传下来的过滤器**是调用方的包名**，
+     * 不是 MIME 类型；父类拿它和 `getType(uri)`（这里是
+     * `application/vnd.android.package-archive`）比较，必然不匹配。
+     *
+     * 后果是 `AndroidIntentBridge.installApk` 里那段"先试着打开一次，以便给出可读错误"
+     * 的预校验会对**完全正常的 APK** 报"无法读取 APK"，把一次成功的安装判成失败。
+     *
+     * ## 安全性没有放松
+     *
+     * 类型过滤从来不是本 provider 的访问控制手段——真正的边界是 `resolve()` 里的
+     * 根目录白名单与路径越界检查，它在这里照常执行。我们只是声明"这个 URI 指向的
+     * 文件我可以按任意类型提供读取"，这对一个只读、且已限定目录的 provider 是合理的；
+     * 何况调用方要拿到的类型本来就由 `getType` 决定。
+     */
+    @Override public AssetFileDescriptor openTypedAssetFile(Uri uri, String mimeTypeFilter, Bundle opts)
+            throws FileNotFoundException {
+        return openAssetFile(uri, "r");
     }
 
     @Override public Uri insert(Uri uri, ContentValues values) {
