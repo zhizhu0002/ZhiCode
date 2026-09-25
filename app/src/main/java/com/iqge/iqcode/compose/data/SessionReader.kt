@@ -58,7 +58,23 @@ internal object SessionReader {
     fun transcript(file: File): List<ChatItem> {
         val items = mutableListOf<ChatItem>()
         var seq = 0
-        fun id(prefix: String) = "$prefix-${++seq}"
+        /*
+         * 恢复出来的条目 id 必须与 WorkspaceViewModel.nextId() **命名空间不重叠**。
+         *
+         * 为什么不能直接用 "u-1"：ViewModel 的 idCounter 是进程内从 0 开始的，
+         * 而启动时会自动恢复最近一条会话。于是就会出现
+         *   恢复：SessionReader 生成 u-1, u-2, u-3
+         *   发送：ViewModel.nextId("u") 因为 idCounter 还是 0，又生成一个 u-1
+         * 同一份对话流里出现两个 u-1。Compose 的 LazyColumn 以 id 作 key，
+         * 重复 key 会直接抛 IllegalArgumentException 把整个界面崩掉，
+         * 而且只在两条都进入可视区时才触发——表现为"发一条消息就闪退"，很难查。
+         *
+         * 实测确认过这条路径：恢复后发送得到 id=[u-1, u-2, u-3, u-1, e-2]，重复 {u-1=2}。
+         *
+         * 加 "session-" 前缀后，本函数产出的 id 一定形如 session-u-1，
+         * 而 ViewModel 只会产出 (a|att|e|g|i|skill|u|web)-<数字>，两者不可能相等。
+         */
+        fun id(prefix: String) = "session-$prefix-${++seq}"
 
         /** 工具 id → 它所在分组卡的下标。用于把结果/进度写回正确的卡。 */
         val toolGroupIndex = mutableMapOf<String, Int>()
