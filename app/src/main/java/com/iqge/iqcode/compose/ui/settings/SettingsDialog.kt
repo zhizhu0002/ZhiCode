@@ -375,9 +375,15 @@ private fun ProjectPathField(draft: SettingsDraft, onChange: (SettingsDraft) -> 
  * 扩展功能。
  *
  * 这里只列**已经能用**的入口。原版还有两项（运行时 UI 画布、其他设置），当前处理如下：
- * - 「运行时 UI 画布」：整套运行时画布都还没移植（原版有 `UiCanvasStore`、`ui_canvas` 工具
- *   和一个把画布文档作用到界面节点的消费端），所以不摆这个入口——
- *   点进去只会得到一句"已执行（Mock）"，比没有入口更糟。
+ *
+ * - 「运行时 UI 画布」：**画布的存储与工具是齐的**——`com.iqge.UiCanvasStore`、
+ *   `UiCanvasController`、以及已注册进 `ToolRegistry` 的 `ui_canvas` 工具都在，
+ *   Agent 调用它也会正常落盘一份有界操作文档。缺的是**消费端**：
+ *   `UiCanvasController.apply(View root, JSONObject document)` 是按稳定节点 id
+ *   在 **Android View 树**上找 View 再改属性；Compose 这边没有这套 id，
+ *   也没有任何代码读那份文档。所以现在点这个入口只会打开一个空壳面板，
+ *   不如先不放入口。要接的话工作量在"给 Compose 界面定义稳定槽位 id
+ *   并把文档作用上去"，不是重写存储。
  * - 「其他设置」：那一项原本只是「自定义头部提示词」的另一个入口。现在提示词输入框
  *   已经并入「上下文与项目」分类，同一个字段不需要两条路径，入口撤销。
  */
