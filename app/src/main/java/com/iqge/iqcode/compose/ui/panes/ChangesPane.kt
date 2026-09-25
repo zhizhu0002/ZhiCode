@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,9 +70,14 @@ fun ChangesPane(
             if (diff.files.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        text = "工作区没有未提交的变更",
+                        // 空白态的文案必须区分「确实没有变更」与「没能读到变更」：
+                        // 原来写死"工作区没有未提交的变更"，于是 git 失败时界面
+                        // 会一口咬定没有变更 —— 明明什么都没查到却给了确定性结论。
+                        text = diff.note.ifEmpty { "工作区没有未提交的变更" },
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 28.dp),
                     )
                 }
                 return@Surface

@@ -152,6 +152,15 @@ data class DiffFile(
 data class DiffState(
     val files: List<DiffFile> = emptyList(),
     val loading: Boolean = false,
+    /**
+     * 空列表时要显示的说明。
+     *
+     * 为什么需要这个字段：变更面板的空白态原来写死「工作区没有未提交的变更」，
+     * 但 git **失败**时（运行时未安装 / 不是 git 仓库 / 目录不存在）列表同样是空的。
+     * 那样界面会一口咬定"没有变更" —— 明明什么都没查到，却给出了确定性结论。
+     * 所以把原因带上来，空白态显示真实原因。
+     */
+    val note: String = "",
 ) {
     val additions: Int get() = files.sumOf { it.additions }
     val deletions: Int get() = files.sumOf { it.deletions }

@@ -7,6 +7,7 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.iqge.iqcode.compose.data.FileBrowser
+import com.iqge.iqcode.compose.data.GitChanges
 import com.iqge.iqcode.compose.data.MockWorkspaceRepository
 import com.iqge.iqcode.compose.data.SessionReader
 import com.iqge.iqcode.compose.data.WorkspaceRepository
@@ -27,6 +28,7 @@ import com.iqge.iqcode.compose.model.ChatKind
 import com.iqge.iqcode.compose.model.ChoiceIntent
 import com.iqge.iqcode.compose.model.ChoiceOption
 import com.iqge.iqcode.compose.model.ChoicePickerState
+import com.iqge.iqcode.compose.model.DiffState
 import com.iqge.iqcode.compose.model.EffortLevel
 import com.iqge.iqcode.compose.model.FileEntry
 import com.iqge.iqcode.compose.model.OpenFile
@@ -125,6 +127,7 @@ class WorkspaceViewModel(
 
     private var pendingQuestions: PendingQuestions? = null
 
+
     /**
      * 会话操作的目标。
      *
@@ -149,7 +152,8 @@ class WorkspaceViewModel(
             contextTokens = 0,
             contextWindow = 200_000,
             deviceStatus = clockLabel(),
-            diff = repo.changes(),
+            // 变更面板首屏为空；git 是要真实执行命令的，等用户点「刷新」再读。
+            diff = DiffState(),
             terminalLines = repo.terminalBanner(repo.projectPath()),
             // 文件面板走真实文件系统。只列**一层**（不递归）：内置 Termux 环境装好后
             // home 下可能有几千个文件，递归会拖慢启动。
@@ -1491,7 +1495,12 @@ class WorkspaceViewModel(
 
     // ---------- 工作区 ----------
 
-    fun selectTab(tab: WorkspaceTab) = _state.update { it.copy(tab = tab) }
+    fun selectTab(tab: WorkspaceTab) {
+        _state.update { it.copy(tab = tab) }
+        // 进入「变更」页时才去读 git。切换 Tab 是明确的用户动作，
+        // 每次切过去读一次是合理的；若挂在回合结束自动读，大仓库会明显拖慢对话。
+        if (tab == WorkspaceTab.CHANGES) refreshDiff()
+    }
 
     /**
      * 重新拉一次变更列表（变更面板的「刷新」）。
@@ -1499,8 +1508,32 @@ class WorkspaceViewModel(
      * 对应原版 `refreshChanges()`（重跑 `git status --short` + `git diff`）。
      * 这里数据来自 [repo]，所以"刷新"等价于重新读一次。
      */
+    /**
+     * 刷新 git 变更。
+     *
+     * 三条 git 命令（rev-parse / status / diff）+ 未跟踪文件的补丁，必须放 IO 线程，
+     * 而且这是**唯一**会去读 git 的入口 —— 不在回合结束时自动跑：
+     * 一个大仓库的 `git diff` 可能几秒，挂在每个回合结尾会让对话明显变卡。
+     */
     fun refreshDiff() {
-        _state.update { it.copy(diff = repo.changes(), message = "已刷新变更列表") }
+        val path = _state.value.projectPath
+        _state.update { it.copy(diff = it.diff.copy(loading = true)) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = runCatching { GitChanges.read(getApplication(), path) }
+                .getOrElse { error ->
+                    DiffState(note = "读取 git 变更失败：" + (error.message ?: "未知原因"))
+                }
+            _state.update {
+                it.copy(
+                    diff = result,
+                    message = when {
+                        result.note.isNotEmpty() -> result.note
+                        result.files.isEmpty() -> "工作区没有未提交的变更"
+                        else -> "已刷新变更列表（${result.files.size} 个文件）"
+                    },
+                )
+            }
+        }
     }
 
     fun cycleThemeMode() = _state.update {
