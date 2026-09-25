@@ -289,6 +289,38 @@ data class RoleCardEditor(
     val saveable: Boolean get() = nameError == null
 }
 
+/** 记忆文件的作用域。路径约定见 `MemoryStore`（必须与 `/init` 指令的目标一致）。 */
+enum class MemoryScope(val label: String) {
+    PROJECT("项目 IQ.md"),
+    USER("用户 IQ.md"),
+}
+
+/** 一个记忆文件在列表里的展示信息。 */
+data class MemoryFile(
+    val scope: MemoryScope,
+    val path: String,
+    val exists: Boolean,
+    val sizeLabel: String,
+)
+
+/** 记忆面板状态：`editing != null` 即编辑器，否则列表。 */
+data class MemoryState(
+    val files: List<MemoryFile>,
+    val editing: MemoryEditor? = null,
+)
+
+/** 正在编辑的记忆文件。新建一个尚不存在的文件时 [exists] 为 false。 */
+data class MemoryEditor(
+    val scope: MemoryScope,
+    val path: String,
+    val body: String,
+    val exists: Boolean,
+) {
+    val title: String get() = if (exists) "编辑 ${scope.label}" else "新建 ${scope.label}"
+    val empty: Boolean get() = body.isBlank()
+}
+
+
 
 
 /**

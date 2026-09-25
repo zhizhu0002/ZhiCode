@@ -61,6 +61,7 @@ import com.iqge.iqcode.compose.ui.dialogs.ChoicePickerOverlay
 import com.iqge.iqcode.compose.ui.dialogs.ApiConfigOverlay
 import com.iqge.iqcode.compose.ui.dialogs.McpConfigOverlay
 import com.iqge.iqcode.compose.ui.dialogs.ModelPickerOverlay
+import com.iqge.iqcode.compose.ui.dialogs.MemoryOverlay
 import com.iqge.iqcode.compose.ui.dialogs.RoleCardsOverlay
 import com.iqge.iqcode.compose.ui.dialogs.SkillsOverlay
 import com.iqge.iqcode.compose.ui.dialogs.EnvironmentOverlay
@@ -339,6 +340,15 @@ private fun IqCodeScreen(
                 onDraftChange = viewModel::updateRoleCardDraft,
                 onSave = viewModel::saveRoleCard,
                 onCancelEditor = viewModel::cancelRoleCardEditor,
+            )
+            MemoryOverlay(
+                state = state.memory,
+                onDismiss = viewModel::closeMemory,
+                onEdit = viewModel::editMemory,
+                onRunInit = { viewModel.closeMemory(); viewModel.runInitFromUi() },
+                onBodyChange = viewModel::updateMemoryBody,
+                onSave = viewModel::saveMemory,
+                onCancelEdit = viewModel::cancelMemoryEdit,
             )
         }
     }

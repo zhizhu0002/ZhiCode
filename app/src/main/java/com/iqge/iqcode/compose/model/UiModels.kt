@@ -295,6 +295,7 @@ data class WorkspaceUiState(
     val mcpConfig: com.iqge.iqcode.compose.model.McpConfigState? = null,
     val skills: com.iqge.iqcode.compose.model.SkillsState? = null,
     val roleCards: com.iqge.iqcode.compose.model.RoleCardsState? = null,
+    val memory: com.iqge.iqcode.compose.model.MemoryState? = null,
     val modelPicker: com.iqge.iqcode.compose.model.ModelPickerState? = null,
     /** 非空即设置弹窗打开；所有编辑先落在这里，「保存」才写回上面的字段。 */
     val settingsDraft: SettingsDraft? = null,

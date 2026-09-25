@@ -16,6 +16,7 @@ import com.iqge.iqcode.compose.data.MockWorkspaceRepository
 import com.iqge.iqcode.compose.data.ModelCatalogStore
 import com.iqge.iqcode.compose.data.SessionReader
 import com.iqge.iqcode.compose.data.RoleCardStore
+import com.iqge.iqcode.compose.data.MemoryStore
 import com.iqge.iqcode.compose.data.SkillStore
 import com.iqge.iqcode.compose.data.WorkspacePaths
 import com.iqge.iqcode.compose.data.WorkspaceRepository
@@ -45,6 +46,10 @@ import com.iqge.iqcode.compose.model.McpScope
 import com.iqge.iqcode.compose.model.McpServer
 import com.iqge.iqcode.compose.model.McpServerDraft
 import com.iqge.iqcode.compose.model.McpType
+import com.iqge.iqcode.compose.model.MemoryEditor
+import com.iqge.iqcode.compose.model.MemoryFile
+import com.iqge.iqcode.compose.model.MemoryScope
+import com.iqge.iqcode.compose.model.MemoryState
 import com.iqge.iqcode.compose.model.ModelPickerState
 import com.iqge.iqcode.compose.model.OpenFile
 import com.iqge.iqcode.compose.model.PermissionMode
@@ -703,6 +708,86 @@ class WorkspaceViewModel(
         val content = runCatching { RoleCardStore.activeContent(getApplication()) }.getOrDefault("")
         // 空串表示"确实没有启用的卡"，也要覆盖掉配置里的旧值，所以这里不能判空就跳过。
         roleCardOverride = content
+    }
+
+    // ---------- 记忆文件（IQ.md） ----------
+
+    fun openMemory() {
+        _state.update { it.copy(memory = MemoryState(files = MemoryStore.list(it.projectPath))) }
+    }
+
+    fun closeMemory() = _state.update { it.copy(memory = null) }
+
+    /** 打开某个记忆文件编辑。文件不存在时给一份空编辑器（即"新建"）。 */
+    fun editMemory(file: MemoryFile) {
+        val path = _state.value.projectPath
+        val body = MemoryStore.read(path, file.scope).getOrElse { error ->
+            _state.update { it.copy(message = "打开失败：${error.message ?: "未知原因"}") }
+            return
+        }
+        _state.update {
+            it.copy(
+                memory = it.memory?.copy(
+                    editing = MemoryEditor(scope = file.scope, path = file.path, body = body, exists = file.exists),
+                ),
+            )
+        }
+    }
+
+    fun updateMemoryBody(body: String) = _state.update {
+        val memory = it.memory ?: return@update it
+        val editing = memory.editing ?: return@update it
+        it.copy(memory = memory.copy(editing = editing.copy(body = body)))
+    }
+
+    fun cancelMemoryEdit() = _state.update {
+        it.copy(memory = it.memory?.copy(editing = null))
+    }
+
+    fun saveMemory() {
+        val state = _state.value
+        val editing = state.memory?.editing ?: return
+        val result = MemoryStore.save(state.projectPath, editing.scope, editing.body)
+        _state.update {
+            it.copy(
+                memory = MemoryState(files = MemoryStore.list(it.projectPath)),
+                message = if (result.isSuccess) "${editing.scope.label} 已保存"
+                else "保存失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+            )
+        }
+    }
+
+    /**
+     * `/init`：让 Agent 直接创建或完善项目 IQ.md。
+     *
+     * 指令照抄原版：明确要求**不要**进计划模式、不建任务、不起子 Agent、不做大范围调研，
+     * 只读现有的 IQ.md / CLAUDE.md / README 与主构建清单，然后直接写 IQ.md。
+     *
+     * 两个细节都保留：
+     * - 先退出计划模式。计划模式下引擎只产出计划不落盘，`/init` 会变成"只给我一份计划"，
+     *   而那显然不是用户想要的。
+     * - 对话流里放一条可见的 `/init` 用户气泡：这条请求是应用自己发的，
+     *   不显示出来的话用户会看到一条自己没写过的消息引发的回复。
+     */
+    /** 界面入口：记忆面板里的「让 IQ 完善」按钮。 */
+    fun runInitFromUi() = runInitPrompt()
+
+    private fun runInitPrompt() {
+        if (engine.isBusy()) {
+            appendInfo("初始化项目说明", "IQ 正在执行任务，请先等待或停止当前任务。")
+            return
+        }
+        runCatching { engine.cancelPlanModeFromUi("/init 使用快速直接模式") }
+
+        _state.update {
+            it.copy(
+                transcript = it.transcript + ChatItem(id = nextId("u"), kind = ChatKind.USER, title = "你", body = "/init"),
+                composerBusy = true,
+                workingStatus = "正在整理项目说明…",
+                busySessionIds = it.busySessionIds + it.activeSessionId,
+            )
+        }
+        startTurn(INIT_INSTRUCTION)
     }
 
     fun removeAttachment(id: String) {
@@ -1500,6 +1585,8 @@ class WorkspaceViewModel(
             "/tasks" -> openTaskList()
             "/skills" -> openSkills()
             "/agents" -> openRoleCards()
+            "/memory" -> openMemory()
+            "/init" -> runInitPrompt()
 
             "/web" -> handleWebSlash(arg)
 
@@ -2909,5 +2996,20 @@ class WorkspaceViewModel(
 
         /** 文本附件（技能）拼进提示词的长度上限，与原版一致。 */
         private const val TEXT_ATTACHMENT_LIMIT = 60_000
+
+        /**
+         * `/init` 的指令，逐字取自原版。
+         *
+         * 全英文是刻意的（原版如此）：这段是要模型执行的指令，
+         * 而它明确要求限制调研范围、禁止起子 Agent，措辞改动会改变实际行为，
+         * 所以不翻译、不改写。
+         */
+        private const val INIT_INSTRUCTION =
+            "This is the built-in fast /init maintenance command. Do not enter plan mode, create tasks, " +
+                "launch subagents, or perform broad repository research. Read only the existing " +
+                "IQ.md/CLAUDE.md/README and primary build manifest or script when present, then directly " +
+                "create or improve IQ.md with concise build, test, architecture, conventions, and " +
+                "repository-specific instructions. Preserve useful existing instructions and run at most " +
+                "one small verification command."
     }
 }
