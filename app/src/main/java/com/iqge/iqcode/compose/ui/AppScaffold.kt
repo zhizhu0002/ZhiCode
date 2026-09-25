@@ -245,7 +245,7 @@ private fun IqCodeScreen(
             )
             ChoicePickerOverlay(
                 picker = state.choicePicker,
-                onSelect = viewModel::onChoiceSelected,
+                onSubmit = viewModel::onSubmitSelection,
                 onDismiss = viewModel::dismissChoicePicker,
                 onSubmitFreeForm = viewModel::onSubmitFreeForm,
             )

@@ -105,6 +105,11 @@ data class ChoiceOption(val label: String, val detail: String = "", val checked:
  *
  * 与旧版的区别：多了 [prompt]（弹窗顶部的加粗提问）与 [allowFreeForm]
  * （允许在选项之外写一段自由回答）。
+ *
+ * [multiSelect] / [submitLabel] / [cancelLabel] 是为「提问」门控加的：
+ * 引擎的 `AskUserQuestion` 支持多选，并且在多问题时会分步展示，
+ * 按钮文案要变成「下一步」而不是「提交」。这些字段有默认值，
+ * 因此权限/推理/模型这些单选选择器完全不受影响。
  */
 data class ChoicePickerState(
     val title: String,
@@ -113,6 +118,9 @@ data class ChoicePickerState(
     val prompt: String = "",
     val allowFreeForm: Boolean = false,
     val freeFormHint: String = "其他回答…",
+    val multiSelect: Boolean = false,
+    val submitLabel: String = "提交",
+    val cancelLabel: String = "取消",
 )
 
 enum class ChoiceIntent {
@@ -126,6 +134,9 @@ enum class ChoiceIntent {
 
     /** 计划模式的目标澄清：选完（或自由回答）后才产出计划。 */
     PLAN_GOAL,
+
+    /** 引擎 `AskUserQuestion` 发起的分步提问。 */
+    QUESTION,
 }
 
 data class DiffFile(

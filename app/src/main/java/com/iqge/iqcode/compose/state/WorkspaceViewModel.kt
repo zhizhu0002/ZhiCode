@@ -45,6 +45,7 @@ import com.iqge.iqcode.compose.model.WorkspaceTab
 import com.iqge.iqcode.compose.model.WorkspaceUiState
 import com.iqge.iqcode.compose.model.WebSearchProvider
 import com.termux.app.iqcode.core.PlanApprovalGate
+import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -104,6 +105,23 @@ class WorkspaceViewModel(
 
     /** 正在等待用户回执的权限请求 id。 */
     private var pendingPermissionId: String? = null
+
+    /**
+     * 正在进行的「提问」流程。
+     *
+     * 引擎的 `AskUserQuestion` 可以一次带多个问题，界面是**分步**展示的，
+     * 所以必须把请求 id、问题列表、当前步骤、已收集的答案都留着 ——
+     * 只存"当前这一步"的话，走到第二步就丢了前面的答案。
+     */
+    private class PendingQuestions(
+        val requestId: String,
+        val questions: JSONArray,
+        var index: Int = 0,
+        val answers: JSONObject = JSONObject(),
+    )
+
+    private var pendingQuestions: PendingQuestions? = null
+
 
     private val initialSessions = repo.sessions()
     private val _state = MutableStateFlow(
@@ -599,14 +617,84 @@ class WorkspaceViewModel(
     }
 
     override fun onEngineQuestionRequest(requestId: String, questionsJson: String) {
-        // 提问门控的完整界面（多问题 / 多选项 / 自由回答）在下一阶段接线。
-        // 这里**不静默卡住**：立即回一个空答案让引擎继续，
-        // 并把"未接线"这件事明确告诉用户，而不是让他对着转圈等 30 分钟。
-        engine.respondQuestion(requestId, JSONObject())
-        appendInfo(
-            "提问未接线",
-            "IQ 发起了选择请求，但选择窗口尚未接入真实引擎，已按「未选择」继续。\n\n原始请求：\n$questionsJson",
-        )
+        val questions = runCatching { JSONArray(questionsJson) }.getOrDefault(JSONArray())
+        if (questions.length() == 0) {
+            // 空提问没有可问的内容，直接回执让引擎继续，别把用户晾在一个空窗口前。
+            engine.respondQuestion(requestId, JSONObject())
+            return
+        }
+        pendingQuestions = PendingQuestions(requestId = requestId, questions = questions)
+        showQuestionStep()
+    }
+
+    /**
+     * 展示提问流程的第 [step] 步。
+     *
+     * 引擎的 `AskUserQuestion` 有两种形态：单问题（直接提交）与多问题（分步，
+     * 每步一个窗口，按钮是「下一步」，最后一步才是「提交」）。
+     * 答案按**问题原文**为键累积（与引擎的约定一致）。
+     */
+    private fun showQuestionStep() {
+        val flow = pendingQuestions ?: return
+        val question = flow.questions.optJSONObject(flow.index)
+        if (question == null) {
+            // 该步不是合法对象：跳过它而不是整个流程失败。
+            advanceQuestion(JSONObject())
+            return
+        }
+        val options = question.optJSONArray("options")
+        val choices = buildList {
+            if (options != null) {
+                for (i in 0 until options.length()) {
+                    val option = options.optJSONObject(i) ?: continue
+                    add(ChoiceOption(label = option.optString("label", ""), detail = option.optString("description", "")))
+                }
+            }
+        }
+        val isLast = flow.index >= flow.questions.length() - 1
+        _state.update {
+            it.copy(
+                choicePicker = ChoicePickerState(
+                    title = question.optString("header", "问题"),
+                    intent = ChoiceIntent.QUESTION,
+                    prompt = question.optString("question", "IQ 应该怎么做？"),
+                    options = choices,
+                    allowFreeForm = true,
+                    freeFormHint = "其他回答…",
+                    multiSelect = question.optBoolean("multiSelect", false),
+                    // 多问题时分步：中间步骤是「下一步」，最后一步才是「提交」。
+                    submitLabel = if (isLast) "提交" else "下一步",
+                ),
+            )
+        }
+    }
+
+    /** 记录这一步的答案并前进；已是最后一步则回执引擎。 */
+    private fun advanceQuestion(answer: Any?) {
+        val flow = pendingQuestions ?: return
+        val question = flow.questions.optJSONObject(flow.index)
+        val key = question?.optString("question", "") ?: ""
+        if (key.isNotEmpty() && answer != null) {
+            runCatching { flow.answers.put(key, answer) }
+        }
+        val next = flow.index + 1
+        if (next >= flow.questions.length()) {
+            pendingQuestions = null
+            _state.update { it.copy(choicePicker = null) }
+            engine.respondQuestion(flow.requestId, flow.answers)
+            return
+        }
+        flow.index = next
+        showQuestionStep()
+    }
+
+    /** 取消整个提问流程：回执空答案，引擎会按「未选择」继续。 */
+    private fun cancelQuestions() {
+        val flow = pendingQuestions ?: return
+        pendingQuestions = null
+        _state.update { it.copy(choicePicker = null) }
+        engine.respondQuestion(flow.requestId, JSONObject())
+        appendInfo("已跳过提问", "IQ 的提问被跳过，它会按「未选择」继续。")
     }
 
     override fun onEnginePlanApprovalRequest(request: EnginePlanApproval) {
@@ -1026,7 +1114,36 @@ class WorkspaceViewModel(
     }
 
     fun dismissChoicePicker() {
+        // 提问流程的「取消」必须把空答案回执给引擎，否则引擎会一直等
+        // （`QuestionGate.ask` 的闩锁要等 30 分钟才超时）。
+        if (_state.value.choicePicker?.intent == ChoiceIntent.QUESTION) {
+            cancelQuestions()
+            return
+        }
         _state.update { it.copy(choicePicker = null) }
+    }
+
+    /**
+     * 提交选择器里选中的项。
+     *
+     * [indices] 是选中的下标列表：单选选择器只会有 0 或 1 个，
+     * 多选的提问流程会有多个。统一用列表是为了让两条路径共用一套 UI 回调。
+     */
+    fun onSubmitSelection(indices: List<Int>) {
+        val picker = _state.value.choicePicker ?: return
+        // 提问流程走自己的分步状态机，答案要按问题原文累积。
+        if (picker.intent == ChoiceIntent.QUESTION) {
+            val labels = indices.mapNotNull { picker.options.getOrNull(it)?.label }
+            val answer: Any? = when {
+                labels.isEmpty() -> null
+                picker.multiSelect -> JSONArray(labels)
+                else -> labels.first()
+            }
+            advanceQuestion(answer)
+            return
+        }
+        // 单选选择器语义不变：等价于点第一项。
+        onChoiceSelected(indices.firstOrNull() ?: -1)
     }
 
     fun onChoiceSelected(index: Int) {
@@ -1058,6 +1175,11 @@ class WorkspaceViewModel(
                     "恢复会话" -> _state.update { it.copy(sidebarOpen = false, message = "已恢复会话（Mock）") }
                     else -> _state.update { it.copy(message = "${option.label}（Mock）") }
                 }
+            }
+            ChoiceIntent.QUESTION -> {
+                // 提问流程正常走 onSubmitSelection / dismissChoicePicker；
+                // 单选回调真落到这里时按「跳过本步」处理，不要静默什么都不做。
+                advanceQuestion(null)
             }
             ChoiceIntent.GENERIC, ChoiceIntent.ATTACH -> _state.update {
                 it.copy(choicePicker = null, message = "${option.label}（Mock）")

@@ -278,7 +278,7 @@ fun PlanApprovalOverlay(
 @Composable
 fun ChoicePickerOverlay(
     picker: ChoicePickerState?,
-    onSelect: (Int) -> Unit,
+    onSubmit: (List<Int>) -> Unit,
     onDismiss: () -> Unit,
     onSubmitFreeForm: (String) -> Unit = { onDismiss() },
 ) {
@@ -288,10 +288,15 @@ fun ChoicePickerOverlay(
     // 之前点击直接调 onSelect()，ViewModel 会立刻提交并把 choicePicker 置空，
     // 于是窗口一点就关、根本没机会按「提交」，也没法改主意。
     var localSelected by remember(picker) { mutableStateOf(-1) }
-    val selected = if (localSelected >= 0) {
-        localSelected
+    // 多选（引擎提问可能带 multiSelect）走这一份本地集合。
+    var localMulti by remember(picker) { mutableStateOf(emptySet<Int>()) }
+    val multi = picker?.multiSelect == true
+    val selectedIndices: Set<Int> = if (multi) {
+        if (localMulti.isNotEmpty()) localMulti
+        else picker?.options?.indices?.filter { picker.options[it].checked }?.toSet() ?: emptySet()
     } else {
-        picker?.options?.indexOfFirst { it.checked } ?: -1
+        val single = if (localSelected >= 0) localSelected else picker?.options?.indexOfFirst { it.checked } ?: -1
+        if (single >= 0) setOf(single) else emptySet()
     }
     val usingFreeForm = freeForm.isNotBlank()
 
@@ -335,22 +340,23 @@ fun ChoicePickerOverlay(
                 }
             },
             actions = {
-                SecondaryButton(text = "取消", onClick = onDismiss)
-                // 「提交」是**唯一**的提交入口；没选任何项也没填自由文本时置灰，
+                SecondaryButton(text = picker.cancelLabel, onClick = onDismiss)
+                // 提交按钮是**唯一**的提交入口；没选任何项也没填自由文本时置灰，
                 // 让"还不能提交"这件事可见，而不是点了没反应。
+                // 文案来自 [ChoicePickerState.submitLabel]：多问题的提问流程中途是「下一步」。
                 PrimaryButton(
-                    text = "提交",
-                    enabled = usingFreeForm || selected >= 0,
+                    text = picker.submitLabel,
+                    enabled = usingFreeForm || selectedIndices.isNotEmpty(),
                     onClick = {
                         if (usingFreeForm) onSubmitFreeForm(freeForm)
-                        else if (selected >= 0) onSelect(selected)
+                        else onSubmit(selectedIndices.sorted())
                     },
                     modifier = Modifier.padding(start = 8.dp),
                 )
             },
         ) {
             picker.options.forEachIndexed { index, option ->
-                val checked = index == selected && !usingFreeForm
+                val checked = index in selectedIndices && !usingFreeForm
                 // 每项 = Card 包一个 Miuix BasicComponent：
                 // 标题/说明/选中控件的排版完全交给 Miuix
                 Card(
@@ -363,6 +369,14 @@ fun ChoicePickerOverlay(
                     ),
                     pressFeedbackType = PressFeedbackType.None,
                 ) {
+                    val toggle = {
+                        freeForm = ""
+                        if (multi) {
+                            localMulti = if (index in localMulti) localMulti - index else localMulti + index
+                        } else {
+                            localSelected = index
+                        }
+                    }
                     BasicComponent(
                         title = option.label,
                         titleColor = BasicComponentDefaults.titleColor(
@@ -375,15 +389,15 @@ fun ChoicePickerOverlay(
                         // 左侧选择控件。Miuix `RadioButton` 未选中时不画任何东西，
                         // 只剩一块空白，所以这里用 `Checkbox`：未选中也有一个可见的方框。
                         // 颜色全部走 Miuix 默认，避免手挑颜色在动态取色下失配。
-                        // 点击只更新本地选中态，等「提交」才回调 ViewModel。
+                        // 点击只更新本地选中态，等提交才回调 ViewModel。
                         startAction = {
                             Checkbox(
                                 state = if (checked) ToggleableState.On else ToggleableState.Off,
-                                onClick = { freeForm = ""; localSelected = index },
+                                onClick = toggle,
                                 modifier = Modifier.size(20.dp),
                             )
                         },
-                        onClick = { freeForm = ""; localSelected = index },
+                        onClick = toggle,
                         insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     )
                 }
