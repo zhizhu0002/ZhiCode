@@ -648,6 +648,7 @@ private fun PaneHost(
             rootPath = state.projectPath,
             entries = state.fileEntries,
             openFile = state.openFile,
+            emptyNote = state.fileNote,
             onOpen = viewModel::openFile,
             onUp = viewModel::navigateUp,
             onNavigate = viewModel::navigateTo,

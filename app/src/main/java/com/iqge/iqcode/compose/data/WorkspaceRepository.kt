@@ -5,21 +5,17 @@ import com.iqge.iqcode.compose.model.TerminalLine
 /**
  * 尚未真实化的数据来源。
  *
- * 现状：
- * - 会话列表 / 对话历史 / 任务清单 → [SessionReader]（真实磁盘）
- * - 文件面板 → [FileBrowser]（真实文件系统）
- * - git 变更 → [GitChanges]（真实 git）
- * - 对话引擎 → `engine/IqEngineController`（真实模型调用）
+ * 现状：会话历史（[SessionReader]）、文件面板（[FileBrowser]）、
+ * git 变更（[GitChanges]）、项目路径（[WorkspacePaths]）、
+ * 对话引擎（`engine/IqEngineController`）全部已接真实实现。
  *
- * 只剩两项：
- * - [projectName] / [projectPath]：项目路径将来要支持用户手动切换；
- * - [terminalBanner]：真实 PTY 接上后这个占位横幅会被移除。
+ * 只剩最后一项 [terminalBanner]：内置环境**未就绪**时终端页显示的只读占位文案。
+ * 真实 PTY 接上后（TerminalPane 的 runtimeReady 分支）它就不再被使用，
+ * 等终端页完全不依赖占位数据时这个接口可以整体删掉。
  *
- * ⚠️ 刻意不保留任何"返回假列表 / 假历史 / 假 diff"的方法：
+ * ⚠️ 刻意不保留任何"返回假列表 / 假历史 / 假 diff / 假项目"的方法：
  * 那类方法一旦存在就容易被误接回去，表现为"界面像在工作、其实数据是假的"。
  */
 interface WorkspaceRepository {
-    fun projectName(): String
-    fun projectPath(): String
     fun terminalBanner(project: String): List<TerminalLine>
 }

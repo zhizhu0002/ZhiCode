@@ -262,6 +262,14 @@ data class WorkspaceUiState(
     val terminalLines: List<TerminalLine> = emptyList(),
     val filePath: String = "",
     val fileEntries: List<FileEntry> = emptyList(),
+    /**
+     * 文件列表为空时要显示的说明。
+     *
+     * 与 [DiffState.note] 同一个道理：目录**不存在**与目录**真的为空**
+     * 在界面上都是"0 项"，但前者是故障、后者是正常。不区分的话，
+     * 用户看到一个空的文件面板只会以为应用坏了。
+     */
+    val fileNote: String = "",
     val openFile: OpenFile? = null,
     val message: String? = null,
     val busySessionIds: Set<String> = emptySet(),

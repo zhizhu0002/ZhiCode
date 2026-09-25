@@ -10,6 +10,7 @@ import com.iqge.iqcode.compose.data.FileBrowser
 import com.iqge.iqcode.compose.data.GitChanges
 import com.iqge.iqcode.compose.data.MockWorkspaceRepository
 import com.iqge.iqcode.compose.data.SessionReader
+import com.iqge.iqcode.compose.data.WorkspacePaths
 import com.iqge.iqcode.compose.data.WorkspaceRepository
 import com.iqge.iqcode.compose.engine.EngineEvents
 import com.iqge.iqcode.compose.engine.EngineOverrides
@@ -141,8 +142,10 @@ class WorkspaceViewModel(
 
     private val _state = MutableStateFlow(
         WorkspaceUiState(
-            projectName = repo.projectName(),
-            projectPath = repo.projectPath(),
+            // 项目路径是真实工作区（$HOME/workspace），不再是开发本应用时用的那个路径。
+            // 它在运行环境装好后由 [ensureWorkspace] 创建，见那里的说明。
+            projectName = WorkspacePaths.nameOf(WorkspacePaths.defaultProject()),
+            projectPath = WorkspacePaths.defaultProject(),
             // 会话列表 / 对话历史 / 任务清单都来自磁盘，这里先给空值，
             // 由 [initSessionState] 在 IO 线程读好后填上。
             // 不在构造器里同步读盘：会话 JSONL 可能有几千行，会拖慢启动。
@@ -155,11 +158,11 @@ class WorkspaceViewModel(
             deviceStatus = clockLabel(),
             // 变更面板首屏为空；git 是要真实执行命令的，等用户点「刷新」再读。
             diff = DiffState(),
-            terminalLines = repo.terminalBanner(repo.projectPath()),
+            terminalLines = repo.terminalBanner(WorkspacePaths.defaultProject()),
             // 文件面板走真实文件系统。只列**一层**（不递归）：内置 Termux 环境装好后
             // home 下可能有几千个文件，递归会拖慢启动。
-            filePath = FileBrowser.projectRoot(),
-            fileEntries = FileBrowser.children(FileBrowser.projectRoot()),
+            filePath = WorkspacePaths.defaultProject(),
+            fileEntries = emptyList(),
             busySessionIds = emptySet(),
             composerBusy = false,
             workingStatus = null,
@@ -183,10 +186,53 @@ class WorkspaceViewModel(
      */
     private fun initSessionState() {
         viewModelScope.launch(Dispatchers.IO) {
+            ensureWorkspace()
             val sessions = SessionReader.list(_state.value.projectPath)
             _state.update { it.copy(sessions = sessions) }
             sessions.firstOrNull()?.let { openSession(it) }
         }
+    }
+
+    /**
+     * 确保当前项目目录存在。
+     *
+     * 两个时机都需要：运行环境刚装好（home 此时才出现）、以及每次启动
+     * （环境是上次装的）。**必须在列会话之前调用** —— 会话按项目目录分键存储，
+     * 目录不存在时会话会落在一个"幽灵项目"键下，之后换了路径就找不回来了。
+     */
+    private fun ensureWorkspace() {
+        val path = _state.value.projectPath
+        // 目录已存在：只需按真实文件系统算出列表与说明。
+        if (WorkspacePaths.exists(path)) {
+            reloadFiles()
+            return
+        }
+        // 目录不存在，且运行环境还没装（home 目录都还没出现）：
+        // 此时**不能**建目录（父目录不存在），但也**不能什么都不说** ——
+        // 否则文件面板会显示"0 项"却没有任何解释。
+        if (!installer.isInstalled()) {
+            _state.update {
+                it.copy(
+                    fileEntries = emptyList(),
+                    fileNote = "工作区还不存在：$path\n初始化内置 Termux 环境后会自动建立。",
+                )
+            }
+            return
+        }
+        WorkspacePaths.ensure(path)
+        reloadFiles()
+    }
+
+    /** 刷新文件面板当前目录的列表，并同步 [WorkspaceUiState.fileNote]。 */
+    private fun reloadFiles() {
+        val path = _state.value.filePath
+        val entries = FileBrowser.children(path)
+        val note = when {
+            entries.isNotEmpty() -> ""
+            !java.io.File(path).isDirectory -> if (java.io.File(path).exists()) "不是目录：$path" else "目录不存在：$path"
+            else -> ""
+        }
+        _state.update { it.copy(fileEntries = entries, fileNote = note) }
     }
 
     private var idCounter = 0L
@@ -1626,6 +1672,10 @@ class WorkspaceViewModel(
                         environmentReport = reportText,
                     )
                 }
+                // home 目录是随运行环境一起出现的，所以工作区只能在这之后创建。
+                // 不创建的话：变更面板永远显示"项目目录不存在"，
+                // 终端的工作目录会回退到 home，会话也会落在一个不存在的项目键下。
+                ensureWorkspace()
             }
         }
     }
@@ -1762,17 +1812,15 @@ class WorkspaceViewModel(
     /** 刷新文件面板。Agent 改动文件后用它重新列目录。 */
     fun refreshFiles() {
         viewModelScope.launch(Dispatchers.IO) {
-            val entries = FileBrowser.children(_state.value.filePath)
-            _state.update { it.copy(fileEntries = entries, message = "已刷新文件列表") }
+            reloadFiles()
+            _state.update { it.copy(message = "已刷新文件列表") }
         }
     }
 
     fun navigateTo(path: String) {
         // 列目录要读盘，放 IO 线程：大目录（例如 node_modules）在主线程列会卡住界面。
-        viewModelScope.launch(Dispatchers.IO) {
-            val entries = FileBrowser.children(path)
-            _state.update { it.copy(filePath = path, fileEntries = entries, openFile = null) }
-        }
+        _state.update { it.copy(filePath = path, openFile = null) }
+        viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
     }
 
     fun navigateUp() {
@@ -1800,7 +1848,8 @@ class WorkspaceViewModel(
     }
 
     /** 文件面板的根路径（内置 Termux home 不存在时回退到应用私有目录）。 */
-    private fun rootPath(): String = FileBrowser.projectRoot()
+    /** 文件面板的根 = 当前项目路径（不是 Termux home），这样面包屑与「上一级」都以项目为界。 */
+    private fun rootPath(): String = _state.value.projectPath
 
     fun closeFile() = _state.update { it.copy(openFile = null) }
 

@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,6 +57,11 @@ fun FilesPane(
     onNavigate: (String) -> Unit,
     onCloseFile: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 列表为空时的说明（目录不存在等）。
+     * 默认空串 = 目录真的为空，此时不显示任何提示。
+     */
+    emptyNote: String = "",
 ) {
     val scheme = MiuixTheme.colorScheme
     Surface(modifier = modifier.fillMaxSize(), color = IqColors.panelSurface()) {
@@ -86,6 +92,19 @@ fun FilesPane(
                     ) {
                         items(entries, key = { it.path }) { entry ->
                             FileRow(entry = entry, onOpen = { onOpen(entry) })
+                        }
+                        // 目录不存在时把原因说出来，而不是让面板空着（"0 项"）
+                        // 让用户以为应用坏了。
+                        if (entries.isEmpty() && emptyNote.isNotEmpty()) {
+                            item {
+                                Text(
+                                    text = emptyNote,
+                                    color = scheme.onSurfaceVariantSummary,
+                                    fontSize = 11.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
+                                )
+                            }
                         }
                         item { Box(modifier = Modifier.padding(bottom = 8.dp)) }
                     }
