@@ -216,7 +216,18 @@ data class WorkspaceUiState(
     val contextTokens: Int = 0,
     val contextWindow: Int = 200_000,
     val deviceStatus: String = "",
-    val runtimeReady: Boolean = true,
+    /** 内置 Termux 运行环境是否已安装就绪。由 [RuntimeInstaller.isInstalled] 真实探测，不再是常量。 */
+    val runtimeReady: Boolean = false,
+    /** 正在解压 / 配置内置 Termux 环境。 */
+    val runtimeInstalling: Boolean = false,
+    /** 初始化进度 0~100。 */
+    val runtimeProgress: Int = 0,
+    /** 初始化过程中的当前步骤文案。 */
+    val runtimeMessage: String = "",
+    /** 非空即「环境自检」弹窗打开。 */
+    val environmentOpen: Boolean = false,
+    /** 环境自检报告全文（可复制）。 */
+    val environmentReport: String = "",
     val sidebarOpen: Boolean = false,
     val slashQuery: String? = null,
     val slashMatches: List<SlashCommand> = emptyList(),

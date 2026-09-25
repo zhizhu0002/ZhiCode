@@ -29,7 +29,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import android.app.Application
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
@@ -49,10 +51,12 @@ import com.iqge.iqcode.compose.model.WorkspaceTab
 import com.iqge.iqcode.compose.model.AgentTask
 import com.iqge.iqcode.compose.model.WorkspaceUiState
 import com.iqge.iqcode.compose.state.WorkspaceViewModel
+import com.iqge.iqcode.compose.state.WorkspaceViewModelFactory
 import com.iqge.iqcode.compose.ui.chat.AgentProgressCard
 import com.iqge.iqcode.compose.ui.chat.ChatList
 import com.iqge.iqcode.compose.ui.composer.Composer
 import com.iqge.iqcode.compose.ui.dialogs.ChoicePickerOverlay
+import com.iqge.iqcode.compose.ui.dialogs.EnvironmentOverlay
 import com.iqge.iqcode.compose.ui.dialogs.PermissionOverlay
 import com.iqge.iqcode.compose.ui.dialogs.PlanApprovalOverlay
 import com.iqge.iqcode.compose.ui.dialogs.TaskListOverlay
@@ -69,9 +73,25 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
 
+/**
+ * 取（或创建）主 ViewModel。
+ *
+ * 不能用默认的 `viewModel()`：反射工厂需要精确的 `(Application)` 构造器，而
+ * `WorkspaceViewModel` 的构造器带默认参数，Kotlin 不会生成那个重载，会直接抛
+ * `NoSuchMethodException` 并让界面白屏。详见 [WorkspaceViewModelFactory]。
+ *
+ * 工厂里再注入 `WorkspaceRepository` —— 这是后续把 Mock 换成真实引擎的唯一入口。
+ */
+@Composable
+private fun rememberWorkspaceViewModel(): WorkspaceViewModel {
+    val application = LocalContext.current.applicationContext as Application
+    val factory = remember(application) { WorkspaceViewModelFactory(application) }
+    return viewModel(factory = factory)
+}
+
 /** 应用入口：主题 + 主界面。 */
 @Composable
-fun IqCodeApp(viewModel: WorkspaceViewModel = viewModel()) {
+fun IqCodeApp(viewModel: WorkspaceViewModel = rememberWorkspaceViewModel()) {
     val state by viewModel.state.collectAsState()
 
     val systemDark = isSystemInDarkTheme()
@@ -201,6 +221,7 @@ private fun IqCodeScreen(
                 state.planApproval != null ||
                 state.choicePicker != null ||
                 state.settingsDraft != null ||
+                state.environmentOpen ||
                 state.taskListOpen
             if (modalOpen) {
                 Box(
@@ -239,6 +260,19 @@ private fun IqCodeScreen(
                 tasks = state.tasks,
                 open = state.taskListOpen,
                 onDismiss = viewModel::closeTaskList,
+            )
+            EnvironmentOverlay(
+                open = state.environmentOpen,
+                report = state.environmentReport,
+                runtimeReady = state.runtimeReady,
+                installing = state.runtimeInstalling,
+                progress = state.runtimeProgress,
+                message = state.runtimeMessage,
+                onDismiss = viewModel::closeEnvironment,
+                onInstall = viewModel::installRuntime,
+                onRepair = viewModel::repairRuntime,
+                onRefresh = viewModel::refreshEnvironmentReport,
+                onCopy = { viewModel.copyEnvironmentReport() },
             )
         }
     }
@@ -663,7 +697,9 @@ private fun IqSidebarHost(
         },
         onRoleCard = { viewModel.onComposerChange("/agents"); viewModel.send() },
         onSandbox = { viewModel.onComposerChange("/sandbox"); viewModel.send() },
-        onRuntime = { viewModel.onComposerChange("/doctor"); viewModel.send() },
+        // 「运行环境」行现在是真实探测结果 + 真实的安装/自检窗口，
+        // 不再是把 /doctor 当普通消息发出去（那样只会得到一句 Mock 回复）。
+        onRuntime = viewModel::openEnvironment,
         onSettings = viewModel::openSettings,
         modifier = modifier,
     )

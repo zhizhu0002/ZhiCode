@@ -48,9 +48,14 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
  * Miuix `DialogDefaults` 的边距很保守（实测 `outsideMargin` = 12dp × 12dp、
  * `insideMargin` = 24dp × 24dp），在 360dp 宽的手机上窗口只剩 336dp、
  * 内容区再被吃掉 48dp，实际可用宽度只有 288dp。
- * 这里把两侧边距各收掉一半多，窗口与内容区都明显变宽。
+ * 这里把两侧边距各收掉一些，窗口与内容区都明显变宽。
+ *
+ * **横向 6dp 是走过头了**：在 450dpi 手机上只有 17px，弹窗几乎左右顶到屏幕边，
+ * 看起来不像弹窗而像整屏页面。18dp 是常规弹窗内缩（Material 系默认 16~24dp），
+ * 既留出与屏幕的呼吸感，又比 Miuix 默认宽了 6dp。
+ * 纵向保持 12dp：手机竖屏下高度本来就紧张，多留白会把内容区挤没。
  */
-internal val DialogWideOutsideMargin = DpSize(6.dp, 12.dp)
+internal val DialogWideOutsideMargin = DpSize(18.dp, 12.dp)
 internal val DialogWideInsideMargin = DpSize(14.dp, 14.dp)
 
 /**

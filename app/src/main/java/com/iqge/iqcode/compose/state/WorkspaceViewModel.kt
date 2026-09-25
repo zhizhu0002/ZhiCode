@@ -1,9 +1,15 @@
 package com.iqge.iqcode.compose.state
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.iqge.iqcode.compose.data.MockWorkspaceRepository
 import com.iqge.iqcode.compose.data.WorkspaceRepository
+import com.iqge.iqcode.compose.runtime.EnvDoctor
+import com.iqge.RuntimeInstaller
 import com.iqge.iqcode.compose.model.Attachment
 import com.iqge.iqcode.compose.model.ChatItem
 import com.iqge.iqcode.compose.model.ChatKind
@@ -29,6 +35,7 @@ import com.iqge.iqcode.compose.model.ToolKind
 import com.iqge.iqcode.compose.model.WorkspaceTab
 import com.iqge.iqcode.compose.model.WorkspaceUiState
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,10 +52,19 @@ import java.util.Locale
  *
  * 数据来自 [WorkspaceRepository]；第一期用 Mock 实现模拟流式回复与工具执行，
  * 后续换成真实引擎实现即可，UI 层不用改。
+ *
+ * 继承 [AndroidViewModel] 而不是 `ViewModel`，是为了拿到 `Application`：
+ * 内置 Termux 环境的安装与自检都需要 Context。
+ * 这样做还有一个实际好处 —— `viewModel()` 的默认工厂本来就支持 `AndroidViewModel`，
+ * 所以 `IqCodeApp()` 里那行默认参数不用改、也不用自己写 Factory。
  */
 class WorkspaceViewModel(
+    application: Application,
     private val repo: WorkspaceRepository = MockWorkspaceRepository(),
-) : ViewModel() {
+) : AndroidViewModel(application) {
+
+    /** 内置 Termux 环境安装器（第一次使用前会解压 32MB 的 bootstrap）。 */
+    private val installer = RuntimeInstaller(application)
 
     private val initialSessions = repo.sessions()
     private val _state = MutableStateFlow(
@@ -70,6 +86,8 @@ class WorkspaceViewModel(
             workingStatus = null,
             tasks = repo.tasks(),
             sidebarOpen = false,
+            // 真实探测，不再是写死的 true
+            runtimeReady = installer.isInstalled(),
         )
     )
 
@@ -813,6 +831,119 @@ class WorkspaceViewModel(
             ThemeMode.DARK -> ThemeMode.SYSTEM
         }
         it.copy(themeMode = next, message = "主题：${next.label}")
+    }
+
+    // ---------- 内置 Termux 运行环境 ----------
+
+    /**
+     * 生成自检报告。
+     *
+     * 刻意**绝不抛异常**：这是排障入口，它自己崩掉或什么都不显示，就等于把唯一的诊断手段也弄没了。
+     * 探测失败时把失败原因当作报告正文显示出来，至少还能看到是哪一项炸的。
+     */
+    private fun buildEnvironmentReport(): String = runCatching {
+        EnvDoctor.report(getApplication())
+    }.getOrElse { error ->
+        "# IQ Code Compose · 环境自检\n\n" +
+            "自检本身失败了：\n" +
+            "${error.javaClass.name}: ${error.message}\n\n" +
+            "堆栈：\n" +
+            error.stackTraceToString() +
+            "\n— 报告结束，可整段复制"
+    }
+
+    /** 打开「环境自检」：现场跑一遍探测并生成可复制的报告。 */
+    fun openEnvironment() {
+        val reportText = buildEnvironmentReport()
+        _state.update {
+            it.copy(
+                environmentOpen = true,
+                environmentReport = reportText,
+                runtimeReady = runCatching { installer.isInstalled() }.getOrDefault(false),
+            )
+        }
+    }
+
+    fun closeEnvironment() = _state.update { it.copy(environmentOpen = false) }
+
+    /** 重新生成自检报告（安装前后各跑一次，便于对比）。 */
+    fun refreshEnvironmentReport() {
+        val reportText = buildEnvironmentReport()
+        _state.update {
+            it.copy(
+                environmentReport = reportText,
+                runtimeReady = runCatching { installer.isInstalled() }.getOrDefault(false),
+            )
+        }
+    }
+
+    /**
+     * 安装（或重新初始化）内置 Termux 环境。
+     *
+     * 解压 32MB、落 3473 个文件、建 1177 个符号链接，必须放到 IO 线程，
+     * 并且把进度实时回灌给 UI —— 整个过程在真机上要十几秒，不给反馈会被当成卡死。
+     */
+    fun installRuntime() {
+        if (_state.value.runtimeInstalling) return
+        _state.update {
+            it.copy(runtimeInstalling = true, runtimeProgress = 0, runtimeMessage = "正在准备…")
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = runCatching {
+                installer.install { message, percent ->
+                    _state.update { it.copy(runtimeMessage = message, runtimeProgress = percent) }
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(
+                        runtimeInstalling = false,
+                        runtimeMessage = "初始化失败：${error.message ?: error.javaClass.simpleName}",
+                    )
+                }
+            }.isSuccess
+
+            if (ok) {
+                val reportText = buildEnvironmentReport()
+                _state.update {
+                    it.copy(
+                        runtimeInstalling = false,
+                        runtimeProgress = 100,
+                        runtimeMessage = "内置 Termux 环境已就绪",
+                        runtimeReady = installer.isInstalled(),
+                        environmentReport = reportText,
+                    )
+                }
+            }
+        }
+    }
+
+    /** 幂等修复：清半成品目录、补齐 apt/dpkg 兼容层。适用于 apt 升级过或上次中断。 */
+    fun repairRuntime() {
+        if (_state.value.runtimeInstalling) return
+        _state.update { it.copy(runtimeInstalling = true, runtimeMessage = "正在修复…") }
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = runCatching { installer.repairIfInstalled() }.isSuccess
+            val reportText = buildEnvironmentReport()
+            _state.update {
+                it.copy(
+                    runtimeInstalling = false,
+                    runtimeMessage = if (ok) "已修复" else "修复失败",
+                    runtimeReady = installer.isInstalled(),
+                    environmentReport = reportText,
+                )
+            }
+        }
+    }
+
+    /** 复制自检报告到剪贴板，便于把真机现状整段发出来定位问题。 */
+    fun copyEnvironmentReport(): Boolean {
+        val app = getApplication<Application>()
+        val text = _state.value.environmentReport.ifBlank { buildEnvironmentReport() }
+        val clipboard = app.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            ?: return false
+        clipboard.setPrimaryClip(ClipData.newPlainText("IQ Code 环境自检", text))
+        _state.update { it.copy(message = "环境自检报告已复制") }
+        return true
     }
 
     // ---------- 设置 ----------
