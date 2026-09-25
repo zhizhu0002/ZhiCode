@@ -6,15 +6,31 @@ plugins {
 }
 
 android {
+    // 代码包名（可读，保留品牌路径）。注意它与下面的 applicationId **故意不同**。
     namespace 'com.iqge.iqcode.compose'
     compileSdk 37
 
     defaultConfig {
-        applicationId 'com.iqge.iqcode.compose'
+        /*
+         * applicationId 必须是**恰好 8 个字符**，这不是口味问题，是硬约束：
+         *
+         *   内置 Termux bootstrap 里有 337 个 ELF 二进制把前缀路径
+         *   "/data/data/com.termux"（21 字符）编译进了字符串表。
+         *   安装时要把这个路径原地改写成本应用的 "/data/user/0/<pkg>"。
+         *   ELF 的字符串表是按偏移定位的，替换串长度只要变一位，后面所有偏移都会错位，
+         *   二进制即损坏。所以必须满足 13 + len(pkg) == 21，即 len(pkg) == 8。
+         *
+         *   原版选 "com.iqge"（正好 8 字符）正是这个原因；这里沿用同一策略。
+         *   见 com.iqge.RuntimeInstaller 里的 ensureSafePrefixRewrite()。
+         */
+        applicationId 'iqge.app'
         minSdk 24
         targetSdk 28
         versionCode 1
-        versionName '0.1'
+        versionName '0.2'
+
+        // 内置 Termux 只提供 arm64 用户空间
+        ndk { abiFilters 'arm64-v8a' }
     }
 
     compileOptions {
@@ -23,6 +39,15 @@ android {
     }
 
     buildFeatures { compose true }
+
+    // 解压后的 libtermux.so 要用绝对路径 System.load，必须按传统方式打进 APK
+    packagingOptions {
+        jniLibs { useLegacyPackaging true }
+        resources { excludes += ['META-INF/*.kotlin_module'] }
+    }
+
+    // bootstrap-aarch64.zip 不能被压缩：一是包体巨大，二是要按 32MB 原样读进 assets
+    androidResources { noCompress 'zip' }
 
     lint { abortOnError false; checkReleaseBuilds false }
 }
@@ -47,4 +72,7 @@ dependencies {
     implementation 'top.yukonga.miuix.kmp:miuix-squircle:0.9.4'
     // 模糊效果：独立 artifact，Android 需 API 33+（RuntimeShader），用 isRuntimeShaderSupported() 门控
     implementation 'top.yukonga.miuix.kmp:miuix-blur-android:0.9.4'
+
+    // 原版引擎源码里用到了 androidx.annotation 的 @NonNull/@Nullable 等注解，仅编译期需要
+    compileOnly 'androidx.annotation:annotation:1.8.1'
 }

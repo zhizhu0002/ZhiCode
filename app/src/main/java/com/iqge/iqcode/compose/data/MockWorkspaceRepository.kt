@@ -19,7 +19,8 @@ class MockWorkspaceRepository : WorkspaceRepository {
 
     override fun projectName(): String = "IQ-Code-Compose"
 
-    override fun projectPath(): String = "/data/user/0/com.iqge/files/home/projects/IQ-Code-Compose"
+    override fun projectPath(): String =
+        com.termux.shared.termux.TermuxConstants.TERMUX_HOME_DIR_PATH + "/projects/IQ-Code-Compose"
 
     /**
      * Agent 任务清单。`detail` 用 Markdown 写，详情窗口直接交给 `IqMarkdown` 渲染，

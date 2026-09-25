@@ -11,11 +11,63 @@
     -->
     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
+    <!--
+      以下是原版 IQ Code 实际使用的权限集，移植后原样保留：
+      - INTERNET            模型 API / WebSearch / WebFetch
+      - SYSTEM_ALERT_WINDOW 悬浮窗（FloatingOverlayService）
+      - WAKE_LOCK           保活与 Agent 运行期唤醒锁
+      - FOREGROUND_SERVICE  KeilAliveService / 内置 Termux 长任务
+      - POST_NOTIFICATIONS  前台服务通知（Android 13+）
+      - 存储三类           内置 Termux 的 ~/storage 映射与 /sdcard 访问
+      - VIBRATE             交互反馈
+      - REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 保活引导
+      - REQUEST_INSTALL_PACKAGES   APK 安装能力（AndroidIntent install_apk）
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!--
+      targetSdk 28 时 Android 不做包可见性过滤，但 Android 11+ 的运行环境需要显式声明，
+      否则 AndroidIntent 拿不到可处理的目标，浏览器 / 安装器都会失败。
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="http" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+    </queries>
+
     <application
+        android:name=".IqCodeApplication"
         android:allowBackup="false"
         android:label="IQ Code Compose"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
+        android:requestLegacyExternalStorage="true"
+        android:extractNativeLibs="true"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
+
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
@@ -26,6 +78,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 后台保活（用户显式开启） -->
+        <service
+            android:name="com.iqge.background.KeepAliveService"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+        <!-- 悬浮窗（收起后回到主界面） -->
+        <service
+            android:name="com.iqge.FloatingOverlayService"
+            android:exported="false" />
+
+        <!--
+          Phase 7（Bcore 沙箱宿主）将在此追加：
+          SandboxControlProvider / SandboxGuardService / SandboxDashboardActivity，
+          以及 Bcore 合并进来的 SystemCallProvider / DaemonService / ProxyVpnService / ProxyActivity$Pn。
+        -->
     </application>
 
 </manifest>

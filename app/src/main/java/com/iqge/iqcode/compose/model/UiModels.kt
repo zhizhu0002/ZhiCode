@@ -186,7 +186,7 @@ data class QueuedPrompt(val chatItemId: String, val text: String)
 
 data class WorkspaceUiState(
     val projectName: String = "home",
-    val projectPath: String = "/data/user/0/com.iqge/files/home",
+    val projectPath: String = com.termux.shared.termux.TermuxConstants.TERMUX_HOME_DIR_PATH,
     val sessions: List<SessionSummary> = emptyList(),
     val activeSessionId: String = "",
     val transcript: List<ChatItem> = emptyList(),
