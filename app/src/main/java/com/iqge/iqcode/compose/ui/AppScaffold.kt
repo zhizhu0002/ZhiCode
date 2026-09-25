@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -701,6 +703,14 @@ private fun ComposerHost(
     wide: Boolean,
     glass: Glass,
 ) {
+    // 用 GetContent 而不是 OpenDocument：这里的授权只为"立刻读一次字节"服务，
+    // 内容读完就进内存了，不需要跨进程重启保留的持久授权。
+    // （原版用 ACTION_OPEN_DOCUMENT + takePersistableUriPermission，是因为它把 Uri
+    //  留在附件列表里直到用户点发送，中间可能经历一次重组甚至进程重启。）
+    val pickImage = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+    ) { uri -> if (uri != null) viewModel.attachImage(uri) }
+
     Composer(
         state = state,
         wide = wide,
@@ -708,7 +718,7 @@ private fun ComposerHost(
         onTextChange = viewModel::onComposerChange,
         onSend = viewModel::send,
         onStop = viewModel::stop,
-        onAttach = viewModel::addMockAttachment,
+        onAttach = { pickImage.launch("image/*") },
         onRemoveAttachment = { viewModel.removeAttachment(it.id) },
         onPermissionChip = viewModel::showPermissionPicker,
         onEffortChip = viewModel::showEffortPicker,

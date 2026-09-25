@@ -8,6 +8,7 @@ import com.iqge.iqcode.compose.model.EffortLevel
 import com.iqge.iqcode.compose.model.PermissionMode
 import com.iqge.iqcode.compose.model.TaskState
 import com.termux.app.iqcode.core.IQCodeEngine
+import org.json.JSONArray
 import com.termux.app.iqcode.core.PermissionGate
 import com.termux.app.iqcode.core.PermissionModePolicy
 import com.termux.app.iqcode.core.PlanApprovalGate
@@ -195,13 +196,21 @@ internal class IqEngineController(
     /** 当前回合已经开始（用于区分「该排队」还是「该直接发」）。 */
     fun hasEngine(): Boolean = engine != null
 
-    fun sendPrompt(prompt: String) {
-        engine().sendPrompt(prompt)
+    /**
+     * 发送一轮请求。
+     *
+     * [extraContent] 是 Anthropic 风格的附加内容块（当前只有图片：base64 + media_type）。
+     * 引擎侧会自己按 `visionEnabled` 决定是否真的发出去（见 `VisionMessageFilter`），
+     * 所以这里不做二次判断——两处都判会出现"界面拦了但引擎其实允许"这类不一致。
+     */
+    fun sendPrompt(prompt: String, extraContent: JSONArray? = null) {
+        if (extraContent == null || extraContent.length() == 0) engine().sendPrompt(prompt)
+        else engine().sendPrompt(prompt, extraContent)
     }
 
     /** 排队一条预输入。返回 false 表示引擎当时并不忙（调用方应改走 [sendPrompt]）。 */
-    fun steer(prompt: String, messageId: String): Boolean =
-        engine?.steerPrompt(prompt, null, messageId) ?: false
+    fun steer(prompt: String, messageId: String, extraContent: JSONArray? = null): Boolean =
+        engine?.steerPrompt(prompt, extraContent ?: JSONArray(), messageId) ?: false
 
     /**
      * 停止当前回合。

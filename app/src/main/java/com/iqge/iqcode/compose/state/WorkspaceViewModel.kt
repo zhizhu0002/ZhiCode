@@ -7,6 +7,7 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.iqge.iqcode.compose.data.ApiConfigStore
+import com.iqge.iqcode.compose.data.AttachmentReader
 import com.iqge.iqcode.compose.data.Clipboard
 import com.iqge.iqcode.compose.data.FileBrowser
 import com.iqge.iqcode.compose.data.GitChanges
@@ -154,6 +155,7 @@ class WorkspaceViewModel(
      */
     private var pendingSessionAction: SessionSummary? = null
     private var pendingMessageAction: ChatItem? = null
+
     private var modelCatalogJob: Job? = null
 
     /**
@@ -302,23 +304,89 @@ class WorkspaceViewModel(
         _state.update { it.copy(slashQuery = null, slashMatches = emptyList()) }
     }
 
-    fun addMockAttachment() {
-        val index = _state.value.attachments.size + 1
-        val isImage = index % 2 == 0
-        _state.update {
-            it.copy(
-                attachments = it.attachments + Attachment(
-                    id = nextId("att"),
-                    label = if (isImage) "screenshot-$index.png" else "notes-$index.txt",
-                    detail = if (isImage) "PNG · 截图" else "TEXT · 只读内容",
-                    isImage = isImage,
-                ),
-                message = "已附加${if (isImage) "图片" else "文本"}（Mock）",
+    /**
+     * 附件载荷。
+     *
+     * **故意不放进 `WorkspaceUiState`**：图片是几 MB 的字节数组，塞进不可变状态里会让
+     * 每次 `copy()` 都拖着它，而且 Compose 判断状态是否变化时要对它做 `equals`——
+     * 每帧比较几 MB 是纯粹的浪费。界面只需要名字和大小，真正的字节留在这里，
+     * 发送时再取。
+     */
+    private class AttachmentPayload(val bytes: ByteArray?, val mimeType: String)
+
+    private val attachmentPayloads = mutableMapOf<String, AttachmentPayload>()
+
+    /**
+     * 附加一张图片（来自系统选择器）。
+     *
+     * 读盘与大小校验都在 IO 线程：10 MB 的图片读进来是实打实的耗时。
+     */
+    fun attachImage(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { AttachmentReader.readImage(getApplication(), uri) }
+            result.fold(
+                onSuccess = { image ->
+                    val id = nextId("att")
+                    attachmentPayloads[id] = AttachmentPayload(image.bytes, image.mimeType)
+                    _state.update { s ->
+                        s.copy(
+                            attachments = s.attachments + Attachment(
+                                id = id,
+                                label = image.name,
+                                // 「PNG · 2.4 MB」两个信息都来自真实读数，不是写死的文案。
+                                detail = "${image.formatLabel} · ${image.sizeLabel}",
+                                isImage = true,
+                            ),
+                            message = "已添加图片：${image.name}",
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    _state.update { it.copy(message = "图片读取失败：${error.message ?: "未知原因"}") }
+                },
             )
         }
     }
 
+    /**
+     * 把待发图片编成引擎要的内容块。
+     *
+     * 结构对齐原版 `buildImageBlocks()`：`{type:image, source:{type:base64, media_type, data}, name}`。
+     * 是否真的发给模型由引擎按 `visionEnabled` 决定（`VisionMessageFilter`），
+     * 这里不重复判断——两处都判会出现"界面拦了但引擎其实允许"这类不一致。
+     */
+    private fun buildImageBlocks(): JSONArray {
+        val blocks = JSONArray()
+        _state.value.attachments.filter { it.isImage }.forEach { attachment ->
+            val payload = attachmentPayloads[attachment.id] ?: return@forEach
+            val bytes = payload.bytes ?: return@forEach
+            if (bytes.isEmpty()) return@forEach
+            runCatching {
+                blocks.put(
+                    JSONObject()
+                        .put("type", "image")
+                        .put(
+                            "source",
+                            JSONObject()
+                                .put("type", "base64")
+                                .put("media_type", payload.mimeType)
+                                .put("data", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)),
+                        )
+                        .put("name", attachment.label),
+                )
+            }
+        }
+        return blocks
+    }
+
+    /** 清空附件：界面条目与载荷必须一起走，否则载荷留在 map 里没人回收。 */
+    private fun clearAttachments() {
+        attachmentPayloads.clear()
+        _state.update { it.copy(attachments = emptyList()) }
+    }
+
     fun removeAttachment(id: String) {
+        attachmentPayloads.remove(id)
         _state.update { s -> s.copy(attachments = s.attachments.filterNot { it.id == id }) }
     }
 
@@ -345,6 +413,10 @@ class WorkspaceViewModel(
                 title = "你",
                 body = text,
             )
+            // 顺序很重要：先编好要发的内容块，再把附件清掉。
+            // 反过来的话队列里这条预输入就永远发不出那张图了。
+            val imageBlocks = buildImageBlocks()
+            clearAttachments()
             _state.update { s ->
                 val toolsRunning = s.transcript.lastOrNull()
                     ?.tools?.any { !it.completed } == true
@@ -357,7 +429,6 @@ class WorkspaceViewModel(
                     composerText = "",
                     slashQuery = null,
                     slashMatches = emptyList(),
-                    attachments = emptyList(),
                     transcript = s.transcript + userItem,
                     pendingInputs = queue,
                     workingStatus = queuedStatus(queue.size),
@@ -367,7 +438,7 @@ class WorkspaceViewModel(
             // 真正的排队交给引擎：它会在「当前工具执行完 / 当前模型回复结束」这个
             // 协议安全点把预输入并入对话，并回调 onQueuedPromptApplied。
             // 界面这边不再自己维护"跑完一轮再发下一条"的递归链（那会与引擎重复排队）。
-            val steered = engine.steer(text, userItem.id)
+            val steered = engine.steer(text, userItem.id, imageBlocks)
             if (!steered) {
                 // 极端竞态：这里判定为忙，但真正入队时回合已经结束。
                 // 不静默丢弃 —— 把文字放回输入框，用户能直接重发。
@@ -387,12 +458,14 @@ class WorkspaceViewModel(
             title = "你",
             body = text,
         )
+        // 同上：先编内容块再清附件。
+        val imageBlocks = buildImageBlocks()
+        clearAttachments()
         _state.update {
             it.copy(
                 composerText = "",
                 slashQuery = null,
                 slashMatches = emptyList(),
-                attachments = emptyList(),
                 transcript = it.transcript + userItem,
                 contextTokens = it.contextTokens + 1_100,
                 composerBusy = true,
@@ -400,7 +473,7 @@ class WorkspaceViewModel(
                 busySessionIds = it.busySessionIds + it.activeSessionId,
             )
         }
-        startTurn(text)
+        startTurn(text, imageBlocks)
     }
 
     /**
@@ -409,7 +482,7 @@ class WorkspaceViewModel(
      * 会话配置**每一轮都重新下发**：用户在设置里改了权限模式/推理强度/上下文窗口后，
      * 不需要重启应用就能在下一轮生效。
      */
-    private fun startTurn(prompt: String) {
+    private fun startTurn(prompt: String, extraContent: JSONArray? = null) {
         val configured = runCatching { engine.configure(engineOverrides()) }
         if (configured.isFailure) {
             // 配置阶段就失败（例如 SharedPreferences 损坏）时不要静默：
@@ -417,7 +490,7 @@ class WorkspaceViewModel(
             finishTurnWithError("引擎配置失败：" + (configured.exceptionOrNull()?.message ?: "未知原因"))
             return
         }
-        runCatching { engine.sendPrompt(prompt) }.onFailure { error ->
+        runCatching { engine.sendPrompt(prompt, extraContent) }.onFailure { error ->
             finishTurnWithError(ToolText.friendlyError(error.message, error))
         }
     }
