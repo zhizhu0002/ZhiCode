@@ -289,6 +289,15 @@ internal class IqEngineController(
      */
     fun configuredModel(): String = sessionConfig?.model.orEmpty().ifEmpty { "（引擎未配置）" }
 
+    /**
+     * 引擎当前的系统提示词。
+     *
+     * 与 [configuredModel] 同样是为了"直接问引擎"：设置页里的输入框只证明界面存下了
+     * 这段文字，不证明它被送进了请求。这一项尤其需要对照——它属于"改了看起来没事，
+     * 但可能整轮都没生效"的那类设置。
+     */
+    fun configuredSystemPrompt(): String = sessionConfig?.customSystemPrompt.orEmpty()
+
     fun contextPercent(): Int = runCatching { engine?.contextPercent() ?: 0 }.getOrDefault(0)
 
     // ------------------------------------------------------------------

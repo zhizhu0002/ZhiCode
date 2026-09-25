@@ -2029,22 +2029,18 @@ class WorkspaceViewModel(
     }
 
     /**
-     * 分类页里的「入口类」条目（API 配置记录 / MCP / UI 画布 / 其他设置）：
-     * 先关掉设置弹窗，再把对应目标落成一次指令或信息卡。
+     * 分类页里的「入口类」条目：先关掉设置弹窗，再把对应目标打开。
+     *
+     * 这里只接**真的有实现**的目标。原来还给 `canvas` / `other` 留了分支，
+     * 但它们分别指向"未移植的运行时画布"和"自定义头部提示词的第二个入口"，
+     * 现在画布入口已撤、提示词并入「上下文与项目」，两条分支一并删掉——
+     * 留着只会让后来的人以为这里有功能。
      */
     fun navigateFromSettings(target: String) {
         _state.update { it.copy(settingsDraft = null) }
         when (target) {
             "apiProfiles" -> openApiConfig()
             "mcp" -> openMcpConfig()
-            "canvas" -> {
-                onComposerChange("/canvas")
-                send()
-            }
-            "other" -> appendInfo(
-                "其他设置",
-                "自定义头部提示词已并入设置页「上下文与项目」分类，可直接在弹窗内编辑。",
-            )
             else -> Unit
         }
     }

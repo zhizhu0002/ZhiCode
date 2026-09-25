@@ -325,6 +325,33 @@ private fun ContextProjectPage(draft: SettingsDraft, onChange: (SettingsDraft) -
     )
 
     ProjectPathField(draft, onChange)
+    CustomSystemPromptField(draft, onChange)
+}
+
+/**
+ * 自定义头部提示词。
+ *
+ * 这一项**已经真的生效**：`WorkspaceViewModel.engineOverrides()` 会把它塞进
+ * `SessionConfig.customSystemPrompt`，每次 `startTurn` 前重新 `configure`，
+ * 所以它随下一次完整任务一起发给模型。
+ *
+ * 因此提示语必须如实说明两件事，否则用户会误判它的权限：
+ * 一是它**不能**覆盖安全规则（权限模式、工具白名单、Root 限制由引擎侧强制）；
+ * 二是它**只从下一轮生效**（当前这轮已经在跑，改了对它没用）。
+ * 另外要提醒不要在这里写密钥——这段文本会原样进入请求。
+ */
+@Composable
+private fun CustomSystemPromptField(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
+    SettingsTextField(
+        title = "自定义头部提示词",
+        value = draft.customSystemPrompt,
+        onValueChange = { onChange(draft.copy(customSystemPrompt = it)) },
+        summary = "作为系统指令随模型请求发送。从下一完整任务生效；不能覆盖应用安全规则、" +
+            "权限模式、工具白名单或 Root 限制。请勿填写 API 密钥。" +
+            if (draft.customSystemPrompt.isBlank()) "" else "当前 ${draft.customSystemPrompt.length} 字。",
+        singleLine = false,
+        minLines = 5,
+    )
 }
 
 /** 项目目录是自由文本，走 `BasicComponent` 的 `bottomAction` 槽位放输入框。 */
@@ -344,6 +371,16 @@ private fun ProjectPathField(draft: SettingsDraft, onChange: (SettingsDraft) -> 
     )
 }
 
+/**
+ * 扩展功能。
+ *
+ * 这里只列**已经能用**的入口。原版还有两项（运行时 UI 画布、其他设置），当前处理如下：
+ * - 「运行时 UI 画布」：整套运行时画布都还没移植（原版有 `UiCanvasStore`、`ui_canvas` 工具
+ *   和一个把画布文档作用到界面节点的消费端），所以不摆这个入口——
+ *   点进去只会得到一句"已执行（Mock）"，比没有入口更糟。
+ * - 「其他设置」：那一项原本只是「自定义头部提示词」的另一个入口。现在提示词输入框
+ *   已经并入「上下文与项目」分类，同一个字段不需要两条路径，入口撤销。
+ */
 @Composable
 private fun ExtensionsPage(onNavigate: (String) -> Unit) {
     SettingsGroupHeader("扩展功能")
@@ -351,16 +388,6 @@ private fun ExtensionsPage(onNavigate: (String) -> Unit) {
         title = "Model Context Protocol（MCP）",
         valueText = "MCP 服务器配置",
         onClick = { onNavigate("mcp") },
-    )
-    SettingsEntry(
-        title = "无需重编译的界面调整",
-        valueText = "运行时 UI 画布",
-        onClick = { onNavigate("canvas") },
-    )
-    SettingsEntry(
-        title = "其他设置",
-        valueText = "自定义头部提示词",
-        onClick = { onNavigate("other") },
     )
 }
 

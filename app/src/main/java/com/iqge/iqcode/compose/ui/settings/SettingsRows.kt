@@ -196,6 +196,14 @@ internal fun SettingsTextField(
     value: String,
     onValueChange: (String) -> Unit,
     summary: String? = null,
+    /**
+     * 是否单行。
+     *
+     * 默认单行（项目目录这类短值）；多行时给 [minLines] 一个可见的高度，
+     * 否则空内容的多行框会塌成一条线，用户看不出那里能写字。
+     */
+    singleLine: Boolean = true,
+    minLines: Int = 1,
 ) {
     BasicComponent(
         title = title,
@@ -207,7 +215,8 @@ internal fun SettingsTextField(
                 value = value,
                 onValueChange = onValueChange,
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
+                singleLine = singleLine,
+                minLines = minLines,
             )
         },
     )
