@@ -2,6 +2,8 @@ package com.termux.shared.termux;
 
 import android.content.Context;
 
+import com.zhizhu.zhicode.compose.BuildConfig;
+
 import java.io.File;
 
 /**
@@ -14,7 +16,7 @@ import java.io.File;
  *   <li><b>会被 javac 内联。</b>{@code static final String X = "字面量";} 是「编译期常量」，
  *       javac 会把值直接内联进全部调用点（本工程有 35 处）。一旦内联，运行期改这个字段毫无作用。
  *       所以这里刻意**不加 final**，让调用点编译成真实的 {@code getstatic} 字段读取。</li>
- *   <li><b>绑死了包名。</b>本工程是独立软件，包名是 {@code com.iqge.iqcode.compose}，
+ *   <li><b>绑死了包名。</b>本工程是独立软件，包名是 {@code com.zhizhu.zhicode.compose}，
  *       数据目录是它自己的私有目录，绝不能再用 {@code /data/user/0/com.iqge}。</li>
  * </ol>
  *
@@ -23,9 +25,29 @@ import java.io.File;
  */
 public final class TermuxConstants {
 
-    /** 兜底默认值：仅在 {@link #configure} 之前被读到才会用到（例如单元测试）。 */
-    private static final String DEFAULT_PACKAGE_NAME = "iqge.app";
-    private static final String DEFAULT_FILES_DIR_PATH = "/data/user/0/iqge.app/files";
+    /**
+     * 兜底默认值：仅在 {@link #configure} 之前被读到才会用到（例如单元测试）。
+     *
+     * <p>**故意不写死字符串**：直接引用 BuildConfig.APPLICATION_ID，也就是
+     * app/build.gradle 里那一个 applicationId。全部路径都由它派生，
+     * 换包名时只改 build.gradle 一行，代码侧零改动、也不会出现两处不一致。
+     */
+    private static final String DEFAULT_PACKAGE_NAME = BuildConfig.APPLICATION_ID;
+    private static final String DEFAULT_FILES_DIR_PATH = "/data/user/0/" + DEFAULT_PACKAGE_NAME + "/files";
+
+    /**
+     * 品牌短标识，**整份代码里只在这里定义一次**。
+     *
+     * <p>用来给 prefix 内部那些自有文件命名（{@code libexec/<slug>/}、
+     * {@code <slug>-main.list}、{@code .<slug>-ok}、{@code dpkg.<slug>-real} …），
+     * 以及各类 SharedPreferences 名、环境变量前缀、日志标记。
+     *
+     * <p>刻意集中成一个常量而不是到处写字符串字面量：这些名字分散在
+     * Java、Kotlin、assets 里的 shell 脚本三方，任何一处漏改都会造成
+     * "apt 钩子装了但脚本找不到"或"标记文件写在 A、检查在 B"这类**静默失效**。
+     * shell 脚本侧通过 {@code @SLUG@} 占位符注入（见 RuntimeInstaller.writeTemplate）。
+     */
+    public static final String BRAND_SLUG = "zhicode";
 
     // ---------------------------------------------------------------- 可配置值
     // 注意：以下 4 个字段**故意不加 final**。加了就会被 javac 内联，运行期配置失效。
@@ -37,7 +59,7 @@ public final class TermuxConstants {
     public static String TERMUX_FILES_DIR_PATH = DEFAULT_FILES_DIR_PATH;
 
     /** 数据目录，即 {@link #TERMUX_FILES_DIR_PATH} 的父目录（{@code /data/user/0/<pkg>}）。 */
-    public static String TERMUX_DATA_DIR_PATH = "/data/user/0/iqge.app";
+    public static String TERMUX_DATA_DIR_PATH = "/data/user/0/" + DEFAULT_PACKAGE_NAME;
 
     /** {@code $HOME}。 */
     public static String TERMUX_HOME_DIR_PATH = DEFAULT_FILES_DIR_PATH + "/home";

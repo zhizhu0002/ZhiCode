@@ -6,24 +6,41 @@ plugins {
 }
 
 android {
-    // 代码包名（可读，保留品牌路径）。注意它与下面的 applicationId **故意不同**。
-    namespace 'com.iqge.iqcode.compose'
+    namespace 'com.zhizhu.zhicode.compose'
     compileSdk 37
 
     defaultConfig {
         /*
-         * applicationId 必须是**恰好 8 个字符**，这不是口味问题，是硬约束：
+         * ⚠️ 已知限制：这个 applicationId 会让**内置 Termux 运行时无法安装**。
          *
-         *   内置 Termux bootstrap 里有 337 个 ELF 二进制把前缀路径
-         *   "/data/data/com.termux"（21 字符）编译进了字符串表。
-         *   安装时要把这个路径原地改写成本应用的 "/data/user/0/<pkg>"。
-         *   ELF 的字符串表是按偏移定位的，替换串长度只要变一位，后面所有偏移都会错位，
-         *   二进制即损坏。所以必须满足 13 + len(pkg) == 21，即 len(pkg) == 8。
+         * 原因是长度对不上，而且没有绕法：
          *
-         *   原版选 "com.iqge"（正好 8 字符）正是这个原因；这里沿用同一策略。
-         *   见 com.iqge.RuntimeInstaller 里的 ensureSafePrefixRewrite()。
+         *   内置 Termux bootstrap 里有 337 个 ELF 二进制把前缀 "/data/data/com.termux"
+         *   （21 字符）编译进了字符串表。安装时必须把它**原地**改写成
+         *   "/data/user/0/<包名>"。ELF 字符串表按偏移定位，替换串只要差一个字节，
+         *   后面所有偏移全部错位，二进制即损坏。所以必须满足
+         *       13 + len(applicationId) == 21  →  len(applicationId) == 8
+         *
+         *   "com.zhizhu.zhicode" 是 18 字符 → "/data/user/0/com.zhizhu.zhicode" 是 31 字符。
+         *   RuntimeInstaller 会**明确报错**（不会静默产出损坏文件）：
+         *     - ensureSafePrefixRewrite() 旧/新前缀长度不等 → IllegalStateException
+         *     - replaceAllInPlace() 对每个 bootstrap 文件再次校验 → IllegalStateException
+         *
+         * 后果：应用可编译、可安装、可启动，但"安装内置 Termux 环境"这一步必然失败。
+         *   不可用：终端页、Bash/RootBash、GitStatus、Delete、Enter/ExitWorktree、
+         *           TermuxDoctor/TermuxRepair、pkg install、沙箱 Termux 桥
+         *   仍可用：模型对话、会话、设置/API/MCP/技能/角色卡/记忆、
+         *           Read/Write/Edit/Glob/Grep/Stat/Mkdir/Move/List/Copy、
+         *           文件与变更面板、AndroidIntent、剪贴板、/web 联网
+         *
+         * 要同时保住运行时与品牌名，只有两条路：
+         *   1) 换成等长的 8 字符 applicationId（如 "zhi.code" → /data/user/0/zhi.code = 21）；
+         *   2) 离线重写那 337 个 ELF 的字符串表（重算 section 偏移与 RIP 相对引用）——
+         *      属于独立工程，且需要 x86_64 宿主才能验证（本机 aarch64，NDK 跑不起来）。
+         *
+         * 这不是设计疏漏，是**有意接受的取舍**，写在这里以免后人误以为是配置错误。
          */
-        applicationId 'iqge.app'
+        applicationId 'com.zhizhu.zhicode'
         minSdk 24
         targetSdk 28
         versionCode 1
@@ -38,7 +55,13 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
-    buildFeatures { compose true }
+    // 开启 BuildConfig：包名的**唯一真实来源**就是上面的 applicationId，
+    // 代码里（TermuxConstants 的兜底值等）一律引用 BuildConfig.APPLICATION_ID，
+    // 不再各自抄一份字符串。下次换包名只需改这一行。
+    buildFeatures {
+        compose true
+        buildConfig true
+    }
 
     // 解压后的 libtermux.so 要用绝对路径 System.load，必须按传统方式打进 APK
     packagingOptions {
@@ -56,7 +79,7 @@ android {
 androidComponents {
     onVariants(selector().all()) { variant ->
         variant.outputs.forEach { output ->
-            output.outputFileName.set("IQCodeCompose-${variant.name}.apk")
+            output.outputFileName.set("ZhiCode-${variant.name}.apk")
         }
     }
 }

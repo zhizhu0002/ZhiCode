@@ -59,9 +59,9 @@
     </queries>
 
     <application
-        android:name=".IqCodeApplication"
+        android:name=".ZhiCodeApplication"
         android:allowBackup="false"
-        android:label="IQ Code Compose"
+        android:label="蜘蛛"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true"
@@ -83,7 +83,7 @@
           APK 分享用的只读 ContentProvider（AndroidIntent 工具 install_apk 依赖它）。
 
           没有这条声明，「用本地路径安装 APK」必然失败：AndroidIntentBridge.installApk
-          会先调 IqFileProvider.uriForFile 把 /sdcard 或 $HOME 下的 APK 换成 content:// URI
+          会先调 ZhiFileProvider.uriForFile 把 /sdcard 或 $HOME 下的 APK 换成 content:// URI
           再交给系统安装器；provider 未注册时这一步直接抛异常，
           等于 AndroidIntent 的安装能力整个不可用。
 
@@ -92,20 +92,20 @@
           所以不需要 file_paths 之类的 meta-data 资源。
         -->
         <provider
-            android:name="com.iqge.IqFileProvider"
+            android:name="com.zhizhu.zhicode.ZhiFileProvider"
             android:authorities="${applicationId}.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true" />
 
         <!-- 后台保活（用户显式开启） -->
         <service
-            android:name="com.iqge.background.KeepAliveService"
+            android:name="com.zhizhu.zhicode.background.KeepAliveService"
             android:exported="false"
             android:stopWithTask="false" />
 
         <!-- 悬浮窗（收起后回到主界面） -->
         <service
-            android:name="com.iqge.FloatingOverlayService"
+            android:name="com.zhizhu.zhicode.FloatingOverlayService"
             android:exported="false" />
 
         <!--
@@ -121,14 +121,14 @@
           不能放主进程，否则一个原生 hook 崩溃会把编辑器/Agent 一起带走。
         -->
         <provider
-            android:name="com.iqge.sandbox.SandboxControlProvider"
+            android:name="com.zhizhu.zhicode.sandbox.SandboxControlProvider"
             android:authorities="${applicationId}.sandbox.control"
             android:exported="false"
             android:process=":iqsandbox" />
 
         <!-- 沙箱管理界面。它本身留在主进程（不设 android:process），只通过上面的 provider 发指令 -->
         <activity
-            android:name="com.iqge.sandbox.SandboxDashboardActivity"
+            android:name="com.zhizhu.zhicode.sandbox.SandboxDashboardActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:exported="false"
             android:screenOrientation="unspecified"
@@ -139,7 +139,7 @@
           没有它主进程会被系统回收，Agent/工具链会随之中断。
         -->
         <service
-            android:name="com.iqge.sandbox.SandboxGuardService"
+            android:name="com.zhizhu.zhicode.sandbox.SandboxGuardService"
             android:exported="false"
             android:stopWithTask="false" />
 
