@@ -61,6 +61,7 @@ fun IqSidebar(
     onDeleteSession: (SessionSummary) -> Unit,
     onSelectTab: (WorkspaceTab) -> Unit,
     onRoleCard: () -> Unit,
+    onSkills: () -> Unit,
     onSandbox: () -> Unit,
     onRuntime: () -> Unit,
     onSettings: () -> Unit,
@@ -130,6 +131,7 @@ fun IqSidebar(
                     active = state.tab == WorkspaceTab.FILES,
                     onClick = { onSelectTab(WorkspaceTab.FILES) },
                 )
+                SidebarAction(label = "技能", icon = IqIcons.skill, onClick = onSkills)
                 SidebarAction(label = "自定义角色卡", icon = IqIcons.roleCard, onClick = onRoleCard)
                 SidebarAction(label = "IQ 沙箱", icon = IqIcons.sandbox, onClick = onSandbox)
             }

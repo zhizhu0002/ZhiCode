@@ -61,6 +61,8 @@ import com.iqge.iqcode.compose.ui.dialogs.ChoicePickerOverlay
 import com.iqge.iqcode.compose.ui.dialogs.ApiConfigOverlay
 import com.iqge.iqcode.compose.ui.dialogs.McpConfigOverlay
 import com.iqge.iqcode.compose.ui.dialogs.ModelPickerOverlay
+import com.iqge.iqcode.compose.ui.dialogs.RoleCardsOverlay
+import com.iqge.iqcode.compose.ui.dialogs.SkillsOverlay
 import com.iqge.iqcode.compose.ui.dialogs.EnvironmentOverlay
 import com.iqge.iqcode.compose.ui.dialogs.PermissionOverlay
 import com.iqge.iqcode.compose.ui.dialogs.PlanApprovalOverlay
@@ -311,6 +313,32 @@ private fun IqCodeScreen(
                 onDraftChange = viewModel::updateMcpDraft,
                 onSave = viewModel::saveMcpServer,
                 onCancelForm = viewModel::cancelMcpForm,
+            )
+            SkillsOverlay(
+                state = state.skills,
+                onDismiss = viewModel::closeSkills,
+                onNew = viewModel::newSkill,
+                onEdit = viewModel::editSkill,
+                onAttach = viewModel::attachSkill,
+                onDelete = viewModel::deleteSkill,
+                onCreateDraftChange = viewModel::updateSkillCreateDraft,
+                onCreate = viewModel::createSkill,
+                onCancelCreate = viewModel::cancelSkillCreate,
+                onBodyChange = viewModel::updateSkillBody,
+                onSave = viewModel::saveSkill,
+                onCancelEdit = viewModel::cancelSkillEdit,
+            )
+            RoleCardsOverlay(
+                state = state.roleCards,
+                onDismiss = viewModel::closeRoleCards,
+                onNew = viewModel::newRoleCard,
+                onEdit = viewModel::editRoleCard,
+                onSelect = viewModel::selectRoleCard,
+                onDisable = viewModel::disableRoleCard,
+                onDelete = viewModel::deleteRoleCard,
+                onDraftChange = viewModel::updateRoleCardDraft,
+                onSave = viewModel::saveRoleCard,
+                onCancelEditor = viewModel::cancelRoleCardEditor,
             )
         }
     }
@@ -746,7 +774,8 @@ private fun IqSidebarHost(
             viewModel.selectTab(tab)
             viewModel.closeSidebar()
         },
-        onRoleCard = { viewModel.onComposerChange("/agents"); viewModel.send() },
+        onSkills = viewModel::openSkills,
+        onRoleCard = viewModel::openRoleCards,
         onSandbox = { viewModel.onComposerChange("/sandbox"); viewModel.send() },
         // 「运行环境」行现在是真实探测结果 + 真实的安装/自检窗口，
         // 不再是把 /doctor 当普通消息发出去（那样只会得到一句 Mock 回复）。

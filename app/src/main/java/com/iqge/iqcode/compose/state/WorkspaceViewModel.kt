@@ -15,6 +15,8 @@ import com.iqge.iqcode.compose.data.McpStore
 import com.iqge.iqcode.compose.data.MockWorkspaceRepository
 import com.iqge.iqcode.compose.data.ModelCatalogStore
 import com.iqge.iqcode.compose.data.SessionReader
+import com.iqge.iqcode.compose.data.RoleCardStore
+import com.iqge.iqcode.compose.data.SkillStore
 import com.iqge.iqcode.compose.data.WorkspacePaths
 import com.iqge.iqcode.compose.data.WorkspaceRepository
 import com.iqge.iqcode.compose.engine.EngineEvents
@@ -50,9 +52,17 @@ import com.iqge.iqcode.compose.model.PermissionRequest
 import com.iqge.iqcode.compose.model.QueuedPrompt
 import com.iqge.iqcode.compose.model.PlanApproval
 import com.iqge.iqcode.compose.model.RiskLevel
+import com.iqge.iqcode.compose.model.RoleCard
+import com.iqge.iqcode.compose.model.RoleCardEditor
+import com.iqge.iqcode.compose.model.RoleCardsState
 import com.iqge.iqcode.compose.model.SLASH_COMMANDS
 import com.iqge.iqcode.compose.model.SessionSummary
 import com.iqge.iqcode.compose.model.SettingsCategory
+import com.iqge.iqcode.compose.model.SkillCreateDraft
+import com.iqge.iqcode.compose.model.SkillEditTarget
+import com.iqge.iqcode.compose.model.SkillEntry
+import com.iqge.iqcode.compose.model.SkillScope
+import com.iqge.iqcode.compose.model.SkillsState
 import com.iqge.iqcode.compose.model.SettingsDraft
 import com.iqge.iqcode.compose.model.SlashCommand
 import com.iqge.iqcode.compose.model.ThemeMode
@@ -171,6 +181,15 @@ class WorkspaceViewModel(
      */
     private var modelOverride: String? = null
 
+    /**
+     * 会话级角色卡覆盖。
+     *
+     * 与 [modelOverride] 同理：磁盘上的卡片清单与"实际生效内容"是两份数据，
+     * 引擎的 SessionConfig 只认后者。空串 ≠ null —— 空串表示"确实停用了"（要覆盖掉
+     * 配置里的旧值），null 表示"本轮不覆盖"（会退回旧值，于是停用看起来没生效）。
+     */
+    private var roleCardOverride: String? = null
+
 
     private val _state = MutableStateFlow(
         WorkspaceUiState(
@@ -221,6 +240,7 @@ class WorkspaceViewModel(
             // 顶栏的模型名/密钥状态要反映**真实生效**的配置，
             // 否则用户会看到一个跟实际请求无关的模型名。
             syncActiveProfile()
+            syncRoleCardFromStore()
             ensureWorkspace()
             val sessions = SessionReader.list(_state.value.projectPath)
             _state.update { it.copy(sessions = sessions) }
@@ -385,6 +405,306 @@ class WorkspaceViewModel(
         _state.update { it.copy(attachments = emptyList()) }
     }
 
+    /**
+     * 把待发的**文本**附件拼进提示词。
+     *
+     * 结构照抄原版 `buildPromptWithAttachments`：包成 `<attached_context>` 块，
+     * 每个附件一个 `<attachment name="...">`。用 XML 风格的包裹是有意的——
+     * 模型对"这段是附带资料、不是用户指令"的分界需要明确标记，
+     * 直接把技能内容贴在提示词后面会让它读成用户要求。
+     *
+     * 只有存在文本附件时才加包裹层；一个都没有就原样返回，
+     * 避免每条消息都拖着空标签。
+     */
+    private fun buildPromptWithTextAttachments(prompt: String): String {
+        val texts = _state.value.attachments.filter { !it.isImage && it.textBody != null }
+        if (texts.isEmpty()) return prompt
+        return buildString {
+            append(prompt).append("\n\n<attached_context>")
+            texts.forEach { attachment ->
+                append("\n<attachment name=\"").append(attachment.label.replace("\"", "'")).append("\">\n")
+                val body = attachment.textBody.orEmpty()
+                append(if (body.length > TEXT_ATTACHMENT_LIMIT) body.take(TEXT_ATTACHMENT_LIMIT) + "\n[…attachment truncated…]" else body)
+                append("\n</attachment>")
+            }
+            append("\n</attached_context>")
+        }
+    }
+
+    // ---------- Skill ----------
+
+    fun openSkills() {
+        _state.update { it.copy(skills = SkillsState(skills = SkillStore.list(it.projectPath))) }
+    }
+
+    fun closeSkills() = _state.update { it.copy(skills = null) }
+
+    fun newSkill() = _state.update {
+        it.copy(skills = it.skills?.copy(createForm = SkillCreateDraft()))
+    }
+
+    fun updateSkillCreateDraft(transform: (SkillCreateDraft) -> SkillCreateDraft) = _state.update {
+        val skills = it.skills ?: return@update it
+        val form = skills.createForm ?: return@update it
+        it.copy(skills = skills.copy(createForm = transform(form)))
+    }
+
+    fun cancelSkillCreate() = _state.update {
+        it.copy(skills = it.skills?.copy(createForm = null))
+    }
+
+    /** 新建：建目录 + 写模板，然后**直接进入编辑器**（用户下一步必然是要写内容）。 */
+    fun createSkill() {
+        val s = _state.value
+        val form = s.skills?.createForm ?: return
+        if (!form.saveable) return
+        val name = form.name.trim()
+        val result = SkillStore.create(s.projectPath, form.scope, name)
+        result.fold(
+            onSuccess = {
+                val read = SkillStore.read(s.projectPath, form.scope, name)
+                val body = read.getOrElse { "" }
+                _state.update { state ->
+                    state.copy(
+                        skills = SkillsState(
+                            skills = SkillStore.list(state.projectPath),
+                            editing = SkillEditTarget(
+                                name = name,
+                                scope = form.scope,
+                                path = SkillStore.fileOf(state.projectPath, form.scope, name).absolutePath,
+                                body = body,
+                            ),
+                        ),
+                        message = if (it) "已创建技能 $name" else "技能 $name 已存在，直接打开编辑",
+                    )
+                }
+            },
+            onFailure = { error ->
+                _state.update { it.copy(message = "创建失败：${error.message ?: "未知原因"}") }
+            },
+        )
+    }
+
+    fun editSkill(entry: SkillEntry) {
+        val s = _state.value
+        val body = SkillStore.read(s.projectPath, entry.scope, entry.name).getOrElse { error ->
+            _state.update { it.copy(message = "打开失败：${error.message ?: "未知原因"}") }
+            return
+        }
+        _state.update {
+            it.copy(
+                skills = it.skills?.copy(
+                    createForm = null,
+                    editing = SkillEditTarget(entry.name, entry.scope, entry.path, body),
+                ),
+            )
+        }
+    }
+
+    fun updateSkillBody(body: String) = _state.update {
+        val skills = it.skills ?: return@update it
+        val editing = skills.editing ?: return@update it
+        it.copy(skills = skills.copy(editing = editing.copy(body = body)))
+    }
+
+    fun cancelSkillEdit() = _state.update {
+        it.copy(skills = it.skills?.copy(editing = null))
+    }
+
+    fun saveSkill() {
+        val s = _state.value
+        val editing = s.skills?.editing ?: return
+        val result = SkillStore.save(s.projectPath, editing.scope, editing.name, editing.body)
+        _state.update {
+            it.copy(
+                skills = SkillsState(skills = SkillStore.list(it.projectPath)),
+                message = if (result.isSuccess) "技能 ${editing.name} 已保存"
+                else "保存失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+            )
+        }
+    }
+
+    fun deleteSkill(entry: SkillEntry) {
+        val result = SkillStore.delete(_state.value.projectPath, entry.scope, entry.name)
+        _state.update {
+            it.copy(
+                skills = SkillsState(skills = SkillStore.list(it.projectPath)),
+                message = if (result.isSuccess) "已删除技能 ${entry.name}"
+                else "删除失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+            )
+        }
+    }
+
+    /**
+     * 把技能附加到下一步任务。
+     *
+     * 走**文本附件**路径而不是直接塞进输入框：输入框是用户的编辑区，
+     * 往里面灌几百行技能内容会让人没法继续写自己的话。
+     * 附加后内容由 [buildPromptWithTextAttachments] 在发送时包进 `<attached_context>`。
+     */
+    fun attachSkill(entry: SkillEntry) {
+        val body = SkillStore.read(_state.value.projectPath, entry.scope, entry.name).getOrElse { error ->
+            _state.update { it.copy(message = "附加失败：${error.message ?: "未知原因"}") }
+            return
+        }
+        val id = nextId("skill")
+        _state.update { s ->
+            // 同名技能只留一条：连着点两次「附加」应该还是那一份，而不是叠两份进提示词。
+            val kept = s.attachments.filterNot { it.label == "skill:${entry.name}" }
+            s.copy(
+                attachments = kept + Attachment(
+                    id = id,
+                    label = "skill:${entry.name}",
+                    detail = "${entry.scope.label} · ${entry.sizeLabel}",
+                    isImage = false,
+                    textBody = body,
+                ),
+                message = "已附加技能：${entry.name}",
+            )
+        }
+    }
+
+    // ---------- 角色卡 ----------
+
+    /**
+     * 打开角色卡管理器。
+     *
+     * 角色卡与技能的区别值得说清楚：技能是"按需加载的资料"（Agent 主动调用
+     * `Skill` 工具，或用户手动附加一次），角色卡是**长期生效的人设指令**——
+     * 引擎把启用中的内容作为 `<role_card>` 块拼进每一次系统提示词。
+     */
+    fun openRoleCards() {
+        val context = getApplication<android.app.Application>()
+        _state.update {
+            it.copy(
+                roleCards = RoleCardsState(
+                    cards = RoleCardStore.list(context),
+                    activeId = RoleCardStore.activeId(context),
+                ),
+                settingsDraft = null,
+            )
+        }
+    }
+
+    fun closeRoleCards() = _state.update { it.copy(roleCards = null) }
+
+    fun newRoleCard() = _state.update {
+        it.copy(roleCards = it.roleCards?.copy(editor = RoleCardEditor()))
+    }
+
+    fun editRoleCard(card: RoleCard) = _state.update {
+        it.copy(
+            roleCards = it.roleCards?.copy(
+                editor = RoleCardEditor(id = card.id, name = card.name, content = card.content),
+            ),
+        )
+    }
+
+    fun updateRoleCardDraft(transform: (RoleCardEditor) -> RoleCardEditor) = _state.update {
+        val state = it.roleCards ?: return@update it
+        val editor = state.editor ?: return@update it
+        it.copy(roleCards = state.copy(editor = transform(editor)))
+    }
+
+    fun cancelRoleCardEditor() = _state.update {
+        it.copy(roleCards = it.roleCards?.copy(editor = null))
+    }
+
+    /**
+     * 保存角色卡并**立即启用**。
+     *
+     * 与原版一致：保存一张卡就意味着"我现在要用它"，所以同时写清单、写 activeId、
+     * 并把内容灌进引擎配置。分三步做是必须的——只写清单不写 activeId 的话，
+     * 用户会看到卡保存成功却没有任何效果。
+     */
+    fun saveRoleCard() {
+        val editor = _state.value.roleCards?.editor ?: return
+        if (!editor.saveable) return
+        val context = getApplication<android.app.Application>()
+        val result = RoleCardStore.upsert(
+            context,
+            RoleCard(id = editor.id, name = editor.name.trim(), content = editor.content),
+        )
+        result.fold(
+            onSuccess = { saved ->
+                roleCardOverride = saved.content
+                refreshRoleCards(message = "角色卡「${saved.name}」已保存并启用")
+                runCatching { engine.configure(engineOverrides()) }
+            },
+            onFailure = { error ->
+                _state.update { it.copy(message = "保存失败：${error.message ?: "未知原因"}") }
+            },
+        )
+    }
+
+    /** 启用一张已存在的卡。 */
+    fun selectRoleCard(card: RoleCard) {
+        val context = getApplication<android.app.Application>()
+        val result = RoleCardStore.save(context, RoleCardStore.list(context), card.id)
+        if (result.isFailure) {
+            _state.update { it.copy(message = "启用失败：${result.exceptionOrNull()?.message ?: "未知原因"}") }
+            return
+        }
+        roleCardOverride = card.content
+        refreshRoleCards(message = "已启用角色卡：${card.name}")
+        runCatching { engine.configure(engineOverrides()) }
+    }
+
+    fun disableRoleCard() {
+        val context = getApplication<android.app.Application>()
+        val result = RoleCardStore.save(context, RoleCardStore.list(context), "")
+        if (result.isFailure) {
+            _state.update { it.copy(message = "停用失败：${result.exceptionOrNull()?.message ?: "未知原因"}") }
+            return
+        }
+        // 覆盖值置成空串（而不是 null）：null 表示"不覆盖"，那会退回配置里的旧值，
+        // 于是"停用"看起来没生效——角色卡还挂在系统提示词里。
+        roleCardOverride = ""
+        refreshRoleCards(message = "角色卡已停用")
+        runCatching { engine.configure(engineOverrides()) }
+    }
+
+    fun deleteRoleCard(card: RoleCard) {
+        val context = getApplication<android.app.Application>()
+        val wasActive = _state.value.roleCards?.activeId == card.id
+        val result = RoleCardStore.delete(context, card.id)
+        if (result.isFailure) {
+            _state.update { it.copy(message = "删除失败：${result.exceptionOrNull()?.message ?: "未知原因"}") }
+            return
+        }
+        if (wasActive) {
+            roleCardOverride = ""
+            runCatching { engine.configure(engineOverrides()) }
+        }
+        refreshRoleCards(message = "已删除角色卡：${card.name}")
+    }
+
+    private fun refreshRoleCards(message: String) {
+        val context = getApplication<android.app.Application>()
+        _state.update {
+            it.copy(
+                roleCards = RoleCardsState(
+                    cards = RoleCardStore.list(context),
+                    activeId = RoleCardStore.activeId(context),
+                ),
+                message = message,
+            )
+        }
+    }
+
+    /**
+     * 把磁盘上启用中的角色卡内容读进会话覆盖值。
+     *
+     * 启动时调用一次：`SessionConfig.load()` 不带 roleCard（引擎只按 `applyProfile`
+     * 填协议/地址/模型），所以不主动读的话，重启后角色卡在列表里显示"已启用"
+     * 却不会被注入请求——正是那种"看起来配好了其实没生效"的状态。
+     */
+    private fun syncRoleCardFromStore() {
+        val content = runCatching { RoleCardStore.activeContent(getApplication()) }.getOrDefault("")
+        // 空串表示"确实没有启用的卡"，也要覆盖掉配置里的旧值，所以这里不能判空就跳过。
+        roleCardOverride = content
+    }
+
     fun removeAttachment(id: String) {
         attachmentPayloads.remove(id)
         _state.update { s -> s.copy(attachments = s.attachments.filterNot { it.id == id }) }
@@ -413,9 +733,10 @@ class WorkspaceViewModel(
                 title = "你",
                 body = text,
             )
-            // 顺序很重要：先编好要发的内容块，再把附件清掉。
-            // 反过来的话队列里这条预输入就永远发不出那张图了。
+            // 顺序很重要：先编好要发的内容块与拼好提示词，再把附件清掉。
+            // 反过来的话队列里这条预输入就永远发不出那张图、也丢掉附加的技能了。
             val imageBlocks = buildImageBlocks()
+            val promptWithTextAttachments = buildPromptWithTextAttachments(text)
             clearAttachments()
             _state.update { s ->
                 val toolsRunning = s.transcript.lastOrNull()
@@ -438,7 +759,7 @@ class WorkspaceViewModel(
             // 真正的排队交给引擎：它会在「当前工具执行完 / 当前模型回复结束」这个
             // 协议安全点把预输入并入对话，并回调 onQueuedPromptApplied。
             // 界面这边不再自己维护"跑完一轮再发下一条"的递归链（那会与引擎重复排队）。
-            val steered = engine.steer(text, userItem.id, imageBlocks)
+            val steered = engine.steer(promptWithTextAttachments, userItem.id, imageBlocks)
             if (!steered) {
                 // 极端竞态：这里判定为忙，但真正入队时回合已经结束。
                 // 不静默丢弃 —— 把文字放回输入框，用户能直接重发。
@@ -473,7 +794,7 @@ class WorkspaceViewModel(
                 busySessionIds = it.busySessionIds + it.activeSessionId,
             )
         }
-        startTurn(text, imageBlocks)
+        startTurn(buildPromptWithTextAttachments(text), imageBlocks)
     }
 
     /**
@@ -525,6 +846,7 @@ class WorkspaceViewModel(
             sandboxAgentFullAccess = s.settings.sandboxAgentFullAccess,
             forcedKeepAliveEnabled = s.settings.forcedKeepAliveEnabled,
             model = modelOverride,
+            roleCard = roleCardOverride,
         )
     }
 
@@ -1176,6 +1498,8 @@ class WorkspaceViewModel(
             }
 
             "/tasks" -> openTaskList()
+            "/skills" -> openSkills()
+            "/agents" -> openRoleCards()
 
             "/web" -> handleWebSlash(arg)
 
@@ -1498,6 +1822,7 @@ class WorkspaceViewModel(
                 it.copy(apiConfig = state, settingsDraft = null)
             }
             syncActiveProfile()
+            syncRoleCardFromStore()
         }
     }
 
@@ -1542,6 +1867,7 @@ class WorkspaceViewModel(
             val state = ApiConfigStore.read(getApplication())
             _state.update { it.copy(apiConfig = state, message = "API 配置已保存") }
             syncActiveProfile()
+            syncRoleCardFromStore()
         }
     }
 
@@ -1558,6 +1884,7 @@ class WorkspaceViewModel(
                 )
             }
             syncActiveProfile()
+            syncRoleCardFromStore()
         }
     }
 
@@ -1572,6 +1899,7 @@ class WorkspaceViewModel(
                 )
             }
             syncActiveProfile()
+            syncRoleCardFromStore()
         }
     }
 
@@ -1800,6 +2128,7 @@ class WorkspaceViewModel(
             // 覆盖值先生效，所以即使写配置失败模型也已经切换了；把这一点如实说出来，
             // 而不是报一个"保存失败"让人以为模型没换。
             syncActiveProfile()
+            syncRoleCardFromStore()
             _state.update {
                 it.copy(
                     message = if (result.isSuccess) "模型：$target"
@@ -2577,5 +2906,8 @@ class WorkspaceViewModel(
          * 引擎没有给出结构化返回值，所以只能照它的契约来。
          */
         private const val ENGINE_NOTHING_TO_COMPACT = "上下文已经足够精简"
+
+        /** 文本附件（技能）拼进提示词的长度上限，与原版一致。 */
+        private const val TEXT_ATTACHMENT_LIMIT = 60_000
     }
 }

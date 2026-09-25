@@ -195,6 +195,102 @@ data class McpConfigState(
     val form: McpServerDraft? = null,
 )
 
+/** Skill 的作用域。目录约定必须与引擎 `SkillTool` 一致，见 `SkillStore`。 */
+enum class SkillScope(val label: String) {
+    PROJECT("项目级"),
+    USER("用户级"),
+}
+
+/** 列表里的一条技能。 */
+data class SkillEntry(
+    val name: String,
+    val scope: SkillScope,
+    val path: String,
+    val summary: String,
+    val sizeLabel: String,
+)
+
+/**
+ * Skill 管理面板的状态。
+ *
+ * 三种形态共用一个弹窗，靠这两个字段区分：
+ * - `createForm != null` → 新建表单（问名称与存放位置）
+ * - `editing != null` → 编辑 SKILL.md
+ * - 两者都为 null → 列表
+ *
+ * 用两个字段而不是一个 `mode` 枚举：新建与编辑需要携带的数据完全不同，
+ * 塞进一个 sealed 层级只会让调用方多写一层 when。
+ */
+data class SkillsState(
+    val skills: List<SkillEntry>,
+    val createForm: SkillCreateDraft? = null,
+    val editing: SkillEditTarget? = null,
+)
+
+/** 新建技能的表单。 */
+data class SkillCreateDraft(
+    val name: String = "",
+    val scope: SkillScope = SkillScope.PROJECT,
+) {
+    val nameError: String? = when {
+        name.isBlank() -> null // 还没开始输入，不要一上来就报错
+        !Regex("[A-Za-z0-9._-]{1,64}").matches(name.trim()) -> "只能包含字母、数字、. _ -（1–64 个字符）"
+        else -> null
+    }
+
+    val saveable: Boolean get() = name.isNotBlank() && nameError == null
+}
+
+/** 正在编辑的技能。 */
+data class SkillEditTarget(
+    val name: String,
+    val scope: SkillScope,
+    val path: String,
+    /** 编辑中的内容。保存前只在内存里，不落盘。 */
+    val body: String,
+) {
+    /** 内容长度提示用。空内容不算错误，只提示一句。 */
+    val empty: Boolean get() = body.isBlank()
+}
+
+/**
+ * 一张角色卡。
+ *
+ * 内容会作为 `<role_card>` 块注入系统提示词（见引擎 `SystemPromptBuilder`），
+ * 所以它是"长期生效的人设指令"，不是一次性提示词。
+ */
+data class RoleCard(val id: String, val name: String, val content: String) {
+    /** 列表副标题：显示内容摘要，让用户不必点进去就知道卡里写了什么。 */
+    val summary: String
+        get() {
+            val flattened = content.replace('\n', ' ').trim()
+            if (flattened.isEmpty()) return "空内容"
+            return if (flattened.length <= 48) flattened else flattened.take(48) + "…"
+        }
+}
+
+/** 角色卡面板状态：`editor != null` 即编辑页，否则列表页。 */
+data class RoleCardsState(
+    val cards: List<RoleCard>,
+    val activeId: String,
+    val editor: RoleCardEditor? = null,
+)
+
+/** 新增 / 编辑角色卡的草稿。[id] 为空表示新增。 */
+data class RoleCardEditor(
+    val id: String = "",
+    val name: String = "",
+    val content: String = "",
+) {
+    val isEditing: Boolean get() = id.isNotBlank()
+
+    /** 名称是唯一必填项：内容留空是允许的（等于临时停用这张卡的效果）。 */
+    val nameError: String? get() = if (name.isBlank()) "请填写角色名称" else null
+    val saveable: Boolean get() = nameError == null
+}
+
+
+
 /**
  * 模型选择面板的状态。
  *

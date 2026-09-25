@@ -41,6 +41,8 @@ internal data class EngineOverrides(
     val projectDirectory: String? = null,
     val visionEnabled: Boolean? = null,
     val customSystemPrompt: String? = null,
+    /** 角色卡内容。引擎把它作为 &lt;role_card&gt; 块注入系统提示词（见 SystemPromptBuilder）。 */
+    val roleCard: String? = null,
     val autoCompact: Boolean? = null,
     val autoCompactPercent: Int? = null,
     val webSearchEnabled: Boolean? = null,
@@ -191,6 +193,7 @@ internal class IqEngineController(
         o.rootExecutionEnabled?.let { config.rootExecutionEnabled = it }
         o.sandboxAgentFullAccess?.let { config.sandboxAgentFullAccess = it }
         o.forcedKeepAliveEnabled?.let { config.forcedKeepAliveEnabled = it }
+        o.roleCard?.let { config.roleCard = it }
     }
 
     fun isBusy(): Boolean = engine?.isBusy ?: false
@@ -317,6 +320,14 @@ internal class IqEngineController(
      * 有这个读取口就能直接对照，而不是靠界面自己声明。
      */
     fun configuredWebSearchEnabled(): Boolean = sessionConfig?.webSearchEnabled == true
+
+    /**
+     * 引擎当前的动态角色卡内容。
+     *
+     * 角色卡最容易出的问题是"列表里勾着但请求里没有"（清单与生效内容两份数据没同步），
+     * 所以需要一个直接读引擎配置的口子来对照，而不是相信界面的勾选态。
+     */
+    fun configuredRoleCard(): String = sessionConfig?.roleCard.orEmpty()
 
     /**
      * 手动触发一次上下文压缩（`/compact`）。

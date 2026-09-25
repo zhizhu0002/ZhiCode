@@ -60,6 +60,9 @@ object IqIcons {
     val projectHistory: ImageVector get() = set.Refresh
     val projectPath: ImageVector get() = set.Home
     val roleCard: ImageVector get() = set.ContactsCircle
+
+    /** Skill 管理器。用 &quot;Layers&quot; 之外的图标以免和悬浮球/沙箱撞脸。 */
+    val skill: ImageVector get() = set.Tasks
     val sandbox: ImageVector get() = set.Layers
     val runtime: ImageVector get() = set.Ok
 

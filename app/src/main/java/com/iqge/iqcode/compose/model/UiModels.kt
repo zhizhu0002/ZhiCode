@@ -72,7 +72,22 @@ enum class ThemeMode(val label: String) { SYSTEM("跟随系统"), LIGHT("浅色"
 
 data class SlashCommand(val name: String, val hint: String)
 
-data class Attachment(val id: String, val label: String, val detail: String, val isImage: Boolean)
+/**
+ * 附件条上的一个条目。
+ *
+ * 两种来源共用一个模型：
+ * - 图片（`isImage = true`）：真正的字节放在 ViewModel 的载荷表里，不进不可变状态；
+ *   发送时编成 base64 内容块。
+ * - 文本（技能）：[textBody] 直接带内容。技能文件只有几 KB，放状态里代价可忽略，
+ *   而它必须能被拼进提示词正文（见 `buildPromptWithTextAttachments`）。
+ */
+data class Attachment(
+    val id: String,
+    val label: String,
+    val detail: String,
+    val isImage: Boolean,
+    val textBody: String? = null,
+)
 
 data class PermissionRequest(
     val id: String,
@@ -278,6 +293,8 @@ data class WorkspaceUiState(
     /** 非空即 API 配置窗口打开（列表或编辑表单）。 */
     val apiConfig: com.iqge.iqcode.compose.model.ApiConfigState? = null,
     val mcpConfig: com.iqge.iqcode.compose.model.McpConfigState? = null,
+    val skills: com.iqge.iqcode.compose.model.SkillsState? = null,
+    val roleCards: com.iqge.iqcode.compose.model.RoleCardsState? = null,
     val modelPicker: com.iqge.iqcode.compose.model.ModelPickerState? = null,
     /** 非空即设置弹窗打开；所有编辑先落在这里，「保存」才写回上面的字段。 */
     val settingsDraft: SettingsDraft? = null,
