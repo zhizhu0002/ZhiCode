@@ -282,11 +282,16 @@ class RuntimeInstaller(private val context: Context) {
             if (arrow <= 0 || arrow >= line.length - 1) {
                 throw IOException("Malformed symlink line: $line")
             }
-            val linkTarget = line.substring(0, arrow).trim()
+            val rawTarget = line.substring(0, arrow).trim()
             val linkName = line.substring(arrow + 1).trim()
-            if (linkTarget.isEmpty() || linkName.isEmpty()) {
+            if (rawTarget.isEmpty() || linkName.isEmpty()) {
                 throw IOException("Malformed symlink line: $line")
             }
+            // 目标本身也可能嵌着旧前缀，必须一起改写。
+            // 实测 1161 条里有 20 条是带前缀的绝对路径（pacman keyring），
+            // 不改写就会生成指向 /data/data/com.termux 的死链。
+            // 其余 1141 条是相对目标（如 ../../LICENSES/GPL-2.0.txt），按链接所在目录解析，保持原样。
+            val linkTarget = rawTarget.replace(OLD_PREFIX, newPrefix())
             val linkPath = safeBootstrapPath(stagingRoot, linkName)
             linkPath.parentFile?.mkdirs()
             kotlin.runCatching { linkPath.delete() }
