@@ -122,7 +122,7 @@ public final class AndroidIntentBridge {
                 String path = "file".equalsIgnoreCase(scheme) ? uri.getPath() : uri.toString();
                 if (path == null || path.trim().isEmpty()) return ToolExecutionResult.error("APK 路径为空");
                 uri = IqFileProvider.uriForFile(context, new File(path));
-            } else if ("content".equalsIgnoreCase(scheme) && IqFileProvider.AUTHORITY.equals(uri.getAuthority())) {
+            } else if ("content".equalsIgnoreCase(scheme) && IqFileProvider.authority(context).equals(uri.getAuthority())) {
                 // Verify our URI before handing it to another process; this produces an actionable
                 // error instead of a silent Package Installer failure for a missing APK.
                 try (android.content.res.AssetFileDescriptor ignored = context.getContentResolver().openAssetFileDescriptor(uri, "r")) {
@@ -166,7 +166,7 @@ public final class AndroidIntentBridge {
     private static void rememberPendingApk(Context context, Intent install) {
         PENDING_APK_INSTALL.set(new Intent(install));
         Uri uri = install.getData();
-        if (uri != null && IqFileProvider.AUTHORITY.equals(uri.getAuthority())) {
+        if (uri != null && IqFileProvider.authority(context).equals(uri.getAuthority())) {
             context.getSharedPreferences(INSTALL_PREFS, Context.MODE_PRIVATE).edit()
                 .putString(PENDING_APK_URI, uri.toString()).apply();
         }
@@ -177,7 +177,7 @@ public final class AndroidIntentBridge {
             .getString(PENDING_APK_URI, "");
         if (value == null || value.trim().isEmpty()) return null;
         Uri uri = Uri.parse(value);
-        if (!IqFileProvider.AUTHORITY.equals(uri.getAuthority())) {
+        if (!IqFileProvider.authority(context).equals(uri.getAuthority())) {
             clearRememberedApk(context);
             return null;
         }

@@ -7,15 +7,26 @@ import org.json.JSONObject;
 
 /** Synchronous IPC from IQ Code/Agent into the isolated :iqsandbox host process. */
 public final class SandboxHostClient {
-    public static final String AUTHORITY = "com.iqge.sandbox.control";
-    private static final Uri URI = Uri.parse("content://" + AUTHORITY);
+    /**
+     * Derived from the real applicationId rather than hardcoded.
+     *
+     * Provider authorities are device-global: if the original com.iqge build is installed
+     * alongside this one, a hardcoded "com.iqge.sandbox.control" on both sides makes the
+     * second install fail with INSTALL_FAILED_CONFLICTING_PROVIDER. The manifest declares
+     * the matching "${applicationId}.sandbox.control".
+     */
+    public static String authority(Context context) {
+        return context.getPackageName() + ".sandbox.control";
+    }
+
     private SandboxHostClient() {}
 
     public static JSONObject call(Context context, String action, JSONObject payload) {
         try {
             Bundle in = new Bundle();
             in.putString("payload", payload == null ? "{}" : payload.toString());
-            Bundle out = context.getContentResolver().call(URI, "control", action, in);
+            Uri uri = Uri.parse("content://" + authority(context));
+            Bundle out = context.getContentResolver().call(uri, "control", action, in);
             if (out == null) return error("IQSandbox 进程没有返回结果");
             String raw = out.getString("result", "");
             if (raw.isEmpty()) return error("IQSandbox 返回空结果");

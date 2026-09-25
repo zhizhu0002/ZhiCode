@@ -722,7 +722,7 @@ class WorkspaceViewModel(
      * 打开 IQ 沙箱管理界面（`SandboxDashboardActivity`）。
      *
      * 与「环境弹窗」不同，这里**不能**只改本进程的 UI 状态：沙箱引擎整个跑在
-     * `:iqsandbox` 进程里，管理界面通过 `com.iqge.sandbox.control` 这个同 UID
+     * `:iqsandbox` 进程里，管理界面通过 `${applicationId}.sandbox.control` 这个同 UID
      * 私有 provider 与它通信（见 SandboxControlProvider）。所以这里必须真的
      * 启动那个 Activity，而不是弹一个本地的 Compose 面板 —— 后者会得到一个
      * "永远连不上引擎"的空壳界面。

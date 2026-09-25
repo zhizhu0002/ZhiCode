@@ -25,7 +25,22 @@ import java.util.Locale;
  * Android. It intentionally exposes only explicitly supported roots and rejects path traversal.
  */
 public final class IqFileProvider extends ContentProvider {
-    public static final String AUTHORITY = "com.iqge.fileprovider";
+
+    /**
+     * Authority must be unique across the whole device, so it is derived from the
+     * actual applicationId instead of being hardcoded.
+     *
+     * Hardcoding "com.iqge.fileprovider" (as the original app does) breaks installation
+     * whenever the original com.iqge build is also present: two packages may not own the
+     * same provider authority, and the installer rejects the second one with
+     * INSTALL_FAILED_CONFLICTING_PROVIDER before any of our code runs.
+     *
+     * The manifest declares the matching "${applicationId}.fileprovider", so both sides
+     * always agree no matter what applicationId this build uses.
+     */
+    public static String authority(Context context) {
+        return context.getPackageName() + ".fileprovider";
+    }
 
     @Override public boolean onCreate() { return true; }
 
@@ -112,7 +127,7 @@ public final class IqFileProvider extends ContentProvider {
         File external = Environment.getExternalStorageDirectory().getCanonicalFile();
         File home = new File(TermuxConstants.TERMUX_HOME_DIR_PATH).getCanonicalFile();
         File cache = context.getCacheDir().getCanonicalFile();
-        Uri.Builder out = new Uri.Builder().scheme("content").authority(AUTHORITY);
+        Uri.Builder out = new Uri.Builder().scheme("content").authority(authority(context));
         if (under(file, external)) {
             out.appendPath("storage").appendPath("shared");
             appendRelative(out, external, file);
@@ -130,8 +145,9 @@ public final class IqFileProvider extends ContentProvider {
 
     private File resolve(Uri uri, boolean requireFile) {
         try {
-            if (uri == null || !"content".equalsIgnoreCase(uri.getScheme())
-                || !AUTHORITY.equals(uri.getAuthority())) throw new SecurityException("无效 IQ Code content URI");
+            Context providerContext = getContext();
+            if (uri == null || !"content".equalsIgnoreCase(uri.getScheme()) || providerContext == null
+                || !authority(providerContext).equals(uri.getAuthority())) throw new SecurityException("无效 IQ Code content URI");
             List<String> segments = uri.getPathSegments();
             if (segments == null || segments.isEmpty()) throw new FileNotFoundException("URI 缺少路径");
             Context context = getContext();
