@@ -11,9 +11,15 @@ import com.iqge.iqcode.compose.model.TerminalLine
 /**
  * 数据来源抽象。
  *
- * 第一期由 [MockWorkspaceRepository] 提供内存假数据；
- * 后续接真实 IQ Code 引擎时，只需实现本接口并把实例交给 WorkspaceViewModel，
- * UI 层不需要改动。
+ * 现状：**对话已经接到真实引擎**（见 `engine/IqEngineController`），
+ * 所以这里只剩「会话列表 / 变更 / 文件 / 终端横幅」这些尚未真实化的部分。
+ *
+ * `assistantReply` / `toolSequence` 这两个模拟流式回复与模拟工具序列的接口
+ * 已经随接入真实引擎一并删除 —— 留着它们会让人误以为对话仍走 Mock，
+ * 一旦被误接回去就会出现"界面像在正常工作、其实没调用模型"这种最难查的问题。
+ *
+ * 后续 Phase 会逐项把剩下的方法换成真实实现（文件系统 / git diff / 真实 PTY / 会话持久化），
+ * 届时这里的方法会一个个减少，而不是被整体替换。
  */
 interface WorkspaceRepository {
     fun projectName(): String
@@ -27,19 +33,4 @@ interface WorkspaceRepository {
     fun childrenOf(path: String): List<FileEntry>
     fun readFile(path: String): OpenFile
     fun terminalBanner(project: String): List<TerminalLine>
-    /** 模拟一次助手回复的流式分片。 */
-    fun assistantReply(prompt: String): List<String>
-    /** 模拟一次工具调用序列（名称、显示名、摘要、输出）。 */
-    fun toolSequence(prompt: String): List<MockToolRun>
 }
-
-data class MockToolRun(
-    val toolName: String,
-    val displayName: String,
-    val summary: String,
-    val output: String,
-    val additions: Int = 0,
-    val deletions: Int = 0,
-    val exitCode: Int = 0,
-    val elapsedMs: Long = 900L,
-)

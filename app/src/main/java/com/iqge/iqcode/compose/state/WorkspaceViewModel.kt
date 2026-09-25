@@ -8,8 +8,17 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.iqge.iqcode.compose.data.MockWorkspaceRepository
 import com.iqge.iqcode.compose.data.WorkspaceRepository
+import com.iqge.iqcode.compose.engine.EngineEvents
+import com.iqge.iqcode.compose.engine.EngineOverrides
+import com.iqge.iqcode.compose.engine.EnginePlanApproval
+import com.iqge.iqcode.compose.engine.IqEngineController
+import com.iqge.iqcode.compose.engine.ToolText
+import com.iqge.iqcode.compose.engine.toEngineEffort
+import com.iqge.iqcode.compose.engine.toEngineMode
+import com.iqge.iqcode.compose.engine.toUiPlanApproval
 import com.iqge.iqcode.compose.runtime.EnvDoctor
 import com.iqge.RuntimeInstaller
+import com.iqge.iqcode.compose.model.AgentTask
 import com.iqge.iqcode.compose.model.Attachment
 import com.iqge.iqcode.compose.model.ChatItem
 import com.iqge.iqcode.compose.model.ChatKind
@@ -34,10 +43,10 @@ import com.iqge.iqcode.compose.model.ToolActivity
 import com.iqge.iqcode.compose.model.ToolKind
 import com.iqge.iqcode.compose.model.WorkspaceTab
 import com.iqge.iqcode.compose.model.WorkspaceUiState
-import kotlinx.coroutines.CompletableDeferred
+import com.iqge.iqcode.compose.model.WebSearchProvider
+import com.termux.app.iqcode.core.PlanApprovalGate
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,10 +70,40 @@ import java.util.Locale
 class WorkspaceViewModel(
     application: Application,
     private val repo: WorkspaceRepository = MockWorkspaceRepository(),
-) : AndroidViewModel(application) {
+) : AndroidViewModel(application), EngineEvents {
 
     /** 内置 Termux 环境安装器（第一次使用前会解压 32MB 的 bootstrap）。 */
     private val installer = RuntimeInstaller(application)
+
+    /** 真实 IQ Code 引擎。懒创建，第一次发消息时才初始化。 */
+    private val engine = IqEngineController(application, this)
+
+    // ------------------------------------------------------------------
+    // 运行期状态（属于"这一轮正在发生什么"，不是界面状态，因此不进 StateFlow）
+    // ------------------------------------------------------------------
+
+    /** 当前正在流式输出的助手气泡 id。为 null 表示还没有任何 delta。 */
+    private var streamingAssistantId: String? = null
+
+    /** 当前回合的工具分组 id。一个工具批次 = 一张分组卡。 */
+    private var currentGroupId: String? = null
+
+    /** 引擎给的工具 id → 它落在哪个分组卡里。用于把结果/进度写回正确的位置。 */
+    private data class LiveTool(val groupId: String, val name: String, val command: String)
+
+    private val liveTools = mutableMapOf<String, LiveTool>()
+
+    /**
+     * 工具实时输出的合并缓冲。
+     *
+     * `onToolProgress` 的粒度是"每次进程写出一点"，Bash 跑一条 `apt install` 能到几千次。
+     * 每次都改 StateFlow 会把界面拖垮，所以按 [PROGRESS_FLUSH_MS] 合并后再落盘。
+     */
+    private val progressBuffers = mutableMapOf<String, StringBuilder>()
+    private val progressLastFlush = mutableMapOf<String, Long>()
+
+    /** 正在等待用户回执的权限请求 id。 */
+    private var pendingPermissionId: String? = null
 
     private val initialSessions = repo.sessions()
     private val _state = MutableStateFlow(
@@ -93,8 +132,6 @@ class WorkspaceViewModel(
 
     val state: StateFlow<WorkspaceUiState> = _state.asStateFlow()
 
-    private var turnJob: Job? = null
-    private var permissionGate: CompletableDeferred<Boolean>? = null
     private var idCounter = 0L
 
     private fun nextId(prefix: String): String = "$prefix-${++idCounter}"
@@ -159,7 +196,7 @@ class WorkspaceViewModel(
             runSlashCommand(text)
             return
         }
-        if (turnJob?.isActive == true) {
+        if (engine.isBusy()) {
             // 预输入，复刻原版 sendPrompt() 的 steering 分支（MainActivity.java:1425-1450）：
             //  1) 用户气泡**立刻**进对话流（原版同样 addChatView(userItem)），这就是可见的确认；
             //  2) 清空输入框与附件；
@@ -191,6 +228,21 @@ class WorkspaceViewModel(
                     message = queuedNote,
                 )
             }
+            // 真正的排队交给引擎：它会在「当前工具执行完 / 当前模型回复结束」这个
+            // 协议安全点把预输入并入对话，并回调 onQueuedPromptApplied。
+            // 界面这边不再自己维护"跑完一轮再发下一条"的递归链（那会与引擎重复排队）。
+            val steered = engine.steer(text, userItem.id)
+            if (!steered) {
+                // 极端竞态：这里判定为忙，但真正入队时回合已经结束。
+                // 不静默丢弃 —— 把文字放回输入框，用户能直接重发。
+                _state.update { s ->
+                    s.copy(
+                        pendingInputs = s.pendingInputs.filterNot { q -> q.chatItemId == userItem.id },
+                        composerText = text,
+                        message = "上一回合刚好结束，消息未能入队，已放回输入框",
+                    )
+                }
+            }
             return
         }
         val userItem = ChatItem(
@@ -212,14 +264,70 @@ class WorkspaceViewModel(
                 busySessionIds = it.busySessionIds + it.activeSessionId,
             )
         }
-        turnJob = viewModelScope.launch { runMockTurn(text) }
+        startTurn(text)
+    }
+
+    /**
+     * 把一条提示词交给真实引擎。
+     *
+     * 会话配置**每一轮都重新下发**：用户在设置里改了权限模式/推理强度/上下文窗口后，
+     * 不需要重启应用就能在下一轮生效。
+     */
+    private fun startTurn(prompt: String) {
+        val configured = runCatching { engine.configure(engineOverrides()) }
+        if (configured.isFailure) {
+            // 配置阶段就失败（例如 SharedPreferences 损坏）时不要静默：
+            // 否则界面会一直停在"正在思考…"，用户只能干等。
+            finishTurnWithError("引擎配置失败：" + (configured.exceptionOrNull()?.message ?: "未知原因"))
+            return
+        }
+        runCatching { engine.sendPrompt(prompt) }.onFailure { error ->
+            finishTurnWithError(ToolText.friendlyError(error.message, error))
+        }
+    }
+
+    /**
+     * 把当前界面状态翻译成引擎覆盖项。
+     *
+     * `model` **故意留空**：界面上的 `modelLabel` 目前还是演示标签，真正生效的模型
+     * 来自 API 配置记录（`ApiSettingsStore`）。在这里覆盖会用一个不存在的模型名把请求打挂；
+     * 等设置页接线（Phase 5）之后再把模型选择器接上。
+     */
+    private fun engineOverrides(): EngineOverrides {
+        val s = _state.value
+        return EngineOverrides(
+            permissionMode = s.permissionMode.toEngineMode(),
+            effort = s.effort.toEngineEffort(),
+            contextWindow = s.contextWindow,
+            projectDirectory = s.projectPath,
+            customSystemPrompt = s.settings.customSystemPrompt,
+            visionEnabled = s.settings.visionEnabled,
+            autoCompact = s.settings.autoCompact,
+            autoCompactPercent = s.settings.autoCompactPercent,
+            webSearchEnabled = s.settings.webSearchEnabled,
+            webSearchProvider = when (s.settings.webSearchProvider) {
+                WebSearchProvider.AUTO -> "auto"
+                WebSearchProvider.DUCKDUCKGO -> "duckduckgo"
+                WebSearchProvider.BING -> "bing"
+            },
+            webSearchMaxResults = s.settings.webSearchMaxResults,
+            webTimeoutSec = s.settings.webSearchTimeoutSec,
+            rootExecutionEnabled = s.settings.rootExecutionEnabled,
+            sandboxAgentFullAccess = s.settings.sandboxAgentFullAccess,
+            forcedKeepAliveEnabled = s.settings.forcedKeepAliveEnabled,
+        )
     }
 
     fun stop() {
-        turnJob?.cancel()
-        turnJob = null
-        permissionGate?.complete(false)
-        permissionGate = null
+        // 引擎的 cancel() 会一并取消权限/提问/计划三个门控，
+        // 所以这里不需要再单独回执一次权限，只要把界面状态收干净。
+        engine.cancel()
+        pendingPermissionId = null
+        // 在途的流式残片与工具进度缓冲全部丢弃：它们属于已经作废的这一轮。
+        progressBuffers.clear()
+        progressLastFlush.clear()
+        liveTools.clear()
+        currentGroupId = null
         _state.update {
             // 停止时把还在排队的预输入**还原回输入框**（拼成多行逐条显示），
             // 而不是直接丢弃 —— 否则连发多条再按停止就会漏消息。
@@ -240,183 +348,457 @@ class WorkspaceViewModel(
         }
     }
 
-    private suspend fun runMockTurn(prompt: String) {
-        delay(320)
-        val reply = repo.assistantReply(prompt)
-        val assistantId = nextId("a")
-        val builder = StringBuilder()
-        var inserted = false
-        for (chunk in reply) {
-            delay(90)
-            builder.append(chunk)
-            val body = builder.toString()
-            _state.update { s ->
-                val item = ChatItem(
-                    id = assistantId,
-                    kind = ChatKind.ASSISTANT,
-                    title = "IQ",
-                    body = body,
-                    streaming = true,
-                    processSteps = listOf("开始分析请求", "正在生成回复"),
-                )
-                s.copy(
-                    transcript = if (inserted) s.transcript.map { if (it.id == assistantId) item else it }
-                    else s.transcript + item,
-                    workingStatus = "正在回复…",
-                    contextTokens = s.contextTokens + 45,
-                )
-            }
-            inserted = true
-        }
+    // ==================================================================
+    // 引擎事件逐条落地
+    //
+    // 线程约定：这些方法**全部在主线程被调用**（IqEngineController 负责搬运），
+    // 所以可以直接改 StateFlow、不需要再加 post/Handler。
+    // 顺序约定：凡是"文本之后紧跟工具/结束"的地方，控制器都已先 flush 过文本缓冲，
+    // 否则工具卡会插到还没显示的正文前面。
+    // ==================================================================
 
-        val tools = repo.toolSequence(prompt)
-        val groupId = nextId("g")
-        val activities = tools.mapIndexed { index, run ->
-            ToolActivity(
-                id = nextId("t$index"),
-                toolName = run.toolName,
-                displayName = run.displayName,
-                summary = run.summary,
-                output = run.output,
-                additions = run.additions,
-                deletions = run.deletions,
-                kind = kindOf(run.toolName),
+    override fun onEngineSessionStarted(model: String) {
+        streamingAssistantId = null
+        currentGroupId = null
+        liveTools.clear()
+        progressBuffers.clear()
+        progressLastFlush.clear()
+        _state.update {
+            it.copy(
+                composerBusy = true,
+                workingStatus = "正在思考…",
+                busySessionIds = it.busySessionIds + it.activeSessionId,
             )
         }
-        _state.update { s ->
-            val finalized = s.transcript.map {
-                if (it.id == assistantId) it.copy(
-                    streaming = false,
-                    thinking = "先确认工具链与组件签名，再逐块重写界面。",
-                    processSteps = listOf("开始分析请求", "完成回复"),
-                ) else it
+    }
+
+    override fun onEngineText(delta: String) {
+        val existing = streamingAssistantId
+        if (existing == null) {
+            // 首个 delta 才创建气泡。原版是回合开始时就插一个空气泡、
+            // 结束时再丢弃空的；Compose 里那样会先闪一个空白块，观感更差，
+            // 所以改成延迟创建 —— 语义等价（空回复同样不会留下气泡）。
+            val id = nextId("a")
+            streamingAssistantId = id
+            _state.update { s ->
+                s.copy(
+                    transcript = s.transcript + ChatItem(
+                        id = id,
+                        kind = ChatKind.ASSISTANT,
+                        title = "IQ",
+                        body = delta,
+                        streaming = true,
+                        processSteps = listOf("开始分析请求"),
+                    ),
+                    workingStatus = "正在回复…",
+                )
             }
+            return
+        }
+        _state.update { s ->
             s.copy(
-                transcript = finalized + ChatItem(
+                transcript = s.transcript.map {
+                    if (it.id == existing) it.copy(body = it.body + delta) else it
+                },
+                workingStatus = "正在回复…",
+            )
+        }
+    }
+
+    override fun onEngineThinking(delta: String) {
+        val id = streamingAssistantId ?: return
+        _state.update { s ->
+            s.copy(
+                transcript = s.transcript.map {
+                    if (it.id != id) it
+                    // 思考预览按 1200 字符上限保留尾部（原版 liveThinking 的做法），
+                    // 否则长思考会把内存和渲染都拖住。
+                    else {
+                        val merged = foldWhitespace(it.thinking + delta)
+                        it.copy(thinking = if (merged.length > THINKING_LIMIT) merged.takeLast(THINKING_LIMIT) else merged)
+                    }
+                },
+            )
+        }
+    }
+
+    override fun onEngineToolBatchStarted(toolIds: List<String>) {
+        // 一个批次 = 一张新的工具分组卡。批次边界由引擎给，界面不猜。
+        val groupId = nextId("g")
+        currentGroupId = groupId
+        _state.update { s ->
+            s.copy(
+                transcript = s.transcript + ChatItem(
                     id = groupId,
                     kind = ChatKind.TOOL_GROUP,
-                    groupLabel = groupLabel(activities),
-                    tools = activities,
+                    groupLabel = "",
+                    tools = emptyList(),
                 ),
             )
         }
+    }
 
-        for ((index, activity) in activities.withIndex()) {
-            delay(150)
-            if (kindOf(activity.toolName) == ToolKind.EDIT && _state.value.permissionMode == PermissionMode.ASK) {
-                val allowed = requestPermission(activity)
-                if (!allowed) {
-                    markTool(activity.copy(failed = true, completed = true, output = "用户拒绝了这次调用。"))
-                    continue
-                }
-            }
-            _state.update { s ->
-                s.copy(
-                    workingStatus = "正在执行 ${activity.displayName}…",
-                    transcript = s.transcript.map { item ->
-                        if (item.id != groupId) item
-                        else item.copy(tools = item.tools.map { if (it.id == activity.id) it.copy(elapsedMs = tools[index].elapsedMs) else it })
-                    },
-                )
-            }
-            delay(600)
-            val finished = activity.copy(
-                completed = index < activities.lastIndex,
-                elapsedMs = tools[index].elapsedMs,
-                failed = tools[index].exitCode != 0,
-            )
-            _state.update { s ->
-                s.copy(
-                    transcript = s.transcript.map { item ->
-                        if (item.id != groupId) item
-                        else item.copy(
-                            tools = item.tools.map { if (it.id == activity.id) finished else it },
-                            groupCompleted = index == activities.lastIndex,
-                        )
-                    },
-                )
-            }
+    override fun onEngineToolUse(id: String, name: String, input: JSONObject?) {
+        // 工作流类工具（任务清单/计划模式）不产生工具卡，只更新进度与步骤，
+        // 与原版一致：它们的效果体现在任务面板和计划窗口上。
+        if (ToolText.isWorkflowTool(name)) {
+            _state.update { it.copy(workingStatus = "正在执行 $name…") }
+            appendProcessStep("调用工具：$name")
+            return
         }
 
-        delay(240)
-        // 出队一条（FIFO），其余继续排队 —— 连发多条时逐条执行，不会漏
-        val next = _state.value.pendingInputs.firstOrNull()
-        _state.update {
-            val rest = it.pendingInputs.drop(1)
-            it.copy(
-                composerBusy = false,
-                // 复刻原版 handleQueuedPromptApplied()：预输入被加载时状态改为
-                // 「预输入已加载，正在继续…」（MainActivity.java:4427）
-                workingStatus = if (next != null) "预输入已加载，正在继续…" else null,
-                contextTokens = it.contextTokens + 3_600,
-                busySessionIds = it.busySessionIds - it.activeSessionId,
-                pendingInputs = rest,
-                message = if (next != null) {
-                    if (rest.isEmpty()) "预输入已加载，正在继续" else "预输入已加载，还剩 ${rest.size} 条"
-                } else {
-                    "本轮任务完成"
+        val groupId = currentGroupId ?: nextId("g").also { currentGroupId = it }
+        val summary = ToolText.summary(name, input) ?: ""
+        val command = input?.optString("command", "") ?: ""
+        val (added, deleted) = ToolText.delta(name, input)
+        val activity = ToolActivity(
+            id = id,
+            toolName = name,
+            displayName = ToolText.userFacingName(name),
+            summary = summary,
+            additions = added,
+            deletions = deleted,
+            kind = kindOf(name),
+        )
+        liveTools[id] = LiveTool(groupId, name, command)
+
+        _state.update { s ->
+            val text = if (s.transcript.any { it.id == groupId }) s.transcript
+            else s.transcript + ChatItem(id = groupId, kind = ChatKind.TOOL_GROUP)
+            s.copy(
+                transcript = text.map { item ->
+                    if (item.id != groupId) item
+                    else {
+                        val tools = item.tools + activity
+                        item.copy(tools = tools, groupLabel = groupLabel(tools))
+                    }
                 },
-                sessions = it.sessions.map { s ->
-                    if (s.id == it.activeSessionId) s.copy(
-                        messageCount = s.messageCount + 2,
-                        busy = false,
-                        updatedAtLabel = "刚刚",
-                    ) else s
-                },
+                workingStatus = "正在执行 $name…",
             )
         }
-
-        // 复刻原版：预输入在当前回合结束后接着跑。
-        // 用户气泡在排队那一刻就已插入，所以这里只跑 assistant 回合，不再补用户消息。
-        // 递归链：每条执行完都会再取队首，直到队列空。
-        if (next != null) {
-            // ⚠️ 必须同时把 composerBusy 置回 true：续跑的回合同样"在忙"，
-            // 否则输入器会回到空闲态（暂停键消失、发送键可点）。
-            _state.update { s -> s.copy(composerBusy = true) }
-            turnJob = viewModelScope.launch { runMockTurn(next.text) }
-        }
+        appendProcessStep("调用工具：$name")
     }
 
-    /** 排队状态文案；多条时把条数显示出来，避免"发了没反应"的错觉。 */
-    private fun queuedStatus(count: Int): String =
-        if (count <= 1) "已预输入，等待当前回复完成…" else "已预输入 $count 条，等待当前回复完成…"
+    override fun onEngineToolProgress(id: String, chunk: String, stderr: Boolean, elapsedMs: Long) {
+        if (liveTools[id] == null) return
+        val buffer = progressBuffers.getOrPut(id) { StringBuilder() }
+        if (stderr) buffer.append("[stderr]\n")
+        buffer.append(chunk)
+        // 单条工具的实时输出上限，超出丢头部（原版 liveOutput 是 40000）。
+        if (buffer.length > LIVE_OUTPUT_LIMIT) buffer.delete(0, buffer.length - LIVE_OUTPUT_LIMIT)
 
-    private suspend fun requestPermission(activity: ToolActivity): Boolean {
-        val gate = CompletableDeferred<Boolean>()
-        permissionGate = gate
-        _state.update {
-            it.copy(
-                permissionRequest = PermissionRequest(
-                    id = activity.id,
-                    tool = activity.toolName,
-                    subtitle = subtitleFor(activity.toolName),
-                    detail = activity.summary,
-                    riskLevel = if (activity.toolName == "Bash") RiskLevel.HIGH else RiskLevel.NORMAL,
-                )
-            )
-        }
-        val result = gate.await()
-        permissionGate = null
-        _state.update { it.copy(permissionRequest = null) }
-        return result
-    }
-
-    fun resolvePermission(allow: Boolean, alwaysAllow: Boolean = false) {
-        if (alwaysAllow) {
-            _state.update { it.copy(permissionMode = PermissionMode.ACCEPT_EDITS, message = "已切换为自动编辑") }
-        }
-        permissionGate?.complete(allow)
-    }
-
-    private fun markTool(activity: ToolActivity) {
+        val now = System.currentTimeMillis()
+        val last = progressLastFlush[id] ?: 0L
+        if (now - last < PROGRESS_FLUSH_MS) return
+        progressLastFlush[id] = now
+        val text = buffer.toString()
         _state.update { s ->
             s.copy(
                 transcript = s.transcript.map { item ->
                     if (item.kind != ChatKind.TOOL_GROUP) item
-                    else item.copy(tools = item.tools.map { if (it.id == activity.id) activity else it })
-                }
+                    else item.copy(
+                        tools = item.tools.map {
+                            if (it.id == id) it.copy(output = text, elapsedMs = maxOf(it.elapsedMs, elapsedMs)) else it
+                        },
+                    )
+                },
             )
         }
+    }
+
+    override fun onEngineToolResult(
+        id: String,
+        name: String,
+        isError: Boolean,
+        exitCode: Int,
+        content: String,
+        diff: String,
+        addedLines: Int,
+        deletedLines: Int,
+        command: String,
+    ) {
+        val live = liveTools.remove(id)
+        progressBuffers.remove(id)
+        progressLastFlush.remove(id)
+
+        _state.update { s ->
+            s.copy(
+                transcript = s.transcript.map { item ->
+                    if (item.kind != ChatKind.TOOL_GROUP) item
+                    else item.copy(
+                        tools = item.tools.map { tool ->
+                            if (tool.id != id) tool
+                            else tool.copy(
+                                completed = true,
+                                failed = isError,
+                                exitCode = exitCode,
+                                output = content,
+                                elapsedMs = maxOf(tool.elapsedMs, 0L),
+                                additions = if (addedLines > 0) addedLines else tool.additions,
+                                deletions = if (deletedLines > 0) deletedLines else tool.deletions,
+                                // 包管理器命令失败时默认展开：报错信息通常很长，
+                                // 折叠着用户只能看到"退出码 1"，等于没说。
+                                expanded = tool.expanded ||
+                                    (isError && ToolText.isPackageManagerTool(command)),
+                            )
+                        },
+                    )
+                },
+                workingStatus = "正在继续处理…",
+            )
+        }
+        appendProcessStep("工具完成：$name")
+
+        // 编辑类工具可能改动工作区，顺手刷新变更面板。
+        if (live != null && kindOf(name) == ToolKind.EDIT) refreshDiff()
+    }
+
+    override fun onEngineToolBatchCompleted(toolIds: List<String>) {
+        if (toolIds.isEmpty()) return
+        _state.update { s ->
+            s.copy(
+                transcript = s.transcript.map { item ->
+                    if (item.kind != ChatKind.TOOL_GROUP) item
+                    else {
+                        val touched = item.tools.any { it.id in toolIds }
+                        if (!touched) item
+                        else item.copy(
+                            groupCompleted = true,
+                            // 批结束时仍没拿到结果的成员，原版会标记成失败并补一句话。
+                            // 保留这个行为：静默留一个"永远转圈"的卡更难排查。
+                            tools = item.tools.map { tool ->
+                                if (tool.id in toolIds && !tool.completed) {
+                                    tool.copy(
+                                        completed = true,
+                                        failed = true,
+                                        output = tool.output.ifEmpty { "工具在返回结果前结束。" },
+                                    )
+                                } else tool
+                            },
+                        )
+                    }
+                },
+            )
+        }
+        currentGroupId = null
+    }
+
+    override fun onEnginePermissionRequest(requestId: String, tool: String, summary: String, highRisk: Boolean) {
+        pendingPermissionId = requestId
+        _state.update {
+            it.copy(
+                permissionRequest = PermissionRequest(
+                    id = requestId,
+                    tool = tool,
+                    subtitle = subtitleFor(tool),
+                    detail = summary,
+                    riskLevel = if (highRisk) RiskLevel.HIGH else RiskLevel.NORMAL,
+                ),
+            )
+        }
+    }
+
+    override fun onEngineQuestionRequest(requestId: String, questionsJson: String) {
+        // 提问门控的完整界面（多问题 / 多选项 / 自由回答）在下一阶段接线。
+        // 这里**不静默卡住**：立即回一个空答案让引擎继续，
+        // 并把"未接线"这件事明确告诉用户，而不是让他对着转圈等 30 分钟。
+        engine.respondQuestion(requestId, JSONObject())
+        appendInfo(
+            "提问未接线",
+            "IQ 发起了选择请求，但选择窗口尚未接入真实引擎，已按「未选择」继续。\n\n原始请求：\n$questionsJson",
+        )
+    }
+
+    override fun onEnginePlanApprovalRequest(request: EnginePlanApproval) {
+        _state.update { it.copy(planApproval = request.toUiPlanApproval()) }
+    }
+
+    override fun onEngineTasksChanged(tasks: List<AgentTask>) {
+        _state.update { it.copy(tasks = tasks) }
+    }
+
+    override fun onEngineProjectDirectoryChanged(directory: String) {
+        _state.update {
+            it.copy(
+                projectPath = directory,
+                projectName = directory.trimEnd('/').substringAfterLast('/').ifEmpty { directory },
+                filePath = directory,
+            )
+        }
+    }
+
+    override fun onEngineQueuedPromptApplied() {
+        // 引擎已经把队首预输入并入了对话。界面这边做的是：
+        // 出队一条（FIFO），并把还在流的上一段回复收尾。
+        finalizeStreaming(keepIfEmpty = false)
+        _state.update { s ->
+            val rest = s.pendingInputs.drop(1)
+            s.copy(
+                pendingInputs = rest,
+                workingStatus = "预输入已加载，正在继续…",
+                message = if (rest.isEmpty()) "预输入已加载，正在继续" else "预输入已加载，还剩 ${rest.size} 条",
+            )
+        }
+    }
+
+    override fun onEngineResponseRetry() {
+        // 重试会重发整段回复：把上一次失败尝试留下的半截气泡丢掉，
+        // 否则界面上会出现"半句话 + 完整回复"。
+        discardStreamingAssistant()
+        _state.update { it.copy(workingStatus = "连接中断，正在重试模型请求…", composerBusy = true) }
+    }
+
+    override fun onEngineInterruptedBySteering() {
+        discardStreamingAssistant()
+        _state.update {
+            it.copy(
+                workingStatus = "旧响应已打断，正在按最新纠正重新规划…",
+                composerBusy = true,
+            )
+        }
+    }
+
+    override fun onEngineUsage(inputTokens: Long, outputTokens: Long) {
+        val used = maxOf(0L, inputTokens) + maxOf(0L, outputTokens)
+        _state.update { s ->
+            // 有效窗口下限 16000：配置里若是 0/异常值，也不能让上下文条除出 Inf。
+            val window = maxOf(16_000, engine.contextWindowTokens().takeIf { it > 0 } ?: s.contextWindow)
+            val shown = if (used > 0) used.toInt() else engine.estimateContextTokens()
+            s.copy(contextTokens = shown, contextWindow = window)
+        }
+    }
+
+    override fun onEngineStatus(status: String) {
+        val text = ToolText.displayStatus(status, "thinking", true)
+        _state.update { it.copy(workingStatus = text) }
+        appendProcessStep(text)
+    }
+
+    override fun onEngineTurnComplete(stopReason: String) {
+        finalizeStreaming(keepIfEmpty = false)
+        _state.update { s ->
+            s.copy(
+                composerBusy = false,
+                workingStatus = null,
+                busySessionIds = s.busySessionIds - s.activeSessionId,
+                contextTokens = engine.estimateContextTokens().takeIf { it > 0 } ?: s.contextTokens,
+                sessions = s.sessions.map { session ->
+                    if (session.id == s.activeSessionId) session.copy(busy = false, updatedAtLabel = "刚刚") else session
+                },
+            )
+        }
+    }
+
+    override fun onEngineError(message: String, error: Throwable?) {
+        finishTurnWithError(ToolText.friendlyError(message, error))
+    }
+
+    // ---------- 引擎事件用到的内部工具 ----------
+
+    /** 一轮以错误收尾：收尾气泡、落一条错误卡、把忙碌态清干净。 */
+    private fun finishTurnWithError(text: String) {
+        finalizeStreaming(keepIfEmpty = false)
+        _state.update { s ->
+            s.copy(
+                transcript = s.transcript + ChatItem(
+                    id = nextId("e"),
+                    kind = ChatKind.ERROR,
+                    title = "错误",
+                    body = text,
+                ),
+                composerBusy = false,
+                workingStatus = null,
+                permissionRequest = null,
+                busySessionIds = s.busySessionIds - s.activeSessionId,
+            )
+        }
+        pendingPermissionId = null
+    }
+
+    /** 结束流式状态。[keepIfEmpty] 为 false 时，空白气泡会被丢弃（原版 discardEmptyStreamingMessage）。 */
+    private fun finalizeStreaming(keepIfEmpty: Boolean) {
+        val id = streamingAssistantId ?: return
+        streamingAssistantId = null
+        _state.update { s ->
+            s.copy(
+                transcript = s.transcript.mapNotNull { item ->
+                    if (item.id != id) item
+                    else if (!keepIfEmpty && item.body.isBlank() && item.thinking.isBlank()) null
+                    else item.copy(streaming = false)
+                },
+            )
+        }
+    }
+
+    /** 整条丢弃当前流式气泡（重试 / 被纠偏打断时用）。 */
+    private fun discardStreamingAssistant() {
+        val id = streamingAssistantId ?: return
+        streamingAssistantId = null
+        _state.update { s -> s.copy(transcript = s.transcript.filterNot { it.id == id }) }
+    }
+
+    /** 给当前助手气泡记一条过程步骤（最多 12 条，相邻重复去重，与原版一致）。 */
+    private fun appendProcessStep(step: String) {
+        val id = streamingAssistantId ?: return
+        _state.update { s ->
+            s.copy(
+                transcript = s.transcript.map { item ->
+                    if (item.id != id) item
+                    else {
+                        val merged = if (item.processSteps.lastOrNull() == step) item.processSteps
+                        else (item.processSteps + step).takeLast(PROCESS_STEP_LIMIT)
+                        item.copy(processSteps = merged)
+                    }
+                },
+            )
+        }
+    }
+
+    /** 思考文本的空白折叠：连续空白合成一个空格（原版 appendCollapsedWhitespace）。 */
+    private fun foldWhitespace(text: String): String {
+        val out = StringBuilder(text.length)
+        var lastSpace = false
+        for (ch in text) {
+            val isSpace = ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r'
+            if (isSpace) {
+                if (!lastSpace) out.append(' ')
+                lastSpace = true
+            } else {
+                out.append(ch)
+                lastSpace = false
+            }
+        }
+        return out.toString()
+    }
+
+
+    private fun queuedStatus(count: Int): String =
+        if (count <= 1) "已预输入，等待当前回复完成…" else "已预输入 $count 条，等待当前回复完成…"
+
+    /**
+     * 回执一次权限请求。
+     *
+     * 回执对象是**引擎**而不是界面上的临时对象：引擎的工具线程正阻塞在
+     * `PermissionGate.require()` 的闩锁上，只有真正 respond 过去它才会继续。
+     * 若一直不回执，引擎会等满 30 分钟。
+     */
+    fun resolvePermission(allow: Boolean, alwaysAllow: Boolean = false) {
+        val requestId = pendingPermissionId
+        pendingPermissionId = null
+        engine.respondPermission(requestId ?: "", allow)
+        _state.update {
+            it.copy(
+                permissionRequest = null,
+                permissionMode = if (alwaysAllow) PermissionMode.ACCEPT_EDITS else it.permissionMode,
+                message = if (alwaysAllow) {
+                    if (allow) "已允许本次调用，并切换为自动编辑" else "已拒绝本次调用，并切换为自动编辑"
+                } else {
+                    if (allow) "已允许本次调用" else "已拒绝本次调用"
+                },
+            )
+        }
+        // 切到自动编辑后要立刻下发，否则下一条工具调用还会弹窗。
+        if (alwaysAllow) runCatching { engine.configure(engineOverrides()) }
     }
 
     private fun kindOf(toolName: String): ToolKind = when (toolName) {
@@ -494,90 +876,45 @@ class WorkspaceViewModel(
      */
     private fun enterPlanMode(arg: String) {
         if (arg == "off" || arg == "exit") {
+            runCatching { engine.cancelPlanModeFromUi("") }
             _state.update { it.copy(planApproval = null, message = "已退出计划模式") }
             return
         }
-        if (arg.isNotEmpty()) {
-            // 已经带了目标，直接产出计划
-            producePlan(goal = arg)
+        if (engine.isBusy()) {
+            _state.update { it.copy(message = "当前回合还在进行，等它结束后再进入计划模式") }
             return
         }
-        _state.update {
-            it.copy(
-                choicePicker = ChoicePickerState(
-                    title = "计划目标",
-                    intent = ChoiceIntent.PLAN_GOAL,
-                    prompt = "计划窗口已打开（只读模式）。你想让我为哪个目标制定实施计划？",
-                    allowFreeForm = true,
-                    freeFormHint = "其他回答…",
-                    options = listOf(
-                        ChoiceOption(
-                            label = "IQ-Code-Compose 主界面收尾",
-                            detail = "围绕 projects/IQ-Code-Compose 继续开发：侧栏布局、WindowDialog、" +
-                                "Markdown 渲染与发布收尾。",
-                        ),
-                        ChoiceOption(
-                            label = "Miuix 组件适配 / 移植",
-                            detail = "围绕 Miuix 相关工程继续适配 Card / Surface / WindowDialog 等组件。",
-                        ),
-                        ChoiceOption(
-                            label = "ControlLayoutConverter 相关工作",
-                            detail = "围绕 projects/ControlLayoutConverter（或 ControlConverter-v0.3）" +
-                                "继续开发、修复或发版。",
-                        ),
-                        ChoiceOption(
-                            label = "你先说清楚要做什么",
-                            detail = "我描述具体需求（例如新功能、修 bug、性能优化、打包发版），" +
-                                "你再据此写计划。",
-                        ),
-                    ),
-                )
-            )
+        val result = runCatching { engine.enterPlanModeFromUi() }
+        val entered = result.getOrNull()?.isError == false
+        if (!entered) {
+            // 计划模式进不去时必须说出来。默默什么都不做的话，用户会以为
+            // 自己已经在只读模式里了 —— 而实际上下一条消息会照常执行。
+            finishTurnWithError("进入计划模式失败：" + (result.exceptionOrNull()?.message ?: "引擎拒绝了该请求"))
+            return
+        }
+        _state.update { it.copy(permissionMode = PermissionMode.PLAN, message = "已进入计划模式（只读）") }
+        // 带了目标就当成一条普通提示词发出去：计划模式下引擎只会产出计划，不会执行。
+        // 「问目标」这一步由引擎自己用「选择」窗口发起（等提问门控接线后生效）。
+        if (arg.isNotEmpty()) {
+            _state.update { it.copy(composerText = arg) }
+            send()
         }
     }
 
-    /** 真正产出计划（Markdown 正文由 `ui/Markdown.kt` 渲染）。 */
-    private fun producePlan(goal: String) {
-        val revision = 3
-        _state.update {
-            it.copy(
-                choicePicker = null,
-                planApproval = PlanApproval(
-                    id = nextId("plan"),
-                    title = "实现计划",
-                    revision = revision,
-                    path = "/data/user/0/com.iqge/files/home/.iq/projects/" +
-                        "-data-user-0-com-iqge-files-home-d869025f44cb/plans/" +
-                        "43db878b-665c-4003-b41f-b8a8dab74de2.md",
-                    body = buildString {
-                        append("## 说明\n\n")
-                        append("目标：").append(goal).append("\n\n")
-                        append("你没有指定更细的约束，所以我按当前活跃项目的真实状态给出一个可执行计划。")
-                        append("以下都是我在只读探查中实际观察到的：\n\n")
-                        append("- 活跃工程：`projects/IQ-Code-Compose`（Compose + Miuix 重写的主界面）\n")
-                        append("- 工具链：Gradle **9.3.1** / AGP **9.1.1** / Kotlin **2.4.0**，")
-                        append("Miuix `0.9.4`\n")
-                        append("- 产物：`app/build/outputs/apk/debug/IQCodeCompose-debug.apk`，")
-                        append("`versionCode 1` / `versionName 0.1`\n")
-                        append("- 手写绘制站点已从 **78** 降到 **9**，其余交给 Miuix `Card` / `Surface`\n\n")
-                        append("## 待办\n\n")
-                        append("1. 侧栏：去掉搜索、会话区占满、工作区移到底部\n")
-                        append("2. 「选择」与「提交计划」窗口改用 `WindowDialog`\n")
-                        append("3. Markdown 渲染：标题 / 粗体 / 行内代码 / 列表 / 代码块\n\n")
-                        append("```\n")
-                        append("./gradlew :app:assembleDebug\n")
-                        append("BUILD SUCCESSFUL in 43s\n")
-                        append("```\n\n")
-                        append("计划模式无法执行 Bash，因此尚未做任何文件改动、没有跑构建。")
-                    },
-                    permissionNote = "批准只确认计划；后续操作仍按你的权限模式：${it.permissionMode.label}",
-                ),
-            )
-        }
-    }
-
+    /**
+     * 批准 / 退回计划。
+     *
+     * 回执必须发给引擎：`onPlanApprovalRequest` 对应的工具线程正阻塞在审批闩锁上，
+     * 只有 `respondPlanApproval` 才会让它继续。原版这个闩锁**故意没有超时**——
+     * 无人值守的请求永远不能变成"批准执行"。
+     */
     fun resolvePlan(approved: Boolean) {
         val plan = _state.value.planApproval ?: return
+        engine.respondPlanApproval(
+            plan.id,
+            if (approved) PlanApprovalGate.Decision.APPROVE else PlanApprovalGate.Decision.KEEP_PLANNING,
+            "",
+        )
         appendInfo(
             if (approved) "计划已批准" else "计划已退回",
             if (approved) "开始执行：${plan.title}" else "等待修改后的计划。",
@@ -585,13 +922,18 @@ class WorkspaceViewModel(
         _state.update { it.copy(planApproval = null) }
     }
 
+
     /** 「继续规划」并带上用户填写的反馈。 */
     fun resolvePlanWithFeedback(feedback: String) {
-        if (feedback.isBlank()) {
-            resolvePlan(approved = false)
-            return
-        }
-        appendInfo("已提交反馈", feedback.trim())
+        val plan = _state.value.planApproval ?: return
+        val trimmed = feedback.trim()
+        // 空反馈等价于"退回"：把 KEEP_PLANNING 与空 feedback 一起发过去，
+        // 引擎会重新进入规划并等待下一版计划。
+        engine.respondPlanApproval(plan.id, PlanApprovalGate.Decision.KEEP_PLANNING, trimmed)
+        appendInfo(
+            if (trimmed.isEmpty()) "计划已退回" else "已提交反馈",
+            if (trimmed.isEmpty()) "等待修改后的计划。" else trimmed,
+        )
         _state.update { it.copy(planApproval = null) }
     }
 
@@ -720,16 +1062,19 @@ class WorkspaceViewModel(
             ChoiceIntent.GENERIC, ChoiceIntent.ATTACH -> _state.update {
                 it.copy(choicePicker = null, message = "${option.label}（Mock）")
             }
-            // 目标选定后才产出计划；加上 detail 让计划正文里能看到完整目标
-            ChoiceIntent.PLAN_GOAL -> producePlan(
-                goal = if (option.detail.isNotEmpty()) "${option.label} —— ${option.detail}" else option.label,
-            )
+            // 计划模式下的「目标澄清」：用户选定的目标本身就是一条提示词。
+            // 计划正文由引擎产出（不再由界面拼），所以这里只是把它发出去。
+            ChoiceIntent.PLAN_GOAL -> {
+                val goal = if (option.detail.isNotEmpty()) "${option.label} —— ${option.detail}" else option.label
+                _state.update { it.copy(choicePicker = null, composerText = goal) }
+                send()
+            }
         }
     }
 
     /**
      * 选择窗口里的「其他回答…」提交：不走选项，直接把这段自由文本当作输入。
-     * 在计划模式下它等价于"自定义目标"，会直接产出计划。
+     * 在计划模式下它等价于"自定义目标"，会作为提示词发给引擎。
      */
     fun onSubmitFreeForm(text: String) {
         val trimmed = text.trim()
@@ -739,7 +1084,8 @@ class WorkspaceViewModel(
         }
         val picker = _state.value.choicePicker
         if (picker?.intent == ChoiceIntent.PLAN_GOAL) {
-            producePlan(goal = trimmed)
+            _state.update { it.copy(choicePicker = null, composerText = trimmed) }
+            send()
             return
         }
         _state.update {
@@ -780,8 +1126,15 @@ class WorkspaceViewModel(
     }
 
     fun openSession(session: SessionSummary) {
-        turnJob?.cancel()
-        turnJob = null
+        // 切会话必须先把引擎这一轮停掉：否则旧会话的回调还会继续往新的
+        // transcript 里写（引擎的 cancel 会连带取消三个门控）。
+        engine.cancel()
+        discardStreamingAssistant()
+        currentGroupId = null
+        liveTools.clear()
+        progressBuffers.clear()
+        progressLastFlush.clear()
+        pendingPermissionId = null
         _state.update {
             it.copy(
                 activeSessionId = session.id,
@@ -1089,5 +1442,17 @@ class WorkspaceViewModel(
         private fun trimZero(value: Float): String =
             if (value >= 100f || value % 1f == 0f) String.format(Locale.US, "%.0f", value)
             else String.format(Locale.US, "%.1f", value)
+
+        /** 思考预览保留的尾部字符数（原版 `liveThinking` 上限 1200）。 */
+        private const val THINKING_LIMIT = 1200
+
+        /** 单条工具实时输出的上限（原版 `liveOutput` 上限 40000）。 */
+        private const val LIVE_OUTPUT_LIMIT = 40_000
+
+        /** 工具实时输出落盘间隔：每条进程输出都改一次 StateFlow 会把界面拖垮。 */
+        private const val PROGRESS_FLUSH_MS = 200L
+
+        /** 助手气泡上保留的过程步骤条数上限（原版 12）。 */
+        private const val PROCESS_STEP_LIMIT = 12
     }
 }

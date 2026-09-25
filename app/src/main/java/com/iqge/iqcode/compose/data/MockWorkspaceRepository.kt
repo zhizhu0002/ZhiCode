@@ -375,47 +375,4 @@ class MockWorkspaceRepository : WorkspaceRepository {
         TerminalLine("APK: app/build/outputs/apk/debug/IQCodeCompose-debug.apk", TerminalTone.DIM),
         TerminalLine("~ $ ", TerminalTone.PROMPT),
     )
-
-    override fun assistantReply(prompt: String): List<String> = listOf(
-        "已收到：", "\"", prompt, "\"", "\n\n",
-        "我按计划把这件事拆成三步：\n",
-        "1. 先确认工程与工具链可用；\n",
-        "2. 再用 Miuix 组件重写主界面分区；\n",
-        "3. 最后逐屏截图比对视觉。\n\n",
-        "顶栏、对话流与输入器先落地，随后补齐侧栏与三个工作区面板。",
-    )
-
-    override fun toolSequence(prompt: String): List<MockToolRun> = listOf(
-        MockToolRun(
-            toolName = "Grep",
-            displayName = "搜索代码",
-            summary = "class MainActivity|SLASH_COMMANDS",
-            output = "MainActivity.java:151: class MainActivity extends Activity\n" +
-                "MainActivity.java:415: new SlashCommand(\"/help\", …)",
-            elapsedMs = 210L,
-        ),
-        MockToolRun(
-            toolName = "Read",
-            displayName = "读取文件",
-            summary = "app/src/main/java/com/iqge/MainActivity.java",
-            output = "读取 120 行（offset=1353, limit=120）。",
-            elapsedMs = 640L,
-        ),
-        MockToolRun(
-            toolName = "Edit",
-            displayName = "修改文件",
-            summary = "ui/composer/Composer.kt",
-            output = "已应用 1 处修改。",
-            additions = 18,
-            deletions = 5,
-            elapsedMs = 380L,
-        ),
-        MockToolRun(
-            toolName = "Bash",
-            displayName = "执行命令",
-            summary = "./gradlew :app:assembleDebug",
-            output = "BUILD SUCCESSFUL in 47s\n1 actionable task: 1 executed",
-            elapsedMs = 47_000L,
-        ),
-    )
 }
