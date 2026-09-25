@@ -298,6 +298,22 @@ internal class IqEngineController(
      */
     fun configuredSystemPrompt(): String = sessionConfig?.customSystemPrompt.orEmpty()
 
+    /**
+     * 手动触发一次上下文压缩（`/compact`）。
+     *
+     * 引擎的 [IQCodeEngine.compactContext] 是**同步阻塞**的：它要调用模型生成语义摘要，
+     * 期间会走网络。所以调用方必须放在 IO 线程，并且注意它返回的是摘要文本，
+     * 不是"成功/失败"。
+     *
+     * 忙碌时直接拒绝：压缩会改写会话历史，和正在跑的回合抢同一份上下文，
+     * 两边同时动必然出错。
+     */
+    fun compactContext(instructions: String): Result<String> = runCatching {
+        check(!isBusy()) { "任务正在运行，完成后再压缩上下文" }
+        val engine = engine ?: error("引擎尚未初始化")
+        engine.compactContext(instructions.trim())
+    }
+
     fun contextPercent(): Int = runCatching { engine?.contextPercent() ?: 0 }.getOrDefault(0)
 
     // ------------------------------------------------------------------

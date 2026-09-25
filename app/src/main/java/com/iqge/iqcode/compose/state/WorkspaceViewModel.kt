@@ -7,6 +7,7 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.iqge.iqcode.compose.data.ApiConfigStore
+import com.iqge.iqcode.compose.data.Clipboard
 import com.iqge.iqcode.compose.data.FileBrowser
 import com.iqge.iqcode.compose.data.GitChanges
 import com.iqge.iqcode.compose.data.McpStore
@@ -152,6 +153,7 @@ class WorkspaceViewModel(
      * 否则会出现"想删 A 结果删了当前会话"这类错删。
      */
     private var pendingSessionAction: SessionSummary? = null
+    private var pendingMessageAction: ChatItem? = null
     private var modelCatalogJob: Job? = null
 
     /**
@@ -1064,6 +1066,16 @@ class WorkspaceViewModel(
 
     // ---------- 斜杠命令 ----------
 
+    /**
+     * 斜杠命令路由。
+     *
+     * ## 两条原则
+     *
+     * 1. **能接真功能的就接真功能**，不要保留"看起来执行了"的假回执。
+     * 2. **没实现的就直说没实现**。原来兜底分支会打印"已执行 `xxx`（Mock）"，
+     *    这是最糟的一种反馈：用户以为命令生效了，于是去做下一件事。
+     *    现在的兜底是明确列出"这条还没移植"以及可用的替代指令。
+     */
     private fun runSlashCommand(raw: String) {
         val command = raw.substringBefore(' ').lowercase(Locale.US)
         val arg = raw.substringAfter(' ', "").trim()
@@ -1077,24 +1089,179 @@ class WorkspaceViewModel(
             "/effort" -> showEffortPicker()
             "/model" -> showModelPicker()
             "/cancel" -> stop()
-            "/usage", "/stats", "/status" -> appendInfo(
-                "会话状态",
-                buildString {
-                    append("模型：").append(_state.value.modelLabel).append('\n')
-                    append("项目：").append(_state.value.projectName).append('\n')
-                    append("上下文：").append(formatTokens(_state.value.contextTokens))
-                    append(" / ").append(formatTokens(_state.value.contextWindow)).append('\n')
-                    append("权限：").append(_state.value.permissionMode.label).append('\n')
-                    append("推理强度：").append(_state.value.effort.label)
-                },
-            )
+            "/config" -> openSettings()
+            "/mcp" -> openMcpConfig()
+            "/copy" -> copyLatestAssistantReply()
+            "/compact" -> compactContext(arg)
+
+            // 环境类：都落到真实的 Termux 环境弹窗上（含安装/修复入口），
+            // 不再是把命令当普通消息发出去换一句假回复。
+            "/doctor", "/runtime" -> openEnvironment()
+            "/repair" -> {
+                openEnvironment()
+                repairRuntime()
+            }
+
+            "/tasks" -> openTaskList()
+
+            "/context" -> {
+                if (arg.isEmpty()) {
+                    showContextInfo()
+                } else {
+                    val tokens = parseTokenCount(arg)
+                    if (tokens == null) {
+                        _state.update { it.copy(message = "请输入 128k、200k、1m、1.5m 这类格式") }
+                    } else {
+                        _state.update { it.copy(contextWindow = tokens, message = "上下文窗口已设置为 ${formatTokens(tokens)}") }
+                    }
+                }
+            }
+
+            "/resume" -> {
+                openSidebar()
+                _state.update { it.copy(message = "在侧栏选择要恢复的会话") }
+            }
+
+            "/usage", "/stats", "/status" -> showContextInfo()
             "/help" -> appendInfo(
                 "全部指令",
                 SLASH_COMMANDS.joinToString("\n") { "` ${it.name} ` — ${it.hint}" },
             )
-            "/compact" -> appendInfo("上下文压缩", "已请求模型整理上下文（Mock，不会真正压缩）。")
-            "/config" -> openSettings()
-            else -> appendInfo("指令", "已执行 `$command`（Mock），$arg".trim())
+
+            else -> appendInfo(
+                "指令尚未移植",
+                buildString {
+                    append("`").append(command).append("` 在当前 Compose 版本里还没有对应实现，")
+                    append("本机也没有执行任何操作。\n\n")
+                    append("可用的相关指令：\n")
+                    append("` /doctor ` `/runtime` `/repair` — 内置 Termux 环境\n")
+                    append("` /compact ` — 真正调用模型压缩上下文\n")
+                    append("` /context ` — 查看或设置上下文窗口\n")
+                    append("` /copy ` — 复制最近一条回复\n")
+                    append("` /tasks ` — 查看 Agent 任务列表\n")
+                    append("` /resume ` — 从侧栏恢复历史会话\n")
+                    append("` /mcp ` — MCP 服务器配置\n")
+                    append("` /model ` — 切换模型")
+                },
+            )
+        }
+    }
+
+    /**
+     * 重新估算上下文用量。
+     *
+     * 压缩之后必须重算：`contextTokens` 平时是**累加**出来的（每轮加上 API 上报的用量），
+     * 压缩会真的丢掉一部分历史，累加值只会越走越大，不重算就会显示一个虚高的占用。
+     */
+    private fun syncContextUsage() {
+        _state.update { s ->
+            val window = maxOf(16_000, engine.contextWindowTokens().takeIf { it > 0 } ?: s.contextWindow)
+            s.copy(contextTokens = engine.estimateContextTokens(), contextWindow = window)
+        }
+    }
+
+    /**
+     * `/context 1m` 这类参数。
+     *
+     * 返回 null 表示格式不合法（而不是抛异常）——调用方要的是"给一句提示"，
+     * 不是错误处理。边界与原版一致：16k–2m，超出范围会让引擎按无效窗口处理。
+     */
+    private fun parseTokenCount(raw: String): Int? {
+        var s = raw.trim().lowercase(Locale.US).replace(",", "").replace("_", "")
+        if (s.isEmpty()) return null
+        var multiplier = 1.0
+        when {
+            s.endsWith("k") -> { multiplier = 1_000.0; s = s.dropLast(1) }
+            s.endsWith("m") -> { multiplier = 1_000_000.0; s = s.dropLast(1) }
+        }
+        val value = s.toDoubleOrNull()?.times(multiplier) ?: return null
+        if (!value.isFinite() || value < 16_000.0 || value > 2_000_000.0) return null
+        return value.toInt()
+    }
+
+    /**
+     * 「重试上一问」：把最近一条用户消息重新发一次。
+     *
+     * 注意重发**不会**撤回上一轮的结果，所以它会作为新一轮追加在对话末尾
+     * （与原版行为一致：原版也是重发，而不是回滚历史）。
+     */
+    private fun retryLastUserPrompt() {
+        val lastUser = _state.value.transcript.lastOrNull {
+            it.kind == ChatKind.USER && it.body.isNotBlank()
+        }
+        if (lastUser == null) {
+            _state.update { it.copy(message = "没有可重试的问题") }
+            return
+        }
+        _state.update { it.copy(composerText = lastUser.body) }
+        send()
+    }
+
+    /** `/context`（无参数）与 `/usage`、`/stats`、`/status` 共用。 */    private fun showContextInfo() {
+        val s = _state.value
+        val measured = engine.hasMeasuredContextUsage()
+        appendInfo(
+            "会话状态",
+            buildString {
+                append("模型：").append(s.modelLabel).append('\n')
+                append("API 配置：").append(s.profileName)
+                append(if (s.apiKeyConfigured) "（已配置密钥）" else "（未配置密钥）").append('\n')
+                append("项目：").append(s.projectPath).append('\n')
+                append("上下文：").append(formatTokens(s.contextTokens))
+                append(" / ").append(formatTokens(s.contextWindow))
+                append(if (measured) "（API 实测用量）" else "（本地估算，尚未产生 API 用量）").append('\n')
+                append("权限：").append(s.permissionMode.label).append('\n')
+                append("推理强度：").append(s.effort.label).append('\n')
+                append("运行环境：").append(if (s.runtimeReady) "已就绪" else "未初始化")
+            },
+        )
+    }
+
+    /**
+     * `/compact`：真正调用模型做语义压缩。
+     *
+     * 引擎侧是同步阻塞的（会走网络），所以放 IO 线程；期间给一条进行中提示，
+     * 因为大上下文压缩可能要几十秒，没有反馈用户会以为卡死了。
+     *
+     * ⚠️ 引擎**不保证**真的调用了模型：`compactContextSemantic` 在算不出可压缩区间时
+     * 会直接返回 [ENGINE_NOTHING_TO_COMPACT] 那句话（见其 `cut <= 0` 分支），
+     * 引擎自己的自动压缩也用同一个前缀判断。所以这里必须分流——
+     * 不加区分地宣称"已用模型生成摘要"就是在编造一次并不存在的模型调用。
+     */
+    private fun compactContext(instructions: String) {
+        if (engine.isBusy()) {
+            appendInfo("上下文压缩", "任务正在运行，完成后再压缩上下文。")
+            return
+        }
+        // 用中性的进行时措辞：此时还不知道引擎会不会真的调模型。
+        appendInfo("上下文压缩", "正在整理上下文…")
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { engine.compactContext(instructions) }
+            result.fold(
+                onSuccess = { summary ->
+                    syncContextUsage()
+                    val usage = "现在上下文：${formatTokens(_state.value.contextTokens)} / ${formatTokens(_state.value.contextWindow)}"
+                    if (summary.startsWith(ENGINE_NOTHING_TO_COMPACT)) {
+                        appendInfo(
+                            "无需压缩",
+                            "引擎判断当前没有可压缩的历史，因此**没有**调用模型。\n$usage",
+                        )
+                        return@fold
+                    }
+                    appendInfo(
+                        "上下文压缩完成",
+                        buildString {
+                            append("已用模型生成语义摘要，后续请求改用摘要后的上下文。\n")
+                            append(usage).append('\n')
+                            if (summary.isNotBlank()) {
+                                append("\n摘要要点：\n").append(summary.take(COMPACT_SUMMARY_LIMIT))
+                                if (summary.length > COMPACT_SUMMARY_LIMIT) append("…")
+                            }
+                        },
+                    )
+                },
+                onFailure = { error -> appendInfo("上下文压缩失败", error.message ?: "未知原因") },
+            )
         }
     }
 
@@ -1490,6 +1657,9 @@ class WorkspaceViewModel(
             ChatKind.ASSISTANT, ChatKind.ERROR -> listOf("复制", "重试上一问")
             else -> listOf("复制", if (item.groupCompleted) "已全部完成" else "执行中")
         }
+        // 与 showSessionActions 同理：动作在**选择器回调**里执行，那时拿到的只有选项文案，
+        // 不记住来源就会"复制了别的消息"。
+        pendingMessageAction = item
         _state.update {
             it.copy(
                 choicePicker = ChoicePickerState(
@@ -1497,6 +1667,53 @@ class WorkspaceViewModel(
                     intent = ChoiceIntent.MESSAGE_ACTION,
                     options = options.map { ChoiceOption(it) },
                 )
+            )
+        }
+    }
+
+    // ---------- 剪贴板 ----------
+
+    /**
+     * 复制一条消息的可见文本。
+     *
+     * 复制的是用户**看得到的内容**：助手消息取正文（没有正文时退回思考内容），
+     * 工具组则是把各工具的标题拼起来——复制一个空串对用户毫无用处。
+     */
+    fun copyMessage(item: ChatItem) {
+        val text = when (item.kind) {
+            ChatKind.ASSISTANT, ChatKind.ERROR -> item.body.ifBlank { item.thinking }
+            // 工具组没有正文，把各工具的展示名与摘要拼起来——复制空串对用户没用。
+            ChatKind.TOOL_GROUP -> item.tools.joinToString("\n") { tool ->
+                listOfNotNull(tool.displayName.takeIf { it.isNotBlank() }, tool.summary.takeIf { it.isNotBlank() })
+                    .joinToString(" · ")
+            }
+            else -> item.body
+        }
+        copyText(text, "IQ Code 消息")
+    }
+
+    /** `/copy`：复制最近一条助手回复。 */
+    fun copyLatestAssistantReply() {
+        val latest = _state.value.transcript.lastOrNull {
+            it.kind == ChatKind.ASSISTANT && it.body.isNotBlank()
+        }
+        if (latest == null) {
+            _state.update { it.copy(message = "还没有可复制的回复") }
+            return
+        }
+        copyText(latest.body, "IQ Code 回复")
+    }
+
+    private fun copyText(text: String, label: String) {
+        val ok = Clipboard.copy(getApplication(), label, text)
+        _state.update {
+            it.copy(
+                message = when {
+                    !ok -> "复制失败：内容为空或剪贴板不可用"
+                    // Android 13 起系统自己会弹「已复制」，应用再弹一次就是重复打扰。
+                    Clipboard.systemShowsCopyToast() -> ""
+                    else -> "已复制到剪贴板"
+                },
             )
         }
     }
@@ -1605,8 +1822,29 @@ class WorkspaceViewModel(
             }
             // MODEL 不再走选择器：模型面板要异步拉目录并写回配置记录，
             // 用 5 个固定选项的通用选择器表达不了，已换成 ui/dialogs/ModelPickerOverlay。
-            ChoiceIntent.MESSAGE_ACTION -> _state.update {
-                it.copy(choicePicker = null, message = "${option.label}（Mock）")
+            ChoiceIntent.MESSAGE_ACTION -> {
+                val target = pendingMessageAction
+                pendingMessageAction = null
+                _state.update { it.copy(choicePicker = null) }
+                if (target == null) {
+                    // 拿不到来源就不猜：宁可无反应，也不能复制到别的消息。
+                    _state.update { it.copy(message = "找不到目标消息，操作已取消") }
+                } else when (option.label) {
+                    "复制" -> copyMessage(target)
+                    "再次发送" -> {
+                        // 复用用户消息的原文重发；工具组这类没有正文的目标不支持。
+                        if (target.body.isBlank()) _state.update { it.copy(message = "这条消息没有可重发的内容") }
+                        else {
+                            _state.update { it.copy(composerText = target.body) }
+                            send()
+                        }
+                    }
+                    "编辑后发送" -> _state.update { it.copy(composerText = target.body, message = "已放回输入框，可编辑后发送") }
+                    "重试上一问" -> retryLastUserPrompt()
+                    // 这两种是状态展示项，点了不做任何事。
+                    "已全部完成", "执行中" -> Unit
+                    else -> _state.update { it.copy(message = "不支持的操作：${option.label}") }
+                }
             }
             ChoiceIntent.SESSION_ACTION -> {
                 val target = pendingSessionAction
@@ -2166,5 +2404,17 @@ class WorkspaceViewModel(
 
         /** 助手气泡上保留的过程步骤条数上限（原版 12）。 */
         private const val PROCESS_STEP_LIMIT = 12
+
+        /** 压缩摘要回显上限：摘要是给人看要点的，整段贴进对话会把记录淹掉。 */
+        private const val COMPACT_SUMMARY_LIMIT = 600
+
+        /**
+         * 引擎"没什么可压缩"时返回的前缀。
+         *
+         * 这不是我发明的约定：`IQCodeEngine.compactContextSemantic` 用这句话作为
+         * 未调用模型的信号，引擎自己的自动压缩分支也用 `startsWith` 判断它。
+         * 引擎没有给出结构化返回值，所以只能照它的契约来。
+         */
+        private const val ENGINE_NOTHING_TO_COMPACT = "上下文已经足够精简"
     }
 }
