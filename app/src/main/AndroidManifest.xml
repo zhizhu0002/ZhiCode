@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      miuix-blur-android 在自己的清单里声明 minSdk 33（它整个库都依赖 RuntimeShader），
+      而本工程 minSdk = 24，不禁用会让清单合并失败。
+      官方文档给的正是这条路径：用 overrideLibrary 放开，然后在**代码里**用
+      `isRuntimeShaderSupported()` 门控，保证低版本设备上完全不进入 blur 代码路径。
+      见 ui/Glass.kt。
+    -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
+
+    <application
+        android:allowBackup="false"
+        android:label="IQ Code Compose"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

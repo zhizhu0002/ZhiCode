@@ -1,0 +1,14 @@
+# Gradle / AGP
+.gradle/
+build/
+*/build/
+local.properties
+.cxx/
+
+# IDE
+.idea/
+*.iml
+
+# 本地临时产物
+*.keystore
+*.jks

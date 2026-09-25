@@ -1,0 +1,50 @@
+import com.android.build.api.variant.ApplicationAndroidComponentsExtension
+
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
+
+android {
+    namespace 'com.iqge.iqcode.compose'
+    compileSdk 37
+
+    defaultConfig {
+        applicationId 'com.iqge.iqcode.compose'
+        minSdk 24
+        targetSdk 28
+        versionCode 1
+        versionName '0.1'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures { compose true }
+
+    lint { abortOnError false; checkReleaseBuilds false }
+}
+
+// AGP 9 移除了 applicationVariants，改用 androidComponents API 定制输出文件名
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("IQCodeCompose-${variant.name}.apk")
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.activity:activity-compose:1.12.0'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-ui:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-core:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-icons:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-preference:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-shader:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-squircle:0.9.4'
+    // 模糊效果：独立 artifact，Android 需 API 33+（RuntimeShader），用 isRuntimeShaderSupported() 门控
+    implementation 'top.yukonga.miuix.kmp:miuix-blur-android:0.9.4'
+}
