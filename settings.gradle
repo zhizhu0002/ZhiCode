@@ -3,7 +3,14 @@ pluginManagement {
 }
 dependencyResolutionManagement {
     repositoriesMode = RepositoriesMode.FAIL_ON_PROJECT_REPOS
-    repositories { google(); mavenCentral() }
+    repositories {
+        google()
+        mavenCentral()
+        // FreeReflection 只发布在 jitpack（Bcore 用它绕过 hidden API 限制）
+        maven { url 'https://www.jitpack.io' }
+    }
 }
 rootProject.name = 'IQ-Code-Compose'
 include ':app'
+// IQ 沙箱（Bcore / BlackBox 宿主）—— Phase 7
+include ':Bcore', ':black-reflection', ':compiler'

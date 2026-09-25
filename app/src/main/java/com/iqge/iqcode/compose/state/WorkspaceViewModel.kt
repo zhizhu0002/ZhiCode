@@ -718,6 +718,37 @@ class WorkspaceViewModel(
 
     fun closeMemory() = _state.update { it.copy(memory = null) }
 
+    /**
+     * 打开 IQ 沙箱管理界面（`SandboxDashboardActivity`）。
+     *
+     * 与「环境弹窗」不同，这里**不能**只改本进程的 UI 状态：沙箱引擎整个跑在
+     * `:iqsandbox` 进程里，管理界面通过 `com.iqge.sandbox.control` 这个同 UID
+     * 私有 provider 与它通信（见 SandboxControlProvider）。所以这里必须真的
+     * 启动那个 Activity，而不是弹一个本地的 Compose 面板 —— 后者会得到一个
+     * "永远连不上引擎"的空壳界面。
+     *
+     * ViewModel 手里只有 Application 上下文，从 Application 启动 Activity
+     * 必须带 FLAG_ACTIVITY_NEW_TASK，否则直接抛 AndroidRuntimeException。
+     * 失败时如实上报，不静默吞掉（例如清单里少声明了该 Activity）。
+     */
+    fun openSandbox() {
+        val context = getApplication<android.app.Application>()
+        val started = runCatching {
+            context.startActivity(
+                android.content.Intent(context, com.iqge.sandbox.SandboxDashboardActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+        started.onFailure { error ->
+            appendInfo(
+                "无法打开 IQ 沙箱",
+                "启动沙箱管理界面失败：${error.javaClass.simpleName}: ${error.message ?: "未知原因"}\n\n" +
+                    "沙箱引擎运行在 :iqsandbox 进程，界面必须由系统拉起而无法在本进程内绘制。",
+            )
+        }
+    }
+
+
     /** 打开某个记忆文件编辑。文件不存在时给一份空编辑器（即"新建"）。 */
     fun editMemory(file: MemoryFile) {
         val path = _state.value.projectPath
@@ -1587,6 +1618,10 @@ class WorkspaceViewModel(
             "/agents" -> openRoleCards()
             "/memory" -> openMemory()
             "/init" -> runInitPrompt()
+
+            // 沙箱是**跨进程**的：引擎在 :iqsandbox，界面必须交给系统启动。
+            // 以前这条命令没有路由，会掉进下面的"指令尚未移植"兜底卡片。
+            "/sandbox" -> openSandbox()
 
             "/web" -> handleWebSlash(arg)
 

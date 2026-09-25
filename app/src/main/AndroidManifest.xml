@@ -109,10 +109,39 @@
             android:exported="false" />
 
         <!--
-          Phase 7（Bcore 沙箱宿主）将在此追加：
-          SandboxControlProvider / SandboxGuardService / SandboxDashboardActivity，
-          以及 Bcore 合并进来的 SystemCallProvider / DaemonService / ProxyVpnService / ProxyActivity$Pn。
-        -->
-    </application>
+          IQ 沙箱（BlackBox 虚拟 Android 运行时宿主）—— Phase 7。
 
+          这三项是**宿主自己**的声明；Bcore 库自带的清单（DaemonService、
+          SystemCallProvider、ProxyVpnService、LauncherActivity，以及 :p0..:p49 的
+          四组 Proxy* 组件）会在依赖合并时自动并进来，不需要在这里重复写。
+
+          SandboxControlProvider 必须跑在 :iqsandbox 进程：
+          它是主进程与沙箱引擎之间**同 UID 的私有 RPC** 通道，
+          沙箱真正的高层控制面（安装/启动/停止 guest）全在这个进程里，
+          不能放主进程，否则一个原生 hook 崩溃会把编辑器/Agent 一起带走。
+        -->
+        <provider
+            android:name="com.iqge.sandbox.SandboxControlProvider"
+            android:authorities="com.iqge.sandbox.control"
+            android:exported="false"
+            android:process=":iqsandbox" />
+
+        <!-- 沙箱管理界面。它本身留在主进程（不设 android:process），只通过上面的 provider 发指令 -->
+        <activity
+            android:name="com.iqge.sandbox.SandboxDashboardActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
+            android:exported="false"
+            android:screenOrientation="unspecified"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!--
+          调试 guest 期间的前台保活。guest Activity 会盖住 IQ Code，
+          没有它主进程会被系统回收，Agent/工具链会随之中断。
+        -->
+        <service
+            android:name="com.iqge.sandbox.SandboxGuardService"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+    </application>
 </manifest>

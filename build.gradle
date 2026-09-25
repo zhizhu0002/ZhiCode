@@ -3,3 +3,32 @@ plugins {
     id 'org.jetbrains.kotlin.android' version '2.4.0' apply false
     id 'org.jetbrains.kotlin.plugin.compose' version '2.4.0' apply false
 }
+
+/*
+ * Bcore 用传统 `apply plugin: 'com.android.library'` 应用 Android 库插件，
+ * 而**不**在这里写 `id 'com.android.library' version ... apply false`。
+ *
+ * 原因：plugins {} 块是通过"插件 marker"坐标解析的，需要
+ *   com.android.library:com.android.library.gradle.plugin:<ver>
+ * 这个空壳 artifact。本机离线缓存里只有 com.android.application 的 marker，
+ * 没有 library 的，于是会报 Plugin not found。
+ *
+ * 但 AGP 本体（com.android.tools.build:gradle:9.1.1）已经因为 application 插件
+ * 被放到构建 classpath 上，同一个 jar 里同时包含 application 与 library 两个
+ * 插件描述符，所以直接 apply 就能拿到，不依赖任何 marker。
+ */
+
+/*
+ * Bcore 的构建脚本按原版引用 rootProject.ext.*，所以这里保留同名变量。
+ *
+ * iqNdkVersion 在本机是**不可用**的：宿主是 aarch64，而 Android NDK 只发布
+ * linux-x86_64 的宿主工具链，ndk-build 会直接报 Unknown host CPU architecture。
+ * 因此 Bcore 不再走 ndk-build，而是直接使用同源的预编译 libblackbox.so（见 Bcore/build.gradle）。
+ * 保留该字段只是为了让原版的构建脚本行不用改动。
+ */
+ext {
+    compileSdkVersion = 37
+    targetSdkVersion = 28
+    minSdk = 24
+    iqNdkVersion = findProperty('IQ_NDK_VERSION') ?: '29.0.13846066'
+}

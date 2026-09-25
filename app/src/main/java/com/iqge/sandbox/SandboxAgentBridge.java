@@ -34,6 +34,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import top.niunaijun.blackbox.app.BActivityThread;
 
 /**
  * Cross-process control plane used by Sandbox and Debug tools.
@@ -149,7 +150,7 @@ public final class SandboxAgentBridge {
     }
 
     private static JSONObject error(Throwable e){JSONObject out=new JSONObject();try{out.put("ok",false).put("error",e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage()));}catch(Exception ignored){}return out;}
-    private static String safeVirtualPackage(){try{/* Phase 7：接入 Bcore 后改为 BActivityThread.getAppPackageName() */ String p=null;return p==null?"":p;}catch(Throwable ignored){return "";}}
+    private static String safeVirtualPackage(){try{String p=BActivityThread.getAppPackageName();return p==null?"":p;}catch(Throwable ignored){return "";}}
 
     private static JSONArray dumpUi(Activity a)throws Exception{
         JSONArray out=new JSONArray(); View root=a.getWindow().getDecorView(); walk(root,"0",out,0); return out;
