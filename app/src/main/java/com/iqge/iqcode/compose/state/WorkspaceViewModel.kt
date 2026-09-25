@@ -10,6 +10,7 @@ import com.iqge.iqcode.compose.data.ApiConfigStore
 import com.iqge.iqcode.compose.data.FileBrowser
 import com.iqge.iqcode.compose.data.GitChanges
 import com.iqge.iqcode.compose.data.MockWorkspaceRepository
+import com.iqge.iqcode.compose.data.ModelCatalogStore
 import com.iqge.iqcode.compose.data.SessionReader
 import com.iqge.iqcode.compose.data.WorkspacePaths
 import com.iqge.iqcode.compose.data.WorkspaceRepository
@@ -35,6 +36,7 @@ import com.iqge.iqcode.compose.model.ChoicePickerState
 import com.iqge.iqcode.compose.model.DiffState
 import com.iqge.iqcode.compose.model.EffortLevel
 import com.iqge.iqcode.compose.model.FileEntry
+import com.iqge.iqcode.compose.model.ModelPickerState
 import com.iqge.iqcode.compose.model.OpenFile
 import com.iqge.iqcode.compose.model.PermissionMode
 import com.iqge.iqcode.compose.model.PermissionRequest
@@ -56,6 +58,9 @@ import com.termux.app.iqcode.core.PlanApprovalGate
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -142,6 +147,20 @@ class WorkspaceViewModel(
      * 否则会出现"想删 A 结果删了当前会话"这类错删。
      */
     private var pendingSessionAction: SessionSummary? = null
+    private var modelCatalogJob: Job? = null
+
+    /**
+     * 会话级模型覆盖。
+     *
+     * 为什么不能只写配置记录：官方 API 记录在引擎层是**不可变的**——
+     * `ApiSettingsStore.saveProfile` 对官方记录强制回写 `name/baseUrl/defaultModel`
+     * （`OFFICIAL_PROFILE_ID` 分支），所以往官方记录写模型会静默失效。
+     * 原版的处理方式是同时把模型写进**当前会话配置**并 `engine.configure()`；
+     * 这里用同一口径：持久化照写（自定义配置有效），即时生效靠这个覆盖值。
+     *
+     * 切换 API 配置时清空——换了配置就该用那份配置自己的模型。
+     */
+    private var modelOverride: String? = null
 
 
     private val _state = MutableStateFlow(
@@ -425,6 +444,7 @@ class WorkspaceViewModel(
             rootExecutionEnabled = s.settings.rootExecutionEnabled,
             sandboxAgentFullAccess = s.settings.sandboxAgentFullAccess,
             forcedKeepAliveEnabled = s.settings.forcedKeepAliveEnabled,
+            model = modelOverride,
         )
     }
 
@@ -1206,6 +1226,8 @@ class WorkspaceViewModel(
     }
 
     fun selectApiProfile(profileId: String) {
+        // 换配置就用那份配置自己的模型，别把上一条配置的会话级覆盖带过去。
+        modelOverride = null
         viewModelScope.launch(Dispatchers.IO) {
             val result = ApiConfigStore.select(getApplication(), profileId)
             val state = ApiConfigStore.read(getApplication())
@@ -1244,7 +1266,7 @@ class WorkspaceViewModel(
         _state.update {
             it.copy(
                 profileName = active?.name ?: "未配置",
-                modelLabel = active?.model ?: "未设置",
+                modelLabel = modelOverride ?: active?.model ?: "未设置",
                 apiKeyConfigured = active?.hasKey == true,
             )
         }
@@ -1291,20 +1313,88 @@ class WorkspaceViewModel(
         }
     }
 
+    /**
+     * 打开模型选择面板。
+     *
+     * 面板先立起来（显示"正在获取"），目录拉取在 IO 线程后台跑；回来后再填列表。
+     * 原版就是这个顺序，否则网络慢时点按钮像没反应。
+     *
+     * 会话正在跑的时候换模型不会打断当前轮：模型写在配置记录里，下一轮 `configure`
+     * 自然带上（原版的"下一完整轮生效"）。
+     */
     fun showModelPicker() {
-        val models = listOf(
-            "IQ-Code-2.0-preview" to "默认 · 200k 上下文",
-            "IQ-Code-2.0-fast" to "低延迟 · 128k 上下文",
-            "IQ-Code-2.0-max" to "高推理 · 1m 上下文",
-        )
-        _state.update {
-            it.copy(
-                choicePicker = ChoicePickerState(
-                    title = "选择模型",
-                    intent = ChoiceIntent.MODEL,
-                    options = models.map { (id, detail) -> ChoiceOption(id, detail, id == it.modelLabel) },
-                )
+        _state.update { s ->
+            val active = s.apiConfig?.let { config -> config.profiles.firstOrNull { it.id == config.activeId } }
+            s.copy(
+                modelPicker = ModelPickerState(
+                    profileName = active?.name ?: s.profileName,
+                    currentModel = active?.model?.takeIf { it.isNotBlank() } ?: s.modelLabel,
+                ),
             )
+        }
+        fetchModelCatalog()
+    }
+
+    fun closeModelPicker() {
+        modelCatalogJob?.cancel()
+        modelCatalogJob = null
+        _state.update { it.copy(modelPicker = null) }
+    }
+
+    fun setModelQuery(text: String) {
+        _state.update { s -> s.copy(modelPicker = s.modelPicker?.copy(query = text)) }
+    }
+
+    private fun fetchModelCatalog() {
+        modelCatalogJob?.cancel()
+        modelCatalogJob = viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { ModelCatalogStore.fetch(getApplication()) }
+            val fetched = result.getOrNull()
+            _state.update { s ->
+                // 面板可能已经被关掉了：这时不要把状态又塞回去。
+                val picker = s.modelPicker ?: return@update s
+                s.copy(
+                    modelPicker = if (fetched == null) {
+                        picker.copy(
+                            loading = false,
+                            status = ModelCatalogStore.friendlyError(result.exceptionOrNull()),
+                            models = emptyList(),
+                        )
+                    } else {
+                        picker.copy(
+                            loading = false,
+                            status = if (fetched.isEmpty()) "API 未返回可用模型，可手动输入"
+                            else "已获取 ${fetched.size} 个模型",
+                            models = fetched,
+                        )
+                    },
+                )
+            }
+        }
+    }
+
+    /**
+     * 应用选定的模型：写进当前配置记录并重跑 `configure`，让下一次请求就用上新模型。
+     *
+     * 这里**不**走 `engineOverrides().model`：模型属于配置记录的持久化内容，
+     * 只做一次内存覆盖会让"底栏显示的模型"和"实际请求的模型"在下一次启动后分叉。
+     */
+    fun applySelectedModel(model: String) {
+        val target = model.trim()
+        if (target.isEmpty()) return
+        closeModelPicker()
+        modelOverride = target
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { ApiConfigStore.setDefaultModel(getApplication(), target) }
+            // 覆盖值先生效，所以即使写配置失败模型也已经切换了；把这一点如实说出来，
+            // 而不是报一个"保存失败"让人以为模型没换。
+            syncActiveProfile()
+            _state.update {
+                it.copy(
+                    message = if (result.isSuccess) "模型：$target"
+                    else "模型：$target（本次会话已生效，未能写入配置：${result.exceptionOrNull()?.message ?: "未知原因"}）",
+                )
+            }
         }
     }
 
@@ -1427,9 +1517,8 @@ class WorkspaceViewModel(
                     it.copy(choicePicker = null, effort = level, message = "推理强度：${level.label}")
                 } else _state.update { it.copy(choicePicker = null) }
             }
-            ChoiceIntent.MODEL -> _state.update {
-                it.copy(choicePicker = null, modelLabel = option.label, message = "已切换模型：${option.label}")
-            }
+            // MODEL 不再走选择器：模型面板要异步拉目录并写回配置记录，
+            // 用 5 个固定选项的通用选择器表达不了，已换成 ui/dialogs/ModelPickerOverlay。
             ChoiceIntent.MESSAGE_ACTION -> _state.update {
                 it.copy(choicePicker = null, message = "${option.label}（Mock）")
             }

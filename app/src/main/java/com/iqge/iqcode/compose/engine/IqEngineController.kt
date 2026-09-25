@@ -280,6 +280,15 @@ internal class IqEngineController(
 
     fun contextWindowTokens(): Int = sessionConfig?.contextWindowTokens ?: 0
 
+    /**
+     * 引擎当前实际使用的模型名。
+     *
+     * 存在的理由：底栏那个模型标签是**界面自己**算出来的（可能带会话级覆盖），
+     * 光看标签无法区分"界面以为换了"和"引擎真的收到了"。排查"模型切了但请求还是旧的"
+     * 这类问题时需要一个直接读引擎配置的口子。
+     */
+    fun configuredModel(): String = sessionConfig?.model.orEmpty().ifEmpty { "（引擎未配置）" }
+
     fun contextPercent(): Int = runCatching { engine?.contextPercent() ?: 0 }.getOrDefault(0)
 
     // ------------------------------------------------------------------

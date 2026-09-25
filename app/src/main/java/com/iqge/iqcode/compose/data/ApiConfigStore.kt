@@ -48,6 +48,23 @@ internal object ApiConfigStore {
         saved.id
     }
 
+    /**
+     * 只改当前生效配置的默认模型。
+     *
+     * 与 [save] 的区别：这里**必然**走 `replaceKey=false`，因为改模型名不该碰密钥，
+     * 也不该要求用户重新输入。原版 `applySelectedModel` 就是这个语义。
+     */
+    fun setDefaultModel(context: Context, model: String): Result<String> = runCatching {
+        require(model.isNotBlank()) { "模型名不能为空" }
+        val store = ApiSettingsStore(context)
+        val profile = store.getActiveProfile() ?: error("没有可用的 API 配置")
+        profile.defaultModel = model.trim()
+        store.saveProfile(profile, "", false)
+        // 重新选中，让 store 里的 active 记录与刚保存的内容对齐（saveProfile 会按 id 覆盖）。
+        store.selectProfile(profile.id)
+        profile.id
+    }
+
     fun select(context: Context, profileId: String): Result<Unit> = runCatching {
         ApiSettingsStore(context).selectProfile(profileId)
     }

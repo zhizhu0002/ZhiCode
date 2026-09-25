@@ -89,6 +89,28 @@ data class ApiConfigState(
     val form: ApiProfileDraft? = null,
 )
 
+/** 模型目录里的一项。[displayName] 可能与 [id] 相同，界面据此决定要不要重复显示。 */
+data class ModelOption(val id: String, val displayName: String)
+
+/**
+ * 模型选择面板的状态。
+ *
+ * 原版的这个面板是**异步填充**的：先开着窗显示"正在从当前 API 获取模型…"，
+ * 目录回来后再把列表填进去。所以 [loading] / [status] / [models] 必须是状态而不是
+ * 一次性参数——网络慢的时候界面得先立起来。
+ *
+ * [query] 是手动输入框的内容。目录拉不到时用户就靠它兜底，因此它不能只在弹窗内部
+ * 存活（比如转屏或重组时被清掉）。
+ */
+data class ModelPickerState(
+    val profileName: String,
+    val currentModel: String,
+    val query: String = "",
+    val loading: Boolean = true,
+    val status: String = "正在从当前 API 获取模型…",
+    val models: List<ModelOption> = emptyList(),
+)
+
 /** 首次进入时的示例记录，对齐参考图的「IQ Code 官方 API / openai-responses · gpt-5.6-sol」。 */
 val DEFAULT_API_PROFILES: List<ApiProfile> = listOf(
     ApiProfile(

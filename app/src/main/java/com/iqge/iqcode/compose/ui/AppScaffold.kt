@@ -57,6 +57,7 @@ import com.iqge.iqcode.compose.ui.chat.ChatList
 import com.iqge.iqcode.compose.ui.composer.Composer
 import com.iqge.iqcode.compose.ui.dialogs.ChoicePickerOverlay
 import com.iqge.iqcode.compose.ui.dialogs.ApiConfigOverlay
+import com.iqge.iqcode.compose.ui.dialogs.ModelPickerOverlay
 import com.iqge.iqcode.compose.ui.dialogs.EnvironmentOverlay
 import com.iqge.iqcode.compose.ui.dialogs.PermissionOverlay
 import com.iqge.iqcode.compose.ui.dialogs.PlanApprovalOverlay
@@ -94,7 +95,6 @@ private fun rememberWorkspaceViewModel(): WorkspaceViewModel {
 @Composable
 fun IqCodeApp(viewModel: WorkspaceViewModel = rememberWorkspaceViewModel()) {
     val state by viewModel.state.collectAsState()
-    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.openApiConfig() }
 
     val systemDark = isSystemInDarkTheme()
     val isDark = when (state.themeMode) {
@@ -275,6 +275,16 @@ private fun IqCodeScreen(
                 onRepair = viewModel::repairRuntime,
                 onRefresh = viewModel::refreshEnvironmentReport,
                 onCopy = { viewModel.copyEnvironmentReport() },
+            )
+            ModelPickerOverlay(
+                picker = state.modelPicker,
+                onDismiss = viewModel::closeModelPicker,
+                onQueryChange = viewModel::setModelQuery,
+                onUse = viewModel::applySelectedModel,
+                onOpenApiConfig = {
+                    viewModel.closeModelPicker()
+                    viewModel.openApiConfig()
+                },
             )
             ApiConfigOverlay(
                 config = state.apiConfig,
