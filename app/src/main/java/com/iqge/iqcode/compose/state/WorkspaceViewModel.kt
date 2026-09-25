@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.iqge.iqcode.compose.data.ApiConfigStore
 import com.iqge.iqcode.compose.data.FileBrowser
 import com.iqge.iqcode.compose.data.GitChanges
+import com.iqge.iqcode.compose.data.McpStore
 import com.iqge.iqcode.compose.data.MockWorkspaceRepository
 import com.iqge.iqcode.compose.data.ModelCatalogStore
 import com.iqge.iqcode.compose.data.SessionReader
@@ -36,6 +37,10 @@ import com.iqge.iqcode.compose.model.ChoicePickerState
 import com.iqge.iqcode.compose.model.DiffState
 import com.iqge.iqcode.compose.model.EffortLevel
 import com.iqge.iqcode.compose.model.FileEntry
+import com.iqge.iqcode.compose.model.McpScope
+import com.iqge.iqcode.compose.model.McpServer
+import com.iqge.iqcode.compose.model.McpServerDraft
+import com.iqge.iqcode.compose.model.McpType
 import com.iqge.iqcode.compose.model.ModelPickerState
 import com.iqge.iqcode.compose.model.OpenFile
 import com.iqge.iqcode.compose.model.PermissionMode
@@ -1255,10 +1260,91 @@ class WorkspaceViewModel(
         }
     }
 
+    // ---------- MCP 配置 ----------
+
+    /**
+     * 打开 MCP 服务器配置（列表页）。
+     *
+     * 与 API 配置一样共用"列表页 / 表单页"两态，`form` 非空即表单。
+     * 这里的读写是**同步**的：`McpConfigStore` 只读一个本地小 JSON，
+     * 没有网络也没有密钥解密，放 IO 线程反而让状态更新顺序更难推理。
+     */
+    fun openMcpConfig() {
+        _state.update { it.copy(mcpConfig = McpStore.read(), settingsDraft = null) }
+    }
+
+    fun closeMcpConfig() = _state.update { it.copy(mcpConfig = null) }
+
+    fun newMcpServer() = _state.update {
+        it.copy(mcpConfig = it.mcpConfig?.copy(form = McpServerDraft(originalName = null)))
+    }
+
+    /**
+     * 编辑已有服务器：需要回读 `args` / `env` / `headers` 的原文，
+     * 因为列表模型只带了参数个数（这些内容可能很大，不该进列表状态）。
+     */
+    fun editMcpServer(server: McpServer) {
+        val raw = McpStore.rawOf(server.name)
+        _state.update {
+            val config = it.mcpConfig ?: return@update it
+            val draft = if (raw != null) McpStore.draftOf(server, raw.first, raw.second, raw.third)
+            else McpStore.draftOf(server, emptyList(), "", "")
+            it.copy(mcpConfig = config.copy(form = draft))
+        }
+    }
+
+    fun updateMcpDraft(transform: (McpServerDraft) -> McpServerDraft) = _state.update {
+        val config = it.mcpConfig ?: return@update it
+        val form = config.form ?: return@update it
+        it.copy(mcpConfig = config.copy(form = transform(form)))
+    }
+
+    fun cancelMcpForm() = _state.update {
+        it.copy(mcpConfig = it.mcpConfig?.copy(form = null))
+    }
+
+    fun saveMcpServer() {
+        val form = _state.value.mcpConfig?.form ?: return
+        if (!form.saveable) return
+        val result = McpStore.save(form)
+        _state.update {
+            it.copy(
+                mcpConfig = McpStore.read(),
+                message = if (result.isSuccess) "MCP 配置已保存"
+                else "保存失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+            )
+        }
+    }
+
+    /** 启用 / 停用：整行点击触发，等价于原版行尾的「启用/停用」按钮。 */
+    fun toggleMcpServer(server: McpServer) {
+        val result = McpStore.setEnabled(server.name, !server.enabled)
+        _state.update {
+            it.copy(
+                mcpConfig = McpStore.read(),
+                message = when {
+                    result.isFailure -> "保存失败：${result.exceptionOrNull()?.message ?: "未知原因"}"
+                    server.enabled -> "已停用：${server.name}"
+                    else -> "已启用：${server.name}"
+                },
+            )
+        }
+    }
+
+    fun deleteMcpServer(server: McpServer) {
+        val result = McpStore.delete(server.name)
+        _state.update {
+            it.copy(
+                mcpConfig = McpStore.read(),
+                message = if (result.isSuccess) "已删除 MCP 服务器：${server.name}"
+                else "删除失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+            )
+        }
+    }
+
     /**
      * 把当前生效的 API 配置同步到界面摘要，并让引擎重新读取。
-     *
-     * 必须让引擎重读：它内部持有配置副本，不重新下发的话
+     *     * 必须让引擎重读：它内部持有配置副本，不重新下发的话
      * 用户"保存了密钥却仍然报 API key is not configured"。
      */
     private fun syncActiveProfile() {
@@ -1950,7 +2036,7 @@ class WorkspaceViewModel(
         _state.update { it.copy(settingsDraft = null) }
         when (target) {
             "apiProfiles" -> openApiConfig()
-            "mcp" -> appendInfo("MCP 服务器", "MCP 服务器配置将在接入真实引擎后提供。")
+            "mcp" -> openMcpConfig()
             "canvas" -> {
                 onComposerChange("/canvas")
                 send()

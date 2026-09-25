@@ -278,6 +278,7 @@ data class WorkspaceUiState(
     val settings: AppSettings = AppSettings(),
     /** 非空即 API 配置窗口打开（列表或编辑表单）。 */
     val apiConfig: com.iqge.iqcode.compose.model.ApiConfigState? = null,
+    val mcpConfig: com.iqge.iqcode.compose.model.McpConfigState? = null,
     val modelPicker: com.iqge.iqcode.compose.model.ModelPickerState? = null,
     /** 非空即设置弹窗打开；所有编辑先落在这里，「保存」才写回上面的字段。 */
     val settingsDraft: SettingsDraft? = null,

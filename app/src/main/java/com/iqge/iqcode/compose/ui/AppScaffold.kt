@@ -57,6 +57,7 @@ import com.iqge.iqcode.compose.ui.chat.ChatList
 import com.iqge.iqcode.compose.ui.composer.Composer
 import com.iqge.iqcode.compose.ui.dialogs.ChoicePickerOverlay
 import com.iqge.iqcode.compose.ui.dialogs.ApiConfigOverlay
+import com.iqge.iqcode.compose.ui.dialogs.McpConfigOverlay
 import com.iqge.iqcode.compose.ui.dialogs.ModelPickerOverlay
 import com.iqge.iqcode.compose.ui.dialogs.EnvironmentOverlay
 import com.iqge.iqcode.compose.ui.dialogs.PermissionOverlay
@@ -296,6 +297,17 @@ private fun IqCodeScreen(
                 onDraftChange = viewModel::updateApiProfileDraft,
                 onSave = viewModel::saveApiProfile,
                 onCancelForm = viewModel::cancelApiProfileForm,
+            )
+            McpConfigOverlay(
+                config = state.mcpConfig,
+                onDismiss = viewModel::closeMcpConfig,
+                onNew = viewModel::newMcpServer,
+                onEdit = viewModel::editMcpServer,
+                onToggle = viewModel::toggleMcpServer,
+                onDelete = viewModel::deleteMcpServer,
+                onDraftChange = viewModel::updateMcpDraft,
+                onSave = viewModel::saveMcpServer,
+                onCancelForm = viewModel::cancelMcpForm,
             )
         }
     }
