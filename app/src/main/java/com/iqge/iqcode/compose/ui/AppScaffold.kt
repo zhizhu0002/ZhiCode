@@ -85,7 +85,8 @@ import top.yukonga.miuix.kmp.theme.lightColorScheme
  * `WorkspaceViewModel` 的构造器带默认参数，Kotlin 不会生成那个重载，会直接抛
  * `NoSuchMethodException` 并让界面白屏。详见 [WorkspaceViewModelFactory]。
  *
- * 工厂里再注入 `WorkspaceRepository` —— 这是后续把 Mock 换成真实引擎的唯一入口。
+ * 工厂里再注入 `WorkspaceRepository`。注意它现在只剩「终端占位横幅」一项：
+ * 对话流、工具执行、会话文件都已由真实引擎负责，不再是模拟实现。
  */
 @Composable
 private fun rememberWorkspaceViewModel(): WorkspaceViewModel {
@@ -132,7 +133,7 @@ private fun IqCodeScreen(
     val wide = configuration.screenWidthDp >= 600
 
     // 提示条已移除：Snackbar 会遮挡底部输入器，且本工程的 message 基本都是
-    // "已恢复会话（Mock）" 这类一次性反馈，直接静默即可。
+    // 一次性操作反馈（「已复制到剪贴板」「配置已保存」这类），直接静默即可。
     // 若将来需要反馈，改在 Composer 上方做一条内联提示，不要用悬浮 Snackbar。
 
     // 玻璃对象分两层，因为捕获节点不能包含自己：

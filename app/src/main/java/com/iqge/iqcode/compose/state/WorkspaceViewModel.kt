@@ -81,7 +81,7 @@ import java.util.Locale
 /**
  * 主界面状态机。
  *
- * 数据来自 [WorkspaceRepository]；第一期用 Mock 实现模拟流式回复与工具执行，
+ * 数据来自 [WorkspaceRepository]（现在只剩终端占位横幅项）；对话流、工具执行、会话文件
  * 后续换成真实引擎实现即可，UI 层不用改。
  *
  * 继承 [AndroidViewModel] 而不是 `ViewModel`，是为了拿到 `Application`：
@@ -2018,8 +2018,11 @@ class WorkspaceViewModel(
                 // 单选回调真落到这里时按「跳过本步」处理，不要静默什么都不做。
                 advanceQuestion(null)
             }
-            ChoiceIntent.GENERIC, ChoiceIntent.ATTACH -> _state.update {
-                it.copy(choicePicker = null, message = "${option.label}（Mock）")
+            // 通用选择器：没有任何附加语义，选中只意味着"用户做了选择"。
+            // 这里**不能**再打印"已执行 xxx（Mock）"——那会让人以为某个动作发生了。
+            // 附件也不再走这里：它已经有真正的系统图片选择器（attachImage）。
+            ChoiceIntent.GENERIC -> _state.update {
+                it.copy(choicePicker = null, message = "已选择：${option.label}")
             }
             // 计划模式下的「目标澄清」：用户选定的目标本身就是一条提示词。
             // 计划正文由引擎产出（不再由界面拼），所以这里只是把它发出去。
@@ -2524,7 +2527,7 @@ class WorkspaceViewModel(
     // ---------- 操作反馈 ----------
     //
     // 原先这里由 Snackbar 消费 message，但浮层会遮挡底部输入器，已移除。
-    // state.message 继续记录最后一次操作结果（"已恢复会话（Mock）"等），
+    // state.message 继续记录最后一次操作结果（「已切换 API 配置」「模型：xxx」等），
     // 留作将来接内联提示的缓冲；不接也不会渲染出任何东西。
 
     companion object {

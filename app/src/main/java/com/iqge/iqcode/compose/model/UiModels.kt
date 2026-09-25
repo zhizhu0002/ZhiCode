@@ -129,7 +129,6 @@ enum class ChoiceIntent {
     EFFORT,
     MESSAGE_ACTION,
     SESSION_ACTION,
-    ATTACH,
 
     /** 计划模式的目标澄清：选完（或自由回答）后才产出计划。 */
     PLAN_GOAL,
