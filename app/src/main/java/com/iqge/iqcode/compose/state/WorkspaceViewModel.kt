@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.iqge.iqcode.compose.data.FileBrowser
 import com.iqge.iqcode.compose.data.MockWorkspaceRepository
 import com.iqge.iqcode.compose.data.SessionReader
 import com.iqge.iqcode.compose.data.WorkspaceRepository
@@ -150,8 +151,10 @@ class WorkspaceViewModel(
             deviceStatus = clockLabel(),
             diff = repo.changes(),
             terminalLines = repo.terminalBanner(repo.projectPath()),
-            filePath = repo.projectPath(),
-            fileEntries = repo.rootFiles(),
+            // 文件面板走真实文件系统。只列**一层**（不递归）：内置 Termux 环境装好后
+            // home 下可能有几千个文件，递归会拖慢启动。
+            filePath = FileBrowser.projectRoot(),
+            fileEntries = FileBrowser.children(FileBrowser.projectRoot()),
             busySessionIds = emptySet(),
             composerBusy = false,
             workingStatus = null,
@@ -1722,16 +1725,32 @@ class WorkspaceViewModel(
         navigateTo(entry.path)
     }
 
-    /** 面包屑点击等场景：直接跳到任意层级目录。 */
+    /** 刷新文件面板。Agent 改动文件后用它重新列目录。 */
+    fun refreshFiles() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val entries = FileBrowser.children(_state.value.filePath)
+            _state.update { it.copy(fileEntries = entries, message = "已刷新文件列表") }
+        }
+    }
+
     fun navigateTo(path: String) {
-        _state.update { it.copy(filePath = path, fileEntries = repo.childrenOf(path), openFile = null) }
+        // 列目录要读盘，放 IO 线程：大目录（例如 node_modules）在主线程列会卡住界面。
+        viewModelScope.launch(Dispatchers.IO) {
+            val entries = FileBrowser.children(path)
+            _state.update { it.copy(filePath = path, fileEntries = entries, openFile = null) }
+        }
     }
 
     fun navigateUp() {
         val current = _state.value.filePath
-        if (current == repo.projectPath()) return
+        val root = rootPath()
+        if (current == root) return
         val parent = current.substringBeforeLast('/', "")
-        if (parent.isEmpty()) return
+        if (parent.isEmpty() || parent.length < root.length) {
+            // 已经到根（或再往上会越过根）：回到根，而不是继续往外走。
+            navigateTo(root)
+            return
+        }
         navigateTo(parent)
     }
 
@@ -1740,9 +1759,14 @@ class WorkspaceViewModel(
             openDirectory(entry)
             return
         }
-        val file: OpenFile = repo.readFile(entry.path)
-        _state.update { it.copy(openFile = file, message = "已打开 ${entry.name}（只读）") }
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = FileBrowser.read(entry.path)
+            _state.update { it.copy(openFile = file, message = "已打开 ${entry.name}（只读）") }
+        }
     }
+
+    /** 文件面板的根路径（内置 Termux home 不存在时回退到应用私有目录）。 */
+    private fun rootPath(): String = FileBrowser.projectRoot()
 
     fun closeFile() = _state.update { it.copy(openFile = null) }
 
