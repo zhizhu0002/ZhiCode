@@ -637,6 +637,10 @@ private fun PaneHost(
         WorkspaceTab.TERMINAL -> TerminalPane(
             lines = state.terminalLines,
             projectName = state.projectName,
+            // 内置 Termux 环境是否就绪决定这个是"真终端"还是"只读占位"。
+            // runtimeReady 是真实探测（见 EnvDoctor / RuntimeInstaller），不是常量。
+            runtimeReady = state.runtimeReady,
+            workingDirectory = state.projectPath,
             modifier = modifier,
         )
         WorkspaceTab.FILES -> FilesPane(

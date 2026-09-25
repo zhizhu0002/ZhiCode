@@ -14,14 +14,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.iqge.RuntimeInstaller
+import com.iqge.TermuxTerminalPane
 import com.iqge.iqcode.compose.theme.IqRadius
 import com.iqge.iqcode.compose.ui.IqIcons
 import com.iqge.iqcode.compose.model.TerminalLine
@@ -39,14 +45,93 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 终端面板。
- * 第一期只还原外观：只读滚动缓冲 + 输入行占位，未接入真实 Termux PTY。
+ *
+ * 两种形态，由 [runtimeReady] 决定：
+ * - **环境就绪**：挂真实的 Termux PTY（`AndroidView` 承载 [TermuxTerminalPane]），
+ *   里面是真正的 bash，可以跑命令；
+ * - **环境未就绪**：显示只读滚动缓冲 + 一句"为什么不能输入"，
+ *   而不是给一个点了没反应的输入框。
+ *
+ * 为什么用 `AndroidView` 而不是纯 Compose 重写终端：
+ * `TerminalView`（约 2000 行）依赖 `Canvas` 逐字符绘制、CSI 序列解析、
+ * 文本选择与缩放手势，全部重写成 Compose 的收益很低、风险很高。
+ * 终端的正确性来自 `TerminalEmulator`/`TerminalBuffer`（已完整移植），
+ * 渲染层复用现成 View 是更稳的选择。
  */
 @Composable
 fun TerminalPane(
     lines: List<TerminalLine>,
     projectName: String,
+    runtimeReady: Boolean,
+    workingDirectory: String,
     modifier: Modifier = Modifier,
-    /** 清屏动作。默认 `null` = 不显示按钮（终端还没接 PTY，清屏无处生效）。 */
+    /** 清屏动作。默认 `null` = 不显示按钮。 */
+    onClear: (() -> Unit)? = null,
+) {
+    if (runtimeReady) {
+        RealTerminalPane(
+            projectName = projectName,
+            workingDirectory = workingDirectory,
+            modifier = modifier,
+        )
+        return
+    }
+    TerminalPlaceholder(
+        lines = lines,
+        projectName = projectName,
+        modifier = modifier,
+        onClear = onClear,
+    )
+}
+
+/**
+ * 真实 PTY。
+ *
+ * ⚠️ 这个视图持有的是**真实子进程**（bash）与 PTY 文件描述符，
+ * 必须随 Composable 离开组合而关闭，否则每切一次 Tab 就漏一个 bash 进程。
+ * `onRelease` 里调 `closeAll()` 正是为此。
+ */
+@Composable
+private fun RealTerminalPane(
+    projectName: String,
+    workingDirectory: String,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val pane = remember {
+        TermuxTerminalPane(context, RuntimeInstaller(context.applicationContext))
+    }
+
+    // 项目目录变化时同步给终端（下一次新建会话用它当工作目录）。
+    LaunchedEffect(workingDirectory) {
+        pane.setNextSessionWorkingDirectory(workingDirectory)
+    }
+
+    DisposableEffect(Unit) {
+        pane.onRuntimeReady()
+        onDispose { pane.closeAll() }
+    }
+
+    Surface(modifier = modifier.fillMaxSize(), color = IqColors.panelSurface()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            PaneHeader(
+                title = "终端",
+                subtitle = projectName,
+            )
+            AndroidView(
+                factory = { pane },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/** 环境未就绪时的只读占位。文案明确说明**为什么**不能输入。 */
+@Composable
+private fun TerminalPlaceholder(
+    lines: List<TerminalLine>,
+    projectName: String,
+    modifier: Modifier = Modifier,
     onClear: (() -> Unit)? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -63,7 +148,7 @@ fun TerminalPane(
                 actionIcon = IqIcons.clear,
                 actionDescription = "清屏",
                 onAction = onClear,
-                subtitle = "$projectName · Mock",
+                subtitle = projectName,
             )
             Surface(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -84,7 +169,6 @@ fun TerminalPane(
                             )
                         }
                     }
-                    // Miuix 滚动条
                     VerticalScrollBar(
                         adapter = rememberScrollBarAdapter(listState),
                         modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
@@ -92,42 +176,16 @@ fun TerminalPane(
                 }
             }
             IqHorizontalDivider()
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(46.dp)
-                    .padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "$ ",
-                    color = scheme.primary,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                )
-                // 命令输入位走 Miuix TextField 的禁用态 + useLabelAsPlaceholder：
-                // 占位文字、焦点、键盘行为都由组件负责，将来接入 PTY 只需把
-                // enabled 打开，不用再重画一个假的输入框。
-                //
-                // 三处尺寸必须显式覆盖，否则文字会被裁成一团乱码：
-                // Miuix `TextFieldDefaults` 写死 `LabelFontSizeNormal = 17sp`、
-                // `InsideMargin = 16dp×16dp`、`CornerRadius = 16dp`（字节码实测）。
-                // 17sp 的标签 + 上下各 16dp 内边距 = 约 54dp，而终端输入行只有 42dp。
-                // 标签的字号没有公开参数可调，所以只能把 insideMargin 压到 4dp 让位，
-                // 并把圆角收进本工程的 IqRadius。
-                TextField(
-                    value = "",
-                    onValueChange = {},
-                    modifier = Modifier.weight(1f),
-                    enabled = false,
-                    singleLine = true,
-                    label = "输入命令（未接入 PTY）",
-                    useLabelAsPlaceholder = true,
-                    textStyle = MiuixTheme.textStyles.body2,
-                    insideMargin = DpSize(10.dp, 4.dp),
-                    cornerRadius = IqRadius.inner,
-                )
-            }
+            Text(
+                text = if (lines.any { it.text.contains("未就绪") || it.text.contains("尚未接入") }) {
+                    "初始化内置 Termux 环境后，这里会变成可输入的真实终端。"
+                } else {
+                    "内置 Termux 环境未就绪，无法启动终端。"
+                },
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = 10.5.sp,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp),
+            )
         }
     }
 }

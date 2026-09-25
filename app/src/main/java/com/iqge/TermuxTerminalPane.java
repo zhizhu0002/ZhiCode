@@ -240,7 +240,10 @@ public final class TermuxTerminalPane extends FrameLayout implements TerminalVie
 
     private void showRuntimeMessage() {
         terminalHost.removeAllViews();
-        TextView t = label("正在准备内置 Termux 运行环境…\n首次启动只需本地解压，无需联网下载。", 13, MUTED, false);
+        // 本应用的运行环境是**用户点按钮触发**安装的，不是自动准备中。
+        // 原版这里写的是"正在准备…第一次启动只需本地解压"，会让人干等一件
+        // 实际没在发生的事，所以改成指路：去哪里把它装上。
+        TextView t = label("内置 Termux 环境尚未就绪。\n请先在侧栏「准备内置 Termux 环境」里初始化，完成后这里就是可输入的真实终端。", 13, MUTED, false);
         t.setGravity(Gravity.CENTER); t.setPadding(dp(24), dp(24), dp(24), dp(24));
         terminalHost.addView(t, new FrameLayout.LayoutParams(-1, -1));
         UiMotion.pageIn(t);
@@ -289,7 +292,7 @@ public final class TermuxTerminalPane extends FrameLayout implements TerminalVie
         e.put("COLORTERM", "truecolor");
         e.put("LANG", "en_US.UTF-8");
         e.put("TERMUX_VERSION", "0.118.3");
-        e.put("TERMUX_APP__PACKAGE_NAME", TermuxConstants.TERMUX_PACKAGE_NAME);
+        e.put("TERMUX_APP__PACKAGE_NAME", getContext().getPackageName());
         e.put("TERMUX_APP__PACKAGE_MANAGER", "apt");
         e.put("TERMUX_APP__PACKAGE_VARIANT", "apt-android-7");
         e.put("TERMUX_APP__FILES_DIR", TermuxConstants.TERMUX_FILES_DIR_PATH);
