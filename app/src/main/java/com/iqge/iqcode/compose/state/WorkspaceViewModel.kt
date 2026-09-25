@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.iqge.iqcode.compose.data.ApiConfigStore
 import com.iqge.iqcode.compose.data.FileBrowser
 import com.iqge.iqcode.compose.data.GitChanges
 import com.iqge.iqcode.compose.data.MockWorkspaceRepository
@@ -23,6 +24,8 @@ import com.iqge.iqcode.compose.engine.toUiPlanApproval
 import com.iqge.iqcode.compose.runtime.EnvDoctor
 import com.iqge.RuntimeInstaller
 import com.iqge.iqcode.compose.model.AgentTask
+import com.iqge.iqcode.compose.model.ApiProfile
+import com.iqge.iqcode.compose.model.ApiProfileDraft
 import com.iqge.iqcode.compose.model.Attachment
 import com.iqge.iqcode.compose.model.ChatItem
 import com.iqge.iqcode.compose.model.ChatKind
@@ -130,6 +133,7 @@ class WorkspaceViewModel(
 
 
 
+
     /**
      * 会话操作的目标。
      *
@@ -186,6 +190,9 @@ class WorkspaceViewModel(
      */
     private fun initSessionState() {
         viewModelScope.launch(Dispatchers.IO) {
+            // 顶栏的模型名/密钥状态要反映**真实生效**的配置，
+            // 否则用户会看到一个跟实际请求无关的模型名。
+            syncActiveProfile()
             ensureWorkspace()
             val sessions = SessionReader.list(_state.value.projectPath)
             _state.update { it.copy(sessions = sessions) }
@@ -1135,6 +1142,115 @@ class WorkspaceViewModel(
         _state.update { it.copy(planApproval = null) }
     }
 
+    // ---------- API 配置 ----------
+
+    /**
+     * 打开 API 配置（列表页）。
+     *
+     * 顺带刷新 [WorkspaceUiState.profileName] / [WorkspaceUiState.modelLabel]：
+     * 这两个字段原来写死成演示值，现在它们是**真实生效的配置摘要**，
+     * 否则顶栏会显示一个跟实际请求无关的模型名。
+     */
+    fun openApiConfig() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val state = ApiConfigStore.read(getApplication())
+            _state.update {
+                it.copy(apiConfig = state, settingsDraft = null)
+            }
+            syncActiveProfile()
+        }
+    }
+
+    fun closeApiConfig() = _state.update { it.copy(apiConfig = null) }
+
+    /** 新增：给一张空表单。 */
+    fun newApiProfile() = _state.update {
+        it.copy(apiConfig = it.apiConfig?.copy(form = ApiProfileDraft.blank()))
+    }
+
+    /** 编辑：**故意不回填密钥**（见 ApiConfigStore 的说明）。 */
+    fun editApiProfile(profile: ApiProfile) = _state.update {
+        it.copy(apiConfig = it.apiConfig?.copy(form = ApiProfileDraft.from(profile)))
+    }
+
+    fun updateApiProfileDraft(transform: (ApiProfileDraft) -> ApiProfileDraft) = _state.update {
+        val config = it.apiConfig ?: return@update it
+        val form = config.form ?: return@update it
+        it.copy(apiConfig = config.copy(form = transform(form)))
+    }
+
+    fun cancelApiProfileForm() = _state.update {
+        it.copy(apiConfig = it.apiConfig?.copy(form = null))
+    }
+
+    /**
+     * 保存一条 API 配置。
+     *
+     * 密钥写入 AndroidKeyStore 加密存储；编辑已有记录时若密钥留空，
+     * 传 `replaceKey=false` 沿用原密钥，而不是把它清掉。
+     */
+    fun saveApiProfile() {
+        val form = _state.value.apiConfig?.form ?: return
+        if (!form.saveable) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = ApiConfigStore.save(getApplication(), form)
+            if (result.isFailure) {
+                val error = result.exceptionOrNull()
+                _state.update { it.copy(message = "保存失败：" + (error?.message ?: "未知原因")) }
+                return@launch
+            }
+            val state = ApiConfigStore.read(getApplication())
+            _state.update { it.copy(apiConfig = state, message = "API 配置已保存") }
+            syncActiveProfile()
+        }
+    }
+
+    fun selectApiProfile(profileId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = ApiConfigStore.select(getApplication(), profileId)
+            val state = ApiConfigStore.read(getApplication())
+            _state.update {
+                it.copy(
+                    apiConfig = state,
+                    message = if (result.isSuccess) "已切换 API 配置" else "切换失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+                )
+            }
+            syncActiveProfile()
+        }
+    }
+
+    fun deleteApiProfile(profileId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = ApiConfigStore.delete(getApplication(), profileId)
+            val state = ApiConfigStore.read(getApplication())
+            _state.update {
+                it.copy(
+                    apiConfig = state,
+                    message = if (result.isSuccess) "配置已删除" else "无法删除：${result.exceptionOrNull()?.message ?: "未知原因"}",
+                )
+            }
+            syncActiveProfile()
+        }
+    }
+
+    /**
+     * 把当前生效的 API 配置同步到界面摘要，并让引擎重新读取。
+     *
+     * 必须让引擎重读：它内部持有配置副本，不重新下发的话
+     * 用户"保存了密钥却仍然报 API key is not configured"。
+     */
+    private fun syncActiveProfile() {
+        val active = ApiConfigStore.active(getApplication())
+        _state.update {
+            it.copy(
+                profileName = active?.name ?: "未配置",
+                modelLabel = active?.model ?: "未设置",
+                apiKeyConfigured = active?.hasKey == true,
+            )
+        }
+        runCatching { engine.configure(engineOverrides()) }
+    }
+
     private fun appendInfo(title: String, body: String) {
         _state.update {
             it.copy(transcript = it.transcript + ChatItem(id = nextId("i"), kind = ChatKind.INFO, title = title, body = body))
@@ -1744,12 +1860,7 @@ class WorkspaceViewModel(
     fun navigateFromSettings(target: String) {
         _state.update { it.copy(settingsDraft = null) }
         when (target) {
-            // 这些还没有独立面板，先以信息卡说明现状，避免死链
-            "apiProfiles" -> appendInfo(
-                "API 配置记录",
-                "当前使用 **${_state.value.profileName}** · ${_state.value.modelLabel}。\n" +
-                    "API 地址、协议与密钥的独立保存需要真实引擎，本期尚未接入。",
-            )
+            "apiProfiles" -> openApiConfig()
             "mcp" -> appendInfo("MCP 服务器", "MCP 服务器配置将在接入真实引擎后提供。")
             "canvas" -> {
                 onComposerChange("/canvas")

@@ -56,6 +56,7 @@ import com.iqge.iqcode.compose.ui.chat.AgentProgressCard
 import com.iqge.iqcode.compose.ui.chat.ChatList
 import com.iqge.iqcode.compose.ui.composer.Composer
 import com.iqge.iqcode.compose.ui.dialogs.ChoicePickerOverlay
+import com.iqge.iqcode.compose.ui.dialogs.ApiConfigOverlay
 import com.iqge.iqcode.compose.ui.dialogs.EnvironmentOverlay
 import com.iqge.iqcode.compose.ui.dialogs.PermissionOverlay
 import com.iqge.iqcode.compose.ui.dialogs.PlanApprovalOverlay
@@ -93,6 +94,7 @@ private fun rememberWorkspaceViewModel(): WorkspaceViewModel {
 @Composable
 fun IqCodeApp(viewModel: WorkspaceViewModel = rememberWorkspaceViewModel()) {
     val state by viewModel.state.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.openApiConfig() }
 
     val systemDark = isSystemInDarkTheme()
     val isDark = when (state.themeMode) {
@@ -273,6 +275,17 @@ private fun IqCodeScreen(
                 onRepair = viewModel::repairRuntime,
                 onRefresh = viewModel::refreshEnvironmentReport,
                 onCopy = { viewModel.copyEnvironmentReport() },
+            )
+            ApiConfigOverlay(
+                config = state.apiConfig,
+                onDismiss = viewModel::closeApiConfig,
+                onNew = viewModel::newApiProfile,
+                onEdit = viewModel::editApiProfile,
+                onSelect = viewModel::selectApiProfile,
+                onDelete = viewModel::deleteApiProfile,
+                onDraftChange = viewModel::updateApiProfileDraft,
+                onSave = viewModel::saveApiProfile,
+                onCancelForm = viewModel::cancelApiProfileForm,
             )
         }
     }

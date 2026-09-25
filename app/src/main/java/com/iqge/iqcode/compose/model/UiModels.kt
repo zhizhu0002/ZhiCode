@@ -234,8 +234,10 @@ data class WorkspaceUiState(
     val permissionMode: PermissionMode = PermissionMode.ASK,
     val effort: EffortLevel = EffortLevel.AUTO,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
-    val profileName: String = "官方 API",
-    val modelLabel: String = "IQ-Code-2.0-preview",
+    val profileName: String = "未配置",
+    /** 当前 API 配置是否已有密钥。顶栏据此提示"还不能用"，避免发出去才发现报错。 */
+    val apiKeyConfigured: Boolean = false,
+    val modelLabel: String = "未设置",
     val contextTokens: Int = 0,
     val contextWindow: Int = 200_000,
     val deviceStatus: String = "",
@@ -275,6 +277,8 @@ data class WorkspaceUiState(
     val busySessionIds: Set<String> = emptySet(),
     /** 设置页新增的持久化项（见 [AppSettings]）。 */
     val settings: AppSettings = AppSettings(),
+    /** 非空即 API 配置窗口打开（列表或编辑表单）。 */
+    val apiConfig: com.iqge.iqcode.compose.model.ApiConfigState? = null,
     /** 非空即设置弹窗打开；所有编辑先落在这里，「保存」才写回上面的字段。 */
     val settingsDraft: SettingsDraft? = null,
 ) {

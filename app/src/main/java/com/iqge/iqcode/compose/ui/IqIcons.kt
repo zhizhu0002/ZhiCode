@@ -73,6 +73,8 @@ object IqIcons {
 
     // 通用
     val close: ImageVector get() = set.Close
+    /** 编辑（API 配置等条目的修改入口）。 */
+    val edit: ImageVector get() = set.Edit
     val collapse: ImageVector get() = set.ExpandMore
     val expand: ImageVector get() = set.ChevronForward
     val refresh: ImageVector get() = set.Refresh
