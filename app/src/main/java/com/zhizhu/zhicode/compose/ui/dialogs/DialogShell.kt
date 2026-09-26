@@ -229,7 +229,7 @@ internal fun PrimaryButton(
     Button(
         onClick = onClick,
         enabled = enabled,
-        cornerRadius = ZhiRadius.floating,
+        cornerRadius = ZhiRadius.button,
         colors = ButtonDefaults.buttonColorsPrimary(
             color = scheme.primary,
             contentColor = scheme.onPrimary,
@@ -256,7 +256,7 @@ internal fun SecondaryButton(text: String, onClick: () -> Unit, modifier: Modifi
     TextButton(
         text = text,
         onClick = onClick,
-        cornerRadius = ZhiRadius.floating,
+        cornerRadius = ZhiRadius.button,
         modifier = modifier,
     )
 }

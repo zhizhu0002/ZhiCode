@@ -32,6 +32,8 @@ import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.ProgressIndicatorDefaults
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.TabRowDefaults
+import top.yukonga.miuix.kmp.basic.TabRowWithContour
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.VerticalDivider
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -295,6 +297,62 @@ fun ZhiSectionLabel(text: String, modifier: Modifier = Modifier) {
         text = text,
         modifier = modifier,
         textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+    )
+}
+
+/**
+ * `matchWidth` 时用的宽度上限。
+ *
+ * 取一个远大于任何手机宽度的值，好让「等分」结果不被 Miuix 默认的
+ * `TabRowWithContourMaxWidth`（84dp）截断 —— 宽度算法是
+ * `(可用宽 − (n−1)×间距) / n` 再 `coerceIn(minWidth, maxWidth)`，
+ * 上限越小越会迫使整行溢出、进入横向滚动。
+ */
+private val TabsMatchWidthLimit = 1000.dp
+
+/**
+ * 分段按钮组。转发到 Miuix **[TabRowWithContour]** —— `TabRow` 的带轮廓变体。
+ *
+ * ## 为什么用带轮廓的那个
+ *
+ * Miuix 的 `TabRow` 有两个变体（官方文档「页面导航 → TabRow」）：
+ *  - `TabRow`：各项各自一个圆角块，未选中项**也**有可见描边，像一排独立按钮；
+ *  - `TabRowWithContour`：整行一个外轮廓 + 内部一条底轨，只有选中项凸起一个圆角块。
+ *
+ * 后者才是 HyperOS 里那种「一格一格」的分段控件观感，也是顶栏工作区标签与
+ * 设置页分类标签想要的形态。
+ *
+ * ## 两个变体的默认尺寸不同，换用时要一起改
+ *
+ * | | `TabRow` | `TabRowWithContour` |
+ * |---|---|---|
+ * | 高 / 圆角 | 42 / 12 | **45 / 8** |
+ * | min / max 宽 | 76 / 98 | **62 / 84** |
+ * | itemSpacing | 9 | **5** |
+ *
+ * 高度差 3dp：外层的固定高度常量（如 `WorkspaceTabRowHeight`）必须跟着给到 45dp，
+ * 否则轮廓会被裁掉。
+ *
+ * ## `matchWidth`
+ *
+ * 置 `true` 时把 min/max 宽放开，让 n 项精确等分整行宽度并填满；置 `false`
+ * 时沿用 Miuix 默认区间，项数超出一屏就横向滚动。
+ */
+@Composable
+fun ZhiSegmentedTabs(
+    tabs: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    matchWidth: Boolean = false,
+) {
+    TabRowWithContour(
+        tabs = tabs,
+        selectedTabIndex = selectedIndex,
+        onTabSelected = onSelect,
+        modifier = modifier,
+        minWidth = if (matchWidth) 0.dp else TabRowDefaults.TabRowWithContourMinWidth,
+        maxWidth = if (matchWidth) TabsMatchWidthLimit else TabRowDefaults.TabRowWithContourMaxWidth,
     )
 }
 

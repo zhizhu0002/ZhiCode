@@ -4,7 +4,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
@@ -69,9 +68,11 @@ fun ZhiSidebar(
 ) {
     val scheme = MiuixTheme.colorScheme
     Surface(modifier = modifier, color = ZhiColors.panelSurface()) {
-        Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
-            // 每块功能分组包一个带描边的框，视觉上把「新建/项目」「会话列表」
-            // 「工作区」「运行环境」四段分开；框内自带内边距与圆角。
+        Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
+            // 每块功能分组 = 框上方的分组标题 + 一个带描边的框，
+            // 把「新建/项目」「会话列表」「工作区」「运行环境」四段分开。
+            // 标题原先写在框**内**，看起来像框里的一个条目，也把框撑高了；
+            // 改到框外后与 Miuix / HyperOS 设置页的做法一致。
             SidebarSection {
                 SidebarAction(
                     label = "新会话",
@@ -87,6 +88,7 @@ fun ZhiSidebar(
                 title = "项目历史 · ${state.projectName}",
                 // 这一块要吃掉剩余高度，这样一屏能看到尽可能多的会话
                 modifier = Modifier.weight(1f, fill = true),
+                fillHeight = true,
             ) {
                 // 会话区占满剩余高度（搜索框已按要求移除）。
                 LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = true)) {
@@ -150,30 +152,38 @@ fun ZhiSidebar(
 }
 
 /**
- * 侧栏里的一个功能分组：带描边的圆角容器 + 可选的小标题。
+ * 侧栏里的一个功能分组：**框上方的分组标题** + 一个圆角容器。
  *
- * 描边用 `BorderStroke`（Miuix `Surface` 原生参数），不再手写 `border`；
- * `title` 为空时连标题一起省掉，避免出现只有空行没有文字的头。
+ * `title` 为空时连标题一起省掉（第 1、4 段就是这样，它们没有分组名），
+ * 不会出现只有空行没有文字的头。
+ *
+ * `fillHeight` 用于「会话列表」那段：它要吃掉剩余高度，好让一屏能多列几个会话。
  */
 @Composable
 private fun SidebarSection(
     modifier: Modifier = Modifier,
     title: String? = null,
+    fillHeight: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth().padding(vertical = 1.dp),
-        cornerRadius = ZhiRadius.card,
-        insideMargin = PaddingValues(horizontal = 3.dp, vertical = 2.dp),
-    ) {
+    Column(modifier = modifier.fillMaxWidth().padding(vertical = 1.dp)) {
         if (title != null) {
             // 分组标题走 Miuix SmallTitle，不再手写字号/字重
             ZhiSectionLabel(
                 text = title,
-                modifier = Modifier.padding(start = 6.dp, top = 1.dp, bottom = 2.dp),
+                modifier = Modifier.padding(start = 9.dp, top = 3.dp, bottom = 1.dp),
             )
         }
-        content()
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                // 需要吃掉剩余高度的分组：外层已用 weight 约束高度，这里让框撑满
+                .then(if (fillHeight) Modifier.weight(1f, fill = true) else Modifier),
+            cornerRadius = ZhiRadius.card,
+            insideMargin = PaddingValues(horizontal = 2.dp, vertical = 1.dp),
+        ) {
+            content()
+        }
     }
 }
 
@@ -231,7 +241,7 @@ private fun SidebarAction(
                 }
             },
             // 点击由外层 Card 处理：这里再传一次 onClick 会形成嵌套可点区域
-            insideMargin = PaddingValues(horizontal = 8.dp, vertical = 1.dp),
+            insideMargin = PaddingValues(horizontal = 7.dp, vertical = 0.dp),
         )
     }
 }
@@ -251,7 +261,7 @@ private fun SessionRow(
         onLongPress = onActions,
         modifier = Modifier.fillMaxWidth().heightIn(max = SessionRowMaxHeight),
         cornerRadius = ZhiRadius.card,
-        insideMargin = PaddingValues(start = 6.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+        insideMargin = PaddingValues(start = 6.dp, end = 2.dp, top = 1.dp, bottom = 1.dp),
         colors = CardDefaults.defaultColors(
             color = if (active) ZhiColors.cardInnerSurface() else Color.Transparent,
             contentColor = if (session.busy) scheme.primary else scheme.onSurface,
@@ -312,7 +322,7 @@ private fun SessionRow(
  * `bipush 56` → `heightIn`），而侧栏要在有限高度里塞下尽可能多的会话，
  * 所以从外面再套一层 `heightIn(max = …)`：内层的 min 会被外层 max 收敛下来。
  */
-private val SidebarRowMaxHeight = 38.dp
+private val SidebarRowMaxHeight = 34.dp
 
 /** 会话行最大高度（标题 + 元信息两行）。 */
-private val SessionRowMaxHeight = 54.dp
+private val SessionRowMaxHeight = 46.dp

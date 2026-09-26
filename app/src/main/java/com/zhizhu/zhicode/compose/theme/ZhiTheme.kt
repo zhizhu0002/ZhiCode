@@ -31,6 +31,23 @@ val LocalIqDark = compositionLocalOf { false }
  */
 object ZhiRadius {
     val floating = 20.dp
+
+    /**
+     * 文字按钮（`Button` / `TextButton`）。
+     *
+     * **不能**沿用 [floating]（20dp）：Miuix 按钮的标准高度是
+     * `ButtonDefaults.MinHeight` = **40dp**，20dp 半径恰好等于高度的一半，
+     * 于是按钮圆成一个**胶囊**。Miuix 自己给按钮的圆角是
+     * `ButtonDefaults.CornerRadius` = **16dp**（16/40 = 0.4），是不顶满的圆角矩形。
+     *
+     * 注：[floating] 给**面板/卡片**用（顶栏下半圆角、悬浮输入器、悬浮任务卡）没问题，
+     * 那些容器高度远大于 40dp，20dp 不到半高。
+     *
+     * 图标按钮不用这个值：Miuix `IconButtonDefaults.CornerRadius` = 40dp 配
+     * MinHeight 40dp，也就是**正圆**，见 `ZhiFilledIconButton`。
+     */
+    val button = 12.dp
+
     val card = 14.dp
     val inner = 10.dp
     val square = 4.dp

@@ -29,12 +29,12 @@ import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
+import com.zhizhu.zhicode.compose.ui.ZhiSegmentedTabs
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -124,26 +124,25 @@ fun SettingsDialog(
 // ------------------------------------------------------------------ 分类 Tab
 
 /**
- * 分类 Tab。转发到 Miuix [TabRow]（自带胶囊选中态、等分与滚动行为）。
+ * 分类 Tab。转发到 [ZhiSegmentedTabs]（Miuix `TabRowWithContour`，即带轮廓变体）。
  *
- * [TabRow] 支持 `tabs` 数量超过一屏时横向滚动，且选中项会自动滚入视野 ——
- * 这两件事以前是手写 `Row + horizontalScroll + LaunchedEffect(animateScrollTo)` 做的。
+ * `matchWidth = true`：6 个分类等分整行宽度并**全部可见**。原先用标准 `TabRow` 并指定
+ * `minWidth = 72.dp`，6×72 + 间距 ≈ 430dp 远超弹窗宽度，于是整行溢出、后面的分类被推到
+ * 屏幕外，只能靠横向滚动才发现。改为等分后每项约 55dp，2 字标签（外观/模型/安全/
+ * 联网/上下文/扩展）刚好放得下。
  */
 @Composable
 private fun CategoryTabs(
     selected: SettingsCategory,
     onSelect: (SettingsCategory) -> Unit,
 ) {
-    TabRow(
-        // 用简写标签：Miuix TabRow 会按容器宽度分配各项宽度，长标签（"模型与权限"）
-        // 在手机宽度下必然被省略号截断。全称仍保留在 [SettingsCategory.label] 里。
+    ZhiSegmentedTabs(
+        // 用简写标签：长标签（"模型与权限"）在手机宽度下必然被省略号截断。
+        // 全称仍保留在 [SettingsCategory.label] 里。
         tabs = SettingsCategory.entries.map { it.tabLabel },
-        selectedTabIndex = SettingsCategory.entries.indexOf(selected).coerceAtLeast(0),
-        onTabSelected = { index -> SettingsCategory.entries.getOrNull(index)?.let(onSelect) },
-        // 6 个分类在手机上放不下。给足最小宽度让汉字完整显示，放不下时 TabRow 自己
-        // 横向滚动（minWidth 太小会变成"上…"这种截断，比滚动更难看）。
-        minWidth = 72.dp,
-        maxWidth = 104.dp,
+        selectedIndex = SettingsCategory.entries.indexOf(selected).coerceAtLeast(0),
+        onSelect = { index -> SettingsCategory.entries.getOrNull(index)?.let(onSelect) },
+        matchWidth = true,
     )
 }
 

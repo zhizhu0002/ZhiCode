@@ -76,7 +76,6 @@ import top.yukonga.miuix.kmp.basic.FloatingToolbar
 
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Surface
-import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
@@ -516,11 +515,13 @@ private fun CompactWorkspace(
     }
 }
 
-/** 工作区 Tab 行的总高度：够容纳 Miuix 胶囊选中态，避免它被裁掉。 */
-internal val WorkspaceTabRowHeight = 42.dp
+/** 工作区 Tab 行的总高度。必须 ≥ `TabRowWithContour` 的默认高（45dp），否则轮廓会被裁。 */
+internal val WorkspaceTabRowHeight = 45.dp
 
 /**
- * 工作区 Tab 行。转发到 Miuix [TabRow]。
+ * 工作区 Tab 行。转发到 [ZhiSegmentedTabs]（Miuix `TabRowWithContour`，即带轮廓变体）。
+ *
+ * `matchWidth = true`：4 项等分填满整行，不再受默认 84dp 上限影响。
  *
  * 这里以前是手写的 `ZhiButtonGroup`（等分按键 + 自绘选中胶囊），理由是"TabRow 的轮廓
  * 会向外绘制并盖住相邻内容"。实测确实会溢出，但正确做法不是退回手写，而是
@@ -539,14 +540,12 @@ internal fun WorkspaceTabs(
         modifier = modifier.fillMaxWidth().height(WorkspaceTabRowHeight).clipToBounds(),
         contentAlignment = Alignment.Center,
     ) {
-        TabRow(
+        ZhiSegmentedTabs(
             tabs = tabs.map { it.label },
-            selectedTabIndex = tabs.indexOf(selected).coerceAtLeast(0),
-            onTabSelected = { index -> tabs.getOrNull(index)?.let(onSelect) },
-            // 手机宽度下 4 项等分约 90dp；窄到放不下时 TabRow 自己滚动。
-            // 窄一点：4 项等分时每项约 90dp，标签居中留白更少，整行更紧凑
-            minWidth = 64.dp,
-            maxWidth = 104.dp,
+            selectedIndex = tabs.indexOf(selected).coerceAtLeast(0),
+            onSelect = { index -> tabs.getOrNull(index)?.let(onSelect) },
+            modifier = Modifier.fillMaxWidth(),
+            matchWidth = true,
         )
     }
 }
@@ -567,7 +566,15 @@ private fun ChatArea(
     modifier: Modifier = Modifier,
     glass: Glass,
 ) {
-    val floating = state.workingStatus != null || state.tasks.isNotEmpty()
+    // 只在**真正在跑**时显示悬浮任务卡。
+    //
+    // `workingStatus` 非空 ⟺ 忙碌中（"正在思考…"、"正在执行 X…" 等），每次运行结束、
+    // 连接中断恢复、重置新会话都会把它置回 null，所以它是判定"是否在跑"的可靠信号。
+    //
+    // 原先这里还有一个 `|| state.tasks.isNotEmpty()`：于是 AI 只要用 TaskCreate /
+    // TodoWrite 列过一次任务清单，即使已经答完、什么都没在执行，这张卡也会一直挂在
+    // 输入器上方。而任务清单本身已经在对话流里，点卡片还能看完整版 —— 属于重复打扰。
+    val floating = state.workingStatus != null
 
     // 对话区加一个框：纯白/纯黑的背板上如果没有边界，对话与面板会糊成一片。
     // 框用 Surface 的 border（Miuix 原生参数），圆角与其它卡片同一 token。

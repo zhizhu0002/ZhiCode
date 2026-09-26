@@ -57,8 +57,16 @@ fun ChatList(
                 item { EmptyState() }
             }
             items(state.transcript, key = { it.id }) { item ->
-                // 新消息淡入 + 已有消息位置变化时平滑推移
-                Box(modifier = Modifier.animateItem().padding(end = 14.dp)) {
+                // 新消息淡入 + 已有消息位置变化时平滑推移。
+                //
+                // ⚠️ `fadeOutSpec = null` 是刻意的，别加回来。
+                // 默认的淡出会让"被移除的项"在动画期间**继续绘制**，于是当
+                // `newSession()` 把 transcript 一次清空时，那几张还没淡完的卡片
+                // 会和紧接着出现的 `EmptyState()` 叠在一起 —— 表现为卡片与
+                // "想让 IQ 做什么？"互相穿透、错位，看起来像渲染 bug。
+                // 删除单条消息时瞬间消失没有观感损失（用户主动触发，预期即时），
+                // 换掉这个交集比留着更划算。
+                Box(modifier = Modifier.animateItem(fadeOutSpec = null).padding(end = 14.dp)) {
                     when (item.kind) {
                         ChatKind.USER -> UserBubble(item) { onMessageActions(item) }
                         ChatKind.ASSISTANT -> AssistantCard(

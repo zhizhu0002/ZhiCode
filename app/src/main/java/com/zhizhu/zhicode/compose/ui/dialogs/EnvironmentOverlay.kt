@@ -111,7 +111,7 @@ fun EnvironmentOverlay(
                 TextButton(
                     text = "复制报告",
                     onClick = onCopy,
-                    cornerRadius = ZhiRadius.floating,
+                    cornerRadius = ZhiRadius.button,
                 )
                 Row(modifier = Modifier.padding(start = 8.dp)) {
                     if (runtimeReady) {
@@ -140,14 +140,14 @@ fun EnvironmentOverlay(
                     TextButton(
                         text = "重新检测",
                         onClick = onRefresh,
-                        cornerRadius = ZhiRadius.floating,
+                        cornerRadius = ZhiRadius.button,
                         modifier = Modifier.padding(start = 8.dp),
                     )
                     if (runtimeReady) {
                         TextButton(
                             text = "修复",
                             onClick = onRepair,
-                            cornerRadius = ZhiRadius.floating,
+                            cornerRadius = ZhiRadius.button,
                             modifier = Modifier.padding(start = 4.dp),
                         )
                     }
