@@ -317,68 +317,610 @@ final class SandboxFrida {
     // ------------------------------------------------------------ 桥脚本载荷
 
     /**
-     * Frida agent 源码。写成字符串常量而不是放在 assets 里，是因为 Gadget 的
-     * Script 交互要求脚本就是一个同目录的文件，而这份内容必须在进程内即可生成。
+     * Frida agent 源码。
      *
-     * <p><b>归属（这里曾经写过一句不成立的话，记下来）</b>：这段载荷与
+     * <p><b>为什么是一份 text block 而不是 assets 里的 .js</b>：Gadget 的 Script 交互要求
+     * 脚本是一个与 Gadget 同目录的文件，而内容必须在进程内即可生成。也曾考虑过把脚本挪进
+     * {@code assets/} 或 {@code res/raw/} —— 但那样它就从 {@code tools/provenance.sh} 的
+     * 比对范围里消失了（那个脚本只比对 {@code .java}/{@code .kt}）：一行都没重写，
+     * 数字却会变好看。这份载荷有五百多行，摆在 Java 里确实不好看，但摆在那里才看得见。
+     *
+     * <p><b>归属（这里曾经写过一句不成立的话，记下来）</b>：这份载荷原先与
      * {@code IQ-Code-Android/app/src/main/java/com/iqge/sandbox/SandboxFridaBridge.java}
      * 里 {@code bridgeScript} 的返回串<b>同文</b> —— 把品牌名对齐（{@code Zhi} ↔ {@code IQ}）
-     * 之后逐行相同，唯一的差别是注入对象那一行的名字（{@code const Zhi=…}）
-     * 与 eval 那行的形参名。也就是说它<b>不是</b>「从外部引入的冻结资源」，
-     * 而是原版的代码留在本文件里，并且照旧计入「净相同行」。
-     *
-     * <p>本类此前用一句注释把它声明成「冻结资源，不是本次重写的对象」。
+     * 之后逐行相同。本类此前用一句注释把它声明成「从外部引入的冻结资源，不是本次重写的对象」，
      * 那正是本工程明确要防的写法：<b>一句注释就能让度量里的对象自己消失</b>。
      * （Termux 上游那七千多行确实被单列，但那是按写明的规则、且有独立的来源与许可；
-     * 这里当初没有那样的依据，写下的却是一样的结论。）所以它现在是重写对象。
+     * 这里当初没有那样的依据，写下的却是一样的结论。）它现在按自己的结构重写过：
+     * 常量集中在头部、op 走一张分派表、扫描器分块带名字、错误文案是自己的。
      *
-     * <p>另一半是仍然成立的：{@code rpc.exports} / 信箱文件名 / ready 标记是 Java 侧与
-     * 本脚本的协议边界，改一侧就必须同步改另一侧；不变量由
-     * {@code FridaScriptBootstrapRegressionTest}、{@code FridaDeadlockRegressionTest}
-     * 与 {@code app/tests/js/frida-agent-harness.mjs} 一起守着。装载方式（谁写、写去哪、
-     * 何时清信箱）属于本类的重写范围。注入对象的名字（{@code Zhi.emit} / {@code Zhi.hooks} /
-     * {@code Zhi.scan}）不是行为，但会被写进工具 schema 与系统提示词，所以改名必须三处同步。
+     * <p><b>说清楚这一次重写买到了什么</b>：它买到的是度量上那 40 行（净相同行 2157 → 2118），
+     * <b>不是</b>「因此就不再是派生实现」—— 算法与线上契约按设计保持不变，所以它仍然是
+     * 派生作品（IQ Code 是 MIT，原作者也已许可改写与发行，这不冲突）。
+     * 真正与度量无关、也是这次顺带做成的收益是可读性（原先有一行是 3210 个字符）
+     * 与测试：原先守这 40 行的全是逐字拼写断言（{@code contains("…")}），等于「不许改」。
+     *
+     * <p><b>边界与守卫</b>：{@code rpc.exports} / 信箱文件名 / ready 标记 / 响应字段是
+     * Java 侧与本脚本的协议边界，改一侧必须同步改另一侧。行为由
+     * {@code app/tests/js/frida-agent-harness.mjs} 真跑着验证（把这份载荷从下面的 text block
+     * 里抽出来，用桩替换 Frida 宿主对象，按信箱协议发命令读响应：五种停止原因、
+     * 部分失败要返回部分结果、重叠不虚增 scanned、重复上报去重、慢命令不阻塞短命令……）；
+     * 名字一致性与两棵树的数值关系由 {@code FridaScriptBootstrapRegressionTest} 与
+     * {@code FridaDeadlockRegressionTest} 守着。
+     * 那个 harness <b>证明不了</b>真实的 Gadget 载入、{@code Interceptor}/{@code Stalker}
+     * 钩子与真实 {@code Memory.scan} 的行为 —— 那些要在 IQ 沙箱里跑起来才知道。
      */
     private static String agentScript(File dir) {
         String base = js(dir.getAbsolutePath());
-        return "rpc.exports={\n" +
-            "init(){let I=\"" + base + "\";\n" +
-            "const CMD=I+'/command.json'; const READY=I+'/ready.json'; const EVENTS=I+'/events.log';\n" +
-            "const hooks=new Map(); const watches=new Map(); const active=new Map(); let lastId=''; const MAX_SCAN_MATCHES=2048; const DEFAULT_SCAN_MATCHES=256; const SCAN_SYNC_ERROR='Memory.scanSync is disabled in frida_eval; use Debug action=frida_scan or await Zhi.scan(options).';\n" +
-            "function jsonSafe(v,depth,seen){ depth=depth||0; seen=seen||new Set(); if(v===undefined||v===null)return null; if(typeof v==='bigint')return v.toString(); if(typeof v==='string')return v.length>262144?v.slice(0,262144)+'…[truncated]':v; if(typeof v!=='object')return v; if(v&&v.constructor&&v.constructor.name==='NativePointer')return v.toString(); if(depth>=8)return '[depth-limit]'; if(seen.has(v))return '[circular]'; seen.add(v); try{ if(Array.isArray(v)){const n=Math.min(v.length,2048),a=[];for(let i=0;i<n;i++)a.push(jsonSafe(v[i],depth+1,seen));if(v.length>n)a.push('[+'+(v.length-n)+' more]');return a;} const o={}; let count=0; for(const k in v){if(count++>=256){o.__truncated__=true;break;}try{o[k]=jsonSafe(v[k],depth+1,seen);}catch(e){o[k]='[unserializable]';}} return o;} finally{seen.delete(v);} }\n" +
-            "function emit(v){ try{ const f=new File(EVENTS,'a'); f.write(JSON.stringify({ts:Date.now(),value:jsonSafe(v)})+'\\n'); f.flush(); f.close(); }catch(_){} }\n" +
-            "const Zhi={emit, hooks, watches, ptr:(v)=>ptr(v), module:(n)=>Process.getModuleByName(n)};\n" +
-            "function hex(ab){ if(ab===null)return ''; const a=new Uint8Array(ab); let s=''; for(let i=0;i<a.length;i++)s+=a[i].toString(16).padStart(2,'0'); return s;}\n" +
-            "function bytes(s){ s=String(s||'').replace(/0x/g,'').replace(/[^0-9a-f]/gi,''); if(s.length%2)throw new Error('hex length must be even'); const a=new Uint8Array(s.length/2); for(let i=0;i<a.length;i++)a[i]=parseInt(s.substr(i*2,2),16); return a;}\n" +
-            "function pointerDistance(start,end){const n=parseInt(end.sub(start).toString(),16);if(!Number.isSafeInteger(n)||n<0)throw new Error('scan range is too large');return n;}\n" +
-            "function legacyScan(a,n,pattern,deadline){return safeScan({address:a,size:n,pattern:pattern},deadline).then(r=>{if(!r.complete)throw new Error('Memory.scanSync compatibility scan stopped: '+r.stop_reason);return r.matches;});}\n" +
-            "function rewriteLegacyScan(source){const token='Memory.scanSync';let out='',cursor=0;for(;;){const i=source.indexOf(token,cursor);if(i<0){out+=source.slice(cursor);break;}const open=source.indexOf('(',i+token.length);if(open<0){out+=source.slice(cursor);break;}let depth=0,quote='',escaped=false,end=-1,args=[],last=open+1;for(let j=open+1;j<source.length;j++){const ch=source[j];if(quote){if(escaped)escaped=false;else if(ch===String.fromCharCode(92))escaped=true;else if(ch===quote)quote='';continue;}if(ch===String.fromCharCode(34)||ch===String.fromCharCode(39)||ch===String.fromCharCode(96)){quote=ch;continue;}if(ch==='('||ch==='['||ch==='{'){depth++;continue;}if(ch===')'){if(depth===0){args.push(source.slice(last,j));end=j;break;}depth--;continue;}if(ch===','&&depth===0){args.push(source.slice(last,j));last=j+1;}}if(end<0||args.length!==3){out+=source.slice(cursor,i+token.length);cursor=i+token.length;continue;}out+=source.slice(cursor,i)+'(await __legacyScan('+args[0]+','+args[1]+','+args[2]+'))';cursor=end+1;}return out;}\n" +
-            "function boundedInteger(value,fallback,min,max){if(value===undefined||value===null||value===''||typeof value==='boolean')return fallback;const n=Number(value);return Number.isFinite(n)?Math.max(min,Math.min(max,Math.floor(n))):fallback;}\n" +
-            "function validateScanPattern(pattern){const parts=pattern.split(':');if(parts.length>2)throw new Error('invalid scan pattern');const bytes=parts[0].trim().split(/\\s+/);if(bytes.length===0||bytes.some(v=>!/[0-9a-f?]{2}/i.test(v)||v.length!==2))throw new Error('invalid scan pattern');if(parts.length===2){const mask=parts[1].trim().split(/\\s+/);if(mask.length!==bytes.length||mask.some(v=>!/[0-9a-f]{2}/i.test(v)||v.length!==2))throw new Error('invalid scan pattern mask');}return bytes.length;}\n" +
-            "function resolveScanTarget(p){const moduleName=String(p.module||'').trim();const hasAddress=p.address!==undefined&&p.address!==null&&String(p.address).trim()!=='';const hasSize=p.size!==undefined&&p.size!==null&&String(p.size).trim()!=='';if(moduleName&&(hasAddress||hasSize))throw new Error('scan accepts either module or address/size, not both');let base,size;if(moduleName){const m=Process.getModuleByName(moduleName);base=m.base;size=Number(m.size);}else{if(!hasAddress||!hasSize)throw new Error('scan requires module or address with size');base=ptr(p.address);size=Number(p.size);}if(!Number.isSafeInteger(size)||size<=0)throw new Error('scan size must be a positive safe integer');const end=base.add(size);if(end.compare(base)<=0)throw new Error('scan range overflow');return {base,end,size,module:moduleName};}\n" +
-            "function moduleUnchanged(target){if(!target.module)return true;try{const m=Process.getModuleByName(target.module);return m.base.compare(target.base)===0&&Number(m.size)===target.size;}catch(_){return false;}}\n" +
-            "function readableSlices(start,end){const ranges=Process.enumerateRanges({protection:'r--',coalesce:false}).slice().sort((a,b)=>a.base.compare(b.base));const out=[];let floor=start;for(const range of ranges){const rangeEnd=range.base.add(range.size);if(rangeEnd.compare(floor)<=0||range.base.compare(end)>=0)continue;const sliceStart=range.base.compare(floor)<0?floor:range.base;const sliceEnd=rangeEnd.compare(end)>0?end:rangeEnd;if(sliceStart.compare(sliceEnd)<0){out.push({base:sliceStart,size:pointerDistance(sliceStart,sliceEnd)});floor=sliceEnd;if(floor.compare(end)>=0)break;}}return out;}\n" +
-            "function scanBlock(base,size,pattern,state){return new Promise(resolve=>{let settled=false;try{Memory.scan(base,size,pattern,{onMatch(address,matchSize){const key=address.toString()+':'+matchSize;if(state.seen.has(key))state.duplicateMatches++;else{state.seen.add(key);state.matches.push({address:address.toString(),size:matchSize});}if(state.matches.length>=state.max){state.capped=true;return 'stop';}},onError(reason){if(!settled){settled=true;resolve({ok:false,error:String(reason)});}},onComplete(){if(!settled){settled=true;resolve({ok:true});}}});}catch(error){if(!settled){settled=true;resolve({ok:false,error:String(error)});}}});}\n" +
-            "async function safeScan(options,outerDeadline){const p=options||{};const target=resolveScanTarget(p);const pattern=String(p.pattern||'').trim();if(!pattern)throw new Error('scan pattern is empty');const patternSize=validateScanPattern(pattern);if(patternSize>8388608)throw new Error('scan pattern is too large');const max=boundedInteger(p.max,DEFAULT_SCAN_MATCHES,1,MAX_SCAN_MATCHES);const requestedChunk=boundedInteger(p.chunk_size,4194304,65536,8388608);const chunkSize=Math.min(8388608,Math.max(requestedChunk,patternSize*2));const timeoutMs=boundedInteger(p.timeout_ms,30000,1000,120000);const localDeadline=Date.now()+timeoutMs;const deadline=Number.isFinite(outerDeadline)?Math.min(localDeadline,outerDeadline):localDeadline;const state={seen:new Set(),matches:[],max,capped:false,duplicateMatches:0};const errors=[];let errorCount=0,attempted=0,scanned=0,skipped=0,failedSize=0;let cursor=target.base,timedOut=false,mappingChanged=false;while(cursor.compare(target.end)<0&&!state.capped){if(Date.now()>=deadline){timedOut=true;break;}if(!moduleUnchanged(target)){mappingChanged=true;break;}const slices=readableSlices(cursor,target.end);if(slices.length===0){skipped+=pointerDistance(cursor,target.end);cursor=target.end;break;}let refresh=false;for(const slice of slices){if(cursor.compare(slice.base)<0){skipped+=pointerDistance(cursor,slice.base);cursor=slice.base;}const sliceEnd=slice.base.add(slice.size);let firstBlock=true;while(cursor.compare(sliceEnd)<0){if(Date.now()>=deadline){timedOut=true;break;}if(!moduleUnchanged(target)){mappingChanged=true;break;}const overlap=firstBlock?0:patternSize-1;const blockBase=overlap>0?cursor.sub(overlap):cursor;const part=Math.min(chunkSize,pointerDistance(blockBase,sliceEnd));const nextCursor=blockBase.add(part);const advance=pointerDistance(cursor,nextCursor);if(advance<=0)throw new Error('scan chunk made no progress');attempted+=part;const result=await scanBlock(blockBase,part,pattern,state);cursor=nextCursor;firstBlock=false;if(result.ok){if(!state.capped)scanned+=advance;}else{failedSize+=advance;errorCount++;if(errors.length<128)errors.push({address:blockBase.toString(),size:part,error:result.error});refresh=true;}if(state.capped||timedOut||mappingChanged||refresh)break;await new Promise(resolve=>setImmediate(resolve));}if(state.capped||timedOut||mappingChanged||refresh)break;}if(state.capped||timedOut||mappingChanged)break;if(refresh){await new Promise(resolve=>setImmediate(resolve));continue;}if(cursor.compare(target.end)<0){skipped+=pointerDistance(cursor,target.end);cursor=target.end;}}const stopReason=state.capped?'max_matches':timedOut?'timeout':mappingChanged?'mapping_changed':errorCount>0?'scan_errors':'complete';return {base:target.base.toString(),size:target.size,module:target.module||null,pattern_size:patternSize,chunk_size:chunkSize,chunk_overlap:patternSize-1,timeout_ms:timeoutMs,max_matches:max,attempted,scanned,skipped,failed_size:failedSize,match_count:state.matches.length,duplicate_matches:state.duplicateMatches,error_count:errorCount,errors_truncated:errorCount>errors.length,errors,complete:stopReason==='complete'&&cursor.compare(target.end)>=0,stop_reason:stopReason,matches:state.matches};}\n" +
-            "Zhi.scan=(options)=>safeScan(options||{});\n" +
-            "async function run(c){ const p=c.payload||{}; switch(c.op){\n" +
-            "case 'ping': return {pid:Process.id,arch:Process.arch,platform:Process.platform,page_size:Process.pageSize};\n" +
-            "case 'modules': return Process.enumerateModules().map(m=>({name:m.name,base:m.base.toString(),size:m.size,path:m.path}));\n" +
-            "case 'ranges': return Process.enumerateRanges({protection:p.protection||'r--',coalesce:p.coalesce!==false}).slice(0,p.max||4000).map(r=>({base:r.base.toString(),size:r.size,protection:r.protection,file:r.file?{path:r.file.path,offset:r.file.offset,size:r.file.size}:null}));\n" +
-            "case 'read': { const n=Math.max(1,Math.min(1048576,Number(p.size||64))); const a=ptr(p.address); const data=p.volatile===false?a.readByteArray(n):a.readVolatile(n); return {address:a.toString(),size:n,protection:Memory.queryProtection(a),volatile:p.volatile!==false,hex:hex(data)}; }\n" +
-            "case 'write': { const a=ptr(p.address); const b=bytes(p.data); if(p.volatile===false)a.writeByteArray(b.buffer);else a.writeVolatile(b.buffer); return {address:a.toString(),written:b.byteLength,volatile:p.volatile!==false,protection:Memory.queryProtection(a)}; }\n" +
-            "case 'protect': { const a=ptr(p.address); const n=Math.max(1,Number(p.size||Process.pageSize)); return {address:a.toString(),size:n,protection:p.protection,success:Memory.protect(a,n,String(p.protection||'rw-'))}; }\n" +
-            "case 'patch': { const a=ptr(p.address); const b=bytes(p.data); Memory.patchCode(a,b.byteLength,code=>code.writeByteArray(b.buffer)); return {address:a.toString(),patched:b.byteLength}; }\n" +
-            "case 'scan': return safeScan(p);\n" +
-            "case 'watch_start': { const id=String(p.watch_id||('watch-'+Date.now())); if(watches.has(id))throw new Error('watch already exists: '+id); const a=ptr(p.address),n=Math.max(1,Math.min(65536,Number(p.size||4))),ms=Math.max(20,Math.min(60000,Number(p.interval_ms||100))); let last=null; const timer=setInterval(()=>{try{const cur=hex(a.readVolatile(n));if(cur!==last){emit({type:'memory_watch',watch_id:id,address:a.toString(),size:n,previous:last,data:cur});last=cur;}}catch(e){emit({type:'memory_watch_error',watch_id:id,error:String(e)});}},ms); watches.set(id,timer); return {watch_id:id,address:a.toString(),size:n,interval_ms:ms}; }\n" +
-            "case 'watch_stop': { const id=String(p.watch_id||''); const timer=watches.get(id); if(timer!==undefined){clearInterval(timer);watches.delete(id);} return {watch_id:id,stopped:timer!==undefined}; }\n" +
-            "case 'watch_stop_all': { for(const timer of watches.values())try{clearInterval(timer);}catch(_){} const count=watches.size; watches.clear(); return {stopped:count}; }\n" +
-            "case 'export': { const m=p.module?Process.getModuleByName(String(p.module)):null; const a=m?m.findExportByName(String(p.name)):Module.findGlobalExportByName(String(p.name)); return {address:a?a.toString():null}; }\n" +
-            "case 'hook_detach_all': { for(const h of hooks.values()){try{h.detach();}catch(_){}} hooks.clear(); Interceptor.detachAll(); return {detached:true}; }\n" +
-            "case 'eval': { const source=rewriteLegacyScan(String(p.script||'')); const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor; const fn=new AsyncFunction('Zhi','Process','Module','Memory','MemoryAccessMonitor','Interceptor','Stalker','Thread','DebugSymbol','Backtracer','NativeFunction','NativeCallback','CModule','ptr','__legacyScan','\"use strict\";\\n'+source); const ms=Math.max(1000,Math.min(120000,Number(p.timeout_ms||30000))); const deadline=Date.now()+ms; const evalZhi=Object.assign({},Zhi,{scan:(options)=>safeScan(options||{},deadline)}); const evalMemory=new Proxy(Memory,{get(target,property){if(property==='scanSync')return (a,n,pattern)=>legacyScan(a,n,pattern,deadline);return target[property];},set(target,property,value){target[property]=value;return true;}}); let timer; try{const value=await Promise.race([Promise.resolve(fn(evalZhi,Process,Module,evalMemory,MemoryAccessMonitor,Interceptor,Stalker,Thread,DebugSymbol,Backtracer,NativeFunction,NativeCallback,CModule,ptr,(a,n,pattern)=>legacyScan(a,n,pattern,deadline))),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('frida_eval deadline exceeded: '+ms+'ms')),ms);})]); return {value:jsonSafe(value)};} finally{if(timer!==undefined)clearTimeout(timer);} }\n" +
-            "default: throw new Error('unknown Frida op: '+c.op); }}\n" +
-            "function finish(c,out){ try{File.writeAllText(I+'/response-'+c.id+'.json',JSON.stringify(out));}catch(e){emit({type:'response_write_error',id:c.id,error:String(e)});} active.delete(c.id); }\nfunction start(c){ if(active.has(c.id))return; active.set(c.id,true); const out={id:c.id,ok:true}; Promise.resolve().then(()=>run(c)).then(v=>{out.result=jsonSafe(v);},e=>{out.ok=false;out.error=String(e&&e.stack?e.stack:e);}).then(()=>finish(c,out),e=>{out.ok=false;out.error=String(e);finish(c,out);}); }\nfunction tick(){ let c; try{c=JSON.parse(File.readAllText(CMD));}catch(_){return;} if(!c||!c.id||c.id===lastId)return; lastId=c.id; start(c); }\n" +
-            "File.writeAllText(READY,'1');\n" +
-            "setInterval(tick,30);}};\n";
+        return """
+                rpc.exports = {
+                  init() {
+                    const DIR = "__BASE__";
+                    const MAILBOX = DIR + "/command.json";
+                    const READY = DIR + "/ready.json";
+                    const EVENTS = DIR + "/events.log";
+
+                    const HIT_LIMIT = 2048;
+                    const HIT_DEFAULT = 256;
+                    const TEXT_LIMIT = 262144;
+                    const ARRAY_LIMIT = 2048;
+                    const KEY_LIMIT = 256;
+                    const DEPTH_LIMIT = 8;
+                    const ERR_LIMIT = 128;
+                    const PATTERN_MAX = 8388608;
+                    const CHUNK_MIN = 65536;
+                    const CHUNK_MAX = 8388608;
+                    const CHUNK_DEFAULT = 4194304;
+                    const SCAN_TIMEOUT_MIN = 1000;
+                    const SCAN_TIMEOUT_MAX = 120000;
+                    const SCAN_TIMEOUT_DEFAULT = 30000;
+                    const EVAL_TIMEOUT_MIN = 1000;
+                    const EVAL_TIMEOUT_MAX = 120000;
+                    const EVAL_TIMEOUT_DEFAULT = 30000;
+                    const WATCH_MIN = 1;
+                    const WATCH_MAX = 65536;
+                    const WATCH_INTERVAL_MIN = 20;
+                    const WATCH_INTERVAL_MAX = 60000;
+                    const READ_MIN = 1;
+                    const READ_MAX = 1048576;
+                    const RANGE_LIMIT_DEFAULT = 4000;
+
+                    const hooks = new Map();
+                    const watches = new Map();
+                    const inflight = new Map();
+                    let lastId = '';
+
+                    function clamp(value, fallback, low, high) {
+                      if (value === undefined || value === null || value === '' || typeof value === 'boolean') return fallback;
+                      const n = Number(value);
+                      return Number.isFinite(n) ? Math.max(low, Math.min(high, Math.floor(n))) : fallback;
+                    }
+
+                    function gap(from, to) {
+                      const n = parseInt(to.sub(from).toString(), 16);
+                      if (!Number.isSafeInteger(n) || n < 0) throw new Error('scan range is too large');
+                      return n;
+                    }
+
+                    function toHex(buffer) {
+                      if (buffer === null) return '';
+                      const view = new Uint8Array(buffer);
+                      let out = '';
+                      for (let i = 0; i < view.length; i++) out += view[i].toString(16).padStart(2, '0');
+                      return out;
+                    }
+
+                    function toBytes(text) {
+                      const cleaned = String(text || '').replace(/0x/g, '').replace(/[^0-9a-f]/gi, '');
+                      if (cleaned.length % 2) throw new Error('hex length must be even');
+                      const out = new Uint8Array(cleaned.length / 2);
+                      for (let i = 0; i < out.length; i++) out[i] = parseInt(cleaned.substr(i * 2, 2), 16);
+                      return out;
+                    }
+
+                    function jsonSafe(value, depth, seen) {
+                      depth = depth || 0;
+                      seen = seen || new Set();
+                      if (value === undefined || value === null) return null;
+                      if (typeof value === 'bigint') return value.toString();
+                      if (typeof value === 'string') return value.length > TEXT_LIMIT ? value.slice(0, TEXT_LIMIT) + '…[truncated]' : value;
+                      if (typeof value !== 'object') return value;
+                      if (value && value.constructor && value.constructor.name === 'NativePointer') return value.toString();
+                      if (depth >= DEPTH_LIMIT) return '[depth-limit]';
+                      if (seen.has(value)) return '[circular]';
+                      seen.add(value);
+                      try {
+                        if (Array.isArray(value)) {
+                          const kept = Math.min(value.length, ARRAY_LIMIT);
+                          const out = [];
+                          for (let i = 0; i < kept; i++) out.push(jsonSafe(value[i], depth + 1, seen));
+                          if (value.length > kept) out.push('[+' + (value.length - kept) + ' more]');
+                          return out;
+                        }
+                        const out = {};
+                        let keys = 0;
+                        for (const key in value) {
+                          if (keys++ >= KEY_LIMIT) { out.__truncated__ = true; break; }
+                          try { out[key] = jsonSafe(value[key], depth + 1, seen); }
+                          catch (_) { out[key] = '[unserializable]'; }
+                        }
+                        return out;
+                      } finally {
+                        seen.delete(value);
+                      }
+                    }
+
+                    function appendEvent(value) {
+                      try {
+                        const log = new File(EVENTS, 'a');
+                        log.write(JSON.stringify({ts: Date.now(), value: jsonSafe(value)}) + '\\n');
+                        log.flush();
+                        log.close();
+                      } catch (_) {
+                      }
+                    }
+
+                    const Zhi = {emit: appendEvent, hooks, watches, ptr: (v) => ptr(v), module: (n) => Process.getModuleByName(n)};
+
+                    function slicesOf(start, end) {
+                      const ranges = Process.enumerateRanges({protection: 'r--', coalesce: false}).slice().sort((a, b) => a.base.compare(b.base));
+                      const out = [];
+                      let floor = start;
+                      for (const range of ranges) {
+                        const rangeEnd = range.base.add(range.size);
+                        if (rangeEnd.compare(floor) <= 0 || range.base.compare(end) >= 0) continue;
+                        const from = range.base.compare(floor) < 0 ? floor : range.base;
+                        const to = rangeEnd.compare(end) > 0 ? end : rangeEnd;
+                        if (from.compare(to) < 0) {
+                          out.push({base: from, size: gap(from, to)});
+                          floor = to;
+                          if (floor.compare(end) >= 0) break;
+                        }
+                      }
+                      return out;
+                    }
+
+                    function scanBlock(base, size, pattern, found) {
+                      return new Promise((resolve) => {
+                        let settled = false;
+                        try {
+                          Memory.scan(base, size, pattern, {
+                            onMatch(address, matchSize) {
+                              const key = address.toString() + ':' + matchSize;
+                              if (found.seen.has(key)) {
+                                found.repeats++;
+                              } else {
+                                found.seen.add(key);
+                                found.hits.push({address: address.toString(), size: matchSize});
+                              }
+                              if (found.hits.length >= found.limit) {
+                                found.capped = true;
+                                return 'stop';
+                              }
+                            },
+                            onError(reason) {
+                              if (!settled) { settled = true; resolve({ok: false, error: String(reason)}); }
+                            },
+                            onComplete() {
+                              if (!settled) { settled = true; resolve({ok: true}); }
+                            }
+                          });
+                        } catch (error) {
+                          if (!settled) { settled = true; resolve({ok: false, error: String(error)}); }
+                        }
+                      });
+                    }
+
+                    function cellCount(pattern) {
+                      const halves = pattern.split(':');
+                      if (halves.length > 2) throw new Error('invalid scan pattern');
+                      const cells = halves[0].trim().split(/\\s+/);
+                      if (cells.length === 0 || cells.some((v) => !/[0-9a-f?]{2}/i.test(v) || v.length !== 2)) throw new Error('invalid scan pattern');
+                      if (halves.length === 2) {
+                        const masks = halves[1].trim().split(/\\s+/);
+                        if (masks.length !== cells.length || masks.some((v) => !/[0-9a-f]{2}/i.test(v) || v.length !== 2)) throw new Error('invalid scan pattern mask');
+                      }
+                      return cells.length;
+                    }
+
+                    function scanTarget(params) {
+                      const moduleName = String(params.module || '').trim();
+                      const hasAddress = params.address !== undefined && params.address !== null && String(params.address).trim() !== '';
+                      const hasSize = params.size !== undefined && params.size !== null && String(params.size).trim() !== '';
+                      if (moduleName && (hasAddress || hasSize)) throw new Error('scan accepts either module or address/size, not both');
+                      let base, size;
+                      if (moduleName) {
+                        const found = Process.getModuleByName(moduleName);
+                        base = found.base;
+                        size = Number(found.size);
+                      } else {
+                        if (!hasAddress || !hasSize) throw new Error('scan requires module or address with size');
+                        base = ptr(params.address);
+                        size = Number(params.size);
+                      }
+                      if (!Number.isSafeInteger(size) || size <= 0) throw new Error('scan size must be a positive safe integer');
+                      const end = base.add(size);
+                      if (end.compare(base) <= 0) throw new Error('scan range overflow');
+                      return {base, end, size, module: moduleName};
+                    }
+
+                    function stillMapped(target) {
+                      if (!target.module) return true;
+                      try {
+                        const found = Process.getModuleByName(target.module);
+                        return found.base.compare(target.base) === 0 && Number(found.size) === target.size;
+                      } catch (_) {
+                        return false;
+                      }
+                    }
+
+                    async function boundedScan(options, outerDeadline) {
+                      const params = options || {};
+                      const target = scanTarget(params);
+                      const pattern = String(params.pattern || '').trim();
+                      if (!pattern) throw new Error('scan pattern is empty');
+                      const cells = cellCount(pattern);
+                      if (cells > PATTERN_MAX) throw new Error('scan pattern is too large');
+                      const limit = clamp(params.max, HIT_DEFAULT, 1, HIT_LIMIT);
+                      const wanted = clamp(params.chunk_size, CHUNK_DEFAULT, CHUNK_MIN, CHUNK_MAX);
+                      const chunk = Math.min(CHUNK_MAX, Math.max(wanted, cells * 2));
+                      const budget = clamp(params.timeout_ms, SCAN_TIMEOUT_DEFAULT, SCAN_TIMEOUT_MIN, SCAN_TIMEOUT_MAX);
+                      const ownDeadline = Date.now() + budget;
+                      const deadline = Number.isFinite(outerDeadline) ? Math.min(ownDeadline, outerDeadline) : ownDeadline;
+                      const found = {seen: new Set(), hits: [], limit, capped: false, repeats: 0};
+                      const errors = [];
+                      let fails = 0;
+                      let attempted = 0;
+                      let scanned = 0;
+                      let skipped = 0;
+                      let failed = 0;
+                      let cursor = target.base;
+                      let expired = false;
+                      let remapped = false;
+                      while (cursor.compare(target.end) < 0 && !found.capped) {
+                        if (Date.now() >= deadline) { expired = true; break; }
+                        if (!stillMapped(target)) { remapped = true; break; }
+                        const slices = slicesOf(cursor, target.end);
+                        if (slices.length === 0) {
+                          skipped += gap(cursor, target.end);
+                          cursor = target.end;
+                          break;
+                        }
+                        let retry = false;
+                        for (const slice of slices) {
+                          if (cursor.compare(slice.base) < 0) {
+                            skipped += gap(cursor, slice.base);
+                            cursor = slice.base;
+                          }
+                          const sliceEnd = slice.base.add(slice.size);
+                          let first = true;
+                          while (cursor.compare(sliceEnd) < 0) {
+                            if (Date.now() >= deadline) { expired = true; break; }
+                            if (!stillMapped(target)) { remapped = true; break; }
+                            const overlap = first ? 0 : cells - 1;
+                            const blockBase = overlap > 0 ? cursor.sub(overlap) : cursor;
+                            const part = Math.min(chunk, gap(blockBase, sliceEnd));
+                            const next = blockBase.add(part);
+                            const advance = gap(cursor, next);
+                            if (advance <= 0) throw new Error('scan chunk made no progress');
+                            attempted += part;
+                            const result = await scanBlock(blockBase, part, pattern, found);
+                            cursor = next;
+                            first = false;
+                            if (result.ok) {
+                              if (!found.capped) scanned += advance;
+                            } else {
+                              failed += advance;
+                              fails++;
+                              if (errors.length < ERR_LIMIT) errors.push({address: blockBase.toString(), size: part, error: result.error});
+                              retry = true;
+                            }
+                            if (found.capped || expired || remapped || retry) break;
+                            await new Promise((resolve) => setImmediate(resolve));
+                          }
+                          if (found.capped || expired || remapped || retry) break;
+                        }
+                        if (found.capped || expired || remapped) break;
+                        if (retry) {
+                          await new Promise((resolve) => setImmediate(resolve));
+                          continue;
+                        }
+                        if (cursor.compare(target.end) < 0) {
+                          skipped += gap(cursor, target.end);
+                          cursor = target.end;
+                        }
+                      }
+                      const reason = found.capped ? 'max_matches' : expired ? 'timeout' : remapped ? 'mapping_changed' : fails > 0 ? 'scan_errors' : 'complete';
+                      return {
+                        base: target.base.toString(),
+                        size: target.size,
+                        module: target.module || null,
+                        pattern_size: cells,
+                        chunk_size: chunk,
+                        chunk_overlap: cells - 1,
+                        timeout_ms: budget,
+                        max_matches: limit,
+                        attempted,
+                        scanned,
+                        skipped,
+                        failed_size: failed,
+                        match_count: found.hits.length,
+                        duplicate_matches: found.repeats,
+                        error_count: fails,
+                        errors_truncated: fails > errors.length,
+                        errors,
+                        complete: reason === 'complete' && cursor.compare(target.end) >= 0,
+                        stop_reason: reason,
+                        matches: found.hits
+                      };
+                    }
+
+                    function legacyScan(address, size, pattern, deadline) {
+                      return boundedScan({address, size, pattern}, deadline).then((report) => {
+                        if (!report.complete) throw new Error('Memory.scanSync compatibility scan stopped: ' + report.stop_reason);
+                        return report.matches;
+                      });
+                    }
+
+                    function translateScanSync(source) {
+                      const token = 'Memory.scanSync';
+                      let out = '';
+                      let cursor = 0;
+                      for (;;) {
+                        const at = source.indexOf(token, cursor);
+                        if (at < 0) {
+                          out += source.slice(cursor);
+                          break;
+                        }
+                        const open = source.indexOf('(', at + token.length);
+                        if (open < 0) {
+                          out += source.slice(cursor);
+                          break;
+                        }
+                        let depth = 0;
+                        let quote = '';
+                        let escaped = false;
+                        let close = -1;
+                        const args = [];
+                        let last = open + 1;
+                        for (let i = open + 1; i < source.length; i++) {
+                          const ch = source[i];
+                          if (quote) {
+                            if (escaped) escaped = false;
+                            else if (ch === String.fromCharCode(92)) escaped = true;
+                            else if (ch === quote) quote = '';
+                            continue;
+                          }
+                          if (ch === String.fromCharCode(34) || ch === String.fromCharCode(39) || ch === String.fromCharCode(96)) {
+                            quote = ch;
+                            continue;
+                          }
+                          if (ch === '(' || ch === '[' || ch === '{') {
+                            depth++;
+                            continue;
+                          }
+                          if (ch === ')') {
+                            if (depth === 0) {
+                              args.push(source.slice(last, i));
+                              close = i;
+                              break;
+                            }
+                            depth--;
+                            continue;
+                          }
+                          if (ch === ',' && depth === 0) {
+                            args.push(source.slice(last, i));
+                            last = i + 1;
+                          }
+                        }
+                        if (close < 0 || args.length !== 3) {
+                          out += source.slice(cursor, at + token.length);
+                          cursor = at + token.length;
+                          continue;
+                        }
+                        out += source.slice(cursor, at) + '(await __legacyScan(' + args[0] + ',' + args[1] + ',' + args[2] + '))';
+                        cursor = close + 1;
+                      }
+                      return out;
+                    }
+
+                    const OPS = {};
+
+                    OPS['ping'] = () => ({pid: Process.id, arch: Process.arch, platform: Process.platform, page_size: Process.pageSize});
+
+                    OPS['modules'] = () => Process.enumerateModules().map((m) => ({name: m.name, base: m.base.toString(), size: m.size, path: m.path}));
+
+                    OPS['ranges'] = (params) => Process.enumerateRanges({
+                      protection: params.protection || 'r--',
+                      coalesce: params.coalesce !== false
+                    }).slice(0, params.max || RANGE_LIMIT_DEFAULT).map((r) => ({
+                      base: r.base.toString(),
+                      size: r.size,
+                      protection: r.protection,
+                      file: r.file ? {path: r.file.path, offset: r.file.offset, size: r.file.size} : null
+                    }));
+
+                    OPS['read'] = (params) => {
+                      const size = Math.max(READ_MIN, Math.min(READ_MAX, Number(params.size || 64)));
+                      const address = ptr(params.address);
+                      const data = params.volatile === false ? address.readByteArray(size) : address.readVolatile(size);
+                      return {
+                        address: address.toString(),
+                        size,
+                        protection: Memory.queryProtection(address),
+                        volatile: params.volatile !== false,
+                        hex: toHex(data)
+                      };
+                    };
+
+                    OPS['write'] = (params) => {
+                      const address = ptr(params.address);
+                      const data = toBytes(params.data);
+                      if (params.volatile === false) address.writeByteArray(data.buffer);
+                      else address.writeVolatile(data.buffer);
+                      return {
+                        address: address.toString(),
+                        written: data.byteLength,
+                        volatile: params.volatile !== false,
+                        protection: Memory.queryProtection(address)
+                      };
+                    };
+
+                    OPS['protect'] = (params) => {
+                      const address = ptr(params.address);
+                      const size = Math.max(1, Number(params.size || Process.pageSize));
+                      return {
+                        address: address.toString(),
+                        size,
+                        protection: params.protection,
+                        success: Memory.protect(address, size, String(params.protection || 'rw-'))
+                      };
+                    };
+
+                    OPS['patch'] = (params) => {
+                      const address = ptr(params.address);
+                      const data = toBytes(params.data);
+                      Memory.patchCode(address, data.byteLength, (writer) => writer.writeByteArray(data.buffer));
+                      return {address: address.toString(), patched: data.byteLength};
+                    };
+
+                    OPS['scan'] = (params) => boundedScan(params);
+
+                    OPS['watch_start'] = (params) => {
+                      const id = String(params.watch_id || ('watch-' + Date.now()));
+                      if (watches.has(id)) throw new Error('watch already exists: ' + id);
+                      const address = ptr(params.address);
+                      const size = Math.max(WATCH_MIN, Math.min(WATCH_MAX, Number(params.size || 4)));
+                      const every = Math.max(WATCH_INTERVAL_MIN, Math.min(WATCH_INTERVAL_MAX, Number(params.interval_ms || 100)));
+                      let previous = null;
+                      const timer = setInterval(() => {
+                        try {
+                          const now = toHex(address.readVolatile(size));
+                          if (now !== previous) {
+                            appendEvent({type: 'memory_watch', watch_id: id, address: address.toString(), size, previous, data: now});
+                            previous = now;
+                          }
+                        } catch (error) {
+                          appendEvent({type: 'memory_watch_error', watch_id: id, error: String(error)});
+                        }
+                      }, every);
+                      watches.set(id, timer);
+                      return {watch_id: id, address: address.toString(), size, interval_ms: every};
+                    };
+
+                    OPS['watch_stop'] = (params) => {
+                      const id = String(params.watch_id || '');
+                      const timer = watches.get(id);
+                      if (timer !== undefined) {
+                        clearInterval(timer);
+                        watches.delete(id);
+                      }
+                      return {watch_id: id, stopped: timer !== undefined};
+                    };
+
+                    OPS['watch_stop_all'] = () => {
+                      for (const timer of watches.values()) {
+                        try { clearInterval(timer); } catch (_) {}
+                      }
+                      const count = watches.size;
+                      watches.clear();
+                      return {stopped: count};
+                    };
+
+                    OPS['export'] = (params) => {
+                      const owner = params.module ? Process.getModuleByName(String(params.module)) : null;
+                      const address = owner ? owner.findExportByName(String(params.name)) : Module.findGlobalExportByName(String(params.name));
+                      return {address: address ? address.toString() : null};
+                    };
+
+                    OPS['hook_detach_all'] = () => {
+                      for (const handle of hooks.values()) {
+                        try { handle.detach(); } catch (_) {}
+                      }
+                      hooks.clear();
+                      Interceptor.detachAll();
+                      return {detached: true};
+                    };
+
+                    OPS['eval'] = async (params) => {
+                      const ms = Math.max(EVAL_TIMEOUT_MIN, Math.min(EVAL_TIMEOUT_MAX, Number(params.timeout_ms || EVAL_TIMEOUT_DEFAULT)));
+                      const deadline = Date.now() + ms;
+                      const source = translateScanSync(String(params.script || ''));
+                      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+                      const invokeUser = new AsyncFunction(
+                        'Zhi', 'Process', 'Module', 'Memory', 'MemoryAccessMonitor', 'Interceptor', 'Stalker', 'Thread',
+                        'DebugSymbol', 'Backtracer', 'NativeFunction', 'NativeCallback', 'CModule', 'ptr', '__legacyScan',
+                        '"use strict";\\n' + source
+                      );
+                      const scanSyncShim = (address, size, pattern) => legacyScan(address, size, pattern, deadline);
+                      const userZhi = Object.assign({}, Zhi, {scan: (options) => boundedScan(options || {}, deadline)});
+                      const userMemory = new Proxy(Memory, {
+                        get(store, key) {
+                          if (key === 'scanSync') return scanSyncShim;
+                          return store[key];
+                        },
+                        set(store, key, value) {
+                          store[key] = value;
+                          return true;
+                        }
+                      });
+                      let timer;
+                      try {
+                        const value = await Promise.race([
+                          Promise.resolve(invokeUser(userZhi, Process, Module, userMemory, MemoryAccessMonitor, Interceptor, Stalker,
+                            Thread, DebugSymbol, Backtracer, NativeFunction, NativeCallback, CModule, ptr, scanSyncShim)),
+                          new Promise((_, reject) => {
+                            timer = setTimeout(() => reject(new Error('frida_eval deadline exceeded: ' + ms + 'ms')), ms);
+                          })
+                        ]);
+                        return {value};
+                      } finally {
+                        if (timer !== undefined) clearTimeout(timer);
+                      }
+                    };
+
+                    function writeReply(id, reply) {
+                      try {
+                        File.writeAllText(DIR + '/response-' + id + '.json', JSON.stringify(reply));
+                      } catch (error) {
+                        appendEvent({type: 'response_write_error', id, error: String(error)});
+                      }
+                      inflight.delete(id);
+                    }
+
+                    function invoke(entry) {
+                      if (inflight.has(entry.id)) return;
+                      inflight.set(entry.id, true);
+                      const reply = {id: entry.id, ok: true};
+                      Promise.resolve().then(() => {
+                        const handler = OPS[entry.op];
+                        if (typeof handler !== 'function') throw new Error('unknown Frida op: ' + entry.op);
+                        return handler(entry.payload || {});
+                      }).then(
+                        (value) => { reply.result = jsonSafe(value); },
+                        (error) => { reply.ok = false; reply.error = String(error && error.stack ? error.stack : error); }
+                      ).then(
+                        () => writeReply(entry.id, reply),
+                        (error) => { reply.ok = false; reply.error = String(error); writeReply(entry.id, reply); }
+                      );
+                    }
+
+                    function pollMailbox() {
+                      let entry;
+                      try {
+                        entry = JSON.parse(File.readAllText(MAILBOX));
+                      } catch (_) {
+                        return;
+                      }
+                      if (!entry || !entry.id || entry.id === lastId) return;
+                      lastId = entry.id;
+                      invoke(entry);
+                    }
+
+                    File.writeAllText(READY, '1');
+                    setInterval(pollMailbox, 30);
+                  }
+                };
+                """.replace("__BASE__", base);
     }
 }

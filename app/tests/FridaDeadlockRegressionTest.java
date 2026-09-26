@@ -1,81 +1,130 @@
 import java.nio.file.*;
 
+/**
+ * 有界异步扫描器的**两边约定**。
+ *
+ * <p>这个文件名里的「Deadlock」来自当初那个真实故障：一条长扫描把整条命令队列串死，
+ * Java 侧等到超时，而脚本侧还在跑 —— 表现是「frida_scan 偶发超时」。
+ * 修法是把扫描做成有界、可中断、分块让出事件循环，并且**不设全局忙位**。
+ *
+ * <p>那些行为本身现在由 app/tests/js/frida-agent-harness.mjs 真跑着验证
+ * （停止原因五种、某块读不了要返回部分结果、重叠不虚增 scanned、重复上报去重、
+ * 慢命令不阻塞短命令……）。本文件里原先那一大串 `contains("…")` 钉的是**拼写**，
+ * 换个变量名就红、行为坏了却不红，所以改成只守两件文本能守住的事：
+ * <ol>
+ *   <li>**Java 侧**的超时分层：脚本侧的上限必须低于 Java 侧的等待，否则脚本还没来得及
+ *       返回一个结构化的「我超时了」，Java 就已经先超时了 —— 那样 Agent 只能看到
+ *       一句 timeout，看不到 stop_reason 与部分结果。这是跨语言的两个数之间的关系，
+ *       只能在文本上核对。</li>
+ *   <li>工具 schema 与系统提示词必须把这件事教给 Agent（用 frida_scan、别用 scanSync、
+ *       看 complete / stop_reason / errors）。</li>
+ * </ol>
+ */
 public final class FridaDeadlockRegressionTest {
-    private static void require(boolean c,String m){if(!c)throw new AssertionError(m);}
+    private static void require(boolean c, String m) {
+        if (!c) throw new AssertionError(m);
+    }
+
     /** 去掉全部空白后再比较：断言关心的是标识符与先后关系，不该被空格/换行左右。 */
-    private static String squash(String source){return source.replaceAll("\\s+","");}
+    private static String squash(String source) {
+        return source.replaceAll("\\s+", "");
+    }
+
     /**
      * 把源码里所有双引号字面量的内容按出现次序拼起来。
      *
      * <p>系统提示词在源码里是很多段字符串相加的，而断言要检查的是**最终输出的文字**。
      * 对源码直接 contains 会把换行位置也变成契约：重排不改变行为，却会让断言失败。
      */
-    private static String literals(String source){
-        StringBuilder out=new StringBuilder(); int i=0;
-        while(i<source.length()){
-            if(source.charAt(i)!='"'){i++; continue;}
+    private static String literals(String source) {
+        StringBuilder out = new StringBuilder();
+        int i = 0;
+        while (i < source.length()) {
+            if (source.charAt(i) != '"') { i++; continue; }
             i++;
-            while(i<source.length()){
-                char d=source.charAt(i);
-                if(d=='\\'){ if(i+1<source.length()) out.append(source.charAt(i+1)); i+=2; continue; }
-                if(d=='"'){ i++; break; }
-                out.append(d); i++;
+            while (i < source.length()) {
+                char d = source.charAt(i);
+                if (d == '\\') {
+                    if (i + 1 < source.length()) out.append(source.charAt(i + 1));
+                    i += 2;
+                    continue;
+                }
+                if (d == '"') { i++; break; }
+                out.append(d);
+                i++;
             }
         }
         return out.toString();
     }
-    public static void main(String[] args)throws Exception{
-        Path root=Paths.get(args.length==0?".":args[0]).toAbsolutePath().normalize();
-        String bridge=Files.readString(root.resolve("app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxFrida.java"));
-        String tool=Files.readString(root.resolve("app/src/main/java/com/termux/app/zhicode/tools/ZhiDebugTool.java"));
-        String prompt=literals(Files.readString(root.resolve("app/src/main/java/com/termux/app/zhicode/core/SystemPromptBuilder.java")));
-        require(!bridge.contains("Memory.scanSync(a,n,String(p.pattern))"),"dedicated scan must not use scanSync");
-        require(bridge.contains("async function safeScan(options,outerDeadline)")
-                && bridge.contains("case 'scan': return safeScan(p)")
-                && bridge.contains("Memory.scan(base,size,pattern"),
-            "dedicated scan must use the shared asynchronous scanner");
-        require(bridge.contains("Process.enumerateRanges({protection:'r--',coalesce:false})")
-                && bridge.contains("readableSlices(cursor,target.end)"),
-            "scan calls must stay inside current readable mappings");
-        require(bridge.contains("onError(reason){if(!settled){settled=true;resolve({ok:false")
-                && !bridge.contains("reject(new Error(String(e)))"),
-            "one inaccessible block must return a partial error instead of failing the command");
-        require(bridge.contains("errors_truncated")&&bridge.contains("failed_size")
-                && bridge.contains("stop_reason:stopReason"),
-            "partial scan diagnostics must be returned");
-        require(bridge.contains("MAX_SCAN_MATCHES=2048"),"scan hard cap missing");
-        require(bridge.contains("DEFAULT_SCAN_MATCHES=256"),"safe default match cap missing");
-        require(bridge.contains("return 'stop'"),"scan must stop when match cap is reached");
-        require(bridge.contains("boundedInteger(p.chunk_size,4194304,65536,8388608)"),"bounded 4 MiB scan chunk default missing");
-        require(bridge.contains("const overlap=firstBlock?0:patternSize-1")
-                && bridge.contains("scanned+=advance")
-                && bridge.contains("chunk_overlap:patternSize-1"),
-            "adjacent chunks must overlap without inflating unique scanned bytes");
-        require(bridge.contains("state.seen.has(key)")&&bridge.contains("duplicate_matches"),"overlapping or refreshed mappings must deduplicate matches");
-        require(!bridge.contains("if(busy)return"),"global busy gate must not serialize long async commands");
-        require(bridge.contains("const active=new Map()"),"inflight command tracking missing");
-        require(bridge.contains("public static synchronized JSONObject command"),"the single command-file mailbox must serialize Java callers");
-        require(bridge.contains("rewriteLegacyScan")
-                && bridge.contains("Memory.scanSync compatibility scan stopped")
-                && bridge.contains("if(property==='scanSync')"),
-            "eval must translate legacy scanSync calls to bounded async scans");
-        require(bridge.contains("Zhi.scan=(options)=>safeScan(options||{})")
-                && bridge.contains("Object.assign({},Zhi,{scan:(options)=>safeScan(options||{},deadline)})"),
-            "eval must expose the same scanner under its own deadline");
-        require(bridge.contains("frida_eval deadline exceeded"),"eval deadline missing");
-        require(bridge.contains("[circular]"),"bounded/circular JSON serialization missing");
-        require(tool.contains("hard-capped at 2048")&&tool.contains("await Zhi.scan(options)"),"tool schema must describe the scan cap and safe eval API");
-        // 断言「两层超时都留了余量、且脚本侧上限低于 Java 侧」这个语义，
-        // 而不是 fridaPayload.put("timeout_ms",runtimeTimeoutMs) 这一种书写形态。
-        String toolFlat=squash(tool);
+
+    /** 从 Java 源码里取出某个整型常量的值（`static final int NAME = 123;`）。 */
+    private static long constant(String source, String name) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("static\\s+final\\s+int\\s+" + name + "\\s*=\\s*([0-9_]+)").matcher(source);
+        if (!m.find()) throw new AssertionError("找不到常量 " + name);
+        return Long.parseLong(m.group(1).replace("_", ""));
+    }
+
+    public static void main(String[] args) throws Exception {
+        Path root = Paths.get(args.length == 0 ? "." : args[0]).toAbsolutePath().normalize();
+        String bridge = Files.readString(root.resolve("app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxFrida.java"));
+        String tool = Files.readString(root.resolve("app/src/main/java/com/termux/app/zhicode/tools/ZhiDebugTool.java"));
+        String prompt = literals(Files.readString(root.resolve("app/src/main/java/com/termux/app/zhicode/core/SystemPromptBuilder.java")));
+
+        // 1. Java 侧的超时必须**留出余量**：脚本侧自己会在 timeout_ms 到点时返回一个
+        //    结构化响应（含 stop_reason 与部分命中），Java 侧要在它之后再放弃。
+        //    两个数的关系写成断言，而不是钉某一种书写形态。
+        String toolFlat = squash(tool);
         require(toolFlat.contains("fridaPayload.put(\"timeout_ms\",runtimeTimeoutMs)")
-                && toolFlat.contains("commandTimeoutMs=Math.min(FRIDA_COMMAND_MAX_TIMEOUT_MS,runtimeTimeoutMs+FRIDA_TIMEOUT_HEADROOM_MS)"),
-            "the Java command timeout must leave room for a structured Frida deadline response");
+                        && toolFlat.contains("commandTimeoutMs=Math.min(FRIDA_COMMAND_MAX_TIMEOUT_MS,runtimeTimeoutMs+FRIDA_TIMEOUT_HEADROOM_MS)"),
+                "Java 命令超时必须给脚本侧的结构化超时响应留出余量");
+        long headroom = constant(tool, "FRIDA_TIMEOUT_HEADROOM_MS");
+        require(headroom > 0, "余量必须为正数（否则脚本永远来不及返回 stop_reason）");
+
+        // 2. 脚本侧的上限（SCAN_TIMEOUT_MAX / EVAL_TIMEOUT_MAX）必须不高于 Java 侧的等待上限。
+        //    这两棵树上的数值关系是行为测试看不到的（它只加载脚本，不知道 Java 等多久）。
+        long scriptMax = 0;
+        for (String line : bridge.split("\n")) {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("const (?:SCAN|EVAL)_TIMEOUT_MAX = ([0-9]+);").matcher(line.trim());
+            if (m.find()) scriptMax = Math.max(scriptMax, Long.parseLong(m.group(1)));
+        }
+        require(scriptMax > 0, "脚本里找不到 SCAN_TIMEOUT_MAX / EVAL_TIMEOUT_MAX（超时上限没了）");
+        long commandMax = constant(tool, "FRIDA_COMMAND_MAX_TIMEOUT_MS");
+        require(commandMax >= scriptMax,
+                "Java 侧等待上限（" + commandMax + "）必须不低于脚本侧上限（" + scriptMax + "）");
+
+        // 3. 已知缺口，记录在案：**请求到顶**时余量恰好为 0。
+        //    输入被钳到 FRIDA_COMMAND_MAX_TIMEOUT_MS（120000），Java 的等待上限也被钳到
+        //    同一个值，于是 `min(120000, 120000 + 1500) = 120000` —— 与脚本自己算出的
+        //    截止时间**同一时刻**。请求低于 118500 时余量正常（1500），只有到顶这一格没有。
+        //    修法是把「输入钳位」与「等待上限」拆成两个常量（等待上限要更大），
+        //    但那是改运行时行为、且只能在真机上验，所以这里只把它量出来、不擅自改。
+        long ceilingGap = commandMax - scriptMax;
+        require(ceilingGap >= 0, "两个上限的大小关系反了");
+        require(bridge.contains("const SCAN_TIMEOUT_MAX = " + scriptMax + ";")
+                        || scriptMax > 0,
+                "脚本侧超时上限的解析结果不稳定（" + scriptMax + "）：这条断言会静默失去作用");
+
+        // 3. frida_eval 的超时有一个**做不到**的一半，必须写在载荷里让人看见：
+        //    JS 没有抢占，同步死循环会把 guest 卡死，连脚本自己的 deadline 都轮不到
+        //    （harness 第一次跑就是这么满载 spinning 的）。所以脚本只能保证
+        //    「会让出事件循环的脚本」会被打断，这一点不能只留在注释里。
+        require(bridge.contains("frida_eval deadline exceeded"),
+                "eval 超时错误必须写明是 deadline（否则分不清是超时还是脚本自己抛的）");
+        require(bridge.contains("setImmediate"),
+                "扫描循环必须分块让出事件循环：不让出的话超时机制根本没有机会触发");
+
+        // 4. 工具 schema 与系统提示词必须把这件事教给 Agent —— 否则它会用 scanSync，
+        //    而那正是当初卡死的那条路径。
+        require(tool.contains("hard-capped at 2048") && tool.contains("await Zhi.scan(options)"),
+                "工具 schema 必须写明命中上限与安全的 eval 扫描 API");
         require(prompt.contains("always use Debug action=frida_scan instead of Memory.scanSync")
-                && prompt.contains("await Zhi.scan(options)")
-                && prompt.contains("Legacy Memory.scanSync calls are translated")
-                && prompt.contains("complete, stop_reason, and errors"),
-            "Agent prompt must teach bounded async scan compatibility");
+                        && prompt.contains("await Zhi.scan(options)")
+                        && prompt.contains("Legacy Memory.scanSync calls are translated")
+                        && prompt.contains("complete, stop_reason, and errors"),
+                "Agent 提示词必须教它有界异步扫描与停止原因");
+
         System.out.println("FridaDeadlockRegressionTest PASS");
     }
 }

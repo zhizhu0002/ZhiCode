@@ -49,17 +49,50 @@ function eq(actual, expected, message) {
 
 // ------------------------------------------------- 从 Java 源码抽出载荷
 //
-// 载荷是 `return "…" + "…" + base + "…"` 这种拼接。这里按 Java 的转义规则把字面量
-// 还原、把变量（base，即 session 目录）留成占位符，调用方替换成测试用的路径。
-// 之所以从源码抽而不是复制一份：复制一份就变成「测试另一个人写的副本」，
-// 源码改了测试不会红 —— 那正是本仓库反复记过的错误。
+// 载荷在 Java 里是**一份自己写的 text block**（`return """ … """.replace("__BASE__", base)`）;
+// 这里按 text block 的规则还原它。支持两种形态：text block（当前）与字符串拼接（旧写法）——
+// 后者留着是因为「载荷以什么形式嵌进 Java」是实现的自由，不是这份契约；
+// 但**载荷内容必须只有一份**：从源码抽而不是复制一份，复制一份就变成
+// 「测试另一个人写的副本」，源码改了测试不会红 —— 那正是本仓库反复记过的错误。
 export function extractPayload(javaPath, methodName) {
     const src = readFileSync(javaPath, 'utf8');
     const start = src.indexOf('private static String ' + methodName + '(');
     if (start < 0) throw new Error('找不到方法: ' + methodName);
-    const ret = src.indexOf('return "', start);
-    if (ret < 0) throw new Error('找不到 return 的字面量');
 
+    const blockAt = src.indexOf('return """', start);
+    const literalAt = src.indexOf('return "', start);
+    if (blockAt >= 0 && (literalAt < 0 || blockAt <= literalAt)) {
+        return extractTextBlock(src, blockAt + 'return '.length);
+    }
+    return extractConcatenation(src, literalAt);
+}
+
+/**
+ * 还原 text block 的内容。
+ *
+ * 两步：按**最小缩进**（Java 的 incidental whitespace）脱缩进，再把 `\\` 还原成 `\`。
+ * 少了第一步，JS 源码会带着 16 个空格的缩进 —— 那样 `return """` 里的内容照样能跑，
+ * 但每一行都不等于源文件里的那一行，抽出来比对就没有意义了。
+ */
+function extractTextBlock(src, at) {
+    const open = src.indexOf('"""', at) + 3;
+    if (open < 3) throw new Error('text block 的起始 """ 没找到');
+    const close = src.indexOf('"""', open);
+    if (close < 0) throw new Error('text block 的结束 """ 没找到');
+    let body = src.slice(open, close);
+    if (body.startsWith('\r\n')) body = body.slice(2);
+    else if (body.startsWith('\n')) body = body.slice(1);
+    const lines = body.split('\n');
+    const widths = lines.filter((l) => l.trim().length > 0)
+        .map((l) => l.length - l.trimStart().length);
+    const strip = widths.length ? Math.min(...widths) : 0;
+    return lines.map((l) => (l.trim().length ? l.slice(strip) : '')).join('\n')
+        .replace(/\\\\/g, '\\');
+}
+
+/** 旧的拼接写法：`return "…" + "…" + base + "…";`，变量留成 `__VAR_name__` 占位。 */
+function extractConcatenation(src, ret) {
+    if (ret < 0) throw new Error('找不到 return 的字面量');
     let i = ret + 'return '.length;
     let out = '';
     while (i < src.length) {
@@ -306,7 +339,9 @@ const READY = 'ready.json';
 const CMD = 'command.json';
 
 function boot(javaFile, env) {
-    const payload = extractPayload(javaFile, 'agentScript').replace('__VAR_base__', '/guest/session');
+    const payload = extractPayload(javaFile, 'agentScript')
+        .replace('__BASE__', '/guest/session')
+        .replace('__VAR_base__', '/guest/session');
     const context = createContext(env.globals);
     // 载荷的结构：rpc.exports = { init(){ ……全部实现…… } }。加载只是定义它，
     // init() 才会写 ready 标记并装上信箱轮询 —— 与 Gadget 的行为一致。
@@ -523,20 +558,21 @@ async function testPureLogic(env, tick) {
     const bigintValue = await evalIn(env, tick, 'return {n: 7n};', 'jsonSafe(bigint)');
     eq(bigintValue && bigintValue.n, '7', 'bigint 必须转成字符串（JSON 没有 bigint）');
 
-    // 数组截断：上限是 2048 项 + 一条标记。**标记里的数字现在是错的**，这一条把它钉住：
-    // eval 路径上 jsonSafe 被套了两次（`run` 里 `{value: jsonSafe(value)}` 一次，
-    // `start` 里 `out.result = jsonSafe(v)` 又一次）。第二次看到的是**已经被截断**
-    // （2049 项）的数组，于是它算出 `2049 - 2048 = 1`，标记变成 `[+1 more]` ——
-    // 真实被截掉的是 952 项。两个不同的规模都得到 `[+1 more]`，这条断言就是证据。
-    // 它不影响安全性（长度仍被夹住），但会让 Agent 误判「丢了多少」；
-    // 修法是去掉重复那一层（重写时再动，先在这里把现状钉住）。
+    // 数组截断：上限 2048 项，超出时追加一条 `[+N more]`，N 是**真实被截掉的条数**。
+    //
+    // 这一条曾经是错的，而且是这套测试的第一次运行抓出来的：旧实现在 eval 路径上
+    // 把 jsonSafe 套了两次（`run` 里一次、`start` 里又一次），第二次看到的是已经被
+    // 截断的 2049 项数组，于是算出 `2049 - 2048 = 1` —— 无论原始是 3000 项还是 5000 项，
+    // 标记永远是 `[+1 more]`。原先的断言把这个错**钉成了契约**（写的是
+    // `assert equals "[+1 more]"`），所以这里必须用两个不同的规模来断言：
+    // 一个规模只能证明「有个数字」，两个规模才能证明「数字是对的」。
     for (const size of [3000, 5000]) {
         const arrayValue = await evalIn(env, tick, 'return {a: new Array(' + size + ').fill(1)};',
             'jsonSafe(超长数组 ' + size + ')');
         eq(arrayValue && arrayValue.a.length, 2049,
             '超长数组必须截到 2048 + 一条标记（否则一次 frida_read 就能撑爆上下文）');
-        eq(arrayValue && arrayValue.a[2048], '[+1 more]',
-            '数组标记里的数字是**第二次** jsonSafe 算的（对 ' + size + ' 项也一样）');
+        eq(arrayValue && arrayValue.a[2048], '[+' + (size - 2048) + ' more]',
+            size + ' 项数组的标记必须报出真实的截断条数（' + size + ' − 2048）');
     }
 
     const ptrValue = await evalIn(env, tick, 'return {p: ptr("0x1000")};', 'jsonSafe(NativePointer)');
