@@ -205,7 +205,7 @@ public class FileProvider extends ContentProvider {
                 in = info.loadXmlMetaData(context.getPackageManager(), META_DATA_FILE_PROVIDER_PATHS);
             }
         } catch (Throwable ignored) {
-            // During the very early :iqsandbox controller attach, BlackBox may be only
+            // During the very early controller attach, BlackBox may be only
             // partially initialized and PackageManager can temporarily return a
             // ProviderInfo without meta-data. A FileProvider must never kill the host
             // process for that recoverable condition.

@@ -70,6 +70,19 @@ import top.niunaijun.blackbox.utils.StoragePermissionHelper;
 public class BlackBoxCore extends ClientConfiguration {
     public static final String TAG = "BlackBoxCore";
 
+    /**
+     * 沙箱控制器进程名的后缀，单一来源见 {@link SandboxContract}。
+     *
+     * 之所以不把常量定义在本类上：宿主层在**每个**进程的 attachBaseContext 里都要判定
+     * 进程角色，若读取 BlackBoxCore 的字段就会触发本类的静态初始化
+     * （{@code new BlackBoxCore()} + resolveHostUserId），
+     * 破坏「主进程完全不碰 BlackBox」这条约束。
+     * {@link SandboxContract} 只有编译期常量，javac 会内联，零类加载。
+     */
+    public static String sandboxControllerProcessName() {
+        return getHostPkg() + SandboxContract.CONTROLLER_PROCESS_SUFFIX;
+    }
+
     private static final BlackBoxCore sBlackBoxCore = new BlackBoxCore();
     private static Context sContext;
     
@@ -808,14 +821,13 @@ public class BlackBoxCore extends ClientConfiguration {
     public void doAttachBaseContext(Context context,
                                    ClientConfiguration clientConfiguration) {
         try {
-            // IQ Code runs the BlackBox controller in a dedicated :iqsandbox process.
-            // That controller only orchestrates Binder/package services and must NOT load
-            // libblackbox or install ART/resource hooks. Native hooking belongs to :black
-            // and :pN Guest processes. Loading NativeCore here caused process-death on
-            // some Android 15 ROMs before Java could report an exception.
+            // 控制器跑在宿主自己声明的专用进程里（见 SandboxContract）。
+            // 该进程只编排 Binder/包服务，**不得**加载 libblackbox，也不得安装 ART/资源 hook。
+            // native hook 属于 :black 与 :pN Guest 进程。在这里加载 NativeCore 曾导致
+            // 某些 Android 15 ROM 在 Java 来得及抛异常之前就整进程死亡。
             String earlyProcessName = getProcessName(context);
             String earlyHostPackage = clientConfiguration.getHostPackageName();
-            boolean dedicatedSandboxMain = earlyProcessName.equals(earlyHostPackage + ":iqsandbox");
+            boolean dedicatedSandboxMain = earlyProcessName.equals(earlyHostPackage + SandboxContract.CONTROLLER_PROCESS_SUFFIX);
             writeStartupStage(context, dedicatedSandboxMain ? "attach:controller-hookless" : "attach:native-essential-begin");
             if (!dedicatedSandboxMain) {
                 setEssentialProperties(context, clientConfiguration);
@@ -847,25 +859,23 @@ public class BlackBoxCore extends ClientConfiguration {
         installSystemHooks();
 
         String processName = getProcessName(getContext());
-        String sandboxMainProcess = BlackBoxCore.getHostPkg() + ":iqsandbox";
+        String sandboxMainProcess = sandboxControllerProcessName();
 
-        // The dedicated controller must be genuinely hookless. In v0.21.7 the early
-        // native setup was skipped, but initNotificationManager()/HookManager.init()
-        // still ran later in this method. That left a startup race and could pull hidden
-        // hooks/BlackReflection into :iqsandbox on Android 15. The controller only owns
-        // the RPC surface; :black and :pN own BlackBox runtime hooks.
+        // 控制器必须真正 hookless。早期版本虽然跳过了 native 初始化，但本方法后面的
+        // initNotificationManager()/HookManager.init() 仍然会执行，留下启动竞态，
+        // 并可能把 hidden hook / BlackReflection 拉进控制器进程。
+        // 控制器只负责 RPC 面；:black 与 :pN 才是 BlackBox 运行时 hook 的归属。
         if (processName.equals(sandboxMainProcess)) {
             mProcessType = ProcessType.Main;
             writeStartupStage(context, "attach:controller-ready");
-            Slog.d(TAG, "Dedicated IQSandbox controller attached without runtime hooks");
+            Slog.d(TAG, "Dedicated sandbox controller attached without runtime hooks");
             return;
         }
 
         initNotificationManager();
-        // IQ Code isolates BlackBox from the editor/Agent. The dedicated
-        // com.iqge:iqsandbox controller is the BlackBox control/Main process.
-        // Keep getHostPkg() as com.iqge so authorities, proxy components and
-        // package identity stay valid; only the process-role test changes.
+        // 蜘蛛把 BlackBox 与编辑器/Agent 隔离：专用控制器进程即 BlackBox 的控制/Main 进程。
+        // getHostPkg() 仍返回宿主包名，authorities / proxy 组件 / 包身份都据此保持有效；
+        // 变的只有进程角色判定。
         if (processName.equals(BlackBoxCore.getHostPkg())) {
             mProcessType = ProcessType.Main;
             startLogcat();
@@ -978,7 +988,7 @@ public class BlackBoxCore extends ClientConfiguration {
         // The dedicated controller is intentionally hookless. It only needs the remote
         // BlackBox services hosted by :black. Do not initialize NativeCore or hook the
         // host ActivityThread here. Besides being unnecessary, those operations can
-        // terminate :iqsandbox natively on Android 15 before any Throwable is catchable.
+        // terminate the controller process natively on Android 15 before any Throwable is catchable.
         if (isMainProcess()) {
             try {
                 writeStartupStage(getContext(), "create:controller-start-server");

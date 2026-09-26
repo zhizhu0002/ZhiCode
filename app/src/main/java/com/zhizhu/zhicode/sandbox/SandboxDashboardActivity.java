@@ -39,7 +39,7 @@ import java.util.concurrent.Executors;
 
 /**
  * Human-facing sandbox manager intentionally hosted in IQ Code's stable main process.
- * BlackBox itself lives behind SandboxControlProvider in :iqsandbox. If the backend
+ * BlackBox itself lives behind SandboxControlProvider in :zhisandbox. If the backend
  * process dies, this Activity stays alive and shows the startup stage instead of
  * disappearing with the backend.
  */

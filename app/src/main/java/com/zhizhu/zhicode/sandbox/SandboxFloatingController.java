@@ -65,7 +65,7 @@ public final class SandboxFloatingController {
                     return true;
             }return false;});
             log.setOnClickListener(v->showLog(activity)); back.setOnClickListener(v->openIQ(activity,false));
-            stop.setOnClickListener(v->{new Thread(()->{try{ZhiSandboxEngine.stop(pkg);SandboxGuardService.stop(activity);}catch(Throwable ignored){} activity.runOnUiThread(()->openIQ(activity,false));},"iq-sandbox-stop").start();});
+            stop.setOnClickListener(v->{new Thread(()->{try{ZhiSandbox.stop(pkg);SandboxGuardService.stop(activity);}catch(Throwable ignored){} activity.runOnUiThread(()->openIQ(activity,false));},"iq-sandbox-stop").start();});
             activity.addContentView(panel,new ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT));
             panel.setX(dp(activity,10)); panel.setY(dp(activity,36));
         });

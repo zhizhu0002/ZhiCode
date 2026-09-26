@@ -26,7 +26,7 @@ public final class SandboxFridaBridge {
     private SandboxFridaBridge() {}
 
     public static synchronized JSONObject load(Context context) throws Exception {
-        Context host = ZhiSandboxEngine.hostContext(); if (host == null) host = context;
+        Context host = ZhiSandbox.hostContext(); if (host == null) host = context;
         if (loaded && sessionDir != null) return status(host);
         File master = FridaRuntimeManager.masterGadget(host);
         if (!FridaRuntimeManager.isInstalled(host)) throw new IllegalStateException("Frida Gadget 未安装；先执行 Debug action=frida_install");
@@ -52,7 +52,7 @@ public final class SandboxFridaBridge {
     }
 
     public static JSONObject status(Context context) throws Exception {
-        Context host = ZhiSandboxEngine.hostContext(); if (host == null) host = context;
+        Context host = ZhiSandbox.hostContext(); if (host == null) host = context;
         JSONObject o = new JSONObject()
             .put("installed", FridaRuntimeManager.isInstalled(host))
             .put("version", FridaRuntimeManager.VERSION)

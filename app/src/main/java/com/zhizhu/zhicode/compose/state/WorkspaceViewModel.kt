@@ -886,7 +886,7 @@ class WorkspaceViewModel(
      * 打开 IQ 沙箱管理界面（`SandboxDashboardActivity`）。
      *
      * 与「环境弹窗」不同，这里**不能**只改本进程的 UI 状态：沙箱引擎整个跑在
-     * `:iqsandbox` 进程里，管理界面通过 `${applicationId}.sandbox.control` 这个同 UID
+     * `:zhisandbox` 进程里，管理界面通过 `${applicationId}.sandbox.control` 这个同 UID
      * 私有 provider 与它通信（见 SandboxControlProvider）。所以这里必须真的
      * 启动那个 Activity，而不是弹一个本地的 Compose 面板 —— 后者会得到一个
      * "永远连不上引擎"的空壳界面。
@@ -907,7 +907,7 @@ class WorkspaceViewModel(
             appendInfo(
                 "无法打开 IQ 沙箱",
                 "启动沙箱管理界面失败：${error.javaClass.simpleName}: ${error.message ?: "未知原因"}\n\n" +
-                    "沙箱引擎运行在 :iqsandbox 进程，界面必须由系统拉起而无法在本进程内绘制。",
+                    "沙箱引擎运行在 :zhisandbox 进程，界面必须由系统拉起而无法在本进程内绘制。",
             )
         }
     }
@@ -1805,7 +1805,7 @@ class WorkspaceViewModel(
             "/memory" -> openMemory()
             "/init" -> runInitPrompt()
 
-            // 沙箱是**跨进程**的：引擎在 :iqsandbox，界面必须交给系统启动。
+            // 沙箱是**跨进程**的：引擎在 :zhisandbox，界面必须交给系统启动。
             // 以前这条命令没有路由，会掉进下面的"指令尚未移植"兜底卡片。
             "/sandbox" -> openSandbox()
 

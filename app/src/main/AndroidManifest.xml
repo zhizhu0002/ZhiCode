@@ -134,7 +134,7 @@
           SystemCallProvider、ProxyVpnService、LauncherActivity，以及 :p0..:p49 的
           四组 Proxy* 组件）会在依赖合并时自动并进来，不需要在这里重复写。
 
-          SandboxControlProvider 必须跑在 :iqsandbox 进程：
+          SandboxControlProvider 必须跑在 :zhisandbox 进程：
           它是主进程与沙箱引擎之间**同 UID 的私有 RPC** 通道，
           沙箱真正的高层控制面（安装/启动/停止 guest）全在这个进程里，
           不能放主进程，否则一个原生 hook 崩溃会把编辑器/Agent 一起带走。
@@ -143,7 +143,7 @@
             android:name="com.zhizhu.zhicode.sandbox.SandboxControlProvider"
             android:authorities="${applicationId}.sandbox.control"
             android:exported="false"
-            android:process=":iqsandbox" />
+            android:process=":zhisandbox" />
 
         <!-- 沙箱管理界面。它本身留在主进程（不设 android:process），只通过上面的 provider 发指令 -->
         <activity

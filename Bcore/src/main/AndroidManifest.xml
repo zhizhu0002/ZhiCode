@@ -528,13 +528,13 @@
 
         <activity
             android:name=".app.LauncherActivity"
-            android:process=":iqsandbox"
+            android:process=":zhisandbox"
             android:excludeFromRecents="true"
             android:theme="@style/LauncherTheme" />
 
         <service
             android:name="top.niunaijun.blackbox.proxy.ProxyVpnService"
-            android:process=":iqsandbox"
+            android:process=":zhisandbox"
             android:enabled="true"
             android:exported="false"
             android:permission="android.permission.BIND_VPN_SERVICE"

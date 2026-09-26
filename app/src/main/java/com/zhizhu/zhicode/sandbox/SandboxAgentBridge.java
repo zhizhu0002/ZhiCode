@@ -116,7 +116,7 @@ public final class SandboxAgentBridge {
             return;
         }
 
-        final Activity a=ZhiSandboxEngine.resumedActivity();final String pkg=ZhiSandboxEngine.resumedPackage();
+        final Activity a=ZhiSandbox.resumedActivity();final String pkg=ZhiSandbox.resumedPackage();
         if(a==null||pkg==null||pkg.isEmpty())return;
         if(!target.isEmpty()&&!target.equals(pkg))return;
         if("screenshot".equals(action)){
@@ -180,7 +180,7 @@ public final class SandboxAgentBridge {
     private static void inputText(Activity a,String text){View v=a.getCurrentFocus();if(v==null)throw new IllegalStateException("当前没有获得焦点的输入控件");EditorInfo info=new EditorInfo();InputConnection ic=v.onCreateInputConnection(info);if(ic==null)throw new IllegalStateException("当前焦点不接受文本输入");ic.commitText(text,1);}
     private static boolean screenshotActivityReady(Activity activity,String pkg){
         if(activity==null||activity.isFinishing()||(Build.VERSION.SDK_INT>=17&&activity.isDestroyed())||activity.getWindow()==null)return false;
-        View root=activity.getWindow().getDecorView();return activity==ZhiSandboxEngine.resumedActivity()&&pkg.equals(ZhiSandboxEngine.resumedPackage())&&root.isAttachedToWindow()&&root.getWidth()>0&&root.getHeight()>0;
+        View root=activity.getWindow().getDecorView();return activity==ZhiSandbox.resumedActivity()&&pkg.equals(ZhiSandbox.resumedPackage())&&root.isAttachedToWindow()&&root.getWidth()>0&&root.getHeight()>0;
     }
 
     /** Capture the composed Guest window. PixelCopy includes SurfaceView/GL/Vulkan layers that View.draw() misses. */
@@ -290,7 +290,7 @@ public final class SandboxAgentBridge {
         if(!tmp.renameTo(dst)){tmp.delete();throw new IllegalStateException("截图文件原子发布失败: "+dst);}
         return dst;
     }
-    private static File screenshotDir(Context c){Context host=ZhiSandboxEngine.hostContext();if(host==null)host=c;File dir=new File(host.getFilesDir(),"sandbox/screenshots");ensureDirectory(dir);return dir;}
+    private static File screenshotDir(Context c){Context host=ZhiSandbox.hostContext();if(host==null)host=c;File dir=new File(host.getFilesDir(),"sandbox/screenshots");ensureDirectory(dir);return dir;}
     private static void pruneScreenshots(File dir){
         File[] files=dir.listFiles();if(files==null)return;long cutoff=System.currentTimeMillis()-SCREENSHOT_MAX_AGE_MS;int retained=0;
         for(File file:files){String name=file.getName();if(name.endsWith(".png.tmp")){if(file.lastModified()<cutoff)file.delete();continue;}if(!name.endsWith(".png"))continue;if(file.lastModified()<cutoff)file.delete();else retained++;}
@@ -301,7 +301,7 @@ public final class SandboxAgentBridge {
         try{File claim=new File(resultDir(c),id+".claim");boolean won=claim.createNewFile();if(won)claim.setLastModified(System.currentTimeMillis());return won;}
         catch(Throwable e){SandboxDebugLog.event("截图桥 claim 失败: "+id+" / "+e);JSONObject out=error(e);CAPTURE_IO.execute(()->writeResult(c,id,out));return false;}
     }
-    private static File resultDir(Context c){Context host=ZhiSandboxEngine.hostContext();if(host==null)host=c;File dir=new File(host.getFilesDir(),"sandbox/agent-results");ensureDirectory(dir);return dir;}
+    private static File resultDir(Context c){Context host=ZhiSandbox.hostContext();if(host==null)host=c;File dir=new File(host.getFilesDir(),"sandbox/agent-results");ensureDirectory(dir);return dir;}
     private static void ensureDirectory(File dir){if(!dir.isDirectory()&&!dir.mkdirs()&&!dir.isDirectory())throw new IllegalStateException("无法创建目录: "+dir);}
     private static void pruneRequestArtifacts(File dir){
         File[] files=dir.listFiles();if(files==null)return;long cutoff=System.currentTimeMillis()-REQUEST_ARTIFACT_MAX_AGE_MS;

@@ -5,7 +5,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import org.json.JSONObject;
 
-/** Synchronous IPC from IQ Code/Agent into the isolated :iqsandbox host process. */
+/** Synchronous IPC from IQ Code/Agent into the isolated :zhisandbox host process. */
 public final class SandboxHostClient {
     /**
      * Derived from the real applicationId rather than hardcoded.

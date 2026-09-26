@@ -2,10 +2,11 @@ package com.zhizhu.zhicode.compose
 
 import android.app.Application
 import android.content.Context
-import com.zhizhu.zhicode.sandbox.ZhiSandboxEngine
+import com.zhizhu.zhicode.sandbox.ZhiSandbox
 import com.zhizhu.zhicode.sandbox.SandboxAgentBridge
 import com.zhizhu.zhicode.sandbox.SandboxDebugLog
-import com.zhizhu.zhicode.sandbox.SandboxProcessRole
+import com.zhizhu.zhicode.sandbox.SandboxProcess
+import com.zhizhu.zhicode.sandbox.SandboxStage
 import com.zhizhu.zhicode.sandbox.SandboxTermuxBridge
 import com.termux.shared.termux.TermuxConstants
 
@@ -19,10 +20,10 @@ import com.termux.shared.termux.TermuxConstants
  *    晚一步就会有人读到兜底的 `com.iqge` 路径。
  * 2. **安装崩溃日志**。放在 `attachBaseContext` 里，早于 ContentProvider 创建，
  *    否则启动期崩溃抓不到。
- * 3. **IQ 沙箱（BlackBox）只挂在沙箱自己的进程里**（`:iqsandbox` / `:black` / `:p0..:p49`）。
+ * 3. **IQ 沙箱（BlackBox）只挂在沙箱自己的进程里**（`:zhisandbox` / `:black` / `:p0..:p49`）。
  *    主进程刻意不 attach：沙箱要 hook ART、替换一堆系统服务，任何一处失败
  *    在启动期都会把整个应用带走；隔离在 guest 进程里，崩了只影响那一个 guest，
- *    编辑器与 Agent 执行链不受影响。判定见 [SandboxProcessRole]。
+ *    编辑器与 Agent 执行链不受影响。判定见 [SandboxProcess]。
  * 4. **主进程启动沙箱的 Termux 桥**，让 guest 侧的沙箱工具能复用同一条内置 Termux 用户空间。
  */
 class ZhiCodeApplication : Application() {
@@ -37,16 +38,20 @@ class ZhiCodeApplication : Application() {
         TermuxConstants.configure(base)
 
         SandboxDebugLog.init(base)
+        // 阶段日志按 pid 分文件，必须尽早初始化：引擎 attach/create 的每一步都靠它留痕，
+        // 否则「卡在哪一步」只能靠猜（旧实现的单文件覆盖写就是这么丢掉线索的）。
+        SandboxStage.init(base)
+        SandboxStage.mark("app:attach-begin")
         installCrashLogger()
 
-        sandboxProcess = SandboxProcessRole.shouldAttachBlackBox(base)
+        sandboxProcess = SandboxProcess.ownsEngine(base)
         SandboxDebugLog.event(
-            "Application attach: " + SandboxProcessRole.processName(base) + " sandbox=" + sandboxProcess
+            "Application attach: " + SandboxProcess.name(base) + " sandbox=" + sandboxProcess
         )
         if (sandboxProcess) {
             // 顺序不能换：attach 必须早于 create，且都发生在任何 ContentProvider 之后被
             // 首次 IPC 触发之前（SandboxControlProvider 自己在 onCreate 里也会补一次排队初始化）。
-            ZhiSandboxEngine.attach(base)
+            ZhiSandbox.attach(base)
         }
     }
 
@@ -54,8 +59,8 @@ class ZhiCodeApplication : Application() {
         super.onCreate()
         if (sandboxProcess) {
             SandboxAgentBridge.register(this)
-            ZhiSandboxEngine.create()
-        } else if (SandboxProcessRole.isMainProcess(this)) {
+            ZhiSandbox.create()
+        } else if (SandboxProcess.isMain(this)) {
             SandboxTermuxBridge.start(this)
         }
     }
@@ -64,7 +69,7 @@ class ZhiCodeApplication : Application() {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             SandboxDebugLog.event(
-                "未捕获异常 [" + SandboxProcessRole.processName(this) + "/" + thread.name + "]: " +
+                "未捕获异常 [" + SandboxProcess.name(this) + "/" + thread.name + "]: " +
                     SandboxDebugLog.stackTrace(error)
             )
             previous?.uncaughtException(thread, error)

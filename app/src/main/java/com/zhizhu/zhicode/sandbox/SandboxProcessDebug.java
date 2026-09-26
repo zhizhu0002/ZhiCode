@@ -176,7 +176,7 @@ public final class SandboxProcessDebug {
         long address = parseAddress(addressText);
         int count = Math.max(1, Math.min(MAX_MEMORY_BYTES, size));
         MapLine mapping = findMapping(address, count, false);
-        Context host = ZhiSandboxEngine.hostContext(); if (host == null) host = context;
+        Context host = ZhiSandbox.hostContext(); if (host == null) host = context;
         if (!FridaRuntimeManager.isInstalled(host))
             throw new IllegalStateException("安全内存通道未就绪：已禁用 /proc/self/mem 与 Unsafe 直读以避免 EACCES/闪退。先执行 Debug action=frida_install，再重试 memory_read/frida_read。");
         JSONObject payload = new JSONObject().put("address", hex(address)).put("size", count).put("volatile", true);
@@ -204,7 +204,7 @@ public final class SandboxProcessDebug {
         if (data.length == 0) throw new IllegalArgumentException("写入数据不能为空");
         if (data.length > MAX_MEMORY_BYTES) throw new IllegalArgumentException("单次最多写入 " + MAX_MEMORY_BYTES + " 字节");
         MapLine mapping = findMapping(address, data.length, true);
-        Context host = ZhiSandboxEngine.hostContext(); if (host == null) host = context;
+        Context host = ZhiSandbox.hostContext(); if (host == null) host = context;
         if (!FridaRuntimeManager.isInstalled(host))
             throw new IllegalStateException("安全内存通道未就绪：已禁用 /proc/self/mem 与 Unsafe 直写以避免 EACCES/闪退。先执行 Debug action=frida_install，再重试 memory_write/frida_write。");
         JSONObject payload = new JSONObject().put("address", hex(address)).put("data", toHex(data)).put("volatile", true);
