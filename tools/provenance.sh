@@ -166,7 +166,7 @@ END {
 if [ "${PROVENANCE_PER_FILE:-0}" = "1" ]; then
     echo
     echo "按重合行数排序（只列仍与 IQ Code 逐行相同的文件）："
-    printf "%7s %7s %8s  %s\n" "相同" "现在" "重合率" "文件"
-    awk -F'|' '$5 > 0 { printf "%7d %7d %7.1f%%  %s\n", $5, $4, $5 * 100 / $4, $1 }' "$REPORT" \
+    printf "%7s %7s %7s %8s  %s\n" "相同" "原版" "现在" "重合率" "文件"
+    awk -F'|' '$5 > 0 { printf "%7d %7d %7d %7.1f%%  %s\n", $5, $3, $4, $5 * 100 / $4, $1 }' "$REPORT" \
         | sort -k1,1nr
 fi

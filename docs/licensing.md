@@ -147,19 +147,20 @@ bootstrap 里的程序许可各自适用，且要求源码对接收者可得。
 ### 当前数字（2026 年，本轮重写后）
 
 ```
-归属区域                    文件    行数   仍与 IQCode 相同
-Termux 上游（非 IQ Code）     23    7377        7274
-Termux 集成层                30    5752        3878
-Compose 界面层               57   15401           0
-其它                        12    2472        1502
-Agent 工具                   43    2837        2088
-Agent 核心                    8    1949         688
-沙箱宿主层                   16    4707         563
-合计                       189   40495       15993
+归属区域                             文件         行数   仍与 IQCode 相同
+Termux 上游（非 IQ Code）             23       7420           7274
+Termux 集成层                       31       6075           3833
+Compose 界面层                      57      15515              0
+其它                               12       2476           1499
+Agent 工具                         43       2971           2069
+Agent 核心                          8       1985            680
+沙箱宿主层                            16       4761            563
+合计                              190      41203          15918
 
-已是我们自己的:        24502 行
-真正属于 IQ Code:       8719 行（其中 Termux 上游 7274 行只是同一来源，与独立性无关）
-```
+已是我们自己的:        25285 行
+逐行相同合计:          15918 行
+  其中 Termux 上游:     7274 行（Termux 自己的代码，与独立性无关）
+  真正属于 IQ Code:     8644 行
 
 **一个重要的范围澄清**：重合行数最大的那些文件**不是 IQ Code 的代码**：
 
@@ -174,7 +175,7 @@ Agent 核心                    8    1949         688
 这些是 **Termux 上游**（`terminal-emulator` / `terminal-view`，Apache-2.0），
 由 `provenance.sh` 归入「Termux 上游（非 IQ Code）」一类。
 它们的正确做法是原样保留并履行 Apache-2.0 义务（已在 `NOTICE` 中声明），
-**重写它们既没有意义也是错的**。真正需要处理的是下面这张表里的文件。
+**重写它们既没有意义也是错的**。真正需要处理的是下面这两张表里的文件。
 
 | 类 | 原版行 | 现在行 | 相同行 | 重合 |
 | --- | --- | --- | --- | --- |
@@ -184,14 +185,14 @@ Agent 核心                    8    1949         688
 | `SandboxGuestHost` | 299 | 886 | 53 | 6.0% |
 | `SandboxOverlay` | 104 | 281 | 24 | 8.5% |
 | `SandboxShell` | 102 | 270 | 23 | 8.5% |
-| `FridaEnv` | 135 | 289 | 31 | 10.7% |
+| `FridaEnv` | 135 | 335 | 31 | 9.3% |
 | `SandboxKeeper` | 34 | 99 | 12 | 12.1% |
 | `ZhiSandbox` | 190 | 332 | 46 | 13.9% |
 | `SandboxRpcService` | 110 | 246 | 42 | 17.1% |
 | `SandboxConsole` | 78 | 212 | 37 | 17.5% |
 | `SandboxGuestDebug` | 288 | 572 | 119 | 20.8% |
 | `SandboxPrefs` | 96 | 146 | 33 | 22.6% |
-| `SandboxFrida` | 141 | 330 | 75 | 22.7% |
+| `SandboxFrida` | 141 | 338 | 75 | 22.2% |
 | `SandboxProcess` | 40 | 69 | 18 | 26.1% |
 | `SandboxRpc` | 29 | 45 | 13 | 28.9% |
 | `SandboxStage` | — | 110 | — | 新文件 |
@@ -202,14 +203,71 @@ Agent 核心                    8    1949         688
 - `SandboxFrida` 里那段 agent JS 是**刻意冻结**的。它是对外契约：
   `IQ.emit` / `IQ.hooks` / `IQ.scan` 三个注入 API 名同时被工具 schema 与注入脚本引用，
   `rpc.exports`、信箱文件名、ready 标记是 Java 与脚本之间的协议边界。
-  该类的 22.7% 主要就是这段必须保留的载荷。
-- **Agent 运行时仍在进行中**，是当前比例最高的残留区（8719 行中约 8156 行）。
+  该类的 22.2% 主要就是这段必须保留的载荷。
+  （Gadget 的**磁盘文件名**已改为 `libzhifrida.so` / `libzhifrida.config` / `zhi-agent.js`，
+  而注入 API 名保持原样：它们不是品牌串，是已经写在工具 schema 与系统提示词里的契約。）
+- **Agent 运行时仍在进行中**，是当前比例最高的残留区（见下文「仍然剩下的」）。
+
+### 改名迁移（A–D，已完成）
+
+把仍活着的旧品牌串改成「蜘蛛 / zhicode」。**只改名，不改行为**。
+下面几处是例外——它们是已经落盘的用户数据或已经写死的对外契约，改了就读不到了：
+
+| 位置 | 内容 | 为什么不能改 |
+| --- | --- | --- |
+| `AndroidSecretStore` | `iq_code_android_secrets` / `iq_code_android_api_key_v1` | 用户机器上的 API Key 就在这两个名字下，改名 = 读不到 |
+| `ApiSettingsStore` | `iq_code_android_settings` | 同上，设置会全部看起来「没配置过」 |
+| `SessionStore` | `<iq_internal_continue>`、`_iq_compacted_input` | 老会话里已经写进去的标记；不认它就会把那段字当成用户消息显示出来 |
+| `TermuxConstants` | `LEGACY_DATA_DIR_NAME = ".iq"` 等 | 它本身就是旧名，用途就是兼容读取 |
+| `SandboxFrida` | `IQ.emit` / `IQ.hooks` / `IQ.scan` | 注入脚本 API 名，同时写在工具 schema 与系统提示词里 |
+| 各处 | `com.iqge` | 是**另一个应用**的包名，不是我们的品牌；路径伪装与文档 provider 需要它 |
+
+各项改动的具体内容：
+
+- **A（`7a390a9`）** 品牌串与线程名，并修掉两个真 bug：
+  `iq-patch-deb` 这个脚本名从来没存在过（正确名由 `BRAND_SLUG` 派生），
+  以及 `KeepAliveService` 写的是旧 prefs、导致关掉保活不会生效。
+- **B（`312c89c`）** `$HOME/.iq` → `$HOME/.zhicode`（**整体 rename**，不是两处都读）、
+  `IQ.md` → `ZhiCode.md`。用户**项目目录**里的 `.iq` 不动（那是他的版本库），
+  读取端改成新名优先、旧名兜底。
+  这里有个容易漏的点：`/init` 指令里的目标文件名如果不改，
+  模型会去写 `IQ.md` 而界面读的是 `ZhiCode.md`，看起来就像「`/init` 什么都没做」。
+- **C（`3829aa9`）** `LocalIqDark`、空态文案、注释里的旧产品名。
+- **D（`53be6c3`）** Gadget 磁盘文件名 `libiqfrida.so` → `libzhifrida.so`（及同名 `.config`、`iq-agent.js`）。
+  主副本是几十 MB 的下载产物，所以加了就地 rename 迁移，不让用户重下。
+
+### 仍然剩下的（按重合行数排序）
+
+`PROVENANCE_PER_FILE=1 bash tools/provenance.sh` 会打印完整清单。当前最前面的几项：
+
+| 相同 | 原版 | 现在 | 重合 | 文件 |
+| --- | --- | --- | --- | --- |
+| 2453 | 2453 | 2453 | 100% | `com/termux/terminal/TerminalEmulator.java` — Termux 上游，**应当原样** |
+| 1297 | 1297 | 1297 | 100% | `com/termux/view/TerminalView.java` — 同上 |
+| 621 | 622 | 622 | 99.8% | `api/OpenAIResponsesProvider.java` |
+| 565 | 583 | 592 | 95.4% | `com/zhizhu/zhicode/TermuxTerminalPane.java` |
+| 449 | 451 | 451 | 99.6% | `api/OpenAIChatCompletionsProvider.java` |
+| 435 | 468 | 475 | 91.6% | `termux/TermuxShellExecutor.java` |
+| 388 | 390 | 390 | 99.5% | `core/ContextCompactor.java` |
+| 352 | 354 | 354 | 99.4% | `tasks/TaskStore.java` |
+| 310 | 310 | 310 | 100% | `com/zhizhu/zhicode/UiMotion.java` |
+| 254 | 257 | 257 | 98.8% | `api/AnthropicMessagesProvider.java` |
+| 240 | 241 | 241 | 99.6% | `com/zhizhu/zhicode/MarkdownRenderer.java` |
+| 298 | 310 | 311 | 95.8% | `tools/AndroidIntentBridge.java` |
+| 285 | 642 | 1221 | 23.3% | `storage/SessionStore.java`（已重写，仅列作对照） |
+
+两点必须说清楚：
+
+1. 头部那些 Termux 文件重合 100% 是**正确状态**，不是漏洞。
+   它们由 Apache-2.0 授权且已在 `NOTICE` 里声明，重写它们既无意义也是错的。
+2. 真正剩下、值得处理的是 `api/` 请求层与 Compose 界面层的几个大文件，
+   它们目前几乎是原样保留的。全部逐行相同行数、扣除 Termux 上游之后是 **8644 行**。
 
 ### 数据层（已完成）
 
 | 类 | 原版行 | 现在行 | 相同行 | 重合 |
 | --- | --- | --- | --- | --- |
-| `McpConfigStore` | 80 | 227 | 32 | 14.1% |
+| `McpConfigStore` | 80 | 239 | 32 | 13.4% |
 | `AndroidSecretStore` | 112 | 224 | 43 | 19.2% |
 | `ApiSettingsStore` | 331 | 584 | 117 | 20.0% |
 | `SessionStore` | 642 | 1202 | 285 | 23.7% |
@@ -245,7 +303,7 @@ Agent 核心                    8    1949         688
 
 ### 沙箱宿主层（已完成，含 Agent 侧两个工具类）
 
-18 个文件，563 / 4707 行 = **12.0%**（从重写前的 96% 降下来）：
+16 个文件，563 / 4761 行 = **11.8%**（从重写前的 96% 降下来）：
 
 ---
 
