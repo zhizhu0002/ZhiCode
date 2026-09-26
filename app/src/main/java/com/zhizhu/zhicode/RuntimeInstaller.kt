@@ -45,11 +45,21 @@ class RuntimeInstaller(private val context: Context) {
         /*
          * 自建 bootstrap（不再是官方 release 那份）。
          *
-         * 来源：fork 的 zhizhu0002/termux-packages @ 6548df2，用
+         * 来源：fork 的 zhizhu0002/termux-packages，用
          * `scripts/build-bootstraps.sh --architectures aarch64` 从源码构建，
          * properties.sh 里的 TERMUX_APP__PACKAGE_NAME = com.zhizhu.code，
          * 因此包内路径全部烘焙为 /data/data/com.zhizhu.code/...。
-         * CI 运行：https://github.com/zhizhu0002/termux-packages/actions/runs/36175482858
+         * CI 运行：https://github.com/zhizhu0002/termux-packages/actions/runs/36215047261
+         *
+         * ⚠️ 那一次 CI 的「验收（旧前缀必须为 0）」步骤是**失败**的，但这不影响产物 ——
+         * 失败原因是下方第 2 条那两处**纯注释**里的旧前缀，不是内容坏了。
+         * 工作流已在后续提交里改成「先自愈再断言」（能修的自动修掉，只有真出现 ELF
+         * 里的旧前缀才报错），所以再跑一次这一步就会是绿的。
+         *
+         * 这个 artifact 相对上一份的**实质改进只有一处**：sed 不再带 SELinux 支持
+         * （`pkg install` 时那句 "failed to set default file creation context" 消失了）。
+         * 校验：bin/sed 213808 → 211296 字节，警告字符串与 libandroid-selinux 引用
+         * 双双从 1 处降到 0 处。
          *
          * 之后在本地做过两道后处理（见 tools/termux-bootstrap-fork/）：
          *   1. 裁剪：extract_debs() 会把 output/ 里**每个** deb 都解进归档，而 fork 场景
@@ -61,6 +71,9 @@ class RuntimeInstaller(private val context: Context) {
          *      - 上游 build-bootstraps.sh 把二阶脚本的 @TERMUX_PACKAGE_ARCH@ 替换成了空串
          *        （函数收 $1，调用处传的是未定义的 $package_arch）→ 已修正为 aarch64
          *      - termux-exec 的两个**注释**里残留旧前缀 → 已改写为 com.zhizhu.code
+         *        （`bin/termux-exec-ld-preload-lib` 第 103 行、`ExecIntercept.h` 4 处，
+         *         都是示例/说明文字，不是生效路径。CI 里那 2 个文件正是旧前缀检查的
+         *         全部命中项 —— 这份 artifact 的 audit 文件也是这么记录的）
          *
          * 与官方包的差异：官方 82 包，我们 85 包 = **官方 82 包一个不缺** + 3 个：
          *   · libmagic  —— nano 新版多出的依赖（官方那份是 7 月旧版 nano）
@@ -95,12 +108,12 @@ class RuntimeInstaller(private val context: Context) {
          * 注意 bin/mount、bin/lsblk、bin/cfdisk 这类命令不在包里是**正常的** ——
          * 它们属于 util-linux 的子包 mount-utils / blk-utils / fdisk，不在运行时闭包里。
          */
-        const val BOOTSTRAP_VERSION = "bootstrap-2026.09.25-fork6548df2+apt.android-7+prune2"
+        const val BOOTSTRAP_VERSION = "bootstrap-2026.09.26-fork-apt.android-7+prune3"
         const val BOOTSTRAP_ASSET = "bootstrap-aarch64.zip"
-        const val BOOTSTRAP_SIZE = 33_485_088L
-        const val BOOTSTRAP_SHA256 = "543464f1b5b7ebedaebc5482ef0d55220a158bd0d9c9d39676da2a912f4a4c72"
+        const val BOOTSTRAP_SIZE = 33_484_104L
+        const val BOOTSTRAP_SHA256 = "a3b33de50113ef47c266a5c61240d05af0b80e3f39d51d0dd45b4b40ec802770"
         const val BOOTSTRAP_SOURCE =
-            "https://github.com/zhizhu0002/termux-packages/actions/runs/36175482858"
+            "https://github.com/zhizhu0002/termux-packages/actions/runs/36215047261"
 
         private const val OFFICIAL_MAIN_REPOSITORY = "https://packages.termux.dev/apt/termux-main"
         private const val OFFICIAL_ROOT_REPOSITORY = "https://packages.termux.dev/apt/termux-root"
