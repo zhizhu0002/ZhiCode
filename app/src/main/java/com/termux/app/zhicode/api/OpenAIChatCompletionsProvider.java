@@ -1,6 +1,7 @@
 package com.termux.app.zhicode.api;
 
 import com.termux.app.zhicode.api.compat.ReasoningMapper;
+import com.termux.app.zhicode.json.JsonItems;
 import com.termux.app.zhicode.model.AssistantTurn;
 import com.termux.app.zhicode.model.SessionConfig;
 import com.termux.app.zhicode.model.ToolCall;
@@ -419,9 +420,7 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
             }
             if (messages == null) return out;
 
-            for (int i = 0; i < messages.length(); i++) {
-                JSONObject message = messages.optJSONObject(i);
-                if (message == null) continue;
+            for (JSONObject message : JsonItems.of(messages)) {
                 JSONArray blocks = message.optJSONArray("content");
                 if (blocks == null) continue;
                 if ("assistant".equals(message.optString("role", "user"))) {
@@ -436,9 +435,7 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
         static JSONArray mapTools(JSONArray tools) throws Exception {
             JSONArray out = new JSONArray();
             if (tools == null) return out;
-            for (int i = 0; i < tools.length(); i++) {
-                JSONObject tool = tools.optJSONObject(i);
-                if (tool == null) continue;
+            for (JSONObject tool : JsonItems.of(tools)) {
                 String name = tool.optString("name", "").trim();
                 // 无名工具直接跳过：发出去会被服务端拒绝整份请求，
                 // 而拒绝信息不会指出是哪个工具的问题。
@@ -456,9 +453,7 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
         private static void appendAssistant(JSONArray out, JSONArray blocks) throws Exception {
             StringBuilder text = new StringBuilder();
             JSONArray toolCalls = new JSONArray();
-            for (int i = 0; i < blocks.length(); i++) {
-                JSONObject block = blocks.optJSONObject(i);
-                if (block == null) continue;
+            for (JSONObject block : JsonItems.of(blocks)) {
                 String type = block.optString("type", "");
                 if ("text".equals(type)) {
                     String value = block.optString("text", "");
@@ -489,9 +484,7 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
 
         private static void appendUserAndToolResults(JSONArray out, JSONArray blocks) throws Exception {
             JSONArray pendingUserParts = new JSONArray();
-            for (int i = 0; i < blocks.length(); i++) {
-                JSONObject block = blocks.optJSONObject(i);
-                if (block == null) continue;
+            for (JSONObject block : JsonItems.of(blocks)) {
                 String type = block.optString("type", "");
                 if ("tool_result".equals(type)) {
                     // 工具结果之前累积的 user 片段必须先落盘，否则顺序会被打乱：
@@ -588,9 +581,7 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
         if (content instanceof JSONArray) {
             JSONArray array = (JSONArray) content;
             StringBuilder out = new StringBuilder();
-            for (int i = 0; i < array.length(); i++) {
-                JSONObject part = array.optJSONObject(i);
-                if (part == null) continue;
+            for (JSONObject part : JsonItems.of(array)) {
                 if ("text".equals(part.optString("type"))) out.append(part.optString("text", ""));
             }
             return out.toString();

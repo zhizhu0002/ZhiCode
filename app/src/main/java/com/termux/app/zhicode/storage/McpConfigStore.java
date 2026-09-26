@@ -1,5 +1,6 @@
 package com.termux.app.zhicode.storage;
 
+import com.termux.app.zhicode.json.JsonItems;
 import com.termux.shared.termux.TermuxConstants;
 
 import org.json.JSONArray;
@@ -162,10 +163,7 @@ public final class McpConfigStore {
                 StandardCharsets.UTF_8);
             JSONArray array = new JSONObject(text).optJSONArray(KEY_SERVERS);
             if (array != null) {
-                for (int i = 0; i < array.length(); i++) {
-                    JSONObject entry = array.optJSONObject(i);
-                    if (entry != null) servers.add(Server.fromJson(entry));
-                }
+                for (JSONObject entry : JsonItems.of(array)) servers.add(Server.fromJson(entry));
             }
             recordFailure("");
             return servers;

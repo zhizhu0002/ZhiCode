@@ -21,6 +21,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.termux.app.zhicode.json.JsonItems;
 import com.termux.app.zhicode.termux.TermuxShellExecutor;
 import com.termux.shared.termux.TermuxConstants;
 
@@ -228,9 +229,7 @@ public final class SandboxBoard extends Activity {
         List<String> packages = new ArrayList<>();
         JSONArray apps = listing.optJSONArray("apps");
         if (apps != null) {
-            for (int i = 0; i < apps.length(); i++) {
-                JSONObject app = apps.optJSONObject(i);
-                if (app == null) continue;
+            for (JSONObject app : JsonItems.of(apps)) {
                 String pkg = app.optString("package", "");
                 if (!pkg.isEmpty()) packages.add(pkg);
             }
@@ -558,10 +557,7 @@ public final class SandboxBoard extends Activity {
         List<JSONObject> processes = new ArrayList<>();
         JSONArray rows = response.optJSONArray("processes");
         if (rows != null) {
-            for (int i = 0; i < rows.length(); i++) {
-                JSONObject row = rows.optJSONObject(i);
-                if (row != null) processes.add(row);
-            }
+            for (JSONObject row : JsonItems.of(rows)) processes.add(row);
         }
         return processes;
     }

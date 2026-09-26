@@ -1,5 +1,6 @@
 package com.termux.app.zhicode.mcp;
 
+import com.termux.app.zhicode.json.JsonItems;
 import com.termux.app.zhicode.model.ToolExecutionResult;
 import com.termux.app.zhicode.storage.McpConfigStore;
 import com.zhizhu.zhicode.compose.BuildConfig;
@@ -363,9 +364,7 @@ public final class McpRuntime {
     private static String flattenContent(JSONArray content) {
         if (content == null) return "";
         StringBuilder out = new StringBuilder();
-        for (int i = 0; i < content.length(); i++) {
-            JSONObject item = content.optJSONObject(i);
-            if (item == null) continue;
+        for (JSONObject item : JsonItems.of(content)) {
             String text = item.optString("text", "");
             if (text.isEmpty()) continue;
             if (out.length() > 0) out.append('\n');

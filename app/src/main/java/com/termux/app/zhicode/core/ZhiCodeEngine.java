@@ -10,6 +10,7 @@ import com.termux.app.zhicode.api.StreamListener;
 import com.termux.app.zhicode.agents.AgentDefinition;
 import com.termux.app.zhicode.agents.AgentTask;
 import com.termux.app.zhicode.agents.SubagentManager;
+import com.termux.app.zhicode.json.JsonItems;
 import com.termux.app.zhicode.model.AssistantTurn;
 import com.termux.app.zhicode.model.PlanWorkflowState;
 import com.termux.app.zhicode.model.SessionConfig;
@@ -1188,9 +1189,7 @@ public final class ZhiCodeEngine {
     private ToolBatch buildToolBatch(AssistantTurn assistant) {
         Set<String> breakBefore = new LinkedHashSet<>();
         boolean pendingBoundary = false;
-        for (int i = 0; i < assistant.content.length(); i++) {
-            JSONObject block = assistant.content.optJSONObject(i);
-            if (block == null) continue;
+        for (JSONObject block : JsonItems.of(assistant.content)) {
             if ("tool_use".equals(block.optString("type"))) {
                 String id = block.optString("id", "");
                 if (pendingBoundary && !id.isEmpty()) breakBefore.add(id);
@@ -1395,9 +1394,7 @@ public final class ZhiCodeEngine {
 
     private static boolean hasMeaningfulAssistantContent(JSONArray content) {
         if (content == null || content.length() == 0) return false;
-        for (int i = 0; i < content.length(); i++) {
-            JSONObject block = content.optJSONObject(i);
-            if (block == null) continue;
+        for (JSONObject block : JsonItems.of(content)) {
             String type = block.optString("type", "");
             if ("tool_use".equals(type)) return true;
             if ("text".equals(type) && !block.optString("text", "").trim().isEmpty()) return true;
@@ -1645,8 +1642,8 @@ public final class ZhiCodeEngine {
             synchronized (messageLock) {
                 RepairState state = new RepairState(findPairedToolCallIds());
                 JSONArray rebuilt = new JSONArray();
-                for (int i = 0; i < messages.length(); i++) {
-                    repairSingleMessage(messages.optJSONObject(i), state, missingResultReason, rebuilt);
+                for (JSONObject message : JsonItems.of(messages)) {
+                    repairSingleMessage(message, state, missingResultReason, rebuilt);
                 }
                 if (state.changes == 0) return 0;
 
@@ -1671,12 +1668,10 @@ public final class ZhiCodeEngine {
     private Set<String> findPairedToolCallIds() {
         Set<String> callsSeen = new LinkedHashSet<>();
         Set<String> paired = new LinkedHashSet<>();
-        for (int i = 0; i < messages.length(); i++) {
-            JSONArray content = contentOf(messages.optJSONObject(i));
+        for (JSONObject message : JsonItems.of(messages)) {
+            JSONArray content = contentOf(message);
             if (content == null) continue;
-            for (int j = 0; j < content.length(); j++) {
-                JSONObject block = content.optJSONObject(j);
-                if (block == null) continue;
+            for (JSONObject block : JsonItems.of(content)) {
                 String type = block.optString("type", "");
                 if ("tool_use".equals(type)) {
                     String id = block.optString("id", "").trim();
@@ -1703,9 +1698,7 @@ public final class ZhiCodeEngine {
 
         JSONArray kept = new JSONArray();
         JSONArray synthesizedResults = new JSONArray();
-        for (int i = 0; i < content.length(); i++) {
-            JSONObject block = content.optJSONObject(i);
-            if (block == null) continue;
+        for (JSONObject block : JsonItems.of(content)) {
             String type = block.optString("type", "");
 
             if ("tool_use".equals(type)) {
@@ -1796,9 +1789,7 @@ public final class ZhiCodeEngine {
         for (int i = Math.max(0, from); i < to; i++) {
             JSONArray content = contentOf(messages.optJSONObject(i));
             if (content == null) continue;
-            for (int j = 0; j < content.length(); j++) {
-                JSONObject block = content.optJSONObject(j);
-                if (block == null) continue;
+            for (JSONObject block : JsonItems.of(content)) {
                 String type = block.optString("type", "");
                 if ("tool_use".equals(type)) {
                     String id = block.optString("id", "").trim();
@@ -1818,9 +1809,7 @@ public final class ZhiCodeEngine {
         for (int i = Math.min(beforeExclusive, messages.length()) - 1; i >= 0; i--) {
             JSONArray content = contentOf(messages.optJSONObject(i));
             if (content == null) continue;
-            for (int j = 0; j < content.length(); j++) {
-                JSONObject block = content.optJSONObject(j);
-                if (block == null) continue;
+            for (JSONObject block : JsonItems.of(content)) {
                 if (!"tool_use".equals(block.optString("type", ""))) continue;
                 if (id.equals(block.optString("id", ""))) return i;
             }
@@ -2221,9 +2210,7 @@ public final class ZhiCodeEngine {
     private JSONArray effectiveToolSchemas() {
         JSONArray base = tools.apiSchemas();
         JSONArray schemas = new JSONArray();
-        for (int i = 0; i < base.length(); i++) {
-            JSONObject schema = base.optJSONObject(i);
-            if (schema == null) continue;
+        for (JSONObject schema : JsonItems.of(base)) {
             String name = schema.optString("name", "");
             if (isSchemaExcluded(name)) continue;
             schemas.put(schema);
@@ -2231,10 +2218,7 @@ public final class ZhiCodeEngine {
         if (isToolAllowed("AskUserQuestion")) schemas.put(askUserQuestionSchema());
         if (!subagentMode && subagents != null) {
             JSONArray agentSchemas = subagents.apiSchemas();
-            for (int i = 0; i < agentSchemas.length(); i++) {
-                JSONObject schema = agentSchemas.optJSONObject(i);
-                if (schema != null) schemas.put(schema);
-            }
+            for (JSONObject schema : JsonItems.of(agentSchemas)) schemas.put(schema);
         }
         return schemas;
     }

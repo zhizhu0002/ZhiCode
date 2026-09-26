@@ -1,5 +1,6 @@
 package com.termux.app.zhicode.core;
 
+import com.termux.app.zhicode.json.JsonItems;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -57,9 +58,7 @@ final class VisionMessageFilter {
         // 视觉开启是最常见的情况。提前返回省掉一次对整段对话的遍历。
         if (messages == null || visionEnabled) return messages;
 
-        for (int i = 0; i < messages.length(); i++) {
-            JSONObject message = messages.optJSONObject(i);
-            if (message == null) continue;
+        for (JSONObject message : JsonItems.of(messages)) {
             JSONArray content = message.optJSONArray(KEY_CONTENT);
             if (content == null) continue;
             message.put(KEY_CONTENT, filtered(content));

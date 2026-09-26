@@ -1,6 +1,7 @@
 package com.termux.app.zhicode.api;
 
 import com.termux.app.zhicode.api.compat.ReasoningMapper;
+import com.termux.app.zhicode.json.JsonItems;
 import com.termux.app.zhicode.model.AssistantTurn;
 import com.termux.app.zhicode.model.SessionConfig;
 import com.termux.app.zhicode.model.ToolCall;
@@ -278,9 +279,7 @@ public final class OpenAIResponsesProvider implements ModelProvider {
         private static JSONArray mapTools(JSONArray tools, boolean nativeShell) throws Exception {
             JSONArray out = new JSONArray();
             if (tools == null) return out;
-            for (int i = 0; i < tools.length(); i++) {
-                JSONObject tool = tools.optJSONObject(i);
-                if (tool == null) continue;
+            for (JSONObject tool : JsonItems.of(tools)) {
                 String name = tool.optString("name", "");
                 if (name.isEmpty()) continue;
                 if (nativeShell && "Bash".equals(name)) {
@@ -320,9 +319,7 @@ public final class OpenAIResponsesProvider implements ModelProvider {
             Set<String> emittedCalls = new LinkedHashSet<>();
             Set<String> emittedOutputs = new LinkedHashSet<>();
 
-            for (int i = 0; i < messages.length(); i++) {
-                JSONObject message = messages.optJSONObject(i);
-                if (message == null) continue;
+            for (JSONObject message : JsonItems.of(messages)) {
                 JSONArray blocks = message.optJSONArray("content");
                 if (blocks == null) continue;
                 if ("assistant".equals(message.optString("role", "user"))) {
@@ -337,9 +334,7 @@ public final class OpenAIResponsesProvider implements ModelProvider {
         private static void appendAssistantItems(JSONArray out, JSONArray blocks, Set<String> paired,
                                                  Set<String> emittedCalls) throws JSONException {
             JSONArray textParts = new JSONArray();
-            for (int i = 0; i < blocks.length(); i++) {
-                JSONObject block = blocks.optJSONObject(i);
-                if (block == null) continue;
+            for (JSONObject block : JsonItems.of(blocks)) {
                 String type = block.optString("type", "");
                 if ("text".equals(type)) {
                     String text = block.optString("text", "");
@@ -385,9 +380,7 @@ public final class OpenAIResponsesProvider implements ModelProvider {
                                             Set<String> emittedCalls, Set<String> emittedOutputs)
                 throws JSONException {
             JSONArray userParts = new JSONArray();
-            for (int i = 0; i < blocks.length(); i++) {
-                JSONObject block = blocks.optJSONObject(i);
-                if (block == null) continue;
+            for (JSONObject block : JsonItems.of(blocks)) {
                 String type = block.optString("type", "");
                 if ("tool_result".equals(type)) {
                     String callId = block.optString("tool_use_id", "").trim();
@@ -459,14 +452,10 @@ public final class OpenAIResponsesProvider implements ModelProvider {
             Set<String> seenCalls = new LinkedHashSet<>();
             Set<String> paired = new LinkedHashSet<>();
             if (messages == null) return paired;
-            for (int i = 0; i < messages.length(); i++) {
-                JSONObject message = messages.optJSONObject(i);
-                if (message == null) continue;
+            for (JSONObject message : JsonItems.of(messages)) {
                 JSONArray blocks = message.optJSONArray("content");
                 if (blocks == null) continue;
-                for (int j = 0; j < blocks.length(); j++) {
-                    JSONObject block = blocks.optJSONObject(j);
-                    if (block == null) continue;
+                for (JSONObject block : JsonItems.of(blocks)) {
                     String type = block.optString("type", "");
                     if ("tool_use".equals(type)) {
                         String id = block.optString("id", "").trim();
@@ -693,9 +682,7 @@ public final class OpenAIResponsesProvider implements ModelProvider {
 
             JSONArray parts = item.optJSONArray("content");
             if (parts == null) return;
-            for (int i = 0; i < parts.length(); i++) {
-                JSONObject part = parts.optJSONObject(i);
-                if (part == null) continue;
+            for (JSONObject part : JsonItems.of(parts)) {
                 if (!"output_text".equals(part.optString("type"))) continue;
                 TextAccumulator accumulator = textAccumulator(key, item.optString("phase", null));
                 emitText(key, accumulator.phase,

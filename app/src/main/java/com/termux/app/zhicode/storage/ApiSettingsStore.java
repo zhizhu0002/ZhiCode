@@ -3,6 +3,7 @@ package com.termux.app.zhicode.storage;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.termux.app.zhicode.json.JsonItems;
 import com.termux.app.zhicode.model.ApiProfile;
 import com.termux.app.zhicode.model.SessionConfig;
 import com.termux.app.zhicode.security.AndroidSecretStore;
@@ -624,9 +625,7 @@ public final class ApiSettingsStore {
         try {
             JSONArray array = new JSONArray(raw);
             Set<String> seenIds = new HashSet<>();
-            for (int i = 0; i < array.length(); i++) {
-                JSONObject json = array.optJSONObject(i);
-                if (json == null) continue;
+            for (JSONObject json : JsonItems.of(array)) {
                 ApiProfile profile = ApiProfile.fromJson(json);
                 if (seenIds.add(profile.id)) profiles.add(profile);
             }

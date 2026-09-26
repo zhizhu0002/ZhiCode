@@ -1,5 +1,6 @@
 package com.termux.app.zhicode.core;
 
+import com.termux.app.zhicode.json.JsonItems;
 import com.termux.app.zhicode.model.AssistantTurn;
 import com.termux.app.zhicode.model.SessionConfig;
 
@@ -273,9 +274,8 @@ final class ContextCompactor {
         }
 
         StringBuilder text = new StringBuilder();
-        for (int i = 0; i < turn.content.length(); i++) {
-            JSONObject block = turn.content.optJSONObject(i);
-            if (block == null || !"text".equals(block.optString("type", ""))) continue;
+        for (JSONObject block : JsonItems.of(turn.content)) {
+            if (!"text".equals(block.optString("type", ""))) continue;
             String value = block.optString("text", "");
             if (value.isEmpty()) continue;
             if (text.length() > 0) text.append('\n');
@@ -416,9 +416,7 @@ final class ContextCompactor {
                             + " This deterministic digest preserves their recoverable facts:\n"
                             + overflowDigest + "\n</overflow_digest>"))));
         }
-        for (int i = 0; i < selected.length(); i++) {
-            JSONObject sourceMessage = selected.optJSONObject(i);
-            if (sourceMessage == null) continue;
+        for (JSONObject sourceMessage : JsonItems.of(selected)) {
             JSONArray content = shrinkBlocks(sourceMessage.optJSONArray("content"), textLimit, toolLimit);
             if (content.length() == 0) content.put(textBlock("[non-text assistant state omitted]"));
             out.put(message(sourceMessage.optString("role", "user"), content));
@@ -436,9 +434,7 @@ final class ContextCompactor {
         JSONArray content = new JSONArray();
         if (sourceContent == null) return content;
 
-        for (int i = 0; i < sourceContent.length(); i++) {
-            JSONObject block = sourceContent.optJSONObject(i);
-            if (block == null) continue;
+        for (JSONObject block : JsonItems.of(sourceContent)) {
             String type = block.optString("type", "");
 
             if ("thinking".equals(type)) continue;
@@ -496,9 +492,7 @@ final class ContextCompactor {
         if (message == null || !"user".equals(message.optString("role", ""))) return false;
         JSONArray content = message.optJSONArray("content");
         if (content == null) return false;
-        for (int i = 0; i < content.length(); i++) {
-            JSONObject block = content.optJSONObject(i);
-            if (block == null) continue;
+        for (JSONObject block : JsonItems.of(content)) {
             String type = block.optString("type", "");
             if ("text".equals(type) || "image".equals(type)) return true;
         }
@@ -525,9 +519,7 @@ final class ContextCompactor {
     private static String digestContent(JSONArray content, int maxChars) {
         if (content == null) return "";
         StringBuilder out = new StringBuilder();
-        for (int i = 0; i < content.length(); i++) {
-            JSONObject block = content.optJSONObject(i);
-            if (block == null) continue;
+        for (JSONObject block : JsonItems.of(content)) {
             String type = block.optString("type", "");
             String value = "";
             if ("text".equals(type)) value = block.optString("text", "");
@@ -582,9 +574,7 @@ final class ContextCompactor {
             return TOKENS_PER_MESSAGE + roughTextTokens(String.valueOf(message.opt("content")));
         }
         long tokens = TOKENS_PER_MESSAGE;
-        for (int i = 0; i < content.length(); i++) {
-            JSONObject block = content.optJSONObject(i);
-            if (block == null) continue;
+        for (JSONObject block : JsonItems.of(content)) {
             tokens += TOKENS_PER_BLOCK + roughBlockTokens(block);
         }
         return (int) Math.min(Integer.MAX_VALUE, tokens);

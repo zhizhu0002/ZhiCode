@@ -2,6 +2,7 @@ package com.termux.app.zhicode.tools;
 
 import android.content.Context;
 
+import com.termux.app.zhicode.json.JsonItems;
 import com.termux.app.zhicode.model.SessionConfig;
 import com.termux.app.zhicode.model.ToolExecutionResult;
 import com.termux.app.zhicode.termux.TermuxShellExecutor;
@@ -318,15 +319,13 @@ public final class ZhiDebugTool implements ZhiTool {
         if (processes.length() == 0) throw new IllegalStateException("沙箱应用当前没有运行进程: " + pkg);
 
         if (requested > 0) {
-            for (int i = 0; i < processes.length(); i++) {
-                JSONObject process = processes.optJSONObject(i);
-                if (process != null && process.optInt("pid", -1) == requested) return requested;
+            for (JSONObject process : JsonItems.of(processes)) {
+                if (process.optInt("pid", -1) == requested) return requested;
             }
             throw new SecurityException("PID " + requested + " 不属于当前 蜘蛛沙箱 包 " + pkg);
         }
-        for (int i = 0; i < processes.length(); i++) {
-            JSONObject process = processes.optJSONObject(i);
-            if (process != null && pkg.equals(process.optString("process", ""))) return process.optInt("pid", -1);
+        for (JSONObject process : JsonItems.of(processes)) {
+            if (pkg.equals(process.optString("process", ""))) return process.optInt("pid", -1);
         }
         return processes.optJSONObject(0).optInt("pid", -1);
     }

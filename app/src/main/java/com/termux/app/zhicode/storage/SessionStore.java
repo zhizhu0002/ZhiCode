@@ -3,6 +3,7 @@ package com.termux.app.zhicode.storage;
 import android.system.Os;
 import android.system.OsConstants;
 
+import com.termux.app.zhicode.json.JsonItems;
 import com.termux.app.zhicode.model.PlanWorkflowState;
 import com.termux.app.zhicode.model.SessionConfig;
 import com.termux.shared.termux.TermuxConstants;
@@ -564,9 +565,7 @@ public final class SessionStore {
      */
     private static JSONArray mergeAdjacentRoles(JSONArray conversation) throws Exception {
         JSONArray merged = new JSONArray();
-        for (int i = 0; i < conversation.length(); i++) {
-            JSONObject message = conversation.optJSONObject(i);
-            if (message == null) continue;
+        for (JSONObject message : JsonItems.of(conversation)) {
             JSONArray content = message.optJSONArray(Field.CONTENT);
             if (content == null) continue;
             String role = message.optString(Field.ROLE, Role.USER);
@@ -957,9 +956,7 @@ public final class SessionStore {
 
         JSONArray after = new JSONArray();
         boolean replaced = false;
-        for (int i = 0; i < before.length(); i++) {
-            JSONObject block = before.optJSONObject(i);
-            if (block == null) continue;
+        for (JSONObject block : JsonItems.of(before)) {
             String type = block.optString(Field.TYPE, "");
             if (!isEditableBlock(block, type)) {
                 after.put(copy(block));
@@ -1033,9 +1030,7 @@ public final class SessionStore {
         boolean human = Role.USER.equals(role);
         boolean assistant = Role.ASSISTANT.equals(role);
 
-        for (int i = 0; i < content.length(); i++) {
-            JSONObject block = content.optJSONObject(i);
-            if (block == null) continue;
+        for (JSONObject block : JsonItems.of(content)) {
             String type = block.optString(Field.TYPE, "");
             if (human && Block.IMAGE.equals(type)) return true;
 
@@ -1056,9 +1051,7 @@ public final class SessionStore {
      */
     private static String firstHumanText(JSONArray content) {
         if (content == null) return "";
-        for (int i = 0; i < content.length(); i++) {
-            JSONObject block = content.optJSONObject(i);
-            if (block == null) continue;
+        for (JSONObject block : JsonItems.of(content)) {
             if (!Block.TEXT.equals(block.optString(Field.TYPE))) continue;
             String text = block.optString(Field.TEXT, "").trim();
             if (!text.isEmpty() && !isInternalMarkerText(text)) return text;
