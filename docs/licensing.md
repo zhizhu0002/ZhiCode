@@ -148,18 +148,18 @@ bootstrap 里的程序许可各自适用，且要求源码对接收者可得。
 ```
 归属区域                             文件         行数   仍与 IQCode 相同
 Termux 上游（非 IQ Code）             23       7394           7274
-Termux 集成层                       34       7284           2735
+Termux 集成层                       35       8734           2063
 Compose 界面层                      57      15427              0
-其它                                8       1924           1194
-Agent 工具                         44       4310           1557
-Agent 核心                          8       2168           1868
+其它                                8       1980           1138
+Agent 工具                         44       5673            933
+Agent 核心                          8       2444           1804
 沙箱宿主层                            16       4716            563
-合计                              190      43223          15191
+合计                              191      46368          13775
 
-已是我们自己的:        28032 行
-逐行相同合计:          15191 行
+已是我们自己的:        32593 行
+逐行相同合计:          13775 行
   其中 Termux 上游:     7274 行（Termux 自己的代码，与独立性无关）
-  真正属于 IQ Code:     7917 行
+  真正属于 IQ Code:     6501 行
 ```
 
 ### 这个数字曾经是错的（记下来，因为它会再次发生）
@@ -273,30 +273,90 @@ Agent 核心                          8       2168           1868
 | --- | --- | --- | --- | --- | --- |
 | 1233 | 1245 | 1250 | 98.6% | `com/termux/app/zhicode/core/ZhiCodeEngine.java` | 批 D |
 | 565 | 583 | 592 | 95.4% | `com/zhizhu/zhicode/TermuxTerminalPane.java` | 批 F |
-| 435 | 468 | 475 | 91.6% | `com/termux/app/zhicode/termux/TermuxShellExecutor.java` | 批 E |
 | 388 | 390 | 390 | 99.5% | `com/termux/app/zhicode/core/ContextCompactor.java` | 批 D |
-| 352 | 354 | 354 | 99.4% | `com/termux/app/zhicode/tasks/TaskStore.java` | 批 E |
 | 310 | 310 | 310 | 100.0% | `com/zhizhu/zhicode/UiMotion.java` | 批 F |
-| 297 | 310 | 311 | 95.5% | `com/termux/app/zhicode/tools/AndroidIntentBridge.java` | 批 C |
-| 284 | 642 | 1104 | 25.7% | `com/termux/app/zhicode/storage/SessionStore.java` | 批 E |
 | 256 | 622 | 929 | 27.6% | `com/termux/app/zhicode/api/OpenAIResponsesProvider.java` | 批 B（已重写） |
-| 183 | 197 | 202 | 90.6% | `com/termux/app/zhicode/tools/BashTool.java` | 批 C |
-| 181 | 181 | 181 | 100.0% | `com/termux/app/zhicode/tools/UnifiedDiff.java` | 批 C |
-| 166 | 167 | 167 | 99.4% | `com/termux/app/zhicode/tools/WebSearchTool.java` | 批 C |
+| 204 | 354 | 545 | 37.4% | `com/termux/app/zhicode/tasks/TaskStore.java` | 批 E（已重写） |
+| 199 | 642 | 1138 | 17.5% | `com/termux/app/zhicode/storage/SessionStore.java` | 批 E（已重写） |
+| 189 | 468 | 929 | 20.3% | `com/termux/app/zhicode/termux/TermuxShellExecutor.java` | 批 E（已重写） |
 | 156 | 451 | 596 | 26.2% | `com/termux/app/zhicode/api/OpenAIChatCompletionsProvider.java` | 批 B（已重写） |
 | 148 | 155 | 162 | 91.4% | `com/termux/app/zhicode/agents/SubagentManager.java` | 批 G |
-| 130 | 136 | 178 | 73.0% | `com/zhizhu/zhicode/ZhiFileProvider.java` | 批 E |
-| 126 | 134 | 137 | 92.0% | `com/termux/app/zhicode/agents/AgentDefinitionLoader.java` | 批 C |
+| 141 | 310 | 607 | 23.2% | `com/termux/app/zhicode/tools/AndroidIntentBridge.java` | 批 C（已重写） |
 | 122 | 257 | 460 | 26.5% | `com/termux/app/zhicode/api/AnthropicMessagesProvider.java` | 批 B（已重写） |
-| 119 | 288 | 572 | 20.8% | `com/zhizhu/zhicode/sandbox/SandboxGuestDebug.java` | 批 ? |
-| 110 | 110 | 110 | 100.0% | `com/termux/app/zhicode/tools/MultiEditTool.java` | 批 C |
-| 109 | 331 | 603 | 18.1% | `com/termux/app/zhicode/storage/ApiSettingsStore.java` | 批 E |
+| 119 | 288 | 572 | 20.8% | `com/zhizhu/zhicode/sandbox/SandboxGuestDebug.java` | 批 G |
 | 108 | 139 | 196 | 55.1% | `com/termux/app/zhicode/model/PlanWorkflowState.java` | 批 C |
+| 102 | 181 | 319 | 32.0% | `com/termux/app/zhicode/tools/UnifiedDiff.java` | 批 C |
+| 93 | 331 | 699 | 13.3% | `com/termux/app/zhicode/storage/ApiSettingsStore.java` | 批 E（已重写） |
 | 78 | 98 | 150 | 52.0% | `com/termux/app/zhicode/core/PlanApprovalGate.java` | 批 D |
-| 77 | 78 | 78 | 98.7% | `com/termux/app/zhicode/tools/WebFetchTool.java` | 批 C |
-| 75 | 141 | 339 | 22.1% | `com/zhizhu/zhicode/sandbox/SandboxFrida.java` | 批 ? |
+| 75 | 141 | 339 | 22.1% | `com/zhizhu/zhicode/sandbox/SandboxFrida.java` | 批 G |
+| 74 | 136 | 234 | 31.6% | `com/zhizhu/zhicode/ZhiFileProvider.java` | 批 E（已重写） |
 | 74 | 80 | 84 | 88.1% | `com/zhizhu/zhicode/background/KeepAliveService.java` | 批 G |
-| 72 | 87 | 142 | 50.7% | `com/termux/app/zhicode/storage/PlanStore.java` | 批 E |
+| 57 | 59 | 66 | 86.4% | `com/zhizhu/zhicode/background/RootKeepAliveController.java` | 批 G |
+| 53 | 299 | 886 | 6.0% | `com/zhizhu/zhicode/sandbox/SandboxGuestHost.java` | 沙箱层 |
+
+### 批 E（1/3、2/3）：终端执行器、任务存储与提示词装配（已完成）
+
+| 文件 | 重合 | 现在 | 做了什么 |
+| --- | --- | --- | --- |
+| `tools/AndroidIntentBridge.java` | 297 → 141 | 23.2% | 三类意图各自成方法；`am start` 解析与 shell 词法分析独立出来 |
+| `agents/AgentDefinitionLoader.java` | 126 → 45 | 30.0% | 解析与合并分开；四层来源的优先级写进注释 |
+| `background/*` 之外的小件 | — | — | `AndroidSecretStore`、`PermissionGate`、`VisionMessageFilter` |
+| `core/SystemPromptBuilder.java` | 48 → 6 | 2.5% | 规则清单从字符串相加改成数组 |
+| `tasks/TaskStore.java` | 352 → 204 | 37.4% | 一任务一文件、id 高水位文件、进程内锁 + 文件锁 |
+| `termux/TermuxShellExecutor.java` | 435 → 189 | 20.3% | 拆成启动前检查 / 包管理锁 / 进程构建 / 等待完成 / 收尾 |
+| `storage/SessionStore.java` 等 | 见上一节 | — | 存储层统一走 `AtomicFiles` |
+
+这一批里最需要记下来的一件事是**系统提示词的逐字节校验**。
+
+`SystemPromptBuilder` 是行为契约：那些英文句子决定 agent 会不会先确认再动手、
+会不会声称自己做了没做的事。改写它属于「改动行为」，不能和「改写实现」混在一起。
+所以这次不是靠看，而是**用程序验**：把改动前后两个版本的 `build()` 各自编译成一个
+不依赖 Android 的独立程序（把四个 `config.*` 字段访问换成固定值），用同一组输入打印
+提示词，然后比较：
+
+```
+old  12381 bytes
+new  12381 bytes
+cmp  →  完全相同
+```
+
+顺带修掉一个更隐蔽的毛病：`SandboxIntegrationStructureTest` 与
+`FridaDeadlockRegressionTest` 都对 `SystemPromptBuilder.java` 的**源码**做 `contains`，
+于是「换行打在哪个位置」也变成了契约 —— 重排之后它们失败了，而提示词输出并没有变。
+两个测试现在改成先从源码里抽取双引号字面量、拼回内容再比较，检查的是
+「这个文件最终会输出什么文字」，而不是「作者把这些字打在哪儿」。
+
+### 批 E（3/3）：存储层最后两块（已完成）
+
+| 文件 | 重合 | 现在 | 做了什么 |
+| --- | --- | --- | --- |
+| `storage/SessionStore.java` | 284 → 199 | 17.5% | 「读」与「写」各收敛成一个入口，见下 |
+| `storage/ApiSettingsStore.java` | 109 → 93 | 13.3% | 设置项改成一张表，读写同源 |
+
+`SessionStore` 的三处结构收敛：
+
+1. **三种读法收成一个 `scan(file, strict)`**。原先宽容读（`readRows`）与严格读
+   （改历史前必须「整个文件都读懂了」）是两段几乎一样的逐行循环。合成一个之后
+   `strict` 就不是一个零散的布尔参数，而是「这份数据我能不能安全重写」这件事本身。
+2. **两种写法收成一个 `appendLines(file, lines, durable)`**。区别只有是否 fsync：
+   消息是高频写入（每次 fsync 会让打字卡顿），改备注是低频且重要。原先两份方法体
+   完全重复。
+3. **整文件替换改走 `AtomicFiles`**。「写临时文件 → fsync → rename」这段在上一批已经
+   抽成 `AtomicFiles` 了，这里跟着用，本类只保留它特有的一步：替换后恢复原 mtime。
+
+另外把 `ROW_*` / `"type"` / `"payload"` 这类固定字符串收进 `RowType` / `Role` /
+`Block` / `Field` 四个内部常量类。理由不是好看：`"payload"` 在原先的代码里出现十几次，
+每处各写一份字面量的话，改字段名时漏掉的那一处只表现为「某类历史读不出来」。
+
+`ApiSettingsStore` 的改动更值得说，因为它修的是一类真实缺陷：原先 `loadGlobal()` 与
+`saveGlobal()` 是两份各 25 行的键名清单，必须一直保持一致 —— 而「加了新设置但只加了
+一半」的后果是「设置能存进去、重启后消失」，不报错、不崩，只表现为用户抱怨。
+现在只有一张 `SETTINGS` 表，读与写都从它派生，默认值直接取 `SessionConfig` 的字段初值
+（所以也不存在「默认值改了一处忘了另一处」）。压缩比例是 double、prefs 只支持按位存
+long，因此显式留在表外。
+
+这两块都没有改行为：`SessionStore` 的公开方法签名一个没动，`ApiSettingsStore` 的
+prefs 键名与值格式一字未改（键名是持久化契约，改了等于丢用户设置）。
 ### 批 B：`api/` 协议层（已完成）
 
 这一批针对工程里「最不该看着像原版」的地方 —— 协议层是纯粹的技术实现：

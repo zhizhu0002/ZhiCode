@@ -13,8 +13,15 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 /**
  * 全局设置与 API 配置的持久化。
@@ -22,104 +29,202 @@ import java.util.Locale;
  * <h3>秘密不在这里</h3>
  * 本类只存<b>不含密钥</b>的元数据（地址、模型名、协议）。API Key 一律走
  * {@link AndroidSecretStore}，落到 Android Keystore 里。这样即使设置被导出或备份，
- * 也不会连带泄露令牌。{@code ApiProfile} 里没有密钥字段，是刻意的。
+ * 也不会连带泄露令牌 —— {@code ApiProfile} 里没有密钥字段，是刻意的。
  *
  * <h3>不内置任何 API 配置</h3>
- * 应用不预置任何厂商地址：所有配置都由用户自己新增。这有两个理由：
+ * 应用不预置任何厂商地址：所有配置都由用户自己新增。理由有两个：
  * 一是替某个服务做默认入口（尤其是带推广参数的）等于替它做导流；
- * 二是任何内置地址都会让「请求发到哪」这件事变得不透明。
- * 因此配置列表可以为空，{@link #getActiveProfile()} 返回 null 表示还没有可用配置，
- * 而“未配置”会由 {@code ApiUrlPolicy} 拦下来并给出明确提示。
+ * 二是任何内置地址都会让「请求发到哪」变得不透明。
+ * 所以配置列表可以为空，{@link #getActiveProfile()} 返回 null 表示还没有可用配置，
+ * 而「未配置」由 {@code ApiUrlPolicy} 拦下来并给出明确提示。
  *
  * <h3>一次性清除内置端点</h3>
- * 早期版本内置过一条厂商配置（id、名字里都写着官方）。升级时必须把它删干净，
+ * 早期版本内置过一条厂商配置（id 与名字里都写着官方）。升级时必须把它删干净，
  * 否则用户会继续被导向那个地址。见 {@link #purgeBundledEndpoint}。
  *
  * <h3>读取路径不应该写盘</h3>
- * 规范化的结果只在<b>确实变化</b>时才落盘。原先每次 {@code getProfiles()} 都会写一次，
- * 而调用方常在循环里取它——既浪费，也让「读」有机会覆盖别的线程刚写下的内容。
+ * 规范化结果只在<b>确实变化</b>时才落盘。原先每次 {@code getProfiles()} 都写一次，
+ * 而调用方常在循环里取它 —— 既浪费，也让「读」有机会覆盖别的线程刚写下的内容。
  *
  * <h3>损坏的 profile 列表不得被静默覆盖</h3>
  * 原先解析失败只返回空列表，而 {@link #load()} 紧接着会走迁移逻辑并<b>写回</b>一份新列表，
- * 于是用户自建的 profile 全部消失。现在坏内容会先留档，且原因可查
- * （{@link #lastError()}）。
+ * 于是用户自建的 profile 全部消失。现在坏内容会先留档，且原因可查（{@link #lastError()}）。
+ *
+ * <h3>设置项只有一份清单</h3>
+ * 会话级设置的读写由 {@link #SETTINGS} 一张表驱动，而不是「读一个方法、写另一个方法」
+ * 两份键名清单。两份清单必须一直保持一致，而「加了新设置但只加了一半」的后果是
+ * 「设置能存进去、重启后消失」—— 不报错、不崩，只表现为用户抱怨。
  */
 public final class ApiSettingsStore {
 
-    /** 当前 prefs 文件名。由品牌短标识派生，保证与其它模块拼出的名字一致。 */
+    /** 当前 prefs 文件名。由品牌短标识派生，与其它模块拼出的名字必须一致。 */
     private static final String PREFS = TermuxConstants.BRAND_SLUG + "_settings";
 
-    // ------------------------------------------------------------ 存储键
-    // 这些键名是持久化契约，改动等于丢掉用户已有设置，因此集中在一处并说明。
-
-    private static final String KEY_PROFILES = "api_profiles_v1";
-    private static final String KEY_ACTIVE_PROFILE = "active_api_profile_id";
-    private static final String KEY_MIGRATED_PROFILE = "legacy_api_profile_id";
-    private static final String KEY_ROLE_CARDS = "role_cards_v1";
-    private static final String KEY_ACTIVE_ROLE_CARD = "active_role_card_id";
-    private static final String KEY_LAST_SESSION = "last_session_path";
-
-    /** 键名与 {@link SessionConfig} 的字段一一对应；改一个就要一起改 {@code loadGlobal/saveGlobal}。 */
-    private static final String KEY_PROTOCOL = "protocol";
-    private static final String KEY_BASE_URL = "base_url";
-    private static final String KEY_MODEL = "model";
-    private static final String KEY_VISION_ENABLED = "vision_enabled";
-    private static final String KEY_EFFORT = "effort";
-    private static final String KEY_CUSTOM_PROMPT = "custom_system_prompt";
-    private static final String KEY_ROLE_CARD = "role_card";
-    private static final String KEY_REASONING_SUMMARY = "reasoning_summary";
-    private static final String KEY_PRESERVE_REASONING = "preserve_reasoning_state";
-    private static final String KEY_TOOL_MODE = "tool_mode";
-    private static final String KEY_PERMISSION_MODE = "permission_mode";
-    private static final String KEY_SANDBOX_FULL_ACCESS = "sandbox_agent_full_access";
-    private static final String KEY_ROOT_EXECUTION = "root_execution_enabled";
-    private static final String KEY_FORCED_KEEP_ALIVE = "forced_keep_alive_enabled";
-    private static final String KEY_PROJECT_DIRECTORY = "project_directory";
-    private static final String KEY_MAX_TOKENS = "max_tokens";
-    private static final String KEY_CONTEXT_WINDOW = "context_window_tokens";
-    private static final String KEY_AUTO_COMPACT = "auto_compact";
-    private static final String KEY_AUTO_COMPACT_RATIO = "auto_compact_ratio";
-    private static final String KEY_COMPACTION_VERSION = "context_compaction_logic_version";
-    private static final String KEY_WEB_SEARCH_ENABLED = "web_search_enabled";
-    private static final String KEY_WEB_SEARCH_PROVIDER = "web_search_provider";
-    private static final String KEY_WEB_SEARCH_MAX_RESULTS = "web_search_max_results";
-    private static final String KEY_WEB_FETCH_MAX_CHARS = "web_fetch_max_chars";
-    private static final String KEY_WEB_TIMEOUT = "web_timeout_ms";
-
-    // ------------------------------------------------------------ 版本与迁移
-
     /**
-     * 上下文压缩逻辑的版本。
+     * 存储键。
      *
-     * <p>第 1 版的默认压缩比例是 0.78，第 2 版改成 1.0（即只在真的满了才压缩）。
-     * 升级时必须把「用户没动过、仍是 0.78」的那批值改写过来，
-     * 否则老用户会继续用过时的保守比例。用户手工设过的值不动。
+     * <p>这些键名是<b>持久化契约</b>：改一个就等于丢掉用户已有的设置。
+     * 所以集中在一处，并且不允许顺手重命名。
      */
+    private static final class Key {
+        static final String PROFILES = "api_profiles_v1";
+        static final String ACTIVE_PROFILE = "active_api_profile_id";
+        static final String MIGRATED_PROFILE = "legacy_api_profile_id";
+        static final String ROLE_CARDS = "role_cards_v1";
+        static final String ACTIVE_ROLE_CARD = "active_role_card_id";
+        static final String LAST_SESSION = "last_session_path";
+
+        // 以下与 SessionConfig 的字段一一对应，见 SETTINGS。
+        static final String PROTOCOL = "protocol";
+        static final String BASE_URL = "base_url";
+        static final String MODEL = "model";
+        static final String VISION_ENABLED = "vision_enabled";
+        static final String EFFORT = "effort";
+        static final String CUSTOM_PROMPT = "custom_system_prompt";
+        static final String ROLE_CARD = "role_card";
+        static final String REASONING_SUMMARY = "reasoning_summary";
+        static final String PRESERVE_REASONING = "preserve_reasoning_state";
+        static final String TOOL_MODE = "tool_mode";
+        static final String PERMISSION_MODE = "permission_mode";
+        static final String SANDBOX_FULL_ACCESS = "sandbox_agent_full_access";
+        static final String ROOT_EXECUTION = "root_execution_enabled";
+        static final String FORCED_KEEP_ALIVE = "forced_keep_alive_enabled";
+        static final String PROJECT_DIRECTORY = "project_directory";
+        static final String MAX_TOKENS = "max_tokens";
+        static final String CONTEXT_WINDOW = "context_window_tokens";
+        static final String AUTO_COMPACT = "auto_compact";
+        static final String AUTO_COMPACT_RATIO = "auto_compact_ratio";
+        static final String COMPACTION_VERSION = "context_compaction_logic_version";
+        static final String WEB_SEARCH_ENABLED = "web_search_enabled";
+        static final String WEB_SEARCH_PROVIDER = "web_search_provider";
+        static final String WEB_SEARCH_MAX_RESULTS = "web_search_max_results";
+        static final String WEB_FETCH_MAX_CHARS = "web_fetch_max_chars";
+        static final String WEB_TIMEOUT = "web_timeout_ms";
+
+        static final String BUNDLED_PURGE = "bundled_endpoint_purge_version";
+
+        private Key() {}
+    }
+
+    /** 上下文压缩逻辑的版本，见 {@link #migrateCompactionRatio}。 */
     private static final int COMPACTION_LOGIC_VERSION = 2;
 
-    /**
-     * 清除内置端点的一次性标记（版本号）。
-     *
-     * <p>与其它版本标记同一套路：<b>一次</b>写完就不再重跑。写成版本号而不是布尔，
-     * 是为了将来如果还需要再清一次别的内置项，直接提升版本号即可。
-     */
-    private static final String KEY_BUNDLED_PURGE = "bundled_endpoint_purge_version";
+    /** 清除内置端点的一次性标记（版本号）。 */
     private static final int BUNDLED_PURGE_VERSION = 1;
 
-    /** 第 1 版压缩比例，仅用于识别「用户没动过」。 */
+    /** 第 1 版的默认压缩比例，仅用于识别「用户没动过」。 */
     private static final double LEGACY_COMPACT_RATIO = 0.78d;
 
     /**
-     * 判定“这条记录是内置的”所用的名字片段。
+     * 判定「这条记录是内置的」所用的名字片段。
      *
-     * <p>内置记录的展示名一直是「… 官方 API」（早期是另一个产品名），所以名字里带
-     * 这两个词就是它。刻意不在这里写它的域名或 id：那样等于把要删除的东西再复制一份，
-     * 而匹配名字已经能盖住两种来源（从旧版升级来的、以及从别的同源工程迁移来的）。
+     * <p>内置记录的展示名一直是「… 官方 API」（早期是另一个产品名），所以名字里带这两个词
+     * 就是它。刻意不写它的域名或 id：那等于把要删除的东西再抄一份，而匹配名字已经能覆盖
+     * 两种来源（从旧版升级来的、以及从别的同源工程迁移来的）。
      *
-     * <p>已知代价：用户若自己把某个配置改名成含这两个词的，会在这次清理里被删掉。
+     * <p>已知代价：用户若自己把某条配置改名成含这两个词的，会在这次清理里被删掉。
      * 只发生一次，而且丢的是一条可以重建的配置，不是用户数据。
      */
     private static final String[] BUNDLED_NAME_HINTS = {"官方", "official"};
+
+    // ------------------------------------------------------------ 设置项表
+
+    /**
+     * 一个设置项的读写入口。
+     *
+     * <p>{@link #value} 同时充当「用户没设过时的默认值」：它返回的就是
+     * {@link SessionConfig} 当前的字段值，所以默认值不必在表里再写一遍 ——
+     * 也就不会出现「默认值在 SessionConfig 里改了，prefs 层还留着旧默认值」。
+     */
+    private interface Setting {
+        Object value(SessionConfig config);
+
+        void apply(SessionConfig config, Object value);
+    }
+
+    /** 普通项（String / Boolean / Integer）。 */
+    private static Setting item(Function<SessionConfig, Object> get, BiConsumer<SessionConfig, Object> set) {
+        return new Setting() {
+            @Override
+            public Object value(SessionConfig config) {
+                return get.apply(config);
+            }
+
+            @Override
+            public void apply(SessionConfig config, Object value) {
+                set.accept(config, value);
+            }
+        };
+    }
+
+    /**
+     * 字符串项，读写都过一遍 {@code normalize}。
+     *
+     * <p>读也规范化是必需的：磁盘上可能留着旧版本写下的未清理内容（多余空白、控制字符），
+     * 只在写入时清理的话，这些值会一直原样流到 HTTP 请求体里。
+     */
+    private static Setting textItem(Function<SessionConfig, String> get, BiConsumer<SessionConfig, String> set,
+                                    UnaryOperator<String> normalize) {
+        return new Setting() {
+            @Override
+            public Object value(SessionConfig config) {
+                return normalize.apply(orEmpty(get.apply(config)));
+            }
+
+            @Override
+            public void apply(SessionConfig config, Object value) {
+                set.accept(config, normalize.apply(orEmpty((String) value)));
+            }
+        };
+    }
+
+    /**
+     * 会话级设置的读写清单。
+     *
+     * <p>顺序与界面上设置的排列一致，只为便于对照；prefs 本身无序。
+     * 需要特殊处理的项<b>不在</b>这张表里：压缩比例是 double，
+     * prefs 只支持按位存 long，另见 {@link #migrateCompactionRatio}。
+     */
+    private static final Map<String, Setting> SETTINGS = new LinkedHashMap<>();
+
+    static {
+        SETTINGS.put(Key.PROTOCOL, item(c -> c.protocol, (c, v) -> c.protocol = (String) v));
+        SETTINGS.put(Key.BASE_URL, textItem(c -> c.baseUrl, (c, v) -> c.baseUrl = v, ApiSettingsStore::trimToEmpty));
+        SETTINGS.put(Key.MODEL, item(c -> c.model, (c, v) -> c.model = (String) v));
+        SETTINGS.put(Key.EFFORT, item(c -> c.effort, (c, v) -> c.effort = (String) v));
+        SETTINGS.put(Key.VISION_ENABLED, item(c -> c.visionEnabled, (c, v) -> c.visionEnabled = (Boolean) v));
+        SETTINGS.put(Key.REASONING_SUMMARY,
+                item(c -> c.reasoningSummary, (c, v) -> c.reasoningSummary = (String) v));
+        SETTINGS.put(Key.PRESERVE_REASONING,
+                item(c -> c.preserveReasoningState, (c, v) -> c.preserveReasoningState = (Boolean) v));
+        SETTINGS.put(Key.CUSTOM_PROMPT, textItem(c -> c.customSystemPrompt,
+                (c, v) -> c.customSystemPrompt = v, ApiSettingsStore::sanitizePrompt));
+        SETTINGS.put(Key.ROLE_CARD, textItem(c -> c.roleCard,
+                (c, v) -> c.roleCard = v, ApiSettingsStore::sanitizePrompt));
+        SETTINGS.put(Key.TOOL_MODE, item(c -> c.toolMode, (c, v) -> c.toolMode = (String) v));
+        SETTINGS.put(Key.PERMISSION_MODE, item(c -> c.permissionMode, (c, v) -> c.permissionMode = (String) v));
+        SETTINGS.put(Key.SANDBOX_FULL_ACCESS,
+                item(c -> c.sandboxAgentFullAccess, (c, v) -> c.sandboxAgentFullAccess = (Boolean) v));
+        SETTINGS.put(Key.ROOT_EXECUTION,
+                item(c -> c.rootExecutionEnabled, (c, v) -> c.rootExecutionEnabled = (Boolean) v));
+        SETTINGS.put(Key.FORCED_KEEP_ALIVE,
+                item(c -> c.forcedKeepAliveEnabled, (c, v) -> c.forcedKeepAliveEnabled = (Boolean) v));
+        SETTINGS.put(Key.PROJECT_DIRECTORY,
+                item(c -> c.projectDirectory, (c, v) -> c.projectDirectory = (String) v));
+        SETTINGS.put(Key.MAX_TOKENS, item(c -> c.maxTokens, (c, v) -> c.maxTokens = (Integer) v));
+        SETTINGS.put(Key.CONTEXT_WINDOW,
+                item(c -> c.contextWindowTokens, (c, v) -> c.contextWindowTokens = (Integer) v));
+        SETTINGS.put(Key.AUTO_COMPACT, item(c -> c.autoCompact, (c, v) -> c.autoCompact = (Boolean) v));
+        SETTINGS.put(Key.WEB_SEARCH_ENABLED,
+                item(c -> c.webSearchEnabled, (c, v) -> c.webSearchEnabled = (Boolean) v));
+        SETTINGS.put(Key.WEB_SEARCH_PROVIDER,
+                item(c -> c.webSearchProvider, (c, v) -> c.webSearchProvider = (String) v));
+        SETTINGS.put(Key.WEB_SEARCH_MAX_RESULTS,
+                item(c -> c.webSearchMaxResults, (c, v) -> c.webSearchMaxResults = (Integer) v));
+        SETTINGS.put(Key.WEB_FETCH_MAX_CHARS,
+                item(c -> c.webFetchMaxChars, (c, v) -> c.webFetchMaxChars = (Integer) v));
+        SETTINGS.put(Key.WEB_TIMEOUT, item(c -> c.webTimeoutMs, (c, v) -> c.webTimeoutMs = (Integer) v));
+    }
 
     private final SharedPreferences prefs;
     private final AndroidSecretStore secrets;
@@ -131,53 +236,53 @@ public final class ApiSettingsStore {
         purgeBundledEndpoint();
     }
 
-    // -------------------------------------------------- 一次性清除内置端点
+    // ------------------------------------------------------------ 一次性清理
 
     /**
      * 删除内置厂商配置，并清掉可能残留的全局端点。
      *
-     * <p>要清两处，少一处都会“看起来删掉了，其实还在用”：
+     * <p>要清两处，少一处都会「看起来删掉了、其实还在用」：
      * <ul>
      *   <li><b>配置列表</b>里的那条记录；</li>
-     *   <li><b>全局端点</b> {@code base_url}。{@code load()} 在列表非空时会用激活配置覆盖它，
-     *       但列表为空时它就会被直接当作请求地址 —— 那样删了记录却还在往旧地址发请求。</li>
+     *   <li><b>全局端点</b> {@code base_url}。{@link #load()} 在列表非空时会用激活配置覆盖它，
+     *       但列表为空时它会被直接当作请求地址 —— 那样就是删了记录却还在往旧地址发请求。</li>
      * </ul>
      *
      * <p>顺带删掉该记录的密钥槽：那条密钥是给那个服务用的，留着没有意义，
-     * 而且用户已经看不到它了，等于一个无法清理的残留密文。
+     * 而用户已经看不到它了，等于一个无法清理的残留密文。
      *
      * <p>只清一次（版本标记）。之后每次构造只多读一个 int，不做任何遍历。
      */
     private synchronized void purgeBundledEndpoint() {
-        if (prefs.getInt(KEY_BUNDLED_PURGE, 0) >= BUNDLED_PURGE_VERSION) return;
+        if (prefs.getInt(Key.BUNDLED_PURGE, 0) >= BUNDLED_PURGE_VERSION) return;
 
         List<ApiProfile> kept = new ArrayList<>();
         for (ApiProfile profile : readProfiles()) {
-            if (isBundledEndpoint(profile)) {
-                try {
-                    secrets.removeApiKey(profile.id, profile.credentialRevision);
-                } catch (Throwable ignored) {
-                    // 密钥槽删不掉也要继续：留着一个读不到的密文比留着一条可用配置安全。
-                }
+            if (!isBundledEndpoint(profile)) {
+                kept.add(profile);
                 continue;
             }
-            kept.add(profile);
+            try {
+                secrets.removeApiKey(profile.id, profile.credentialRevision);
+            } catch (Throwable ignored) {
+                // 密钥槽删不掉也要继续：留一个读不到的密文，比留一条可用配置安全。
+            }
         }
 
-        String active = prefs.getString(KEY_ACTIVE_PROFILE, "");
-        if (findProfile(kept, active) == null) active = kept.isEmpty() ? "" : kept.get(0).id;
-        persistProfiles(kept, active);
+        String activeId = prefs.getString(Key.ACTIVE_PROFILE, "");
+        if (findProfile(kept, activeId) == null) activeId = kept.isEmpty() ? "" : kept.get(0).id;
+        persistProfiles(kept, activeId);
 
-        // 全局端点一并清空：这是「记录没了但请求还发往旧地址」的唯一原因。
+        // 全局端点一并清空。这是「记录没了，请求还发往旧地址」的唯一来源。
         prefs.edit()
-                .putString(KEY_BASE_URL, "")
-                .putInt(KEY_BUNDLED_PURGE, BUNDLED_PURGE_VERSION)
+                .putString(Key.BASE_URL, "")
+                .putInt(Key.BUNDLED_PURGE, BUNDLED_PURGE_VERSION)
                 .apply();
     }
 
     /** 是否内置厂商配置：看展示名，不看域名（不把要删的东西再抄一遍）。 */
     private static boolean isBundledEndpoint(ApiProfile profile) {
-        String name = profile == null || profile.name == null ? "" : profile.name.toLowerCase(Locale.US);
+        String name = profile == null ? "" : orEmpty(profile.name).toLowerCase(Locale.US);
         for (String hint : BUNDLED_NAME_HINTS) {
             if (name.contains(hint)) return true;
         }
@@ -190,7 +295,7 @@ public final class ApiSettingsStore {
         SessionConfig config = loadGlobal();
         List<ApiProfile> profiles = normalizedProfiles();
         if (profiles.isEmpty()) {
-            // 没有配置就把端点字段清空。这里不能只 return config：
+            // 一条配置都没有时，端点字段必须清空。这里不能只 return config：
             // 全局 base_url 可能是上一次内置配置留下的值，带着它返回就等于
             // 「列表里已经没有那条记录了，请求却还发往那个地址」。
             config.profileId = "";
@@ -198,12 +303,7 @@ public final class ApiSettingsStore {
             config.apiKey = "";
             return config;
         }
-        String activeId = prefs.getString(KEY_ACTIVE_PROFILE, "");
-        ApiProfile active = findProfile(profiles, activeId);
-        if (active == null) {
-            active = profiles.get(0);
-            prefs.edit().putString(KEY_ACTIVE_PROFILE, active.id).apply();
-        }
+        ApiProfile active = activeProfileIn(profiles);
         applyProfile(config, active, apiKeyFor(active));
         return config;
     }
@@ -214,12 +314,10 @@ public final class ApiSettingsStore {
         return copies;
     }
 
-    /** 当前生效配置；一条也没有时返回 {@code null}（界面据此显示“未配置”）。 */
+    /** 当前生效配置；一条也没有时返回 {@code null}（界面据此显示「未配置」）。 */
     public synchronized ApiProfile getActiveProfile() {
         List<ApiProfile> profiles = getProfiles();
-        if (profiles.isEmpty()) return null;
-        ApiProfile active = findProfile(profiles, prefs.getString(KEY_ACTIVE_PROFILE, ""));
-        return active == null ? profiles.get(0) : active;
+        return profiles.isEmpty() ? null : activeProfileIn(profiles);
     }
 
     public synchronized ApiProfile getProfile(String profileId) {
@@ -237,7 +335,7 @@ public final class ApiSettingsStore {
         if (findProfile(getProfiles(), profileId) == null) {
             throw new IllegalArgumentException("未知的 API 配置: " + profileId);
         }
-        prefs.edit().putString(KEY_ACTIVE_PROFILE, profileId).apply();
+        prefs.edit().putString(Key.ACTIVE_PROFILE, profileId).apply();
     }
 
     /** 取某 profile 解析后的完整会话配置；profile 不存在返回 null。 */
@@ -249,34 +347,38 @@ public final class ApiSettingsStore {
         return resolved;
     }
 
+    /**
+     * 列表里的激活项。
+     *
+     * <p>激活 id 失效时退回第一条即可：{@link #normalizedProfiles()} 读盘时已经修好并写回，
+     * 所以这里只是一层兜底。
+     */
+    private ApiProfile activeProfileIn(List<ApiProfile> profiles) {
+        ApiProfile active = findProfile(profiles, prefs.getString(Key.ACTIVE_PROFILE, ""));
+        return active == null ? profiles.get(0) : active;
+    }
+
     // ------------------------------------------------------------ 对外写入
 
     /**
-     * 保存一个 profile。
+     * 保存一条配置。
      *
-     * <p>{@code replaceKey} 为真时才动密钥。为假表示「只改元数据」，
-     * 此时密钥槽与 {@code credentialRevision} 必须原样保留，否则用户每改一次模型名
-     * 就要重新填一次密钥。
+     * <p>{@code replaceKey} 为真时才动密钥。为假表示「只改元数据」，此时密钥槽与
+     * {@code credentialRevision} 必须原样保留，否则用户每改一次模型名就要重填一次密钥。
      */
-    public synchronized ApiProfile saveProfile(ApiProfile draft, String apiKey, boolean replaceKey) throws Exception {
+    public synchronized ApiProfile saveProfile(ApiProfile draft, String apiKey, boolean replaceKey)
+            throws Exception {
         if (draft == null) throw new IllegalArgumentException("需要 API 配置");
         List<ApiProfile> profiles = getProfiles();
         ApiProfile existing = findProfile(profiles, draft.id);
-        ApiProfile saved = draft.copy();
-        if (isBlank(saved.id)) saved.id = new ApiProfile().id;
-        saved.name = firstNonBlank(saved.name, "API 配置");
-        saved.protocol = firstNonBlank(saved.protocol, new ApiProfile().protocol);
-        saved.baseUrl = trimToEmpty(saved.baseUrl);
-        saved.defaultModel = trimToEmpty(saved.defaultModel);
+        ApiProfile saved = prepared(draft);
 
         if (existing == null) {
-            saved.revision = 1;
-            saved.credentialRevision = 1;
             profiles.add(saved);
         } else {
             saved.revision = existing.revision;
             saved.credentialRevision = existing.credentialRevision;
-            // 端点三元组变了才算一次新的配置修订（用于让上层知道要重建连接）。
+            // 端点三元组变了才算一次新的配置修订（上层据此知道要重建连接）。
             if (!sameEndpoint(existing, saved)) saved.revision++;
             replaceAt(profiles, saved);
         }
@@ -285,35 +387,58 @@ public final class ApiSettingsStore {
             if (existing != null) saved.credentialRevision = existing.credentialRevision + 1;
             secrets.setApiKey(saved.id, saved.credentialRevision, trimToEmpty(apiKey));
         }
-        String activeId = prefs.getString(KEY_ACTIVE_PROFILE, saved.id);
+
+        String activeId = prefs.getString(Key.ACTIVE_PROFILE, saved.id);
         persistProfiles(profiles, activeId.isEmpty() ? saved.id : activeId);
         return saved.copy();
     }
 
-    /** 删除一条配置。允许删到一条不剩 —— “一条都没有”是合法的初始状态。 */
+    /**
+     * 把一份草稿补成可落盘的记录。
+     *
+     * <p>先 {@code copy()}：后面要改字段，不能改到调用方手上那一份。
+     * 修订号从 1 起，若这条已存在，调用方随后会用盘上那份覆盖掉。
+     */
+    private static ApiProfile prepared(ApiProfile draft) {
+        ApiProfile defaults = new ApiProfile();
+        ApiProfile saved = draft.copy();
+        if (isBlank(saved.id)) saved.id = defaults.id;
+        saved.name = firstNonBlank(saved.name, "API 配置");
+        saved.protocol = firstNonBlank(saved.protocol, defaults.protocol);
+        saved.baseUrl = trimToEmpty(saved.baseUrl);
+        saved.defaultModel = trimToEmpty(saved.defaultModel);
+        saved.revision = 1;
+        saved.credentialRevision = 1;
+        return saved;
+    }
+
+    /** 删掉一条配置。允许删到一条不剩 —— 「一条都没有」是合法的初始状态。 */
     public synchronized void deleteProfile(String profileId) {
         List<ApiProfile> profiles = getProfiles();
         ApiProfile profile = findProfile(profiles, profileId);
         if (profile == null) return;
+
         profiles.remove(profile);
         secrets.removeApiKey(profile.id, profile.credentialRevision);
-        String active = prefs.getString(KEY_ACTIVE_PROFILE, "");
-        if (profile.id.equals(active)) active = profiles.isEmpty() ? "" : profiles.get(0).id;
-        persistProfiles(profiles, active);
+        String activeId = prefs.getString(Key.ACTIVE_PROFILE, "");
+        if (profile.id.equals(activeId)) activeId = profiles.isEmpty() ? "" : profiles.get(0).id;
+        persistProfiles(profiles, activeId);
     }
 
     /**
-     * 保存全局设置，并把相关改动落到当前生效的 profile 上。
+     * 保存全局设置，并把相关改动落到当前生效的那条配置上。
      *
-     * <p>密钥只有<b>真的变了</b>才写入新的 credentialRevision。
+     * <p>密钥只有<b>真的变了</b>才写进新的 {@code credentialRevision}。
      * 每次保存都递增的话，用户改一下网页搜索开关就会让密钥槽搬家，
      * 而旧槽永远留着没人清理。
      */
     public synchronized void save(SessionConfig config) throws Exception {
+        // 先清理再落盘：这一步在写 prefs 之前抛出，磁盘上不会留下半份状态。
         config.customSystemPrompt = sanitizePrompt(config.customSystemPrompt);
+
         List<ApiProfile> profiles = getProfiles();
         ApiProfile profile = findProfile(profiles, config.profileId);
-        if (profile == null) profile = findProfile(profiles, prefs.getString(KEY_ACTIVE_PROFILE, ""));
+        if (profile == null) profile = findProfile(profiles, prefs.getString(Key.ACTIVE_PROFILE, ""));
         if (profile == null) profile = profiles.get(0);
 
         ApiProfile updated = profile.copy();
@@ -328,57 +453,58 @@ public final class ApiSettingsStore {
             updated.credentialRevision = profile.credentialRevision + 1;
             secrets.setApiKey(updated.id, updated.credentialRevision, nextKey);
         }
+
         replaceAt(profiles, updated);
         persistProfiles(profiles, updated.id);
         applyProfile(config, updated, apiKeyFor(updated));
         saveGlobal(config);
     }
 
-    // ------------------------------------------------------- 会话文件记忆
+    // ------------------------------------------------------------ 会话文件记忆
 
     public synchronized File getLastSessionFile() {
-        String path = prefs.getString(KEY_LAST_SESSION, "");
+        String path = prefs.getString(Key.LAST_SESSION, "");
         if (isBlank(path)) return null;
         File file = new File(path.trim());
         return file.isFile() ? file : null;
     }
 
     public synchronized void setLastSessionFile(File file) {
-        prefs.edit().putString(KEY_LAST_SESSION, file == null ? "" : file.getAbsolutePath()).apply();
+        prefs.edit().putString(Key.LAST_SESSION, file == null ? "" : file.getAbsolutePath()).apply();
     }
 
     // ------------------------------------------------------------ 角色卡
 
     public synchronized JSONArray getRoleCards() {
         try {
-            return new JSONArray(prefs.getString(KEY_ROLE_CARDS, "[]"));
+            return new JSONArray(prefs.getString(Key.ROLE_CARDS, "[]"));
         } catch (Exception unreadable) {
+            // 角色卡坏了就当没有：它不影响会话能否继续，而抛异常会让设置页打不开。
             return new JSONArray();
         }
     }
 
     public synchronized void saveRoleCards(JSONArray cards, String activeId) {
         prefs.edit()
-                .putString(KEY_ROLE_CARDS, cards == null ? "[]" : cards.toString())
-                .putString(KEY_ACTIVE_ROLE_CARD, activeId == null ? "" : activeId)
+                .putString(Key.ROLE_CARDS, cards == null ? "[]" : cards.toString())
+                .putString(Key.ACTIVE_ROLE_CARD, orEmpty(activeId))
                 .apply();
     }
 
     public synchronized String getActiveRoleCardId() {
-        return prefs.getString(KEY_ACTIVE_ROLE_CARD, "");
+        return prefs.getString(Key.ACTIVE_ROLE_CARD, "");
     }
 
     /**
      * 只写「强制后台保活」这一个开关，供 {@code KeepAliveService} 在自我停止时回调。
      *
-     * <p>存在的理由是一个真实的缺陷：{@code KeepAliveService} 曾经自己拼出
-     * prefs 文件名与键名直接写盘，而它写的是<b>旧版</b> prefs 文件
-     * （搬迁用的那个只读来源）。结果是「用户从通知里停掉保活 → 开关并没有被关掉 →
-     * 下次启动界面仍显示开启」。键属于本类，写入就该由本类负责，
-     * 否则键名一旦改动就会有第二次同样的漂移。
+     * <p>存在的理由是一个真实的缺陷：{@code KeepAliveService} 曾经自己拼出 prefs 文件名与
+     * 键名直接写盘，而它写的是<b>旧版</b> prefs 文件（迁移用的那个只读来源）。结果是
+     * 「用户从通知里停掉保活 → 开关并没有被关掉 → 下次启动界面仍显示开启」。
+     * 键属于本类，写入就该由本类负责，否则键名一旦改动就会有第二次同样的漂移。
      *
-     * <p>只改这一个键、不经过 {@link #save(SessionConfig)}：服务停止时只关心
-     * 「开关归位」，重新读写整份设置既多余，也可能把界面尚未保存的草稿覆盖掉。
+     * <p>只改这一个键、不经过 {@link #save(SessionConfig)}：服务停止时只关心「开关归位」，
+     * 重新读写整份设置既多余，也可能把界面尚未保存的草稿覆盖掉。
      */
     public static void setForcedKeepAliveEnabled(Context context, boolean enabled) {
         if (context == null) return;
@@ -386,152 +512,128 @@ public final class ApiSettingsStore {
         if (app == null) app = context;
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
-                .putBoolean(KEY_FORCED_KEEP_ALIVE, enabled)
+                .putBoolean(Key.FORCED_KEEP_ALIVE, enabled)
                 .apply();
     }
 
-    // ------------------------------------------------------------ 全局字段
+    // ------------------------------------------------------------ 全局字段读写
 
+    /** 从 prefs 读出整份全局设置。默认值就是 {@link SessionConfig} 的字段初值。 */
     private SessionConfig loadGlobal() {
         SessionConfig config = new SessionConfig();
-        config.protocol = prefs.getString(KEY_PROTOCOL, config.protocol);
+        for (Map.Entry<String, Setting> entry : SETTINGS.entrySet()) {
+            readSetting(prefs, entry.getKey(), entry.getValue(), config);
+        }
 
-        String baseUrl = trimToEmpty(prefs.getString(KEY_BASE_URL, config.baseUrl));
-        config.baseUrl = baseUrl;
-
-        config.model = prefs.getString(KEY_MODEL, config.model);
-        config.visionEnabled = prefs.getBoolean(KEY_VISION_ENABLED, config.visionEnabled);
-        config.effort = prefs.getString(KEY_EFFORT, config.effort);
-        config.customSystemPrompt = sanitizePrompt(prefs.getString(KEY_CUSTOM_PROMPT, ""));
-        config.roleCard = sanitizePrompt(prefs.getString(KEY_ROLE_CARD, ""));
-        config.reasoningSummary = prefs.getString(KEY_REASONING_SUMMARY, config.reasoningSummary);
-        config.preserveReasoningState = prefs.getBoolean(KEY_PRESERVE_REASONING, config.preserveReasoningState);
-        config.toolMode = prefs.getString(KEY_TOOL_MODE, config.toolMode);
-        config.permissionMode = prefs.getString(KEY_PERMISSION_MODE, config.permissionMode);
-        config.sandboxAgentFullAccess = prefs.getBoolean(KEY_SANDBOX_FULL_ACCESS, config.sandboxAgentFullAccess);
-        config.rootExecutionEnabled = prefs.getBoolean(KEY_ROOT_EXECUTION, config.rootExecutionEnabled);
-        config.forcedKeepAliveEnabled = prefs.getBoolean(KEY_FORCED_KEEP_ALIVE, config.forcedKeepAliveEnabled);
-        config.projectDirectory = prefs.getString(KEY_PROJECT_DIRECTORY, TermuxConstants.TERMUX_HOME_DIR_PATH);
-        config.maxTokens = prefs.getInt(KEY_MAX_TOKENS, config.maxTokens);
-        config.contextWindowTokens = prefs.getInt(KEY_CONTEXT_WINDOW, config.contextWindowTokens);
-        config.autoCompact = prefs.getBoolean(KEY_AUTO_COMPACT, config.autoCompact);
-
-        // double 在 SharedPreferences 里只能按位存 long；原样往返，避免精度问题。
+        // double 在 prefs 里只能按位存 long；原样往返，避免精度问题。
         config.autoCompactRatio = Double.longBitsToDouble(
-                prefs.getLong(KEY_AUTO_COMPACT_RATIO, Double.doubleToRawLongBits(config.autoCompactRatio)));
-
-        int compactionVersion = prefs.getInt(KEY_COMPACTION_VERSION, 0);
-        if (compactionVersion < COMPACTION_LOGIC_VERSION
-                && Math.abs(config.autoCompactRatio - LEGACY_COMPACT_RATIO) < 0.000001d) {
-            // 仍是旧版默认值 → 说明用户没动过，跟着新版一起改。
-            config.autoCompactRatio = 1.0d;
-        }
-        if (compactionVersion < COMPACTION_LOGIC_VERSION) {
-            // 版本号与比例一次性写回，避免每次启动都重算一遍。
-            prefs.edit()
-                    .putInt(KEY_COMPACTION_VERSION, COMPACTION_LOGIC_VERSION)
-                    .putLong(KEY_AUTO_COMPACT_RATIO, Double.doubleToRawLongBits(config.autoCompactRatio))
-                    .apply();
-        }
-
-        config.webSearchEnabled = prefs.getBoolean(KEY_WEB_SEARCH_ENABLED, config.webSearchEnabled);
-        config.webSearchProvider = prefs.getString(KEY_WEB_SEARCH_PROVIDER, config.webSearchProvider);
-        config.webSearchMaxResults = prefs.getInt(KEY_WEB_SEARCH_MAX_RESULTS, config.webSearchMaxResults);
-        config.webFetchMaxChars = prefs.getInt(KEY_WEB_FETCH_MAX_CHARS, config.webFetchMaxChars);
-        config.webTimeoutMs = prefs.getInt(KEY_WEB_TIMEOUT, config.webTimeoutMs);
+                prefs.getLong(Key.AUTO_COMPACT_RATIO, Double.doubleToRawLongBits(config.autoCompactRatio)));
+        migrateCompactionRatio(config);
         return config;
     }
 
     private void saveGlobal(SessionConfig config) {
+        SharedPreferences.Editor editor = prefs.edit();
+        for (Map.Entry<String, Setting> entry : SETTINGS.entrySet()) {
+            writeSetting(editor, entry.getKey(), entry.getValue(), config);
+        }
+        editor.putLong(Key.AUTO_COMPACT_RATIO, Double.doubleToRawLongBits(config.autoCompactRatio));
+        editor.putInt(Key.COMPACTION_VERSION, COMPACTION_LOGIC_VERSION);
+        editor.apply();
+    }
+
+    /** 按字段当前值的类型决定 prefs 的读法，见 {@link Setting#value}。 */
+    private static void readSetting(SharedPreferences prefs, String key, Setting setting, SessionConfig config) {
+        Object fallback = setting.value(config);
+        if (fallback instanceof Boolean) setting.apply(config, prefs.getBoolean(key, (Boolean) fallback));
+        else if (fallback instanceof Integer) setting.apply(config, prefs.getInt(key, (Integer) fallback));
+        else setting.apply(config, prefs.getString(key, (String) fallback));
+    }
+
+    /**
+     * 按字段当前值的类型决定 prefs 的写法。
+     *
+     * <p>类型不认识时直接抛：静默地把一个 double 当成字符串写进去，下次读出来的就是
+     * 一个「看起来像数字的文本」，而且不会有任何报错提示。
+     */
+    private static void writeSetting(SharedPreferences.Editor editor, String key, Setting setting,
+                                     SessionConfig config) {
+        Object value = setting.value(config);
+        if (value instanceof Boolean) editor.putBoolean(key, (Boolean) value);
+        else if (value instanceof Integer) editor.putInt(key, (Integer) value);
+        else if (value == null || value instanceof String) editor.putString(key, (String) value);
+        else throw new IllegalStateException("设置项 " + key + " 的类型没有对应的写入方式: " + value.getClass());
+    }
+
+    /**
+     * 压缩逻辑第 1 版的默认比例是 0.78，第 2 版改成 1.0（即只在真的满了才压缩）。
+     *
+     * <p>升级时必须把「用户没动过、仍然是 0.78」的那批值改写过来，否则老用户会一直用
+     * 过时的保守比例。用户手工设过的值不动 —— 判断依据正是「等于旧默认值」。
+     * 版本号与比例一起写回，避免每次启动都重算一遍。
+     */
+    private void migrateCompactionRatio(SessionConfig config) {
+        if (prefs.getInt(Key.COMPACTION_VERSION, 0) >= COMPACTION_LOGIC_VERSION) return;
+        if (Math.abs(config.autoCompactRatio - LEGACY_COMPACT_RATIO) < 0.000001d) {
+            config.autoCompactRatio = 1.0d;
+        }
         prefs.edit()
-                .putString(KEY_PROTOCOL, config.protocol)
-                .putString(KEY_BASE_URL, trimToEmpty(config.baseUrl))
-                .putString(KEY_MODEL, config.model)
-                .putBoolean(KEY_VISION_ENABLED, config.visionEnabled)
-                .putString(KEY_EFFORT, config.effort)
-                .putString(KEY_CUSTOM_PROMPT, sanitizePrompt(config.customSystemPrompt))
-                .putString(KEY_ROLE_CARD, sanitizePrompt(config.roleCard))
-                .putString(KEY_REASONING_SUMMARY, config.reasoningSummary)
-                .putBoolean(KEY_PRESERVE_REASONING, config.preserveReasoningState)
-                .putString(KEY_TOOL_MODE, config.toolMode)
-                .putString(KEY_PERMISSION_MODE, config.permissionMode)
-                .putBoolean(KEY_SANDBOX_FULL_ACCESS, config.sandboxAgentFullAccess)
-                .putBoolean(KEY_ROOT_EXECUTION, config.rootExecutionEnabled)
-                .putBoolean(KEY_FORCED_KEEP_ALIVE, config.forcedKeepAliveEnabled)
-                .putString(KEY_PROJECT_DIRECTORY, config.projectDirectory)
-                .putInt(KEY_MAX_TOKENS, config.maxTokens)
-                .putInt(KEY_CONTEXT_WINDOW, config.contextWindowTokens)
-                .putBoolean(KEY_AUTO_COMPACT, config.autoCompact)
-                .putLong(KEY_AUTO_COMPACT_RATIO, Double.doubleToRawLongBits(config.autoCompactRatio))
-                .putInt(KEY_COMPACTION_VERSION, COMPACTION_LOGIC_VERSION)
-                .putBoolean(KEY_WEB_SEARCH_ENABLED, config.webSearchEnabled)
-                .putString(KEY_WEB_SEARCH_PROVIDER, config.webSearchProvider)
-                .putInt(KEY_WEB_SEARCH_MAX_RESULTS, config.webSearchMaxResults)
-                .putInt(KEY_WEB_FETCH_MAX_CHARS, config.webFetchMaxChars)
-                .putInt(KEY_WEB_TIMEOUT, config.webTimeoutMs)
+                .putInt(Key.COMPACTION_VERSION, COMPACTION_LOGIC_VERSION)
+                .putLong(Key.AUTO_COMPACT_RATIO, Double.doubleToRawLongBits(config.autoCompactRatio))
                 .apply();
     }
 
-    // ------------------------------------------------------- profile 列表
+    // ------------------------------------------------------------ profile 列表
 
     /**
-     * 规范化后的列表：官方配置一定存在且排在首位，其余保持原顺序。
+     * 从 prefs 读出配置列表，并修好其中的不一致。
      *
-     * <p>规范化结果只在<b>与已存的字符串不同</b>时才写回。
-     * 这条判断是必需的：本方法由 {@link #getProfiles()} 调用，而调用方常在循环里取它；
-     * 每次都写盘不仅浪费，还会让「读」有机会覆盖别的线程刚写下的内容。
+     * <p>只在<b>内容确实变化</b>时才写回：本方法由 {@link #getProfiles()} 调用，而调用方
+     * 常在循环里取它；每次都写盘不仅浪费，还会让「读」有机会覆盖别的线程刚写下的内容。
+     *
+     * <p>这里不插入任何内置记录：列表可以为空。
      */
     private List<ApiProfile> normalizedProfiles() {
         List<ApiProfile> stored = readProfiles();
-        if (stored.isEmpty()) {
-            // 完全没有记录时才走迁移：这时没有任何东西会丢。
-            return migrateLegacyProfile(loadGlobal());
-        }
+        // 完全没有记录时才走迁移：这时没有任何东西会丢。
+        if (stored.isEmpty()) return migrateLegacyProfile(loadGlobal());
 
-        // 去重保序：同一个 id 只保留第一个，避开界面上出现两份同名配置。
-        // 不在这里插入任何内置记录 —— 列表可以为空。
-        List<ApiProfile> normalized = new ArrayList<>(stored.size());
-        for (ApiProfile profile : stored) {
-            if (findProfile(normalized, profile.id) == null) normalized.add(profile);
-        }
-
-        String active = prefs.getString(KEY_ACTIVE_PROFILE, "");
-        if (findProfile(normalized, active) == null) active = normalized.get(0).id;
-        if (!profilesJson(normalized).equals(prefs.getString(KEY_PROFILES, ""))
-                || !active.equals(prefs.getString(KEY_ACTIVE_PROFILE, ""))) {
-            persistProfiles(normalized, active);
-        }
-        return normalized;
+        String activeId = prefs.getString(Key.ACTIVE_PROFILE, "");
+        if (findProfile(stored, activeId) == null) activeId = stored.get(0).id;
+        boolean changed = !profilesJson(stored).equals(prefs.getString(Key.PROFILES, ""))
+                || !activeId.equals(prefs.getString(Key.ACTIVE_PROFILE, ""));
+        if (changed) persistProfiles(stored, activeId);
+        return stored;
     }
 
     /**
-     * 读 profile 列表。
+     * 读配置列表，并按 id 去重（界面上出现两份同名配置只会让人误操作）。
      *
-     * <p>关键区分：<b>没有记录</b>与<b>记录损坏</b>是两件事。
-     * 前者可以安全迁移；后者若被当成前者，调用方接着写回新列表就会抹掉用户的数据。
-     * 因此损坏时把原文留档到 {@code api_profiles_v1.corrupt} 并记下原因，
+     * <p>关键区分：<b>没有记录</b>与<b>记录损坏</b>是两件事。前者可以安全迁移；
+     * 后者若被当成前者，调用方紧接着写回新列表就会抹掉用户的数据。
+     * 所以损坏时把原文留档到 {@code api_profiles_v1.corrupt} 并记下原因，
      * 而不是假装没有记录。
      */
     private List<ApiProfile> readProfiles() {
         ArrayList<ApiProfile> profiles = new ArrayList<>();
-        String raw = prefs.getString(KEY_PROFILES, "");
+        String raw = prefs.getString(Key.PROFILES, "");
         if (isBlank(raw)) {
             recordError("");
             return profiles;
         }
         try {
             JSONArray array = new JSONArray(raw);
+            Set<String> seenIds = new HashSet<>();
             for (int i = 0; i < array.length(); i++) {
                 JSONObject json = array.optJSONObject(i);
                 if (json == null) continue;
                 ApiProfile profile = ApiProfile.fromJson(json);
-                // 去重：同一个 id 只保留第一个，避免界面上出现两份同名配置。
-                if (findProfile(profiles, profile.id) == null) profiles.add(profile);
+                if (seenIds.add(profile.id)) profiles.add(profile);
             }
             recordError("");
             return profiles;
         } catch (Exception broken) {
-            String keptKey = KEY_PROFILES + ".corrupt";
+            String keptKey = Key.PROFILES + ".corrupt";
             if (!prefs.contains(keptKey)) prefs.edit().putString(keptKey, raw).apply();
             recordError("API 配置解析失败，原文已保存在 " + keptKey + "；原因: " + broken);
             return profiles;
@@ -540,8 +642,8 @@ public final class ApiSettingsStore {
 
     private void persistProfiles(List<ApiProfile> profiles, String activeId) {
         prefs.edit()
-                .putString(KEY_PROFILES, profilesJson(profiles))
-                .putString(KEY_ACTIVE_PROFILE, activeId)
+                .putString(Key.PROFILES, profilesJson(profiles))
+                .putString(Key.ACTIVE_PROFILE, activeId)
                 .apply();
     }
 
@@ -554,15 +656,15 @@ public final class ApiSettingsStore {
     /**
      * 从「全局设置」迁移出第一份 profile。
      *
-     * <p>只在没有任何 profile 记录时才会被调用。如果旧版设置里填过地址或密钥，
-     * 就把它落成一份「原 API 配置」，免得用户升级后以为配置丢了；
-     * 什么都没填就一份也不建，等用户自己新增。
+     * <p>只在<b>没有任何</b> profile 记录时才会被调用。旧版设置里填过地址或密钥的话，
+     * 就把它落成一份「原 API 配置」，免得用户升级后以为配置丢了；什么都没填就一份也不建，
+     * 等用户自己新增。
      */
     private List<ApiProfile> migrateLegacyProfile(SessionConfig legacy) {
         ArrayList<ApiProfile> profiles = new ArrayList<>();
-
         String legacyUrl = trimToEmpty(legacy.baseUrl);
         String legacyKey = trimToEmpty(secrets.getApiKey());
+
         if (!legacyUrl.isEmpty() || !legacyKey.isEmpty()) {
             ApiProfile profile = new ApiProfile();
             profile.name = "原 API 配置";
@@ -573,12 +675,12 @@ public final class ApiSettingsStore {
                 try {
                     secrets.setApiKey(profile.id, profile.credentialRevision, legacyKey);
                 } catch (Exception keyMoveFailed) {
-                    // 密钥没搬过去也没关系：apiKeyFor() 对这份 profile 会回退读旧槽。
+                    // 密钥没搬过去也不致命：apiKeyFor() 对这条记录会回退读旧槽。
                     recordError("旧 API Key 搬迁失败: " + keyMoveFailed);
                 }
             }
             profiles.add(profile);
-            prefs.edit().putString(KEY_MIGRATED_PROFILE, profile.id).apply();
+            prefs.edit().putString(Key.MIGRATED_PROFILE, profile.id).apply();
         }
         persistProfiles(profiles, profiles.isEmpty() ? "" : profiles.get(0).id);
         return profiles;
@@ -586,7 +688,8 @@ public final class ApiSettingsStore {
 
     // ------------------------------------------------------------ 小工具
 
-    private void applyProfile(SessionConfig config, ApiProfile profile, String apiKey) {
+    /** 把一条 profile 的字段铺到会话配置上。字段名与 {@link ApiProfile} 一一对应。 */
+    private static void applyProfile(SessionConfig config, ApiProfile profile, String apiKey) {
         config.profileId = profile.id;
         config.profileRevision = profile.revision;
         config.credentialRevision = profile.credentialRevision;
@@ -600,25 +703,29 @@ public final class ApiSettingsStore {
     private String apiKeyFor(ApiProfile profile) {
         String key = secrets.getApiKey(profile.id, profile.credentialRevision);
         if (!key.isEmpty()) return key;
-        return profile.id.equals(prefs.getString(KEY_MIGRATED_PROFILE, "")) ? secrets.getApiKey() : "";
+        boolean migrated = profile.id.equals(prefs.getString(Key.MIGRATED_PROFILE, ""));
+        return migrated ? secrets.getApiKey() : "";
     }
 
-    private static void replaceAt(List<ApiProfile> profiles, ApiProfile replacement) {
+    /** 列表里 id 相同的位置；没有就返回 -1。 */
+    private static int indexOf(List<ApiProfile> profiles, String id) {
+        if (id == null) return -1;
         for (int i = 0; i < profiles.size(); i++) {
-            if (replacement.id.equals(profiles.get(i).id)) {
-                profiles.set(i, replacement);
-                return;
-            }
+            if (id.equals(profiles.get(i).id)) return i;
         }
-        profiles.add(replacement);
+        return -1;
     }
 
     private static ApiProfile findProfile(List<ApiProfile> profiles, String id) {
-        if (id == null) return null;
-        for (ApiProfile profile : profiles) {
-            if (id.equals(profile.id)) return profile;
-        }
-        return null;
+        int index = indexOf(profiles, id);
+        return index < 0 ? null : profiles.get(index);
+    }
+
+    /** 用 {@code replacement} 顶掉同 id 的那条；没有就追加到末尾。 */
+    private static void replaceAt(List<ApiProfile> profiles, ApiProfile replacement) {
+        int index = indexOf(profiles, replacement.id);
+        if (index < 0) profiles.add(replacement);
+        else profiles.set(index, replacement);
     }
 
     /** 端点是否等价。不等价才算一次新的配置修订。 */
@@ -632,11 +739,12 @@ public final class ApiSettingsStore {
      * 规范化用户自定义提示词。
      *
      * <p>统一换行符，并拒绝 NUL 与控制字符：这些字符会一路传到 HTTP 请求体里，
-     * 在那里表现为难以定位的协议错误。早一点在这里报出来，错误信息才对得上原因。
+     * 在那儿表现为难以定位的协议错误。早一点在这里报出来，错误信息才对得上原因。
      */
     private static String sanitizePrompt(String value) {
-        String input = value == null ? "" : value.replace("\r\n", "\n").replace('\r', '\n');
+        String input = orEmpty(value).replace("\r\n", "\n").replace('\r', '\n');
         if (input.indexOf('\0') >= 0) throw new IllegalArgumentException("自定义提示词不能包含 NUL 字符");
+
         StringBuilder clean = new StringBuilder(input.length());
         for (int i = 0; i < input.length(); ) {
             int codePoint = input.codePointAt(i);
@@ -661,6 +769,10 @@ public final class ApiSettingsStore {
         return isBlank(value) ? fallback : value.trim();
     }
 
+    private static String orEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
     // ------------------------------------------------------------ 诊断
 
     private volatile String lastError = "";
@@ -675,6 +787,6 @@ public final class ApiSettingsStore {
     }
 
     private void recordError(String reason) {
-        lastError = reason == null ? "" : reason;
+        lastError = orEmpty(reason);
     }
 }
