@@ -11,12 +11,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
@@ -26,6 +26,25 @@ import com.zhizhu.zhicode.compose.model.ChatKind
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+
+/**
+ * 对话内容的指纹。
+ *
+ * 用 `snapshotFlow` 观察它时，只要它没变就不会重复触发吸底 ——
+ * 所以它必须覆盖所有会让**末尾那一项变高**的信号：条数、正文长度、
+ * 思考长度、工具条数，以及切会话与工作状态。
+ *
+ * 做成 `data class` 是为了让 `snapshotFlow` 能用 `equals` 判重，
+ * 否则每次发射都会当成新值。
+ */
+private data class ContentStamp(
+    val size: Int,
+    val body: Int,
+    val thinking: Int,
+    val tools: Int,
+    val session: String,
+    val status: String?,
+)
 
 /** 对话流，对应原版 renderChat() + addTranscriptWindow()。 */
 @Composable
@@ -48,16 +67,27 @@ fun ChatList(
     val currentState by rememberUpdatedState(state)
 
     /*
-     * 是否“贴着底部”。
+     * 是否跟随最新内容（吸底）。
      *
-     * 只在贴底时自动跟随：用户往上翻看历史时，不能因为模型还在流式输出就把他拽回去。
-     * 末尾那个固定高度的占位 Box 很小，所以“它可见”就等价于“已经在底部附近”。
+     * ⚠️ 不能用「可见的末项是不是最后一项」来判断。内容增长本身就会把末项
+     * 顶出屏幕，于是在我们来得及滚动之前条件就已经变成 false —— 表现是
+     * 回复长过一屏之后跟随就断了，得手动往下滑。
+     *
+     * 改成只看**用户的动作**：他松手时停在底部就继续跟随，停在中途就暂停
+     * （他在看历史）。
+     *
+     * `isScrollInProgress` 在这里只反映用户拖动 / 惯性滚动：我们用的是
+     * `requestScrollToItem`，它不走挂起滚动、也不占滚动互斥锁，不会把它置真。
+     *
+     * 两个分支都要处理：
+     * - **一开始滚动就立刻暂停** —— 否则用户按住往上拖的时候流式内容还会把他
+     *   拽回底部（`autoFollow` 还是 true），手感是"手指和自动滚动在抢"。
+     * - **停手时按位置决定** —— 停在底部就恢复跟随，停在中途就不跟。
      */
-    val followTail by remember {
-        derivedStateOf {
-            val info = listState.layoutInfo
-            val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf true
-            lastVisible.index >= info.totalItemsCount - 1
+    var autoFollow by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            autoFollow = if (scrolling) false else !listState.canScrollForward
         }
     }
 
@@ -73,30 +103,45 @@ fun ChatList(
     /*
      * 自动吸底。
      *
-     * 原先只以 `transcript.size` 为键 —— 而流式输出时**条数不变、只有正文在长**，
-     * 所以整个回复过程里列表都不会跟随，必须手动往下滑。
-     * 现在把末尾那条的正文长度、思考长度、工具条数也算进键里，才能跟着流式内容走。
+     * 原实现有两个叠在一起的问题，合起来就是“不及时”：
      *
-     * 用 `scrollToItem`（瞬时）而不是 `animateScrollToItem`：流式内容是连续增长的，
-     * 每一步都起一个动画会互相打断、看起来反而在抖。
+     * 1. 用 `LaunchedEffect(内容长度…)` + `scrollToItem`。
+     *    `scrollToItem` 是**挂起**函数，而流式输出下内容长度几乎每帧都在变 ——
+     *    LaunchedEffect 于是不停地取消并重启协程，滚动经常在真正生效之前就被
+     *    取消掉，只能等某个空档才追上，看起来就是“滚一下停一下”。
+     *    改用 `requestScrollToItem`：**非挂起**，只登记一个目标下标，
+     *    在**下一次测量**里生效，取消不掉。
+     *
+     * 2. 用“可见末项”算贴底（见 [autoFollow] 的注释）。
+     *
+     * 另外改成一个**长驻**的 effect + `snapshotFlow` 观察内容指纹，
+     * 而不是把内容长度当 `LaunchedEffect` 的 key —— 后者每个 token 都要
+     * 重建一次协程，这些开销完全没有必要。
+     *
+     * 日志输出时不用 `animateScrollToItem`：内容连续增长时每一步都起动画
+     * 会互相打断，反而更抖。
      */
-    LaunchedEffect(
-        state.transcript.size,
-        state.transcript.lastOrNull()?.body?.length,
-        state.transcript.lastOrNull()?.thinking?.length,
-        state.transcript.lastOrNull()?.tools?.size,
-        state.activeSessionId,
-        state.workingStatus,
-    ) {
-        val s = currentState
-        val size = s.transcript.size
-        // 空态时它会占一项（索引 0）；末尾还有一项固定高度的占位 Box
-        val leading = if (size == 0) 1 else 0
-        val tailIndex = leading + size
-        val switched = s.activeSessionId != lastSessionId
-        lastSessionId = s.activeSessionId
-        if (tailIndex <= 0) return@LaunchedEffect
-        if (switched || followTail) listState.scrollToItem(tailIndex)
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val s = currentState
+            val last = s.transcript.lastOrNull()
+            ContentStamp(
+                size = s.transcript.size,
+                body = last?.body?.length ?: -1,
+                thinking = last?.thinking?.length ?: -1,
+                tools = last?.tools?.size ?: -1,
+                session = s.activeSessionId,
+                status = s.workingStatus,
+            )
+        }.collect { stamp ->
+            // 空态时它会占一项（索引 0）；末尾还有一项固定高度的占位 Box
+            val leading = if (stamp.size == 0) 1 else 0
+            val tailIndex = leading + stamp.size
+            val switched = stamp.session != lastSessionId
+            lastSessionId = stamp.session
+            if (tailIndex <= 0) return@collect
+            if (switched || autoFollow) listState.requestScrollToItem(tailIndex)
+        }
     }
 
     Box(modifier = modifier.fillMaxSize()) {

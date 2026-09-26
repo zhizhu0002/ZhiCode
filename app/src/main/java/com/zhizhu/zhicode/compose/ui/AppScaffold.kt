@@ -34,12 +34,10 @@ import androidx.compose.runtime.getValue
 import android.app.Application
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
@@ -580,15 +578,16 @@ private fun ChatArea(
     // 进行时文案）。当前是否在跑由输入器右侧的停止键表达。
     val floating = state.tasks.isNotEmpty()
 
-    // 对话区加一个框：纯白/纯黑的背板上如果没有边界，对话与面板会糊成一片。
-    // 框用 Surface 的 border（Miuix 原生参数），圆角与其它卡片同一 token。
-    Surface(
-        modifier = modifier.fillMaxSize().padding(horizontal = ChatFramePadding, vertical = ChatFramePadding),
-        shape = RoundedCornerShape(ZhiRadius.card),
-        color = Color.Transparent,
-        border = BorderStroke(1.dp, MiuixTheme.colorScheme.dividerLine),
-    ) {
-    Box(modifier = Modifier.fillMaxSize()) {
+    // 对话区**不加框**（改过两次，别再加回来）。
+    //
+    // 原来这里套了一层 `Surface(border = BorderStroke(1.dp, dividerLine))`，
+    // 外加 6dp 四周留白，理由是"纯色背板上没有边界会让对话与面板糊成一片"。
+    // 实际看下来这条线是**多余的视觉噪音**：面板底色与消息卡片本身已经有对比，
+    // 而这条线紧贴屏幕边缘，看着像一个白加的容器。去掉后对话直接铺满面板。
+    //
+    // ⚠️ 不要顺手把 6dp 留白搬到下面的 Box 上：那个留白原本只为了让线不贴边，
+    // 线没了留白就没意义了（`ChatFramePadding` 已一并删掉）。
+    Box(modifier = modifier.fillMaxSize()) {
         ChatList(
             state = state,
             onToggleTool = viewModel::toggleToolExpanded,
@@ -635,11 +634,7 @@ private fun ChatArea(
             ComposerHost(state = state, viewModel = viewModel, wide = wide, glass = glass)
         }
     }
-    }
 }
-
-/** 对话框的四周留白。 */
-private val ChatFramePadding = 6.dp
 
 /** 悬浮输入器占位高度（含底部外边距），供对话列表留白使用。 */
 private val ComposerInset = 104.dp
