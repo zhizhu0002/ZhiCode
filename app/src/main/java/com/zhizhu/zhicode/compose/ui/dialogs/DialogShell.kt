@@ -14,11 +14,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.DpSize
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Button
@@ -29,7 +27,6 @@ import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.theme.TextStyles
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 
 /**
@@ -59,38 +56,13 @@ internal val DialogWideOutsideMargin = DpSize(18.dp, 12.dp)
 internal val DialogWideInsideMargin = DpSize(14.dp, 14.dp)
 
 /**
- * 弹窗专用的紧凑文字样式。
+ * 弹窗内容的外壳：左对齐标题 + 固定说明 + 中间内容区 + 底部固定按钮区。
  *
- * Miuix 默认阶梯偏大（实测 `title1..4` = 32/24/20/18sp、`body1` = 16sp、
- * `body2` = 14sp、`button` = 17sp），而 `BasicComponent` 的标题走 `headline1`、
- * `TextField` / `TextButton` 也走主题样式，所以只能通过覆盖主题样式来整体收小；
- * 逐个传 `fontSize` 对这些 Miuix 组件无效。
- *
- * 覆盖范围仅限弹窗内部（嵌套一层 `MiuixTheme`），不影响主界面。
- * `lineHeight` 置为 Unspecified，避免沿用大字号的行高。
- */
-@Composable
-internal fun compactDialogTextStyles(): TextStyles {
-    val base = MiuixTheme.textStyles
-    fun TextStyle.compact(size: TextUnit) = copy(fontSize = size, lineHeight = TextUnit.Unspecified)
-    return base.copy(
-        main = base.main.compact(14.sp),
-        paragraph = base.paragraph.compact(13.sp),
-        body1 = base.body1.compact(13.sp),
-        body2 = base.body2.compact(12.sp),
-        button = base.button.compact(13.sp),
-        footnote1 = base.footnote1.compact(12.sp),
-        footnote2 = base.footnote2.compact(10.5.sp),
-        subtitle = base.subtitle.compact(12.5.sp),
-        // `BasicComponent` 的标题走 headline1、说明走 body2（实测），
-        // 所以这两个必须一起覆盖，否则列表项标题还是 17sp
-        headline1 = base.headline1.compact(12.5.sp),
-        headline2 = base.headline2.compact(12.sp),
-    )
-}
-
-/**
- * 所有弹窗内容的外壳：紧凑字号 + 左对齐标题 + 固定说明 + 中间内容区 + 底部固定按钮区。
+ * 这里以前还嵌套了一层 `MiuixTheme`，用一套弹窗专用的紧凑字阶把字号整体收小
+ * （当时 Miuix 默认 `main` = 17sp，弹窗里要压到 14sp）。字阶现在已在根级统一
+ * （见 `theme/ZhiTextStyles.kt`），那一层的作用就**反转**了 —— 它会把弹窗文字
+ * 顶回 14sp，比主界面的 13sp 还大。所以整层连同那个函数一起删掉，弹窗直接继承
+ * 根字阶。（它当时传的 `colors = MiuixTheme.colorScheme` 本来就是恒等的。）
  *
  * [groupBody] 为真时，中间内容区会被包进一层 Miuix [Card]。
  *
@@ -127,88 +99,83 @@ internal fun DialogShell(
     actions: @Composable () -> Unit,
     body: @Composable () -> Unit,
 ) {
-    MiuixTheme(
-        colors = MiuixTheme.colorScheme,
-        textStyles = compactDialogTextStyles(),
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.Start,
     ) {
-        Column(
+        // 标题行：标题靠左吃剩余宽度，右侧留一个可选动作位（设置页放 × 关闭）
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.Start,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 标题行：标题靠左吃剩余宽度，右侧留一个可选动作位（设置页放 × 关闭）
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = title,
-                    color = titleColor,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Start,
-                    modifier = Modifier.weight(1f),
-                )
-                if (titleAction != null) titleAction()
-            }
-
-            if (header != null) {
-                Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { header() }
-            }
-
-            if (prompt != null) {
-                Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { prompt() }
-            }
-
-            // 中间区域吃掉"剩余高度"（weight(fill = false)），并内部滚动。
-            //
-            // 这里**不能**写死 `heightIn(max = ...)`：弹窗总高还要加上标题、
-            // 说明、底部输入框和按钮，固定值一叠加就会超出屏幕，把按钮挤出可视区。
-            // weight 让滚动区自动收缩到真正剩下的空间，所以无论哪一层多高，
-            // 按钮区始终留在屏幕内。
-            val middleModifier = Modifier.fillMaxWidth().weight(1f, fill = fillBody)
-
-            val scrollableBody: @Composable () -> Unit = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    body()
-                }
-            }
-
-            if (!groupBody) {
-                Column(modifier = middleModifier.padding(top = 8.dp)) { scrollableBody() }
-            } else {
-                // 显式给一层比弹窗底更明显的容器色：Miuix 的浅色方案里
-                // `background` 与 `surfaceContainer` **都是 #FFFFFF**，
-                // 用默认卡片色会与弹窗底完全同色、分组看不出来。
-                Card(
-                    modifier = middleModifier.padding(top = 10.dp),
-                    cornerRadius = ZhiRadius.card,
-                    insideMargin = PaddingValues(0.dp),
-                    colors = CardDefaults.defaultColors(
-                        color = MiuixTheme.colorScheme.surfaceContainerHigh,
-                        contentColor = MiuixTheme.colorScheme.onSurfaceContainerHigh,
-                    ),
-                ) {
-                    Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)) {
-                        scrollableBody()
-                    }
-                }
-            }
-
-            if (footer != null) {
-                Column(modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) { footer() }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-                content = { actions() },
+            Text(
+                text = title,
+                color = titleColor,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Start,
+                modifier = Modifier.weight(1f),
             )
+            if (titleAction != null) titleAction()
         }
+
+        if (header != null) {
+            Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { header() }
+        }
+
+        if (prompt != null) {
+            Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { prompt() }
+        }
+
+        // 中间区域吃掉"剩余高度"（weight(fill = false)），并内部滚动。
+        //
+        // 这里**不能**写死 `heightIn(max = ...)`：弹窗总高还要加上标题、
+        // 说明、底部输入框和按钮，固定值一叠加就会超出屏幕，把按钮挤出可视区。
+        // weight 让滚动区自动收缩到真正剩下的空间，所以无论哪一层多高，
+        // 按钮区始终留在屏幕内。
+        val middleModifier = Modifier.fillMaxWidth().weight(1f, fill = fillBody)
+
+        val scrollableBody: @Composable () -> Unit = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                body()
+            }
+        }
+
+        if (!groupBody) {
+            Column(modifier = middleModifier.padding(top = 8.dp)) { scrollableBody() }
+        } else {
+            // 显式给一层比弹窗底更明显的容器色：Miuix 的浅色方案里
+            // `background` 与 `surfaceContainer` **都是 #FFFFFF**，
+            // 用默认卡片色会与弹窗底完全同色、分组看不出来。
+            Card(
+                modifier = middleModifier.padding(top = 10.dp),
+                cornerRadius = ZhiRadius.card,
+                insideMargin = PaddingValues(0.dp),
+                colors = CardDefaults.defaultColors(
+                    color = MiuixTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MiuixTheme.colorScheme.onSurfaceContainerHigh,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)) {
+                    scrollableBody()
+                }
+            }
+        }
+
+        if (footer != null) {
+            Column(modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) { footer() }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+            content = { actions() },
+        )
     }
 }
 

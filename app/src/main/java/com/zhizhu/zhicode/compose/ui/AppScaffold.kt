@@ -46,6 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.LocalZhiDark
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.theme.zhiTextStyles
 import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.AgentTask
@@ -118,7 +119,10 @@ fun ZhiCodeApp(viewModel: WorkspaceViewModel = rememberWorkspaceViewModel()) {
         // 之所以要覆盖主题的 background：Miuix 浅色方案里 background / surface /
         // surfaceContainer 都是 #FFFFFF，纯白铺满后板块完全分不出来。
         val appColors = colors.copy(background = ZhiColors.backdrop())
-        MiuixTheme(colors = appColors) {
+        // textStyles 必须在这里给：Miuix 组件读的是主题样式（TextField→main、
+        // Button→button、BasicComponent→headline1/body2、SmallTitle→subtitle），
+        // 逐个传 fontSize 够不到它们。字阶与依据见 theme/ZhiTextStyles.kt。
+        MiuixTheme(colors = appColors, textStyles = zhiTextStyles()) {
             ZhiCodeScreen(state = state, viewModel = viewModel, isDark = isDark)
         }
     }
