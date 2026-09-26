@@ -29,14 +29,14 @@ import top.niunaijun.blackbox.app.BActivityThread;
  * In-process debugger for IQ Sandbox guest processes.
  *
  * This class intentionally operates only on /proc/self and code loaded into the current
- * virtual process. The main Agent selects a concrete sandbox PID through SandboxAgentBridge,
+ * virtual process. The main Agent selects a concrete sandbox PID through SandboxGuestHost,
  * then that process performs the operation on itself. This keeps raw memory/debug operations
  * scoped to IQ Sandbox instead of turning IQ Code into a system-wide injector.
  */
-public final class SandboxProcessDebug {
+public final class SandboxGuestDebug {
     private static final int MAX_MAP_CHARS = 512_000;
     private static final int MAX_MEMORY_BYTES = 65_536;
-    private SandboxProcessDebug() {}
+    private SandboxGuestDebug() {}
 
     public static JSONObject dispatch(Context context, String action, JSONObject p) throws Exception {
         JSONObject out = new JSONObject();
@@ -75,16 +75,16 @@ public final class SandboxProcessDebug {
                 out.put("message", "GC 已请求");
                 break;
             case "proc_frida_status":
-                out.put("frida", SandboxFridaBridge.status(context));
+                out.put("frida", SandboxFrida.status(context));
                 break;
             case "proc_frida_load":
-                out.put("frida", SandboxFridaBridge.load(context));
+                out.put("frida", SandboxFrida.load(context));
                 break;
             case "proc_frida_command":
-                out.put("frida", SandboxFridaBridge.command(context, p.optString("op", ""), p.optJSONObject("frida_payload"), Math.max(1000, Math.min(120000, p.optInt("timeout_ms", 10000)))));
+                out.put("frida", SandboxFrida.command(context, p.optString("op", ""), p.optJSONObject("frida_payload"), Math.max(1000, Math.min(120000, p.optInt("timeout_ms", 10000)))));
                 break;
             case "proc_frida_events":
-                out.put("events", SandboxFridaBridge.events(Math.max(1024, Math.min(1000000, p.optInt("max_chars", 200000)))));
+                out.put("events", SandboxFrida.events(Math.max(1024, Math.min(1000000, p.optInt("max_chars", 200000)))));
                 break;
             default:
                 out.put("ok", false).put("error", "未知进程调试动作: " + action);
@@ -177,10 +177,10 @@ public final class SandboxProcessDebug {
         int count = Math.max(1, Math.min(MAX_MEMORY_BYTES, size));
         MapLine mapping = findMapping(address, count, false);
         Context host = ZhiSandbox.hostContext(); if (host == null) host = context;
-        if (!FridaRuntimeManager.isInstalled(host))
+        if (!FridaEnv.isInstalled(host))
             throw new IllegalStateException("安全内存通道未就绪：已禁用 /proc/self/mem 与 Unsafe 直读以避免 EACCES/闪退。先执行 Debug action=frida_install，再重试 memory_read/frida_read。");
         JSONObject payload = new JSONObject().put("address", hex(address)).put("size", count).put("volatile", true);
-        JSONObject response = SandboxFridaBridge.command(context, "read", payload, 12000);
+        JSONObject response = SandboxFrida.command(context, "read", payload, 12000);
         JSONObject result = response.optJSONObject("result");
         if (result == null) throw new IllegalStateException("Frida read 未返回 result: " + response);
         String hexData = result.optString("hex", "");
@@ -205,10 +205,10 @@ public final class SandboxProcessDebug {
         if (data.length > MAX_MEMORY_BYTES) throw new IllegalArgumentException("单次最多写入 " + MAX_MEMORY_BYTES + " 字节");
         MapLine mapping = findMapping(address, data.length, true);
         Context host = ZhiSandbox.hostContext(); if (host == null) host = context;
-        if (!FridaRuntimeManager.isInstalled(host))
+        if (!FridaEnv.isInstalled(host))
             throw new IllegalStateException("安全内存通道未就绪：已禁用 /proc/self/mem 与 Unsafe 直写以避免 EACCES/闪退。先执行 Debug action=frida_install，再重试 memory_write/frida_write。");
         JSONObject payload = new JSONObject().put("address", hex(address)).put("data", toHex(data)).put("volatile", true);
-        JSONObject response = SandboxFridaBridge.command(context, "write", payload, 12000);
+        JSONObject response = SandboxFrida.command(context, "write", payload, 12000);
         JSONObject result = response.optJSONObject("result");
         if (result == null) throw new IllegalStateException("Frida write 未返回 result: " + response);
         return new JSONObject()

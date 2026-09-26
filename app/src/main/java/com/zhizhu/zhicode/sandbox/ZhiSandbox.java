@@ -106,9 +106,9 @@ public final class ZhiSandbox {
 
                 @Override public void beforeApplicationOnCreate(String pkg, String process, Application a, int uid) {
                     Context host = appContext == null ? a : appContext;
-                    if (FridaRuntimeManager.isAutoAttachEnabled(host, pkg)) {
+                    if (FridaEnv.isAutoAttachEnabled(host, pkg)) {
                         try {
-                            SandboxFridaBridge.load(host);
+                            SandboxFrida.load(host);
                             SandboxConsole.event("Frida auto-attach 已在 Application.onCreate 前加载: " + pkg + " / " + process);
                         } catch (Throwable error) {
                             SandboxConsole.event("Frida auto-attach 失败: " + pkg + " / " + process + " / " + error);
@@ -128,9 +128,9 @@ public final class ZhiSandbox {
                     resumedPackage = pkg;
                     SandboxConsole.event("Activity resumed: " + pkg + " / " + activity.getClass().getName());
                     if (SandboxPrefs.isFloatingLogEnabled(appContext)) {
-                        SandboxFloatingController.attach(activity, pkg);
+                        SandboxOverlay.attach(activity, pkg);
                     } else {
-                        SandboxFloatingController.detach(activity);
+                        SandboxOverlay.detach(activity);
                     }
                 }
 
@@ -246,9 +246,9 @@ public final class ZhiSandbox {
         synchronized (LIFECYCLE_LOCK) {
             ensureReady();
             Context context = appContext;
-            if (context != null) SandboxGuardService.start(context);
+            if (context != null) SandboxKeeper.start(context);
             boolean launched = BlackBoxCore.get().launchApk(pkg, USER_ID);
-            if (!launched && context != null) SandboxGuardService.stop(context);
+            if (!launched && context != null) SandboxKeeper.stop(context);
             return launched;
         }
     }
@@ -257,7 +257,7 @@ public final class ZhiSandbox {
         ensureReady();
         BlackBoxCore.get().stopPackage(pkg, USER_ID);
         Context context = appContext;
-        if (context != null) SandboxGuardService.stop(context);
+        if (context != null) SandboxKeeper.stop(context);
     }
 
     public static void clearData(String pkg) {
@@ -269,7 +269,7 @@ public final class ZhiSandbox {
         ensureReady();
         BlackBoxCore.get().uninstallPackageAsUser(pkg, USER_ID);
         Context context = appContext;
-        if (context != null) SandboxGuardService.stop(context);
+        if (context != null) SandboxKeeper.stop(context);
     }
 
     // ------------------------------------------------------------------ 设置
@@ -291,8 +291,8 @@ public final class ZhiSandbox {
         SandboxPrefs.setFloatingLogEnabled(context, enabled);
         Activity activity = resumedActivity.get();
         if (activity != null) {
-            if (enabled) SandboxFloatingController.attach(activity, resumedPackage);
-            else SandboxFloatingController.detach(activity);
+            if (enabled) SandboxOverlay.attach(activity, resumedPackage);
+            else SandboxOverlay.detach(activity);
         }
         SandboxConsole.event("日志悬浮窗已" + (enabled ? "开启" : "关闭"));
         return SandboxPrefs.isFloatingLogEnabled(context);
@@ -311,7 +311,7 @@ public final class ZhiSandbox {
         synchronized (LIFECYCLE_LOCK) {
             if (SandboxPrefs.isRootHidden(context) == hidden) return false;
             List<ApplicationInfo> apps = installedApplications();
-            SandboxGuardService.stop(context);
+            SandboxKeeper.stop(context);
             for (ApplicationInfo info : apps) BlackBoxCore.get().stopPackage(info.packageName, USER_ID);
             long deadline = SystemClock.uptimeMillis() + 1500L;
             boolean stopped = allGuestsStopped(apps);

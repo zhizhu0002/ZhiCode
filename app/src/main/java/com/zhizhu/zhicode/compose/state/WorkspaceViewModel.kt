@@ -883,7 +883,7 @@ class WorkspaceViewModel(
     fun closeMemory() = _state.update { it.copy(memory = null) }
 
     /**
-     * 打开 IQ 沙箱管理界面（`SandboxDashboardActivity`）。
+     * 打开 IQ 沙箱管理界面（`SandboxBoard`）。
      *
      * 与「环境弹窗」不同，这里**不能**只改本进程的 UI 状态：沙箱引擎整个跑在
      * `:zhisandbox` 进程里，管理界面通过 `${applicationId}.sandbox.control` 这个同 UID
@@ -899,7 +899,7 @@ class WorkspaceViewModel(
         val context = getApplication<android.app.Application>()
         val started = runCatching {
             context.startActivity(
-                android.content.Intent(context, com.zhizhu.zhicode.sandbox.SandboxDashboardActivity::class.java)
+                android.content.Intent(context, com.zhizhu.zhicode.sandbox.SandboxBoard::class.java)
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         }

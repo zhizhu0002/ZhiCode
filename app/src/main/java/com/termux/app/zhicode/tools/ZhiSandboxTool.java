@@ -5,7 +5,7 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.util.Base64;
 
-import com.zhizhu.zhicode.sandbox.SandboxAgentBridge;
+import com.zhizhu.zhicode.sandbox.SandboxGuestHost;
 import com.zhizhu.zhicode.sandbox.SandboxRpc;
 import com.zhizhu.zhicode.sandbox.SandboxConsole;
 import com.termux.app.zhicode.model.SessionConfig;
@@ -73,7 +73,7 @@ public final class ZhiSandboxTool implements ZhiTool {
     private ToolExecutionResult control(String action,JSONObject in)throws Exception{
         JSONObject payload=new JSONObject();if(in.has("node"))payload.put("node",in.optString("node",""));if(in.has("text"))payload.put("text",in.optString("text",""));
         for(String k:new String[]{"x","y","x1","y1","x2","y2","duration_ms"})if(in.has(k))payload.put(k,in.optInt(k));
-        JSONObject r=SandboxAgentBridge.request(context,action,in.optString("package",""),payload,"screenshot".equals(action)?12000:4500);
+        JSONObject r=SandboxGuestHost.request(context,action,in.optString("package",""),payload,"screenshot".equals(action)?12000:4500);
         if(!r.optBoolean("ok",false))return ToolExecutionResult.error(r.optString("error",r.toString()));
         String display=r.toString(2);
         return "screenshot".equals(action)?screenshotResult(r,display):ToolExecutionResult.ok(display);

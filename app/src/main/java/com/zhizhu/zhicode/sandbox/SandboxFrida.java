@@ -20,17 +20,17 @@ import java.nio.charset.StandardCharsets;
  * Agent dynamic memory/instrumentation without requiring adb, frida-server, ptrace, or a Python
  * Frida client on the phone.
  */
-public final class SandboxFridaBridge {
+public final class SandboxFrida {
     private static volatile boolean loaded;
     private static volatile File sessionDir;
-    private SandboxFridaBridge() {}
+    private SandboxFrida() {}
 
     public static synchronized JSONObject load(Context context) throws Exception {
         Context host = ZhiSandbox.hostContext(); if (host == null) host = context;
         if (loaded && sessionDir != null) return status(host);
-        File master = FridaRuntimeManager.masterGadget(host);
-        if (!FridaRuntimeManager.isInstalled(host)) throw new IllegalStateException("Frida Gadget 未安装；先执行 Debug action=frida_install");
-        File dir = new File(FridaRuntimeManager.root(host), "sessions/" + Process.myPid());
+        File master = FridaEnv.masterGadget(host);
+        if (!FridaEnv.isInstalled(host)) throw new IllegalStateException("Frida Gadget 未安装；先执行 Debug action=frida_install");
+        File dir = new File(FridaEnv.root(host), "sessions/" + Process.myPid());
         if (!dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) throw new IllegalStateException("无法创建 Frida Guest session: " + dir);
         File gadget = new File(dir, "libiqfrida.so");
         File config = new File(dir, "libiqfrida.config");
@@ -54,8 +54,8 @@ public final class SandboxFridaBridge {
     public static JSONObject status(Context context) throws Exception {
         Context host = ZhiSandbox.hostContext(); if (host == null) host = context;
         JSONObject o = new JSONObject()
-            .put("installed", FridaRuntimeManager.isInstalled(host))
-            .put("version", FridaRuntimeManager.VERSION)
+            .put("installed", FridaEnv.isInstalled(host))
+            .put("version", FridaEnv.VERSION)
             .put("loaded", loaded)
             .put("pid", Process.myPid());
         if (sessionDir != null) o.put("session_dir", sessionDir.getAbsolutePath()).put("ready", new File(sessionDir, "ready.json").isFile());

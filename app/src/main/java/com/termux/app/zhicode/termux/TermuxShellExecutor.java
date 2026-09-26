@@ -2,7 +2,7 @@ package com.termux.app.zhicode.termux;
 
 import android.content.Context;
 
-import com.zhizhu.zhicode.sandbox.SandboxTermuxBridge;
+import com.zhizhu.zhicode.sandbox.SandboxShell;
 
 import com.termux.shared.termux.TermuxConstants;
 
@@ -171,9 +171,9 @@ public final class TermuxShellExecutor {
             env.put("PWD", requestedWorking.getAbsolutePath());
             env.put("SHELL", prefix + "/bin/bash");
             env.put("ZHICODE_APP", "1");
-            env.put("ZHICODE_SANDBOX_BRIDGE_DIR", SandboxTermuxBridge.bridgeDir(context));
+            env.put("ZHICODE_SANDBOX_BRIDGE_DIR", SandboxShell.bridgeDir(context));
             env.put("ZHICODE_APK_PATH", context.getApplicationInfo().sourceDir);
-            SandboxTermuxBridge.ensureCliInstalled(context);
+            SandboxShell.ensureCliInstalled(context);
             env.put("ZHICODE_TOOL_EXECUTOR", "1");
             env.put("TERMUX_VERSION", "0.118.3");
             env.put("TERMUX_APP__PACKAGE_NAME", TermuxConstants.TERMUX_PACKAGE_NAME);

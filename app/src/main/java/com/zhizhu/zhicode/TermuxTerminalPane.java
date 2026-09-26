@@ -4,7 +4,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 
-import com.zhizhu.zhicode.sandbox.SandboxTermuxBridge;
+import com.zhizhu.zhicode.sandbox.SandboxShell;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.util.Log;
@@ -280,7 +280,7 @@ public final class TermuxTerminalPane extends FrameLayout implements TerminalVie
     }
 
     private String[] environmentArray() {
-        SandboxTermuxBridge.ensureCliInstalled(getContext());
+        SandboxShell.ensureCliInstalled(getContext());
         Map<String,String> e = new LinkedHashMap<>();
         String prefix = TermuxConstants.TERMUX_PREFIX_DIR_PATH;
         e.put("HOME", TermuxConstants.TERMUX_HOME_DIR_PATH);
@@ -316,7 +316,7 @@ public final class TermuxTerminalPane extends FrameLayout implements TerminalVie
         e.put("TERMUX__ROOTFS", TermuxConstants.TERMUX_FILES_DIR_PATH);
         e.put("ZHICODE_APP", "1");
         e.put("ZHICODE_TERMINAL_SESSION", "1");
-        e.put("ZHICODE_SANDBOX_BRIDGE_DIR", SandboxTermuxBridge.bridgeDir(getContext()));
+        e.put("ZHICODE_SANDBOX_BRIDGE_DIR", SandboxShell.bridgeDir(getContext()));
         e.put("ZHICODE_APK_PATH", getContext().getApplicationInfo().sourceDir);
         List<String> out = new ArrayList<>();
         for (Map.Entry<String,String> x : e.entrySet()) out.add(x.getKey() + "=" + x.getValue());

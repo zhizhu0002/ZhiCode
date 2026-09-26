@@ -3,11 +3,11 @@ package com.zhizhu.zhicode.compose
 import android.app.Application
 import android.content.Context
 import com.zhizhu.zhicode.sandbox.ZhiSandbox
-import com.zhizhu.zhicode.sandbox.SandboxAgentBridge
+import com.zhizhu.zhicode.sandbox.SandboxGuestHost
 import com.zhizhu.zhicode.sandbox.SandboxConsole
 import com.zhizhu.zhicode.sandbox.SandboxProcess
 import com.zhizhu.zhicode.sandbox.SandboxStage
-import com.zhizhu.zhicode.sandbox.SandboxTermuxBridge
+import com.zhizhu.zhicode.sandbox.SandboxShell
 import com.termux.shared.termux.TermuxConstants
 
 /**
@@ -58,10 +58,10 @@ class ZhiCodeApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         if (sandboxProcess) {
-            SandboxAgentBridge.register(this)
+            SandboxGuestHost.register(this)
             ZhiSandbox.create()
         } else if (SandboxProcess.isMain(this)) {
-            SandboxTermuxBridge.start(this)
+            SandboxShell.start(this)
         }
     }
 

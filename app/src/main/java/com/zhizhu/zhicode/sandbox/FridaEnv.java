@@ -21,11 +21,11 @@ import java.util.Locale;
  * pinned to an official frida/frida GitHub release. The embedded Termux curl+xz toolchain does
  * the transport/decompression and Java verifies the downloaded compressed asset before use.
  */
-public final class FridaRuntimeManager {
+public final class FridaEnv {
     public static final String VERSION = "17.17.0";
     public static final String GADGET_URL = "https://github.com/frida/frida/releases/download/17.17.0/frida-gadget-17.17.0-android-arm64.so.xz";
     public static final String GADGET_XZ_SHA256 = "942b66a229da11f1dda38c2c3c126bf23df76c0febc0925b6a5decc04687e871";
-    private FridaRuntimeManager() {}
+    private FridaEnv() {}
 
     public static File root(Context c) { return new File(c.getFilesDir(), "sandbox/frida"); }
     public static File masterGadget(Context c) { return new File(root(c), "frida-" + VERSION + "/libiqfrida.so"); }

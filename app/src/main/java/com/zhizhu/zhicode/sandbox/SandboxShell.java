@@ -27,17 +27,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Same-UID file bridge that makes IQ Sandbox/Debug callable from the embedded Termux shell.
  * It does not require adb, an exported Android component, a network socket, or root.
  */
-public final class SandboxTermuxBridge {
+public final class SandboxShell {
     private static final AtomicBoolean STARTED=new AtomicBoolean();
     private static volatile Context app;
-    private SandboxTermuxBridge(){}
+    private SandboxShell(){}
 
     public static void start(Context context){
         app=context.getApplicationContext();
         if(!isMainHostProcess(app))return;
         ensureDirs(app); ensureCliInstalled(app);
         if(!STARTED.compareAndSet(false,true))return;
-        Thread t=new Thread(SandboxTermuxBridge::loop,"iq-termux-sandbox-bridge");t.setDaemon(true);t.start();
+        Thread t=new Thread(SandboxShell::loop,"iq-termux-sandbox-bridge");t.setDaemon(true);t.start();
     }
 
     public static void ensureCliInstalled(Context context){

@@ -3,8 +3,8 @@ package com.termux.app.zhicode.tools;
 import android.app.ActivityManager;
 import android.content.Context;
 
-import com.zhizhu.zhicode.sandbox.FridaRuntimeManager;
-import com.zhizhu.zhicode.sandbox.SandboxAgentBridge;
+import com.zhizhu.zhicode.sandbox.FridaEnv;
+import com.zhizhu.zhicode.sandbox.SandboxGuestHost;
 import com.zhizhu.zhicode.sandbox.SandboxRpc;
 import com.zhizhu.zhicode.sandbox.SandboxConsole;
 import com.termux.app.zhicode.model.SessionConfig;
@@ -76,15 +76,15 @@ public final class ZhiDebugTool implements ZhiTool {
 
     private ToolExecutionResult sandbox(String action,JSONObject in)throws Exception{
         if("process_list".equals(action))return ToolExecutionResult.ok(sandboxProcessList(in.optString("package","")).toString(2));
-        if("frida_runtime_status".equals(action))return ToolExecutionResult.ok(FridaRuntimeManager.status(context).toString(2));
-        if("frida_install".equals(action))return ToolExecutionResult.ok(FridaRuntimeManager.install(context,shell,com.termux.shared.termux.TermuxConstants.TERMUX_HOME_DIR_PATH).toString(2));
+        if("frida_runtime_status".equals(action))return ToolExecutionResult.ok(FridaEnv.status(context).toString(2));
+        if("frida_install".equals(action))return ToolExecutionResult.ok(FridaEnv.install(context,shell,com.termux.shared.termux.TermuxConstants.TERMUX_HOME_DIR_PATH).toString(2));
         String pkg=in.optString("package","").trim();
         if("frida_auto_attach".equals(action)){
             if(pkg.isEmpty())return ToolExecutionResult.error("frida_auto_attach 需要 package");
             boolean enabled=in.optBoolean("enabled",true);
-            JSONObject state=FridaRuntimeManager.setAutoAttach(context,pkg,enabled);
-            if(enabled&&FridaRuntimeManager.isInstalled(context)){
-                try{int livePid=resolveSandboxPid(pkg,in.optInt("pid",-1));JSONObject rr=SandboxAgentBridge.request(context,"proc_frida_load",pkg,livePid,new JSONObject().put("pid",livePid),15000);state.put("live_load",rr);}catch(Throwable e){state.put("live_load","deferred: "+e.getMessage());}
+            JSONObject state=FridaEnv.setAutoAttach(context,pkg,enabled);
+            if(enabled&&FridaEnv.isInstalled(context)){
+                try{int livePid=resolveSandboxPid(pkg,in.optInt("pid",-1));JSONObject rr=SandboxGuestHost.request(context,"proc_frida_load",pkg,livePid,new JSONObject().put("pid",livePid),15000);state.put("live_load",rr);}catch(Throwable e){state.put("live_load","deferred: "+e.getMessage());}
             }
             return ToolExecutionResult.ok(state.toString(2));
         }
@@ -119,7 +119,7 @@ public final class ZhiDebugTool implements ZhiTool {
             payload.put("frida_payload",fridaPayload);
             payload.put("timeout_ms",commandTimeoutMs);
         }
-        JSONObject r=SandboxAgentBridge.request(context,bridgeAction,pkg,pid,payload,("memory_write".equals(action)||"load_library".equals(action)||action.startsWith("frida_"))?Math.max(8000,payload.optInt("timeout_ms",12000)+2000):5000);
+        JSONObject r=SandboxGuestHost.request(context,bridgeAction,pkg,pid,payload,("memory_write".equals(action)||"load_library".equals(action)||action.startsWith("frida_"))?Math.max(8000,payload.optInt("timeout_ms",12000)+2000):5000);
         return r.optBoolean("ok",false)?ToolExecutionResult.ok(r.toString(2)):ToolExecutionResult.error(r.optString("error",r.toString()));
     }
 

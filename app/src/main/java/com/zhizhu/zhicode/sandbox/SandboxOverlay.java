@@ -22,9 +22,9 @@ import android.widget.TextView;
 import com.zhizhu.zhicode.compose.MainActivity;
 
 /** Tiny host-owned overlay injected into every resumed virtual Activity. No SYSTEM_ALERT_WINDOW is required. */
-public final class SandboxFloatingController {
+public final class SandboxOverlay {
     public static final Integer OVERLAY_TAG=0x49515342; // "IQSB"
-    private SandboxFloatingController(){}
+    private SandboxOverlay(){}
 
     public static void attach(Activity activity,String pkg){
         if(activity==null||activity.isFinishing())return;
@@ -65,7 +65,7 @@ public final class SandboxFloatingController {
                     return true;
             }return false;});
             log.setOnClickListener(v->showLog(activity)); back.setOnClickListener(v->openIQ(activity,false));
-            stop.setOnClickListener(v->{new Thread(()->{try{ZhiSandbox.stop(pkg);SandboxGuardService.stop(activity);}catch(Throwable ignored){} activity.runOnUiThread(()->openIQ(activity,false));},"iq-sandbox-stop").start();});
+            stop.setOnClickListener(v->{new Thread(()->{try{ZhiSandbox.stop(pkg);SandboxKeeper.stop(activity);}catch(Throwable ignored){} activity.runOnUiThread(()->openIQ(activity,false));},"iq-sandbox-stop").start();});
             activity.addContentView(panel,new ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT));
             panel.setX(dp(activity,10)); panel.setY(dp(activity,36));
         });
@@ -104,7 +104,7 @@ public final class SandboxFloatingController {
     private static TextView text(Activity activity,String value){TextView t=new TextView(activity);t.setText(value);t.setTextColor(Color.WHITE);t.setTextSize(10);return t;}
 
     private static void openIQ(Activity a,boolean debug){
-        Intent i=new Intent(a,debug?SandboxDashboardActivity.class:MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        Intent i=new Intent(a,debug?SandboxBoard.class:MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
         i.putExtra("iq_sandbox_return",true); a.startActivity(i);
     }
     private static TextView button(Activity a,String s,int color){TextView t=new TextView(a);t.setText(s);t.setTextColor(color);t.setTextSize(11);t.setTypeface(Typeface.DEFAULT_BOLD);t.setGravity(Gravity.CENTER);return t;}

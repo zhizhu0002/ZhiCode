@@ -147,7 +147,7 @@
 
         <!-- 沙箱管理界面。它本身留在主进程（不设 android:process），只通过上面的 provider 发指令 -->
         <activity
-            android:name="com.zhizhu.zhicode.sandbox.SandboxDashboardActivity"
+            android:name="com.zhizhu.zhicode.sandbox.SandboxBoard"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:exported="false"
             android:screenOrientation="unspecified"
@@ -158,7 +158,7 @@
           没有它主进程会被系统回收，Agent/工具链会随之中断。
         -->
         <service
-            android:name="com.zhizhu.zhicode.sandbox.SandboxGuardService"
+            android:name="com.zhizhu.zhicode.sandbox.SandboxKeeper"
             android:exported="false"
             android:stopWithTask="false" />
 

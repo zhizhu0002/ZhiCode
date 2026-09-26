@@ -44,7 +44,7 @@ import top.niunaijun.blackbox.app.BActivityThread;
  * to inspect modules/base addresses, threads, memory and load a debug .so without ptracing
  * unrelated Android processes.
  */
-public final class SandboxAgentBridge {
+public final class SandboxGuestHost {
     public static final String ACTION_CONTROL="com.zhizhu.zhicode.sandbox.AGENT_CONTROL";
     private static final long MAX_CAPTURE_PIXELS=1_000_000L;
     private static final long MAX_SCREENSHOT_BYTES=5L*1024L*1024L;
@@ -54,7 +54,7 @@ public final class SandboxAgentBridge {
     private static final ExecutorService CAPTURE_IO=Executors.newSingleThreadExecutor(r->{Thread t=new Thread(r,"iq-sandbox-capture-io");t.setDaemon(true);return t;});
     private static final AtomicReference<String> ACTIVE_CAPTURE=new AtomicReference<>();
     private static volatile boolean registered;
-    private SandboxAgentBridge(){}
+    private SandboxGuestHost(){}
 
     public static synchronized void register(Context context){
         if(registered)return; registered=true;
@@ -109,7 +109,7 @@ public final class SandboxAgentBridge {
             if(guestPkg.isEmpty()||guestPkg.equals(context.getPackageName()))return;
             new Thread(()->{
                 JSONObject out;
-                try{out=SandboxProcessDebug.dispatch(context,action,p);}
+                try{out=SandboxGuestDebug.dispatch(context,action,p);}
                 catch(Throwable e){out=error(e);}
                 writeResult(context,id,out);
             },"iq-sandbox-proc-debug").start();
@@ -157,7 +157,7 @@ public final class SandboxAgentBridge {
     }
     private static void walk(View v,String path,JSONArray out,int depth)throws Exception{
         if(v==null||depth>40||out.length()>1800)return;
-        if(SandboxFloatingController.OVERLAY_TAG.equals(v.getTag()))return;
+        if(SandboxOverlay.OVERLAY_TAG.equals(v.getTag()))return;
         int[] xy=new int[2]; v.getLocationOnScreen(xy); JSONObject o=new JSONObject();
         o.put("node",path).put("class",v.getClass().getName()).put("bounds",xy[0]+","+xy[1]+","+(xy[0]+v.getWidth())+","+(xy[1]+v.getHeight()))
             .put("visible",v.getVisibility()==View.VISIBLE).put("enabled",v.isEnabled()).put("clickable",v.isClickable()).put("focusable",v.isFocusable());
@@ -199,7 +199,7 @@ public final class SandboxAgentBridge {
                 if(w<=0||h<=0)throw new IllegalStateException("窗口尚未完成布局");
                 long remaining=deadline-SystemClock.uptimeMillis();if(remaining<=250L)throw new IllegalStateException("截图请求已过期");
                 main.postDelayed(timeout,Math.max(100L,remaining-200L));
-                overlay=root.findViewWithTag(SandboxFloatingController.OVERLAY_TAG);oldOverlayVisibility=overlay==null?View.VISIBLE:overlay.getVisibility();
+                overlay=root.findViewWithTag(SandboxOverlay.OVERLAY_TAG);oldOverlayVisibility=overlay==null?View.VISIBLE:overlay.getVisibility();
                 if(overlay!=null)overlay.setVisibility(View.INVISIBLE);
                 root.postOnAnimation(this::captureFrame);
             }catch(Throwable e){fail(e,"start");}
@@ -264,7 +264,7 @@ public final class SandboxAgentBridge {
             if(Looper.myLooper()==Looper.getMainLooper())restore.run();else main.post(restore);
         }
         private void stopPixelThread(){HandlerThread thread=pixelThread;pixelThread=null;if(thread!=null)thread.quitSafely();}
-        private void fail(Throwable error,String stage){finish(SandboxAgentBridge.error(error),stage);}
+        private void fail(Throwable error,String stage){finish(SandboxGuestHost.error(error),stage);}
         private boolean finish(JSONObject out,String stage){
             if(!completed.compareAndSet(false,true))return false;
             main.removeCallbacks(timeout);stopPixelThread();restoreOverlay();
