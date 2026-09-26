@@ -89,7 +89,7 @@ public final class SandboxHostArchitectureTest {
                 "SandboxProcess 必须引用 SandboxContract 判定控制器进程");
         require(coreManifest.contains("android:process=\":zhisandbox\""),
                 "Bcore 清单里的控制器组件必须声明在 :zhisandbox");
-        require(!coreManifest.contains(":iqsandbox"), "Bcore 清单里不得再有 :iqsandbox");
+        require(!code(coreManifest).contains(":iqsandbox"), "Bcore 清单里不得再有 :iqsandbox");
 
         // 2. 宿主清单与引擎必须指向同一个进程名
         require(manifest.contains("android:process=\":zhisandbox\""),

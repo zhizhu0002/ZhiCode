@@ -1001,7 +1001,7 @@ public class BlackBoxCore extends ClientConfiguration {
             } catch (Throwable controllerError) {
                 writeStartupStage(getContext(), "create:controller-error:" + controllerError.getClass().getSimpleName());
                 Slog.e(TAG, "Hookless sandbox controller initialization failed", controllerError);
-                throw new IllegalStateException("IQSandbox controller initialization failed", controllerError);
+                throw new IllegalStateException("ZhiSandbox controller initialization failed", controllerError);
             }
             return;
         }
