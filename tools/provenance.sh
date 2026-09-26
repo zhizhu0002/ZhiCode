@@ -159,3 +159,14 @@ END {
   printf "  真正属于 IQ Code:     %d 行\n", total_shared - termux_upstream
 }
 ' "$REPORT"
+
+# 逐个文件的清单。默认不输出，因为日常只需要上面那张汇总表；
+# 但要决定「下一步重写哪些文件」时必须有它 —— 否则排批次只能靠感觉。
+# 用法: PROVENANCE_PER_FILE=1 bash tools/provenance.sh
+if [ "${PROVENANCE_PER_FILE:-0}" = "1" ]; then
+    echo
+    echo "按重合行数排序（只列仍与 IQ Code 逐行相同的文件）："
+    printf "%7s %7s %8s  %s\n" "相同" "现在" "重合率" "文件"
+    awk -F'|' '$5 > 0 { printf "%7d %7d %7.1f%%  %s\n", $5, $4, $5 * 100 / $4, $1 }' "$REPORT" \
+        | sort -k1,1nr
+fi
