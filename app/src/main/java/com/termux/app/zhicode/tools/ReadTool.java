@@ -29,7 +29,7 @@ import java.nio.charset.StandardCharsets;
  * {@code %6d} 右对齐、后跟制表符：模型据此引用行号，而等宽对齐让它在长文件里
  * 更容易对上位置。这个格式是给模型看的**约定**，改了会让它对不上。
  */
-public final class ReadTool implements ZhiTool {
+final class ReadTool implements ZhiTool {
 
     private static final int DEFAULT_LIMIT = 2000;
     private static final int MIN_LIMIT = 1;

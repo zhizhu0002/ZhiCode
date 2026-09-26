@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
  * 它们可能有几十万个文件，而内容永远不是答案。只跳过这两个名字（而不是所有隐藏目录）：
  * {@code .github}、{@code .termux} 里的文件是正常的搜索目标。
  */
-public final class GlobTool implements ZhiTool {
+final class GlobTool implements ZhiTool {
 
     private static final int MAX_RESULTS = 3000;
     private static final String DEFAULT_PATTERN = "**/*";

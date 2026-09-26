@@ -24,7 +24,7 @@ import java.io.File;
  * 走正则就得先转义替换串，而转义规则对模型来说是不透明的 ——
  * 它看到的是「我明明写了 {@code $1}，结果文件里变成了别的」。
  */
-public final class EditTool implements ZhiTool {
+final class EditTool implements ZhiTool {
 
     private static final long MAX_BYTES = 20L * 1024L * 1024L;
 

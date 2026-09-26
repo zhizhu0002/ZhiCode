@@ -23,7 +23,7 @@ import java.util.Set;
  * 引擎自己会建一些内部任务（比如压缩上下文的占位）。它们对用户没有意义，
  * 而把内部机制混进用户的待办列表会让人以为那是他交代的事。
  */
-public final class TaskListTool implements ZhiTool {
+final class TaskListTool implements ZhiTool {
 
     private static final String NO_TASKS = "No tasks found";
     private static final String INTERNAL_FLAG = "_internal";

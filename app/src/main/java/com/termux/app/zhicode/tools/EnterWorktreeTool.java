@@ -32,7 +32,7 @@ import java.util.UUID;
  * {@code -}：模型偶尔会用中文或空格当标签，那会造出一个路径里有空格的目录，
  * 后面每一次 shell 调用都要额外注意引号。
  */
-public final class EnterWorktreeTool implements ZhiTool {
+final class EnterWorktreeTool implements ZhiTool {
 
     private static final int TIMEOUT_MS = 120_000;
     private static final String DEFAULT_LABEL = "zhi";

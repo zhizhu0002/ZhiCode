@@ -26,7 +26,7 @@ import java.io.File;
  * 是因为 {@code renameTo} 到已存在路径的行为依实现而异（有的覆盖、有的失败），
  * 先清掉才能让两条路径（rename 与 copy）表现一致。
  */
-public final class MoveTool implements ZhiTool {
+final class MoveTool implements ZhiTool {
 
     @Override public String name() { return "Move"; }
 

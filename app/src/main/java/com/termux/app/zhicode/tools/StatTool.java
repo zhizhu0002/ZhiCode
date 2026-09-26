@@ -23,7 +23,7 @@ import java.util.Locale;
  * 而模型常常要判断「这个文件是这次改的还是上次的」。
  * 用 {@link Locale#US} 固定格式，避免跟随系统语言变化。
  */
-public final class StatTool implements ZhiTool {
+final class StatTool implements ZhiTool {
 
     private static final String TIME_FORMAT = "yyyy-MM-dd HH:mm:ss Z";
     private static final String UNAVAILABLE = "unavailable";

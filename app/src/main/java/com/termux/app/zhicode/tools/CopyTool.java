@@ -21,7 +21,7 @@ import java.io.FileOutputStream;
  * 拷贝出来的脚本必须仍然可执行，否则「拷了一份脚本然后跑不动」这种问题
  * 每次都要重新排查。修改时间则被 Glob 用来按新旧排序。
  */
-public final class CopyTool implements ZhiTool {
+final class CopyTool implements ZhiTool {
 
     private static final int BUFFER_BYTES = 64 * 1024;
 

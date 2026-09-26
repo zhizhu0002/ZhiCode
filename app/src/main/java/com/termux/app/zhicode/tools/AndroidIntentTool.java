@@ -20,7 +20,7 @@ import org.json.JSONObject;
  * 真正的意图构造与启动都在 {@link AndroidIntentBridge} 里 —— 那样它也能被
  * 界面直接调用（用户点一个链接），而界面不该为了开个网址去构造一次工具调用。
  */
-public final class AndroidIntentTool implements ZhiTool {
+final class AndroidIntentTool implements ZhiTool {
 
     private final AndroidIntentBridge bridge;
 

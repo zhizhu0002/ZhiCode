@@ -23,7 +23,7 @@ import org.json.JSONObject;
  * 带 {@code --branch} 时它会先输出一行 {@code ## branch…}。模型据此知道
  * 当前分支 —— 否则「改动了三个文件」这句话缺少它最需要的上下文（在哪个分支上）。
  */
-public final class GitStatusTool implements ZhiTool {
+final class GitStatusTool implements ZhiTool {
 
     private static final int TIMEOUT_MS = 30_000;
 

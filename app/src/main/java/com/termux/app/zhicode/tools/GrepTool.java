@@ -37,7 +37,7 @@ import java.util.regex.PatternSyntaxException;
  * 一次搜索里出现几个读不了的文件是常态（.git 里的对象、系统目录），
  * 为它们中断整次搜索会让工具在真实仓库里不可用。
  */
-public final class GrepTool implements ZhiTool {
+final class GrepTool implements ZhiTool {
 
     private static final int MAX_RESULTS = 2000;
     private static final long MAX_FILE_BYTES = 8L * 1024L * 1024L;

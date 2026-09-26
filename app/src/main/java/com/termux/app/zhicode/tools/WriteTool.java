@@ -20,7 +20,7 @@ import java.nio.charset.StandardCharsets;
  * 会让用户丢掉他原本并不打算丢的内容，所以要挡。写之前又按**字节数**检查一次
  * 是因为字符数与字节数不等（中文一个字三字节），按字符判会漏。
  */
-public final class WriteTool implements ZhiTool {
+final class WriteTool implements ZhiTool {
 
     private static final long MAX_BYTES = 20L * 1024L * 1024L;
 

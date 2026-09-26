@@ -29,7 +29,7 @@ import org.json.JSONObject;
  * 单文件读取的所有规则（超长行截断、危险设备文件、行号格式）都应当一致；
  * 两处实现会在某次修改后悄悄分叉，然后模型看到两种不同的行号格式。
  */
-public final class ReadManyTool implements ZhiTool {
+final class ReadManyTool implements ZhiTool {
 
     private static final int MAX_FILES = 24;
     private static final int DEFAULT_LIMIT_PER_FILE = 500;

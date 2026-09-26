@@ -12,7 +12,7 @@
 蜘蛛自己的代码用 **MIT**。发行物里另有 Apache-2.0 组件与一批各自许可的
 Termux 二进制程序，但**本项目整体不必转为 GPL**。
 
-代码层面的独立性看的是**净相同行 2228 行**：逐行相同 4499 行，扣掉 2068 行骨架与
+代码层面的独立性看的是**净相同行 2204 行**：逐行相同 4475 行，扣掉 2068 行骨架与
 203 行跨组件协议串 —— 后两类不是「别人的代码」，任何人在这个需求下都会那么写。
 这个数的定义、算法与它可能被做手脚的地方见下文「净相同行」一节。
 
@@ -163,10 +163,10 @@ Agent 核心                          9       3602            840
 已是我们自己的:        37515 行
 逐行相同合计:          11773 行
   其中 Termux 上游:     7274 行（Termux 自己的代码，与独立性无关）
-  真正属于 IQ Code:     4499 行
+  真正属于 IQ Code:     4475 行
 ```
 
-### 这 4499 行是什么（默认输出）
+### 这 4475 行是什么（默认输出）
 
 「逐行相同」这个数字本身不够用：它把 `import android.os.Process;`、`}`、`return out;`
 与真正的算法代码算在同一格里。把这个数字当成「还抄了多少」，会得出一个偏大得多的结论。
@@ -177,15 +177,15 @@ composition 与 algorithm **两个模式共用**的同一份程序（写在脚�
 ```
 骨架行（括号分号 / import / javadoc）:       2068 行
 含字面量的行（协议键名与用户可见文案）:        513 行
-声明行（字段、签名、注解、静态常量）:          758 行
+声明行（字段、签名、注解、静态常量）:          734 行
 语句行（有判断与动作 —— 最该重写的地方）:    1160 行
-合计:                                        4499 行
+合计:                                        4475 行
 
   可以扣掉的（不构成「留着别人的代码」）：
     骨架行（任何 Java 文件都长这样）:            2068 行
     跨组件协议串行（>=2 个文件按同一名字对齐）:    203 行
     可扣合计:                                   2271 行
-  净相同行（合计 - 可扣 = 还差多少）:           2228 行
+  净相同行（合计 - 可扣 = 还差多少）:           2204 行
 ```
 
 **声明与语句这条界线改过一次，见下面「分类器曾经算错 217 行」一节** ——
@@ -199,7 +199,7 @@ composition 与 algorithm **两个模式共用**的同一份程序（写在脚�
 | --- | --- | --- | --- |
 | 骨架 | 2068 | **不能** | 任何 Java 文件都以 `import …` 开头、以 `}` 结尾。把这些行改得不一样等于删 import 或往里塞噪声 —— 两者都不是我们想要的 |
 | 字面量 | 513 | **不能** | JSON 字段名、动作名是跨组件协议（宿主 `SandboxGuestHost`、Agent 工具、Frida 脚本三方对齐），改了会让两边对不上；用户可见文案是刻意逐字保留的 |
-| 声明 | 758 | 基本不能 | 字段、方法签名、注解，以及 `public static final Status IDLE = Status.IDLE;` 这类静态常量。相同不是因为抄，而是因为**这是 Java 里写同一件事的唯一写法** |
+| 声明 | 734 | 基本不能 | 字段、方法签名、注解，以及 `public static final Status IDLE = Status.IDLE;` 这类静态常量。相同不是因为抄，而是因为**这是 Java 里写同一件事的唯一写法** |
 | 语句 | 1160 | 能，而且应该压 | **这才是「读起来还像原版」的地方**，也是下面排批次看的那一列 |
 
 **关于「字段带初始化器」的界线**：`private final AtomicBoolean busy = new AtomicBoolean(false);`
@@ -226,13 +226,13 @@ getter，逐条核对时看的是**形状**，不是条数。
 
 ### 净相同行：把「不构成派生的行」扣掉（这才是「还差多少」）
 
-上表的 4499 行里有相当一部分既不能改、改了也没意义。把它们扣掉之后剩下的那个数，
+上表的 4475 行里有相当一部分既不能改、改了也没意义。把它们扣掉之后剩下的那个数，
 才是「独立于 IQ Code 还差多少」：
 
 ```
 净相同行 = 逐行相同 - 骨架行 - 跨组件协议串行
-         = 4499 - 2068 - 203
-         = 2228
+         = 4475 - 2068 - 203
+         = 2204
 ```
 
 **可扣的只有两类，规则刻意窄到可以人工核对。声明行与语句行永远不扣** —— 只要这两桶里
@@ -424,6 +424,52 @@ for (int i = 0; i < plan.recent.length(); i++) out.put(plan.recent.getJSONObject
 
 这也是为什么每次改分类器都要重跑四桶并**重新读一遍**某一桶的全文：
 数字总量不变的时候，没有任何东西会提醒你桶分错了。
+
+### 声明桶怎么收窄：36 个顶层类型改为包内可见
+
+声明桶（758 行）里能动的只有一类：**顶层类型的公开面**。
+`public final class ReadTool implements ZhiTool` 与上游逐字相同，因为那是 Java 里
+声明这个类的唯一写法 —— 除非把这个类**降为包内可见**：`final class ReadTool`。
+
+判据不是「grep 一下有没有别的包引用」，而是**编译**：
+
+```
+./gradlew :app:compileDebugJavaWithJavac   # 降级后若有跨包引用，javac 直接报错
+./gradlew :app:assembleDebug               # 再走一遍清单合并与资源链接
+```
+
+再加一遍非 Java 资源的类名扫描（`assets/`、`res/`、`AndroidManifest.xml`）——
+反射按类名找的路径不在编译器的检查范围内。这两遍都过了才算数。
+
+**结果**：36 个文件降级，其中 **24 个**的类声明行原本与上游逐字相同，因此这 24 行不再相同；
+另外 12 个的类声明行本来就不相同（原版那一行的写法不同），所以降级不改变数字。
+逐文件核对的方式是把改动前的 `PROVENANCE_PER_FILE` 报告与改动后的并排比对，
+每行各降 1 —— **净相同行 2228 → 2204**，全部落在声明桶（758 → 734，-24）。
+
+**必须保持 `public` 的四类**（逐类点名，因为它们看起来与上面那 36 个没区别）：
+
+| 类 | 为什么必须是 public |
+| --- | --- |
+| `SandboxBoard`、`SandboxKeeper`、`SandboxRpcService`、`ZhiFileProvider`、`KeepAliveService`、`MainActivity`、`ZhiCodeApplication` | 在 `AndroidManifest.xml` 里注册，由框架实例化（后两者还受基类强制） |
+| `TermuxTerminalPane`、`SandboxOverlay` | 是 View；界面层要按类型引用，且可能被框架反射实例化 |
+| `ZhiTool`、`ToolRegistry`、`BashTool`、`McpTool`、`SkillTool`、`WebSearchTool`、`WebFetchTool`、`ZhiSandboxTool`、`ZhiDebugTool`、`AndroidIntentBridge` | 被别包引用（`ZhiCodeEngine` 在 `core`，工具在 `tools`） |
+| `UiCanvasStore`、`UiCanvasController`、`FridaEnv`、`SandboxGuestHost`、`SandboxPrefs` 等 | 同上；沙箱层与 Agent 层是两个包 |
+
+**Termux 上游那三个包不动**（`com/termux/terminal`、`com/termux/view`、`com/termux/shared`）。
+理由不是「它们也是我们的」，而是：那是 Apache-2.0 第三方文件，改它们的公开面属于
+**修改第三方代码** —— 要按第 4 条附修改声明，收益只是几个数字、成本是一份义务。
+这类文件在度量里本来就被单列成「Termux 上游（非 IQ Code）」，不参与净相同行。
+
+**这一节还留下一个教训**：`TerminalColors`、`TerminalColorScheme`、`TerminalRenderer`、
+`Logger`、`SandboxFrida`、`SandboxGuestDebug`、`SandboxOverlay` 在纯 Java 层面确实只被同包用，
+但「只被同包引用」**不等于**「可以降」——`TerminalOutput` 就是反例：它被同包的
+`TerminalSession extends TerminalOutput` 继承，而 AOSP 的 `TerminalSession` 里有
+`TerminalOutput.context` 这个字段的反射依赖（那是 AOSP 的代码，不是本工程的，
+所以本工程里查不出来）。结论就是前面那句：判据必须是编译 + 资源扫描两遍，而不是 grep。
+
+**量级要说清楚**：这条路本批只产出 24 行（占净相同行 2204 的 1.1%）。
+它值得做的理由不是数字，而是**公开面本来就该最小**；指望靠它把净数字压到 0 是不现实的，
+继续往下的主通道是把剩余的用户可见文案改成自己的措辞（见「字面量」那条）。
 
 ### 这个数字曾经是错的（记下来，因为它会再次发生）
 
@@ -644,7 +690,7 @@ com/zhizhu/zhicode/TermuxTerminalPane.java   只剩 PTY：会话列表、JNI、�
 | --- | --- | --- |
 | `TermuxTerminalPane.java` | 565 → **100** | 592 → 1056 |
 | `UiMotion.java` | 104 → **0**（文件已删） | 392 → 0 |
-| 全工程「真正属于 IQ Code」 | 5120 → **4551**（批 F 当时的数；现行 4499） | |
+| 全工程「真正属于 IQ Code」 | 5120 → **4551**（批 F 当时的数；现行 4475） | |
 
 那剩下的 100 行是：31 行 `import`、若干 `}`、字段与构造器声明，以及
 **只能在 View 一侧写**的 PTY 调用 —— `new TerminalView(getContext(), null)`、

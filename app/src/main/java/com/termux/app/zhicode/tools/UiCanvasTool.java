@@ -36,7 +36,7 @@ import java.util.List;
  * {@code ui_canvas} 类型的附加内容块会被界面直接消费并渲染，不需要模型复述一遍文档。
  * 把整份文档塞进给模型看的文本里，只会白烧 token。
  */
-public final class UiCanvasTool implements ZhiTool {
+final class UiCanvasTool implements ZhiTool {
 
     /** 改画布并落盘的操作。 */
     private static final List<String> SAVING_OPERATIONS = Arrays.asList(

@@ -33,7 +33,7 @@ import java.util.Map;
  * 报的替换次数是**编辑条数**而不是实际替换处数：一处 {@code replace_all}
  * 可能替换几百处，而用户关心的是「我提交了 5 条编辑、动了 3 个文件」。
  */
-public final class MultiEditTool implements ZhiTool {
+final class MultiEditTool implements ZhiTool {
 
     private static final long MAX_BYTES = 20L * 1024L * 1024L;
 

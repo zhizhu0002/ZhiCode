@@ -20,7 +20,7 @@ import org.json.JSONObject;
  * 整个补丁步骤被静默跳过 —— 表现为「修了但没修好」，且没有任何错误输出。
  * 现在由 {@link TermuxConstants#BRAND_SLUG} 派生，改名不会再出现第二次漂移。
  */
-public final class TermuxRepairTool implements ZhiTool {
+final class TermuxRepairTool implements ZhiTool {
 
     private static final int TIMEOUT_MS = 15 * 60 * 1000;
     /** apt 中断退出码，与 shell 约定一致。 */

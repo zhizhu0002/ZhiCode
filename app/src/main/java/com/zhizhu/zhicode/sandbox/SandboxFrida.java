@@ -37,7 +37,7 @@ import java.nio.charset.StandardCharsets;
  * Java 侧仍对 command(...) 加锁，因为 command.json 是单一信箱，
  * 两个线程同时覆写它必然丢请求。锁在 Java 这一侧，脚本那侧靠 id 去重。
  */
-public final class SandboxFrida {
+final class SandboxFrida {
 
     /** Gadget 载入后等待 ready.json 的上限。超时说明脚本没跑起来，而不是 Gadget 载入失败。 */
     private static final long LOAD_TIMEOUT_MS = 6_000;

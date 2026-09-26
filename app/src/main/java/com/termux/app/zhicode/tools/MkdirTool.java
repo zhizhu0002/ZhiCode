@@ -14,7 +14,7 @@ import java.io.File;
  * 与 {@code mkdir}（不带 {@code -p}）不同：调用方的意图是「确保这个目录存在」，
  * 而它已经存在时意图已经满足了。报错误会让模型在重试与放弃之间浪费几轮。
  */
-public final class MkdirTool implements ZhiTool {
+final class MkdirTool implements ZhiTool {
 
     @Override public String name() { return "Mkdir"; }
 

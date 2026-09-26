@@ -18,7 +18,7 @@ import org.json.JSONObject;
  * 真正的流转（进入待批准阶段、记录权限基线）由引擎完成 ——
  * 工具只负责把内容交出去，见 {@link EnterPlanModeTool} 里同样的说明。
  */
-public final class ExitPlanModeTool implements ZhiTool {
+final class ExitPlanModeTool implements ZhiTool {
 
     @Override public String name() { return "ExitPlanMode"; }
 

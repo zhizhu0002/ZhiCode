@@ -30,7 +30,7 @@ import java.util.Locale;
  * 这些命令是把包名交给系统命令行执行的。一旦与实际包名不符，保活会<b>静默失效</b>：
  * 命令照样返回成功，只是白名单加到了另一个（可能并不存在的）包上。所以不写字面量。
  */
-public final class RootKeepAliveController {
+final class RootKeepAliveController {
 
     private static final String PREFS = TermuxConstants.BRAND_SLUG + "_keep_alive";
 

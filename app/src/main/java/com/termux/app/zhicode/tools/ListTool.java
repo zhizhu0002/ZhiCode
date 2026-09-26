@@ -26,7 +26,7 @@ import java.util.Comparator;
  * 目录的 size 在多数文件系统上是个常数，不具信息量，所以照原样显示而不是隐藏 ——
  * 隐藏它会让两个本来对齐的列错位。
  */
-public final class ListTool implements ZhiTool {
+final class ListTool implements ZhiTool {
 
     private static final String SIZE_FORMAT = "%10d ";
     private static final String DIRECTORY_SUFFIX = "/";

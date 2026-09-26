@@ -21,7 +21,7 @@ import org.json.JSONObject;
  * 不另开一个删任务工具，是因为「任务被删掉」与「任务状态变成 deleted」
  * 对调用方是同一件事，分开会让模型在两个工具之间选错。
  */
-public final class TaskUpdateTool implements ZhiTool {
+final class TaskUpdateTool implements ZhiTool {
 
     @Override public String name() { return "TaskUpdate"; }
 

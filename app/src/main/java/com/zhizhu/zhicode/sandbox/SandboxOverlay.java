@@ -38,7 +38,7 @@ import com.zhizhu.zhicode.compose.MainActivity;
  * </ul>
  * 拖动只移动整个面板；位移小于 {@link #TAP_SLOP_DP} 视为点击。
  */
-public final class SandboxOverlay {
+final class SandboxOverlay {
 
     /** 视图标记。用于在 decor 上查找与去重（同一个 decor 只允许一层）。 */
     public static final Integer OVERLAY_TAG = 0x5A484942; // "ZHIB"

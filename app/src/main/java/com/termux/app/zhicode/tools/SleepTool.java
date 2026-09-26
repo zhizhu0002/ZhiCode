@@ -22,7 +22,7 @@ import org.json.JSONObject;
  * {@link Thread#sleep} 抛 {@link InterruptedException} 时不吞掉：
  * 用户点取消就是靠中断这个线程来生效的。吞掉它会让「取消」要等到睡完为止。
  */
-public final class SleepTool implements ZhiTool {
+final class SleepTool implements ZhiTool {
 
     private static final int MAX_SECONDS = 60;
     private static final long MILLIS_PER_SECOND = 1000L;

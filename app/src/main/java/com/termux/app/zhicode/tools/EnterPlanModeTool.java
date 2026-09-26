@@ -22,7 +22,7 @@ import org.json.JSONObject;
  * <p>{@link PermissionKind#INTERNAL}：它不改任何外部状态，
  * 也不该因为它而弹一次确认 —— 那会把「进入只读的计划模式」变成一个需要批准的动作。
  */
-public final class EnterPlanModeTool implements ZhiTool {
+final class EnterPlanModeTool implements ZhiTool {
 
     @Override public String name() { return "EnterPlanMode"; }
 

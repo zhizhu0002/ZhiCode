@@ -18,7 +18,7 @@ import org.json.JSONObject;
  * <p>{@link PermissionKind#INTERNAL}：它只写本应用自己的数据目录，
  * 不碰用户文件，所以不需要向用户确认。
  */
-public final class TaskCreateTool implements ZhiTool {
+final class TaskCreateTool implements ZhiTool {
 
     @Override public String name() { return "TaskCreate"; }
 

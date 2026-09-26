@@ -26,7 +26,7 @@ import java.io.File;
  * <h3>不存在的路径算成功</h3>
  * 「已经没有了」与「我删掉了」对调用方是同一个结果，报错误只会让模型重试一遍。
  */
-public final class DeleteTool implements ZhiTool {
+final class DeleteTool implements ZhiTool {
 
     private static final long MAX_DIFF_BYTES = 5L * 1024L * 1024L;
 

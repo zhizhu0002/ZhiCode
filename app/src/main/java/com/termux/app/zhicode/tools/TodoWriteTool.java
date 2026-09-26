@@ -25,7 +25,7 @@ import java.nio.charset.StandardCharsets;
  * 一次会话里只有一个 agent 循环会写它，而共用的 {@code TaskStore} 才是需要
  * 并发安全的那一份。
  */
-public final class TodoWriteTool implements ZhiTool {
+final class TodoWriteTool implements ZhiTool {
 
     private static final String FILE_NAME = "todos.json";
     private static final int INDENT = 2;

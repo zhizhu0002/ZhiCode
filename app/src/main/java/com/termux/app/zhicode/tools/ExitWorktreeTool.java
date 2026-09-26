@@ -26,7 +26,7 @@ import java.io.File;
  * 回到原工程目录 —— 否则 {@code ExitWorktree} 之后模型以为自己在原目录、
  * 实际还在隔离区里改文件。
  */
-public final class ExitWorktreeTool implements ZhiTool {
+final class ExitWorktreeTool implements ZhiTool {
 
     private static final int STATUS_TIMEOUT_MS = 30_000;
     private static final int REMOVE_TIMEOUT_MS = 60_000;

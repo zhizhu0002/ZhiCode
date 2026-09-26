@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
  * 后者往往是被信号杀的（比如 wrapper 报告 0 之后清理阶段被杀）。
  * 因此这里的选择是「先到者为准」，而不是「控制文件总是优先」。
  */
-public final class BashCompletionCoordinator {
+final class BashCompletionCoordinator {
 
     /** 退出码是从哪来的。{@link #CONTROL} 说明拿到了 wrapper 的完整报告。 */
     public enum Source { NONE, CONTROL, PROCESS }

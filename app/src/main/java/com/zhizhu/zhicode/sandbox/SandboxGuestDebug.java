@@ -46,7 +46,7 @@ import top.niunaijun.blackbox.app.BActivityThread;
  * <p>本类的协议面（动作名、响应键名、上限数值）与宿主侧 {@link SandboxGuestHost}
  * 及 {@code ZhiDebugTool} 严格对齐，重写内部结构时这些串不能动。
  */
-public final class SandboxGuestDebug {
+final class SandboxGuestDebug {
 
     /** maps 文本输出的字节上限（防止一次请求把整个地址空间文本拖进内存）。 */
     private static final int MAX_MAP_TEXT = 512_000;

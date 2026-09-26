@@ -26,7 +26,7 @@ import java.io.File;
  * root 命令常常要在工程之外（{@code /data/adb}、{@code /system}）操作。
  * 但相对路径仍然从工程目录解析 —— 模型用相对路径时想指的几乎总是工程内的位置。
  */
-public final class RootBashTool implements ZhiTool {
+final class RootBashTool implements ZhiTool {
 
     private static final int MIN_TIMEOUT_MS = 1000;
     private static final int MAX_TIMEOUT_MS = 3_600_000;

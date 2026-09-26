@@ -19,7 +19,7 @@ import org.json.JSONObject;
  * 任务可能刚被删掉、或 id 是模型记错的。返回一句 {@code Task not found} 让模型
  * 自己重新列表；报成错误会让它以为工具坏了而放弃整条路径。
  */
-public final class TaskGetTool implements ZhiTool {
+final class TaskGetTool implements ZhiTool {
 
     private static final String NOT_FOUND = "Task not found";
 

@@ -36,7 +36,7 @@ import java.util.Set;
  * 用户手写的 frontmatter 出错是常态。让一次笔误让**所有**代理都消失，
  * 会表现为「子代理功能坏了」，而真正的原因只是某一个文件里少了个冒号。
  */
-public final class AgentDefinitionLoader {
+final class AgentDefinitionLoader {
 
     /** 没有指定类型时用的名字。 */
     public static final String DEFAULT_AGENT = "general-purpose";

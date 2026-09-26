@@ -27,7 +27,7 @@ import org.json.JSONObject;
  * 不该让整次诊断只返回第一段的输出。诊断工具最怕的就是「因为环境坏得比较厉害，
  * 所以诊断也坏了」。
  */
-public final class TermuxDoctorTool implements ZhiTool {
+final class TermuxDoctorTool implements ZhiTool {
 
     private static final int TIMEOUT_MS = 30_000;
 

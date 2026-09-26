@@ -32,7 +32,7 @@ import java.util.Set;
  * 不区分大小写按名字排。用系统默认排序会让同一棵树在两次调用里顺序不同
  * （不区分大小写、或按 inode 顺序），而模型会把「顺序变了」当成「结构变了」。
  */
-public final class TreeTool implements ZhiTool {
+final class TreeTool implements ZhiTool {
 
     private static final int DEFAULT_DEPTH = 4;
     private static final int MAX_DEPTH = 8;
