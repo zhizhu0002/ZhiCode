@@ -106,11 +106,13 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
 }
 
 /**
- * 助手消息：**不套卡片底色**，正文直接排布在背景上（对齐原版
- * `renderAssistant`——原版只给用户气泡和工具行上底色）。
+ * 助手消息：与用户气泡一样套一层卡片底色，占满宽度、配色中性。
  *
- * 结构（自上而下）：顶部右对齐的 `⋯` 操作行 → 思考面板 → 正文 → 上下文页脚，
- * 与图片里「⋯ 在正文上方右侧」的排布一致。
+ * 结构（自上而下）：思考面板 → 正文 → 上下文页脚。
+ *
+ * 原版 `renderAssistant` 只给用户气泡和工具行上底色，这里是**有意偏离**：
+ * 只有一方有框时，AI 的消息看起来像没有归属的裸文本。操作入口是整块卡片的
+ * 长按（原先那个独占一行的 ⋯ 已移除，见函数内注释）。
  */
 @Composable
 fun AssistantCard(
@@ -119,36 +121,33 @@ fun AssistantCard(
     onLongPress: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    // 外层点击走 Miuix Surface(onClick)：不填色（color = Transparent），只取组件库的按压反馈
-    Surface(
-        onClick = onLongPress,
-        modifier = Modifier.fillMaxWidth(),
-        color = Color.Transparent,
-        contentColor = scheme.onSurface,
+    // 与 UserBubble 用同一套容器参数（同样的 ZhiRadius.card 圆角与 BubbleMargin 内边距），
+    // 只是配色中性、占满宽度。
+    //
+    // 此前这里是 `Surface(color = Color.Transparent)`，也就是**没有框**：于是只有用户的
+    // 消息有气泡、AI 的消息像裸文本贴在背景上，双方看起来不对等。
+    //
+    // 那个独占一行的 ⋯（"消息操作"）同时去掉：它是一个高 26dp 的满宽 Row，位置在每条
+    // AI 消息的**最顶部**，所以看上去像粘在上一条消息的下沿、并和上一条的按压高亮连成
+    // 一片。消息操作仍然可用 —— 整块卡片本身就是入口（onLongPress）。
+    Card(
+        onLongPress = onLongPress,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        cornerRadius = ZhiRadius.card,
+        insideMargin = BubbleMargin,
+        colors = CardDefaults.defaultColors(
+            color = ZhiColors.cardSurface(),
+            contentColor = scheme.onSurface,
+        ),
+        pressFeedbackType = PressFeedbackType.Sink,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 4.dp, bottom = 6.dp)
                 .animateContentSize(
                     animationSpec = tween(ZhiMotion.EXPAND, easing = FastOutSlowInEasing),
                 ),
         ) {
-            // 消息操作入口：原版把 ⋯ 放在消息的 heading 行右端
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                // 转发到 Miuix IconButton（compact 覆盖其 40dp 的最小尺寸）
-                ZhiIconButton(
-                    icon = ZhiIcons.more,
-                    description = "消息操作",
-                    onClick = onLongPress,
-                    tint = scheme.onSurfaceVariantSummary,
-                    iconSize = 14.dp,
-                    compact = 26.dp,
-                )
-            }
             if (item.thinking.isNotEmpty() || item.processSteps.isNotEmpty()) {
                 ThinkingPanel(item = item, onToggle = onToggleThinking)
             }
