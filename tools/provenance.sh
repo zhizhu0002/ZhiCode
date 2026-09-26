@@ -41,8 +41,26 @@ normalize() {
 REPORT="$WORK/report.txt"
 : > "$REPORT"
 
+# 改了文件名的沙箱类：这些走后面的 pair_renamed 配对，
+# 必须在按路径的循环里跳过，否则会被算两遍、把文件数与行数虚增。
+RENAMED_BASENAMES="SandboxGuestHost.java SandboxGuestDebug.java SandboxFrida.java FridaEnv.java
+SandboxBoard.java SandboxOverlay.java SandboxKeeper.java SandboxShell.java
+SandboxRpcService.java SandboxPrefs.java SandboxConsole.java SandboxRpc.java
+SandboxProcess.java ZhiSandbox.java"
+
+is_renamed() {
+    local base="$1"
+    for candidate in $RENAMED_BASENAMES; do
+        [ "$base" = "$candidate" ] && return 0
+    done
+    return 1
+}
+
 cd "$OUR"
 while IFS= read -r rel; do
+    if is_renamed "$(basename "$rel")"; then
+        continue
+    fi
     case "$rel" in
         com/zhizhu/zhicode/*)     counterpart="com/iqge/${rel#com/zhizhu/zhicode/}" ;;
         com/termux/app/zhicode/*) counterpart="com/termux/app/iqcode/${rel#com/termux/app/zhicode/}" ;;
@@ -64,6 +82,38 @@ while IFS= read -r rel; do
     fi
     echo "$rel|$counterpart|$theirs|$ours|$shared" >> "$REPORT"
 done < <(find . -name '*.java' -o -name '*.kt' | sed 's#^\./##')
+
+# 单独处理「改了文件名」的沙箱类：按英文名配对后重新比对。
+# 不做这一步的话，它们会因为路径对不上而被算成「无对应文件」，把沙箱层的重合度
+# 误报成 0 —— 数字必须诚实，否则据此做的判断都是错的。
+pair_renamed() {
+    local ourName="$1" theirName="$2"
+    local ourFile="$OUR/com/zhizhu/zhicode/sandbox/$ourName"
+    local theirFile="$OFF/com/iqge/sandbox/$theirName"
+    [ -f "$ourFile" ] && [ -f "$theirFile" ] || return 0
+    normalize "$ourFile" | squash > "$WORK/ours.txt"
+    squash < "$theirFile" > "$WORK/theirs.txt"
+    local shared
+    shared=$(diff --unchanged-group-format='%=' --old-group-format='' \
+                   --new-group-format='' --changed-group-format='' \
+                   "$WORK/theirs.txt" "$WORK/ours.txt" | grep -c .)
+    echo "com/zhizhu/zhicode/sandbox/$ourName|com/iqge/sandbox/$theirName|$(wc -l < "$WORK/theirs.txt")|$(wc -l < "$WORK/ours.txt")|${shared:-0}" >> "$REPORT"
+}
+
+pair_renamed SandboxGuestHost.java      SandboxAgentBridge.java
+pair_renamed SandboxGuestDebug.java     SandboxProcessDebug.java
+pair_renamed SandboxFrida.java          SandboxFridaBridge.java
+pair_renamed FridaEnv.java              FridaRuntimeManager.java
+pair_renamed SandboxBoard.java          SandboxDashboardActivity.java
+pair_renamed SandboxOverlay.java        SandboxFloatingController.java
+pair_renamed SandboxKeeper.java         SandboxGuardService.java
+pair_renamed SandboxShell.java          SandboxTermuxBridge.java
+pair_renamed SandboxRpcService.java     SandboxControlProvider.java
+pair_renamed SandboxPrefs.java          SandboxSettingsStore.java
+pair_renamed SandboxConsole.java        SandboxDebugLog.java
+pair_renamed SandboxRpc.java            SandboxHostClient.java
+pair_renamed SandboxProcess.java        SandboxProcessRole.java
+pair_renamed ZhiSandbox.java            IQSandboxEngine.java
 
 awk -F'|' '
 function area(path) {
