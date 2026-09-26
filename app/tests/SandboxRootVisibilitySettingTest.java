@@ -27,10 +27,15 @@ public final class SandboxRootVisibilitySettingTest {
 
         require(store.contains("AtomicFile") && store.contains("sandbox/settings.json"),
                 "sandbox settings must use one atomic host file");
-        require(store.contains("optBoolean(\"hide_root\", true)") && store.contains("catch (Exception ignored)"),
+        // 断言「安全默认值」这件事本身：默认值常量必须为 true，读取时用该常量兜底，
+        // 且每条失败路径都 return defaults()。刻意不钉 optBoolean("hide_root", true)
+        // 这种书写形态——把键名与默认值提成命名常量是重写范围内的正常改动。
+        require(has(store, "DEFAULT_HIDE_ROOT=true")
+                        && store.contains("optBoolean(KEY_HIDE_ROOT, DEFAULT_HIDE_ROOT)")
+                        && store.contains("return defaults();"),
                 "missing or invalid settings must keep root hidden");
-        require(store.contains("settings.startWrite()") && store.contains("settings.finishWrite(out)")
-                        && store.contains("settings.failWrite(out)"),
+        require(store.contains(".startWrite()") && store.contains(".finishWrite(out)")
+                        && store.contains(".failWrite(out)"),
                 "settings writes must retain AtomicFile rollback semantics");
 
         require(has(engine, "isHideRoot(){return SandboxPrefs.isRootHidden(app);}"),
