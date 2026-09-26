@@ -525,3 +525,42 @@ status**（82 个包）独立验证过：算出的闭包**恰好 82 个包，一
 安全性：`prune-bootstrap.js` 带**重叠保护**（只删「可删包拥有、且不被任何保留包
 拥有」的文件）与**数量守卫**（闭包大小超出 60~150 就整体放弃，宁可归档偏大也不
 产出缺包的坏包）。实测 13813 个删除文件中，因重叠而跳过的为 **0**。
+
+### 10.5 裁剪工具会在删除前做 ELF 依赖兜底（2026-09-26 新增）
+
+只按 `Depends:` 算闭包**不够** —— fork 的单容器构建会让包链接到它没声明的库。
+实测抓到一个：
+
+```
+util-linux 声明: libandroid-glob, libandroid-posix-semaphore, libcap-ng,
+                libsmartcols, ncurses, zlib
+bin/lsns 实际链接: libmount.so        ← 未声明
+```
+
+`libmount` 是独立包，按 `Depends:` 算它不在闭包里 → 被删 → **`bin/lsns` 变成
+CANNOT LINK EXECUTABLE**，而整个过程不报任何错。
+
+所以 `prune-bootstrap.js` 现在会**真的解析每个保留 ELF 的 `DT_NEEDED`**
+（靠自己读 ELF 小节头，不依赖 readelf —— Termux 前缀里没有 binutils），
+发现「需要但没有任何保留包提供」的库时把它所属的包拉回闭包，再重算，直到不动点。
+跑完还会复核一遍，仍有解析不了的库就逐条打印，**不静默通过**。
+
+两个路径下的文件不参与兜底（都属于「装了也用不到」的可选组件）：
+
+| 路径 | 为什么跳过 |
+|---|---|
+| `libexec/installed-tests/` | 随包安装的测试套件，含 `-fsanitize=address` 编出的二进制，需要编译器运行时 `libclang_rt.asan-*.so`（不属于任何运行时包） |
+| `lib/python<版本>/site-packages/` | 可选的语言绑定。例如 libmount 带了 `pylibmount.so`，它需要 `libpython3.14.so`，不跳过就会把整个 python 包（**+23 MB**）拉进闭包 —— 而 bootstrap 里没有任何东西 import 它 |
+
+> 顺带一个容易踩的坑：在 JS 里写文档注释时，路径 `lib/python*/site-packages/`
+> 里面的 `*/` 会**提前关闭块注释**，后面的内容变成代码直接语法报错。
+> 这就是上面写成 `lib/python<版本>/site-packages/` 的原因。
+
+**注意 `bin/mount`、`bin/lsblk`、`bin/cfdisk` 这类命令不在包里是正常的**：
+它们属于 util-linux 的**子包** `mount-utils` / `blk-utils` / `fdisk`，
+不在运行时闭包里，会被整体裁掉。别把它当成「缺文件」。
+
+另外：bootstrap 的 zip 里**没有真实符号链接**（`find -type l` 结果为 0）。
+符号链接全部记在 `SYMLINKS.txt`（格式 `<绝对目标>←<相对链接>`，约 2689 条），
+由 App 在解包时重建。所以 `bin/awk` 在 zip 里查不到实体文件是正常的 ——
+它在 `SYMLINKS.txt` 里指向 `gawk`。
