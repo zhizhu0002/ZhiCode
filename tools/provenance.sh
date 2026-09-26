@@ -225,25 +225,60 @@ END {
 # 「逐行相同」这个数字本身不够用：它把 `import android.os.Process;`、`}`、`return out;`
 # 与真正的算法代码算在同一格里。要决定「还剩多少要重写」，必须知道这些行都是什么。
 #
-# 所以这里把残留行分成三桶。分类刻意简单到可以人工核对：
-#   骨架   —— 只有括号分号、import/package、javadoc 的分隔符行。任何 Java 文件都长这样，
-#             与原版相同不说明任何问题。
-#   字面量 —— 含双引号字符串的行。协议键名（JSON 字段、动作名）与用户可见文案属于契约，
-#             改了会让两个组件对不上；夹具字符串（例如测试数据）也归在这里。
-#             这一桶必须逐条看过，不能只看总数。
-#   其它   —— 剩下的。这一桶才算「读起来还像原版的地方」，是真正要压的数字。
+# 分类器**只此一份**（下面这个 CLASSIFY），composition 与 algorithm 两个模式共用。
+# 这一点是刻意的：本文件其它地方已经踩过「同一份规则写两遍、然后各自漂移」的坑
+# （见上面 RENAMED_BASENAMES 与 PAIRS 必须一致的那段自检）。
 #
+# 分四桶，规则刻意简单到可以人工核对：
+#   骨架 S —— 只有括号分号、import/package、javadoc 的分隔与正文行。
+#             任何 Java/Kotlin 文件都长这样，与原版相同不说明任何问题。
+#   字面量 L —— 含双引号字符串的行。协议键名（JSON 字段、动作名）与用户可见文案属于
+#             契约，改了会让两个组件对不上；这一桶要逐条看过，不能只看总数。
+#   声明 D —— 既没有控制流、也没有赋值或方法调用的行：字段、方法签名、注解。
+#             它们相同不是因为抄，而是因为「写同一件事只有这一种写法」。
+#             全大写名的静态常量（`public static final Status IDLE = Status.IDLE;`，也就是
+#             枚举成员那种写法）也算在这一桶：赋值号在，但它没有判断与动作。
+#   语句 T —— 剩下的，也就是有判断与动作的行。**这一桶才是排批次该看的那个数**。
+#             注意它**不区分**「一行一个方法体的 getter」与真正的分支逻辑 ——
+#             `public boolean isIdle() { return status == Status.IDLE; }` 也在里面。
+#             所以 T 和 composition 模式打印的「去重后」两个数要一起看：原版里大量相同行
+#             其实是同一个写法被重复十九遍。
+#
+# 第三桶的存在是有来历的：最初只分三桶（骨架/字面量/其它），而「其它」里混着大量
+# `public final String planFile;` 这类声明，导致 PlanWorkflowState 看起来有 70 行
+# 「其它行、占比 70%」—— 与人工查阅的结论（真正算法只有 4~6 行）差了一个数量级。
+CLASSIFY='
+  BEGIN {
+    kw = "(^|[^A-Za-z0-9_])(if|for|while|return|throw|catch|switch|case|else|new|instanceof)([^A-Za-z0-9_]|$)"
+  }
+  {
+    line = $0
+    if (line ~ /^[{}();,\[\] ]*$/ || line ~ /^import / || line ~ /^package / || line ~ /^\*/) {
+      print "S|" line; next
+    }
+    if (line ~ /"[^"]*"/) { print "L|" line; next }
+    if (line ~ /static final [A-Za-z0-9_<>\[\]]+ [A-Z][A-Z0-9_]* = /) {
+      print "D|" line; next
+    }
+    if (line ~ kw || line ~ /&&/ || line ~ /\|\|/ || line ~ /->/ \
+        || line ~ /(^|[^=!<>])=([^=]|$)/ \
+        || line ~ /\.(put|get|add|set|remove|append|write|read|apply|of|run|call)\(/) {
+      print "T|" line; next
+    }
+    print "D|" line
+  }
+'
+
 # 用法: PROVENANCE_COMPOSITION=1 bash tools/provenance.sh
 if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ]; then
-    skeleton=0; literal=0; other=0
     # 这份全文要能被人拿去逐条看，所以不能放在 $WORK 里 ——
     # 那个目录在脚本退出时被 trap 删掉，打印出来的路径到时已经不存在了。
-    OTHER_LINES="$PROJECT_ROOT/build/provenance-other-lines.txt"
-    mkdir -p "$(dirname "$OTHER_LINES")"
-    : > "$OTHER_LINES"
+    STATEMENT_LINES="$PROJECT_ROOT/build/provenance-statement-lines.txt"
+    mkdir -p "$(dirname "$STATEMENT_LINES")"
+    : > "$STATEMENT_LINES"
+    : > "$WORK/comp-counts.txt"
     while IFS='|' read -r rel counterpart theirs ours shared; do
         [ -n "$rel" ] || continue
-        [ "$theirs" = "0" ] || [ "$shared" = "0" ] || true
         case "$rel" in
             com/termux/terminal/*|com/termux/view/*|com/termux/shared/*) continue ;;
         esac
@@ -252,26 +287,77 @@ if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ]; then
         squash < "$OFF/$counterpart" > "$WORK/comp-theirs.txt"
         diff --unchanged-group-format='%=' --old-group-format='' \
              --new-group-format='' --changed-group-format='' \
-             "$WORK/comp-theirs.txt" "$WORK/comp-ours.txt" >> "$WORK/comp-lines.txt"
+             "$WORK/comp-theirs.txt" "$WORK/comp-ours.txt" \
+            | awk "$CLASSIFY" > "$WORK/comp-classified.txt"
+        awk -F'|' '{ c[$1]++ }
+             END { printf "%d %d %d %d\n", c["S"] + 0, c["L"] + 0, c["D"] + 0, c["T"] + 0 }' \
+            "$WORK/comp-classified.txt" >> "$WORK/comp-counts.txt"
+        # 语句桶全文要按文件分段留下名字。没有文件名的清单是没法逐条核对的 ——
+        # 「这句话到底是从哪来的」是看这份清单的唯一理由。
+        grep '^T|' "$WORK/comp-classified.txt" | cut -d'|' -f2- > "$WORK/comp-statements.txt"
+        if [ -s "$WORK/comp-statements.txt" ]; then
+            printf '=== %s\n' "$rel" >> "$STATEMENT_LINES"
+            cat "$WORK/comp-statements.txt" >> "$STATEMENT_LINES"
+        fi
     done < "$REPORT"
 
-    awk '
-      {
-        line = $0
-        if (line ~ /^[{}();,\[\] ]*$/ || line ~ /^import / || line ~ /^package / \
-            || line ~ /^\/\*\*$/ || line ~ /^\*\/$/ || line ~ /^\*$/) { skeleton++; next }
-        if (line ~ /"[^"]*"/) { literal++; next }
-        other++
-        print line > otherfile
-      }
-      END {
-        printf "\n残留构成（只看非 Termux 上游的文件）：\n"
-        printf "  骨架行（括号分号 / import / javadoc 分隔符）: %d 行\n", skeleton
-        printf "  含字面量的行（协议键名与用户可见文案）:      %d 行\n", literal
-        printf "  其它行（仍需逐条看的地方）:                  %d 行\n", other
-        printf "  合计:                                        %d 行\n", skeleton + literal + other
-        printf "  「其它行」全文: %s\n", otherfile      }
-    ' otherfile="$OTHER_LINES" "$WORK/comp-lines.txt"
+    awk '{ s += $1; l += $2; d += $3; t += $4 }
+         END {
+           printf "\n残留构成（只看非 Termux 上游的文件）：\n"
+           printf "  骨架行（括号分号 / import / javadoc）:      %5d 行\n", s
+           printf "  含字面量的行（协议键名与用户可见文案）:      %5d 行\n", l
+           printf "  声明行（字段、签名、注解、静态常量）:        %5d 行\n", d
+           printf "  语句行（有判断与动作 —— 最该重写的地方）:    %5d 行\n", t
+           printf "  合计:                                        %5d 行\n", s + l + d + t
+         }' "$WORK/comp-counts.txt"
+    # 去重后那一个数：原版里大量「语句行」是同一个写法被反复写（十几个同形 getter、
+    # 一张 switch 的几十个 case）。逐条核对时看的是形状，所以这个数比上面的 t 更接近
+    # 「还剩多少种要重写的东西」。
+    dedup=$(grep -v '^=== ' "$STATEMENT_LINES" | sort -u | grep -c .)
+    printf "  其中去重后只有:                              %5d 种\n", "${dedup:-0}"
+    printf "  「语句行」全文（按文件分段）: %s\n", "$STATEMENT_LINES"
+fi
+
+# 按**语句行**排序的清单 —— 这才是排批次该看的那一列。
+#
+# 为什么要另开一个口径：`PROVENANCE_PER_FILE` 的重合率是「相同行 ÷ 现在行数」
+# （分母是重写后的行数，所以注释写得越细，同一处残留显示的重合率越高）。
+# 它**不区分**相同的是算法还是签名，于是会系统性地把「公开面大、逻辑少」的数据类
+# 排到最前面 —— 而这类文件恰恰最没得改：
+#
+#   批 H 四个文件（重合率 38%~55%）实测每个只有 4~6 行算法可动；
+#   批 I 沙箱宿主层 563 行相同里只有 127 行不是骨架或协议。
+#
+# 所以这里用**同一个** CLASSIFY 分类器做按文件计数，并按语句行降序排列。
+# 用法: PROVENANCE_ALGORITHM=1 bash tools/provenance.sh
+if [ "${PROVENANCE_ALGORITHM:-0}" = "1" ]; then
+    echo
+    echo "按「语句行」排序（重合行里有判断与动作的那些 —— 最该重写的地方）："
+    printf "%7s %7s %7s %7s %8s  %s\n" "语句" "声明" "骨架" "字面量" "语句占比" "文件"
+    while IFS='|' read -r rel counterpart theirs ours shared; do
+        [ -n "$rel" ] || continue
+        case "$rel" in
+            com/termux/terminal/*|com/termux/view/*|com/termux/shared/*) continue ;;
+        esac
+        [ -f "$OUR/$rel" ] && [ -f "$OFF/$counterpart" ] || continue
+        normalize "$OUR/$rel" | squash > "$WORK/alg-ours.txt"
+        squash < "$OFF/$counterpart" > "$WORK/alg-theirs.txt"
+        diff --unchanged-group-format='%=' --old-group-format='' \
+             --new-group-format='' --changed-group-format='' \
+             "$WORK/alg-theirs.txt" "$WORK/alg-ours.txt" \
+            | awk "$CLASSIFY" > "$WORK/alg-classified.txt"
+        printf '%s %s\n' "$rel" \
+            "$(awk -F'|' '{ c[$1]++ } END { printf "%d %d %d %d", c["T"]+0, c["D"]+0, c["S"]+0, c["L"]+0 }' \
+                "$WORK/alg-classified.txt")"
+    done < "$REPORT" | awk '
+        { t = $2; if (t <= 0) next
+          total = t + $3 + $4 + $5
+          printf "%7d %7d %7d %7d %7.0f%%  %s\n", t, $3, $4, $5, t * 100 / total, $1 }
+    ' | sort -k1,1nr
+    echo
+    echo "注：语句 / 声明 / 骨架 / 字面量 四桶的规则见 CLASSIFY（composition 模式共用同一份）。"
+    echo "    「语句」相同的行通常仍不是抄，而是「写同一件事的唯一写法」；要下判断得看全文 ——"
+    echo "    PROVENANCE_COMPOSITION=1 输出的那一份就是这些行的全文。"
 fi
 
 # 逐个文件的清单。默认不输出，因为日常只需要上面那张汇总表；

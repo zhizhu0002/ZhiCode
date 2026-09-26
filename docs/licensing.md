@@ -149,14 +149,14 @@ bootstrap 里的程序许可各自适用，且要求源码对接收者可得。
 归属区域                             文件         行数   仍与 IQCode 相同
 Termux 上游（非 IQ Code）             23       7394           7274
 Termux 集成层                       35       9327           1932
-Compose 界面层                      59      16115              0
-其它                                7       2287            286
+Compose 界面层                      59      16137              0
+其它                                7       2398            286
 Agent 工具                         44       5673            933
 Agent 核心                          9       3629            867
 沙箱宿主层                            16       4728            533
-合计                              193      49153          11825
+合计                              193      49286          11825
 
-已是我们自己的:        37328 行
+已是我们自己的:        37461 行
 逐行相同合计:          11825 行
   其中 Termux 上游:     7274 行（Termux 自己的代码，与独立性无关）
   真正属于 IQ Code:     4551 行
@@ -166,37 +166,44 @@ Agent 核心                          9       3629            867
 
 「逐行相同」这个数字本身不够用：它把 `import android.os.Process;`、`}`、`return out;`
 与真正的算法代码算在同一格里。把这个数字当成「还抄了多少」，会得出一个偏大得多的结论
-（也会让「压到 0」变成一个不可能、因而没有意义的目标）。所以脚本会把残留行分三桶，
-分类规则简单到可以人工核对：
+（也会让「压到 0」变成一个不可能、因而没有意义的目标）。所以脚本把残留行分四桶，
+分类规则简单到可以人工核对 —— 下面这份 `CLASSIFY` 是 composition 与 algorithm
+**两个模式共用**的同一份程序（写在脚本里一份，不各写一遍：本文件别处已经踩过
+「同一规则写两遍、然后各自漂移」的坑）：
 
 ```
-骨架行（括号分号 / import / javadoc 分隔符）: 2057 行
-含字面量的行（协议键名与用户可见文案）:      515 行
-其它行（仍需逐条看的地方）:                  1979 行
+骨架行（括号分号 / import / javadoc）:       2030 行
+含字面量的行（协议键名与用户可见文案）:        515 行
+声明行（字段、签名、注解、静态常量）:          986 行
+语句行（有判断与动作 —— 最该重写的地方）:     1020 行
 合计:                                        4551 行
+  其中去重后只有:                             828 种
 ```
 
-三桶的含义与可否归零：
+四桶的含义与可否归零：
 
 | 桶 | 行数 | 能不能归零 | 为什么 |
 | --- | --- | --- | --- |
-| 骨架 | 2057 | **不能** | 任何 Java 文件都以 `import …` 开头、以 `}` 结尾。把这些行改得不一样等于删 import 或往里塞噪声 —— 两者都不是我们想要的 |
+| 骨架 | 2030 | **不能** | 任何 Java 文件都以 `import …` 开头、以 `}` 结尾。把这些行改得不一样等于删 import 或往里塞噪声 —— 两者都不是我们想要的 |
 | 字面量 | 515 | **不能** | JSON 字段名、动作名是跨组件协议（宿主 `SandboxGuestHost`、Agent 工具、Frida 脚本三方对齐），改了会让两边对不上；用户可见文案是刻意逐字保留的 |
-| 其它 | 1979 | 能，而且应该压 | 这才是「读起来还像原版」的地方 |
+| 声明 | 986 | 基本不能 | 字段、方法签名、注解，以及 `public static final Status IDLE = Status.IDLE;` 这类静态常量。相同不是因为抄，而是因为**这是 Java 里写同一件事的唯一写法** |
+| 语句 | 1020 | 能，而且应该压 | **这才是「读起来还像原版」的地方**，也是下面排批次看的那一列 |
 
-第三桶里占了绝大多数的是声明与签名，例如 `public final String id;`、
-`public static List<AgentDefinition> loadAll(String projectDirectory) {`、
-`if (files == null) return;`、`try (FileOutputStream out = new FileOutputStream(file, false)) {`。
-它们相同不是因为抄，而是因为**这是 Java 里写同一件事的唯一写法**。
-所以「压」的目标不是把 1979 变成 0，而是把里面真正有判断与结构的行重写完——
-那之后剩下的会是语言本身的形状。
+「去重后只有 828 种」是同一批行的另一个切面：一张 switch 的几十个 `case`、十几个同形
+getter，逐条核对时看的是**形状**，不是条数。
 
-脚本会把第三桶全文写到 `build/provenance-other-lines.txt` 并打印路径，供逐条核对
-（不相信上面这行总结的人可以自己看）。
+脚本会把语句行全文写到 `build/provenance-statement-lines.txt` 并打印路径，供逐条核对
+（不相信上面这行总结的人可以自己看）。这份全文**按文件分段**，每段前面一行
+`=== 相对路径` —— 没有文件名的清单是没法核对的，「这句话到底是从哪来的」是看它的唯一理由。
 
-**这个路径以前是打不开的**：第三桶原先写在 `mktemp -d` 建的工作目录里，而脚本
+**这个路径以前是打不开的**：这份全文原先写在 `mktemp -d` 建的工作目录里，而脚本
 退出时会 `trap` 把它整个删掉 —— 于是「供逐条核对」是一句空头承诺，打印出来的路径
-在下一行就已经不存在了。现在它固定写到工程内的 `build/` 下（1979 行，已验证留存）。
+在下一行就已经不存在了。现在它固定写到工程内的 `build/` 下（1020 行 / 828 种，已验证留存）。
+
+**为什么不再分三桶**：最初只有「骨架 / 字面量 / 其它」三桶，而「其它」里混着大量
+`public final String planFile;` 这类声明，于是 `PlanWorkflowState` 显示有 70 行
+「其它行、占比 70%」—— 与人工查阅的结论差了一个数量级。分成四桶之后同一个文件是
+17 行语句（另见下面批 H 一节对这个数字的对照），数量级这才对得上。
 
 ### 这个数字曾经是错的（记下来，因为它会再次发生）
 
@@ -318,7 +325,7 @@ Agent 核心                          9       3629            867
 | 122 | 257 | 460 | 26.5% | `com/termux/app/zhicode/api/AnthropicMessagesProvider.java` | 已重写 |
 | 102 | 181 | 319 | 32.0% | `com/termux/app/zhicode/tools/UnifiedDiff.java` | 已重写 |
 | 100 | 139 | 207 | 48.3% | `com/termux/app/zhicode/model/PlanWorkflowState.java` | 已重写（批 H）；余量见下节，是声明与签名 |
-| 100 | 583 | 945 | 10.6% | `com/zhizhu/zhicode/TermuxTerminalPane.java` | **已重写（批 F 2/6）；余量是 31 行 import + 只能在 View 侧写的 PTY 调用** |
+| 100 | 583 | 1056 | 9.5% | `com/zhizhu/zhicode/TermuxTerminalPane.java` | **已重写（批 F 2/6）；余量是 31 行 import + 只能在 View 侧写的 PTY 调用** |
 | 93 | 331 | 699 | 13.3% | `com/termux/app/zhicode/storage/ApiSettingsStore.java` | 已重写 |
 | 89 | 288 | 584 | 15.2% | `com/zhizhu/zhicode/sandbox/SandboxGuestDebug.java` | 已重写（批 I）；余量是动作名与 JSON 键（协议） |
 | 75 | 141 | 339 | 22.1% | `com/zhizhu/zhicode/sandbox/SandboxFrida.java` | 已重写；余量主要是内嵌 Frida 脚本的大串 |
@@ -327,6 +334,34 @@ Agent 核心                          9       3629            867
 | 53 | 299 | 886 | 6.0% | `com/zhizhu/zhicode/sandbox/SandboxGuestHost.java` | 已重写 |
 | 50 | 76 | 130 | 38.5% | `com/termux/app/zhicode/api/HttpRequestTracker.java` | 已重写（批 H）；同上 |
 | 46 | 55 | 120 | 38.3% | `com/termux/app/zhicode/termux/BashCompletionCoordinator.java` | 已重写（批 H）；同上 |
+
+**这张表按重合行数排，但排下一批不该按它排。** 重合率的分母是**重写之后**的行数，
+所以注释写得越细、同一处残留显示得越夸张；它又**不区分**相同的是算法还是签名，
+于是会系统性地把「公开面大、逻辑少」的数据类排在最前面 —— 而这类文件恰恰最没得改
+（批 H 就是这么被排出来的，四个文件实际各只有 4~6 行可动）。
+
+换成按**语句行**排序之后（`PROVENANCE_ALGORITHM=1 bash tools/provenance.sh`），
+前面几项是：
+
+```
+ 语句  声明  骨架 字面量 语句占比  文件
+  138    125    186     43     28%  core/ZhiCodeEngine.java
+   74     36     51     34     38%  core/ContextCompactor.java
+   71     52     73      8     35%  tasks/TaskStore.java
+   70     16     96     74     27%  api/OpenAIResponsesProvider.java
+   42     22     55     22     30%  tools/AndroidIntentBridge.java
+   41     20     30     11     40%  tools/UnifiedDiff.java
+   39     21     63     33     25%  api/OpenAIChatCompletionsProvider.java
+   38     60     66     25     20%  termux/TermuxShellExecutor.java
+   37     16     40      0     40%  storage/ApiSettingsStore.java
+   30     63     92     14     15%  storage/SessionStore.java
+```
+
+这一列与人工判读的顺序一致得多：前十个文件正是真正还留着「读起来像原版」的判断与动作
+的地方，而 `PlanWorkflowState`（17）、`PlanApprovalGate`（22）、`HttpRequestTracker`（15）
+这些批 H 文件退到了中段。`SandboxKeeper`、`SandboxShell` 的语句行是 0，
+`SandboxFrida` 的 75 行里有 43 行是内嵌脚本的大串（字面量桶）——
+这两类都不该再花时间。
 
 
 ### 批 F（2/6）：终端面板改用 Compose 重写（已完成，待真机复验）
@@ -367,7 +402,7 @@ com/zhizhu/zhicode/TermuxTerminalPane.java   只剩 PTY：会话列表、JNI、�
 
 | | 重合行 | 现在行数 |
 | --- | --- | --- |
-| `TermuxTerminalPane.java` | 565 → **100** | 592 → 945 |
+| `TermuxTerminalPane.java` | 565 → **100** | 592 → 1056 |
 | `UiMotion.java` | 104 → **0**（文件已删） | 392 → 0 |
 | 全工程「真正属于 IQ Code」 | 5120 → **4551** | |
 
@@ -375,7 +410,8 @@ com/zhizhu/zhicode/TermuxTerminalPane.java   只剩 PTY：会话列表、JNI、�
 **只能在 View 一侧写**的 PTY 调用 —— `new TerminalView(getContext(), null)`、
 `view.attachSession(attached)`、`view.post(...)` 里的三重校验、`JSONArray` 解析骨架。
 这些相同不是因为抄，而是因为它们就是「在 View 里驱动这个上游渲染器」的唯一写法。
-文件行数涨了（592 → 945）是刻意的：注释写明了每处不许改的原因。
+文件行数涨了（592 → 1056）是刻意的：注释写明了每处不许改的原因。
+（其中最后一次增长来自 H3 的修复：重新挂载宿主 + 两次重试 + 取证日志。）
 
 **外观只动了一处**：外壳配色改为跟随深浅主题（原先写死深色档）。深色档色值与改动前
 逐字节相同（就是 `applyPaletteValues` 的那张表），浅色档启用了原作者写下但从未走到过的那张。
@@ -413,6 +449,21 @@ E1/E2（剪贴板）、G1/H4、E7。H3 的根因、第一版修法为什么修�
 一种写法」的那种：`long now = Math.max(System.currentTimeMillis(), updatedAt + 1L);`、
 `if (separator != token.length() || separator <= 0) return null;`。
 
+**这个「4~6」后来被拿来当作新分类器的标尺，结果发现两个数说的不是一件事。**
+`PROVENANCE_ALGORITHM=1` 现在给出 `PlanWorkflowState` 有 **17 行语句**，
+它们逐条是：4 行构造期归一化（`this.revision = Math.max(0L, revision);` 这种）、
+6 行单行谓词（`public boolean isIdle() { return status == Status.IDLE; }`）、
+`if (id.isEmpty()) id = UUID.randomUUID().toString();`、
+两处 `return new PlanWorkflowState(…)`、以及 `Math.max(System.currentTimeMillis(), …)`。
+「4~6」当时数的只是**有分支的行**（那两处状态判断），而分类器不可能、也不应该
+把「单行谓词」从「语句」里摘出去 —— 它确实是一句有返回值的话。
+所以 17 和 4~6 都对，只是口径不同：**排批次看 17 这个数**（它可跨文件比较），
+判断「还剩多少真逻辑」时再逐条读全文。
+
+顺带修掉分类器里一处真的误收：`public static final Status IDLE = Status.IDLE;`
+原先因为带赋值号被算成语句行；它是枚举成员那种写法，现在归声明桶
+（这个文件的语句行因此从 22 降到 17）。
+
 所以这一批实际能做的只有两件事（都已做）：
 
 1. **去掉同一件事的两份写法**
@@ -446,30 +497,36 @@ E1/E2（剪贴板）、G1/H4、E7。H3 的根因、第一版修法为什么修�
 （`SandboxGuestDebug` ← `SandboxProcessDebug`、`ZhiSandbox` ← `IQSandboxEngine` 等），
 所以必须走 `PAIRS` 配对表，按路径找是找不到的。
 
-先用三桶口径逐文件量了一遍，**结果决定了这一批只做了一个文件**：
+先用度量逐个文件量了一遍，**结果决定了这一批只做了一个文件**。
+下表是**重写之后**的四桶口径（用当前分类器测得；`SandboxGuestDebug` 一行的变化见下）：
 
-| 文件（现在 ← 原版） | 相同 | 骨架 | 字面量 | 其它 |
-| --- | --- | --- | --- | --- |
-| `SandboxGuestDebug` ← `SandboxProcessDebug` | 119 | 51 | 34 | **34** |
-| `SandboxFrida` ← `SandboxFridaBridge` | 75 | 21 | 43 | 11 |
-| `SandboxGuestHost` ← `SandboxAgentBridge` | 53 | 45 | 0 | 8 |
-| `ZhiSandbox` ← `IQSandboxEngine` | 46 | 36 | 0 | 10 |
-| `SandboxRpcService` ← `SandboxControlProvider` | 42 | 27 | 7 | 8 |
-| `SandboxConsole` ← `SandboxDebugLog` | 37 | 19 | 2 | 16 |
-| `SandboxBoard` ← `SandboxDashboardActivity` | 37 | 33 | 0 | 4 |
-| `SandboxPrefs` ← `SandboxSettingsStore` | 33 | 19 | 0 | 14 |
-| `FridaEnv` ← `FridaRuntimeManager` | 31 | 21 | 6 | 4 |
-| `SandboxOverlay` ← `SandboxFloatingController` | 24 | 16 | 0 | 8 |
-| `SandboxShell` ← `SandboxTermuxBridge` | 23 | 23 | 0 | **0** |
-| `SandboxProcess` ← `SandboxProcessRole` | 18 | 11 | 1 | 6 |
-| `SandboxRpc` ← `SandboxHostClient` | 13 | 9 | 0 | 4 |
-| `SandboxKeeper` ← `SandboxGuardService` | 12 | 12 | 0 | **0** |
-| 合计 | 563 | 343 | 93 | **127** |
+| 文件（现在 ← 原版） | 相同 | 骨架 | 字面量 | 声明 | 语句 |
+| --- | --- | --- | --- | --- | --- |
+| `SandboxGuestDebug` ← `SandboxProcessDebug` | 89 | 48 | 21 | 8 | **12** |
+| `SandboxOverlay` ← `SandboxFloatingController` | 24 | 16 | 0 | 0 | 8 |
+| `SandboxFrida` ← `SandboxFridaBridge` | 75 | 20 | 43 | 7 | 5 |
+| `SandboxPrefs` ← `SandboxSettingsStore` | 33 | 19 | 0 | 9 | 5 |
+| `SandboxConsole` ← `SandboxDebugLog` | 37 | 19 | 2 | 11 | 5 |
+| `SandboxProcess` ← `SandboxProcessRole` | 18 | 11 | 1 | 2 | 4 |
+| `ZhiSandbox` ← `IQSandboxEngine` | 46 | 35 | 0 | 7 | 4 |
+| `SandboxRpcService` ← `SandboxControlProvider` | 42 | 26 | 7 | 6 | 3 |
+| `SandboxGuestHost` ← `SandboxAgentBridge` | 53 | 44 | 0 | 7 | 2 |
+| `SandboxRpc` ← `SandboxHostClient` | 13 | 9 | 0 | 3 | 1 |
+| `FridaEnv` ← `FridaRuntimeManager` | 31 | 20 | 6 | 4 | 1 |
+| `SandboxBoard` ← `SandboxDashboardActivity` | 37 | 32 | 0 | 4 | 1 |
+| `SandboxShell` ← `SandboxTermuxBridge` | 23 | 22 | 0 | 1 | **0** |
+| `SandboxKeeper` ← `SandboxGuardService` | 12 | 12 | 0 | 0 | **0** |
+| 合计 | 533 | 333 | 80 | 69 | **51** |
 
-两个文件（`SandboxShell`、`SandboxKeeper`）的相同行**全是括号与 import**。
-把这 127 行按内容打出来看，绝大多数是 `break;`（13 个）、`return true;`、
-`try {`、`case MotionEvent.ACTION_DOWN:`、方法签名与字段声明。
-真正的算法只有十来行，而且都是绕不开的：`System.load(canonical);`、
+（重写前这张表是 563 行相同：三桶口径下 343 骨架 / 93 字面量 / 127 其它。
+两个数字的差 30 行就是下面那一处重写的收益；三桶与四桶不可逐格对比，
+因为分桶规则本身变了。）
+
+两个文件（`SandboxShell`、`SandboxKeeper`）的相同行**全是括号与 import 或注解** ——
+按现在的口径它们的语句行是 0，这正是「这两个文件没什么可改」的形式化说法。
+把这一层里非骨架、非字面量的行（现在口径下是 69 行声明 + 51 行语句）按内容打出来看，
+绝大多数是 `break;`（13 个）、`return true;`、`try {`、`case MotionEvent.ACTION_DOWN:`、
+方法签名与字段声明。真正的算法只有十来行，而且都是绕不开的：`System.load(canonical);`、
 `Runtime.getRuntime().gc();`、`while ((b = in.read()) != -1 && b != 0) out.write(b);`
 
 所以只改了一个：**`SandboxGuestDebug` 的 13 分支 switch**。
@@ -480,11 +537,11 @@ E1/E2（剪贴板）、G1/H4、E7。H3 的根因、第一版修法为什么修�
 
 这一处就吃掉了这一批的大部分余量：
 
-    相同行   119 → 89
-    其它桶    34 → 18
-    沙箱宿主层 563 → 533
+    相同行           119 → 89
+    语句行（该文件的） 34 → 12   （那个 34 是三桶口径下的「其它行」）
+    沙箱宿主层        563 → 533
 
-**剩下的 93 行没有再动**，因为它们要么是协议串（动作名、JSON 键，宿主与 Agent 工具
+**剩下的 51 行语句没有再动**，因为它们要么是协议串（动作名、JSON 键，宿主与 Agent 工具
 按同一份名字对齐，改了会让两边对不上），要么是 `return true;` 这种没有第二种写法的行。
 为了把数字压低去重排一个 `try` 的位置，只会让代码变难看。
 
@@ -808,7 +865,10 @@ com/zhizhu/zhicode/ZhiDocumentsProvider.java」—— 删文件后忘了同步�
 find . -maxdepth 2 -name LICENSE -o -maxdepth 2 -name NOTICE | grep -v '/build/'
 
 # 2. 归属度量（需要本机有原版 IQ Code）
-bash tools/provenance.sh
+bash tools/provenance.sh                      # 汇总表 + 漏算自检（有 ⚠ 就说明数字被低估）
+PROVENANCE_COMPOSITION=1 bash tools/provenance.sh   # 残留行的四桶构成 + 语句行全文
+PROVENANCE_ALGORITHM=1  bash tools/provenance.sh    # 按语句行排序的清单（排下一批看这个）
+PROVENANCE_PER_FILE=1   bash tools/provenance.sh    # 按重合行数排序（历史口径，仅作参考）
 
 # 3. 结构测试里有 LicenseNoticeStructureTest 守着这些文件的存在，
 #    它们不会在下一次重构里被静默删掉
