@@ -148,19 +148,50 @@ bootstrap 里的程序许可各自适用，且要求源码对接收者可得。
 ```
 归属区域                             文件         行数   仍与 IQCode 相同
 Termux 上游（非 IQ Code）             23       7394           7274
-Termux 集成层                       35       8734           2063
+Termux 集成层                       35       9311           1949
 Compose 界面层                      57      15427              0
-其它                                8       1980           1138
+其它                                8       2244           1061
 Agent 工具                         44       5673            933
-Agent 核心                          9       3436            855
+Agent 核心                          9       3627            870
 沙箱宿主层                            16       4716            563
-合计                              192      47551          12841
+合计                              192      48392          12650
 
-已是我们自己的:        34710 行
-逐行相同合计:          12841 行
+已是我们自己的:        35742 行
+逐行相同合计:          12650 行
   其中 Termux 上游:     7274 行（Termux 自己的代码，与独立性无关）
-  真正属于 IQ Code:     5567 行
+  真正属于 IQ Code:     5376 行
 ```
+
+### 这 5376 行是什么（`PROVENANCE_COMPOSITION=1`）
+
+「逐行相同」这个数字本身不够用：它把 `import android.os.Process;`、`}`、`return out;`
+与真正的算法代码算在同一格里。把这个数字当成「还抄了多少」，会得出一个偏大得多的结论
+（也会让「压到 0」变成一个不可能、因而没有意义的目标）。所以脚本会把残留行分三桶，
+分类规则简单到可以人工核对：
+
+```
+骨架行（括号分号 / import / javadoc 分隔符）: 2149 行
+含字面量的行（协议键名与用户可见文案）:      609 行
+其它行（仍需逐条看的地方）:                  2618 行
+合计:                                        5376 行
+```
+
+三桶的含义与可否归零：
+
+| 桶 | 行数 | 能不能归零 | 为什么 |
+| --- | --- | --- | --- |
+| 骨架 | 2149 | **不能** | 任何 Java 文件都以 `import …` 开头、以 `}` 结尾。把这些行改得不一样等于删 import 或往里塞噪声 —— 两者都不是我们想要的 |
+| 字面量 | 609 | **不能** | JSON 字段名、动作名是跨组件协议（宿主 `SandboxGuestHost`、Agent 工具、Frida 脚本三方对齐），改了会让两边对不上；用户可见文案是刻意逐字保留的 |
+| 其它 | 2618 | 能，而且应该压 | 这才是「读起来还像原版」的地方 |
+
+第三桶里占了绝大多数的是声明与签名，例如 `public final String id;`、
+`public static List<AgentDefinition> loadAll(String projectDirectory) {`、
+`if (files == null) return;`、`try (FileOutputStream out = new FileOutputStream(file, false)) {`。
+它们相同不是因为抄，而是因为**这是 Java 里写同一件事的唯一写法**。
+所以「压」的目标不是把 2618 变成 0，而是把里面真正有判断与结构的行重写完——
+那之后剩下的会是语言本身的形状。
+
+脚本会把第三桶全文写到临时文件并打印路径，供逐条核对（不相信上面这行总结的人可以自己看）。
 
 ### 这个数字曾经是错的（记下来，因为它会再次发生）
 
@@ -271,27 +302,28 @@ Agent 核心                          9       3436            855
 
 | 相同 | 原版 | 现在 | 重合 | 文件 | 处置 |
 | --- | --- | --- | --- | --- | --- |
-| 1233 → 492 | 1245 | 2094 | 23.5% | `com/termux/app/zhicode/core/ZhiCodeEngine.java` | 批 D（已重写） || 565 | 583 | 592 | 95.4% | `com/zhizhu/zhicode/TermuxTerminalPane.java` | 批 F |
-| 388 → 195 | 390 | 619 | 31.5% | `com/termux/app/zhicode/core/ContextCompactor.java` | 批 D（已重写） |
+| 565 | 583 | 592 | 95.4% | `com/zhizhu/zhicode/TermuxTerminalPane.java` | 批 F |
+| 492 | 1245 | 2094 | 23.5% | `com/termux/app/zhicode/core/ZhiCodeEngine.java` | 已重写；余量是 Listener 接口与用户可见文案 |
 | 310 | 310 | 310 | 100.0% | `com/zhizhu/zhicode/UiMotion.java` | 批 F |
-| 256 | 622 | 929 | 27.6% | `com/termux/app/zhicode/api/OpenAIResponsesProvider.java` | 批 B（已重写） |
-| 204 | 354 | 545 | 37.4% | `com/termux/app/zhicode/tasks/TaskStore.java` | 批 E（已重写） |
-| 199 | 642 | 1138 | 17.5% | `com/termux/app/zhicode/storage/SessionStore.java` | 批 E（已重写） |
-| 189 | 468 | 929 | 20.3% | `com/termux/app/zhicode/termux/TermuxShellExecutor.java` | 批 E（已重写） |
-| 156 | 451 | 596 | 26.2% | `com/termux/app/zhicode/api/OpenAIChatCompletionsProvider.java` | 批 B（已重写） |
-| 148 | 155 | 162 | 91.4% | `com/termux/app/zhicode/agents/SubagentManager.java` | 批 G |
-| 141 | 310 | 607 | 23.2% | `com/termux/app/zhicode/tools/AndroidIntentBridge.java` | 批 C（已重写） |
-| 122 | 257 | 460 | 26.5% | `com/termux/app/zhicode/api/AnthropicMessagesProvider.java` | 批 B（已重写） |
-| 119 | 288 | 572 | 20.8% | `com/zhizhu/zhicode/sandbox/SandboxGuestDebug.java` | 批 G |
-| 108 | 139 | 196 | 55.1% | `com/termux/app/zhicode/model/PlanWorkflowState.java` | 批 C |
-| 102 | 181 | 319 | 32.0% | `com/termux/app/zhicode/tools/UnifiedDiff.java` | 批 C |
-| 93 | 331 | 699 | 13.3% | `com/termux/app/zhicode/storage/ApiSettingsStore.java` | 批 E（已重写） |
-| 78 | 98 | 150 | 52.0% | `com/termux/app/zhicode/core/PlanApprovalGate.java` | 批 D |
-| 75 | 141 | 339 | 22.1% | `com/zhizhu/zhicode/sandbox/SandboxFrida.java` | 批 G |
-| 74 | 136 | 234 | 31.6% | `com/zhizhu/zhicode/ZhiFileProvider.java` | 批 E（已重写） |
-| 74 | 80 | 84 | 88.1% | `com/zhizhu/zhicode/background/KeepAliveService.java` | 批 G |
-| 57 | 59 | 66 | 86.4% | `com/zhizhu/zhicode/background/RootKeepAliveController.java` | 批 G |
-| 53 | 299 | 886 | 6.0% | `com/zhizhu/zhicode/sandbox/SandboxGuestHost.java` | 沙箱层 |
+| 256 | 622 | 929 | 27.6% | `com/termux/app/zhicode/api/OpenAIResponsesProvider.java` | 已重写 |
+| 204 | 354 | 545 | 37.4% | `com/termux/app/zhicode/tasks/TaskStore.java` | 已重写 |
+| 199 | 642 | 1138 | 17.5% | `com/termux/app/zhicode/storage/SessionStore.java` | 已重写 |
+| 195 | 390 | 619 | 31.5% | `com/termux/app/zhicode/core/ContextCompactor.java` | 已重写（模型文本有基线测试钉住） |
+| 189 | 468 | 929 | 20.3% | `com/termux/app/zhicode/termux/TermuxShellExecutor.java` | 已重写 |
+| 156 | 451 | 596 | 26.2% | `com/termux/app/zhicode/api/OpenAIChatCompletionsProvider.java` | 已重写 |
+| 141 | 310 | 607 | 23.2% | `com/termux/app/zhicode/tools/AndroidIntentBridge.java` | 已重写 |
+| 122 | 257 | 460 | 26.5% | `com/termux/app/zhicode/api/AnthropicMessagesProvider.java` | 已重写 |
+| 119 | 288 | 572 | 20.8% | `com/zhizhu/zhicode/sandbox/SandboxGuestDebug.java` | 已重写；余量是动作名与 JSON 键（协议） |
+| 108 | 139 | 196 | 55.1% | `com/termux/app/zhicode/model/PlanWorkflowState.java` | **重合率最高，优先** |
+| 102 | 181 | 319 | 32.0% | `com/termux/app/zhicode/tools/UnifiedDiff.java` | 已重写 |
+| 93 | 331 | 699 | 13.3% | `com/termux/app/zhicode/storage/ApiSettingsStore.java` | 已重写 |
+| 78 | 98 | 150 | 52.0% | `com/termux/app/zhicode/core/PlanApprovalGate.java` | **优先** |
+| 75 | 141 | 339 | 22.1% | `com/zhizhu/zhicode/sandbox/SandboxFrida.java` | 已重写；余量主要是内嵌 Frida 脚本的大串 |
+| 74 | 136 | 234 | 31.6% | `com/zhizhu/zhicode/ZhiFileProvider.java` | 已重写 |
+| 53 | 299 | 886 | 6.0% | `com/zhizhu/zhicode/sandbox/SandboxGuestHost.java` | 已重写 |
+| 53 | 134 | 39.6% | `com/termux/app/zhicode/api/HttpRequestTracker.java` | **优先** |
+| 52 | 55 | 111 | 46.8% | `com/termux/app/zhicode/termux/BashCompletionCoordinator.java` | **优先** |
+
 
 ### 批 E（1/3、2/3）：终端执行器、任务存储与提示词装配（已完成）
 

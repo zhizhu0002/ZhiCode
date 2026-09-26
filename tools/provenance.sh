@@ -222,6 +222,55 @@ END {
 }
 ' "$REPORT"
 
+# 「逐行相同」这个数字本身不够用：它把 `import android.os.Process;`、`}`、`return out;`
+# 与真正的算法代码算在同一格里。要决定「还剩多少要重写」，必须知道这些行都是什么。
+#
+# 所以这里把残留行分成三桶。分类刻意简单到可以人工核对：
+#   骨架   —— 只有括号分号、import/package、javadoc 的分隔符行。任何 Java 文件都长这样，
+#             与原版相同不说明任何问题。
+#   字面量 —— 含双引号字符串的行。协议键名（JSON 字段、动作名）与用户可见文案属于契约，
+#             改了会让两个组件对不上；夹具字符串（例如测试数据）也归在这里。
+#             这一桶必须逐条看过，不能只看总数。
+#   其它   —— 剩下的。这一桶才算「读起来还像原版的地方」，是真正要压的数字。
+#
+# 用法: PROVENANCE_COMPOSITION=1 bash tools/provenance.sh
+if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ]; then
+    skeleton=0; literal=0; other=0
+    : > "$WORK/other-lines.txt"
+    while IFS='|' read -r rel counterpart theirs ours shared; do
+        [ -n "$rel" ] || continue
+        [ "$theirs" = "0" ] || [ "$shared" = "0" ] || true
+        case "$rel" in
+            com/termux/terminal/*|com/termux/view/*|com/termux/shared/*) continue ;;
+        esac
+        [ -f "$OUR/$rel" ] && [ -f "$OFF/$counterpart" ] || continue
+        normalize "$OUR/$rel" | squash > "$WORK/comp-ours.txt"
+        squash < "$OFF/$counterpart" > "$WORK/comp-theirs.txt"
+        diff --unchanged-group-format='%=' --old-group-format='' \
+             --new-group-format='' --changed-group-format='' \
+             "$WORK/comp-theirs.txt" "$WORK/comp-ours.txt" >> "$WORK/comp-lines.txt"
+    done < "$REPORT"
+
+    awk '
+      {
+        line = $0
+        if (line ~ /^[{}();,\[\] ]*$/ || line ~ /^import / || line ~ /^package / \
+            || line ~ /^\/\*\*$/ || line ~ /^\*\/$/ || line ~ /^\*$/) { skeleton++; next }
+        if (line ~ /"[^"]*"/) { literal++; next }
+        other++
+        print line > otherfile
+      }
+      END {
+        printf "\n残留构成（只看非 Termux 上游的文件）：\n"
+        printf "  骨架行（括号分号 / import / javadoc 分隔符）: %d 行\n", skeleton
+        printf "  含字面量的行（协议键名与用户可见文案）:      %d 行\n", literal
+        printf "  其它行（仍需逐条看的地方）:                  %d 行\n", other
+        printf "  合计:                                        %d 行\n", skeleton + literal + other
+        printf "  「其它行」全文: %s\n", otherfile
+      }
+    ' otherfile="$WORK/composition-other.txt" "$WORK/comp-lines.txt"
+fi
+
 # 逐个文件的清单。默认不输出，因为日常只需要上面那张汇总表；
 # 但要决定「下一步重写哪些文件」时必须有它 —— 否则排批次只能靠感觉。
 # 用法: PROVENANCE_PER_FILE=1 bash tools/provenance.sh
