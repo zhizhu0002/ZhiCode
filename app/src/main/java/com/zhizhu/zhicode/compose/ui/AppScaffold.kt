@@ -732,7 +732,6 @@ private fun PaneHost(
         )
         WorkspaceTab.FILES -> FilesPane(
             filePath = state.filePath,
-            rootPath = state.projectPath,
             entries = state.fileEntries,
             openFile = state.openFile,
             emptyNote = state.fileNote,
