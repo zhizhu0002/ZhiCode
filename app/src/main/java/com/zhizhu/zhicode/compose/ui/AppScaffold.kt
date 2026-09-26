@@ -733,6 +733,10 @@ private fun PaneHost(
             // runtimeReady 是真实探测（见 EnvDoctor / RuntimeInstaller），不是常量。
             runtimeReady = state.runtimeReady,
             workingDirectory = state.projectPath,
+            // 终端实例由 ViewModel 持有，**不能**在这里 remember：
+            // PaneHost 用 when(tab) 切面板，切走会让这段 Composable 离开组合，
+            // 实例若建在这里就会连会话一起被销毁（见 TerminalHolder 的注释）。
+            terminalHolder = { ctx -> viewModel.terminalPane(ctx) },
             modifier = modifier,
         )
         WorkspaceTab.FILES -> FilesPane(

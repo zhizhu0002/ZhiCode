@@ -1,5 +1,8 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
+import android.content.Context
+import android.view.View
+import android.view.ViewGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,7 +29,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.zhizhu.zhicode.RuntimeInstaller
 import com.zhizhu.zhicode.TermuxTerminalPane
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -64,6 +66,8 @@ fun TerminalPane(
     projectName: String,
     runtimeReady: Boolean,
     workingDirectory: String,
+    /** 终端实例的持有者（跨 Tab 保活，见 [WorkspaceViewModel.terminalPane]）。 */
+    terminalHolder: TerminalHolder,
     modifier: Modifier = Modifier,
     /** 清屏动作。默认 `null` = 不显示按钮。 */
     onClear: (() -> Unit)? = null,
@@ -72,6 +76,7 @@ fun TerminalPane(
         RealTerminalPane(
             projectName = projectName,
             workingDirectory = workingDirectory,
+            terminalHolder = terminalHolder,
             modifier = modifier,
         )
         return
@@ -85,31 +90,54 @@ fun TerminalPane(
 }
 
 /**
+ * 终端实例的取用口。
+ *
+ * 做成接口而不是直接把 `WorkspaceViewModel` 传进来：这个包（`ui.panes`）里其它面板
+ * 都不认识 ViewModel，终端也不该是例外 —— 它需要的只是“给我一个能跨 Tab 活着的
+ * `TermuxTerminalPane`”。由 `AppScaffold` 在接线处注入。
+ */
+fun interface TerminalHolder {
+    fun obtain(context: Context): TermuxTerminalPane
+}
+
+/**
  * 真实 PTY。
  *
- * ⚠️ 这个视图持有的是**真实子进程**（bash）与 PTY 文件描述符，
- * 必须随 Composable 离开组合而关闭，否则每切一次 Tab 就漏一个 bash 进程。
- * `onRelease` 里调 `closeAll()` 正是为此。
+ * ⚠️ **这里不能持有会话的生命周期**。
+ *
+ * 原来写的是 `remember { TermuxTerminalPane(...) }` + `onDispose { pane.closeAll() }`，
+ * 而 `PaneHost` 用 `when(tab)` 切面板：切到别的 Tab，这段 Composable 直接离开组合，
+ * `onDispose` 触发，**`closeAll()` 把每个会话（bash 进程 + PTY fd）都 finish 掉**。
+ * 所以“切走再切回来”看到的永远是全新的空终端。
+ *
+ * 现在实例由 [TerminalHolder] 持有（实际挂在 ViewModel 上），离开组合时只把它
+ * **从视图树上摘下来**，会话原封不动：
+ * - 子进程不依赖 View 挂在哪里，摘下来之后 bash 照常跑，回声也照常进缓冲；
+ * - 重新切回来时 [AndroidView] 的 factory 返回同一个实例，终端内容还是原来那些。
+ *
+ * 唯一需要防御的是“同一个 View 不能有两个父节点”：切回来时新的 AndroidView 可能
+ * 先建立、旧的还没来得及 dispose，所以 attach 前再摘一次（[detachFromParent]）。
  */
 @Composable
 private fun RealTerminalPane(
     projectName: String,
     workingDirectory: String,
+    terminalHolder: TerminalHolder,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val pane = remember {
-        TermuxTerminalPane(context, RuntimeInstaller(context.applicationContext))
-    }
+    // remember 只是避免每次重组都调一次 obtain；真正的实例缓存由 holder 负责。
+    val pane = remember(terminalHolder) { terminalHolder.obtain(context) }
 
     // 项目目录变化时同步给终端（下一次新建会话用它当工作目录）。
     LaunchedEffect(workingDirectory) {
         pane.setNextSessionWorkingDirectory(workingDirectory)
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(pane) {
         pane.onRuntimeReady()
-        onDispose { pane.closeAll() }
+        // ⚠️ 只摘视图，**不关会话**。真正释放是 ViewModel.onCleared() 与重装环境之前。
+        onDispose { detachFromParent(pane) }
     }
 
     Surface(modifier = modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
@@ -119,11 +147,20 @@ private fun RealTerminalPane(
                 subtitle = projectName,
             )
             AndroidView(
-                factory = { pane },
+                factory = {
+                    // 可能还挂在上一轮的容器上（旧 AndroidView 尚未 dispose），先摘干净
+                    detachFromParent(pane)
+                    pane
+                },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
         }
     }
+}
+
+/** 把一个 View 从它当前的父容器上摘下来（没父容器就什么都不做）。 */
+private fun detachFromParent(view: View) {
+    (view.parent as? ViewGroup)?.removeView(view)
 }
 
 /** 环境未就绪时的只读占位。文案明确说明**为什么**不能输入。 */

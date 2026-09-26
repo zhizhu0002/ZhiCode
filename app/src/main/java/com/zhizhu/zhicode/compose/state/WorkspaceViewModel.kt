@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zhizhu.zhicode.compose.data.ApiConfigStore
@@ -30,7 +32,9 @@ import com.zhizhu.zhicode.compose.engine.toEngineEffort
 import com.zhizhu.zhicode.compose.engine.toEngineMode
 import com.zhizhu.zhicode.compose.engine.toUiPlanApproval
 import com.zhizhu.zhicode.compose.runtime.EnvDoctor
+import com.termux.shared.termux.TermuxConstants
 import com.zhizhu.zhicode.RuntimeInstaller
+import com.zhizhu.zhicode.TermuxTerminalPane
 import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.ApiProfile
 import com.zhizhu.zhicode.compose.model.ApiProfileDraft
@@ -248,6 +252,60 @@ class WorkspaceViewModel(
         autoInstallRuntimeIfStale()
     }
 
+    // ------------------------------------------------------------ 终端保活
+
+    /**
+     * 终端面板实例。**持有它就是为了跨 Tab 保活**。
+     *
+     * ## 为什么必须挂在这里
+     *
+     * 原来的写法是 `TerminalPane` 里 `remember { TermuxTerminalPane(...) }` +
+     * `onDispose { pane.closeAll() }`，而 `PaneHost` 用的是 `when(tab) { … }`：
+     * 切到别的 Tab，终端这段 Composable 直接离开组合 → `onDispose` 触发 →
+     * **`closeAll()` 把每个会话（bash 进程 + PTY fd）都 finish 掉**。
+     * 于是"切走再切回来"看到的永远是全新的空终端，之前跑的命令、工作目录全没了。
+     *
+     * 把实例放到 ViewModel 上就解决了：Composable 进出组合只影响"挂到界面上"这一步，
+     * 会话本身一直在。
+     *
+     * ## 为什么放 ViewModel 不会泄漏 Activity
+     *
+     * `TermuxTerminalPane` 是 `FrameLayout`，构造时用的是 Activity 的 Context。
+     * ViewModel 比 Activity 活得久本来是泄漏的经典形态，但本工程的 MainActivity
+     * 声明了 `configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"`，
+     * **不会因旋转/换主题重建** —— Activity 实例与 ViewModel 同生共死，没有间隙。
+     *
+     * 真正要释放的时机是 [onCleared]（Activity 真正销毁）：那时必须 `closeAll()`，
+     * 否则每开一次应用就漏一批 bash 进程。
+     */
+    private var terminalPane: TermuxTerminalPane? = null
+
+    /** 取（或首次创建）终端面板实例。同一进程内只会有一个。 */
+    fun terminalPane(context: Context): TermuxTerminalPane =
+        terminalPane ?: TermuxTerminalPane(context, installer).also { terminalPane = it }
+
+    /**
+     * 关掉终端里的所有会话并丢弃实例。
+     *
+     * 只在两个地方调用：Activity 真正销毁（[onCleared]），以及**重装环境之前** ——
+     * 重装会把整个 `usr` 目录 rename 换掉，正在跑的 bash 会指向一个已不存在的前缀。
+     */
+    fun releaseTerminalPane() {
+        val pane = terminalPane ?: return
+        terminalPane = null
+        // closeAll() 会 finish 每个 session，并释放 WakeLock —— 属于 View 操作，回主线程做。
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            pane.closeAll()
+        } else {
+            Handler(Looper.getMainLooper()).post { pane.closeAll() }
+        }
+    }
+
+    override fun onCleared() {
+        releaseTerminalPane()
+        super.onCleared()
+    }
+
     /**
      * 启动时检查内置 Termux 环境是否为**当前 APK 内置的那一版**，不是就自动重装。
      *
@@ -260,26 +318,36 @@ class WorkspaceViewModel(
      *
      * ## 与手动触发的区别
      *
-     * 不弹「环境自检」窗口、也不问一句：用户装 APK 的意图就是要用新的那版，
-     * 多问一次没有意义。进度照常回灌到状态里，`environmentOpen` 时能看到。
+     * 不弹「环境自检」窗口、也不问一句：用户装 APK 的意图就是要用新的那版。
+     * 进度照常回灌到状态里，打开环境自检就能看到。
      *
      * ## HOME 不受影响
      *
-     * [RuntimeInstaller.install] 只换 `usr`（`activatePrefix` 换的是前缀目录），
-     * `home` 从头到尾没动过 —— 所以会话历史、项目文件都在。
-     * 但**用 apt 装过的包会丢**（它们装在 `usr` 里），这一点写在
-     * [RuntimeInstaller.isUpToDate] 的文档里。
+     * [RuntimeInstaller.install] 只换 `usr`（`activatePrefix` 把旧前缀 rename 到
+     * `usr-backup` 再删），`home` 从头到尾没动过 —— 会话历史、项目文件都在。
+     * 但**用 apt 装过的包会丢**（它们装在 `usr` 里）。
      *
-     * 失败不抛给调用方：自动流程出错就当没做，用户仍可手动重装。
+     * ## 为什么每一步都写日志
+     *
+     * 这条路径是**静默**的：没有弹窗、失败也只进状态。第一版就是这样被反馈
+     * "启动后没有自动重装" 而无法判断到底走到了哪一步。现在每次判定与结果都追加到
+     * `$HOME/.iq/runtime.log`（终端里 `cat ~/.iq/runtime.log` 就能看）。
      */
     private fun autoInstallRuntimeIfStale() {
-        // IO 线程：读 marker、比对 sha256 都是磁盘操作
+        // IO 线程：读 marker、比对 sha256、写日志都是磁盘操作
         viewModelScope.launch(Dispatchers.IO) {
-            val stale = runCatching { !installer.isUpToDate() }.getOrDefault(false)
-            if (!stale) return@launch
-            // 环境**根本没装**时也走这里（首次启动），与手动安装是同一条路径。
-            val reason = installer.installedVersion()?.let { "内置环境已更新，正在升级…" }
-                ?: "正在初始化内置环境…"
+            val installed = runCatching { installer.installedVersion() }.getOrNull()
+            val bundled = runCatching { installer.bundledVersion() }.getOrNull() ?: "?"
+            val upToDate = runCatching { installer.isUpToDate() }.getOrElse { error ->
+                appendRuntimeLog("检查版本时抛异常：${error.javaClass.simpleName}: ${error.message}")
+                false
+            }
+            appendRuntimeLog(
+                "启动检查：已装=${installed ?: "(无)"} 内置=$bundled 一致=$upToDate"
+            )
+            if (upToDate) return@launch
+
+            val reason = if (installed == null) "正在初始化内置环境…" else "内置环境已更新，正在升级…"
             // "抢占"必须放在同一次 _state.update 里：启动自动装与用户手动点「初始化」
             // 可能同时到达，分开的 check-then-set 会让两边都跑一遍（第二次会把
             // staging 删掉再重建，前一次的进度全乱）。与 turnSessionId 是同一类竞态。
@@ -292,8 +360,35 @@ class WorkspaceViewModel(
                     s.copy(runtimeInstalling = true, runtimeProgress = 0, runtimeMessage = reason)
                 }
             }
-            if (!claimed) return@launch
+            if (!claimed) {
+                appendRuntimeLog("已有安装在进行，本次跳过")
+                return@launch
+            }
+            appendRuntimeLog("开始自动安装（$reason）")
             installRuntimeBlocking(reason)
+        }
+    }
+
+    /**
+     * 把一行诊断写进 `$HOME/.iq/runtime.log`。
+     *
+     * 只保留最后 [RUNTIME_LOG_MAX_LINES] 行：这是个排障用的滚动日志，
+     * 不是审计记录，无限增长会把用户的家目录塞满。
+     *
+     * 绝不抛异常 —— 日志写不进去（磁盘满、权限）不该影响安装本身。
+     */
+    private fun appendRuntimeLog(line: String) {
+        runCatching {
+            val dir = File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".iq")
+            dir.mkdirs()
+            val file = File(dir, "runtime.log")
+            val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+            val kept = if (file.isFile) {
+                file.readLines().takeLast(RUNTIME_LOG_MAX_LINES - 1)
+            } else {
+                emptyList()
+            }
+            file.writeText((kept + "$stamp  $line").joinToString("\n") + "\n")
         }
     }
 
@@ -3020,21 +3115,19 @@ class WorkspaceViewModel(
      * 分别写一份必然走样（一处忘了 `ensureWorkspace()`，另一处忘了更新报告）。
      */
     private suspend fun installRuntimeBlocking(preparing: String) {
-        _state.update { it.copy(runtimeMessage = preparing) }
-        val ok = runCatching {
-            installer.install { message, percent ->
-                _state.update { it.copy(runtimeMessage = message, runtimeProgress = percent) }
-            }
-        }.onFailure { error ->
-            _state.update {
-                it.copy(
-                    runtimeInstalling = false,
-                    runtimeMessage = "初始化失败：${error.message ?: error.javaClass.simpleName}",
-                )
-            }
-        }.isSuccess
+        // 装之前必须先关终端：install() 的 activatePrefix() 会把整个 usr 目录 rename 换掉，
+        // 正在跑的 bash 会立刻指向一个已不存在的前缀（`/bin/bash` 还在内存里，
+        // 但它 fork 出的任何东西都会失败）。切换要在主线程做，所以这里显式切过去等它。
+        withContext(Dispatchers.Main) { releaseTerminalPane() }
 
-        if (!ok) return
+        _state.update { it.copy(runtimeMessage = preparing) }
+        val failure = installRuntimeReporting()
+        if (failure != null) {
+            appendRuntimeLog("安装失败：$failure")
+            _state.update { it.copy(runtimeInstalling = false, runtimeMessage = "初始化失败：$failure") }
+            return
+        }
+        appendRuntimeLog("安装完成：已装=${runCatching { installer.installedVersion() }.getOrNull() ?: "(无)"}")
         val reportText = buildEnvironmentReport()
         _state.update {
             it.copy(
@@ -3049,6 +3142,20 @@ class WorkspaceViewModel(
         // 不创建的话：变更面板永远显示"项目目录不存在"，
         // 终端的工作目录会回退到 home，会话也会落在一个不存在的项目键下。
         ensureWorkspace()
+    }
+
+    /**
+     * 跑一次安装，失败时返回一句人话原因（成功返回 `null`）。
+     *
+     * 把"失败原因"作为返回值而不是就地写状态：调用方还需要把同一句话写进日志，
+     * 两处分别拼一遍字符串必然走样。
+     */
+    private suspend fun installRuntimeReporting(): String? = runCatching {
+        installer.install { message, percent ->
+            _state.update { it.copy(runtimeMessage = message, runtimeProgress = percent) }
+        }
+    }.exceptionOrNull()?.let { error ->
+        error.message ?: error.javaClass.simpleName
     }
 
     /** 幂等修复：清半成品目录、补齐 apt/dpkg 兼容层。适用于 apt 升级过或上次中断。 */
@@ -3240,6 +3347,14 @@ class WorkspaceViewModel(
 
         /** 单条工具实时输出的上限（原版 `liveOutput` 上限 40000）。 */
         private const val LIVE_OUTPUT_LIMIT = 40_000
+
+        /**
+         * 内置环境安装日志保留的行数。
+         *
+         * `~/.iq/runtime.log` 是排障用的滚动日志，不是审计记录 ——
+         * 自动重装这条路径是静默的，不写日志就完全无法判断它走到了哪一步。
+         */
+        private const val RUNTIME_LOG_MAX_LINES = 200
 
         /** 工具实时输出落盘间隔：每条进程输出都改一次 StateFlow 会把界面拖垮。 */
         private const val PROGRESS_FLUSH_MS = 200L
