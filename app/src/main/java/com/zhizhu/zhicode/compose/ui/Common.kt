@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.DropdownEntry
+import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -36,6 +38,8 @@ import top.yukonga.miuix.kmp.basic.TabRowDefaults
 import top.yukonga.miuix.kmp.basic.TabRowWithContour
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.VerticalDivider
+import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
+import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
@@ -354,6 +358,135 @@ fun ZhiSegmentedTabs(
         minWidth = if (matchWidth) 0.dp else TabRowDefaults.TabRowWithContourMinWidth,
         maxWidth = if (matchWidth) TabsMatchWidthLimit else TabRowDefaults.TabRowWithContourMaxWidth,
     )
+}
+
+/**
+ * 下拉菜单里的一项。
+ *
+ * 不直接把 Miuix 的 `DropdownItem` 暴露给界面代码：那样每个调用点都要认识
+ * `DropdownEntry` / `DropdownItem` 两个类，将来 Miuix 改签名会波及一片。
+ * 这里只留界面真正需要表达的三样东西。
+ */
+data class ZhiMenuItem(
+    val text: String,
+    /** 条目下方的说明文字。 */
+    val summary: String? = null,
+    /** 条目左侧的图标。传 null 就不显示。 */
+    val icon: ImageVector? = null,
+    val onClick: () -> Unit,
+)
+
+/**
+ * 图标按钮 + 展开的动作菜单。转发到 Miuix **`OverlayIconDropdownMenu`**。
+ *
+ * 用于输入器的 `+`：点一下展开一组动作（附加文件 / 技能 / 文件工作区 / 图片）。
+ *
+ * ⚠️ **必须位于 Miuix `Scaffold` 内** —— `Overlay*` 系列靠 Scaffold 提供的
+ * `MiuixPopupHost` 渲染弹出内容（官方文档「使用前提」）。本工程根部就是它。
+ *
+ * 默认尺寸按 34dp 给：Miuix `IconButtonDefaults` 是 40dp 正圆，
+ * 而输入器页脚那一行只有 34dp 高，用默认值会把行撑高。
+ */
+@Composable
+fun ZhiIconDropdownMenu(
+    items: List<ZhiMenuItem>,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val entry = DropdownEntry(
+        items = items.map { item ->
+            // 先取出成局部 val：`item.icon` 是可空字段，直接进 lambda 无法智能转换。
+            val icon = item.icon
+            val iconSlot: (@Composable (Modifier) -> Unit)? =
+                if (icon == null) {
+                    null
+                } else {
+                    { m: Modifier ->
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = scheme.primary,
+                            modifier = m,
+                        )
+                    }
+                }
+            DropdownItem(
+                text = item.text,
+                summary = item.summary,
+                onClick = item.onClick,
+                icon = iconSlot,
+            )
+        },
+    )
+    OverlayIconDropdownMenu(
+        entry = entry,
+        modifier = modifier,
+        enabled = enabled,
+        minHeight = 34.dp,
+        minWidth = 34.dp,
+        cornerRadius = 17.dp,
+        content = content,
+    )
+}
+
+/**
+ * 单项下拉选择器。转发到 Miuix **`OverlayDropdownPreference`**。
+ *
+ * 用于输入器底部的权限 / 推理两个 chip：它们是「从固定几项里选一个」，
+ * 选中即生效 —— 正好是 DropdownPreference 的语义，不需要"选完再提交"。
+ *
+ * ## 两个必须知道的约束
+ *
+ * - **必须位于 Miuix `Scaffold` 内**。`Overlay*` 系列靠 Scaffold 提供的
+ *   `MiuixPopupHost` 渲染弹出内容（官方文档「使用前提」）。
+ *   本工程的 AppScaffold 根部就是 Miuix `Scaffold`。
+ * - **`title` 就是按钮上显示的文字**，`showValue` 控制要不要在右侧再重复一遍当前值。
+ *   这里传 `showValue = false`：调用方直接把当前值编进 `title`（如「推理：自动」），
+ *   再显示一次是重复。
+ *
+ * @param title 按钮上的文字。
+ * @param items 选项文字，顺序必须与 [selectedIndex] 的取值空间一致。
+ * @param selectedIndex 当前选中项下标。
+ * @param onSelect 选中回调（收到的是下标）。
+ */
+@Composable
+fun ZhiDropdownChip(
+    title: String,
+    items: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    OverlayDropdownPreference(
+        title = title,
+        items = items,
+        selectedIndex = selectedIndex,
+        onSelectedIndexChange = { onSelect(it) },
+        modifier = modifier,
+        // footer 那一行只有 34dp 高，默认的 BasicComponent 内边距会把三列挤到换行。
+        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+        enabled = enabled,
+        showValue = false,
+    )
+}
+
+/**
+ * 人类可读的字节数。
+ *
+ * 用 1000 进制而不是 1024：这是文件管理器的通行做法（也才与「2.4 MB」这种
+ * 系统显示的读数对得上）。
+ *
+ * 放在这里是因为它有三处使用者（文件面板、附加面板、附加后的提示），
+ * 之前是 `FilesPane` 里的私有函数，没必要各写一份。
+ */
+internal fun zhiFormatSize(bytes: Long): String = when {
+    bytes <= 0L -> "0 B"
+    bytes < 1_000L -> "$bytes B"
+    bytes < 1_000_000L -> String.format(java.util.Locale.US, "%.1f KB", bytes / 1000f)
+    else -> String.format(java.util.Locale.US, "%.1f MB", bytes / 1_000_000f)
 }
 
 /** 横向分隔线。转发到 Miuix [HorizontalDivider]（默认 0.75dp 的 HyperOS 细分线）。 */

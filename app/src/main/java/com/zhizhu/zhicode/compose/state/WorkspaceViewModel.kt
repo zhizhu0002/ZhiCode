@@ -10,6 +10,7 @@ import com.zhizhu.zhicode.compose.data.ApiConfigStore
 import com.zhizhu.zhicode.compose.data.AttachmentReader
 import com.zhizhu.zhicode.compose.data.Clipboard
 import com.zhizhu.zhicode.compose.data.FileBrowser
+import com.zhizhu.zhicode.compose.data.FileSearch
 import com.zhizhu.zhicode.compose.data.GitChanges
 import com.zhizhu.zhicode.compose.data.McpStore
 import com.zhizhu.zhicode.compose.data.MockWorkspaceRepository
@@ -76,6 +77,7 @@ import com.zhizhu.zhicode.compose.model.ToolKind
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.model.WebSearchProvider
+import com.zhizhu.zhicode.compose.ui.zhiFormatSize
 import com.termux.app.zhicode.core.PlanApprovalGate
 import org.json.JSONArray
 import org.json.JSONObject
@@ -2179,7 +2181,30 @@ class WorkspaceViewModel(
      */
     fun reportExternalEvent(title: String, body: String) = appendInfo(title, body)
 
-    // ---------- 选择器 ----------
+    // ---------- 输入器下拉（权限 / 推理）----------
+
+    /*
+     * 输入器页脚的权限 / 推理两个 chip 现在是**下拉菜单**
+     * （Miuix `OverlayDropdownPreference`），选中即生效 —— 不需要"选完再提交"
+     * 那一层，所以这里只有两个 setter。
+     *
+     * 副作用与旧实现保持一致：写状态 + 在对话里留一句可追溯的记录。
+     */
+
+    fun setPermissionMode(mode: PermissionMode) {
+        _state.update { it.copy(permissionMode = mode, message = "权限模式：${mode.label}") }
+    }
+
+    fun setEffort(level: EffortLevel) {
+        _state.update { it.copy(effort = level, message = "推理强度：${level.label}") }
+    }
+
+    /*
+     * 下面两个是**斜杠命令**用的（`/permissions`、`/effort`）。
+     *
+     * 为什么不共用下拉：斜杠命令是在终端/输入框里敲出来的，没有"点一下展开"
+     * 的按钮可以挂下拉菜单，只能弹一个居中列表让人挑。所以这两条路都得留。
+     */
 
     fun showPermissionPicker() {
         val values = PermissionMode.entries
@@ -2210,6 +2235,83 @@ class WorkspaceViewModel(
                     options = values.map { level -> ChoiceOption(level.label, checked = level == it.effort) },
                 )
             )
+        }
+    }
+
+    // ---------- 附加项目文件 ----------
+
+    /**
+     * 打开「附加项目文件」面板。
+     *
+     * 立即跑一次空查询：面板一打开就能看到浅层文件清单，而不是一个空框等用户打字。
+     */
+    fun openAttachPicker() {
+        _state.update { it.copy(attachPickerOpen = true, attachQuery = "") }
+        refreshAttachHits("")
+    }
+
+    fun closeAttachPicker() =
+        _state.update { it.copy(attachPickerOpen = false, attachHits = emptyList()) }
+
+    fun updateAttachQuery(query: String) {
+        _state.update { it.copy(attachQuery = query) }
+        refreshAttachHits(query)
+    }
+
+    /**
+     * 在 IO 线程重算搜索结果。
+     *
+     * ⚠️ 结果是**异步**回来的，所以落回状态前必须确认 [query] 还是当前查询串：
+     * 用户打得快时会有多个搜索在飞，慢的那个回来会把新的结果覆盖掉
+     * （与「错误串台到新会话」是同一类竞态）。面板关掉后也不该再写。
+     */
+    private fun refreshAttachHits(query: String) {
+        val root = _state.value.projectPath
+        viewModelScope.launch {
+            val hits = withContext(Dispatchers.IO) { FileSearch.search(root, query) }
+            _state.update { s ->
+                if (s.attachQuery == query && s.attachPickerOpen) s.copy(attachHits = hits) else s
+            }
+        }
+    }
+
+    /**
+     * 把一个项目文件附加到下一条消息。
+     *
+     * 走**文本附件**路径（与 [attachSkill] 一样）：内容由 [buildPromptWithTextAttachments]
+     * 在发送时包进 `<attached_context>`，而不是灌进输入框 —— 输入框是用户的编辑区。
+     *
+     * 读取交给 [FileBrowser.readTextForAttachment]，它沿用界面预览那套 256 KB 截断与
+     * NUL 二进制判定。所以附加一个几 MB 的日志不会把界面拖死，附加一个 `.so`
+     * 也会被明确拒绝而不是塞一坨乱码进上下文。
+     *
+     * 附加**不关面板**：参考图的说明就是「可多次附加到下一条消息」。
+     */
+    fun attachProjectFile(path: String, relative: String) {
+        viewModelScope.launch {
+            val name = File(path).name
+            val size = withContext(Dispatchers.IO) { runCatching { File(path).length() }.getOrDefault(0L) }
+            val body = withContext(Dispatchers.IO) { FileBrowser.readTextForAttachment(path) }
+            if (body == null) {
+                _state.update { it.copy(message = "附加失败：$name 不是文本文件或读不了") }
+                return@launch
+            }
+            val id = nextId("file")
+            _state.update { s ->
+                // 同一路径只留一条（用相对路径去重，它在项目内唯一）：
+                // 连着点两次应该还是那一份，而不是叠两份进提示词。
+                val kept = s.attachments.filterNot { it.detail == relative }
+                s.copy(
+                    attachments = kept + Attachment(
+                        id = id,
+                        label = name,
+                        detail = relative,
+                        isImage = false,
+                        textBody = body,
+                    ),
+                    message = "已附加：$relative（${zhiFormatSize(size)}）",
+                )
+            }
         }
     }
 
@@ -2456,6 +2558,8 @@ class WorkspaceViewModel(
         val picker = _state.value.choicePicker ?: return
         val option = picker.options.getOrNull(index) ?: return
         when (picker.intent) {
+            // 这两条只服务斜杠命令 `/permissions`、`/effort`（见 showPermissionPicker）。
+            // 输入器上的入口是下拉菜单，走 setPermissionMode / setEffort，不经过这里。
             ChoiceIntent.PERMISSION_MODE -> {
                 val mode = PermissionMode.entries.getOrNull(index)
                 if (mode != null) _state.update {
@@ -2468,7 +2572,7 @@ class WorkspaceViewModel(
                     it.copy(choicePicker = null, effort = level, message = "推理强度：${level.label}")
                 } else _state.update { it.copy(choicePicker = null) }
             }
-            // MODEL 不再走选择器：模型面板要异步拉目录并写回配置记录，
+            // 这里**没有** MODEL：模型面板要异步拉目录并写回配置记录，
             // 用 5 个固定选项的通用选择器表达不了，已换成 ui/dialogs/ModelPickerOverlay。
             ChoiceIntent.MESSAGE_ACTION -> {
                 val target = pendingMessageAction

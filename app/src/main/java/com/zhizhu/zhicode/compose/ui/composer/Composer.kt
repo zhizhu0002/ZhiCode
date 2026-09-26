@@ -37,15 +37,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.model.Attachment
+import com.zhizhu.zhicode.compose.model.EffortLevel
+import com.zhizhu.zhicode.compose.model.PermissionMode
 import com.zhizhu.zhicode.compose.model.SlashCommand
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiFilledIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
+import com.zhizhu.zhicode.compose.ui.ZhiIconDropdownMenu
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
+import com.zhizhu.zhicode.compose.ui.ZhiDropdownChip
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.FloatingToolbar
@@ -71,12 +76,17 @@ fun Composer(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
-    onAttach: () -> Unit,
-    onRemoveAttachment: (Attachment) -> Unit,
-    onPermissionChip: () -> Unit,
-    onEffortChip: () -> Unit,
-    onModelChip: () -> Unit,
     onPickSlash: (SlashCommand) -> Unit,
+    onRemoveAttachment: (Attachment) -> Unit,
+    // ---- `+` 菜单的四个动作（原来只有一个 onAttach 直接弹相册）----
+    onAttachFile: () -> Unit,
+    onOpenSkills: () -> Unit,
+    onOpenFilesTab: () -> Unit,
+    onPickImage: () -> Unit,
+    // ---- 页脚三个下拉 ----
+    onPermissionSelected: (PermissionMode) -> Unit,
+    onEffortSelected: (EffortLevel) -> Unit,
+    onModelChip: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -218,24 +228,64 @@ fun Composer(
                 modifier = Modifier.fillMaxWidth().height(34.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ZhiIconButton(
-                    icon = ZhiIcons.attach,
-                    description = "添加附件",
-                    onClick = onAttach,
-                    iconSize = 18.dp,
-                )
+                // `+` 不再直接弹相册：改成 Miuix 的动作菜单（OverlayIconDropdownMenu）。
+                //
+                // ⚠️ 它必须位于 Miuix `Scaffold` 内 —— Overlay 系列靠 Scaffold 提供的
+                // MiuixPopupHost 渲染弹出内容。本工程根部就是 Scaffold。
+                ZhiIconDropdownMenu(
+                    items = listOf(
+                        ZhiMenuItem(
+                            text = "附加项目文件",
+                            summary = "搜索项目文件，可多次附加到下一条消息",
+                            icon = ZhiIcons.file,
+                            onClick = onAttachFile,
+                        ),
+                        ZhiMenuItem(
+                            text = "Skill 管理器",
+                            summary = "查看、编辑、新建、删除并附加 SKILL.md",
+                            icon = ZhiIcons.skill,
+                            onClick = onOpenSkills,
+                        ),
+                        ZhiMenuItem(
+                            text = "打开文件工作区",
+                            summary = "浏览项目文件并查看内容",
+                            icon = ZhiIcons.files,
+                            onClick = onOpenFilesTab,
+                        ),
+                        ZhiMenuItem(
+                            text = "上传照片",
+                            summary = "从相册或文件中选择图片，作为视觉上下文发送",
+                            icon = ZhiIcons.floatingBall,
+                            onClick = onPickImage,
+                        ),
+                    ),
+                ) {
+                    Icon(
+                        imageVector = ZhiIcons.attach,
+                        contentDescription = "添加附件",
+                        tint = scheme.onBackgroundVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
 
-                ZhiSmallPill(
-                    label = state.permissionMode.label,
-                    onClick = onPermissionChip,
-                    modifier = Modifier.weight(1f),
-                    highlighted = state.permissionMode != com.zhizhu.zhicode.compose.model.PermissionMode.ASK,
-                )
-                ZhiSmallPill(
-                    label = "推理：${state.effort.label}",
-                    onClick = onEffortChip,
+                // 三个下拉都走 Miuix OverlayDropdownPreference（转发层 ZhiDropdownChip）。
+                // 选中即生效，不再弹"选完再提交"的选择器。
+                ZhiDropdownChip(
+                    title = state.permissionMode.label,
+                    items = PermissionMode.entries.map { it.label },
+                    selectedIndex = PermissionMode.entries.indexOf(state.permissionMode),
+                    onSelect = { onPermissionSelected(PermissionMode.entries[it]) },
                     modifier = Modifier.weight(1f),
                 )
+                ZhiDropdownChip(
+                    title = "推理：${state.effort.label}",
+                    items = EffortLevel.entries.map { it.label },
+                    selectedIndex = EffortLevel.entries.indexOf(state.effort),
+                    onSelect = { onEffortSelected(EffortLevel.entries[it]) },
+                    modifier = Modifier.weight(1f),
+                )
+                // 模型这一项**不是**下拉：它要异步拉目录、还要写回配置记录，
+                // 表达不了"固定几项"，仍走原有的 ModelPickerOverlay。
                 ZhiSmallPill(
                     // 原版是 shorten(profileName + " · " + model, wide?26:16)（MainActivity.java:1393）
                     label = shorten(
@@ -245,7 +295,7 @@ fun Composer(
                     onClick = onModelChip,
                     modifier = Modifier.weight(1f),
                 )
-            } // 面板内页脚 Row（+ 与三个 chip）
+            } // 面板内页脚 Row（+ 与三个下拉/按钮）
             } // 悬浮面板内容 Column
         } // FloatingToolbar
         } // 输入框 + 停止/发送键 Row

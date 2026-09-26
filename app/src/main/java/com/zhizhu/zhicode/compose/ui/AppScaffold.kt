@@ -55,6 +55,7 @@ import com.zhizhu.zhicode.compose.state.WorkspaceViewModelFactory
 import com.zhizhu.zhicode.compose.ui.chat.AgentProgressCard
 import com.zhizhu.zhicode.compose.ui.chat.ChatList
 import com.zhizhu.zhicode.compose.ui.composer.Composer
+import com.zhizhu.zhicode.compose.ui.dialogs.AttachFileOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.ChoicePickerOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.McpConfigOverlay
@@ -228,6 +229,7 @@ private fun ZhiCodeScreen(
                 state.choicePicker != null ||
                 state.settingsDraft != null ||
                 state.environmentOpen ||
+                state.attachPickerOpen ||
                 state.taskListOpen
             if (modalOpen) {
                 Box(
@@ -254,6 +256,14 @@ private fun ZhiCodeScreen(
                 onSubmit = viewModel::onSubmitSelection,
                 onDismiss = viewModel::dismissChoicePicker,
                 onSubmitFreeForm = viewModel::onSubmitFreeForm,
+            )
+            AttachFileOverlay(
+                open = state.attachPickerOpen,
+                query = state.attachQuery,
+                hits = state.attachHits,
+                onQueryChange = viewModel::updateAttachQuery,
+                onPick = { hit -> viewModel.attachProjectFile(hit.path, hit.relative) },
+                onDismiss = viewModel::closeAttachPicker,
             )
             SettingsDialog(
                 draft = state.settingsDraft,
@@ -762,10 +772,15 @@ private fun ComposerHost(
         onTextChange = viewModel::onComposerChange,
         onSend = viewModel::send,
         onStop = viewModel::stop,
-        onAttach = { pickImage.launch("image/*") },
         onRemoveAttachment = { viewModel.removeAttachment(it.id) },
-        onPermissionChip = viewModel::showPermissionPicker,
-        onEffortChip = viewModel::showEffortPicker,
+        // `+` 菜单的四个动作
+        onAttachFile = viewModel::openAttachPicker,
+        onOpenSkills = viewModel::openSkills,
+        onOpenFilesTab = { viewModel.selectTab(WorkspaceTab.FILES) },
+        onPickImage = { pickImage.launch("image/*") },
+        // 页脚的下拉：选中即生效，不再弹选择器
+        onPermissionSelected = viewModel::setPermissionMode,
+        onEffortSelected = viewModel::setEffort,
         onModelChip = viewModel::showModelPicker,
         onPickSlash = viewModel::pickSlashCommand,
     )

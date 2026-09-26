@@ -123,8 +123,10 @@ data class ChoiceOption(val label: String, val detail: String = "", val checked:
  *
  * [multiSelect] / [submitLabel] / [cancelLabel] 是为「提问」门控加的：
  * 引擎的 `AskUserQuestion` 支持多选，并且在多问题时会分步展示，
- * 按钮文案要变成「下一步」而不是「提交」。这些字段有默认值，
- * 因此权限/推理/模型这些单选选择器完全不受影响。
+ * 按钮文案要变成「下一步」而不是「提交」。
+ *
+ * ⚠️ 权限模式与推理强度**不再走这里**：它们现在是输入器里的下拉菜单
+ * （见 `OverlayDropdownPreference`），选中即生效，不需要弹窗。
  */
 data class ChoicePickerState(
     val title: String,
@@ -140,8 +142,18 @@ data class ChoicePickerState(
 
 enum class ChoiceIntent {
     GENERIC,
+
+    /**
+     * 权限模式 / 推理强度。
+     *
+     * ⚠️ 界面上的入口已经是输入器里的**下拉菜单**（`OverlayDropdownPreference`，
+     * 见 `setPermissionMode` / `setEffort`），不再走这个选择器。
+     * 但 `/permissions`、`/effort` 两个斜杠命令仍然需要"弹一个列表让人挑"，
+     * 所以这两条路径保留 —— 删掉就等于把斜杠命令一起废了。
+     */
     PERMISSION_MODE,
     EFFORT,
+
     MESSAGE_ACTION,
     SESSION_ACTION,
 
@@ -191,6 +203,22 @@ data class OpenFile(
     val path: String,
     val language: String,
     val content: String,
+)
+
+/**
+ * 「附加项目文件」的一条搜索结果。
+ *
+ * 放在 model 包而不是作为 `FileSearch` 的内部类：它出现在公开的
+ * [WorkspaceUiState.attachHits] 里，而 `FileSearch` 是 `internal` 工具对象
+ * （与 `FileBrowser` 一样）—— Kotlin 不允许公开类型暴露 internal 类型参数。
+ * 这也与 [FileEntry] / [OpenFile] 的位置保持一致。
+ */
+data class FileHit(
+    /** 绝对路径，附加时用它读文件。 */
+    val path: String,
+    /** 相对项目根的路径。界面显示它更短也更容易认。 */
+    val relative: String,
+    val size: Long = 0L,
 )
 
 data class TerminalLine(val text: String, val tone: TerminalTone = TerminalTone.NORMAL)
@@ -286,6 +314,17 @@ data class WorkspaceUiState(
      */
     val fileNote: String = "",
     val openFile: OpenFile? = null,
+    /**
+     * 非空即「附加项目文件」面板打开（输入器 `+` 的第一项）。
+     *
+     * 用 [attachHits] 承载搜索结果而不是在 Composable 里现搜：搜目录是 IO，
+     * 放 recomposition 里会每个字符都卡一下。
+     */
+    val attachPickerOpen: Boolean = false,
+    /** 附加面板的搜索串。 */
+    val attachQuery: String = "",
+    /** 附加面板当前的搜索结果（已由 ViewModel 在 IO 线程算好）。 */
+    val attachHits: List<FileHit> = emptyList(),
     val message: String? = null,
     val busySessionIds: Set<String> = emptySet(),
     /** 设置页新增的持久化项（见 [AppSettings]）。 */

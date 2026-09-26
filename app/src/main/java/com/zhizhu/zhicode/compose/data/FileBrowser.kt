@@ -90,8 +90,27 @@ internal object FileBrowser {
         return OpenFile(name = name, path = path, language = languageFor(name), content = content)
     }
 
-    private fun readPrefix(file: File, limit: Int): ByteArray {
-        file.inputStream().use { input ->
+    /**
+     * 为「附加到消息」读取文本内容。读不出来、或判定是二进制时返回 `null`。
+     *
+     * 为什么单独开一个函数而不是让调用方用 [read]：
+     * [read] 对二进制返回的是「（二进制文件，N 字节，不在界面中显示）」这句**给人看的提示**。
+     * 如果直接把它当正文附加，模型会收到一句毫无意义的说明 —— 所以要能区分
+     * 「读到了文本」和「这根本不该附加」，[read] 的返回值表达不了这个区别。
+     *
+     * 截断与二进制判定都沿用 [read] 的那一套（[MAX_PREVIEW_BYTES] + NUL 检测），
+     * 不另起一份，免得两处口径不一致。
+     */
+    fun readTextForAttachment(path: String): String? {
+        val file = File(path)
+        if (!file.isFile) return null
+        val bytes = runCatching { readPrefix(file, MAX_PREVIEW_BYTES) }.getOrNull() ?: return null
+        if (bytes.isEmpty()) return ""
+        if (bytes.any { it == 0.toByte() }) return null
+        return String(bytes, Charsets.UTF_8)
+    }
+
+    private fun readPrefix(file: File, limit: Int): ByteArray {        file.inputStream().use { input ->
             val out = java.io.ByteArrayOutputStream(minOf(limit, READ_CHUNK))
             val buffer = ByteArray(READ_CHUNK)
             var remaining = limit
