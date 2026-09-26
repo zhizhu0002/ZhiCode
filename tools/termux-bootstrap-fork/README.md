@@ -564,3 +564,76 @@ CANNOT LINK EXECUTABLE**，而整个过程不报任何错。
 符号链接全部记在 `SYMLINKS.txt`（格式 `<绝对目标>←<相对链接>`，约 2689 条），
 由 App 在解包时重建。所以 `bin/awk` 在 zip 里查不到实体文件是正常的 ——
 它在 `SYMLINKS.txt` 里指向 `gawk`。
+
+---
+
+## 十一、实测记录：两个容易搞错的地方
+
+### 11.1 官方 bootstrap 的 `bin/lsns` **也是坏的**（上游 bug，不是我们裁剪引入的）
+
+拿官方那份 2026-07 的 bootstrap 对照：
+
+```
+官方 82 包，bin/lsns 的 DT_NEEDED = libsmartcols.so, libmount.so, libc.so
+官方包内实际提供的库：
+  libsmartcols.so  ✅
+  libmount.so      ❌ 没有
+  libblkid.so      ❌ 没有
+```
+
+也就是说官方那份 `lsns` 一执行就 CANNOT LINK EXECUTABLE。
+
+**根因**：`bin/lsns` 属于 `util-linux` 主包，而 `libmount` 是**同一次 build 的
+子包**。上游没法在元数据里给它声明这个依赖 —— 那是自依赖环
+（`util-linux` → `libmount` → 而 `libmount` 由 `util-linux` 产出）。
+而 `build-bootstraps.sh` 只按**包名**收集到归档里，没有任何东西依赖 `libmount`，
+于是它被漏掉。
+
+所以这是一个**上游 bug**，我们用 ELF 兜底顺手修掉了。包数对比：
+
+```
+官方 82 包
+我们 85 包 = 官方 82 包一个不缺 + libmagic（nano 新版依赖）
+                              + libmount（修 lsns）
+                              + libblkid（libmount 的依赖）
+```
+
+### 11.2 那句 SELinux 警告**只有 `sed` 会发**，`coreutils` / `tar` 不会
+
+三个二进制都链接 `libandroid-selinux.so`，但只有 `sed` 的依赖是**未声明的**：
+
+```
+✅ 已声明   coreutils    bin/coreutils
+✅ 已声明   tar          bin/tar
+❌ 未声明   sed          bin/sed        Depends: (无)
+```
+
+光看"链接了 libandroid-selinux"不能下结论（coreutils / tar 是上游**有意**链接的），
+要看它**会不会真的打那句警告**。实测方法是拿裁剪后的出货二进制直接跑：
+
+```bash
+BS=<解包后的 bootstrap 目录>
+LD_LIBRARY_PATH="$BS/lib" /system/bin/linker64 "$BS/bin/sed" -i 's/a/b/' f.txt
+```
+
+> 为什么要绕 `linker64`：`unzip` 在 Android 上**不保留可执行位**，解出来的
+> 二进制是 `-rw-------`，直接跑会 `Permission denied`。交给系统 linker 加载
+> 只需要读权限，绕得过去。
+>
+> `coreutils` 是 multicall 二进制，不能用 `--coreutils-prog=`（这个构建不认），
+> 得用**真实的 argv[0]**：`ln -s coreutils ./touch` 然后跑 `./touch`，
+> 而且 argv[0] 必须是**绝对路径**（否则报 `expected absolute path`）。
+
+实测结果：
+
+| 命令 | 是否打警告 |
+|---|---|
+| `sed -i 's/bbb/BBB/' f.txt` | **⚠️ 会** |
+| `coreutils touch` / `mkdir` / `cp` / `install` | ✅ 不会 |
+| `tar cf` | ✅ 不会 |
+
+结论：fork 的 `--without-selinux` 补丁**正确且充分** —— 只要给 `sed` 打就行，
+不需要动 `coreutils` / `tar`（那是上游设计，改了反而偏离上游）。
+
+用户看到警告的路径也对得上：`pkg install git` → `dpkg` 的 maintainer script
+里大量用 `sed -i`。

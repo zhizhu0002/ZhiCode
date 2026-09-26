@@ -12,3 +12,6 @@ local.properties
 # 本地临时产物
 *.keystore
 *.jks
+
+# 工具的编译产物（源码 VerifyBootstrap.java 在版本库里）
+tools/termux-bootstrap-fork/*.class

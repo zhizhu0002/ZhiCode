@@ -62,19 +62,34 @@ class RuntimeInstaller(private val context: Context) {
          *        （函数收 $1，调用处传的是未定义的 $package_arch）→ 已修正为 aarch64
          *      - termux-exec 的两个**注释**里残留旧前缀 → 已改写为 com.zhizhu.code
          *
-         * 与官方包的差异仅一处：nano 新版多了 libmagic 依赖（官方那份是 7 月旧版 nano），
-         * 因此我们多 1 个包；官方有的 82 个包我们一个不缺。
+         * 与官方包的差异：官方 82 包，我们 85 包 = **官方 82 包一个不缺** + 3 个：
+         *   · libmagic  —— nano 新版多出的依赖（官方那份是 7 月旧版 nano）
+         *   · libmount  —— 见下节：官方那份**缺这个**，导致 bin/lsns 无法启动
+         *   · libblkid  —— libmount 的依赖
          *
-         * ## 为什么是 85 个包（上一版是 83）
+         * ## 上游已知 bug：官方 bootstrap 的 bin/lsns 是坏的
          *
-         * 只按 Depends: 算闭包**不够**：fork 的单容器构建会让包链接到它没声明的库。
-         * 实例：util-linux 的 bin/lsns 实际链接 libmount.so，而 util-linux 的 Depends
-         * 里没有 libmount，libmount 是独立包 → 被裁掉 → **lsns 变成
-         * CANNOT LINK EXECUTABLE**，且裁剪过程不报任何错。
+         * 这**不是**我们裁剪引入的。实测官方 2026-07 那份 bootstrap：
+         *   bin/lsns 的 DT_NEEDED = libsmartcols.so, libmount.so, libc.so
+         *   包内提供的库      = … libsmartcols.so ✅ … libmount.so ❌ 没有
+         * 也就是说官方那份 `lsns` 执行会 CANNOT LINK EXECUTABLE。
          *
-         * 所以裁剪工具现在会真的解析每个保留 ELF 的 DT_NEEDED（自己读 ELF 小节头，
-         * 不依赖 readelf），把缺失库的提供者拉回闭包直到不动点。
-         * 实测拉回 libmount + libblkid（83 → 85，+366 KB）。
+         * 原因：`bin/lsns` 属于 `util-linux` 主包，而 `libmount` 是**同一次 build 的
+         * 子包** —— 上游没法在元数据里声明这个依赖（会形成自依赖环），
+         * 而 build-bootstraps.sh 只按包名收集，于是 libmount 被漏掉。
+         *
+         * 我们的裁剪工具因此加了 ELF 依赖兜底（见下），**顺带把这个上游 bug 修好了**。
+         *
+         * ## 我们的裁剪工具为什么加了 ELF 依赖兜底（83 → 85）
+         *
+         * fork 的 159 包大包里**是**有 libmount 的（单容器构建会把 util-linux 的
+         * 子包一起编出来）。但只按 Depends: 算运行时闭包就会把它删掉 ——
+         * util-linux 的 Depends 里根本没有 libmount（理由见上：自依赖环）。
+         * 删掉之后 bin/lsns 变坏，而**裁剪过程不报任何错**。
+         *
+         * 所以工具现在会真的解析每个保留 ELF 的 DT_NEEDED（自己读 ELF 小节头，
+         * 不依赖 readelf —— Termux 前缀里没有 binutils），把缺失库的提供者
+         * 拉回闭包直到不动点。实测拉回 libmount + libblkid（83 → 85，+366 KB）。
          * 结果：**bin/ 下 184 个 ELF 的动态依赖全部可在 bootstrap 内解析**。
          *
          * 注意 bin/mount、bin/lsblk、bin/cfdisk 这类命令不在包里是**正常的** ——
