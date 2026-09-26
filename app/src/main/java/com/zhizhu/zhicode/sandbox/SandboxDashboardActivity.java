@@ -39,7 +39,7 @@ import java.util.concurrent.Executors;
 
 /**
  * Human-facing sandbox manager intentionally hosted in IQ Code's stable main process.
- * BlackBox itself lives behind SandboxControlProvider in :zhisandbox. If the backend
+ * BlackBox itself lives behind SandboxRpcService in :zhisandbox. If the backend
  * process dies, this Activity stays alive and shows the startup stage instead of
  * disappearing with the backend.
  */
@@ -98,10 +98,10 @@ public final class SandboxDashboardActivity extends Activity {
     private void reload(){
         if(destroyed)return;
         worker.execute(()->{
-            JSONObject st=SandboxHostClient.call(this,"status",new JSONObject());
+            JSONObject st=SandboxRpc.call(this,"status",new JSONObject());
             if(destroyed)return;
             if(!st.optBoolean("ok")) { retryOrShow(st.optString("error","沙箱后端不可用")); return; }
-            JSONObject r=SandboxHostClient.call(this,"list",new JSONObject());
+            JSONObject r=SandboxRpc.call(this,"list",new JSONObject());
             if(destroyed)return;
             if(!r.optBoolean("ok")) { retryOrShow(r.optString("error","读取沙箱应用失败")); return; }
             startupRetry=0;
@@ -142,7 +142,7 @@ public final class SandboxDashboardActivity extends Activity {
         setRootSwitch(previous,false);
         worker.execute(()->{
             try{
-                JSONObject r=SandboxHostClient.call(this,"set_hide_root",new JSONObject().put("hide_root",hidden));
+                JSONObject r=SandboxRpc.call(this,"set_hide_root",new JSONObject().put("hide_root",hidden));
                 if(!r.optBoolean("ok"))throw new IllegalStateException(r.optString("error","设置失败"));
                 boolean effective=r.optBoolean("hide_root",hidden);
                 runOnUiThread(()->{if(destroyed)return;rootSettingInFlight=false;setRootSwitch(effective,true);toast("Root 隐藏已"+(effective?"开启":"关闭"));reload();});
@@ -169,7 +169,7 @@ public final class SandboxDashboardActivity extends Activity {
         floatingLogInFlight=true;setFloatingLog(!enabled,false);
         worker.execute(()->{
             try{
-                JSONObject r=SandboxHostClient.call(this,"set_show_floating_log",new JSONObject().put("show_floating_log",enabled));
+                JSONObject r=SandboxRpc.call(this,"set_show_floating_log",new JSONObject().put("show_floating_log",enabled));
                 if(!r.optBoolean("ok"))throw new IllegalStateException(r.optString("error","设置失败"));
                 boolean effective=r.optBoolean("show_floating_log",enabled);
                 runOnUiThread(()->{if(destroyed)return;floatingLogInFlight=false;setFloatingLog(effective,true);toast("日志悬浮窗已"+(effective?"开启":"关闭"));reload();});
@@ -186,15 +186,15 @@ public final class SandboxDashboardActivity extends Activity {
         LinearLayout.LayoutParams p=lp(-1,-2);p.setMargins(0,0,0,dp(10));card.setLayoutParams(p);return card;
     }
 
-    private void rpcAction(String action,String pkg,String okText){worker.execute(()->{try{JSONObject p=new JSONObject().put("package",pkg);JSONObject r=SandboxHostClient.call(this,action,p);if(!r.optBoolean("ok"))throw new IllegalStateException(r.optString("error","操作失败"));if("launch".equals(action)&&!r.optBoolean("success",true))throw new IllegalStateException("没有可启动 Activity");runOnUiThread(()->{toast(okText);reload();});}catch(Throwable e){runOnUiThread(()->toast(action+": "+e.getMessage()));}});}
+    private void rpcAction(String action,String pkg,String okText){worker.execute(()->{try{JSONObject p=new JSONObject().put("package",pkg);JSONObject r=SandboxRpc.call(this,action,p);if(!r.optBoolean("ok"))throw new IllegalStateException(r.optString("error","操作失败"));if("launch".equals(action)&&!r.optBoolean("success",true))throw new IllegalStateException("没有可启动 Activity");runOnUiThread(()->{toast(okText);reload();});}catch(Throwable e){runOnUiThread(()->toast(action+": "+e.getMessage()));}});}
 
     private void pick(){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/vnd.android.package-archive");startActivityForResult(i,PICK_APK);}
     @Override protected void onActivityResult(int req,int result,Intent data){super.onActivityResult(req,result,data);if(req!=PICK_APK||result!=RESULT_OK||data==null||data.getData()==null)return;Uri uri=data.getData();worker.execute(()->installUri(uri));}
     private void installUri(Uri uri){
-        try{File dir=new File(getCacheDir(),"sandbox-import");dir.mkdirs();String name=fileName(uri);File target=new File(dir,System.currentTimeMillis()+"-"+name.replaceAll("[^A-Za-z0-9._-]","_"));try(InputStream in=getContentResolver().openInputStream(uri);FileOutputStream out=new FileOutputStream(target)){if(in==null)throw new IllegalArgumentException("无法读取 APK");byte[] buf=new byte[65536];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);}PackageInfo pi=getPackageManager().getPackageArchiveInfo(target.getAbsolutePath(),PackageManager.GET_ACTIVITIES);if(pi==null||pi.packageName==null)throw new IllegalArgumentException("不是有效普通 APK");if(getPackageName().equals(pi.packageName))throw new IllegalArgumentException("不能导入蜘蛛自身");JSONObject r=SandboxHostClient.call(this,"install",new JSONObject().put("path",target.getAbsolutePath()));if(!r.optBoolean("ok")||!r.optBoolean("success"))throw new IllegalStateException(r.optString("error",r.optString("message","安装失败")));runOnUiThread(()->{toast("已安装到沙箱: "+r.optString("package",pi.packageName));reload();});}catch(Throwable e){runOnUiThread(()->toast("安装失败: "+e.getMessage()));}
+        try{File dir=new File(getCacheDir(),"sandbox-import");dir.mkdirs();String name=fileName(uri);File target=new File(dir,System.currentTimeMillis()+"-"+name.replaceAll("[^A-Za-z0-9._-]","_"));try(InputStream in=getContentResolver().openInputStream(uri);FileOutputStream out=new FileOutputStream(target)){if(in==null)throw new IllegalArgumentException("无法读取 APK");byte[] buf=new byte[65536];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);}PackageInfo pi=getPackageManager().getPackageArchiveInfo(target.getAbsolutePath(),PackageManager.GET_ACTIVITIES);if(pi==null||pi.packageName==null)throw new IllegalArgumentException("不是有效普通 APK");if(getPackageName().equals(pi.packageName))throw new IllegalArgumentException("不能导入蜘蛛自身");JSONObject r=SandboxRpc.call(this,"install",new JSONObject().put("path",target.getAbsolutePath()));if(!r.optBoolean("ok")||!r.optBoolean("success"))throw new IllegalStateException(r.optString("error",r.optString("message","安装失败")));runOnUiThread(()->{toast("已安装到沙箱: "+r.optString("package",pi.packageName));reload();});}catch(Throwable e){runOnUiThread(()->toast("安装失败: "+e.getMessage()));}
     }
 
-    private List<JSONObject> processList(String pkg)throws Exception{JSONObject r=SandboxHostClient.call(this,"process_list",new JSONObject().put("package",pkg));if(!r.optBoolean("ok"))throw new IllegalStateException(r.optString("error","读取进程失败"));List<JSONObject> out=new ArrayList<>();JSONArray a=r.optJSONArray("processes");if(a!=null)for(int i=0;i<a.length();i++){JSONObject o=a.optJSONObject(i);if(o!=null)out.add(o);}return out;}
+    private List<JSONObject> processList(String pkg)throws Exception{JSONObject r=SandboxRpc.call(this,"process_list",new JSONObject().put("package",pkg));if(!r.optBoolean("ok"))throw new IllegalStateException(r.optString("error","读取进程失败"));List<JSONObject> out=new ArrayList<>();JSONArray a=r.optJSONArray("processes");if(a!=null)for(int i=0;i<a.length();i++){JSONObject o=a.optJSONObject(i);if(o!=null)out.add(o);}return out;}
     private void fridaFor(String pkg){worker.execute(()->{try{List<JSONObject> ps=processList(pkg);if(ps.isEmpty()){runOnUiThread(()->toast("先运行 Guest，再加载 Frida"));return;}JSONObject chosen=ps.get(0);for(JSONObject p:ps)if(pkg.equals(p.optString("process"))){chosen=p;break;}int pid=chosen.optInt("pid",-1);if(pid<=0)throw new IllegalStateException("无有效 PID");if(!FridaRuntimeManager.isInstalled(this)){final int fpid=pid;runOnUiThread(()->new AlertDialog.Builder(this).setTitle("安装 Frida Gadget "+FridaRuntimeManager.VERSION).setMessage("首次使用需要从 Frida 官方发布页下载 arm64 Gadget并校验固定 SHA-256。").setNegativeButton("取消",null).setPositiveButton("安装并加载",(d,w)->worker.execute(()->installAndLoadFrida(pkg,fpid))).show());return;}loadFrida(pkg,pid);}catch(Throwable e){runOnUiThread(()->toast("Frida: "+e.getMessage()));}});}
     private void installAndLoadFrida(String pkg,int pid){try{runOnUiThread(()->status.setText("正在安装 Frida Gadget "+FridaRuntimeManager.VERSION+"…"));FridaRuntimeManager.install(this,new TermuxShellExecutor(this),TermuxConstants.TERMUX_HOME_DIR_PATH);loadFrida(pkg,pid);}catch(Throwable e){runOnUiThread(()->toast("Frida 安装失败: "+e.getMessage()));}}
     private void loadFrida(String pkg,int pid){try{JSONObject r=SandboxAgentBridge.request(this,"proc_frida_load",pkg,pid,new JSONObject().put("pid",pid),15000);runOnUiThread(()->showMonoDialog(pkg+" · Frida",r.toString()));}catch(Throwable e){runOnUiThread(()->toast("Frida 加载失败: "+e.getMessage()));}}
@@ -203,7 +203,7 @@ public final class SandboxDashboardActivity extends Activity {
     private void showDebug(){
         if(status!=null)status.setText("正在读取诊断信息…");
         worker.execute(()->{
-            String s=SandboxDebugLog.snapshot(this)+"\n===== STARTUP STAGE =====\n"+readStartupStage();
+            String s=SandboxConsole.snapshot(this)+"\n===== STARTUP STAGE =====\n"+readStartupStage();
             runOnUiThread(()->{if(!destroyed)showMonoDialog("IQ 沙箱诊断",s);});
         });
     }

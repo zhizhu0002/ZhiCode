@@ -11,13 +11,25 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 
-/** Cross-process settings shared by the sandbox controller and Guest processes. */
-final class SandboxSettingsStore {
+/**
+ * 跨进程沙箱设置。
+ *
+ * <p>控制器进程与各 Guest 进程都要读同一份设置，所以走 {@link AtomicFile}
+ * 落盘而不是 SharedPreferences —— 后者在多进程并发读写下不保证可见性。
+ *
+ * <p>设置带 {@code version} 字段：版本不匹配时一律回退默认值。
+ * 这样未来增删字段不会让旧文件把新代码带进不一致状态。
+ *
+ * <p>任何读取失败都<b>回退到安全默认值</b>（Root 隐藏默认开），不抛异常：
+ * 设置读不出来不该让沙箱起不来。
+ */
+final class SandboxPrefs {
+
     private static final Object WRITE_LOCK = new Object();
     private static final int VERSION = 1;
     private static final int MAX_SETTINGS_BYTES = 64 * 1024;
 
-    private SandboxSettingsStore() {}
+    private SandboxPrefs() {}
 
     static boolean isRootHidden(Context context) {
         AtomicFile settings = atomicFile(context);
@@ -61,7 +73,11 @@ final class SandboxSettingsStore {
 
     private static JSONObject empty() {
         JSONObject value = new JSONObject();
-        try { value.put("version", VERSION); } catch (Exception ignored) {}
+        try {
+            value.put("version", VERSION);
+        } catch (Exception ignored) {
+            // JSONObject.put 只会抛 JSONException；这里不会发生
+        }
         return value;
     }
 
@@ -88,7 +104,7 @@ final class SandboxSettingsStore {
         AtomicFile settings = atomicFile(context);
         File parent = settings.getBaseFile().getParentFile();
         if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
-            throw new IllegalStateException("Failed to create sandbox settings directory: " + parent);
+            throw new IllegalStateException("无法创建沙箱设置目录: " + parent);
         }
         byte[] data = value.toString(2).getBytes(StandardCharsets.UTF_8);
         FileOutputStream out = null;

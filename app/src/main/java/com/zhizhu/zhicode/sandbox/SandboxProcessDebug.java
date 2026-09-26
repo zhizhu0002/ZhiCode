@@ -240,7 +240,7 @@ public final class SandboxProcessDebug {
             throw new SecurityException("沙箱调试注入只允许加载本应用私有目录中的 .so；先把调试库复制到 files/home 或 sandbox/debug-libs");
         }
         System.load(canonical);
-        SandboxDebugLog.event("Guest 受控加载调试库: " + canonical + " pid=" + Process.myPid());
+        SandboxConsole.event("Guest 受控加载调试库: " + canonical + " pid=" + Process.myPid());
         return new JSONObject().put("loaded", true).put("path", canonical).put("pid", Process.myPid());
     }
 

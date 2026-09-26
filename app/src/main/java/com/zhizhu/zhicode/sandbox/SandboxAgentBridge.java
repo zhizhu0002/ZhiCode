@@ -125,7 +125,7 @@ public final class SandboxAgentBridge {
                 if(!claimScreenshot(context,id,deadline))return;
                 if(!ACTIVE_CAPTURE.compareAndSet(null,id)){JSONObject busy=error(new IllegalStateException("截图桥正在处理另一个请求"));CAPTURE_IO.execute(()->writeResult(context,id,busy));return;}
                 new CaptureSession(a,context,id,pkg,deadline).start();
-            });}catch(Throwable e){SandboxDebugLog.event("截图桥调度失败: "+id+" / "+e);}
+            });}catch(Throwable e){SandboxConsole.event("截图桥调度失败: "+id+" / "+e);}
             return;
         }
         a.runOnUiThread(()->{
@@ -234,7 +234,7 @@ public final class SandboxAgentBridge {
                 if(!activityUsable()||root==null||!root.isAttachedToWindow())throw new IllegalStateException("fallback 时 Guest 窗口已失效");
                 bitmap=Bitmap.createBitmap(outW,outH,Bitmap.Config.ARGB_8888);Canvas canvas=new Canvas(bitmap);
                 canvas.scale(outW/(float)sourceW,outH/(float)sourceH);root.draw(canvas);restoreOverlay();
-                SandboxDebugLog.event("截图桥 fallback: "+id+" / "+reason);
+                SandboxConsole.event("截图桥 fallback: "+id+" / "+reason);
                 encode(bitmap,sourceW,sourceH,outW,outH,"view_draw_fallback",reason);handedOff=true;
             }catch(Throwable e){fail(e,"fallback");}
             finally{if(!handedOff)recycle(bitmap);}
@@ -260,7 +260,7 @@ public final class SandboxAgentBridge {
         private boolean expired(){return SystemClock.uptimeMillis()>=deadline;}
         private void restoreOverlay(){
             if(!overlayRestored.compareAndSet(false,true))return;
-            Runnable restore=()->{try{if(overlay!=null)overlay.setVisibility(oldOverlayVisibility);}catch(Throwable e){SandboxDebugLog.event("截图桥恢复浮层失败: "+id+" / "+e);}};
+            Runnable restore=()->{try{if(overlay!=null)overlay.setVisibility(oldOverlayVisibility);}catch(Throwable e){SandboxConsole.event("截图桥恢复浮层失败: "+id+" / "+e);}};
             if(Looper.myLooper()==Looper.getMainLooper())restore.run();else main.post(restore);
         }
         private void stopPixelThread(){HandlerThread thread=pixelThread;pixelThread=null;if(thread!=null)thread.quitSafely();}
@@ -268,7 +268,7 @@ public final class SandboxAgentBridge {
         private boolean finish(JSONObject out,String stage){
             if(!completed.compareAndSet(false,true))return false;
             main.removeCallbacks(timeout);stopPixelThread();restoreOverlay();
-            CAPTURE_IO.execute(()->{writeResult(context,id,out);ACTIVE_CAPTURE.compareAndSet(id,null);SandboxDebugLog.event("截图桥 "+stage+": "+id+" / "+out.optString("error","ok"));});
+            CAPTURE_IO.execute(()->{writeResult(context,id,out);ACTIVE_CAPTURE.compareAndSet(id,null);SandboxConsole.event("截图桥 "+stage+": "+id+" / "+out.optString("error","ok"));});
             return true;
         }
     }
@@ -299,7 +299,7 @@ public final class SandboxAgentBridge {
     private static boolean claimScreenshot(Context c,String id,long deadline){
         if(id==null||id.isEmpty()||SystemClock.uptimeMillis()>=deadline)return false;
         try{File claim=new File(resultDir(c),id+".claim");boolean won=claim.createNewFile();if(won)claim.setLastModified(System.currentTimeMillis());return won;}
-        catch(Throwable e){SandboxDebugLog.event("截图桥 claim 失败: "+id+" / "+e);JSONObject out=error(e);CAPTURE_IO.execute(()->writeResult(c,id,out));return false;}
+        catch(Throwable e){SandboxConsole.event("截图桥 claim 失败: "+id+" / "+e);JSONObject out=error(e);CAPTURE_IO.execute(()->writeResult(c,id,out));return false;}
     }
     private static File resultDir(Context c){Context host=ZhiSandbox.hostContext();if(host==null)host=c;File dir=new File(host.getFilesDir(),"sandbox/agent-results");ensureDirectory(dir);return dir;}
     private static void ensureDirectory(File dir){if(!dir.isDirectory()&&!dir.mkdirs()&&!dir.isDirectory())throw new IllegalStateException("无法创建目录: "+dir);}
@@ -314,7 +314,7 @@ public final class SandboxAgentBridge {
             try(FileOutputStream stream=new FileOutputStream(tmp)){stream.write(data);stream.flush();stream.getFD().sync();}
             if(dst.exists()&&!dst.delete())throw new IllegalStateException("旧结果清理失败: "+dst);
             if(!tmp.renameTo(dst))throw new IllegalStateException("结果原子发布失败: "+dst);
-        }catch(Throwable e){if(tmp!=null)tmp.delete();SandboxDebugLog.event("桥接结果写入失败: "+id+" / "+e);}
+        }catch(Throwable e){if(tmp!=null)tmp.delete();SandboxConsole.event("桥接结果写入失败: "+id+" / "+e);}
     }
     private static String trim(String s,int max){return s.length()<=max?s:s.substring(0,max)+"…";}
 }

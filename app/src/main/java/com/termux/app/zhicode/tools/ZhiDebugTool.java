@@ -5,8 +5,8 @@ import android.content.Context;
 
 import com.zhizhu.zhicode.sandbox.FridaRuntimeManager;
 import com.zhizhu.zhicode.sandbox.SandboxAgentBridge;
-import com.zhizhu.zhicode.sandbox.SandboxHostClient;
-import com.zhizhu.zhicode.sandbox.SandboxDebugLog;
+import com.zhizhu.zhicode.sandbox.SandboxRpc;
+import com.zhizhu.zhicode.sandbox.SandboxConsole;
 import com.termux.app.zhicode.model.SessionConfig;
 import com.termux.app.zhicode.model.ToolExecutionResult;
 import com.termux.app.zhicode.termux.TermuxShellExecutor;
@@ -71,7 +71,7 @@ public final class ZhiDebugTool implements ZhiTool {
             if("host".equals(scope))return host(config,action,in);
             if(!"sandbox".equals(scope)&&!scope.isEmpty())return ToolExecutionResult.error("未知 Debug scope: "+scope);
             return sandbox(action,in);
-        }catch(Throwable e){SandboxDebugLog.event("Debug 失败: "+scope+"/"+action+" / "+e);return ToolExecutionResult.error("Debug "+scope+"/"+action+" 失败: "+e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage()));}
+        }catch(Throwable e){SandboxConsole.event("Debug 失败: "+scope+"/"+action+" / "+e);return ToolExecutionResult.error("Debug "+scope+"/"+action+" 失败: "+e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage()));}
     }
 
     private ToolExecutionResult sandbox(String action,JSONObject in)throws Exception{
@@ -125,7 +125,7 @@ public final class ZhiDebugTool implements ZhiTool {
 
     private JSONArray sandboxProcessList(String pkgFilter)throws Exception{
         JSONObject payload=new JSONObject();if(pkgFilter!=null&&!pkgFilter.trim().isEmpty())payload.put("package",pkgFilter.trim());
-        JSONObject r=SandboxHostClient.call(context,"process_list",payload);
+        JSONObject r=SandboxRpc.call(context,"process_list",payload);
         if(!r.optBoolean("ok",false))throw new IllegalStateException(r.optString("error",r.toString()));
         JSONArray a=r.optJSONArray("processes");return a==null?new JSONArray():a;
     }

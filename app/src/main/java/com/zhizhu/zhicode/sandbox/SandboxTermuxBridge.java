@@ -44,7 +44,7 @@ public final class SandboxTermuxBridge {
         try{
             File bin=new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH);if(!bin.isDirectory())return;
             writeScript(new File(bin,"iqsandbox"),"Sandbox");writeScript(new File(bin,"iqdebug"),"Debug");
-        }catch(Throwable e){SandboxDebugLog.event("Termux 沙箱 CLI 安装失败: "+e);}
+        }catch(Throwable e){SandboxConsole.event("Termux 沙箱 CLI 安装失败: "+e);}
     }
 
     public static String bridgeDir(Context context){return new File(context.getFilesDir(),"sandbox/termux-bridge").getAbsolutePath();}
@@ -56,7 +56,7 @@ public final class SandboxTermuxBridge {
                 File reqDir=new File(bridgeDir(c),"requests");File[] files=reqDir.listFiles((d,n)->n.endsWith(".req"));
                 if(files!=null&&files.length>0){Arrays.sort(files,Comparator.comparingLong(File::lastModified));for(File f:files)handle(c,f);}
                 Thread.sleep(files!=null&&files.length>0?15:60);
-            }catch(InterruptedException e){Thread.currentThread().interrupt();return;}catch(Throwable e){SandboxDebugLog.event("Termux 沙箱桥异常: "+e);try{Thread.sleep(250);}catch(InterruptedException x){Thread.currentThread().interrupt();return;}}
+            }catch(InterruptedException e){Thread.currentThread().interrupt();return;}catch(Throwable e){SandboxConsole.event("Termux 沙箱桥异常: "+e);try{Thread.sleep(250);}catch(InterruptedException x){Thread.currentThread().interrupt();return;}}
         }
     }
 

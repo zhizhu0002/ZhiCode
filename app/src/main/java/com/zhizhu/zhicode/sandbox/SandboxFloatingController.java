@@ -28,7 +28,7 @@ public final class SandboxFloatingController {
 
     public static void attach(Activity activity,String pkg){
         if(activity==null||activity.isFinishing())return;
-        SandboxDebugLog.event("准备添加日志悬浮窗: "+pkg+" / "+activity.getClass().getName());
+        SandboxConsole.event("准备添加日志悬浮窗: "+pkg+" / "+activity.getClass().getName());
         activity.runOnUiThread(()->{
             View decor=activity.getWindow().getDecorView(); if(!(decor instanceof ViewGroup))return;
             ViewGroup root=(ViewGroup)decor; if(root.findViewWithTag(OVERLAY_TAG)!=null)return;
@@ -98,7 +98,7 @@ public final class SandboxFloatingController {
     }
 
     private static void loadLog(Activity activity,TextView body){
-        new Thread(()->{String value;try{value=SandboxDebugLog.snapshot(activity.getApplicationContext());}catch(Throwable e){value="读取日志失败: "+e;}String result=value;new Handler(Looper.getMainLooper()).post(()->{if(body.getWindowToken()!=null)body.setText(result);});},"iq-sandbox-log").start();
+        new Thread(()->{String value;try{value=SandboxConsole.snapshot(activity.getApplicationContext());}catch(Throwable e){value="读取日志失败: "+e;}String result=value;new Handler(Looper.getMainLooper()).post(()->{if(body.getWindowToken()!=null)body.setText(result);});},"iq-sandbox-log").start();
     }
 
     private static TextView text(Activity activity,String value){TextView t=new TextView(activity);t.setText(value);t.setTextColor(Color.WHITE);t.setTextSize(10);return t;}

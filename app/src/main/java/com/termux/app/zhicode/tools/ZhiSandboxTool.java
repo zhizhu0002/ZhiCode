@@ -6,8 +6,8 @@ import android.content.pm.PackageManager;
 import android.util.Base64;
 
 import com.zhizhu.zhicode.sandbox.SandboxAgentBridge;
-import com.zhizhu.zhicode.sandbox.SandboxHostClient;
-import com.zhizhu.zhicode.sandbox.SandboxDebugLog;
+import com.zhizhu.zhicode.sandbox.SandboxRpc;
+import com.zhizhu.zhicode.sandbox.SandboxConsole;
 import com.termux.app.zhicode.model.SessionConfig;
 import com.termux.app.zhicode.model.ToolExecutionResult;
 
@@ -51,13 +51,13 @@ public final class ZhiSandboxTool implements ZhiTool {
                 case "stop": {String p=reqPkg(in);return result(host("stop",new JSONObject().put("package",p)),"已停止沙箱应用: "+p);}
                 case "clear_data": {String p=reqPkg(in);return result(host("clear_data",new JSONObject().put("package",p)),"已清除沙箱数据: "+p);}
                 case "uninstall": {String p=reqPkg(in);return result(host("uninstall",new JSONObject().put("package",p)),"已从沙箱卸载: "+p);}
-                case "debug_snapshot": return ToolExecutionResult.ok(SandboxDebugLog.snapshot(context));
-                case "clear_debug": SandboxDebugLog.clear();return ToolExecutionResult.ok("沙箱调试日志已清空");
+                case "debug_snapshot": return ToolExecutionResult.ok(SandboxConsole.snapshot(context));
+                case "clear_debug": SandboxConsole.clear();return ToolExecutionResult.ok("沙箱调试日志已清空");
                 case "dump_ui": case "screenshot": case "back": case "click_node": case "long_click_node": case "set_text": case "tap": case "swipe": case "input_text":
                     return control(action,in);
                 default:return ToolExecutionResult.error("未知 Sandbox action: "+action);
             }
-        }catch(Throwable e){SandboxDebugLog.event("Agent Sandbox 失败: "+action+" / "+e);return ToolExecutionResult.error("Sandbox "+action+" 失败: "+e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage()));}
+        }catch(Throwable e){SandboxConsole.event("Agent Sandbox 失败: "+action+" / "+e);return ToolExecutionResult.error("Sandbox "+action+" 失败: "+e.getClass().getSimpleName()+": "+String.valueOf(e.getMessage()));}
     }
     private ToolExecutionResult install(String path)throws Exception{
         if(path==null||path.trim().isEmpty())return ToolExecutionResult.error("install 需要 path");File apk=new File(path);if(!apk.isFile())return ToolExecutionResult.error("APK 不存在: "+path);
@@ -68,7 +68,7 @@ public final class ZhiSandboxTool implements ZhiTool {
         return r.optBoolean("success")?ToolExecutionResult.ok("已安装到 IQ Sandbox: "+r.optString("package",pi.packageName)):ToolExecutionResult.error("沙箱安装失败: "+r.optString("message",r.toString()));
     }
     private String listApps()throws Exception{JSONObject r=host("list",new JSONObject());if(!r.optBoolean("ok"))throw new IllegalStateException(r.optString("error",r.toString()));JSONArray apps=r.optJSONArray("apps");StringBuilder b=new StringBuilder();int n=apps==null?0:apps.length();b.append("IQ Sandbox 已安装 ").append(n).append(" 个应用\n");for(int i=0;i<n;i++){String pkg=apps.optJSONObject(i).optString("package","");b.append("- ").append(pkg).append('\n');}return b.toString();}
-    private JSONObject host(String action,JSONObject payload){return SandboxHostClient.call(context,action,payload);}
+    private JSONObject host(String action,JSONObject payload){return SandboxRpc.call(context,action,payload);}
     private static ToolExecutionResult result(JSONObject r,String success){return r.optBoolean("ok",false)?ToolExecutionResult.ok(success+"\n"+r.toString()):ToolExecutionResult.error(r.optString("error",r.toString()));}
     private ToolExecutionResult control(String action,JSONObject in)throws Exception{
         JSONObject payload=new JSONObject();if(in.has("node"))payload.put("node",in.optString("node",""));if(in.has("text"))payload.put("text",in.optString("text",""));
@@ -87,7 +87,7 @@ public final class ZhiSandboxTool implements ZhiTool {
             JSONObject source=new JSONObject().put("type","base64").put("media_type","image/png").put("data",data);
             JSONArray additional=new JSONArray().put(new JSONObject().put("type","image").put("source",source).put("name",image.getName()));
             return ToolExecutionResult.okWithAdditionalContent(display,additional);
-        }catch(Throwable e){SandboxDebugLog.event("截图像素桥接失败: "+e);return ToolExecutionResult.error("截图已生成，但图像桥接失败: "+e.getMessage()+"\n"+display);}
+        }catch(Throwable e){SandboxConsole.event("截图像素桥接失败: "+e);return ToolExecutionResult.error("截图已生成，但图像桥接失败: "+e.getMessage()+"\n"+display);}
     }
     private static byte[] readScreenshot(File image)throws Exception{
         long length=image.length();if(length<=0||length>MAX_SCREENSHOT_BYTES)throw new IllegalStateException("截图大小超出 5 MiB 限制: "+length);

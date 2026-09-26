@@ -4,7 +4,7 @@ import android.app.Application
 import android.content.Context
 import com.zhizhu.zhicode.sandbox.ZhiSandbox
 import com.zhizhu.zhicode.sandbox.SandboxAgentBridge
-import com.zhizhu.zhicode.sandbox.SandboxDebugLog
+import com.zhizhu.zhicode.sandbox.SandboxConsole
 import com.zhizhu.zhicode.sandbox.SandboxProcess
 import com.zhizhu.zhicode.sandbox.SandboxStage
 import com.zhizhu.zhicode.sandbox.SandboxTermuxBridge
@@ -37,7 +37,7 @@ class ZhiCodeApplication : Application() {
         // 必须是第一个动作：后面所有路径都依赖它
         TermuxConstants.configure(base)
 
-        SandboxDebugLog.init(base)
+        SandboxConsole.init(base)
         // 阶段日志按 pid 分文件，必须尽早初始化：引擎 attach/create 的每一步都靠它留痕，
         // 否则「卡在哪一步」只能靠猜（旧实现的单文件覆盖写就是这么丢掉线索的）。
         SandboxStage.init(base)
@@ -45,12 +45,12 @@ class ZhiCodeApplication : Application() {
         installCrashLogger()
 
         sandboxProcess = SandboxProcess.ownsEngine(base)
-        SandboxDebugLog.event(
+        SandboxConsole.event(
             "Application attach: " + SandboxProcess.name(base) + " sandbox=" + sandboxProcess
         )
         if (sandboxProcess) {
             // 顺序不能换：attach 必须早于 create，且都发生在任何 ContentProvider 之后被
-            // 首次 IPC 触发之前（SandboxControlProvider 自己在 onCreate 里也会补一次排队初始化）。
+            // 首次 IPC 触发之前（SandboxRpcService 自己在 onCreate 里也会补一次排队初始化）。
             ZhiSandbox.attach(base)
         }
     }
@@ -68,9 +68,9 @@ class ZhiCodeApplication : Application() {
     private fun installCrashLogger() {
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
-            SandboxDebugLog.event(
+            SandboxConsole.event(
                 "未捕获异常 [" + SandboxProcess.name(this) + "/" + thread.name + "]: " +
-                    SandboxDebugLog.stackTrace(error)
+                    SandboxConsole.stackTrace(error)
             )
             previous?.uncaughtException(thread, error)
         }

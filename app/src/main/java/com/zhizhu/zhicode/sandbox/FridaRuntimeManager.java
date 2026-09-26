@@ -118,7 +118,7 @@ public final class FridaRuntimeManager {
         if (r.exitCode != 0) throw new IllegalStateException("Frida Gadget 解压失败: " + r.combined());
         if (!isInstalled(c)) throw new IllegalStateException("Frida Gadget 解压后不是有效 ELF");
         writeMarker(c, actual);
-        SandboxDebugLog.event("Frida Gadget " + VERSION + " 已安装: " + dest);
+        SandboxConsole.event("Frida Gadget " + VERSION + " 已安装: " + dest);
         return status(c).put("changed", true);
     }
 

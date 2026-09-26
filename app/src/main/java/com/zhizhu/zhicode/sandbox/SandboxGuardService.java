@@ -20,7 +20,7 @@ public final class SandboxGuardService extends Service {
 
     public static void start(Context c){
         Intent i=new Intent(c,SandboxGuardService.class);
-        try{if(Build.VERSION.SDK_INT>=26)c.startForegroundService(i);else c.startService(i);}catch(Throwable e){SandboxDebugLog.event("SandboxGuard 启动失败: "+e);}
+        try{if(Build.VERSION.SDK_INT>=26)c.startForegroundService(i);else c.startService(i);}catch(Throwable e){SandboxConsole.event("SandboxGuard 启动失败: "+e);}
     }
     public static void stop(Context c){try{c.stopService(new Intent(c,SandboxGuardService.class));}catch(Throwable ignored){}}
 

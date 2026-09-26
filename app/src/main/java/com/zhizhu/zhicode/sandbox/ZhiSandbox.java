@@ -70,7 +70,7 @@ public final class ZhiSandbox {
             appContext = app;
             BlackBoxCore.get().doAttachBaseContext(context, new ClientConfiguration() {
                 @Override public String getHostPackageName() { return app.getPackageName(); }
-                @Override public boolean isHideRoot() { return SandboxSettingsStore.isRootHidden(app); }
+                @Override public boolean isHideRoot() { return SandboxPrefs.isRootHidden(app); }
                 @Override public boolean isEnableDaemonService() { return false; }
                 @Override public boolean isEnableLauncherActivity() { return false; }
                 @Override public boolean isUseVpnNetwork() { return false; }
@@ -81,7 +81,7 @@ public final class ZhiSandbox {
         } catch (Throwable error) {
             initError = error;
             SandboxStage.mark("engine:attach-error:" + error.getClass().getSimpleName());
-            SandboxDebugLog.event("引擎 attach 失败: " + error);
+            SandboxConsole.event("引擎 attach 失败: " + error);
         }
     }
 
@@ -94,14 +94,14 @@ public final class ZhiSandbox {
         }
         SandboxStage.mark("engine:create-begin");
         try {
-            SandboxDebugLog.event("沙箱引擎 create 开始: " + SandboxProcess.name(appContext));
+            SandboxConsole.event("沙箱引擎 create 开始: " + SandboxProcess.name(appContext));
             BlackBoxCore.get().addAppLifecycleCallback(new AppLifecycleCallback() {
                 @Override public void beforeMainLaunchApk(String pkg, int uid) {
-                    SandboxDebugLog.event("准备启动虚拟应用: " + pkg + " user=" + uid);
+                    SandboxConsole.event("准备启动虚拟应用: " + pkg + " user=" + uid);
                 }
 
                 @Override public void beforeCreateApplication(String pkg, String process, Context c, int uid) {
-                    SandboxDebugLog.event("创建虚拟进程: " + pkg + " / " + process);
+                    SandboxConsole.event("创建虚拟进程: " + pkg + " / " + process);
                 }
 
                 @Override public void beforeApplicationOnCreate(String pkg, String process, Application a, int uid) {
@@ -109,15 +109,15 @@ public final class ZhiSandbox {
                     if (FridaRuntimeManager.isAutoAttachEnabled(host, pkg)) {
                         try {
                             SandboxFridaBridge.load(host);
-                            SandboxDebugLog.event("Frida auto-attach 已在 Application.onCreate 前加载: " + pkg + " / " + process);
+                            SandboxConsole.event("Frida auto-attach 已在 Application.onCreate 前加载: " + pkg + " / " + process);
                         } catch (Throwable error) {
-                            SandboxDebugLog.event("Frida auto-attach 失败: " + pkg + " / " + process + " / " + error);
+                            SandboxConsole.event("Frida auto-attach 失败: " + pkg + " / " + process + " / " + error);
                         }
                     }
                 }
 
                 @Override public void afterApplicationOnCreate(String pkg, String process, Application a, int uid) {
-                    SandboxDebugLog.event("虚拟 Application 已启动: " + pkg + " / " + process);
+                    SandboxConsole.event("虚拟 Application 已启动: " + pkg + " / " + process);
                 }
 
                 @Override public void onActivityResumed(Activity activity) {
@@ -126,8 +126,8 @@ public final class ZhiSandbox {
                     if (pkg.isEmpty()) pkg = "guest";
                     resumedActivity = new WeakReference<>(activity);
                     resumedPackage = pkg;
-                    SandboxDebugLog.event("Activity resumed: " + pkg + " / " + activity.getClass().getName());
-                    if (SandboxSettingsStore.isFloatingLogEnabled(appContext)) {
+                    SandboxConsole.event("Activity resumed: " + pkg + " / " + activity.getClass().getName());
+                    if (SandboxPrefs.isFloatingLogEnabled(appContext)) {
                         SandboxFloatingController.attach(activity, pkg);
                     } else {
                         SandboxFloatingController.detach(activity);
@@ -145,11 +145,11 @@ public final class ZhiSandbox {
             BlackBoxCore.get().doCreate();
             CREATED.set(true);
             SandboxStage.mark("engine:create-ok");
-            SandboxDebugLog.event("沙箱引擎已初始化；网络使用宿主机直连，VPN 网络模式已禁用");
+            SandboxConsole.event("沙箱引擎已初始化；网络使用宿主机直连，VPN 网络模式已禁用");
         } catch (Throwable error) {
             initError = error;
             SandboxStage.mark("engine:create-error:" + error.getClass().getSimpleName());
-            SandboxDebugLog.event("引擎 create 失败: " + SandboxDebugLog.stackTrace(error));
+            SandboxConsole.event("引擎 create 失败: " + SandboxConsole.stackTrace(error));
         } finally {
             READY_LATCH.countDown();
         }
@@ -166,7 +166,7 @@ public final class ZhiSandbox {
         try {
             new Handler(Looper.getMainLooper()).post(ZhiSandbox::create);
         } catch (Throwable error) {
-            SandboxDebugLog.event("调度引擎 create 失败: " + error);
+            SandboxConsole.event("调度引擎 create 失败: " + error);
             create();
         }
     }
@@ -276,26 +276,26 @@ public final class ZhiSandbox {
 
     public static boolean isRootHidden() {
         Context context = appContext;
-        return context == null || SandboxSettingsStore.isRootHidden(context);
+        return context == null || SandboxPrefs.isRootHidden(context);
     }
 
     public static boolean isFloatingLogEnabled() {
         Context context = appContext;
-        return context != null && SandboxSettingsStore.isFloatingLogEnabled(context);
+        return context != null && SandboxPrefs.isFloatingLogEnabled(context);
     }
 
     public static boolean setFloatingLogEnabled(boolean enabled) throws Exception {
         ensureReady();
         Context context = appContext;
         if (context == null) throw new IllegalStateException("沙箱 Context 尚未就绪");
-        SandboxSettingsStore.setFloatingLogEnabled(context, enabled);
+        SandboxPrefs.setFloatingLogEnabled(context, enabled);
         Activity activity = resumedActivity.get();
         if (activity != null) {
             if (enabled) SandboxFloatingController.attach(activity, resumedPackage);
             else SandboxFloatingController.detach(activity);
         }
-        SandboxDebugLog.event("日志悬浮窗已" + (enabled ? "开启" : "关闭"));
-        return SandboxSettingsStore.isFloatingLogEnabled(context);
+        SandboxConsole.event("日志悬浮窗已" + (enabled ? "开启" : "关闭"));
+        return SandboxPrefs.isFloatingLogEnabled(context);
     }
 
     /**
@@ -309,7 +309,7 @@ public final class ZhiSandbox {
         Context context = appContext;
         if (context == null) throw new IllegalStateException("沙箱 Context 尚未就绪");
         synchronized (LIFECYCLE_LOCK) {
-            if (SandboxSettingsStore.isRootHidden(context) == hidden) return false;
+            if (SandboxPrefs.isRootHidden(context) == hidden) return false;
             List<ApplicationInfo> apps = installedApplications();
             SandboxGuardService.stop(context);
             for (ApplicationInfo info : apps) BlackBoxCore.get().stopPackage(info.packageName, USER_ID);
@@ -320,8 +320,8 @@ public final class ZhiSandbox {
                 stopped = allGuestsStopped(apps);
             }
             if (!stopped) throw new IllegalStateException("仍有 Guest 进程在运行，Root 隐藏设置未变更");
-            SandboxSettingsStore.setRootHidden(context, hidden);
-            SandboxDebugLog.event("Root 隐藏已" + (hidden ? "开启" : "关闭") + "；已停止全部 Guest");
+            SandboxPrefs.setRootHidden(context, hidden);
+            SandboxConsole.event("Root 隐藏已" + (hidden ? "开启" : "关闭") + "；已停止全部 Guest");
             return true;
         }
     }

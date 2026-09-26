@@ -47,7 +47,7 @@ public final class SandboxFridaBridge {
         while (SystemClock.uptimeMillis() < end && !ready.isFile()) Thread.sleep(25);
         if (!ready.isFile()) throw new IllegalStateException("Frida Gadget 已加载但脚本桥未就绪");
         loaded = true; sessionDir = dir;
-        SandboxDebugLog.event("Frida Gadget 已进入 Guest pid=" + Process.myPid());
+        SandboxConsole.event("Frida Gadget 已进入 Guest pid=" + Process.myPid());
         return status(context);
     }
 
