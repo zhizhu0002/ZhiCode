@@ -40,6 +40,7 @@ public final class SandboxScreenshotBridgeStructureTest {
         String script = read(root, "test-source-no-build.sh");
 
         String flat = squash(bridge);
+        String toolFlat = squash(tool);
         require(bridge.contains("deadline_uptime_ms") && flat.contains("nextSend=now+BROADCAST_RETRY_INTERVAL_MS")
                         && bridge.contains("BROADCAST_RETRY_INTERVAL_MS = 250L")
                         && bridge.contains("context.sendBroadcast(intent)"),
@@ -65,8 +66,12 @@ public final class SandboxScreenshotBridgeStructureTest {
                         && bridge.contains("renameTo(dst)") && bridge.contains("SandboxConsole.event"),
                 "screenshot and result files must be bounded, atomically published, and diagnosable");
 
-        require(tool.contains("?12000:4500") && tool.contains("readScreenshot(image)")
-                        && tool.contains("Base64.NO_WRAP") && tool.contains("\"type\",\"image\""),
+        // 断言「截图与普通 UI 动作用的是两档不同的超时，且值分别是 12s / 4.5s」，
+        // 而不是 ?12000:4500 这一种书写形态——常量名与逗号后的空格属于重写范围内的正常改动。
+        require(toolFlat.contains("SCREENSHOT_TIMEOUT_MS=12000") && toolFlat.contains("UI_ACTION_TIMEOUT_MS=4500")
+                        && toolFlat.contains("ACTION_SCREENSHOT.equals(action)?SCREENSHOT_TIMEOUT_MS:UI_ACTION_TIMEOUT_MS")
+                        && tool.contains("readScreenshot(image)")
+                        && tool.contains("Base64.NO_WRAP") && toolFlat.contains("\"type\",\"image\""),
                 "Sandbox screenshot must attach validated PNG pixels to model content");
         require(tool.contains("sandbox/screenshots") && tool.contains("MAX_SCREENSHOT_BYTES"),
                 "the tool must accept images only from the bounded private screenshot directory");

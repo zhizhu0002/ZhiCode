@@ -2,6 +2,8 @@ import java.nio.file.*;
 
 public final class FridaDeadlockRegressionTest {
     private static void require(boolean c,String m){if(!c)throw new AssertionError(m);}
+    /** 去掉全部空白后再比较：断言关心的是标识符与先后关系，不该被空格/换行左右。 */
+    private static String squash(String source){return source.replaceAll("\\s+","");}
     public static void main(String[] args)throws Exception{
         Path root=Paths.get(args.length==0?".":args[0]).toAbsolutePath().normalize();
         String bridge=Files.readString(root.resolve("app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxFrida.java"));
@@ -43,8 +45,11 @@ public final class FridaDeadlockRegressionTest {
         require(bridge.contains("frida_eval deadline exceeded"),"eval deadline missing");
         require(bridge.contains("[circular]"),"bounded/circular JSON serialization missing");
         require(tool.contains("hard-capped at 2048")&&tool.contains("await IQ.scan(options)"),"tool schema must describe the scan cap and safe eval API");
-        require(tool.contains("fridaPayload.put(\"timeout_ms\",runtimeTimeoutMs)")
-                && tool.contains("commandTimeoutMs=Math.min(120000,runtimeTimeoutMs+1500)"),
+        // 断言「两层超时都留了余量、且脚本侧上限低于 Java 侧」这个语义，
+        // 而不是 fridaPayload.put("timeout_ms",runtimeTimeoutMs) 这一种书写形态。
+        String toolFlat=squash(tool);
+        require(toolFlat.contains("fridaPayload.put(\"timeout_ms\",runtimeTimeoutMs)")
+                && toolFlat.contains("commandTimeoutMs=Math.min(FRIDA_COMMAND_MAX_TIMEOUT_MS,runtimeTimeoutMs+FRIDA_TIMEOUT_HEADROOM_MS)"),
             "the Java command timeout must leave room for a structured Frida deadline response");
         require(prompt.contains("always use Debug action=frida_scan instead of Memory.scanSync")
                 && prompt.contains("await IQ.scan(options)")

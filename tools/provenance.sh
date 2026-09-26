@@ -41,12 +41,13 @@ normalize() {
 REPORT="$WORK/report.txt"
 : > "$REPORT"
 
-# 改了文件名的沙箱类：这些走后面的 pair_renamed 配对，
+# 改了文件名的类（沙箱层 + Agent 工具层）：这些走后面的配对表，
 # 必须在按路径的循环里跳过，否则会被算两遍、把文件数与行数虚增。
 RENAMED_BASENAMES="SandboxGuestHost.java SandboxGuestDebug.java SandboxFrida.java FridaEnv.java
 SandboxBoard.java SandboxOverlay.java SandboxKeeper.java SandboxShell.java
 SandboxRpcService.java SandboxPrefs.java SandboxConsole.java SandboxRpc.java
-SandboxProcess.java ZhiSandbox.java"
+SandboxProcess.java ZhiSandbox.java
+ZhiSandboxTool.java ZhiDebugTool.java"
 
 is_renamed() {
     local base="$1"
@@ -83,13 +84,36 @@ while IFS= read -r rel; do
     echo "$rel|$counterpart|$theirs|$ours|$shared" >> "$REPORT"
 done < <(find . -name '*.java' -o -name '*.kt' | sed 's#^\./##')
 
-# 单独处理「改了文件名」的沙箱类：按英文名配对后重新比对。
-# 不做这一步的话，它们会因为路径对不上而被算成「无对应文件」，把沙箱层的重合度
-# 误报成 0 —— 数字必须诚实，否则据此做的判断都是错的。
-pair_renamed() {
-    local ourName="$1" theirName="$2"
-    local ourFile="$OUR/com/zhizhu/zhicode/sandbox/$ourName"
-    local theirFile="$OFF/com/iqge/sandbox/$theirName"
+# 单独处理「改了文件名」的类：按英文名配对后重新比对。
+# 不做这一步的话，它们会因为路径对不上而被算成「无对应文件」，
+# 把重合度误报成 0 —— 数字必须诚实，否则据此做的判断都是错的。
+#
+# 配对表以「本工程相对目录|原版相对目录|本工程文件名|原版文件名」给出，
+# 因为改名同时跨了两个包：沙箱层在 com/zhizhu/zhicode/sandbox → com/iqge/sandbox，
+# Agent 工具层在 com/termux/app/zhicode/tools → com/termux/app/iqcode/tools。
+PAIRS="
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxGuestHost.java|SandboxAgentBridge.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxGuestDebug.java|SandboxProcessDebug.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxFrida.java|SandboxFridaBridge.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|FridaEnv.java|FridaRuntimeManager.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxBoard.java|SandboxDashboardActivity.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxOverlay.java|SandboxFloatingController.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxKeeper.java|SandboxGuardService.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxShell.java|SandboxTermuxBridge.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxRpcService.java|SandboxControlProvider.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxPrefs.java|SandboxSettingsStore.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxConsole.java|SandboxDebugLog.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxRpc.java|SandboxHostClient.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxProcess.java|SandboxProcessRole.java
+com/zhizhu/zhicode/sandbox|com/iqge/sandbox|ZhiSandbox.java|IQSandboxEngine.java
+com/termux/app/zhicode/tools|com/termux/app/iqcode/tools|ZhiSandboxTool.java|IQSandboxTool.java
+com/termux/app/zhicode/tools|com/termux/app/iqcode/tools|ZhiDebugTool.java|IQDebugTool.java
+"
+
+pair_renamed_in() {
+    local ourDir="$1" theirDir="$2" ourName="$3" theirName="$4"
+    local ourFile="$OUR/$ourDir/$ourName"
+    local theirFile="$OFF/$theirDir/$theirName"
     [ -f "$ourFile" ] && [ -f "$theirFile" ] || return 0
     normalize "$ourFile" | squash > "$WORK/ours.txt"
     squash < "$theirFile" > "$WORK/theirs.txt"
@@ -97,23 +121,13 @@ pair_renamed() {
     shared=$(diff --unchanged-group-format='%=' --old-group-format='' \
                    --new-group-format='' --changed-group-format='' \
                    "$WORK/theirs.txt" "$WORK/ours.txt" | grep -c .)
-    echo "com/zhizhu/zhicode/sandbox/$ourName|com/iqge/sandbox/$theirName|$(wc -l < "$WORK/theirs.txt")|$(wc -l < "$WORK/ours.txt")|${shared:-0}" >> "$REPORT"
+    echo "$ourDir/$ourName|$theirDir/$theirName|$(wc -l < "$WORK/theirs.txt")|$(wc -l < "$WORK/ours.txt")|${shared:-0}" >> "$REPORT"
 }
 
-pair_renamed SandboxGuestHost.java      SandboxAgentBridge.java
-pair_renamed SandboxGuestDebug.java     SandboxProcessDebug.java
-pair_renamed SandboxFrida.java          SandboxFridaBridge.java
-pair_renamed FridaEnv.java              FridaRuntimeManager.java
-pair_renamed SandboxBoard.java          SandboxDashboardActivity.java
-pair_renamed SandboxOverlay.java        SandboxFloatingController.java
-pair_renamed SandboxKeeper.java         SandboxGuardService.java
-pair_renamed SandboxShell.java          SandboxTermuxBridge.java
-pair_renamed SandboxRpcService.java     SandboxControlProvider.java
-pair_renamed SandboxPrefs.java          SandboxSettingsStore.java
-pair_renamed SandboxConsole.java        SandboxDebugLog.java
-pair_renamed SandboxRpc.java            SandboxHostClient.java
-pair_renamed SandboxProcess.java        SandboxProcessRole.java
-pair_renamed ZhiSandbox.java            IQSandboxEngine.java
+while IFS='|' read -r ourDir theirDir ourName theirName; do
+    [ -n "$ourDir" ] || continue
+    pair_renamed_in "$ourDir" "$theirDir" "$ourName" "$theirName"
+done <<< "$PAIRS"
 
 awk -F'|' '
 function area(path) {
