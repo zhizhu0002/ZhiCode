@@ -18,8 +18,8 @@ import java.util.concurrent.TimeUnit;
  * 两者都可能先到，且**都可能不来**（超时），所以状态必须由这个对象统一裁定。
  *
  * <h3>先到者为准</h3>
- * 退出码一旦定下就不再改（{@link #publishControl} 与
- * {@link #publishProcessExit} 都检查过）。顺序很重要：控制文件后到时，
+ * 退出码一旦定下就不再改 —— 两个信号都汇进 {@link #resolve}，判定只有一处。
+ * 顺序很重要：控制文件后到时，
  * 它带来的那个码是**更可信**的，但此时进程可能已经以别的码退出了 ——
  * 后者往往是被信号杀的（比如 wrapper 报告 0 之后清理阶段被杀）。
  * 因此这里的选择是「先到者为准」，而不是「控制文件总是优先」。
@@ -75,15 +75,16 @@ public final class BashCompletionCoordinator {
     /**
      * 报告 wrapper 给出的退出码。
      *
+     * <p>这里校验范围而 {@link #publishProcessExit} 不校验，是有原因的：
+     * 这个码来自控制文件里的一行文本，那个文件可能被上一次未清理的执行留下，
+     * 于是「1899」这样的东西也可能被读进来。而那个码来自 {@code waitFor()}，
+     * 是内核给的，一定在合法范围内。
+     *
      * @return 是否由**本次调用**定下了退出码
      */
     public synchronized boolean publishControl(int code) {
-        if (!isValidExitCode(code) || hasExitCode) return false;
-        hasExitCode = true;
-        exitCode = code;
-        source = Source.CONTROL;
-        resolved.countDown();
-        return true;
+        if (!isValidExitCode(code)) return false;
+        return resolve(code, Source.CONTROL);
     }
 
     /**
@@ -91,14 +92,23 @@ public final class BashCompletionCoordinator {
      *
      * <p>{@link #processExited} 与「是否定下退出码」是两件事：
      * 进程退出一定发生（哪怕控制文件已经先给了码），所以那个闩总是要放行。
+     * 放行必须在 {@link #resolve} 之前 —— 否则等退出码的线程会被唤醒，
+     * 却在 {@code processExited()} 上读到 false。
      */
     public synchronized boolean publishProcessExit(int code) {
         processExited = true;
         processExit.countDown();
+        return resolve(code, Source.PROCESS);
+    }
+
+    /**
+     * 「先到者为准」的唯一落定处。两个信号都走这里，退出码一旦定下就不再改。
+     */
+    private boolean resolve(int code, Source from) {
         if (hasExitCode) return false;
         hasExitCode = true;
         exitCode = code;
-        source = Source.PROCESS;
+        source = from;
         resolved.countDown();
         return true;
     }

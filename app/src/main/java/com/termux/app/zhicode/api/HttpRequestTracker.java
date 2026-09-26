@@ -81,11 +81,6 @@ final class HttpRequestTracker {
         if (scope != null) scope.cancel();
     }
 
-    /** 当前在途请求数，供诊断使用。 */
-    int activeCount() {
-        return active.size();
-    }
-
     /**
      * 一次请求的生命周期句柄。
      *

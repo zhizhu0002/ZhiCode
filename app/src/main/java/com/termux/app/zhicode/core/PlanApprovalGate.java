@@ -113,21 +113,15 @@ public final class PlanApprovalGate {
             request.answered.await();
             ApprovalResponse response = request.getResponse();
             return response == null ? cancelled() : response;
-        } catch (InterruptedException interrupted) {
-            request.complete(cancelled());
-            throw interrupted;
-        } catch (RuntimeException failed) {
+        } catch (InterruptedException | RuntimeException failed) {
+            // 之所以敢写成一个 catch：这段要做的收尾与异常类型无关，
+            // 而 Java 的精确重抛会把 `failed` 按其原始类型抛出 ——
+            // InterruptedException 在签名里已声明，RuntimeException 不受检，两边都合法。
             request.complete(cancelled());
             throw failed;
         } finally {
             pending.remove(request.requestId, request);
         }
-    }
-
-    /** 与 {@link #request} 同一个门，只是名字更贴合调用方的读法。 */
-    public ApprovalResponse awaitApproval(PlanWorkflowState plan, Consumer<ApprovalRequest> notify)
-            throws InterruptedException {
-        return request(plan, notify);
     }
 
     /** 用户什么都没写地回答（比如点「批准」）。 */
@@ -161,7 +155,14 @@ public final class PlanApprovalGate {
         }
     }
 
-    /** 未落定请求的快照，供 Activity 重建后恢复界面。 */
+    /**
+     * 未落定请求的快照，供 Activity 重建后恢复界面。
+     *
+     * <p><b>这一面现在还没有接线。</b>全仓库（含 Kotlin 界面、JVM 单测、文本级断言）
+     * 搜不到调用方：界面目前把请求对象存在自己的字段里，进程重建等于会话结束。
+     * 之所以不删，是因为它是「批准卡片必须能被重新拿到」这条要求唯一的落点 ——
+     * 删掉之后，这个要求在本工程里就没有任何痕迹了。
+     */
     public List<ApprovalRequest> pendingRequests() {
         return new ArrayList<>(pending.values());
     }

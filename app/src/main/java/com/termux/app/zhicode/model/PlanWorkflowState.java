@@ -117,9 +117,16 @@ public final class PlanWorkflowState {
             approvedPermissionMode, planFile, planText, feedback, updatedAt);
     }
 
+    /**
+     * 原样复制。
+     *
+     * <p>委托给 {@link #restore}：两者要做的是同一件事，
+     * 各写一遍的话以后往快照里加字段时就得记住改两处 ——
+     * 漏掉一处表现为「副本少了一个字段」，而这种错不会报错。
+     */
     public PlanWorkflowState copy() {
-        return new PlanWorkflowState(status, workflowId, revision, previousPermissionMode,
-            approvedPermissionMode, planFile, planText, feedback, updatedAt);
+        return restore(status, workflowId, revision, previousPermissionMode, approvedPermissionMode,
+            planFile, planText, feedback, updatedAt);
     }
 
     /**
@@ -133,39 +140,31 @@ public final class PlanWorkflowState {
         if (status != Status.PLANNING && status != Status.AWAITING_APPROVAL) {
             throw new IllegalStateException(ERROR_NOT_EDITABLE + status);
         }
-        return advance(Status.PLANNING, "", planFile, planText, "");
-    }
-
-    public PlanWorkflowState withPlanText(String planText) {
-        return withPlan(planFile, planText);
-    }
-
-    public PlanWorkflowState withPlanFile(String planFile) {
-        return withPlan(planFile, planText);
+        return step(Status.PLANNING, "", planFile, planText, "");
     }
 
     /** 提交计划，等用户批准。 */
     public PlanWorkflowState awaitingApproval() {
         requireStatus(Status.PLANNING);
-        return advance(Status.AWAITING_APPROVAL, "", planFile, planText, feedback);
+        return step(Status.AWAITING_APPROVAL, "", feedback);
     }
 
     /** 用户批准：进入执行，**不改动**用户自己的权限基线。 */
     public PlanWorkflowState executing() {
         requireStatus(Status.AWAITING_APPROVAL);
-        return advance(Status.EXECUTING, "", planFile, planText, "");
+        return step(Status.EXECUTING, "", "");
     }
 
     /** 用户选择「继续讨论」：带着反馈退回计划阶段。 */
     public PlanWorkflowState keepPlanning(String feedback) {
         requireStatus(Status.AWAITING_APPROVAL);
-        return advance(Status.PLANNING, "", planFile, planText, feedback);
+        return step(Status.PLANNING, "", feedback);
     }
 
     /** 执行结束，回到空闲，并把权限还原成批准时定的那一档。 */
     public PlanWorkflowState finished() {
         requireStatus(Status.EXECUTING);
-        return advance(Status.IDLE, approvedPermissionMode, planFile, planText, "");
+        return step(Status.IDLE, approvedPermissionMode, "");
     }
 
     /** 取消流程。已经取消时返回自身（幂等），空快照则拒绝。 */
@@ -173,7 +172,7 @@ public final class PlanWorkflowState {
         requireWorkflow();
         if (status == Status.CANCELLED) return this;
         if (status == Status.IDLE) throw new IllegalStateException(ERROR_ALREADY_IDLE);
-        return advance(Status.CANCELLED, "", planFile, planText, feedback);
+        return step(Status.CANCELLED, "", feedback);
     }
 
     public boolean isIdle() { return status == Status.IDLE; }
@@ -189,13 +188,24 @@ public final class PlanWorkflowState {
     }
 
     /**
+     * 保留当前计划正文与文件，只推进阶段。
+     *
+     * <p>六个推进操作里有五个不动计划正文，只有 {@link #withPlan} 会换掉它。
+     * 让这五个各写一遍「planFile, planText」等于把同一件事写在五处 ——
+     * 以后想给正文加一个伴随字段就得改五处。
+     */
+    private PlanWorkflowState step(Status nextStatus, String approvedMode, String nextFeedback) {
+        return step(nextStatus, approvedMode, planFile, planText, nextFeedback);
+    }
+
+    /**
      * 产出版本号 +1 的新快照。
      *
      * <p>时间戳必须严格递增：界面按它排序，系统时钟回拨时若直接取当前时间，
      * 新快照看起来会比它替换掉的那一版更旧。
      */
-    private PlanWorkflowState advance(Status nextStatus, String approvedMode, String nextPlanFile,
-                                      String nextPlanText, String nextFeedback) {
+    private PlanWorkflowState step(Status nextStatus, String approvedMode, String nextPlanFile,
+                                   String nextPlanText, String nextFeedback) {
         long now = Math.max(System.currentTimeMillis(), updatedAt + 1L);
         return new PlanWorkflowState(nextStatus, workflowId, revision + 1L,
             previousPermissionMode, approvedMode, nextPlanFile, nextPlanText, nextFeedback, now);

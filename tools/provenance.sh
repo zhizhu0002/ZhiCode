@@ -236,7 +236,11 @@ END {
 # 用法: PROVENANCE_COMPOSITION=1 bash tools/provenance.sh
 if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ]; then
     skeleton=0; literal=0; other=0
-    : > "$WORK/other-lines.txt"
+    # 这份全文要能被人拿去逐条看，所以不能放在 $WORK 里 ——
+    # 那个目录在脚本退出时被 trap 删掉，打印出来的路径到时已经不存在了。
+    OTHER_LINES="$PROJECT_ROOT/build/provenance-other-lines.txt"
+    mkdir -p "$(dirname "$OTHER_LINES")"
+    : > "$OTHER_LINES"
     while IFS='|' read -r rel counterpart theirs ours shared; do
         [ -n "$rel" ] || continue
         [ "$theirs" = "0" ] || [ "$shared" = "0" ] || true
@@ -266,9 +270,8 @@ if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ]; then
         printf "  含字面量的行（协议键名与用户可见文案）:      %d 行\n", literal
         printf "  其它行（仍需逐条看的地方）:                  %d 行\n", other
         printf "  合计:                                        %d 行\n", skeleton + literal + other
-        printf "  「其它行」全文: %s\n", otherfile
-      }
-    ' otherfile="$WORK/composition-other.txt" "$WORK/comp-lines.txt"
+        printf "  「其它行」全文: %s\n", otherfile      }
+    ' otherfile="$OTHER_LINES" "$WORK/comp-lines.txt"
 fi
 
 # 逐个文件的清单。默认不输出，因为日常只需要上面那张汇总表；
