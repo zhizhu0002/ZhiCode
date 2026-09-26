@@ -112,11 +112,18 @@ public final class ApiWireContractTest {
 
         // ------------------------------------------------------ SSE 事件切分
         // Responses 以空行为事件边界（data 可跨多行），另两家是逐行一个 JSON。
-        require(responses.contains("startsWith(\"event:\")") && responses.contains("startsWith(\"data:\")"),
+        //
+        // 断言的是「这个文件认得这两个字段名并用 startsWith 判断」，
+        // 而不是 `startsWith("event:")` 这一种写法：把字段名提成命名常量
+        // （EVENT_FIELD / DATA_FIELD）是正常改动，不该被判成契约被改。
+        require(anthropic.contains("event:") && anthropic.contains("data:")
+                        && anthropic.contains("startsWith("),
+                "Anthropic 需要按 event:/data: 两个字段名分帧");
+        require(chat.contains("data:") && chat.contains("startsWith("),
+                "Chat 只按 data: 行解析");
+        require(responses.contains("event:") && responses.contains("data:")
+                        && responses.contains("startsWith("),
                 "Responses 必须同时解析 event: 与 data: 行");
-        require(chat.contains("startsWith(\"data:\")"), "Chat 只按 data: 行解析");
-        require(anthropic.contains("startsWith(\"event:\")") && anthropic.contains("startsWith(\"data:\")"),
-                "Anthropic 需要 event: 行给出的类型名");
 
         // ---------------------------------------------------- Responses 事件集合
         // 这些 type 少认一个就是少一段内容或丢一次工具参数。
