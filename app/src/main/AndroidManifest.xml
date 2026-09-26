@@ -12,19 +12,22 @@
     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
     <!--
-      以下是本应用实际使用的权限集，移植时原样保留了上游那份清单：
+      本应用实际需要的权限集：
       - INTERNET            模型 API / WebSearch / WebFetch
-      - SYSTEM_ALERT_WINDOW 悬浮窗（FloatingOverlayService）
       - WAKE_LOCK           保活与 Agent 运行期唤醒锁
-      - FOREGROUND_SERVICE  KeilAliveService / 内置 Termux 长任务
+      - FOREGROUND_SERVICE  KeepAliveService / 内置 Termux 长任务
       - POST_NOTIFICATIONS  前台服务通知（Android 13+）
       - 存储三类           内置 Termux 的 ~/storage 映射与 /sdcard 访问
       - VIBRATE             交互反馈
       - REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 保活引导
       - REQUEST_INSTALL_PACKAGES   APK 安装能力（AndroidIntent install_apk）
+
+      刻意不带 SYSTEM_ALERT_WINDOW：它是悬浮窗专用权限，而唯一需要它的那个
+      遗留 Service 已经删掉（它在代码里从来没有启动点），主界面与沙箱浮层都在
+      自己的视图树里画，不需要在别人的应用上叠窗口。留着一个没有使用者的
+      「可在其它应用上层显示」权限，对用户只是无谓的授权请求。
     -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
@@ -121,11 +124,6 @@
             android:name="com.zhizhu.zhicode.background.KeepAliveService"
             android:exported="false"
             android:stopWithTask="false" />
-
-        <!-- 悬浮窗（收起后回到主界面） -->
-        <service
-            android:name="com.zhizhu.zhicode.FloatingOverlayService"
-            android:exported="false" />
 
         <!--
           蜘蛛沙箱（BlackBox 虚拟 Android 运行时宿主）—— Phase 7。

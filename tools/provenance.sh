@@ -52,7 +52,7 @@ SandboxBoard.java SandboxOverlay.java SandboxKeeper.java SandboxShell.java
 SandboxRpcService.java SandboxPrefs.java SandboxConsole.java SandboxRpc.java
 SandboxProcess.java ZhiSandbox.java
 ZhiSandboxTool.java ZhiDebugTool.java
-ZhiCodeEngine.java ZhiTool.java ZhiDocumentsProvider.java ZhiFileProvider.java"
+ZhiCodeEngine.java ZhiTool.java ZhiFileProvider.java"
 
 is_renamed() {
     local base="$1"
@@ -115,7 +115,6 @@ com/termux/app/zhicode/tools|com/termux/app/iqcode/tools|ZhiSandboxTool.java|IQS
 com/termux/app/zhicode/tools|com/termux/app/iqcode/tools|ZhiDebugTool.java|IQDebugTool.java
 com/termux/app/zhicode/core|com/termux/app/iqcode/core|ZhiCodeEngine.java|IQCodeEngine.java
 com/termux/app/zhicode/tools|com/termux/app/iqcode/tools|ZhiTool.java|IQTool.java
-com/zhizhu/zhicode|com/iqge|ZhiDocumentsProvider.java|IqDocumentsProvider.java
 com/zhizhu/zhicode|com/iqge|ZhiFileProvider.java|IqFileProvider.java
 "
 

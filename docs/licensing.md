@@ -150,16 +150,17 @@ bootstrap 里的程序许可各自适用，且要求源码对接收者可得。
 Termux 上游（非 IQ Code）             23       7394           7274
 Termux 集成层                       30       5839           3822
 Compose 界面层                      57      15427              0
-其它                               12       2476           1734
+其它                                8       1924           1194
 Agent 工具                         43       2965           2095
 Agent 核心                          8       1985           1918
 沙箱宿主层                            16       4716            563
-合计                              189      40802          17406
+合计                              185      40250          16866
 
-已是我们自己的:        23396 行
-逐行相同合计:          17406 行
+已是我们自己的:        23384 行
+逐行相同合计:          16866 行
   其中 Termux 上游:     7274 行（Termux 自己的代码，与独立性无关）
-  真正属于 IQ Code:    10132 行
+  真正属于 IQ Code:     9592 行
+```
 ```
 
 ### 这个数字曾经是错的（记下来，因为它会再次发生）
@@ -174,7 +175,7 @@ Agent 核心                          8       1985           1918
 | --- | --- | --- |
 | `core/ZhiCodeEngine.java` | 1353 | 0 重合（实测 1238 行相同，99.2%） |
 | `com/zhizhu/zhicode/ZhiTool.java` | 33 | 0 |
-| `com/zhizhu/zhicode/ZhiDocumentsProvider.java` | 126 | 0 |
+| `com/zhizhu/zhicode/ZhiDocumentsProvider.java` | 126 | — | 批 A 已删除 |
 | `com/zhizhu/zhicode/ZhiFileProvider.java` | 199 | 0 |
 
 最严重的是第一个：它是全工程最大的单文件、且几乎整文件与原版逐行相同，
@@ -285,7 +286,27 @@ Agent 核心                          8       1985           1918
 | 310 | 310 | 310 | 100% | `com/zhizhu/zhicode/UiMotion.java` | 批 F |
 | 297 | 310 | 311 | 95.5% | `tools/AndroidIntentBridge.java` | 批 E |
 | 254 | 257 | 257 | 98.8% | `api/AnthropicMessagesProvider.java` | 批 B |
-| 240 | 241 | 241 | 99.6% | `com/zhizhu/zhicode/MarkdownRenderer.java` | 批 A（疑死代码） |
+| 240 | 241 | 241 | 99.6% | `com/zhizhu/zhicode/MarkdownRenderer.java` | **已删**（批 A） |
+
+### 批 A：删掉的死代码（已完成）
+
+这四个文件在整个工程（含脚本、清单、Bcore）里都搜不到引用，逐个确认后删除：
+
+| 文件 | 行 | 确认方式 |
+| --- | --- | --- |
+| `com/zhizhu/zhicode/MarkdownRenderer.java` | 265 | 全仓 grep 无任何引用；Compose 侧有自己的 Markdown 渲染层 |
+| `com/zhizhu/zhicode/ToolActivityGrouper.java` | 91 | 全仓 grep 无任何引用 |
+| `com/zhizhu/zhicode/ZhiDocumentsProvider.java` | 126 | 全仓 grep 无引用，且**清单里根本没有注册**（DocumentsProvider 不注册就不可能被调用） |
+| `com/zhizhu/zhicode/FloatingOverlayService.java` | 130 | 只在清单里注册，代码里没有任何启动点 |
+
+顺带做了一件必要的事：`FloatingOverlayService` 是 `SYSTEM_ALERT_WINDOW` 权限的唯一使用者，
+它既然删了，那条权限声明也一并去掉 —— 留着一个没有使用者的「可在其它应用上层显示」权限，
+对用户只是无谓的授权请求。`EnvDoctor` 仍会显示这项权限的授予状态，那只是诊断信息。
+
+删除后重合行从 10132 降到 **9592**（-540），文件数 189 → 185。
+度量工具的自检立刻起了作用：它报出「PAIRS 里的本工程文件不存在:
+com/zhizhu/zhicode/ZhiDocumentsProvider.java」—— 删文件后忘了同步配对表，
+正是这类自检要防的静默失真。
 | 27 | 27 | 27 | 100% | `tools/ZhiTool.java`（接口） | 批 C，**只改实现不动签名** |
 
 三点必须说清楚：
@@ -296,7 +317,7 @@ Agent 核心                          8       1985           1918
    它此前因为度量工具的漏算显示为 0，是全工程最大的单块残留。**应最先处理**。
    （它同样出现在 `ZhiTool.java`：27 行、100%，但那是接口，按约定只改实现不动签名。）
 3. 真正剩下、值得处理的是 `core/`、`api/` 与 Compose 界面层的几个大文件，
-   它们目前几乎是原样保留的。全部逐行相同行数、扣除 Termux 上游之后是 **10132 行**。
+   它们目前几乎是原样保留的。全部逐行相同行数、扣除 Termux 上游之后是 **9592 行**。
 ### 数据层（已完成）
 
 | 类 | 原版行 | 现在行 | 相同行 | 重合 |
