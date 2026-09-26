@@ -298,9 +298,15 @@ class WorkspaceViewModel(
     private fun reloadFiles() {
         val path = _state.value.filePath
         val entries = FileBrowser.children(path)
+        val dir = java.io.File(path)
         val note = when {
             entries.isNotEmpty() -> ""
-            !java.io.File(path).isDirectory -> if (java.io.File(path).exists()) "不是目录：$path" else "目录不存在：$path"
+            !dir.isDirectory -> if (dir.exists()) "不是目录：$path" else "目录不存在：$path"
+            // 目录存在但一个子项都没列出来 —— 区分「真的是空目录」和「没权限列」。
+            // 面包屑可以从 `/` 一路点下来，而 `/`、`/data` 这类系统目录在应用沙箱里
+            // 是 `drwx--x--x`（other 只有 x 没有 r），列不出来；这时如果只显示
+            // 「0 项」，看起来像目录坏了。`File.list()` 返回 null 就代表列取失败。
+            dir.list() == null -> "无法读取（权限不足）：$path"
             else -> ""
         }
         _state.update { it.copy(fileEntries = entries, fileNote = note) }

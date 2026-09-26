@@ -162,64 +162,35 @@ private fun FileBreadcrumbBar(
         // 压小 insideMargin，给下面的文件列表让位。
         modifier = Modifier.padding(horizontal = 6.dp, vertical = 0.dp),
         insideMargin = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-        // 上限放到 280dp：第一项要显示真实路径（`/data/user/0/<包名>/files/home`
-        // 这类形式就到了 ~40 字符），96dp 会把它截成 `/data/user/0/com…`。
-        // 这只是**上限**：像 `workspace` 这种短段仍然按内容宽度收缩。
-        itemMaxWidth = 280.dp,
+        // itemMaxWidth 用 Miuix 的默认值 160dp，不覆盖 —— 每一级都是单独的目录名，
+        // 最长的是包名 `com.zhizhu.code`（16 字符，约 146dp），160dp 放得下。
+        // ⚠️ 别再把它合并成一条完整路径：那是把好几级塞进一个药丸里，
+        // 一定会被省略号截断，反而什么都看不见。
     )
 }
 
 /**
- * 生成面包屑层级。
+ * 生成面包屑层级：**一级目录一个项**，从文件系统根开始。
  *
- * 第一项是**真实路径**，不是写死的「根」：文件面板的根只是「当前项目」
- * （默认 `$HOME/workspace`），把它标成「根」会让人以为自己站在文件系统根上，
- * 也就看不出自己在哪。真实路径按「留头留尾、省中间」折叠 ——
- * 头是软件根目录（`/data/user/0/<包名>`），尾是「现在在哪」。
+ * `/data/user/0/com.zhizhu.code/files/home/workspace`
+ *   → `/` `data` `user` `0` `com.zhizhu.code` `files` `home` `workspace`
  *
- * 例：`/data/user/0/com.zhizhu.code/files/home/workspace`
- *   → `[/data/user/0/com.zhizhu.code/files/home]` `[workspace]`
+ * 之所以不从「软件根目录」开始：上层目录（`/`、`/data`…）在这个应用里读不了，
+ * 点进去只会看到空列表；但面包屑的价值就是「一眼看出完整位置 + 任意一级可跳」，
+ * 所以路径层级一个不少，上层点不动也无妨（[FileBrowser.children] 对读不到的
+ * 目录返回空列表，面板会给出「无法读取」的说明）。
  *
- * 之后每一项都是真实目录名，点哪一级就回到哪一级。
+ * 每一项的 `path` 都是真实存在的层级，点哪一级就回到哪一级。
  */
 private fun breadcrumbItems(filePath: String): List<BreadcrumbItem> {
     val normalized = filePath.trimEnd('/').ifEmpty { "/" }
-    if (normalized == "/") return listOf(BreadcrumbItem(path = "/", text = "/"))
-
-    // 当前这一级始终单独成项：既让「在哪一级」一眼可见，也能点它回到这一级。
-    val prefix = normalized.substringBeforeLast('/', "")
-    val here = normalized.removePrefix("$prefix/").split('/').filter { it.isNotEmpty() }
-    val prefixPath = prefix.ifEmpty { "/" }
-
-    val items = mutableListOf(
-        BreadcrumbItem(path = prefixPath, text = collapsePath(prefixPath)),
-    )
-    var accumulated = prefix
-    here.forEach { segment ->
+    val items = mutableListOf(BreadcrumbItem(path = "/", text = "/"))
+    var accumulated = ""
+    normalized.trim('/').split('/').filter { it.isNotEmpty() }.forEach { segment ->
         accumulated += "/$segment"
         items += BreadcrumbItem(path = accumulated, text = segment)
     }
     return items
-}
-
-/** 折叠路径时保留的头部段数。4 段正好是 `/data/user/0/<包名>` —— 软件根目录。 */
-private const val PATH_HEAD_SEGMENTS = 4
-
-/** 折叠路径时保留的尾部段数。尾几段是「现在在哪」，也不能省。 */
-private const val PATH_TAIL_SEGMENTS = 2
-
-/**
- * 路径折叠：段数不超过上限就原样返回，超了就省略中间。
- *
- * `/data/user/0/com.zhizhu.code/files/home`（6 段，不超）→ 原样
- * 更深时 → `/data/user/0/com.zhizhu.code/…/home/workspace`
- */
-private fun collapsePath(path: String): String {
-    val segments = path.trim('/').split('/').filter { it.isNotEmpty() }
-    if (segments.size <= PATH_HEAD_SEGMENTS + PATH_TAIL_SEGMENTS) return path
-    val head = segments.take(PATH_HEAD_SEGMENTS).joinToString("/")
-    val tail = segments.takeLast(PATH_TAIL_SEGMENTS).joinToString("/")
-    return "/$head/…/$tail"
 }
 
 /** 文件行：上下各 20dp 内边距 ≈ 60dp 行高，触摸目标也够大。 */
