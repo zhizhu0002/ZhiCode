@@ -566,15 +566,19 @@ private fun ChatArea(
     modifier: Modifier = Modifier,
     glass: Glass,
 ) {
-    // 只在**真正在跑**时显示悬浮任务卡。
+    // 这张卡是「任务进度」，所以**只在真有任务时**才出现。
     //
-    // `workingStatus` 非空 ⟺ 忙碌中（"正在思考…"、"正在执行 X…" 等），每次运行结束、
-    // 连接中断恢复、重置新会话都会把它置回 null，所以它是判定"是否在跑"的可靠信号。
+    // 历史与取舍（两次改动方向相反，别再来回改）：
+    //  1. 最初是 `workingStatus != null || tasks.isNotEmpty()` —— 于是 AI 只要用
+    //     TaskCreate 列过一次清单，答完之后卡还会一直挂着。
+    //  2. 改成只看 `workingStatus != null` —— 又走到另一个极端：单纯「正在思考…」
+    //     时也会弹出一张「任务进度 0 / 0」，一个任务都没有却叫"任务进度"，是噪音。
+    //  3. 现在只看 `tasks.isNotEmpty()`：没任务就不显示，列出任务后显示，与原版的
+    //     多步进度能力一致。
     //
-    // 原先这里还有一个 `|| state.tasks.isNotEmpty()`：于是 AI 只要用 TaskCreate /
-    // TodoWrite 列过一次任务清单，即使已经答完、什么都没在执行，这张卡也会一直挂在
-    // 输入器上方。而任务清单本身已经在对话流里，点卡片还能看完整版 —— 属于重复打扰。
-    val floating = state.workingStatus != null
+    // 注意 `workingStatus` 因此不再有专门的展示位（它是"正在思考…/正在执行 X…"这类
+    // 进行时文案）。当前是否在跑由输入器右侧的停止键表达。
+    val floating = state.tasks.isNotEmpty()
 
     // 对话区加一个框：纯白/纯黑的背板上如果没有边界，对话与面板会糊成一片。
     // 框用 Surface 的 border（Miuix 原生参数），圆角与其它卡片同一 token。

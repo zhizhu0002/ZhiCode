@@ -173,21 +173,26 @@ private fun CardBody(status: String, tasks: List<AgentTask>, maxTasks: Int) {
             )
         }
 
-        ZhiHorizontalDivider(modifier = Modifier.padding(top = 10.dp, bottom = 8.dp))
+        // 状态行为空时整段不画：否则会留下一个"计划模式"空标签 + 一条分隔线。
+        // 悬浮卡现在只看 tasks 决定是否出现，所以 "有任务但此刻没有进行时状态"
+        // （例如任务已全部完成）是正常组合，那时就该省掉这一行。
+        if (status.isNotBlank()) {
+            ZhiHorizontalDivider(modifier = Modifier.padding(top = 10.dp, bottom = 8.dp))
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "计划模式",
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = 11.sp,
-            )
-            Box(modifier = Modifier.weight(1f))
-            Text(
-                text = status,
-                color = scheme.primary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "计划模式",
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = 11.sp,
+                )
+                Box(modifier = Modifier.weight(1f))
+                Text(
+                    text = status,
+                    color = scheme.primary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
         }
 }
 
