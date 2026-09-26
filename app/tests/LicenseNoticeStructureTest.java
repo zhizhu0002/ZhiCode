@@ -38,6 +38,17 @@ public final class LicenseNoticeStructureTest {
         String license = read(root, "LICENSE");
         String notice = read(root, "NOTICE");
         require(license.contains("MIT License"), "顶层 LICENSE 必须是 MIT（蜘蛛自身代码）");
+        // 版权人必须是**具体的人/主体**。这里出过一次：两处版权行一直停在
+        // 「蜘蛛 (ZhiCode) contributors」这种占位写法上 —— 占位版权行在法律上是最弱的一环，
+        // 而没有任何东西在管它（编译、功能、别的测试全都照过）。
+        // 所以钉住具体署名，并明确禁止占位词回来。
+        require(license.contains("Copyright (c) 2026 zhizhu0002"),
+                "本工程的 MIT 版权行必须写明具体版权人");
+        require(!license.contains("contributors") && !license.contains("(ZhiCode)"),
+                "LICENSE 里不得再出现占位版权写法（contributors / (ZhiCode)）");
+        String bundledMit = read(root, "THIRD-PARTY-LICENSES/MIT.txt");
+        require(!bundledMit.contains("contributors") && !bundledMit.contains("(ZhiCode)"),
+                "随附的 MIT 全文里也不得再出现占位版权写法");
         // GPL 传染性是这个工程最容易踩的坑，LICENSE 里必须直接说清为什么不必 GPL 化，
         // 否则后来者会以为可以随手把 GPL 库链进来。
         require(license.contains("聚合") && license.contains("libtermux.so"),

@@ -195,16 +195,109 @@ resize**，不是布局缺陷：`AndroidManifest` 第 97 行是 `softInputMode="
 
 ### 这一轮**没有**验证的部分
 
-- 长按会话行改名、点 `×` 关闭会话、点另一行切换会话；
-- 切到「对话」再切回「终端」时会话是否还在（历史上真实出过的 bug 点）；
-- 抽屉底部两个动作（`⌨  Toggle keyboard` / `↻  Reload properties`）与
-  `~/.termux/termux.properties` 的实际读取；
-- 需要剪贴板的 `Paste` / `Copy selection`；
-- 主题切换（外壳配色跟随深浅主题是这次唯一的外观变更）；
-- 失败路径（环境未初始化、`libtermux.so` 加载失败）；
-- 稳定性（反复切标签、反复开关抽屉、旋转屏幕）；
-- **真机上的任何一次运行**。
+沙箱这一轮没有验证的有：长按改名、点 `×` 关闭会话、切换会话、抽屉底部两个动作、
+需要剪贴板的两项、主题切换、失败路径、稳定性（反复切标签/开关抽屉/旋转）。
+其中大部分**已经在真机上覆盖**（见下面一节）。
 
-真机验收按 A–H 清单逐项做，结果会补到本节。
+## 真机验收（两轮）与 H3 的修复
+
+外壳改成 Compose 之后，在真机上按 A–H 清单跑了两轮：第一轮发现 H3，修完第二轮复验。
+**第二轮无遗留问题。**
+
+| 编号 | 第一轮结果 | 判定 |
+| --- | --- | --- |
+| **B4** | 按 `TAB` 出现 `Display all 488 possibilities? (y or n)`、`--More--`、`^C` | ✅ 通过 —— 那是 bash 自己的补全与分页行为，而且**它证明 `TAB` 确实是以 `\t` 送进 PTY 的**（否则不会触发补全） |
+| **F1** | 浅色主题下外壳变浅、ANSI 配色不变、扩展键变成 `A` `B` | ✅ 通过 —— 外壳按设计跟随主题；`A`/`B` 是 D2 写进 `termux.properties` 的配置被正确读到 |
+| **H3** | 旋转屏幕后终端一片空白，切到别的标签再切回来才恢复 | ❌ 真 bug → 已修，第二轮复验通过（见下） |
+
+第二轮复验**由用户覆盖**的条目（结论来自用户复验，不是我逐条观测）：H3、H1/H2
+（反复切标签、反复开关抽屉）、C4/C5/C6（改名、关闭会话、**切走再切回会话仍在**这个历史
+bug 回归点）、D1、E1/E2（剪贴板两项）、G1/H4、E7。
+
+### H3 的根因
+
+三处上游 `TerminalView` 的代码拼起来就是完整机制：
+
+| 位置 | 事实 |
+| --- | --- |
+| `attachSession()` 第 290–304 行 | 先 `mEmulator = null`，再立刻 `updateSize()` |
+| `updateSize()` 第 984–987 行 | `viewWidth == 0 \|\| viewHeight == 0 \|\| mTermSession == null` 时**静默 return** |
+| `onDraw()` 第 1008–1011 行 | `mEmulator == null` 时**只画一块纯黑** ← 这就是「空白」 |
+
+所以只要 `mEmulator` 是 null，屏幕就是纯黑；而唯一会设它的入口 `updateSize()` 只在
+`onSizeChanged` 里被调 —— 配置变化后尺寸若恰好不再变化，它就再也不会被调。
+
+辅助证据两条：`MainActivity` 声明了
+`configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"`（manifest 第 95 行），
+所以旋转**不重建 Activity**；`runtime.log` 里那段时间只有两条「启动检查」，
+说明 ViewModel 只被创建过两次（第二次是用户杀应用重进），进一步排除了「旋转导致重建」。
+
+### 第一版修法修反了（这段最值得留）
+
+第一版加了 `key(LocalConfiguration.current)` 包住 `AndroidView`，意图是让节点随配置重建、
+`factory` 重跑、重新挂载宿主。**真机上仍然空白** —— 而且这正好暴露了它的副作用：
+
+> 宿主是同一个 `View` 实例。同一帧内它从一个 `AndroidView` 节点迁移到新节点时，
+> **旧节点的释放会把刚被新节点挂上的宿主再摘一次** → 宿主不在视图树上 →
+> 没有测量/布局 → 宽高恒为 0 → `updateSize()` 因 `viewWidth == 0` 静默返回 →
+> `mEmulator` 永远是 null → `onDraw()` 只画纯黑。
+
+也就是说那一版的 `key(...)` 不是在修，而是在**制造**「宿主被摘掉」这个状态。
+用户给的「切标签才恢复」正是判定这一点的证据：切标签是**先彻底离开组合、再干净地进来**，
+绕过了这个争用。
+
+**可复用的教训**：跨 Tab 保活要求复用同一个 `View` 实例（这正是
+`TerminalHolder` / `WorkspaceViewModel.terminalPane` 存在的原因），那就**不能**让它跨
+Compose 节点迁移。`key(...)` 重建节点与「复用同一个 View 实例」是互斥的做法。
+以后再想用 `key(...)` 解决渲染问题，会撞上同一堵墙。
+
+### 最终修法（三层，都不依赖 Compose 重建节点）
+
+1. **去掉 `key(configuration)`**：同一个 `AndroidView` 节点跨旋转保持不动。
+2. **把「切标签再切回」那条已验证可行的路径做在 View 这一层**（宿主内）：
+
+   ```
+   removeAllViews();
+   addView(view, MATCH_PARENT, MATCH_PARENT);
+   view.post(() -> { view.updateSize(); view.onScreenUpdated(); view.invalidate(); });
+   view.postDelayed(() -> { view.updateSize(); view.invalidate(); }, 300);
+   ```
+
+   显式调 `updateSize()` 是必须的：同一个 View 摘下来再挂回**同样尺寸**时
+   `onSizeChanged` 不会触发，而 `updateSize()` 是唯一会设 `mEmulator` 的入口；
+   `postDelayed` 那次是重试，覆盖「第一次调用时布局还没完成」（它在尺寸为 0 时静默返回）。
+   宿主另加 `onAttachedToWindow` 钩子：重新进入视图树时也补量一次。
+3. **兜底网**：宿主把「自己在不在视图树上」暴露成 `hostInTree`；界面层**只在它报告
+   自己真的不在树上时**才重建 `AndroidView` —— 那是它唯一无法自救的情况。
+
+### 顺手留下的一行取证日志
+
+`refreshTerminal()` 里有一行 `Log.i("ZhiTerminal", ...)`，内容是判定所需的几个量：
+`inTree` / 宽高 / 会话数 / 是否已挂会话。旋转在沙箱里无法复现（没有旋转 API），
+这条路径只在配置变化时走到，所以它是唯一的取证手段：真机上
+`logcat -d | grep ZhiTerminal` 就能看出「自动重挂有没有发生、宿主在不在树上、尺寸是多少」。
+它有长期价值，保留。
+
+### 一个被证据推翻的假设（记下来，免得再猜一遍）
+
+`[Process completed (signal 9)]` 最初怀疑来自启动时那条**静默**的版本自检重装
+（`autoInstallRuntimeIfStale` → `installRuntimeBlocking` 第 3122 行显式 `releaseTerminalPane()`
+→ `closeAll()` → SIGKILL）。**用户的 `~/.zhicode/runtime.log` 证伪了它**：
+两次都是「一致=true」、没有「安装完成」，`usr` 根本没被重装。
+
+真正来源：`TerminalSession.finishIfRunning()` 第 234–243 行**显式发 SIGKILL**
+（`Os.kill(mShellPid, SIGKILL)`），打印那行文字的是上游 `TerminalSession` 第 349–367 行
+（`exitCode < 0` 时输出 `(signal N)`）。所以它来自我们自己的三条路径 ——
+`Kill shell` / `Close session` / Activity 销毁时的 `closeAll()` —— 属于**准确上报，不是异常**。
+
+### 至今仍然没有验证的部分（不许因为上面这轮通过而顺推）
+
+- **任何真实模型请求** —— 会话内从未配置 API Key，也就是说「对话」那条主链路
+  至今一次都没有真正跑过；
+- **沙箱端**的会话改名/关闭/切换、剪贴板、失败路径（真机已覆盖，沙箱未覆盖）；
+- `Debug scope=host`（需要 Agent Root，本次会话为关闭状态）；
+- Frida 调试桥（`frida_install` / `frida_load` / `frida_eval`）；
+- 真机上与 root 相关的保活路径（`RootKeepAliveController`）。
+
 
 
