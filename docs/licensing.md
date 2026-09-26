@@ -12,9 +12,11 @@
 蜘蛛自己的代码用 **MIT**。发行物里另有 Apache-2.0 组件与一批各自许可的
 Termux 二进制程序，但**本项目整体不必转为 GPL**。
 
-代码层面的独立性看的是**净相同行 2179 行**（上限，见下文「已知高估」）：逐行相同 4446 行，扣掉 2064 行骨架与
-203 行跨组件协议串 —— 后两类不是「别人的代码」，任何人在这个需求下都会那么写。
-这个数的定义、算法与它可能被做手脚的地方见下文「净相同行」一节。
+代码层面的独立性看的是**净相同行 2157 行**：逐行相同 4446 行，扣掉 2064 行骨架与
+225 行跨组件协议串 —— 后两类不是「别人的代码」，任何人在这个需求下都会那么写。
+这个数的定义、算法与它可能被做手脚的地方见下文「净相同行」一节；
+「接口名只出现在我们一个文件里」这一类（另一端是模型 API / HTTP 头 / 磁盘格式）
+以前扣不掉、现在按写明的判据扣，见「接口名也只出现在一个文件里」一节。
 
 ---
 
@@ -183,9 +185,9 @@ composition 与 algorithm **两个模式共用**的同一份程序（写在脚�
 
   可以扣掉的（不构成「留着别人的代码」）：
     骨架行（任何 Java 文件都长这样）:            2064 行
-    跨组件协议串行（>=2 个文件按同一名字对齐）:    203 行
-    可扣合计:                                   2267 行
-  净相同行（合计 - 可扣 = 还差多少）:           2179 行
+    跨组件协议串行（>=2 个文件，或每一处都在协议位置）: 225 行
+    可扣合计:                                   2289 行
+  净相同行（合计 - 可扣 = 还差多少）:           2157 行
 ```
 
 **声明与语句这条界线改过一次，见下面「分类器曾经算错 217 行」一节** ——
@@ -231,8 +233,8 @@ getter，逐条核对时看的是**形状**，不是条数。
 
 ```
 净相同行 = 逐行相同 - 骨架行 - 跨组件协议串行
-         = 4446 - 2064 - 203
-         = 2179
+         = 4446 - 2064 - 225
+         = 2157
 ```
 
 **可扣的只有两类，规则刻意窄到可以人工核对。声明行与语句行永远不扣** —— 只要这两桶里
@@ -241,7 +243,7 @@ getter，逐条核对时看的是**形状**，不是条数。
 | 可扣类 | 判据 | 为什么它能扣 |
 | --- | --- | --- |
 | 骨架行 | 整行只由 `{}();,[]`、`import`、`package`、javadoc 前缀构成 | 任何 Java/Kotlin 文件都长这样。把它改得不一样等于删 import 或往里塞噪声 |
-| 跨组件协议串行 | 该行的**每一个**字符串字面量都在本工程 ≥2 个文件里出现，且非空、全 ASCII、去掉转义后至少含一个字母或数字 | 这些串是「两个组件按同一个名字对齐」（宿主 / Agent 工具 / Frida 脚本 / 持久化键名）。改了会让两边对不上 —— 那是协议，不是表达 |
+| 跨组件协议串行 | 该行的**每一个**字符串字面量都合格：非空、全 ASCII、去掉转义后至少含一个字母或数字，且**满足两选一** —— ① 在本工程 ≥2 个文件里出现；② 它出现的**每一处**都在**协议位置**：引号之前最近的 `(` 的名字在白名单（`tools/provenance.sh` 里的 `PROTO_CALLS`，只此一份）里，且这个 `(` 到该引号之间没有别的字符串；或形如 `case "…":` | ① 是「两个组件按同一个名字对齐」（宿主 / Agent 工具 / Frida 脚本 / 持久化键名）；② 是「另一端不在本工程里」（模型 API 字段名、HTTP 头、apt/环境变量、用户磁盘上的文档格式）。两类都是**改了会让对面失配**的名字 —— 那是协议，不是表达 |
 
 **这条规则是脚本里写死的，不是事后挑数字**，而且它宁可把数字算高：
 
@@ -252,10 +254,21 @@ getter，逐条核对时看的是**形状**，不是条数。
   因此规则是**先摘掉转义序列再找字母数字**）。
 - **空串一律不扣**。`""` 出现在 97 个文件里，第一版实现就把它算进了协议串，
   于是协议串行从 203 行虚增到 344 行 —— 这个缺陷当时没被看出来，是因为只看了合计数。
+  这一条现在还在起作用，而且是行级的：`String type = block.optString("type", "")` 这一行里
+  `"type"` 虽是接口名，但整行里有 `""`，所以**整行不扣**（行级规则是「每一个串都要合格」）。
+- **「值」不算接口名（比字面判据严一格）**。判协议位置时要求「这个 `(` 到该引号之间
+  没有别的字符串」，也就是只认白名单调用的**第一个字符串实参**：
+  `body.put("key", "value")` 里的 `"value"`、`setRequestProperty("k", "v")` 里的 `"v"`
+  都不算。不这么卡的话，`new JSONObject().put("root","workspace.root")` 这类**文档内容**
+  （画布的 id / type 值，本来就是模型可以自己生成的）会被当成契约扣掉。
+  这一格值 8 行（严 22 行 vs 宽 30 行）—— 宁可把数字算高，所以从严。
 
 每一次扣减都能被推翻：脚本会把**被扣的每一个串连同它出现的文件**写进
-`build/provenance-protocol-strings.txt`（这就是「对齐的另外两处」要能被指出来的意思），
-同一个文件里还有另一段列出**没有被扣**的重复串，供反查「是不是有协议串被漏掉了」。
+`build/provenance-protocol-strings.txt`，分三段 —— `[files]`（≥2 个文件的，
+「对齐的另外两处」指得出来）、`[position]`（只出现一次、仅靠协议位置可扣的，
+每一处都给出「文件:调用名」，看得出是哪个调用里的参数）、以及**没有被扣**的串
+（中文文案 / 空串 / 纯符号 / 只在文案位置出现的英文串）。最后一行给出「只在一个文件里
+出现、也不在协议位置上」的串有多少个 —— 不逐条列出（上千条，列出来只会淹没上面三段）。
 
 已知还剩下的松处：一句纯 ASCII 的用户可见文案若恰好出现在两个文件里，也会被算进协议串。
 所以净数字要连审计文件一起看，不能只看一个数。
@@ -500,36 +513,67 @@ query 不能为空                      →  缺少 query 参数
 实测净相同行 2204 → 2179（-25）。骨架 2068 → 2064、声明 734 → 733、语句 1160 → 1159
 各降 1~4 —— 那不是改到了这些桶，而是 diff 对齐游标随改动平移后的正常噪声。
 
-### 已知高估：接口名只出现在一个文件里
+### 接口名也只出现在一个文件里（已按方案 A 扣减）
 
-`PROVENANCE_LITERALS=1` 把字面量桶拆成两份之后，剩下那 287 行（490 − 203）暴露了口径的
-一个漏洞：**协议串的判据是「≥2 个文件」，但接口的另一端不一定是我们自己的另一个文件。**
+`PROVENANCE_LITERALS=1` 把字面量桶拆成两份之后暴露了口径的一个漏洞：
+**协议串的判据是「≥2 个文件」，但接口的另一端不一定是我们自己的另一个文件。**
+当时不可扣的字面量行是 287 行（490 − 203）。
+
+现在这一类也扣（判据 v2）：`"output_config"`、`"reasoning_effort"`、`"session-id"`、
+`"stop_reason"` 这类**只出现在我们一个文件里、但每一处都在协议位置上**的串 ——
+另一端是 OpenAI / Anthropic 的服务器、是统一的 HTTP 头格式、是已经写在用户磁盘上的会话文件，
+改不得。**放宽的方向是「诚实」意义上的：它让净相同行变小，而不是变大。**
+
+```
+不可扣的字面量行:   287  →  265
+  其中可扣:          22              （原型用 11 个白名单名先量出 21 行；
+                                      补上 isNull / opt* 后 22 行）
+可扣协议串行:       203  →  225      （+22）
+净相同行:          2179  →  2157      （−22）
+```
+
+两个数各自独立量过，结果一致：只读原型 `build/measure-rule-a.awk` 直接判这 287 行，
+得「可扣 22 / 仍不扣 265」；改完脚本后 203 → 225。差值是同一批行。
+
+新被扣掉的行，样例（全表见 `build/provenance-literal-protocol.txt`；每个串的出处见审计文件
+里 `[position]` 那一段，格式是「文件:调用名」）：
+
+| 样例行 | 起作用的协议位置 |
+| --- | --- |
+| `body.put("output_config", new JSONObject().put("effort", effort));` | `put(` |
+| `if (delta != null && delta.has("stop_reason") && !delta.isNull("stop_reason")) {` | `has(` / `isNull(` |
+| `conn.setRequestProperty("session-id", session);` | `setRequestProperty(` |
+| `event.has("output_index") ? event.optInt("output_index", -1) : -1` | `has(` / `optInt(` |
+| `.put("asset_sha256", GADGET_XZ_SHA256);` | `put(` |
+
+**上一版这一节举的例子是错的**（写文档时也得去审计文件里核一遍）：
+`"input_schema"`、`"max_output_tokens"`、`"payload"` 其实都出现在 ≥2 个文件里，
+本来就在 `[files]` 类里被扣掉了（`grep` 一下审计文件就知道）；`"+ "` 则在整个工程里
+**根本不存在**这个串字面量 —— `UnifiedDiff` 写的是 `out.append("--- ")` 这类形式，
+而 `append` 也不在白名单里，所以它从来不是候选。记下来是因为这类例子最容易
+「看着像」就被写进文档，而它正是读者用来核对规则的样本。
+
+**白名单只此一份**（`tools/provenance.sh` 的 `PROTO_CALLS`，审计文件照印，文档不再抄第二份）：
+`put putOpt get getJSONObject getJSONArray getString getInt has isNull remove setRequestProperty
+opt optString optInt optBoolean optLong optDouble optJSONObject optJSONArray`，外加形如
+`case "…":` 的位置。行级判据没有变：该行的**每一个**串都要合格，一个不合格就不扣。
+
+判据刻意比字面更严一格（只认白名单调用的**第一个字符串实参**），代价是少扣 8 行
+（严 22 行 vs 宽 30 行）：从宽的话 `new JSONObject().put("root","workspace.root")` 这种
+**文档内容**（画布的 id / type 值，本来就是模型可以自己生成的）会被当成契约扣掉。
+
+剩下的 265 行按文件分布（这就是这一桶里真正还留着的东西）：
 
 ```
  40 行  sandbox/SandboxFrida.java          内嵌的 Frida JS 脚本（这是我们的代码）
- 32 行  api/OpenAIResponsesProvider.java   OpenAI Responses 的报文字段名
  24 行  core/ZhiCodeEngine.java            工具 schema 与模型可见文案
+ 24 行  api/OpenAIResponsesProvider.java   OpenAI Responses 的报文字段名
  19 行  core/ContextCompactor.java         摘要提示词（有基线测试钉住）
- 13 行  api/OpenAIChatCompletionsProvider.java
- 10 行  api/AnthropicMessagesProvider.java
- 10 行  tools/UnifiedDiff.java             diff 标记（"+ " / "---" / "+++"）
-  9 行  storage/SessionStore.java           持久化字段名
+ 12 行  tools/AndroidIntentBridge.java     Intent 参数名
+ 12 行  api/OpenAIChatCompletionsProvider.java
+ 10 行  tools/UnifiedDiff.java             diff 标记（"--- " / "+++ "）
+  8 行  zhizhu/UiCanvasStore.java          画布文档内容（压缩写法）
 ```
-
-这里的 `"input_schema"`、`"max_output_tokens"`、`setRequestProperty` 的头名、
-`"+ "`、`"payload"` 都是**接口名**：另一端是 OpenAI 的服务器、是统一的 diff 格式、
-是已经写在用户磁盘上的会话文件。它们只出现在我们一个文件里，所以按现在的判据没被扣掉 ——
-**净相同行因此是偏高而不是偏低的。**
-
-两种处理方式，**必须选一种并写下来**，否则「净相同行」就变得不可比：
-
-| 方案 | 判据 | 代价 |
-| --- | --- | --- |
-| A. 补一条机械判据 | 该行的字符串**全部**出现在「接口名位置」：紧跟在 `.put(` / `.optString(` / `.optInt(` / `.optBoolean(` / `.getString(` / `.has(` / `.remove(` / `setRequestProperty(` 之后，或形如 `case "…":` | 规则变复杂；且它是**放宽**扣减，会让净数字变小 —— 必须逐条可核对（脚本照旧把被扣的串连同出现位置写进 `build/`） |
-| B. 保持现状 | 只有 ≥2 个文件的串才算协议 | 净数字偏高；接口名这类行会永远显示为「还要重写」，而它们其实不能改 |
-
-**在这一条定下来之前，净相同行（2179）应当当作上限看。** 目前**没有**采用方案 A，
-原因不是它不对，而是它会让头条数字变小 —— 而那正是最需要被质疑方向的一个改动。
 
 **例外的例外**：那 40 行 Frida JS 不属于「接口名」，它是**我们自己的代码**（一小段
 内嵌脚本，被 Java 字符串拼起来）。它可改、也应该改，是这一桶里唯一真正的重写对象；
@@ -1226,6 +1270,8 @@ PROVENANCE_SHAPE=1 PROVENANCE_SHAPE_UNIQUE=1 bash tools/provenance.sh
                                                     # 「这一行有没有第二种写法」靠它逐条读
 PROVENANCE_DECLARATIONS=1 bash tools/provenance.sh  # 声明桶全文（判公开面能不能收窄）
 PROVENANCE_LITERALS=1     bash tools/provenance.sh  # 字面量桶拆两份：可扣的协议串 / 其余文案
+#    （审计文件 build/provenance-protocol-strings.txt 每跑一次都重写，分三段：
+#      [files] / [position] / 没有被扣的 —— 「净相同行」的每一处扣减都能在里面找到出处）
 PROVENANCE_ALGORITHM=1  bash tools/provenance.sh    # 按语句行排序的清单（排下一批看这个）
 PROVENANCE_PER_FILE=1   bash tools/provenance.sh    # 按重合行数排序（历史口径，仅作参考）
 

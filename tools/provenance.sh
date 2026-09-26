@@ -295,7 +295,7 @@ CLASSIFY='
 # 可扣的只有两类，规则刻意窄到可以人工核对（声明行与语句行**永远**不扣）：
 #   1. 骨架行：整行只有括号分号、import/package、javadoc。
 #      任何 Java/Kotlin 文件都长这样，与原版相同不说明任何问题。
-#   2. 跨组件协议串行：该行的**每一个**字符串字面量都在本工程 >=2 个文件里出现。
+#   2. 跨组件协议串行：该行的**每一个**字符串字面量都合格（合格的两类见下面的判据 v2）。
 #      这些串是「两个组件按同一个名字对齐」（宿主 / Agent 工具 / Frida 脚本 / 持久化键名），
 #      改了会让两边对不上 —— 那是协议，不是表达。
 #
@@ -305,6 +305,27 @@ CLASSIFY='
 # 要连同那份审计文件一起看，不能只看一个数。
 #
 # 提取用**归一化后**的内容，与比对时看到的是同一份文字（否则 `"蜘蛛"` 这类串会对不上）。
+#
+# ---- 判据 v2：除「出现 >=2 个文件」外，另认「每一处都在协议位置」的串 ----
+#
+# 为什么放宽：有些名字只在一个文件里出现，但它另一端的东西**改不得** —— 语言模型 API 的
+# 字段名（`"output_config"`、`"reasoning_effort"`）、HTTP 头、apt/环境的变量名、用户磁盘上的
+# 文档格式键名。改它就会与对面失配，所以它同样不构成「留着别人的代码」。
+# 放宽的方向是**诚实**意义上的：净相同行因此变小，而不是变大；不这么做就是系统性高估
+# （原先 287 行「不可扣」的字面量行里，很大一部分正是这类名字）。
+#
+# 「协议位置」的严格读法（比「引号前最近的 '(' 在白名单里」再严一格）：
+#   引号之前最近的 '(' 的名字在白名单里，**且这个 '(' 到该引号之间没有别的字符串**；
+#   或该形位形如 `case "…":`。
+#   后半句等价于「只认白名单调用的第一个字符串实参」，于是
+#   `body.put("key", "value")` 的 `"value"` 与 `x.setRequestProperty("k", "v")` 的 `"v"`
+#   都**不算**协议位置。这一格是刻意加的：不这样的话，
+#   `new JSONObject().put("root","workspace.root")` 这类**文档内容**
+#   （画布的 id / type 值，本来就是模型可以自己生成的）会被当成契约扣掉。
+#   实测这一格值 8 行（从严 22 行 vs 从宽 30 行）。数字宁可算高，所以从严。
+#
+# 白名单只此一份（下面的 PROTO_CALLS）：审计文件里印的就是它，文档不再抄第二份。
+PROTO_CALLS="put putOpt get getJSONObject getJSONArray getString getInt has isNull remove setRequestProperty opt optString optInt optBoolean optLong optDouble optJSONObject optJSONArray"
 PROTO_AUDIT="$PROJECT_ROOT/build/provenance-protocol-strings.txt"
 PROTO_LIST="$WORK/protocol-strings.txt"
 : > "$WORK/string-files.tsv"
@@ -312,51 +333,104 @@ while IFS= read -r f; do
     case "$f" in
         ./com/termux/terminal/*|./com/termux/view/*|./com/termux/shared/*) continue ;;
     esac
-    normalize "$f" | awk -v file="${f#./}" '
+    # 每个串连**出现位置**一起记：K = 协议位置（后面跟着白名单里的调用名或 case），- = 其他。
+    # 位置是逐处判的：同一个串可以在一个文件里出现在协议位置、在另一个文件里出现在文案里，
+    # 那时它就不满足「每一处都在协议位置」——所以不能只按串记一次。
+    normalize "$f" | awk -v file="${f#./}" -v calls="$PROTO_CALLS" '
+        BEGIN {
+          n = split(calls, W, " ")
+          for (i = 1; i <= n; i++) WL[W[i]] = 1
+        }
+        # seg = 行首（或上一个串之后）到本引号之间的原文。
+        # 注意 RSTART/RLENGTH 是**全局**的：嵌套 match 之前必须先存下来再用，
+        # 否则外层循环会用被内层改过的值切串 —— 那会原地死循环（这个坑踩过）。
+        function protoPos(seg,   head, p, name) {
+          if (seg ~ /(^|[^A-Za-z0-9_])case[ \t]+$/) return "case"
+          if (!match(seg, /\([^()]*$/)) return ""
+          p = RSTART
+          head = substr(seg, 1, p - 1)
+          if (!match(head, /[A-Za-z_][A-Za-z0-9_]*$/)) return ""
+          name = substr(head, RSTART, RLENGTH)
+          return (name in WL) ? name : ""
+        }
         {
           while (match($0, /"[^"]*"/)) {
-            print substr($0, RSTART, RLENGTH) "\t" file
-            $0 = substr($0, RSTART + RLENGTH)
+            rs = RSTART; rl = RLENGTH
+            s = substr($0, rs, rl)
+            name = protoPos(substr($0, 1, rs - 1))
+            printf "%s\t%s\t%s\t%s\n", s, file, (name == "" ? "-" : "K"), (name == "" ? "-" : name)
+            $0 = substr($0, rs + rl)
           }
         }' >> "$WORK/string-files.tsv"
 done < <(find . -name '*.java' -o -name '*.kt')
 
-# 三个条件同时成立才判为「协议串」—— 少任何一个都会把不该扣的行扣掉：
-#   1. 在本工程 >=2 个文件里出现：它存在的理由是「两个组件按同一个名字对齐」；
-#   2. 不是空串 ""：空串不表达任何东西，但它出现在 97 个文件里，
-#      只按第 1 条判会一次多扣几十行（第一版就是这么错的，实测多扣 344 行）；
-#   3. 全 ASCII 且至少含一个字母或数字：本工程里的中文串是**用户可见文案**，
+# 判为「协议串」要三个条件同时成立 —— 少任何一个都会把不该扣的行扣掉：
+#   1. 不是空串 ""：空串不表达任何东西，但它出现在 97 个文件里，
+#      只按「出现 >=2 个文件」判会一次多扣几十行（第一版就是这么错的，实测多扣 344 行）；
+#   2. 全 ASCII 且至少含一个字母或数字：本工程里的中文串是**用户可见文案**，
 #      那是可以改写的（重写文案正是要做的事），所以它属于「还要重写」，不属于「可扣」。
-#      只由符号组成的串（", "、":"）是分隔符，同样**不扣** —— 宁可把数字算高。
+#      只由符号组成的串（", "、":"）是分隔符，同样**不扣** —— 宁可把数字算高；
+#   3. 且下面**两选一**（这就是判据 v2 的放宽处）：
+#      a. 在本工程 >=2 个文件里出现 —— 它存在的理由是「两个组件按同一个名字对齐」；
+#      b. 它出现的**每一处**都在协议位置上 —— 有些名字只在一个文件里出现，
+#         但另一端是模型 API / HTTP 头 / 环境变量 / 磁盘文档格式，改不得。
+#
+# 输出列（后两列只对 b 类有意义）：
+#   P|X <TAB> 串 <TAB> 文件数 <TAB> 出现的文件 <TAB> files|position <TAB> 文件:调用名 <TAB> 出现处数
 sort -u "$WORK/string-files.tsv" | awk -F'\t' '
     {
-      files[$1] = files[$1] (files[$1] == "" ? "" : " ") $2
-      n[$1]++
+      occ[$1]++
+      if (!(($1 SUBSEP $2) in fseen)) {
+        fseen[$1 SUBSEP $2] = 1
+        nf[$1]++
+        files[$1] = files[$1] (files[$1] == "" ? "" : " ") $2
+      }
+      if ($3 == "K") where[$1] = where[$1] (where[$1] == "" ? "" : " ") $2 ":" $4
+      else notproto[$1] = 1
     }
     END {
-      for (s in n) {
-        if (n[s] < 2) continue
+      for (s in occ) {
         # 先把转义序列摘掉再找字母数字：否则 `"\n"`（21 个文件里都出现）会因为那个 n
         # 被当成「含字母的名字」而被扣 —— 它其实和 `","` 一样是分隔符。
         plain = s
         gsub(/\\[^"\\]/, "", plain)
         ok = (s != "\"\"" && s ~ /^"[ -~]*"$/ && plain ~ /[A-Za-z0-9]/)
-        printf "%s\t%s\t%d\t%s\n", (ok ? "P" : "X"), s, n[s], files[s]
+        if (ok && nf[s] >= 2)
+          printf "P\t%s\t%d\t%s\tfiles\t-\t%d\n", s, nf[s], files[s], occ[s]
+        else if (ok && !(s in notproto))
+          printf "P\t%s\t%d\t%s\tposition\t%s\t%d\n", s, nf[s], files[s], where[s], occ[s]
+        else
+          printf "X\t%s\t%d\t%s\t-\t-\t%d\n", s, nf[s], files[s], occ[s]
       }
     }' | sort > "$WORK/strings-classified.tsv"
 
 awk -F'\t' '$1 == "P" { print $2 }' "$WORK/strings-classified.tsv" > "$PROTO_LIST"
 
 mkdir -p "$(dirname "$PROTO_AUDIT")"
+singles=$(awk -F'\t' '$1 == "X" && $3 == 1 { n++ } END { print n + 0 }' "$WORK/strings-classified.tsv")
 {
     echo "# 被判为「跨组件协议串」的字符串字面量（默认运行即写，供核对）"
-    echo "# 规则: 在本工程 >=2 个文件里出现 + 非空 + 全 ASCII + 至少含一个字母/数字。列: 串<TAB>文件数<TAB>出现的文件"
+    echo "# 三个条件（非空 + 全 ASCII + 含字母数字）之外，两选一："
+    echo "#   [files]    在本工程 >=2 个文件里出现 —— 两个组件按同一个名字对齐。"
+    echo "#   [position] 只在一个文件里出现，但**每一处**都在协议位置上 —— 另一端是模型 API /"
+    echo "#              HTTP 头 / 环境变量 / 磁盘文档格式，改不得（判据 v2 新增，见 provenance.sh）。"
+    printf '# 协议位置的调用名白名单: %s\n' "$PROTO_CALLS"
     echo "# 这些串所在的残留行会从「逐行相同」里扣除。若某一行本该改、却出现在此，就是这条规则太松。"
-    awk -F'\t' '$1 == "P" { printf "%s\t%d\t%s\n", $2, $3, $4 }' "$WORK/strings-classified.tsv" | sort -k2,2nr
     echo "#"
-    echo "# 下面是**没有被扣**的重复串（中文文案 / 空串 / 纯符号）。它们留在净相同行里，"
-    echo "# 也就是仍然要重写或被论证 —— 列在这里是为了让人能检查「是不是有协议串被漏掉了」。"
-    awk -F'\t' '$1 == "X" { printf "%s\t%d\t%s\n", $2, $3, $4 }' "$WORK/strings-classified.tsv" | sort -k2,2nr
+    echo "# == 一类 [files]: 串 <TAB> 文件数 <TAB> 出现的文件 =="
+    awk -F'\t' '$1 == "P" && $5 == "files" { printf "%s\t%d\t%s\n", $2, $3, $4 }' "$WORK/strings-classified.tsv" | sort -k2,2nr
+    echo "#"
+    echo "# == 二类 [position]: 串 <TAB> 出现处数 <TAB> 文件:调用名 =="
+    echo "#    这一类的每一处都要能看出「在哪个文件的哪个调用里」——「值被当成键扣掉」一眼可查。"
+    awk -F'\t' '$1 == "P" && $5 == "position" { printf "%s\t%d\t%s\n", $2, $7, $6 }' "$WORK/strings-classified.tsv" | sort -k2,2nr
+    echo "#"
+    echo "# 下面是**没有被扣**的串（中文文案 / 空串 / 纯符号 / 只在文案位置出现的英文串）。"
+    echo "# 它们留在净相同行里，也就是仍然要重写或被论证 —— 列在这里是为了让人能检查"
+    echo "# 「是不是有协议串被漏掉了」。"
+    echo "# 列: 串 <TAB> 文件数 <TAB> 出现的文件"
+    awk -F'\t' '$1 == "X" && $3 >= 2 { printf "%s\t%d\t%s\n", $2, $3, $4 }' "$WORK/strings-classified.tsv" | sort -k2,2nr
+    printf '# 另有 %s 个串只在一个文件里出现、也不在协议位置上（本工程自己的一次性词汇，\n' "$singles"
+    echo "#   不逐条列出：它们上千条，列出来只会淹没有用信息）。"
 } > "$PROTO_AUDIT"
 
 # 这一段**始终执行**：净相同行是要放在汇总表下面的头条数字，不能只在一个模式里出现。
@@ -394,8 +468,9 @@ mkdir -p "$(dirname "$STATEMENT_LINES")"
         # 第五个数是 L 的**子集**，不是另加一桶 —— 合计仍然是前四个之和。
         awk -F'|' -v proto="$PROTO_LIST" '
             BEGIN { while ((getline s < proto) > 0) PROTO[s] = 1 }
-            # 该行算「跨组件协议串行」吗：它必须至少含一个字符串，
-            # 且**每一个**字符串都在 >=2 个文件里出现过。有一个不是，这行就不能扣。
+            # 该行算「跨组件协议串行」吗：它必须至少含一个字符串，且**每一个**字符串
+            # 都是 PROTO_LIST 里的（= 在 >=2 个文件里出现，或每一处都在协议位置上）。
+            # 有一个不是，这行就不能扣 —— 行级判据本身没有变，变的只是 PROTO_LIST 的来源。
             function deductibleL(text,   n, s, ok) {
               n = 0; ok = 1
               while (match(text, /"[^"]*"/)) {
@@ -482,7 +557,7 @@ mkdir -p "$(dirname "$STATEMENT_LINES")"
            printf "  合计:                                        %5d 行\n", s + l + d + t
            printf "\n  可以扣掉的（不构成「留着别人的代码」）：\n"
            printf "    骨架行（任何 Java 文件都长这样）:           %5d 行\n", s
-           printf "    跨组件协议串行（>=2 个文件按同一名字对齐）:  %5d 行\n", p
+           printf "    跨组件协议串行（>=2 个文件，或每一处都在协议位置）:  %5d 行\n", p
            printf "    可扣合计:                                  %5d 行\n", s + p
            printf "  净相同行（合计 - 可扣 = 还差多少）:          %5d 行\n", s + l + d + t - s - p
          }' "$WORK/comp-counts.txt"

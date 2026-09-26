@@ -135,6 +135,26 @@ public final class LicenseNoticeStructureTest {
         require(analysis.contains("build/provenance-unique-shapes.txt"),
                 "「剩下这些没有第二种写法」必须连到逐行清单（build/provenance-unique-shapes.txt），"
                         + "否则这句结论无从核对");
+        // 4e. 扣减规则放宽过一次（只在一个文件里出现、但每一处都在协议位置上的串 ——
+        //     模型 API 字段名、HTTP 头、磁盘上的文档格式键名）。放宽的方向与普通「改好一点」
+        //     相反：它让净数字**变小**。这句话不钉住，后来者无法判断 2157 是收紧还是放宽的产物，
+        //     也就无法判断「数字改小了」到底是重写掉了，还是规则松了。
+        require(analysis.contains("让净相同行变小"),
+                "docs/licensing.md 必须写明放宽扣减的**方向**：它让净数字变小（更诚实），不是变大");
+        // 4f. 位置白名单必须只有一份：写在脚本里，文档指向它。两份各写各的必然漂移 ——
+        //     本文件里已经记过一次「同一规则写两遍然后各自漂移」的坑。
+        String provenance = read(root, "tools/provenance.sh");
+        require(provenance.contains("PROTO_CALLS="),
+                "协议位置白名单必须只此一份（tools/provenance.sh 的 PROTO_CALLS）");
+        require(provenance.contains("每一处都在协议位置"),
+                "tools/provenance.sh 必须把「每一处都在协议位置」这条判据写在脚本里，"
+                        + "否则审计文件里那些只出现一次的串无从解释");
+        require(analysis.contains("PROTO_CALLS"),
+                "docs/licensing.md 必须指向白名单的唯一来源（PROTO_CALLS），不得再抄一份名单");
+        // 4g. 审计文件必须把两类分开，且「仅靠位置」的那一类要能看出出处 ——
+        //     否则「值被当成键扣掉了」这种错无人能查。
+        require(provenance.contains("[position]") && provenance.contains("文件:调用名"),
+                "审计文件必须把「仅靠协议位置可扣」的串与「≥2 个文件」的分开，并给出 文件:调用名");
 
         // 6. 本测试自身必须被 canonical suite 执行，否则它只是一份摆设
         String script = read(root, "test-source-no-build.sh");
