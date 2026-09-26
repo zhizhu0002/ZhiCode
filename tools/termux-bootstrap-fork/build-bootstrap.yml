@@ -186,15 +186,83 @@ jobs:
           unzip -q "$GITHUB_WORKSPACE/bootstrap-aarch64.zip"
 
           total=$(find . -type f | wc -l)
-          old=$(grep -rl --binary-files=text '/data/data/com.termux' . 2>/dev/null | wc -l)
-          new=$(grep -rl --binary-files=text "/data/data/$PKG" . 2>/dev/null | wc -l)
+          # ⚠️ 末尾的 `|| true` 是必需的，别删：
+          # 本步骤是 `set -euo pipefail`，而 `old=$(grep -rl ... | wc -l)` 在
+          # **零命中**时 grep 退出码为 1，pipefail 使整条管道返回 1，赋值语句
+          # 于是失败，`set -e` 直接杀掉脚本 —— 也就是「旧前缀已清零」这个
+          # **成功**结果反而会让验收报错。已用最小用例复现（只打印 total 就 exit 1）。
+          # `new` 同理，一并加上以防隐患。
+          old=$(grep -rl --binary-files=text '/data/data/com.termux' . 2>/dev/null | wc -l || true)
+          new=$(grep -rl --binary-files=text "/data/data/$PKG" . 2>/dev/null | wc -l || true)
           sym=$(wc -l < SYMLINKS.txt 2>/dev/null || echo 0)
 
-          echo "文件总数        : $total"
+          # 关键二进制必须在：这是「内容被改坏/被裁剪误删」的最直接信号。
+          # （arch_bin 里的软链不存进归档而是记在 SYMLINKS.txt，所以只查真实文件）
+          for f in bin/bash bin/apt bin/dpkg bin/curl bin/sed bin/tar bin/grep bin/find; do
+            [ -f "$f" ] || {
+              echo "❌ 缺关键二进制 $f"
+              echo "bin/ 前 40 项："; ls bin/ 2>/dev/null | head -40
+              exit 1
+            }
+          done
+
+          # ── 我们修过的两个上游 bug，必须在 CI 里自己断言 ──────────────────
+          # 否则要下载 122 MB 到本地才知道改没改对，白等一轮。
+          #
+          # ① sed 的 SELinux 污染
+          #    fork 的单容器构建让 coreutils 先把 libandroid-selinux 装进
+          #    $TERMUX_PREFIX，sed 的 gnulib 自动探测（with_selinux=maybe）到了它，
+          #    于是把 SELinux 支持编了进去 → 每次 `sed -i` 都会打
+          #      "failed to set default file creation context ...: Permission denied"
+          #    dpkg 的 maintainer script 大量用 sed -i，所以 `pkg install` 就能看到。
+          #    修法：packages/sed/build.sh 加 --without-selinux。
+          #
+          #    注：coreutils / tar 也链接 libandroid-selinux.so，但那是上游**有意**
+          #    声明并链接的，实测它们并不会打那句警告 —— 只查 sed 就好。
+          if grep -qa 'failed to set default file creation context' bin/sed; then
+            echo "❌ bin/sed 仍带 SELinux 支持 —— pkg install 时还会出现那条警告"
+            echo "   ① packages/sed/build.sh 里有没有 --without-selinux？"
+            echo "   ② 本次 CI 用的 commit 含这个补丁吗？（git log --oneline -1 对照）"
+            exit 1
+          fi
+          if grep -qa 'libandroid-selinux\.so' bin/sed; then
+            echo "❌ bin/sed 仍链接 libandroid-selinux.so"; exit 1
+          fi
+          echo "✅ bin/sed 已不含 SELinux 支持（pkg install 不会再打那条警告）"
+
+          # ② bin/lsns 的 libmount
+          #    bin/lsns 属于 util-linux 主包，而 libmount 是同一次 build 的**子包**，
+          #    上游没法声明这个依赖（自依赖环）→ 官方 release 也漏了，
+          #    官方那份 bin/lsns 同样是 CANNOT LINK EXECUTABLE。
+          #    这里只断言"库在"；通用的 ELF 依赖检查在本地裁剪工具里。
+          for lib in libmount.so libblkid.so libsmartcols.so; do
+            [ -f "lib/$lib" ] || {
+              echo "❌ 缺 lib/$lib —— bin/lsns 会 CANNOT LINK EXECUTABLE"
+              echo "    已知原因见 tools/termux-bootstrap-fork/README.md 第 11.1 节"
+              exit 1
+            }
+          done
+          echo "✅ bin/lsns 依赖的库都在（libmount / libblkid / libsmartcols）"
+
+          # 已装包数只是提示，不作失败条件：正文会说明它与体积的关系。
+          pkgn=$(grep -c '^Package: ' var/lib/dpkg/status 2>/dev/null || echo 0)
+          zipsize=$(stat -c%s "$GITHUB_WORKSPACE/bootstrap-aarch64.zip" 2>/dev/null || echo 0)
+
+          echo "文件总数        : $total   (官方 release 3473)"
+          echo "已装包数        : $pkgn    (官方 release 82)"
+          echo "zip 体积        : $((zipsize/1024/1024)) MB  (官方 release 约 32 MB)"
           echo "旧前缀文件数    : $old   (必须为 0)"
           echo "新前缀文件数    : $new   (应 > 300)"
           echo "SYMLINKS.txt 行 : $sym   (应 > 0)"
           echo "期望前缀        : /data/data/$PKG/files/usr"
+          if [ "$pkgn" -gt 130 ] || [ "$total" -gt 6000 ]; then
+            echo "⚠️  包数/文件数明显偏大 —— 这是 build-bootstraps.sh 的已知特性："
+            echo "    它的 extract_debs() 会把 output/ 里**每个** deb 都解进归档，"
+            echo "    而 fork 场景下所有依赖只能源码编译，于是 doxygen/python/perl/tcl/"
+            echo "    tk/X11/fontconfig 等纯构建期依赖也被打了进去（实测 159 包/122 MB）。"
+            echo "    归档**可用**，只是偏大；按运行时依赖闭包裁剪请见"
+            echo "    tools/termux-bootstrap-fork/prune-bootstrap.js（已实测：→ 85 包/31.9 MB）。"
+          fi
 
           # ★ 二阶段脚本：@占位符必须被正确替换，否则 app 首次启动会坏
           stage2=$(find . -name 'termux-bootstrap-second-stage.sh' | head -1)
@@ -220,9 +288,47 @@ jobs:
           [ "$sym" -gt 0 ]     || { echo "❌ 缺 SYMLINKS.txt 或为空"; exit 1; }
           [ "$new" -gt 300 ]   || { echo "❌ 新前缀命中过少，构建可能没用到新包名"; exit 1; }
           if [ "$old" -ne 0 ]; then
-            echo "❌ 仍有旧前缀 /data/data/com.termux 残留，示例："
-            grep -rl --binary-files=text '/data/data/com.termux' . 2>/dev/null | head -20
-            echo "   很可能是复用了旧前缀的编译产物，检查依赖是否本地编译"
+            echo "❌ 仍有旧前缀 /data/data/com.termux 残留：$old 个文件"
+            echo "   已知来源（运行 #6 实测只剩这 2 个，且都是**注释文本**，不影响功能）："
+            echo "     bin/termux-exec-ld-preload-lib"
+            echo "     include/termux-exec/.../ExecIntercept.h"
+            echo "   二者都来自 termux-exec 包里原样安装的静态文件，可用"
+            echo "     sed -i 's|/data/data/com\\.termux|/data/data/<新包名>|g' <文件>"
+            echo "   修掉（tools/termux-bootstrap-fork/README.md 第九节有完整后处理流程）。"
+            # ── 详细取证：一次运行就要能定位，不要再来一轮 70 分钟 ──
+            # 按「ELF / #! 脚本 / 普通文本」分类，并落盘成 artifact，
+            # 这样即使日志被截断也能拿到完整清单。
+            audit="$GITHUB_WORKSPACE/bootstrap-audit.txt"
+            grep -rl --binary-files=text '/data/data/com.termux' . 2>/dev/null | sort > /tmp/old-prefix-files.txt
+            {
+              echo "旧前缀文件清单（共 $old 个）"
+              echo "分类规则：ELF=前 4 字节 \\x7fELF；脚本=以 #! 开头；文本=其余"
+              echo
+            } > "$audit"
+            : > /tmp/elf.txt; : > /tmp/script.txt; : > /tmp/text.txt
+            while IFS= read -r f; do
+              if [ "$(od -An -c -N4 "$f" 2>/dev/null | tr -d ' \n')" = "177ELF" ]; then
+                echo "$f" >> /tmp/elf.txt
+              elif [ "$(head -c2 "$f" 2>/dev/null)" = '#!' ]; then
+                echo "$f" >> /tmp/script.txt
+              else
+                echo "$f" >> /tmp/text.txt
+              fi
+            done < /tmp/old-prefix-files.txt
+            ne=$(wc -l < /tmp/elf.txt); ns=$(wc -l < /tmp/script.txt); nt=$(wc -l < /tmp/text.txt)
+            echo "  ELF 二进制 : $ne   ← 正常应为 0（源码构建后所有 ELF 都是新前缀）"
+            echo "  #! 脚本    : $ns   ← 正常应为 0"
+            echo "  普通文本   : $nt   ← 非 0 说明有静态文件没被替换（如 termux.properties）"
+            {
+              echo "== ELF ($ne) =="; cat /tmp/elf.txt
+              echo; echo "== #! 脚本 ($ns) =="; cat /tmp/script.txt
+              echo; echo "== 普通文本 ($nt) =="; cat /tmp/text.txt
+            } >> "$audit"
+            echo "--- 普通文本（最可能是漏改的静态文件，全部列出）---"
+            cat /tmp/text.txt
+            echo "--- ELF / 脚本 各列出前 30 个 ---"
+            head -30 /tmp/elf.txt; head -30 /tmp/script.txt
+            echo "完整清单见 artifact: bootstrap-audit.txt"
             exit 1
           fi
           echo "✅ 验收通过：旧前缀已彻底清零"
@@ -232,14 +338,25 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: bootstrap-aarch64-${{ inputs.package_name }}
-          path: bootstrap-aarch64.zip
+          # 失败时 bootstrap-audit.txt 会带上全量旧前缀文件清单，
+          # 一次运行就能定位，不必再然一轮 70 分钟。
+          path: |
+            bootstrap-aarch64.zip
+            bootstrap-audit.txt
           if-no-files-found: warn
           retention-days: 30
+          overwrite: true
 
       - name: 失败时留下诊断信息
         if: failure()
         run: |
           echo "=== properties.sh 最终状态 ==="
           grep -nE '^TERMUX_APP__PACKAGE_NAME=|^TERMUX_APP__NAMESPACE=' scripts/properties.sh || true
+          echo "=== build-bootstraps.sh 的 mv 补丁是否生效 ==="
+          grep -nF 'TERMUX_PACKAGES_DIRECTORY/output/' scripts/build-bootstraps.sh || \
+            echo "（未找到 /output/ 补丁，说明 sed 未生效）"
+          echo "=== output/ 里的 zip / deb ==="
+          ls -l output/*.zip 2>/dev/null || echo "（output/ 无 zip）"
+          ls output/*.deb 2>/dev/null | wc -l || true
           echo "=== 磁盘 ==="
           df -h / || true
