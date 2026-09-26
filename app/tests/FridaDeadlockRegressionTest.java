@@ -4,11 +4,31 @@ public final class FridaDeadlockRegressionTest {
     private static void require(boolean c,String m){if(!c)throw new AssertionError(m);}
     /** 去掉全部空白后再比较：断言关心的是标识符与先后关系，不该被空格/换行左右。 */
     private static String squash(String source){return source.replaceAll("\\s+","");}
+    /**
+     * 把源码里所有双引号字面量的内容按出现次序拼起来。
+     *
+     * <p>系统提示词在源码里是很多段字符串相加的，而断言要检查的是**最终输出的文字**。
+     * 对源码直接 contains 会把换行位置也变成契约：重排不改变行为，却会让断言失败。
+     */
+    private static String literals(String source){
+        StringBuilder out=new StringBuilder(); int i=0;
+        while(i<source.length()){
+            if(source.charAt(i)!='"'){i++; continue;}
+            i++;
+            while(i<source.length()){
+                char d=source.charAt(i);
+                if(d=='\\'){ if(i+1<source.length()) out.append(source.charAt(i+1)); i+=2; continue; }
+                if(d=='"'){ i++; break; }
+                out.append(d); i++;
+            }
+        }
+        return out.toString();
+    }
     public static void main(String[] args)throws Exception{
         Path root=Paths.get(args.length==0?".":args[0]).toAbsolutePath().normalize();
         String bridge=Files.readString(root.resolve("app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxFrida.java"));
         String tool=Files.readString(root.resolve("app/src/main/java/com/termux/app/zhicode/tools/ZhiDebugTool.java"));
-        String prompt=Files.readString(root.resolve("app/src/main/java/com/termux/app/zhicode/core/SystemPromptBuilder.java"));
+        String prompt=literals(Files.readString(root.resolve("app/src/main/java/com/termux/app/zhicode/core/SystemPromptBuilder.java")));
         require(!bridge.contains("Memory.scanSync(a,n,String(p.pattern))"),"dedicated scan must not use scanSync");
         require(bridge.contains("async function safeScan(options,outerDeadline)")
                 && bridge.contains("case 'scan': return safeScan(p)")
