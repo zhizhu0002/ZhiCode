@@ -714,8 +714,11 @@ public final class ZhiCodeEngine {
 
     private void appendInternalContinuation(String stopReason) throws Exception {
         String reason = stopReason == null ? "unknown" : stopReason;
+        // 标记名取自 SessionStore 的单一来源：这个串会被写进持久化历史，
+        // SessionStore 靠它把续跑消息从「人类发言」里排除掉（否则它会变成会话标题、
+        // 也会被当成可编辑的用户消息）。两处必须一致，所以不各写一份字面量。
         JSONArray content = new JSONArray().put(new JSONObject().put("type", "text").put("text",
-            "<iq_internal_continue>Previous model output stopped because of " + reason + ". Continue the same task from exactly where it stopped. Do not repeat completed work; inspect the latest tool/results and continue until the user's requested task is actually complete.</iq_internal_continue>"));
+            SessionStore.internalContinuationText(reason)));
         appendMessage("user", content);
     }
 

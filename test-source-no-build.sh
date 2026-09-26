@@ -81,6 +81,13 @@ run FridaGadgetConfigRegressionTest "$PROJECT_ROOT"
 # FridaScriptBootstrapRegressionTest.java
 run FridaScriptBootstrapRegressionTest "$PROJECT_ROOT"
 
+# ---------- 数据层的格式迁移 ----------
+# 内部续跑标记会写进持久化历史，改名后若只认新标记，
+# 旧会话里的续跑指令会变成可编辑的「人类发言」。这种回归只在旧数据上出现，
+# 编译和新会话都不报错，所以要专门守。
+# SessionMarkerMigrationTest.java
+run SessionMarkerMigrationTest "$PROJECT_ROOT"
+
 # ---------- 许可与归属 ----------
 # 这些声明是纯附加的：删掉它们编译照过、功能照跑、别的测试也照过，
 # 所以要有一条测试专门盯着，否则只能等到别人指出侵权时才发现。
