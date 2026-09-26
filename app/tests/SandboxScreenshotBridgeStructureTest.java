@@ -12,6 +12,18 @@ public final class SandboxScreenshotBridgeStructureTest {
         return new String(Files.readAllBytes(root.resolve(file)), StandardCharsets.UTF_8);
     }
 
+    /**
+     * 去掉全部空白后的源码。
+     *
+     * <p>本测试关心的是「出现了什么标识符、谁在谁之前」，这些与空格、换行无关。
+     * 用去空白形式比较，才能让重写时调整格式（例如把 250L 提成命名常量、
+     * 给实参加空格）不被误判成回归；真正要拦的是「重发间隔变了」「claim 跑到了
+     * Activity 就绪检查之前」这类行为变化。
+     */
+    private static String squash(String source) {
+        return source.replaceAll("\\s+", "");
+    }
+
     private static void requireOrdered(String source, String first, String second, String message) {
         int a = source.indexOf(first), b = source.indexOf(second);
         require(a >= 0 && b > a, message);
@@ -27,19 +39,21 @@ public final class SandboxScreenshotBridgeStructureTest {
         String responses = read(root, "app/src/main/java/com/termux/app/zhicode/api/OpenAIResponsesProvider.java");
         String script = read(root, "test-source-no-build.sh");
 
-        require(bridge.contains("deadline_uptime_ms") && bridge.contains("nextSend=now+250L")
+        String flat = squash(bridge);
+        require(bridge.contains("deadline_uptime_ms") && flat.contains("nextSend=now+BROADCAST_RETRY_INTERVAL_MS")
+                        && bridge.contains("BROADCAST_RETRY_INTERVAL_MS = 250L")
                         && bridge.contains("context.sendBroadcast(intent)"),
                 "screenshot requests must retry the same deadline-bound broadcast");
         require(bridge.contains(".claim") && bridge.contains("claim.createNewFile()")
                         && bridge.contains("pruneRequestArtifacts"),
                 "repeated and competing screenshot receivers must use an atomic claim");
-        requireOrdered(bridge, "screenshotActivityReady(a,pkg)", "claimScreenshot(context,id,deadline)",
+        requireOrdered(flat, "screenshotActivityReady(activity,pkg)", "claimScreenshot(context,id,deadline)",
                 "an unlaid-out Activity must not permanently claim a retryable screenshot request");
         require(bridge.contains("class CaptureSession") && bridge.contains("AtomicBoolean completed")
                         && bridge.contains("ACTIVE_CAPTURE.compareAndSet"),
                 "capture must have one process-local session and one terminal result");
         require(bridge.contains("main.postDelayed(timeout") && bridge.contains("activityUsable()")
-                        && bridge.contains("overlayRestored.compareAndSet(false,true)"),
+                        && flat.contains("overlayRestored.compareAndSet(false,true)"),
                 "capture timeout and Activity loss must restore the overlay exactly once");
         require(bridge.contains("expired-pixelcopy") && bridge.contains("expired-encode")
                         && bridge.contains("pruneScreenshots"),
