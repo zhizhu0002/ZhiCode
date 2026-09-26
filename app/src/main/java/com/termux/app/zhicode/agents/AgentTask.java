@@ -44,7 +44,12 @@ public final class AgentTask {
     public final CountDownLatch done = new CountDownLatch(1);
 
     /** {@code running} / {@code completed} / {@code failed} / {@code cancelled}。 */
-    public volatile String status = "running";
+    public static final String STATUS_RUNNING = "running";
+    public static final String STATUS_COMPLETED = "completed";
+    public static final String STATUS_FAILED = "failed";
+    public static final String STATUS_CANCELLED = "cancelled";
+
+    public volatile String status = STATUS_RUNNING;
     public volatile String progress = "Starting…";
     /** 结束时间；未结束时为 0（界面据此判断要不要显示耗时）。 */
     public volatile long finishedAt;
