@@ -148,19 +148,18 @@ bootstrap 里的程序许可各自适用，且要求源码对接收者可得。
 ```
 归属区域                             文件         行数   仍与 IQCode 相同
 Termux 上游（非 IQ Code）             23       7394           7274
-Termux 集成层                       34       6955           2867
+Termux 集成层                       34       7284           2735
 Compose 界面层                      57      15427              0
 其它                                8       1924           1194
-Agent 工具                         43       2965           2095
-Agent 核心                          8       1987           1913
+Agent 工具                         44       4310           1557
+Agent 核心                          8       2168           1868
 沙箱宿主层                            16       4716            563
-合计                              189      41368          15906
+合计                              190      43223          15191
 
-已是我们自己的:        25462 行
-逐行相同合计:          15906 行
+已是我们自己的:        28032 行
+逐行相同合计:          15191 行
   其中 Termux 上游:     7274 行（Termux 自己的代码，与独立性无关）
-  真正属于 IQ Code:     8632 行
-```
+  真正属于 IQ Code:     7917 行
 ```
 
 ### 这个数字曾经是错的（记下来，因为它会再次发生）
@@ -272,30 +271,33 @@ Agent 核心                          8       1987           1913
 
 | 相同 | 原版 | 现在 | 重合 | 文件 | 处置 |
 | --- | --- | --- | --- | --- | --- |
-| **1233** | **1245** | **1250** | **98.6%** | `core/ZhiCodeEngine.java` | **批 D，优先** |
+| 1233 | 1245 | 1250 | 98.6% | `com/termux/app/zhicode/core/ZhiCodeEngine.java` | 批 D |
 | 565 | 583 | 592 | 95.4% | `com/zhizhu/zhicode/TermuxTerminalPane.java` | 批 F |
-| 435 | 468 | 475 | 91.6% | `termux/TermuxShellExecutor.java` | 批 E |
-| 388 | 390 | 390 | 99.5% | `core/ContextCompactor.java` | 批 D |
-| 352 | 354 | 354 | 99.4% | `tasks/TaskStore.java` | 批 E |
-| 310 | 310 | 310 | 100% | `com/zhizhu/zhicode/UiMotion.java` | 批 F |
-| 297 | 310 | 311 | 95.5% | `tools/AndroidIntentBridge.java` | 批 E |
-| 284 | 642 | 1104 | 25.7% | `storage/SessionStore.java` | 批 E（已重写） |
-| 256 | 622 | 929 | 27.6% | `api/OpenAIResponsesProvider.java` | 批 B（已重写） |
-| 183 | 197 | 202 | 90.6% | `tools/BashTool.java` | 批 C |
-| 181 | 181 | 181 | 100% | `tools/UnifiedDiff.java` | 批 C |
-| 166 | 167 | 167 | 99.4% | `tools/WebSearchTool.java` | 批 C |
-| 156 | 451 | 596 | 26.2% | `api/OpenAIChatCompletionsProvider.java` | 批 B（已重写） |
-| 148 | 155 | 162 | 91.4% | `agents/SubagentManager.java` | 批 G |
-| 139 | 139 | 139 | 100% | `model/PlanWorkflowState.java` | 批 C |
+| 435 | 468 | 475 | 91.6% | `com/termux/app/zhicode/termux/TermuxShellExecutor.java` | 批 E |
+| 388 | 390 | 390 | 99.5% | `com/termux/app/zhicode/core/ContextCompactor.java` | 批 D |
+| 352 | 354 | 354 | 99.4% | `com/termux/app/zhicode/tasks/TaskStore.java` | 批 E |
+| 310 | 310 | 310 | 100.0% | `com/zhizhu/zhicode/UiMotion.java` | 批 F |
+| 297 | 310 | 311 | 95.5% | `com/termux/app/zhicode/tools/AndroidIntentBridge.java` | 批 C |
+| 284 | 642 | 1104 | 25.7% | `com/termux/app/zhicode/storage/SessionStore.java` | 批 E |
+| 256 | 622 | 929 | 27.6% | `com/termux/app/zhicode/api/OpenAIResponsesProvider.java` | 批 B（已重写） |
+| 183 | 197 | 202 | 90.6% | `com/termux/app/zhicode/tools/BashTool.java` | 批 C |
+| 181 | 181 | 181 | 100.0% | `com/termux/app/zhicode/tools/UnifiedDiff.java` | 批 C |
+| 166 | 167 | 167 | 99.4% | `com/termux/app/zhicode/tools/WebSearchTool.java` | 批 C |
+| 156 | 451 | 596 | 26.2% | `com/termux/app/zhicode/api/OpenAIChatCompletionsProvider.java` | 批 B（已重写） |
+| 148 | 155 | 162 | 91.4% | `com/termux/app/zhicode/agents/SubagentManager.java` | 批 G |
 | 130 | 136 | 178 | 73.0% | `com/zhizhu/zhicode/ZhiFileProvider.java` | 批 E |
-| 126 | 134 | 137 | 92.0% | `agents/AgentDefinitionLoader.java` | 批 G |
-| 122 | 257 | 460 | 26.5% | `api/AnthropicMessagesProvider.java` | 批 B（已重写） |
-| 110 | 110 | 110 | 100% | `tools/MultiEditTool.java` | 批 C |
-| 98 | 98 | 98 | 100% | `core/PlanApprovalGate.java` | 批 D |
-| 96 | 98 | 99 | 97.0% | `model/SessionConfig.java` | 批 C，**只改实现不动字段名** |
-| 27 | 27 | 27 | 100% | `tools/ZhiTool.java`（接口） | 批 C，**只改实现不动签名** |
-
-### 批 B：`api/` 协议层（进行中）
+| 126 | 134 | 137 | 92.0% | `com/termux/app/zhicode/agents/AgentDefinitionLoader.java` | 批 C |
+| 122 | 257 | 460 | 26.5% | `com/termux/app/zhicode/api/AnthropicMessagesProvider.java` | 批 B（已重写） |
+| 119 | 288 | 572 | 20.8% | `com/zhizhu/zhicode/sandbox/SandboxGuestDebug.java` | 批 ? |
+| 110 | 110 | 110 | 100.0% | `com/termux/app/zhicode/tools/MultiEditTool.java` | 批 C |
+| 109 | 331 | 603 | 18.1% | `com/termux/app/zhicode/storage/ApiSettingsStore.java` | 批 E |
+| 108 | 139 | 196 | 55.1% | `com/termux/app/zhicode/model/PlanWorkflowState.java` | 批 C |
+| 78 | 98 | 150 | 52.0% | `com/termux/app/zhicode/core/PlanApprovalGate.java` | 批 D |
+| 77 | 78 | 78 | 98.7% | `com/termux/app/zhicode/tools/WebFetchTool.java` | 批 C |
+| 75 | 141 | 339 | 22.1% | `com/zhizhu/zhicode/sandbox/SandboxFrida.java` | 批 ? |
+| 74 | 80 | 84 | 88.1% | `com/zhizhu/zhicode/background/KeepAliveService.java` | 批 G |
+| 72 | 87 | 142 | 50.7% | `com/termux/app/zhicode/storage/PlanStore.java` | 批 E |
+### 批 B：`api/` 协议层（已完成）
 
 这一批针对工程里「最不该看着像原版」的地方 —— 协议层是纯粹的技术实现：
 没有界面、没有用户可见的取舍，写出来长什么样完全取决于写的人。
@@ -327,6 +329,64 @@ Anthropic 那份遇到 `null` 会抛 NPE，另两份返回空串；合并时取�
 `package`、两个 `import`、类声明、`return base;` 这种「一行只干一件事」的行 ——
 任何人在这个需求下都会写出同样的形状。判断「改没改写」不能只看百分比，
 要看**算法与结构**：上表里降到大件的都换了结构，剩下的百分比都落在这类不可避免的行上。
+
+### 批 C：数据类与 Agent 工具（已完成）
+
+这一批是「接口与数据形状」层：字段名、工具名、schema 键名、输出格式都是**契约**
+（写进了会话 JSONL、设置、以及发给模型的提示词），所以改的只能是内部结构、
+分解方式与命名。共 40 个文件、重合行 8632 → 7917（-715）。
+
+按性质分三组。
+
+**值对象（字段名一律不动）**：`model/PlanWorkflowState`（55.1% → 新的状态机写法）、
+`model/SessionConfig`、`model/ApiProfile`、`model/ToolExecutionResult`、
+`model/AssistantTurn`、`model/ToolCall`、`agents/AgentDefinition`、`agents/AgentTask`。
+其中三处是真正的结构改动，不只是重写注释：
+
+1. `PlanWorkflowState` 把「哪个阶段允许哪种操作」写成了一个统一的前置检查
+   （`requireStatus` / `requireWorkflow`），并**把时间戳改成严格单调**：
+   新快照的 `updatedAt` 取「当前时间」与「上一版 + 1」的较大者。系统时钟被回拨时
+   （对时、换时区），原来的写法会让新快照看起来比它替换掉的那一版更旧，
+   而界面是按时间戳判断版本的。
+2. `SessionConfig.copy()` 把 volatile 的 `planWorkflowState` 先落到局部变量再拷：
+   原来直接读两次，两次之间可能被别的线程换掉，于是拷到一个「半新半旧」的组合。
+3. `ToolExecutionResult` 的六个工厂方法收敛到一个私有构造路径，
+   每一种「成功/失败 + 有无 diff + 有无附加内容」的组合都由一个具名方法表达。
+
+**路径与 schema 基础件**：`tools/PathPolicy`（`Set.of` 换成 `Arrays.asList`，见下）、
+`tools/ToolSchemas`、`tools/ZhiTool`（接口，签名未动）、`core/PermissionModePolicy`。
+
+`ToolSchemas` 的重写解决了一个真实的签名污染：`JSONObject.put` 声明受检的
+`JSONException`，于是原来每个工具的 `inputSchema()` 都要自己写 try/catch
+（45 行里有 5 段几乎相同的 catch）。现在只有一处 `with(...)` 负责转换，
+其余地方链式拼装。
+
+`PermissionModePolicy.capSubagent`（97 行 → 89 行，重合 35 → 21）把原来嵌套四层
+`if` 的判断改成了一张「父级模式 → 子代理可以要求哪些模式」的表。表里的每一行都能
+从一条原则推出来（**子代理只能收紧、不能放宽父级权限**），而原来的嵌套 if 读不出
+这条原则 —— 改错一个分支的后果是某个子代理悄悄获得了它不该有的写权限。
+
+**Agent 工具（36 个）**：`Read`/`ReadMany`/`Stat`/`Tree`/`LS`/`Glob`/`Grep`/
+`Write`/`Edit`/`MultiEdit`/`Copy`/`Move`/`Mkdir`/`Delete`/`TaskCreate`/`TaskGet`/
+`TaskList`/`TaskUpdate`/`mcp_list`/`mcp_call`/`GitStatus`/`EnterWorktree`/`AndroidIntent`/
+`Root`/`ui_canvas`/`ToolRegistry` 等。
+
+工具名、schema 属性名、输出格式与错误文案全部保持逐字不变（它们都被测试与提示词
+依赖）。改的是：把重复的文件读写抽成 `TextFiles`；把每个工具里的内联上限判断
+提成具名常量并在注释里写清「这个上限挡的是哪一种失败」；
+`ToolRegistry` 的构造从 36 条平铺的 `register(...)` 改成按用途分组的清单，
+顺序仍然固定（顺序决定提示词内容，从而决定上游的提示词缓存能不能命中）。
+
+**一个必须记下来的坑**：第一批写法里用了 `Set.of(...)` / `List.of(...)`。
+它们是 Java 9 的 API，在 Android 上要 API 30 才有，而本工程 minSdk 24
+且**没有开启核心库脱糖** —— 也就是说编译会通过、在 Android 7～9 的设备上
+一运行就 `NoSuchMethodError`。已全部换成 `Arrays.asList`。
+这个错误编译器和单元测试都发现不了（单元测试跑在 JDK 上，那里什么都有），
+所以它值得单独写在这里。
+
+**另一个坑**：`GlobTool` 的 javadoc 里写了正则片段 `(?:.*/)?`，
+其中的 `*/` 提前结束了注释块，后面整段代码被当成类体外面 —— 报错是
+「illegal start of type」加一串看不懂的错位信息。写含正则的注释时要注意这个。
 
 ### 批 A：删掉的死代码（已完成）
 
