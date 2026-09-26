@@ -194,18 +194,32 @@ public final class TerminalPaneContractTest {
         // 这类回归只在配置变化时复现，文本断言是唯一能守住它的地方。
         require(hostSquashed.contains("publicvoidrefreshTerminal()"),
             "宿主必须提供 refreshTerminal()：它是配置变化后重新对齐渲染的入口");
-        require(hostSquashed.contains("view.post(view::updateSize)"),
-            "refreshTerminal 必须重新量一次尺寸（mEmulator 只有 updateSize 会设）");
-        require(hostSquashed.contains("view.getCurrentSession()!=session"),
-            "refreshTerminal 必须处理「视图上挂的不是当前会话」这一支（否则重挂不上）");
+        require(hostSquashed.contains("removeAllViews();addView(view,newLayoutParams("),
+            "refreshTerminal 必须把 TerminalView 摘下来再挂回去 —— "
+                + "「切到别的标签再切回来」之所以能恢复，就是因为那一步让视图离开又回到视图树，"
+                + "重新走了一遍完整的测量/布局。这是本修复的机制本身，不是可选的清理动作");
+        require(hostSquashed.contains("view.post(()->{view.updateSize();")
+                && hostSquashed.contains("view.postDelayed(()->{view.updateSize();"),
+            "重挂之后必须**显式**调 updateSize()（并在布局尚未完成时补一次）："
+                + "同一个 View 摘下来再挂回同样尺寸时 onSizeChanged 不触发，"
+                + "而 updateSize() 是唯一会设 mEmulator 的入口");
         require(hostSquashed.contains("publicvoidonConfigurationChanged(")
                 && hostSquashed.contains("super.onConfigurationChanged(configuration);"),
             "宿主必须实现 onConfigurationChanged 兜底");
-        require(squash(paneCode).contains("key(configuration){AndroidView("),
-            "AndroidView 必须随配置重建（key(configuration)）：这是「切走再切回能恢复」那条"
-                + "已知可行路径的确定化");
         require(paneCode.contains("LaunchedEffect(configuration) { pane.refreshTerminal() }"),
             "配置变化后必须主动调一次 refreshTerminal");
+        // 反向断言：不许再出现「无条件重建 AndroidView 节点」这种写法。
+        // 它试过并且失败了 —— 宿主是同一个 View 实例，同一帧内从旧节点迁到新节点时，
+        // 旧节点的释放会把刚挂上的宿主再摘一次，宿主从此不在视图树上，
+        // 表现仍然是「旋转后空白、切标签才恢复」，比不改更糟。
+        require(!paneCode.contains("key(configuration)"),
+            "不许用 key(configuration) 无条件重建 AndroidView：它会让旧节点把宿主再摘一次");
+        require(squash(paneCode).contains("key(viewEpoch){AndroidView("),
+            "只允许在宿主报告「自己不在视图树上」时递增 viewEpoch 重建节点");
+        require(squash(paneCode).contains("if(!state.hostInTree)viewEpoch++"),
+            "重建节点的条件必须只有「宿主不在视图树上」这一条");
+        require(hostSquashed.contains("publicfinalbooleanhostInTree;"),
+            "State 必须把「宿主在不在视图树上」暴露给界面层：那是它唯一无法自救的情况");
 
         // ---- 5. 属性解析：续行与 back-key ----
         require(hostSquashed.contains("if(trimmed.endsWith(\"\\\\\"))"),

@@ -163,12 +163,20 @@ private fun RealTerminalPane(
     //
     // MainActivity 声明了 configChanges，所以旋转**不会**重建 Activity，组合也不会重来；
     // 而终端能不能画出来，取决于上游 TerminalView 内部那个 mEmulator 有没有被设上 ——
-    // 它只在尺寸变化时被设，尺寸恰好不变就一直是 null，屏幕就一直是纯黑空白。
-    // 真机上确实这样表现过：旋转后空白，切到别的标签再切回来才恢复
-    // （重新挂载会重新触发尺寸回调）。所以这里主动走一次：
-    // key(...) 让 AndroidView 节点随配置重建，LaunchedEffect 再补一次渲染对齐。
+    // 它只在 updateSize() 里被设，而 updateSize() 在尺寸为 0 时静默返回，
+    // onDraw() 在 mEmulator == null 时只画一块纯黑。真机上确实这样表现过：
+    // 旋转后终端一片空白，切到别的标签再切回来才恢复。
+    //
+    // ⚠️ 这里**不能**无条件 key(configuration) 去重建 AndroidView 节点。
+    // 试过，不行：宿主是同一个 View 实例，同一帧内从旧节点迁到新节点时，
+    // 旧节点的释放会把刚挂上的宿主再摘一次 → 宿主不在视图树上 → 没有测量/布局 →
+    // 尺寸恒为 0 → 谁都救不回来（表现仍然是「旋转后空白、切标签才恢复」）。
+    // 所以顺序反过来：先让宿主自己在原地重挂渲染（refreshTerminal），
+    // **只有当它报告自己真的不在视图树上时才重建节点**（那是它唯一无法自救的情况）。
     val configuration = LocalConfiguration.current
+    var viewEpoch by remember { mutableStateOf(0) }
     LaunchedEffect(configuration) { pane.refreshTerminal() }
+    LaunchedEffect(state.hostInTree) { if (!state.hostInTree) viewEpoch++ }
 
     val selectedIndex = state.sessions.indexOfFirst { it.selected }
 
@@ -194,7 +202,7 @@ private fun RealTerminalPane(
                         when {
                             failure != null -> TerminalFailure(failure, onRetry = { pane.retryTerminal() })
                             notice != null -> TerminalRuntimeNotice(notice)
-                            else -> key(configuration) {
+                            else -> key(viewEpoch) {
                                 AndroidView(
                                     factory = {
                                         // 可能还挂在上一轮的容器上（旧 AndroidView 尚未 dispose），先摘干净

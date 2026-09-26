@@ -100,6 +100,9 @@ public final class TermuxTerminalPane extends FrameLayout
     private static final float MIN_TEXT_SP = 8f;
     private static final float MAX_TEXT_SP = 32f;
 
+    /** 重挂之后补量一次尺寸的延迟。见 {@link #refreshTerminal()} 的说明。 */
+    private static final long REFRESH_RETRY_DELAY_MS = 300L;
+
     private static final String SHELL_NAME = "bash";
     private static final String SESSION_NAME_PREFIX = "bash ";
     private static final int SCROLLBACK_LINES = 5000;
@@ -163,10 +166,19 @@ public final class TermuxTerminalPane extends FrameLayout
         public final float textSp;
         public final List<List<ExtraKey>> extraKeys;
         public final boolean wakeLockHeld;
+        /**
+         * 宿主是否在视图树上。
+         *
+         * <p>为 {@code false} 表示承载它的 `AndroidView` 节点已经不带它了 ——
+         * 那种情况下界面层必须重建那个节点（宿主自己接不回去）。
+         * 这是「旋转后终端空白」这类问题的兜底判定依据。
+         */
+        public final boolean hostInTree;
 
         State(List<SessionInfo> sessions, String title, String runtimeNotice, String failureDetail,
               boolean ctrl, boolean alt, boolean shift, boolean fn, boolean backMapsEscape,
-              float textSp, List<List<ExtraKey>> extraKeys, boolean wakeLockHeld) {
+              float textSp, List<List<ExtraKey>> extraKeys, boolean wakeLockHeld,
+              boolean hostInTree) {
             this.sessions = sessions;
             this.title = title;
             this.runtimeNotice = runtimeNotice;
@@ -179,6 +191,7 @@ public final class TermuxTerminalPane extends FrameLayout
             this.textSp = textSp;
             this.extraKeys = extraKeys;
             this.wakeLockHeld = wakeLockHeld;
+            this.hostInTree = hostInTree;
         }
     }
 
@@ -198,6 +211,9 @@ public final class TermuxTerminalPane extends FrameLayout
     private boolean fn;
     private boolean backMapsEscape;
     private PowerManager.WakeLock wakeLock;
+
+    /** 上一次上报给界面的「宿主在不在视图树上」。只在变化时通知，避免无谓重组。 */
+    private boolean hostInTree = true;
 
     /** 环境未就绪的说明；为空表示环境正常。 */
     private String runtimeNotice;
@@ -235,7 +251,8 @@ public final class TermuxTerminalPane extends FrameLayout
         }
         return new State(rows, currentTitle(), runtimeNotice, failureDetail,
             ctrl, alt, shift, fn, backMapsEscape, terminalTextSp, extraKeys,
-            wakeLock != null && wakeLock.isHeld());
+            wakeLock != null && wakeLock.isHeld(),
+            isAttachedToWindow() && getParent() != null);
     }
 
     /** 登记变更回调。回调在主线程执行（本类的所有状态变化都发生在主线程）。 */
@@ -287,29 +304,84 @@ public final class TermuxTerminalPane extends FrameLayout
      *       「宽或高为 0」或「还没有会话」时**静默返回**；</li>
      *   <li>{@code onDraw()} 在 {@code mEmulator == null} 时**只画一块纯黑**。</li>
      * </ul>
-     * 于是只要 attach 发生在视图还没有尺寸的那一刻，屏幕就一直是纯黑的空白；
-     * 而唯一能把 {@code mEmulator} 设回来的入口 {@code updateSize()} 只在
-     * {@code onSizeChanged} 里被调 —— 配置变化（旋转）后如果尺寸恰好不再变化，
-     * 它就再也不会被调。
+     * 于是只要 {@code mEmulator} 是 null，屏幕就是纯黑 —— 真机上表现为「旋转后终端一片空白」。
      *
-     * <p>真机上的表现正是：旋转后终端一片空白，切到别的标签再切回来又恢复正常
-     * （重新挂载会重新触发尺寸回调）。这个方法把那条「碰巧能恢复」的路径变成确定行为。
+     * <h3>为什么是「摘下来再挂回去」而不是只调 updateSize</h3>
+     * 用户实测：同样的情况下「切到别的标签再切回来」能恢复。那一步做的事就是让本视图
+     * **离开视图树再回来**，重新走一遍完整的测量/布局。这里把那件事做在 View 这一层，
+     * 于是不需要用户去切标签。
      *
-     * <p>刻意**不碰会话与 PTY**：只让渲染重新对齐一次。没挂上就重挂，挂上了就重新量一次尺寸。
+     * <p>显式调 {@code updateSize()} 是必须的：同一个 View 摘下来再挂回**同样的尺寸**时
+     * {@code onSizeChanged} 不会触发，而 {@code updateSize()} 是唯一会设 {@code mEmulator}
+     * 的入口。{@code postDelayed} 那次重试用于覆盖「第一次调用时布局还没完成」——
+     * {@code updateSize()} 在尺寸为 0 时是静默返回的，所以必须再试一次。
+     *
+     * <p>刻意**不碰会话与 PTY**：只让渲染重新对齐。
      */
     public void refreshTerminal() {
         TerminalView view = terminalView;
         TerminalSession session = current();
-        if (view == null || session == null) return;
+        if (view == null || session == null) {
+            // 没有会话时把「宿主是否还在视图树上」记进状态就够了：
+            // 界面据此决定要不要重建承载它的 AndroidView 节点。
+            reportAttachState("no-session");
+            return;
+        }
         if (view.getCurrentSession() != session) {
             // 视图上的会话不是当前会话（例如新会话还没挂上去）→ 重走一次挂载。
             selectSession(selected);
             return;
         }
-        // post 而不是直接调：这里可能仍在布局过程中，尺寸要等这一帧结束才定下来。
-        view.post(view::updateSize);
-        view.onScreenUpdated();
-        view.invalidate();
+
+        // 摘下来再挂回去：复刻「切标签再切回」那条已验证可行的恢复路径。
+        removeAllViews();
+        addView(view, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        view.post(() -> {
+            view.updateSize();
+            view.onScreenUpdated();
+            view.invalidate();
+        });
+        view.postDelayed(() -> {
+            view.updateSize();
+            view.invalidate();
+        }, REFRESH_RETRY_DELAY_MS);
+        reportAttachState("refreshed");
+    }
+
+    /**
+     * 把「宿主是否还在视图树上」记进状态，并打一行现场日志。
+     *
+     * <p>这一行是这类问题的**唯一**取证手段：旋转在沙箱里无法复现（没有旋转 API），
+     * 而这条路径只在配置变化时才会走到。真机上跑 `logcat -d | grep ZhiTerminal`
+     * 就能看到「自动重挂」到底有没有发生、宿主当时在不在树上、尺寸是多少。
+     */
+    private void reportAttachState(String reason) {
+        boolean inTree = isAttachedToWindow() && getParent() != null;
+        Log.i(LOG_TAG, "refreshTerminal(" + reason + "): inTree=" + inTree
+            + " size=" + getWidth() + "x" + getHeight()
+            + " sessions=" + sessions.size()
+            + " sessionAttached=" + (terminalView != null && terminalView.getCurrentSession() != null));
+        if (inTree != hostInTree) {
+            hostInTree = inTree;
+            notifyStateChanged();
+        }
+    }
+
+    @Override
+    public void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        // 重新进入视图树：这正是「切标签回来」时发生的事，渲染机会也在这里。
+        if (!hostInTree) {
+            hostInTree = true;
+            notifyStateChanged();
+        }
+        post(() -> {
+            TerminalView view = terminalView;
+            if (view != null) {
+                view.updateSize();
+                view.invalidate();
+            }
+        });
     }
 
     @Override
