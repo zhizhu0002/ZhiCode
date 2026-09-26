@@ -178,8 +178,10 @@ private fun ModelRow(
         summary = if (duplicated) null else option.id,
         summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
         startAction = {
+            // 不要用 Modifier.size(...) 压小：Miuix Checkbox 的尺寸与圆角是内部写死的，
+            // 压小会把方框变成圆点（理由与截图见 Dialogs.kt 里的同一处）。
             if (selected) {
-                Checkbox(state = ToggleableState.On, onClick = {}, modifier = Modifier.size(20.dp))
+                Checkbox(state = ToggleableState.On, onClick = {})
             }
         },
         onClick = onPick,

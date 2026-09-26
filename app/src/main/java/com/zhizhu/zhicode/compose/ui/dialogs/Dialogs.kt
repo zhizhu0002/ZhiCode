@@ -391,11 +391,17 @@ fun ChoicePickerOverlay(
                         // 只剩一块空白，所以这里用 `Checkbox`：未选中也有一个可见的方框。
                         // 颜色全部走 Miuix 默认，避免手挑颜色在动态取色下失配。
                         // 点击只更新本地选中态，等提交才回调 ViewModel。
+                        //
+                        // ⚠️ 这里**不要**加 `Modifier.size(...)`：Miuix `Checkbox`
+                        // 没有尺寸参数（javap 实测签名只有 state/onClick/modifier/
+                        // colors/enabled，`CheckboxDefaults` 也不提供尺寸），它的
+                        // 绘制尺寸与圆角是内部写死的。外面压小之后圆角超过半宽，
+                        // 方框会被压成一个圆点 —— 实测截图里就是几个灰色圆点，
+                        // 完全看不出是复选项。
                         startAction = {
                             Checkbox(
                                 state = if (checked) ToggleableState.On else ToggleableState.Off,
                                 onClick = toggle,
-                                modifier = Modifier.size(20.dp),
                             )
                         },
                         onClick = toggle,

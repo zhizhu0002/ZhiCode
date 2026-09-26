@@ -149,7 +149,8 @@ private fun RoleCardList(
                         summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
                         startAction = {
                             // 未启用的留一个空位保持左对齐一致（与 API 配置列表同样的处理）。
-                            if (active) Checkbox(state = ToggleableState.On, onClick = {}, modifier = Modifier.size(20.dp))
+                            // 不要用 Modifier.size(...) 压小 Checkbox，理由见 Dialogs.kt 同一处。
+                            if (active) Checkbox(state = ToggleableState.On, onClick = {})
                         },
                         endActions = {
                             ZhiIconButton(icon = ZhiIcons.edit, description = "编辑", onClick = { onEdit(card) }, iconSize = 15.dp)

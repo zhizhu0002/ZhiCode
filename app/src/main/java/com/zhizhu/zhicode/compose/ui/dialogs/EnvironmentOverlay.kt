@@ -136,7 +136,11 @@ fun EnvironmentOverlay(
                         text = "诊断报告",
                         color = scheme.onSurfaceVariantSummary,
                         fontSize = ZhiTextScale.Caption,
-                        modifier = Modifier.fillMaxWidth(0.6f),
+                        // 用 weight 而不是 fillMaxWidth(0.6f)：后者是**固定比例**占位，
+                        // 和同一行里两个按钮抢宽度 —— 窄屏上「修复」放不下就把文字
+                        // 折成竖排（实测截图上就是竖着的两个字）。weight 让标签
+                        // 吃剩余宽度，按钮按内容取宽，两者不再竞争。
+                        modifier = Modifier.weight(1f),
                     )
                     TextButton(
                         text = "重新检测",
