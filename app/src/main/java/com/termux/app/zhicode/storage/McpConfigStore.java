@@ -5,10 +5,8 @@ import com.termux.shared.termux.TermuxConstants;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,22 +19,36 @@ import java.util.List;
  * 如果 load 在解析失败时静默返回空列表，那么下一次 save 就会把一个空配置写回去 ——
  * 用户的全部 MCP 服务器配置被一次解析错误抹掉，而且没有任何提示。
  *
- * <p>因此解析失败时<b>不会</b>假装配置是空的：坏文件被改名留档
- * （{@code mcp.json.corrupt-<时间戳>}），然后才返回空列表。
- * 这样数据还在磁盘上、可人工恢复，而且下一轮 save 不会覆盖任何东西。
+ * <p>所以解析失败时**不**假装配置是空的：坏文件被改名留档
+ * （{@code mcp.json.corrupt-<时间戳>}），然后才返回空列表。数据还在磁盘上、
+ * 可人工恢复，而且因为留档时把它移走了，下一轮 save 也不会覆盖它。
  *
- * <h3>写入同样是原子的</h3>
- * 先写 .tmp、fsync、再 rename。原先的做法是「先删旧文件再 rename」，
- * 那会在两步之间留下一个「配置文件不存在」的窗口 ——
- * 此时如果进程被杀，用户的配置就真的没了。
+ * <h3>写入同样原子（走 {@link AtomicFiles}）</h3>
+ * 原先的做法是「先删旧文件再 rename」，那会在两步之间留下一个
+ * 「配置文件不存在」的窗口 —— 此刻进程被杀，用户的配置就真的没了。
+ * rename 本身就能覆盖目标，不需要那个空档。
  */
 public final class McpConfigStore {
 
     /** 一台 MCP 服务器的配置。字段与 mcp.json 的键一一对应。 */
     public static final class Server {
+
+        private static final String KEY_NAME = "name";
+        private static final String KEY_TYPE = "type";
+        private static final String KEY_COMMAND = "command";
+        private static final String KEY_URL = "url";
+        private static final String KEY_ARGS = "args";
+        private static final String KEY_ENV = "env";
+        private static final String KEY_HEADERS = "headers";
+        private static final String KEY_SCOPE = "scope";
+        private static final String KEY_ENABLED = "enabled";
+
+        private static final String DEFAULT_TYPE = "stdio";
+        private static final String DEFAULT_SCOPE = "user";
+
         public String name = "";
-        /** stdio / http / sse。 */
-        public String type = "stdio";
+        /** {@code stdio} / {@code http} / {@code sse}。 */
+        public String type = DEFAULT_TYPE;
         /** stdio 模式的启动命令。 */
         public String command = "";
         /** http / sse 模式的地址。 */
@@ -44,8 +56,8 @@ public final class McpConfigStore {
         public final List<String> args = new ArrayList<>();
         public JSONObject env = new JSONObject();
         public JSONObject headers = new JSONObject();
-        /** user 或 project。 */
-        public String scope = "user";
+        /** {@code user} 或 {@code project}。 */
+        public String scope = DEFAULT_SCOPE;
         public boolean enabled = true;
 
         /** 深拷贝。改副本不会影响已保存的对象，反之亦然。 */
@@ -67,34 +79,41 @@ public final class McpConfigStore {
             JSONArray argArray = new JSONArray();
             for (String arg : args) argArray.put(arg);
             return new JSONObject()
-                    .put("name", name)
-                    .put("type", type)
-                    .put("command", command)
-                    .put("url", url)
-                    .put("args", argArray)
-                    .put("env", env == null ? new JSONObject() : env)
-                    .put("headers", headers == null ? new JSONObject() : headers)
-                    .put("scope", scope)
-                    .put("enabled", enabled);
+                .put(KEY_NAME, name)
+                .put(KEY_TYPE, type)
+                .put(KEY_COMMAND, command)
+                .put(KEY_URL, url)
+                .put(KEY_ARGS, argArray)
+                .put(KEY_ENV, env == null ? new JSONObject() : env)
+                .put(KEY_HEADERS, headers == null ? new JSONObject() : headers)
+                .put(KEY_SCOPE, scope)
+                .put(KEY_ENABLED, enabled);
         }
 
-        /** 宽容读取：任何一个字段缺失或类型不对都用默认值，不因为一个坏条目丢掉整份配置。 */
+        /**
+         * 宽容读取。
+         *
+         * <p>任何一个字段缺失或类型不对都用默认值，**不**因为一个坏条目丢掉整份配置：
+         * 用户手写过 mcp.json 是常态，而一条服务器写错不该让其它服务器一起失效。
+         */
         static Server fromJson(JSONObject source) {
             Server server = new Server();
-            server.name = source.optString("name", "");
-            server.type = source.optString("type", "stdio");
-            server.command = source.optString("command", "");
-            server.url = source.optString("url", "");
-            JSONArray args = source.optJSONArray("args");
+            server.name = source.optString(KEY_NAME, "");
+            server.type = source.optString(KEY_TYPE, DEFAULT_TYPE);
+            server.command = source.optString(KEY_COMMAND, "");
+            server.url = source.optString(KEY_URL, "");
+            JSONArray args = source.optJSONArray(KEY_ARGS);
             if (args != null) {
                 for (int i = 0; i < args.length(); i++) server.args.add(args.optString(i, ""));
             }
-            JSONObject env = source.optJSONObject("env");
+            JSONObject env = source.optJSONObject(KEY_ENV);
             if (env != null) server.env = deepCopy(env);
-            JSONObject headers = source.optJSONObject("headers");
+            JSONObject headers = source.optJSONObject(KEY_HEADERS);
             if (headers != null) server.headers = deepCopy(headers);
-            server.scope = source.optString("scope", "user");
-            server.enabled = source.optBoolean("enabled", true);
+            server.scope = source.optString(KEY_SCOPE, DEFAULT_SCOPE);
+            // 默认启用：一份「存在但被禁用」的配置在界面上与不存在很难区分，
+            // 而用户写下它就是要用它。
+            server.enabled = source.optBoolean(KEY_ENABLED, true);
             return server;
         }
     }
@@ -102,12 +121,19 @@ public final class McpConfigStore {
     /** 配置文件格式版本。 */
     private static final int VERSION = 1;
 
-    /** 配置体积上限。这是一份服务器清单，超过这个量级说明文件已损坏。 */
+    /** 配置体积上限。这是一份服务器清单，到这个量级说明文件已损坏。 */
     private static final int MAX_CONFIG_BYTES = 1024 * 1024;
 
     private static final String CONFIG_FILE = "mcp.json";
+    private static final String KEY_VERSION = "version";
+    private static final String KEY_SERVERS = "servers";
+    private static final String CORRUPT_SUFFIX = ".corrupt-";
+    private static final int WRITE_INDENT = 2;
 
     private final File file;
+
+    /** 见 {@link #lastLoadFailure()}。 */
+    private volatile String lastLoadFailure = "";
 
     public McpConfigStore() {
         File directory = TermuxConstants.dataDir();
@@ -122,21 +148,19 @@ public final class McpConfigStore {
     /**
      * 读取全部服务器配置。
      *
-     * <p>返回值语义有三档，调用方需要知道的是「空列表可能是真的没有配置，
-     * 也可能是文件坏了」——后者已经通过把坏文件留档来保证数据不丢，
-     * {@link #lastLoadFailure()} 则给出可读的原因。
+     * <p>返回空列表时有两种可能：真的没有配置，或文件坏了 —— 后者已经通过把坏文件
+     * 留档来保证数据不丢，可读的原因见 {@link #lastLoadFailure()}。
      */
     public synchronized List<Server> load() {
         List<Server> servers = new ArrayList<>();
-        File source = file;
-        if (!source.isFile()) {
+        if (!file.isFile()) {
             recordFailure("");
             return servers;
         }
         try {
-            String text = readConfigText(source);
-            JSONObject root = new JSONObject(text);
-            JSONArray array = root.optJSONArray("servers");
+            String text = new String(AtomicFiles.readBytes(file, MAX_CONFIG_BYTES),
+                StandardCharsets.UTF_8);
+            JSONArray array = new JSONObject(text).optJSONArray(KEY_SERVERS);
             if (array != null) {
                 for (int i = 0; i < array.length(); i++) {
                     JSONObject entry = array.optJSONObject(i);
@@ -147,71 +171,25 @@ public final class McpConfigStore {
             return servers;
         } catch (Throwable failure) {
             // 关键：先把坏文件留档，绝不静默当成空配置。
-            String kept = setAsideCorruptFile(source);
+            String kept = setAsideCorruptFile();
             recordFailure(failure.getClass().getSimpleName() + ": " + failure.getMessage()
-                    + (kept.isEmpty() ? "" : "（原文件已留档为 " + kept + "）"));
+                + (kept.isEmpty() ? "" : "（原文件已留档为 " + kept + "）"));
             return servers;
         }
     }
 
-    private String readConfigText(File source) throws Exception {
-        long length = source.length();
-        if (length <= 0) return "";
-        if (length > MAX_CONFIG_BYTES) throw new IllegalStateException("MCP 配置超出体积上限: " + length + " 字节");
-        try (FileInputStream input = new FileInputStream(source);
-             ByteArrayOutputStream output = new ByteArrayOutputStream((int) length)) {
-            byte[] buffer = new byte[8192];
-            int total = 0;
-            int count;
-            while ((count = input.read(buffer)) != -1) {
-                total += count;
-                if (total > MAX_CONFIG_BYTES) throw new IllegalStateException("MCP 配置在读取期间增长超出上限");
-                output.write(buffer, 0, count);
-            }
-            return new String(output.toByteArray(), StandardCharsets.UTF_8);
-        }
-    }
-
-    /** 把无法解析的文件改名留档，返回留档后的名字；改名失败返回空串。 */
-    private String setAsideCorruptFile(File source) {
-        String keptName = source.getName() + ".corrupt-" + System.currentTimeMillis();
-        File kept = new File(source.getParentFile(), keptName);
-        return source.renameTo(kept) ? keptName : "";
-    }
-
-    /**
-     * 原子写入。
-     *
-     * <p>不先删旧文件：删与 rename 之间的窗口里，配置文件是不存在的，
-     * 此刻进程被杀就会丢掉用户的全部配置。rename 本身就能覆盖目标，
-     * 不需要中间的空档。
-     */
+    /** 原子写入。见类注释。 */
     public synchronized void save(List<Server> servers) throws Exception {
-        JSONObject root = new JSONObject().put("version", VERSION);
+        JSONObject root = new JSONObject().put(KEY_VERSION, VERSION);
         JSONArray array = new JSONArray();
         if (servers != null) {
             for (Server server : servers) array.put(server.toJson());
         }
-        root.put("servers", array);
+        root.put(KEY_SERVERS, array);
 
         File parent = file.getParentFile();
-        if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
-            throw new IllegalStateException("无法创建 MCP 配置目录: " + parent);
-        }
-        byte[] data = root.toString(2).getBytes(StandardCharsets.UTF_8);
-        File temporary = new File(parent, CONFIG_FILE + ".tmp");
-        try (FileOutputStream output = new FileOutputStream(temporary, false)) {
-            output.write(data);
-            output.flush();
-            output.getFD().sync();
-        } catch (Throwable failure) {
-            temporary.delete();
-            throw failure;
-        }
-        if (!temporary.renameTo(file)) {
-            temporary.delete();
-            throw new IllegalStateException("无法保存 MCP 配置文件: " + file);
-        }
+        if (parent != null) AtomicFiles.ensureDirectory(parent, "MCP 配置目录");
+        AtomicFiles.publishText(file, root.toString(WRITE_INDENT));
         recordFailure("");
     }
 
@@ -227,7 +205,7 @@ public final class McpConfigStore {
     /**
      * 最近一次加载失败的原因；空串表示上次加载没有出错。
      *
-     * <p>之所以要把这条信息保留下来：{@code load()} 的返回类型是列表，
+     * <p>要把这条信息保留下来，是因为 {@link #load()} 的返回类型是列表，
      * 没有地方能说「我没读成功」。界面要提示「配置读取失败，原文件已留档」，
      * 就得有这个字段。
      */
@@ -235,12 +213,25 @@ public final class McpConfigStore {
         return lastLoadFailure;
     }
 
-    private volatile String lastLoadFailure = "";
+    /**
+     * 把无法解析的文件改名留档。
+     *
+     * <p>用改名而不是复制：改名之后 {@code mcp.json} 就不存在了，
+     * 于是下一轮 save 会新建一份干净的配置，而坏数据完整地留在磁盘上等着人工处理。
+     *
+     * @return 留档后的文件名；改名失败返回空串
+     */
+    private String setAsideCorruptFile() {
+        String keptName = file.getName() + CORRUPT_SUFFIX + System.currentTimeMillis();
+        File kept = new File(file.getParentFile(), keptName);
+        return file.renameTo(kept) ? keptName : "";
+    }
 
     private void recordFailure(String reason) {
         lastLoadFailure = reason == null ? "" : reason;
     }
 
+    /** 深拷一份 JSONObject；对端不可读时给空对象（调用方不必判空）。 */
     private static JSONObject deepCopy(JSONObject source) {
         try {
             return source == null ? new JSONObject() : new JSONObject(source.toString());
