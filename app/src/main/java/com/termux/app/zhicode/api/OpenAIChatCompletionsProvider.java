@@ -19,54 +19,112 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * Generic OpenAI-compatible /v1/chat/completions transport.
+ * OpenAI Chat Completions 协议的流式传输（也覆盖各家的兼容网关）。
  *
- * Designed for third-party gateways and OpenAI-compatible local/remote services:
- * - OpenAI Chat Completions message format
- * - streaming SSE text deltas
- * - streaming tool_calls/function arguments
- * - tool result replay
- * - image_url content parts (including data URLs)
- * - common reasoning_content/reasoning fields used by compatible gateways
+ * <h3>它的历史形状与其它两家不同</h3>
+ * 引擎内部按 Anthropic 的形状维护对话历史（内容块数组）。这个协议用的是另一套：
+ * {@code {role, content}} 里 {@code content} 多半是纯字符串，
+ * 工具调用是 {@code tool_calls[]}，而工具结果必须是一条<b>独立的</b>
+ * {@code {role:"tool", tool_call_id}} 消息。所以这里有一层真正的翻译，
+ * 见 {@link HistoryMapper}。翻译错了不会报错，只会让模型看不到上下文 ——
+ * 表现为「它好像忘了我刚说的」，很难联想到是消息映射的问题。
  *
- * The engine itself keeps one normalized ZhiCode/Anthropic-shaped history. This class
- * translates that normalized history at the transport boundary only.
+ * <h3>流式与非流式共用同一套字段读取</h3>
+ * 两种情况下的字段名是一样的（{@code content}、{@code tool_calls[].function.name}…），
+ * 差别只有三处，都用 {@code incremental} 这个开关显式表达：
+ * <ol>
+ *   <li><b>增量拼接</b>：流式的 arguments 是分片，必须追加；非流式是完整值，直接取。</li>
+ *   <li><b>usage 缺字段时的处理</b>：流式保留旧值（后面的事件更完整）；
+ *       非流式的 usage 是终值，缺字段就是 0。</li>
+ *   <li><b>finish_reason</b>：流式可能只在最后一个分片里给，之前不能动；
+ *       非流式一定有，缺失按 {@code stop} 处理。</li>
+ * </ol>
+ * 上游把这两条路径各写了一遍（{@code processChunk} 与 {@code parseNonStreaming}），
+ * 于是「改了一处忘了另一处」是默认结果。合并后这三处差异成了显式参数。
+ *
+ * <h3>工具调用的 id 与 name 只在第一个分片里</h3>
+ * 后续分片只带 {@code index} 与 arguments 片段。所以累加器必须按 index 复用，
+ * 且只在非空时才覆盖 id/name —— 否则第二个分片会把已经拿到的好名字抹成空。
  */
 public final class OpenAIChatCompletionsProvider implements ModelProvider {
 
+    private static final String USER_AGENT = "ZhiCodeAndroid-JavaNative/0.18";
+    private static final String DATA_FIELD = "data:";
+    private static final String DONE_MARKER = "[DONE]";
+    private static final int MAX_ERROR_CHARS = 12_000;
+
+    /** 工具名缺失时的占位。与 Responses 不同，这个协议下会**保留**这条调用。 */
+    private static final String UNKNOWN_TOOL = "unknown_tool";
+
     private final HttpRequestTracker requests = new HttpRequestTracker();
 
-    @Override public void cancelRequest(Thread worker) {
+    @Override
+    public void cancelRequest(Thread worker) {
         requests.cancel(worker);
     }
 
-    private static final class ToolState {
-        final int index;
-        String id;
-        String name;
-        final StringBuilder arguments = new StringBuilder();
-
-        ToolState(int index) { this.index = index; }
-    }
-
-    private static final class StreamState {
-        final StringBuilder text = new StringBuilder();
-        final StringBuilder thinking = new StringBuilder();
-        final Map<Integer, ToolState> tools = new LinkedHashMap<>();
-        boolean terminalEventSeen;
-    }
+    // ------------------------------------------------------------------ 请求
 
     @Override
     public AssistantTurn createMessage(SessionConfig config, String systemPrompt, JSONArray messages,
                                        JSONArray tools, StreamListener listener) throws Exception {
-        JSONObject body = createRequest(config, systemPrompt, messages, tools);
-        String endpoint = chatEndpoint(ApiUrlPolicy.requireBaseUrl(config));
+        // 注意：这个协议**不**强制要求密钥非空。很多自建网关不需要鉴权，
+        // 而 Anthropic / Responses 两家会在这里直接报错。
+        String baseUrl = ApiUrlPolicy.requireBaseUrl(config);
+        HttpURLConnection conn = openConnection(baseUrl, config);
+        HttpRequestTracker.Scope request = requests.begin(conn);
 
-        HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
+        StreamDecoder decoder = new StreamDecoder(listener);
+        try {
+            writeRequestBody(conn, buildRequestBody(config, systemPrompt, messages, tools));
+
+            int status = conn.getResponseCode();
+            request.markResponseStarted();
+            if (status < 200 || status >= 300) {
+                throw new IllegalStateException(
+                        "OpenAI 兼容 API HTTP " + status + ": " + truncate(readAll(conn.getErrorStream())));
+            }
+
+            if (isStreaming(conn.getContentType())) {
+                readSse(conn.getInputStream(), decoder);
+                if (!decoder.terminalEventSeen) {
+                    // 这个措辞是契约：引擎按 "stream_read_error" 子串判定可重试。
+                    throw new IllegalStateException("stream_read_error: model stream ended before [DONE]");
+                }
+            } else {
+                decoder.applyFullResponse(new JSONObject(readAll(conn.getInputStream())));
+            }
+        } catch (IOException failure) {
+            if (Thread.currentThread().isInterrupted()) throw failure;
+            throw new StreamFailure(request.failureCode(failure), request.failureMessage(failure), failure);
+        } finally {
+            request.close();
+        }
+
+        return decoder.toTurn();
+    }
+
+    /**
+     * 这份响应是不是 SSE。
+     *
+     * <p>判断偏「是」：{@code accept} 头同时声明了两种类型，所以服务端有权回任一者。
+     * 缺 content-type、不是 json、或明说是 event-stream，都按流式处理 ——
+     * 把一段 SSE 当 JSON 解析会立刻炸，而把 JSON 当 SSE 解析只会读到空内容，
+     * 后者更难查。
+     */
+    private static boolean isStreaming(String contentType) {
+        if (contentType == null) return true;
+        String lower = contentType.toLowerCase(Locale.ROOT);
+        return !lower.contains("json") || lower.contains("event-stream");
+    }
+
+    private static HttpURLConnection openConnection(String baseUrl, SessionConfig config) throws IOException {
+        HttpURLConnection conn = (HttpURLConnection) new URL(chatEndpoint(baseUrl)).openConnection();
         conn.setRequestMethod("POST");
         conn.setDoOutput(true);
         conn.setUseCaches(false);
@@ -75,393 +133,491 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
         if (config.apiKey != null && !config.apiKey.trim().isEmpty()) {
             conn.setRequestProperty("authorization", "Bearer " + config.apiKey.trim());
         }
-        conn.setRequestProperty("user-agent", "ZhiCodeAndroid-JavaNative/0.18");
-
-        HttpRequestTracker.Scope request = requests.begin(conn);
-        AssistantTurn turn = new AssistantTurn();
-        StreamState state = new StreamState();
-        try {
-            try (BufferedWriter writer = new BufferedWriter(
-                new OutputStreamWriter(conn.getOutputStream(), StandardCharsets.UTF_8))) {
-                writer.write(body.toString());
-            }
-
-            int status = conn.getResponseCode();
-            request.markResponseStarted();
-            if (status < 200 || status >= 300) {
-                String error = readAll(conn.getErrorStream());
-                throw new IllegalStateException("OpenAI 兼容 API HTTP " + status + ": " + truncate(error, 12000));
-            }
-
-            String contentType = conn.getContentType();
-            boolean streaming = contentType == null || !contentType.toLowerCase().contains("json")
-                || contentType.toLowerCase().contains("event-stream");
-            if (!streaming) {
-                parseNonStreaming(new JSONObject(readAll(conn.getInputStream())), state, turn, listener);
-            } else {
-                readSse(conn.getInputStream(), state, turn, listener);
-                if (!state.terminalEventSeen) {
-                    throw new IllegalStateException("stream_read_error: model stream ended before [DONE]");
-                }
-            }
-        } catch (IOException e) {
-            if (Thread.currentThread().isInterrupted()) throw e;
-            throw new ModelProvider.StreamFailure(request.failureCode(e), request.failureMessage(e), e);
-        } finally {
-            request.close();
-        }
-
-        finalizeTurn(state, turn);
-        if (turn.stopReason == null || turn.stopReason.isEmpty()) {
-            turn.stopReason = turn.toolCalls.isEmpty() ? "end_turn" : "tool_use";
-        }
-        return turn;
+        conn.setRequestProperty("user-agent", USER_AGENT);
+        return conn;
     }
 
-    private static JSONObject createRequest(SessionConfig config, String systemPrompt, JSONArray messages,
-                                            JSONArray tools) throws Exception {
+    /**
+     * 在用户给的 Base URL 上拼出 Chat 端点。
+     *
+     * <p>{@code /v1} 与 {@code /chat/completions} 都做去重：用户填的地址习惯不统一，
+     * 而拼重的结果是 404，表现却是「模型不回复」，很难联想到是地址多了两段。
+     *
+     * <p>小写化显式用 {@link Locale#ROOT}：默认 locale 下土耳其语的
+     * {@code "I".toLowerCase()} 得到的是无点的 {@code ı}，
+     * 于是一个全大写的地址会被判成「没带 /v1」而再拼一次。
+     */
+    private static String chatEndpoint(String baseUrl) {
+        String base = stripTrailingSlash(baseUrl);
+        String lower = base.toLowerCase(Locale.ROOT);
+        if (lower.endsWith("/chat/completions")) return base;
+        if (lower.endsWith("/v1")) return base + "/chat/completions";
+        return base + "/v1/chat/completions";
+    }
+
+    private static void writeRequestBody(HttpURLConnection conn, JSONObject body) throws IOException {
+        try (BufferedWriter writer = new BufferedWriter(
+                new OutputStreamWriter(conn.getOutputStream(), StandardCharsets.UTF_8))) {
+            writer.write(body.toString());
+        }
+    }
+
+    private static JSONObject buildRequestBody(SessionConfig config, String systemPrompt,
+                                               JSONArray messages, JSONArray tools) throws Exception {
         JSONObject body = new JSONObject();
         body.put("model", config.model);
-        body.put("messages", mapMessages(systemPrompt, messages));
+        body.put("messages", HistoryMapper.mapMessages(systemPrompt, messages));
         body.put("stream", true);
 
-        JSONArray mappedTools = mapTools(tools);
+        JSONArray mappedTools = HistoryMapper.mapTools(tools);
         if (mappedTools.length() > 0) {
             body.put("tools", mappedTools);
+            // 只在真的带了工具时才发这两个字段：没有工具却声明 tool_choice，
+            // 有些网关会直接报「tool_choice 需要 tools」。
             body.put("tool_choice", "auto");
             body.put("parallel_tool_calls", true);
         }
 
-        // Chat Completions compatibility intentionally uses the existing Chat
-        // effort mapping. max/ultra collapse to xhigh here; Responses/Codex keep
-        // their strict max/ultra wire semantics in OpenAIResponsesProvider.
+        // 这个协议顶格是 xhigh，所以 max/ultra 在映射层就折叠过来了。
         String effort = ReasoningMapper.openAIChatEffort(config.effort);
         if (effort != null) body.put("reasoning_effort", effort);
 
+        // maxTokens 为 0 表示「不指定」，此时不发这个字段让服务端用自己的默认值；
+        // 发一个 0 会被判成「只要 0 个 token」。
         if (config.maxTokens > 0) body.put("max_tokens", config.maxTokens);
         return body;
     }
 
-    private static JSONArray mapTools(JSONArray tools) throws Exception {
-        JSONArray out = new JSONArray();
-        if (tools == null) return out;
-        for (int i = 0; i < tools.length(); i++) {
-            JSONObject tool = tools.optJSONObject(i);
-            if (tool == null) continue;
-            String name = tool.optString("name", "").trim();
-            if (name.isEmpty()) continue;
-            JSONObject fn = new JSONObject()
-                .put("name", name)
-                .put("description", tool.optString("description", ""))
-                .put("parameters", tool.optJSONObject("input_schema") == null
-                    ? new JSONObject().put("type", "object")
-                    : tool.optJSONObject("input_schema"));
-            out.put(new JSONObject().put("type", "function").put("function", fn));
-        }
-        return out;
-    }
+    // ------------------------------------------------------------ SSE 分帧
 
-    /** Converts the normalized ZhiCode message history into Chat Completions messages. */
-    private static JSONArray mapMessages(String systemPrompt, JSONArray messages) throws Exception {
-        JSONArray out = new JSONArray();
-        if (systemPrompt != null && !systemPrompt.trim().isEmpty()) {
-            out.put(new JSONObject().put("role", "system").put("content", systemPrompt));
-        }
-        if (messages == null) return out;
-
-        for (int i = 0; i < messages.length(); i++) {
-            JSONObject message = messages.optJSONObject(i);
-            if (message == null) continue;
-            String role = message.optString("role", "user");
-            JSONArray blocks = message.optJSONArray("content");
-            if (blocks == null) continue;
-
-            if ("assistant".equals(role)) {
-                appendAssistant(out, blocks);
-            } else {
-                appendUserAndToolResults(out, blocks);
-            }
-        }
-        return out;
-    }
-
-    private static void appendAssistant(JSONArray out, JSONArray blocks) throws Exception {
-        StringBuilder text = new StringBuilder();
-        JSONArray toolCalls = new JSONArray();
-        for (int j = 0; j < blocks.length(); j++) {
-            JSONObject block = blocks.optJSONObject(j);
-            if (block == null) continue;
-            String type = block.optString("type", "");
-            if ("text".equals(type)) {
-                String v = block.optString("text", "");
-                if (!v.isEmpty()) text.append(v);
-            } else if ("tool_use".equals(type)) {
-                JSONObject fn = new JSONObject()
-                    .put("name", block.optString("name", "unknown_tool"))
-                    .put("arguments", block.optJSONObject("input") == null ? "{}" : block.optJSONObject("input").toString());
-                toolCalls.put(new JSONObject()
-                    .put("id", nonEmpty(block.optString("id", "")) ? block.optString("id") : "call_" + UUID.randomUUID())
-                    .put("type", "function")
-                    .put("function", fn));
-            }
-            // Thinking blocks are deliberately transport-internal and are not
-            // flattened into visible assistant text on replay.
-        }
-        if (text.length() == 0 && toolCalls.length() == 0) return;
-        JSONObject msg = new JSONObject().put("role", "assistant");
-        if (text.length() > 0) msg.put("content", text.toString());
-        else msg.put("content", JSONObject.NULL);
-        if (toolCalls.length() > 0) msg.put("tool_calls", toolCalls);
-        out.put(msg);
-    }
-
-    private static void appendUserAndToolResults(JSONArray out, JSONArray blocks) throws Exception {
-        JSONArray userParts = new JSONArray();
-        for (int j = 0; j < blocks.length(); j++) {
-            JSONObject block = blocks.optJSONObject(j);
-            if (block == null) continue;
-            String type = block.optString("type", "");
-            if ("tool_result".equals(type)) {
-                flushUserParts(out, userParts);
-                userParts = new JSONArray();
-                out.put(new JSONObject()
-                    .put("role", "tool")
-                    .put("tool_call_id", block.optString("tool_use_id", ""))
-                    .put("content", toolResultText(block.opt("content"))));
-            } else if ("text".equals(type)) {
-                String v = block.optString("text", "");
-                if (!v.isEmpty()) userParts.put(new JSONObject().put("type", "text").put("text", v));
-            } else if ("image".equals(type)) {
-                JSONObject source = block.optJSONObject("source");
-                if (source != null && "base64".equals(source.optString("type"))) {
-                    String media = source.optString("media_type", "image/jpeg");
-                    String data = source.optString("data", "");
-                    if (!data.isEmpty()) {
-                        userParts.put(new JSONObject().put("type", "image_url")
-                            .put("image_url", new JSONObject().put("url", "data:" + media + ";base64," + data)));
-                    }
-                }
-            }
-        }
-        flushUserParts(out, userParts);
-    }
-
-    private static void flushUserParts(JSONArray out, JSONArray parts) throws Exception {
-        if (parts == null || parts.length() == 0) return;
-        // For maximum compatibility use a plain string when the message is just
-        // one text part; use multimodal content arrays only when needed.
-        if (parts.length() == 1) {
-            JSONObject one = parts.optJSONObject(0);
-            if (one != null && "text".equals(one.optString("type"))) {
-                out.put(new JSONObject().put("role", "user").put("content", one.optString("text", "")));
-                return;
-            }
-        }
-        out.put(new JSONObject().put("role", "user").put("content", parts));
-    }
-
-    private static String toolResultText(Object content) {
-        if (content == null || content == JSONObject.NULL) return "";
-        if (content instanceof String) return (String) content;
-        if (content instanceof JSONArray) {
-            JSONArray a = (JSONArray) content;
-            StringBuilder s = new StringBuilder();
-            for (int i = 0; i < a.length(); i++) {
-                Object v = a.opt(i);
-                if (v instanceof JSONObject && "text".equals(((JSONObject) v).optString("type"))) {
-                    if (s.length() > 0) s.append('\n');
-                    s.append(((JSONObject) v).optString("text", ""));
-                } else if (v != null && v != JSONObject.NULL) {
-                    if (s.length() > 0) s.append('\n');
-                    s.append(String.valueOf(v));
-                }
-            }
-            return s.toString();
-        }
-        return String.valueOf(content);
-    }
-
-    private static void readSse(InputStream in, StreamState state, AssistantTurn turn,
-                                StreamListener listener) throws Exception {
+    private static void readSse(InputStream in, StreamDecoder decoder) throws Exception {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                if (Thread.currentThread().isInterrupted()) throw new InterruptedException("OpenAI compatible request interrupted");
-                if (!line.startsWith("data:")) continue;
-                String payload = line.substring(5).trim();
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new InterruptedException("ZhiCode request interrupted");
+                }
+                // 这个协议只有一个 data: 字段，没有 event: —— 事件类型在 payload 里。
+                if (!line.startsWith(DATA_FIELD)) continue;
+                String payload = line.substring(DATA_FIELD.length()).trim();
                 if (payload.isEmpty()) continue;
-                if ("[DONE]".equals(payload)) {
-                    state.terminalEventSeen = true;
-                    break;
+                if (DONE_MARKER.equals(payload)) {
+                    decoder.terminalEventSeen = true;
+                    return;
                 }
-                processChunk(new JSONObject(payload), state, turn, listener);
+                decoder.applyChunk(new JSONObject(payload));
             }
         }
     }
 
-    private static void processChunk(JSONObject chunk, StreamState state, AssistantTurn turn,
-                                     StreamListener listener) throws Exception {
-        JSONObject usage = chunk.optJSONObject("usage");
-        if (usage != null) {
-            turn.inputTokens = usage.optLong("prompt_tokens", turn.inputTokens);
-            turn.outputTokens = usage.optLong("completion_tokens", turn.outputTokens);
+    // ------------------------------------------------------------ 解码器
+
+    /**
+     * 把 Chat 的响应还原成一条回复。
+     *
+     * <p>无 I/O：状态是「累积的正文/思考 + 按 index 索引的工具调用」。
+     * 提供两个入口 —— {@link #applyChunk} 给流式分片，
+     * {@link #applyFullResponse} 给非流式整包 —— 二者共用同一个字段读取实现。
+     */
+    static final class StreamDecoder {
+
+        private final StreamListener listener;
+        private final AssistantTurn turn = new AssistantTurn();
+        private final StringBuilder text = new StringBuilder();
+        private final StringBuilder thinking = new StringBuilder();
+        /** 按 index 索引：工具调用的参数是分片到达的，必须找到同一个累加器。 */
+        private final Map<Integer, ToolCallAccumulator> tools = new LinkedHashMap<>();
+
+        boolean terminalEventSeen;
+
+        StreamDecoder(StreamListener listener) {
+            this.listener = listener;
+        }
+
+        /** 处理一个流式分片。 */
+        void applyChunk(JSONObject chunk) throws Exception {
+            applyUsage(chunk.optJSONObject("usage"), true);
+
+            // 有些网关把错误当成一个普通分片发过来，而不是用 HTTP 状态码。
+            JSONObject error = chunk.optJSONObject("error");
+            if (error != null) throw new IllegalStateException(error.optString("message", chunk.toString()));
+
+            JSONObject choice = firstChoice(chunk);
+            if (choice == null) return;
+            String finish = choice.optString("finish_reason", "");
+            // 空值与字面量 "null" 都表示「还没结束」：部分网关会把 null 序列化成字符串。
+            if (!finish.isEmpty() && !"null".equals(finish)) turn.stopReason = mapFinishReason(finish);
+            applyContent(choice.optJSONObject("delta"), true);
+        }
+
+        /** 处理一个非流式整包响应。 */
+        void applyFullResponse(JSONObject response) throws Exception {
+            applyUsage(response.optJSONObject("usage"), false);
+
+            JSONObject choice = firstChoice(response);
+            if (choice == null) return;
+            // 非流式一定有 finish_reason，缺失时按正常结束处理（而不是保持未知）。
+            turn.stopReason = mapFinishReason(choice.optString("finish_reason", "stop"));
+            applyContent(choice.optJSONObject("message"), false);
+        }
+
+        /**
+         * @param incremental 分片模式：arguments 是增量、usage 缺字段保留旧值；
+         *                    否则是完整值、缺字段即 0
+         */
+        private void applyUsage(JSONObject usage, boolean incremental) {
+            if (usage == null) return;
+            turn.inputTokens = usage.optLong("prompt_tokens", incremental ? turn.inputTokens : 0L);
+            turn.outputTokens = usage.optLong("completion_tokens", incremental ? turn.outputTokens : 0L);
             if (listener != null) listener.onUsage(turn.inputTokens, turn.outputTokens);
         }
 
-        JSONObject error = chunk.optJSONObject("error");
-        if (error != null) throw new IllegalStateException(error.optString("message", chunk.toString()));
+        private void applyContent(JSONObject source, boolean incremental) throws Exception {
+            if (source == null) return;
 
-        JSONArray choices = chunk.optJSONArray("choices");
-        if (choices == null || choices.length() == 0) return;
-        JSONObject choice = choices.optJSONObject(0);
-        if (choice == null) return;
-        String finish = choice.optString("finish_reason", "");
-        if (!finish.isEmpty() && !"null".equals(finish)) turn.stopReason = mapFinishReason(finish);
+            String chunk = contentText(source.opt("content"));
+            if (!chunk.isEmpty()) {
+                text.append(chunk);
+                if (listener != null) listener.onTextDelta(chunk);
+            }
 
-        JSONObject delta = choice.optJSONObject("delta");
-        if (delta == null) return;
+            // 三个字段名是同一件事的不同叫法：不同网关各自实现时选了不同的名字，
+            // 所以按优先级第一个非空的即答案，而不是把它们拼起来。
+            String reasoning = firstNonEmpty(
+                    stringValue(source.opt("reasoning_content")),
+                    stringValue(source.opt("reasoning")),
+                    stringValue(source.opt("thinking")));
+            if (!reasoning.isEmpty()) {
+                thinking.append(reasoning);
+                if (listener != null) listener.onThinkingDelta(reasoning);
+            }
 
-        String text = contentText(delta.opt("content"));
-        if (!text.isEmpty()) {
-            state.text.append(text);
-            if (listener != null) listener.onTextDelta(text);
-        }
-
-        String thinking = firstNonEmpty(
-            stringValue(delta.opt("reasoning_content")),
-            stringValue(delta.opt("reasoning")),
-            stringValue(delta.opt("thinking"))
-        );
-        if (!thinking.isEmpty()) {
-            state.thinking.append(thinking);
-            if (listener != null) listener.onThinkingDelta(thinking);
-        }
-
-        JSONArray calls = delta.optJSONArray("tool_calls");
-        if (calls != null) {
+            JSONArray calls = source.optJSONArray("tool_calls");
+            if (calls == null) return;
             for (int i = 0; i < calls.length(); i++) {
                 JSONObject call = calls.optJSONObject(i);
                 if (call == null) continue;
+                // 分片里带 index；非流式的数组元素没有 index，用数组下标兜底。
                 int index = call.has("index") ? call.optInt("index", i) : i;
-                ToolState ts = state.tools.get(index);
-                if (ts == null) { ts = new ToolState(index); state.tools.put(index, ts); }
-                String id = call.optString("id", "");
-                if (!id.isEmpty()) ts.id = id;
-                JSONObject fn = call.optJSONObject("function");
-                if (fn != null) {
-                    String name = fn.optString("name", "");
-                    if (!name.isEmpty()) ts.name = name;
-                    String args = fn.optString("arguments", "");
-                    if (!args.isEmpty()) {
-                        ts.arguments.append(args);
-                        if (listener != null) listener.onToolInputDelta(ts.id, ts.name, args);
+                ToolCallAccumulator accumulator = tools.get(index);
+                if (accumulator == null) {
+                    accumulator = new ToolCallAccumulator();
+                    tools.put(index, accumulator);
+                }
+                accumulator.apply(call, incremental, listener);
+            }
+        }
+
+        private AssistantTurn toTurn() throws JSONException {
+            // 思考在前、正文在后：与协议里模型「先推理再回答」的顺序一致。
+            if (thinking.length() > 0) {
+                turn.content.put(new JSONObject().put("type", "thinking").put("thinking", thinking.toString()));
+            }
+            if (text.length() > 0) {
+                turn.content.put(new JSONObject().put("type", "text").put("text", text.toString()));
+            }
+            for (ToolCallAccumulator accumulator : tools.values()) {
+                ToolCallAccumulator.Resolved resolved = accumulator.resolve();
+                turn.content.put(new JSONObject()
+                        .put("type", "tool_use")
+                        .put("id", resolved.id)
+                        .put("name", resolved.name)
+                        .put("input", resolved.input));
+                turn.toolCalls.add(new ToolCall(resolved.id, resolved.name, resolved.input));
+            }
+            if (!turn.toolCalls.isEmpty() && (turn.stopReason == null || "end_turn".equals(turn.stopReason))) {
+                // 有工具调用却报 end_turn 会让引擎直接结束回合、工具永远不执行，
+                // 所以这里必须纠正过来。两种路径都要纠正，故放在收尾统一处理。
+                turn.stopReason = "tool_use";
+            }
+            if (turn.stopReason == null || turn.stopReason.isEmpty()) {
+                turn.stopReason = turn.toolCalls.isEmpty() ? "end_turn" : "tool_use";
+            }
+            return turn;
+        }
+
+        private static JSONObject firstChoice(JSONObject envelope) {
+            JSONArray choices = envelope.optJSONArray("choices");
+            if (choices == null || choices.length() == 0) return null;
+            return choices.optJSONObject(0);
+        }
+    }
+
+    /** 一个工具调用的累积器：id/name 取到一次就不再改，参数按需追加。 */
+    static final class ToolCallAccumulator {
+
+        private String id;
+        private String name;
+        private final StringBuilder arguments = new StringBuilder();
+
+        void apply(JSONObject call, boolean incremental, StreamListener listener) {
+            // 只在非空时覆盖：分片里只有第一个带 id/name，后面的空值不能把已有值抹掉。
+            String incomingId = call.optString("id", "");
+            if (!incomingId.isEmpty()) id = incomingId;
+
+            JSONObject function = call.optJSONObject("function");
+            if (function == null) return;
+            String incomingName = function.optString("name", "");
+            if (!incomingName.isEmpty()) name = incomingName;
+
+            String fragment = function.optString("arguments", "");
+            // 完整值模式下即使是空串也要写入（它会变成 {}），分片模式下空片段没有意义。
+            if (fragment.isEmpty() && incremental) return;
+            arguments.append(fragment);
+            if (incremental && listener != null) listener.onToolInputDelta(id, name, fragment);
+        }
+
+        /** 一条工具调用的最终形态；缺失的 id/name 在这里兜底。 */
+        Resolved resolve() {
+            return new Resolved(
+                    id == null || id.trim().isEmpty() ? "call_" + UUID.randomUUID() : id,
+                    name == null || name.trim().isEmpty() ? UNKNOWN_TOOL : name,
+                    parseToolArguments(arguments.toString()));
+        }
+
+        static final class Resolved {
+            final String id;
+            final String name;
+            final JSONObject input;
+
+            Resolved(String id, String name, JSONObject input) {
+                this.id = id;
+                this.name = name;
+                this.input = input;
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ 历史翻译
+
+    /**
+     * 把引擎的 Anthropic 形状历史翻译成 Chat Completions 的 messages。
+     *
+     * <p>四件事必须做对，做错了都不报错，只是模型看不到上下文：
+     * <ol>
+     *   <li><b>system 是 messages 的第一条</b>，不是顶层字段；</li>
+     *   <li><b>assistant 的多个 text 块要合成一个字符串</b>，而 tool_use 变成
+     *       {@code tool_calls[]}（arguments 是 JSON <b>字符串</b>，不是对象）；</li>
+     *   <li><b>tool_result 必须单独成一条 {@code role:"tool"} 消息</b>，
+     *       不能混在 user 里 —— 混了会被判成「工具调用没有对应结果」而拒绝请求；</li>
+     *   <li><b>thinking 块要丢掉</b>：它是传输层的产物，塞进正文会让模型
+     *       把自己上一轮的内部推理当成说过的话。</li>
+     * </ol>
+     *
+     * <p>另外 {@code flushUserParts} 有个刻意的优化：只有一个 text 片段时降级成
+     * 纯字符串 {@code content}。这是为了兼容那些不认内容数组的老网关 ——
+     * 数组形式在新网关上正确，但在老网关上会被当成「不支持多模态」而拒绝。
+     */
+    static final class HistoryMapper {
+
+        private HistoryMapper() {}
+
+        static JSONArray mapMessages(String systemPrompt, JSONArray messages) throws Exception {
+            JSONArray out = new JSONArray();
+            if (systemPrompt != null && !systemPrompt.trim().isEmpty()) {
+                out.put(new JSONObject().put("role", "system").put("content", systemPrompt));
+            }
+            if (messages == null) return out;
+
+            for (int i = 0; i < messages.length(); i++) {
+                JSONObject message = messages.optJSONObject(i);
+                if (message == null) continue;
+                JSONArray blocks = message.optJSONArray("content");
+                if (blocks == null) continue;
+                if ("assistant".equals(message.optString("role", "user"))) {
+                    appendAssistant(out, blocks);
+                } else {
+                    appendUserAndToolResults(out, blocks);
+                }
+            }
+            return out;
+        }
+
+        static JSONArray mapTools(JSONArray tools) throws Exception {
+            JSONArray out = new JSONArray();
+            if (tools == null) return out;
+            for (int i = 0; i < tools.length(); i++) {
+                JSONObject tool = tools.optJSONObject(i);
+                if (tool == null) continue;
+                String name = tool.optString("name", "").trim();
+                // 无名工具直接跳过：发出去会被服务端拒绝整份请求，
+                // 而拒绝信息不会指出是哪个工具的问题。
+                if (name.isEmpty()) continue;
+                JSONObject schema = tool.optJSONObject("input_schema");
+                JSONObject function = new JSONObject()
+                        .put("name", name)
+                        .put("description", tool.optString("description", ""))
+                        .put("parameters", schema == null ? new JSONObject().put("type", "object") : schema);
+                out.put(new JSONObject().put("type", "function").put("function", function));
+            }
+            return out;
+        }
+
+        private static void appendAssistant(JSONArray out, JSONArray blocks) throws Exception {
+            StringBuilder text = new StringBuilder();
+            JSONArray toolCalls = new JSONArray();
+            for (int i = 0; i < blocks.length(); i++) {
+                JSONObject block = blocks.optJSONObject(i);
+                if (block == null) continue;
+                String type = block.optString("type", "");
+                if ("text".equals(type)) {
+                    String value = block.optString("text", "");
+                    if (!value.isEmpty()) text.append(value);
+                } else if ("tool_use".equals(type)) {
+                    JSONObject input = block.optJSONObject("input");
+                    JSONObject function = new JSONObject()
+                            .put("name", block.optString("name", UNKNOWN_TOOL))
+                            // arguments 必须是字符串形式的 JSON。传对象在某些网关能过，
+                            // 在另一些网关会被判成协议错误 —— 字符串是两边都接受的形状。
+                            .put("arguments", input == null ? "{}" : input.toString());
+                    String id = block.optString("id", "");
+                    toolCalls.put(new JSONObject()
+                            .put("id", id.trim().isEmpty() ? "call_" + UUID.randomUUID() : id)
+                            .put("type", "function")
+                            .put("function", function));
+                }
+                // thinking 块在这里被有意丢弃，见类注释第 4 条。
+            }
+            if (text.length() == 0 && toolCalls.length() == 0) return;
+            JSONObject message = new JSONObject().put("role", "assistant");
+            // 只有工具调用、没有正文时 content 必须是显式 null 而不是缺字段：
+            // 有些网关要求带 tool_calls 的消息必须存在 content 键。
+            message.put("content", text.length() > 0 ? text.toString() : JSONObject.NULL);
+            if (toolCalls.length() > 0) message.put("tool_calls", toolCalls);
+            out.put(message);
+        }
+
+        private static void appendUserAndToolResults(JSONArray out, JSONArray blocks) throws Exception {
+            JSONArray pendingUserParts = new JSONArray();
+            for (int i = 0; i < blocks.length(); i++) {
+                JSONObject block = blocks.optJSONObject(i);
+                if (block == null) continue;
+                String type = block.optString("type", "");
+                if ("tool_result".equals(type)) {
+                    // 工具结果之前累积的 user 片段必须先落盘，否则顺序会被打乱：
+                    // 它们本该在工具结果之前发给模型。
+                    flushUserParts(out, pendingUserParts);
+                    pendingUserParts = new JSONArray();
+                    out.put(new JSONObject()
+                            .put("role", "tool")
+                            .put("tool_call_id", block.optString("tool_use_id", ""))
+                            .put("content", toolResultText(block.opt("content"))));
+                } else if ("text".equals(type)) {
+                    String value = block.optString("text", "");
+                    if (!value.isEmpty()) {
+                        pendingUserParts.put(new JSONObject().put("type", "text").put("text", value));
                     }
+                } else if ("image".equals(type)) {
+                    JSONObject source = block.optJSONObject("source");
+                    if (source == null || !"base64".equals(source.optString("type"))) continue;
+                    String data = source.optString("data", "");
+                    // 空 data 不产出片段：一个空的 data URI 会被服务端判成非法图片。
+                    if (data.isEmpty()) continue;
+                    String mediaType = source.optString("media_type", "image/jpeg");
+                    pendingUserParts.put(new JSONObject()
+                            .put("type", "image_url")
+                            .put("image_url", new JSONObject()
+                                    .put("url", "data:" + mediaType + ";base64," + data)));
                 }
             }
+            flushUserParts(out, pendingUserParts);
         }
-    }
 
-    private static void parseNonStreaming(JSONObject response, StreamState state, AssistantTurn turn,
-                                          StreamListener listener) throws Exception {
-        JSONObject usage = response.optJSONObject("usage");
-        if (usage != null) {
-            turn.inputTokens = usage.optLong("prompt_tokens", 0);
-            turn.outputTokens = usage.optLong("completion_tokens", 0);
-            if (listener != null) listener.onUsage(turn.inputTokens, turn.outputTokens);
-        }
-        JSONArray choices = response.optJSONArray("choices");
-        if (choices == null || choices.length() == 0) return;
-        JSONObject choice = choices.optJSONObject(0);
-        if (choice == null) return;
-        turn.stopReason = mapFinishReason(choice.optString("finish_reason", "stop"));
-        JSONObject message = choice.optJSONObject("message");
-        if (message == null) return;
-
-        String text = contentText(message.opt("content"));
-        if (!text.isEmpty()) {
-            state.text.append(text);
-            if (listener != null) listener.onTextDelta(text);
-        }
-        String thinking = firstNonEmpty(
-            stringValue(message.opt("reasoning_content")),
-            stringValue(message.opt("reasoning")),
-            stringValue(message.opt("thinking"))
-        );
-        if (!thinking.isEmpty()) {
-            state.thinking.append(thinking);
-            if (listener != null) listener.onThinkingDelta(thinking);
-        }
-        JSONArray calls = message.optJSONArray("tool_calls");
-        if (calls != null) {
-            for (int i = 0; i < calls.length(); i++) {
-                JSONObject call = calls.optJSONObject(i);
-                if (call == null) continue;
-                ToolState ts = new ToolState(i);
-                ts.id = call.optString("id", "");
-                JSONObject fn = call.optJSONObject("function");
-                if (fn != null) {
-                    ts.name = fn.optString("name", "");
-                    ts.arguments.append(fn.optString("arguments", ""));
+        private static void flushUserParts(JSONArray out, JSONArray parts) throws Exception {
+            if (parts == null || parts.length() == 0) return;
+            if (parts.length() == 1) {
+                JSONObject only = parts.optJSONObject(0);
+                if (only != null && "text".equals(only.optString("type"))) {
+                    // 单个纯文本片段降级成字符串，兼容不认内容数组的老网关。
+                    out.put(new JSONObject().put("role", "user").put("content", only.optString("text", "")));
+                    return;
                 }
-                state.tools.put(i, ts);
             }
+            out.put(new JSONObject().put("role", "user").put("content", parts));
+        }
+
+        /**
+         * 把工具结果的内容压成纯文本。
+         *
+         * <p>这个协议的工具结果只能是字符串（不像 Anthropic 可以带图片块）。
+         * 数组里的 text 片段取 {@code text} 字段，其它类型的块**原样序列化后带上**。
+         *
+         * <p>关于后半句：直接把 JSON 文本塞进去看起来很难看，但它是**无损**的 ——
+         * 换成「[图片已省略]」这样的占位符会让模型完全不知道那里有什么，
+         * 而带上原始结构至少还能看出「这里有一段非文本内容」以及它的形状。
+         * 这是一个刻意保留的既有行为，不是遗漏的重构。
+         */
+        private static String toolResultText(Object content) {
+            if (content == null || content == JSONObject.NULL) return "";
+            if (content instanceof String) return (String) content;
+            if (content instanceof JSONArray) {
+                JSONArray array = (JSONArray) content;
+                StringBuilder out = new StringBuilder();
+                for (int i = 0; i < array.length(); i++) {
+                    Object item = array.opt(i);
+                    if (item == null || item == JSONObject.NULL) continue;
+                    String piece = item instanceof JSONObject
+                            ? textOf((JSONObject) item)
+                            : String.valueOf(item);
+                    if (out.length() > 0) out.append('\n');
+                    out.append(piece);
+                }
+                return out.toString();
+            }
+            return String.valueOf(content);
+        }
+
+        private static String textOf(JSONObject block) {
+            if ("text".equals(block.optString("type"))) return block.optString("text", "");
+            // 非文本块：连同结构一起带上，保住「这里有什么」这条信息。
+            return block.toString();
         }
     }
 
-    private static void finalizeTurn(StreamState state, AssistantTurn turn) throws Exception {
-        if (state.thinking.length() > 0) {
-            turn.content.put(new JSONObject().put("type", "thinking").put("thinking", state.thinking.toString()));
-        }
-        if (state.text.length() > 0) {
-            turn.content.put(new JSONObject().put("type", "text").put("text", state.text.toString()));
-        }
-        for (ToolState ts : state.tools.values()) {
-            String id = nonEmpty(ts.id) ? ts.id : "call_" + UUID.randomUUID();
-            String name = nonEmpty(ts.name) ? ts.name : "unknown_tool";
-            JSONObject input = parseObjectOrRaw(ts.arguments.toString());
-            turn.content.put(new JSONObject().put("type", "tool_use").put("id", id).put("name", name).put("input", input));
-            turn.toolCalls.add(new ToolCall(id, name, input));
-        }
-        if (!turn.toolCalls.isEmpty() && (turn.stopReason == null || "end_turn".equals(turn.stopReason))) {
-            turn.stopReason = "tool_use";
-        }
-    }
+    // ------------------------------------------------------------ 小工具
 
-    private static JSONObject parseObjectOrRaw(String raw) {
-        if (raw == null || raw.trim().isEmpty()) return new JSONObject();
-        try { return new JSONObject(raw); }
-        catch (JSONException e) {
-            try { return new JSONObject().put("_raw_invalid_json", raw); }
-            catch (JSONException impossible) { return new JSONObject(); }
-        }
-    }
-
+    /**
+     * 从 content 里取文本。它可能是字符串，也可能是内容块数组。
+     *
+     * <p>数组形式出现在两种情况下：模型开了多模态输出，或者网关自己把
+     * 纯文本包成了数组。两种都要能读。
+     */
     private static String contentText(Object content) {
         if (content == null || content == JSONObject.NULL) return "";
         if (content instanceof String) return (String) content;
         if (content instanceof JSONArray) {
+            JSONArray array = (JSONArray) content;
             StringBuilder out = new StringBuilder();
-            JSONArray a = (JSONArray) content;
-            for (int i = 0; i < a.length(); i++) {
-                JSONObject p = a.optJSONObject(i);
-                if (p == null) continue;
-                if ("text".equals(p.optString("type"))) out.append(p.optString("text", ""));
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject part = array.optJSONObject(i);
+                if (part == null) continue;
+                if ("text".equals(part.optString("type"))) out.append(part.optString("text", ""));
             }
             return out.toString();
         }
         return String.valueOf(content);
     }
 
-    private static String stringValue(Object v) {
-        return v instanceof String ? (String) v : "";
+    private static String stringValue(Object value) {
+        return value instanceof String ? (String) value : "";
     }
 
     private static String firstNonEmpty(String... values) {
         if (values == null) return "";
-        for (String v : values) if (v != null && !v.isEmpty()) return v;
+        for (String value : values) {
+            if (value != null && !value.isEmpty()) return value;
+        }
         return "";
     }
 
+    /**
+     * 把服务端的 finish_reason 映射成引擎认识的 stopReason。
+     *
+     * <p>三个特殊值必须映射：{@code tool_calls} 决定引擎去执行工具、
+     * {@code length} 决定它是否续跑被截断的回答、{@code stop} 是正常结束。
+     * 认不出的原样透传 —— 引擎对未知值按「正常结束」处理，
+     * 而编造一个映射会让未来新增的值被误判。
+     */
     private static String mapFinishReason(String reason) {
         if (reason == null) return null;
         if ("tool_calls".equals(reason) || "function_call".equals(reason)) return "tool_use";
@@ -470,29 +626,45 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
         return reason;
     }
 
-    private static String chatEndpoint(String baseUrl) {
-        String base = baseUrl.trim();
-        while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
-        String lower = base.toLowerCase();
-        if (lower.endsWith("/chat/completions")) return base;
-        if (lower.endsWith("/v1")) return base + "/chat/completions";
-        return base + "/v1/chat/completions";
+    /**
+     * 解工具入参。
+     *
+     * <p>解不开时把原文放进 {@code _raw_invalid_json}，而不是抛异常：
+     * Agent 能在工具结果里看到坏掉的原文，从而判断是模型发坏了还是自己拼错了。
+     */
+    private static JSONObject parseToolArguments(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return new JSONObject();
+        try {
+            return new JSONObject(raw);
+        } catch (JSONException malformed) {
+            try {
+                return new JSONObject().put("_raw_invalid_json", raw);
+            } catch (JSONException impossible) {
+                return new JSONObject();
+            }
+        }
+    }
+
+    private static String stripTrailingSlash(String url) {
+        String out = url == null ? "" : url.trim();
+        while (out.endsWith("/")) out = out.substring(0, out.length() - 1);
+        return out;
     }
 
     private static String readAll(InputStream in) throws Exception {
         if (in == null) return "";
         StringBuilder out = new StringBuilder();
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
             String line;
-            while ((line = r.readLine()) != null) out.append(line).append('\n');
+            while ((line = reader.readLine()) != null) out.append(line).append('\n');
         }
         return out.toString();
     }
 
-    private static String truncate(String value, int max) {
+    private static String truncate(String value) {
         if (value == null) return "";
-        return value.length() <= max ? value : value.substring(0, max) + "\n…truncated…";
+        return value.length() <= MAX_ERROR_CHARS
+                ? value
+                : value.substring(0, MAX_ERROR_CHARS) + "\n…truncated…";
     }
-
-    private static boolean nonEmpty(String value) { return value != null && !value.trim().isEmpty(); }
 }
