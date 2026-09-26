@@ -153,8 +153,46 @@ class RuntimeInstaller(private val context: Context) {
 
     // ------------------------------------------------------------ 公开接口
 
-    /** 环境是否已安装就绪：marker 与 shell 都在。 */
+    /**
+     * 环境是否**可用**：marker 与 shell 都在。
+     *
+     * ⚠️ 这里**不比对版本** —— 它的语义是"能不能用"，用于决定要不要立刻拦住用户。
+     * 版本落后不表示不能用（大不了 `lsns` 起不来），所以不该让这个返回 false
+     * 去触发一次几十秒的重装。需要"该不该重装"请看 [isUpToDate]。
+     */
     fun isInstalled(): Boolean = markerFile().isFile && bashFile().isFile
+
+    /**
+     * 已装环境是否与当前 APK 内置的这份**是同一版**。
+     *
+     * marker 里存的就是"版本三元组"（版本 / sha256 / 来源），一直是为这件事准备的
+     * （见 [install] 结尾的写入），只是此前没有任何地方读它 —— 结果是换 APK 之后
+     * `usr` 永远停在旧的那份，`isInstalled()` 照样返回 true，谁都不会去重装。
+     *
+     * 判定用**版本串 + sha256**：
+     *  · 版本串覆盖"同一份 artifact 但本地后处理不同"（`+prune2` → `+prune3`）；
+     *  · sha256 覆盖"版本串忘了改" —— 重新裁剪后体积内容都变了，指纹一定变。
+     * 两者任一不同就重装，宁可多装一次也不要留着不一致的环境。
+     *
+     * marker 读不出来 / 内容为空时返回 `false`（当作需要重装）：
+     * 旧版本装的环境可能没有这个文件，这正该重装。
+     */
+    fun isUpToDate(): Boolean {
+        if (!isInstalled()) return false
+        val text = runCatching { markerFile().readText() }.getOrNull() ?: return false
+        val lines = text.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        if (lines.size < 2) return false
+        return lines[0] == BOOTSTRAP_VERSION && lines[1].equals(BOOTSTRAP_SHA256, ignoreCase = true)
+    }
+
+    /** 已装环境的版本串（marker 第一行）。没有就返回 null，用于界面提示。 */
+    fun installedVersion(): String? =
+        runCatching { markerFile().readText().lineSequence().firstOrNull()?.trim() }
+            .getOrNull()
+            ?.takeIf { it.isNotEmpty() }
+
+    /** 当前 APK 内置的版本串，用于界面提示（"从 A 升到 B"）。 */
+    fun bundledVersion(): String = BOOTSTRAP_VERSION
 
     /**
      * 幂等修复已安装的环境：清掉半成品目录、补齐 apt/dpkg 兼容层、清理孤儿包管理器。

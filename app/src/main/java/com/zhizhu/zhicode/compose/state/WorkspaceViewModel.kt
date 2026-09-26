@@ -245,6 +245,56 @@ class WorkspaceViewModel(
 
     init {
         initSessionState()
+        autoInstallRuntimeIfStale()
+    }
+
+    /**
+     * 启动时检查内置 Termux 环境是否为**当前 APK 内置的那一版**，不是就自动重装。
+     *
+     * ## 为什么需要它
+     *
+     * marker 里一直存着"版本三元组"（版本 / sha256 / 来源），最初就是为这件事写的，
+     * 但此前**没有任何地方读它**。后果是：换了内置 bootstrap 的 APK 装上去以后，
+     * `usr` 永远停在旧的那份 —— `isInstalled()` 只查文件存不存在，照样返回 true，
+     * 于是谁都不会去重装，只能手动卸载重来（会连 HOME 一起丢）。
+     *
+     * ## 与手动触发的区别
+     *
+     * 不弹「环境自检」窗口、也不问一句：用户装 APK 的意图就是要用新的那版，
+     * 多问一次没有意义。进度照常回灌到状态里，`environmentOpen` 时能看到。
+     *
+     * ## HOME 不受影响
+     *
+     * [RuntimeInstaller.install] 只换 `usr`（`activatePrefix` 换的是前缀目录），
+     * `home` 从头到尾没动过 —— 所以会话历史、项目文件都在。
+     * 但**用 apt 装过的包会丢**（它们装在 `usr` 里），这一点写在
+     * [RuntimeInstaller.isUpToDate] 的文档里。
+     *
+     * 失败不抛给调用方：自动流程出错就当没做，用户仍可手动重装。
+     */
+    private fun autoInstallRuntimeIfStale() {
+        // IO 线程：读 marker、比对 sha256 都是磁盘操作
+        viewModelScope.launch(Dispatchers.IO) {
+            val stale = runCatching { !installer.isUpToDate() }.getOrDefault(false)
+            if (!stale) return@launch
+            // 环境**根本没装**时也走这里（首次启动），与手动安装是同一条路径。
+            val reason = installer.installedVersion()?.let { "内置环境已更新，正在升级…" }
+                ?: "正在初始化内置环境…"
+            // "抢占"必须放在同一次 _state.update 里：启动自动装与用户手动点「初始化」
+            // 可能同时到达，分开的 check-then-set 会让两边都跑一遍（第二次会把
+            // staging 删掉再重建，前一次的进度全乱）。与 turnSessionId 是同一类竞态。
+            var claimed = false
+            _state.update { s ->
+                if (s.runtimeInstalling) {
+                    s
+                } else {
+                    claimed = true
+                    s.copy(runtimeInstalling = true, runtimeProgress = 0, runtimeMessage = reason)
+                }
+            }
+            if (!claimed) return@launch
+            installRuntimeBlocking(reason)
+        }
     }
 
     /**
@@ -2884,13 +2934,36 @@ class WorkspaceViewModel(
     // ---------- 内置 Termux 运行环境 ----------
 
     /**
+     * 追加「内置环境版本」一节到自检报告。
+     *
+     * 为什么要单独列出来：以前换 APK 之后 `usr` 会悄悄停在旧的那份，界面上完全看不出来
+     * （`isInstalled()` 只查文件在不在）。现在自检报告里能直接读到"已装哪版 / 内置哪版"，
+     * 不一致时还给出说明 —— 排障时一眼能定位。
+     */
+    private fun bootstrapVersionSection(): String {
+        val installed = runCatching { installer.installedVersion() }.getOrNull()
+        val bundled = runCatching { installer.bundledVersion() }.getOrNull() ?: return ""
+        val same = runCatching { installer.isUpToDate() }.getOrDefault(false)
+        return buildString {
+            append("\n\n## 内置环境版本\n")
+            append("- 已装：").append(installed ?: "（无标记文件，视为未初始化）").append('\n')
+            append("- 内置：").append(bundled).append('\n')
+            append(
+                if (same) "- 状态：一致 ✅"
+                else "- 状态：**不一致** — 启动时会自动重装 `usr`（`home` 不受影响，\n" +
+                    "  但用 apt 装过的包会丢，因为它们在 `usr` 里）"
+            )
+        }
+    }
+
+    /**
      * 生成自检报告。
      *
      * 刻意**绝不抛异常**：这是排障入口，它自己崩掉或什么都不显示，就等于把唯一的诊断手段也弄没了。
      * 探测失败时把失败原因当作报告正文显示出来，至少还能看到是哪一项炸的。
      */
     private fun buildEnvironmentReport(): String = runCatching {
-        EnvDoctor.report(getApplication())
+        EnvDoctor.report(getApplication()) + bootstrapVersionSection()
     }.getOrElse { error ->
         "# 蜘蛛 · 环境自检\n\n" +
             "自检本身失败了：\n" +
@@ -2936,37 +3009,46 @@ class WorkspaceViewModel(
         _state.update {
             it.copy(runtimeInstalling = true, runtimeProgress = 0, runtimeMessage = "正在准备…")
         }
-        viewModelScope.launch(Dispatchers.IO) {
-            val ok = runCatching {
-                installer.install { message, percent ->
-                    _state.update { it.copy(runtimeMessage = message, runtimeProgress = percent) }
-                }
-            }.onFailure { error ->
-                _state.update {
-                    it.copy(
-                        runtimeInstalling = false,
-                        runtimeMessage = "初始化失败：${error.message ?: error.javaClass.simpleName}",
-                    )
-                }
-            }.isSuccess
+        viewModelScope.launch(Dispatchers.IO) { installRuntimeBlocking("正在准备…") }
+    }
 
-            if (ok) {
-                val reportText = buildEnvironmentReport()
-                _state.update {
-                    it.copy(
-                        runtimeInstalling = false,
-                        runtimeProgress = 100,
-                        runtimeMessage = "内置 Termux 环境已就绪",
-                        runtimeReady = installer.isInstalled(),
-                        environmentReport = reportText,
-                    )
-                }
-                // home 目录是随运行环境一起出现的，所以工作区只能在这之后创建。
-                // 不创建的话：变更面板永远显示"项目目录不存在"，
-                // 终端的工作目录会回退到 home，会话也会落在一个不存在的项目键下。
-                ensureWorkspace()
+    /**
+     * 真正干活的那一段。**必须在 IO 线程调用**（解压 33MB、建 2689 个符号链接）。
+     *
+     * 抽出来是因为有两处入口：用户手动点「初始化」（[installRuntime]）与启动时的
+     * 版本过期自动重装（[autoInstallRuntimeIfStale]）。两处必须走同一段逻辑 ——
+     * 分别写一份必然走样（一处忘了 `ensureWorkspace()`，另一处忘了更新报告）。
+     */
+    private suspend fun installRuntimeBlocking(preparing: String) {
+        _state.update { it.copy(runtimeMessage = preparing) }
+        val ok = runCatching {
+            installer.install { message, percent ->
+                _state.update { it.copy(runtimeMessage = message, runtimeProgress = percent) }
             }
+        }.onFailure { error ->
+            _state.update {
+                it.copy(
+                    runtimeInstalling = false,
+                    runtimeMessage = "初始化失败：${error.message ?: error.javaClass.simpleName}",
+                )
+            }
+        }.isSuccess
+
+        if (!ok) return
+        val reportText = buildEnvironmentReport()
+        _state.update {
+            it.copy(
+                runtimeInstalling = false,
+                runtimeProgress = 100,
+                runtimeMessage = "内置 Termux 环境已就绪",
+                runtimeReady = installer.isInstalled(),
+                environmentReport = reportText,
+            )
         }
+        // home 目录是随运行环境一起出现的，所以工作区只能在这之后创建。
+        // 不创建的话：变更面板永远显示"项目目录不存在"，
+        // 终端的工作目录会回退到 home，会话也会落在一个不存在的项目键下。
+        ensureWorkspace()
     }
 
     /** 幂等修复：清半成品目录、补齐 apt/dpkg 兼容层。适用于 apt 升级过或上次中断。 */
