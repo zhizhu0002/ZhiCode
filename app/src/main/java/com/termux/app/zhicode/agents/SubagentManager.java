@@ -149,15 +149,28 @@ public final class SubagentManager {
         StringBuilder b=new StringBuilder("\n\n# Subagent mode\nYou are running as the `").append(d.name).append("` subagent in a separate context window. Subagents cannot spawn other subagents. Return only the result needed by the parent agent.\n");
         if(!d.prompt.isEmpty())b.append("\n# Subagent instructions\n").append(d.prompt).append('\n');
         if(!d.skills.isEmpty())for(String skill:d.skills){String body=readSkill(skill);if(!body.isEmpty())b.append("\n# Preloaded skill: ").append(skill).append("\n").append(body).append('\n');}
-        if(!d.memory.isEmpty()&&!"none".equalsIgnoreCase(d.memory))b.append("\nPersistent memory scope requested: ").append(d.memory).append(". Store concise durable findings under ~/.iq/agent-memory/").append(d.name).append(" when useful.\n");
+        if(!d.memory.isEmpty()&&!"none".equalsIgnoreCase(d.memory))b.append("\nPersistent memory scope requested: ").append(d.memory).append(". Store concise durable findings under ~/").append(TermuxConstants.DATA_DIR_NAME).append("/agent-memory/").append(d.name).append(" when useful.\n");
         return b.toString();
     }
-    private String readSkill(String name){for(File f:new File[]{new File(TermuxConstants.TERMUX_HOME_DIR_PATH,".iq/skills/"+name+"/SKILL.md")}){try{if(f.isFile())return readFileText(f);}catch(Exception ignored){}}return "";}
+    /**
+     * 读技能正文。
+     *
+     * <p>HOME 下的新名与旧名都看一遍：新名是当前写入位置，旧名用于兼容
+     * 用户在改名之前就已经放好的技能（HOME 是我们的目录，会做一次性搬迁，
+     * 但搬迁失败时这里仍应读得到）。
+     */
+    private String readSkill(String name){
+        for(File dir:new File[]{new File(TermuxConstants.dataDir(),"skills"),new File(TermuxConstants.legacyDataDir(),"skills")}){
+            File f=new File(dir,name+"/SKILL.md");
+            try{if(f.isFile())return readFileText(f);}catch(Exception ignored){}
+        }
+        return "";
+    }
 
     private static void applyModel(SessionConfig parent,SessionConfig child,AgentDefinition def,String invocation){String requested=invocation==null||invocation.isEmpty()?def.model:invocation;if(requested==null||requested.isEmpty()||"inherit".equalsIgnoreCase(requested))return;if(Arrays.asList("haiku","sonnet","opus").contains(requested.toLowerCase(Locale.US))) child.model=parent.model; else child.model=requested;}
     private static String validateCwd(String cwd)throws Exception{File f=new File(cwd).getCanonicalFile();if(!f.isDirectory())throw new IllegalArgumentException("Subagent cwd does not exist: "+cwd);return f.getAbsolutePath();}
 
-    private String createWorktree(String project,String id)throws Exception{String root=new File(TermuxConstants.TERMUX_HOME_DIR_PATH,".iq/worktrees/"+id).getAbsolutePath();String q=shellQuote(root);String cmd="git -C "+shellQuote(project)+" rev-parse --is-inside-work-tree >/dev/null && mkdir -p "+shellQuote(new File(root).getParent())+" && git -C "+shellQuote(project)+" worktree add --detach "+q+" HEAD";TermuxShellExecutor.Result r=new TermuxShellExecutor(context).execute(cmd,project,120000);if(r.exitCode!=0)throw new IllegalStateException("Failed to create agent worktree: "+r.combined());return root;}
+    private String createWorktree(String project,String id)throws Exception{String root=new File(TermuxConstants.dataDir(),"worktrees/"+id).getAbsolutePath();String q=shellQuote(root);String cmd="git -C "+shellQuote(project)+" rev-parse --is-inside-work-tree >/dev/null && mkdir -p "+shellQuote(new File(root).getParent())+" && git -C "+shellQuote(project)+" worktree add --detach "+q+" HEAD";TermuxShellExecutor.Result r=new TermuxShellExecutor(context).execute(cmd,project,120000);if(r.exitCode!=0)throw new IllegalStateException("Failed to create agent worktree: "+r.combined());return root;}
     private void cleanupWorktreeIfClean(String project,String wt){if(wt==null||wt.isEmpty())return;try{TermuxShellExecutor sh=new TermuxShellExecutor(context);TermuxShellExecutor.Result dirty=sh.execute("git status --porcelain",wt,30000);if(dirty.exitCode==0&&dirty.combined().trim().isEmpty())sh.execute("git -C "+shellQuote(project)+" worktree remove --force "+shellQuote(wt),project,60000);}catch(Exception ignored){}}
     private static String shellQuote(String s){return "'"+(s==null?"":s.replace("'","'\\''"))+"'";}
     private static String worktreeNotice(AgentTask t){return t.worktreePath==null||t.worktreePath.isEmpty()?"":"\n\nworktree: "+t.worktreePath;}
@@ -165,7 +178,7 @@ public final class SubagentManager {
 
     private static String readFileText(File f)throws Exception{byte[]b=new byte[(int)f.length()];try(java.io.FileInputStream in=new java.io.FileInputStream(f)){int o=0,n;while(o<b.length&&(n=in.read(b,o,b.length-o))>0)o+=n;}return new String(b,StandardCharsets.UTF_8);}
 
-    private void persist(AgentTask t){try{File dir=new File(TermuxConstants.TERMUX_HOME_DIR_PATH,".iq/agent-tasks");dir.mkdirs();File f=new File(dir,t.id+".json");try(FileOutputStream o=new FileOutputStream(f,false)){o.write(t.toJson().toString(2).getBytes(StandardCharsets.UTF_8));}}catch(Exception ignored){}}
+    private void persist(AgentTask t){try{File dir=new File(TermuxConstants.dataDir(),"agent-tasks");dir.mkdirs();File f=new File(dir,t.id+".json");try(FileOutputStream o=new FileOutputStream(f,false)){o.write(t.toJson().toString(2).getBytes(StandardCharsets.UTF_8));}}catch(Exception ignored){}}
     private volatile long lastPersist;
     private void persistThrottled(AgentTask t){long now=System.currentTimeMillis();if(now-lastPersist>500){lastPersist=now;persist(t);}}
 

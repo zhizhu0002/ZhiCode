@@ -31,7 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 会话历史的持久化。
  *
  * <h3>格式与布局</h3>
- * 每个规范化的项目路径拥有自己的历史命名空间：{@code ~/.iq/projects/<路径键>/}。
+ * 每个规范化的项目路径拥有自己的历史命名空间：{@code ~/.zhicode/projects/<路径键>/}。
  * 一次会话就是其中一个 {@code <时间>-<随机>.jsonl} 文件 ——
  * <b>一行一个 JSON 对象</b>，追加写。选 JSONL 而不是单个大 JSON 有两个实际理由：
  * 追加不需要重写整个文件；而且它天然是人类可读、可手工修复的。
@@ -253,12 +253,23 @@ public final class SessionStore {
 
     /** 旧版全局会话目录。仅用于迁移与兼容读取，新会话不再写这里。 */
     public static File sessionDirectory() {
-        return new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".iq/sessions");
+        return new File(TermuxConstants.legacyDataDir(), "sessions");
     }
 
     /** 按项目分目录的根。 */
     public static File projectsDirectory() {
-        return new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".iq/projects");
+        return new File(TermuxConstants.dataDir(), "projects");
+    }
+
+    /**
+     * 按项目分目录的根（旧名），只读兼容。
+     *
+     * <p>正常启动时 {@code $HOME/.iq} 会被整体搬成 {@code $HOME/.zhicode}，
+     * 所以它通常不存在。它存在只有一种可能：搬迁没成功（权限、跨设备）。
+     * 此时若只认新名，用户会以为历史会话全丢了 —— 所以列表与删除都要认这两处。
+     */
+    public static File legacyProjectsDirectory() {
+        return new File(TermuxConstants.legacyDataDir(), "projects");
     }
 
     /** 某项目的会话目录；顺带确保它存在并刷新项目索引。 */
@@ -523,14 +534,12 @@ public final class SessionStore {
 
     // ------------------------------------------------------------ 列表与摘要
 
-    /** 全部会话（旧全局目录 + 各项目目录），按活跃时间倒序。 */
+    /** 全部会话（旧全局目录 + 新旧两个项目根），按活跃时间倒序。 */
     public static List<SessionSummary> listSessions() {
         List<SessionSummary> out = new ArrayList<>();
         addSummaries(out, sessionDirectory());
-        File[] projectDirs = projectsDirectory().listFiles(File::isDirectory);
-        if (projectDirs != null) {
-            for (File directory : projectDirs) addSummaries(out, directory);
-        }
+        addProjectDirectories(out, projectsDirectory());
+        addProjectDirectories(out, legacyProjectsDirectory());
         Collections.sort(out, (a, b) -> Long.compare(b.activityModifiedAt, a.activityModifiedAt));
         return out;
     }
@@ -538,13 +547,18 @@ public final class SessionStore {
     /**
      * 只列某个项目的会话。
      *
-     * <p>额外扫一遍旧全局目录里属于本项目的文件：启动迁移有可能搬不动某个文件
-     * （权限、跨设备），那些会话如果不再列出来，用户会以为丢了。
+     * <p>三处都要扫：新项目根、旧项目根（搬迁未完成时数据还在这里），
+     * 以及旧全局目录里属于本项目的文件 —— 启动迁移有可能搬不动某个文件，
+     * 那些会话如果不再列出来，用户会以为丢了。
      */
     public static List<SessionSummary> listSessions(String projectDirectory) {
         String wanted = canonicalProject(projectDirectory);
+        String key = projectKey(wanted);
         List<SessionSummary> out = new ArrayList<>();
+        // 当前名用 sessionDirectory(...)：它顺带确保目录与项目索引存在（原有行为，
+        // 不要在改名时顺手丢掉）。旧名只读，不创建。
         addSummaries(out, sessionDirectory(wanted));
+        addSummaries(out, new File(legacyProjectsDirectory(), key));
 
         File[] legacy = sessionDirectory().listFiles((directory, name) -> name.endsWith(SESSION_SUFFIX));
         if (legacy != null) {
@@ -559,6 +573,13 @@ public final class SessionStore {
         }
         Collections.sort(out, (a, b) -> Long.compare(b.modifiedAt, a.modifiedAt));
         return out;
+    }
+
+    /** 扫描一个「项目根」下的所有项目子目录。 */
+    private static void addProjectDirectories(List<SessionSummary> out, File projectsRoot) {
+        File[] directories = projectsRoot.listFiles(File::isDirectory);
+        if (directories == null) return;
+        for (File directory : directories) addSummaries(out, directory);
     }
 
     /**

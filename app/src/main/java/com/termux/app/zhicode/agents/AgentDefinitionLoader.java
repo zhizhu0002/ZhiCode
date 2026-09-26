@@ -26,13 +26,19 @@ public final class AgentDefinitionLoader {
         put(out, builtInPlan());
         put(out, builtInVerification());
         put(out, builtInGuide());
-        loadDir(out, new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".iq/agents"), "user");
+        // 用户级：只看 HOME，两处都读（新名优先，旧名兼容）。
+        loadDirs(out, TermuxConstants.dataDirCandidatesIn(new File(TermuxConstants.TERMUX_HOME_DIR_PATH)), "user");
         File project = projectDirectory == null ? null : new File(projectDirectory);
         // ZhiCode discovers project agents by walking from cwd upward. Load parents first,
         // then the closest project directory last so the closest definition wins.
+        //
+        // 项目级目录属于用户的版本库，不能把它的 .iq 搬成 .zhicode，
+        // 因此这里用候选列表：新名优先、旧名兜底。
         List<File> chain = new ArrayList<>();
         for (File p=project; p!=null; p=p.getParentFile()) chain.add(p);
-        for (int i=chain.size()-1;i>=0;i--) loadDir(out, new File(chain.get(i), ".iq/agents"), "project");
+        for (int i=chain.size()-1;i>=0;i--) {
+            loadDirs(out, TermuxConstants.dataDirCandidatesIn(chain.get(i)), "project");
+        }
         return new ArrayList<>(out.values());
     }
 
@@ -44,6 +50,18 @@ public final class AgentDefinitionLoader {
 
     private static void put(Map<String,AgentDefinition> out, AgentDefinition d) {
         if (d != null && !d.name.isEmpty()) out.put(d.name.toLowerCase(Locale.US), d);
+    }
+
+    /**
+     * 依次读取多个候选目录，后读的覆盖先读的。
+     *
+     * <p>{@code candidates} 的顺序约定是「新名在前、旧名在后」（见
+     * {@link TermuxConstants#dataDirCandidatesIn}）。而这里希望<b>新名目录里的定义生效</b>，
+     * 所以倒序遍历：先读旧名、后读新名，让新名成为最后写入、也就是最终生效的那一份。
+     */
+    private static void loadDirs(Map<String,AgentDefinition> out, File[] candidates, String source) {
+        if (candidates == null) return;
+        for (int i = candidates.length - 1; i >= 0; i--) loadDir(out, candidates[i], source);
     }
 
     private static void loadDir(Map<String,AgentDefinition> out, File dir, String source) {

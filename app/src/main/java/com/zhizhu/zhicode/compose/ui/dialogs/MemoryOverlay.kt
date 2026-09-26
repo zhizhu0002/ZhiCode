@@ -28,11 +28,11 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /**
- * 记忆文件（IQ.md）窗口：文件列表与编辑器共用一个弹窗。
+ * 记忆文件（`ZhiCode.md`）窗口：文件列表与编辑器共用一个弹窗。
  *
  * ## 说明文字必须诚实
  *
- * 引擎**不会**自动读 IQ.md（`SystemPromptBuilder` 里没有相关引用，原版也一样）。
+ * 引擎**不会**自动读 ZhiCode.md（`SystemPromptBuilder` 里没有相关引用，原版也一样）。
  * 所以顶部提示写的是"写入不会自动注入模型，它需要被读到"，而不是
  * "会自动作为记忆生效"——后者会让用户以为写完就生效了，然后困惑于模型为什么不遵守。
  */
@@ -83,16 +83,16 @@ private fun MemoryFileList(
 ) {
     val scheme = MiuixTheme.colorScheme
     DialogShell(
-        title = "记忆文件 · IQ.md",
+        title = "记忆文件 · ZhiCode.md",
         groupBody = true,
         actions = {
             SecondaryButton(text = "关闭", onClick = onClose)
-            PrimaryButton(text = "让 IQ 完善", onClick = onRunInit, modifier = Modifier.padding(start = 8.dp))
+            PrimaryButton(text = "让蜘蛛完善", onClick = onRunInit, modifier = Modifier.padding(start = 8.dp))
         },
     ) {
         Text(
             text = "项目级与用户级两份说明文件。写入后**不会**自动注入模型——" +
-                "「让 IQ 完善」会让 Agent 读取现有说明与构建清单后直接整理 IQ.md；" +
+                "「让蜘蛛完善」会让 Agent 读取现有说明与构建清单后直接整理 ZhiCode.md；" +
                 "平时的任务里 Agent 也可以自己用 Read 打开它。",
             color = scheme.onSurfaceVariantSummary,
             fontSize = 10.sp,
@@ -115,7 +115,12 @@ private fun MemoryFileList(
                     titleColor = BasicComponentDefaults.titleColor(
                         color = if (file.exists) scheme.onBackground else scheme.onSurfaceVariantSummary,
                     ),
-                    summary = "${file.sizeLabel} · ${file.path}",
+                    summary = if (file.legacySource == null) {
+                        "${file.sizeLabel} · ${file.path}"
+                    } else {
+                        // 内容来自旧文件：把两件事都写出来，别让用户以为自己在编辑一个不存在的路径。
+                        "${file.sizeLabel} · 当前读自旧文件 ${file.legacySource}，保存会写入 ${file.path}"
+                    },
                     summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
                     endActions = {
                         // 未创建的文件也给编辑按钮：点进去就是一份空编辑器（新建）。
@@ -162,7 +167,7 @@ private fun MemoryEditorBody(
             TextField(
                 value = editing.body,
                 onValueChange = onBodyChange,
-                label = "IQ.md",
+                label = "ZhiCode.md",
                 useLabelAsPlaceholder = false,
                 singleLine = false,
                 minLines = 12,

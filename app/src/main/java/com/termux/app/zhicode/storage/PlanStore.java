@@ -12,7 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 /**
- * 按项目保存计划文本（Markdown），位置是 {@code ~/.iq/projects/<项目键>/plans}。
+ * 按项目保存计划文本（Markdown），位置是 {@code ~/.zhicode/projects/<项目键>/plans}。
  *
  * <p>一份计划就是一个 {@code <workflowId>.md} 文件。
  *

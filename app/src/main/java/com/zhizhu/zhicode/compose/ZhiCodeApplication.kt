@@ -8,6 +8,7 @@ import com.zhizhu.zhicode.sandbox.SandboxConsole
 import com.zhizhu.zhicode.sandbox.SandboxProcess
 import com.zhizhu.zhicode.sandbox.SandboxStage
 import com.zhizhu.zhicode.sandbox.SandboxShell
+import com.termux.app.zhicode.storage.LegacyDataMigration
 import com.termux.shared.termux.TermuxConstants
 
 /**
@@ -36,6 +37,12 @@ class ZhiCodeApplication : Application() {
 
         // 必须是第一个动作：后面所有路径都依赖它
         TermuxConstants.configure(base)
+
+        // 紧跟在 configure 之后、任何读写数据目录的代码之前。
+        // 它把 HOME 下的旧品牌名目录一次性搬成新名（幂等），
+        // 否则用户已有的会话、任务、技能、MCP 配置会“消失”。
+        val migrated = LegacyDataMigration.run()
+        if (migrated.isNotEmpty()) android.util.Log.i("ZhiCode", migrated)
 
         SandboxConsole.init(base)
         // 阶段日志按 pid 分文件，必须尽早初始化：引擎 attach/create 的每一步都靠它留痕，

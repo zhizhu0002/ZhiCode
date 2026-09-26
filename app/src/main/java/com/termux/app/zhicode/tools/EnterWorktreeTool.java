@@ -13,8 +13,8 @@ public final class EnterWorktreeTool implements ZhiTool {
  @Override public JSONObject inputSchema(){JSONObject p=new JSONObject();try{p.put("name",ToolSchemas.string("Optional short worktree label."));}catch(Exception e){throw new IllegalStateException(e);}return ToolSchemas.object(p);}
  @Override public ToolExecutionResult execute(SessionConfig c,JSONObject in)throws Exception{
    if(c.worktreePath!=null&&!c.worktreePath.isEmpty()&&new File(c.worktreePath).isDirectory())return ToolExecutionResult.ok("Already in worktree: "+c.worktreePath);
-   String root=new File(c.projectDirectory).getCanonicalPath();String label=in.optString("name","").replaceAll("[^A-Za-z0-9._-]","-");if(label.isEmpty())label="iq";
-   String path=new File(TermuxConstants.TERMUX_HOME_DIR_PATH,".iq/worktrees/"+label+"-"+UUID.randomUUID().toString().substring(0,8)).getAbsolutePath();
+   String root=new File(c.projectDirectory).getCanonicalPath();String label=in.optString("name","").replaceAll("[^A-Za-z0-9._-]","-");if(label.isEmpty())label="zhi";
+   String path=new File(TermuxConstants.dataDir(),"worktrees/"+label+"-"+UUID.randomUUID().toString().substring(0,8)).getAbsolutePath();
    String cmd="git -C "+q(root)+" rev-parse --is-inside-work-tree >/dev/null && mkdir -p "+q(new File(path).getParent())+" && git -C "+q(root)+" worktree add --detach "+q(path)+" HEAD";
    TermuxShellExecutor.Result r=shell.execute(cmd,root,120000);if(r.exitCode!=0)return ToolExecutionResult.command(r.exitCode,r.combined());
    c.worktreeOriginalDirectory=root;c.worktreePath=path;c.projectDirectory=path;return ToolExecutionResult.ok("Entered isolated worktree: "+path+"\nAll subsequent file/shell tools now operate there until ExitWorktree.");

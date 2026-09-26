@@ -331,7 +331,7 @@ class WorkspaceViewModel(
      *
      * 这条路径是**静默**的：没有弹窗、失败也只进状态。第一版就是这样被反馈
      * "启动后没有自动重装" 而无法判断到底走到了哪一步。现在每次判定与结果都追加到
-     * `$HOME/.iq/runtime.log`（终端里 `cat ~/.iq/runtime.log` 就能看）。
+     * `$HOME/.zhicode/runtime.log`（终端里 `cat ~/.zhicode/runtime.log` 就能看）。
      */
     private fun autoInstallRuntimeIfStale() {
         // IO 线程：读 marker、比对 sha256、写日志都是磁盘操作
@@ -370,7 +370,7 @@ class WorkspaceViewModel(
     }
 
     /**
-     * 把一行诊断写进 `$HOME/.iq/runtime.log`。
+     * 把一行诊断写进 `$HOME/.zhicode/runtime.log`。
      *
      * 只保留最后 [RUNTIME_LOG_MAX_LINES] 行：这是个排障用的滚动日志，
      * 不是审计记录，无限增长会把用户的家目录塞满。
@@ -379,7 +379,7 @@ class WorkspaceViewModel(
      */
     private fun appendRuntimeLog(line: String) {
         runCatching {
-            val dir = File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".iq")
+            val dir = TermuxConstants.dataDir()
             dir.mkdirs()
             val file = File(dir, "runtime.log")
             val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
@@ -874,7 +874,7 @@ class WorkspaceViewModel(
         roleCardOverride = content
     }
 
-    // ---------- 记忆文件（IQ.md） ----------
+    // ---------- 记忆文件（ZhiCode.md） ----------
 
     fun openMemory() {
         _state.update { it.copy(memory = MemoryState(files = MemoryStore.list(it.projectPath))) }
@@ -953,10 +953,10 @@ class WorkspaceViewModel(
     }
 
     /**
-     * `/init`：让 Agent 直接创建或完善项目 IQ.md。
+     * `/init`：让 Agent 直接创建或完善项目 ZhiCode.md。
      *
      * 指令照抄原版：明确要求**不要**进计划模式、不建任务、不起子 Agent、不做大范围调研，
-     * 只读现有的 IQ.md / CLAUDE.md / README 与主构建清单，然后直接写 IQ.md。
+     * 只读现有的 ZhiCode.md / CLAUDE.md / README 与主构建清单，然后直接写 ZhiCode.md。
      *
      * 两个细节都保留：
      * - 先退出计划模式。计划模式下引擎只产出计划不落盘，`/init` 会变成"只给我一份计划"，
@@ -964,7 +964,7 @@ class WorkspaceViewModel(
      * - 对话流里放一条可见的 `/init` 用户气泡：这条请求是应用自己发的，
      *   不显示出来的话用户会看到一条自己没写过的消息引发的回复。
      */
-    /** 界面入口：记忆面板里的「让 IQ 完善」按钮。 */
+    /** 界面入口：记忆面板里的「让蜘蛛完善」按钮。 */
     fun runInitFromUi() = runInitPrompt()
 
     private fun runInitPrompt() {
@@ -3351,7 +3351,7 @@ class WorkspaceViewModel(
         /**
          * 内置环境安装日志保留的行数。
          *
-         * `~/.iq/runtime.log` 是排障用的滚动日志，不是审计记录 ——
+         * `~/.zhicode/runtime.log` 是排障用的滚动日志，不是审计记录 ——
          * 自动重装这条路径是静默的，不写日志就完全无法判断它走到了哪一步。
          */
         private const val RUNTIME_LOG_MAX_LINES = 200
@@ -3378,17 +3378,20 @@ class WorkspaceViewModel(
         private const val TEXT_ATTACHMENT_LIMIT = 60_000
 
         /**
-         * `/init` 的指令，逐字取自原版。
+         * `/init` 的指令，逐字取自原版，只改了一处：目标文件名换成 `ZhiCode.md`。
          *
          * 全英文是刻意的（原版如此）：这段是要模型执行的指令，
          * 而它明确要求限制调研范围、禁止起子 Agent，措辞改动会改变实际行为，
          * 所以不翻译、不改写。
+         *
+         * 文件名必须改 —— 它会让模型去写 `IQ.md`，而界面读的是 `ZhiCode.md`，
+         * 那样 `/init` 看起来会“什么都不做”。文件名的读取兼容见 `MemoryStore`。
          */
         private const val INIT_INSTRUCTION =
             "This is the built-in fast /init maintenance command. Do not enter plan mode, create tasks, " +
                 "launch subagents, or perform broad repository research. Read only the existing " +
-                "IQ.md/CLAUDE.md/README and primary build manifest or script when present, then directly " +
-                "create or improve IQ.md with concise build, test, architecture, conventions, and " +
+                "ZhiCode.md/CLAUDE.md/README and primary build manifest or script when present, then directly " +
+                "create or improve ZhiCode.md with concise build, test, architecture, conventions, and " +
                 "repository-specific instructions. Preserve useful existing instructions and run at most " +
                 "one small verification command."
     }

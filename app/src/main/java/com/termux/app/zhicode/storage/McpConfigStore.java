@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * MCP 服务器配置的持久化，落在 {@code ~/.iq/mcp.json}。
+ * MCP 服务器配置的持久化，落在 {@code ~/.zhicode/mcp.json}（旧位置 {@code ~/.iq/mcp.json} 只读兼容）。
  *
  * <h3>这里最重要的一件事：坏文件绝不能变成「没有配置」</h3>
  * 调用方的固定流程是「{@link #load()} → 改 → {@link #save(List)}」。
@@ -105,19 +105,31 @@ public final class McpConfigStore {
     /** 配置体积上限。这是一份服务器清单，超过这个量级说明文件已损坏。 */
     private static final int MAX_CONFIG_BYTES = 1024 * 1024;
 
-    private static final String CONFIG_DIR = ".iq";
     private static final String CONFIG_FILE = "mcp.json";
 
     private final File file;
 
     public McpConfigStore() {
-        File directory = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, CONFIG_DIR);
+        // 目录名取自 TermuxConstants：HOME 是我们的目录，启动时会做一次性搬迁
+        // （$HOME/.iq -> $HOME/.zhicode），因此这里直接用新名即可。
+        File directory = TermuxConstants.dataDir();
         directory.mkdirs();
         file = new File(directory, CONFIG_FILE);
     }
 
     public File getFile() {
         return file;
+    }
+
+    /**
+     * 旧位置的文件，仅用于搬迁。
+     *
+     * <p>正常情况下 {@code $HOME/.iq} 已被整体搬成 {@code $HOME/.zhicode}，
+     * 这个文件不存在。它存在只有一种可能：搬迁没能完成（权限、跨设备），
+     * 此时读取必须回退到它，否则用户的 MCP 配置会看起来“没了”。
+     */
+    private File legacyFile() {
+        return new File(TermuxConstants.legacyDataDir(), CONFIG_FILE);
     }
 
     /**
@@ -129,12 +141,13 @@ public final class McpConfigStore {
      */
     public synchronized List<Server> load() {
         List<Server> servers = new ArrayList<>();
-        if (!file.isFile()) {
+        File source = file.isFile() ? file : legacyFile();
+        if (!source.isFile()) {
             recordFailure("");
             return servers;
         }
         try {
-            String text = readConfigText();
+            String text = readConfigText(source);
             JSONObject root = new JSONObject(text);
             JSONArray array = root.optJSONArray("servers");
             if (array != null) {
@@ -147,18 +160,18 @@ public final class McpConfigStore {
             return servers;
         } catch (Throwable failure) {
             // 关键：先把坏文件留档，绝不静默当成空配置。
-            String kept = setAsideCorruptFile();
+            String kept = setAsideCorruptFile(source);
             recordFailure(failure.getClass().getSimpleName() + ": " + failure.getMessage()
                     + (kept.isEmpty() ? "" : "（原文件已留档为 " + kept + "）"));
             return servers;
         }
     }
 
-    private String readConfigText() throws Exception {
-        long length = file.length();
+    private String readConfigText(File source) throws Exception {
+        long length = source.length();
         if (length <= 0) return "";
         if (length > MAX_CONFIG_BYTES) throw new IllegalStateException("MCP 配置超出体积上限: " + length + " 字节");
-        try (FileInputStream input = new FileInputStream(file);
+        try (FileInputStream input = new FileInputStream(source);
              ByteArrayOutputStream output = new ByteArrayOutputStream((int) length)) {
             byte[] buffer = new byte[8192];
             int total = 0;
@@ -173,10 +186,10 @@ public final class McpConfigStore {
     }
 
     /** 把无法解析的文件改名留档，返回留档后的名字；改名失败返回空串。 */
-    private String setAsideCorruptFile() {
-        String keptName = CONFIG_FILE + ".corrupt-" + System.currentTimeMillis();
-        File kept = new File(file.getParentFile(), keptName);
-        return file.renameTo(kept) ? keptName : "";
+    private String setAsideCorruptFile(File source) {
+        String keptName = source.getName() + ".corrupt-" + System.currentTimeMillis();
+        File kept = new File(source.getParentFile(), keptName);
+        return source.renameTo(kept) ? keptName : "";
     }
 
     /**

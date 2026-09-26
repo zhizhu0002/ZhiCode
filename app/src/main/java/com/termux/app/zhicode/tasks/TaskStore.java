@@ -102,7 +102,7 @@ public final class TaskStore {
     public TaskStore(String projectDirectory, String workflowId) {
         String canonicalProject = SessionStore.canonicalProject(projectDirectory);
         String key = SessionStore.projectKey(canonicalProject);
-        dir = new File(TermuxConstants.TERMUX_HOME_DIR_PATH, ".iq/tasks/" + key);
+        dir = new File(TermuxConstants.dataDir(), "tasks/" + key);
         highWater = new File(dir, ".highwatermark");
         versionFile = new File(dir, ".version");
         lockFile = new File(dir, ".lock");

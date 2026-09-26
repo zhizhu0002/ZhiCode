@@ -293,16 +293,22 @@ data class RoleCardEditor(
 
 /** 记忆文件的作用域。路径约定见 `MemoryStore`（必须与 `/init` 指令的目标一致）。 */
 enum class MemoryScope(val label: String) {
-    PROJECT("项目 IQ.md"),
-    USER("用户 IQ.md"),
+    PROJECT("项目 ZhiCode.md"),
+    USER("用户 ZhiCode.md"),
 }
 
-/** 一个记忆文件在列表里的展示信息。 */
+/**
+ * 一个记忆文件在列表里的展示信息。
+ *
+ * [path] 是写入目标（当前名）。[legacySource] 不为空表示"当前读到的内容来自旧文件"，
+ * 因为新文件还没有 —— 界面要把这件事说出来，不能让路径和内容对不上。
+ */
 data class MemoryFile(
     val scope: MemoryScope,
     val path: String,
     val exists: Boolean,
     val sizeLabel: String,
+    val legacySource: String? = null,
 )
 
 /** 记忆面板状态：`editing != null` 即编辑器，否则列表。 */

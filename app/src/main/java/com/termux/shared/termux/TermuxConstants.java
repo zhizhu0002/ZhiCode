@@ -73,6 +73,58 @@ public final class TermuxConstants {
     /** {@code $PREFIX/bin/bash}，内置 shell。 */
     public static String TERMUX_BASH_PATH = TERMUX_BIN_PREFIX_DIR_PATH + "/bash";
 
+    // ------------------------------------------------------------ 数据目录命名
+    // 这两个名字与三处约定绑定，改动必须同时处理兼容：
+    //   1. HOME 下是我们自己的目录，可以一次性搬迁；
+    //   2. 用户项目目录里的同名子目录属于用户的 git 仓库，**不能**动它们，
+    //      因此读取时新名优先、旧名兜底（见 dataDirCandidatesIn）。
+
+    /** 数据目录名（当前）。 */
+    public static final String DATA_DIR_NAME = "." + BRAND_SLUG;
+
+    /**
+     * 数据目录名（上一个产品名，只读兼容）。
+     *
+     * <p>保留它是因为用户机器上已经存在 {@code $HOME/.iq} 下的全部数据
+     * （会话、任务、技能、项目计划、MCP 配置）。改名而不认旧名 = 用户数据凭空消失。
+     */
+    public static final String LEGACY_DATA_DIR_NAME = ".iq";
+
+    /** 记忆文件的新名字。 */
+    public static final String MEMORY_FILE_NAME = "ZhiCode.md";
+    /** 记忆文件的旧名字，只读兼容。 */
+    public static final String LEGACY_MEMORY_FILE_NAME = "IQ.md";
+
+    /** HOME 下的数据目录（当前名）。 */
+    public static File dataDir() {
+        return new File(TERMUX_HOME_DIR_PATH, DATA_DIR_NAME);
+    }
+
+    /** HOME 下的数据目录（旧名）。 */
+    public static File legacyDataDir() {
+        return new File(TERMUX_HOME_DIR_PATH, LEGACY_DATA_DIR_NAME);
+    }
+
+    /** 某个作用域下的数据目录（当前名）。{@code scope} 可以是 HOME，也可以是用户的项目目录。 */
+    public static File dataDirIn(File scope) {
+        return new File(scope, DATA_DIR_NAME);
+    }
+
+    /** 某个作用域下的数据目录（旧名）。 */
+    public static File legacyDataDirIn(File scope) {
+        return new File(scope, LEGACY_DATA_DIR_NAME);
+    }
+
+    /**
+     * 读取时用的候选目录，顺序为「新名优先，旧名兜底」。
+     *
+     * <p>用于用户项目目录：我们无权把 {@code <project>/.iq} 搬成
+     * {@code <project>/.zhicode}（那会改到用户的版本库），所以让读取端同时看两处。
+     */
+    public static File[] dataDirCandidatesIn(File scope) {
+        return new File[]{dataDirIn(scope), legacyDataDirIn(scope)};
+    }
+
     // ------------------------------------------------------------------ 便捷对象
     // 同样不加 final，{@link #configure} 会一并重建，保持与上面一致。
 
