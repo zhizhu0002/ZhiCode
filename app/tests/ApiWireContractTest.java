@@ -181,9 +181,16 @@ public final class ApiWireContractTest {
                         && reasoning.contains("openAIResponsesConfiguredEffort"),
                 "ReasoningMapper 必须为 Responses 与 Chat 分别提供映射");
         require(reasoning.contains("anthropicEffort"), "ReasoningMapper 必须提供 Anthropic 映射");
-        require(reasoning.contains("2048") && reasoning.contains("4096") && reasoning.contains("8192")
-                        && reasoning.contains("16384"),
-                "数字 token 预算到档位的分界值是契约，不得改动");
+        // 分界值是契约，但**写法不是**：Java 的数字字面量允许下划线分隔，
+        // 2048 与 2_048 是同一个值。所以先把下划线去掉再检查 ——
+        // 否则一次纯粹的排版改动就会被判成契约被改。
+        // （真正的行为保证在 app/src/test 的 ApiPureLogicTest.numericBudget_mapsToBuckets，
+        //   这条只是「源码里还看得见这些数字」的兜底。）
+        String reasoningDigits = reasoning.replace("_", "");
+        for (String boundary : new String[]{"2048", "4096", "8192", "16384"}) {
+            require(reasoningDigits.contains(boundary),
+                    "数字 token 预算的分界值 " + boundary + " 是契约，不得改动");
+        }
 
         System.out.println("ApiWireContractTest PASS");
     }
