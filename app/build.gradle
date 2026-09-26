@@ -11,36 +11,30 @@ android {
 
     defaultConfig {
         /*
-         * ⚠️ 已知限制：这个 applicationId 会让**内置 Termux 运行时无法安装**。
+         * 这里**不再有**"必须 8 个字符"的限制。
          *
-         * 原因是长度对不上，而且没有绕法：
+         * 历史上确实有：内置 Termux bootstrap 里 337 个 ELF 把前缀
+         * "/data/data/com.termux" 编译进了字符串表，而旧实现为了把前缀换成真实路径，
+         * 对所有文件做**等长原地替换**——于是 13 + len(applicationId) 必须等于 21，
+         * 包名被锁死在 8 个字符（原版选 "com.iqge" 正是这个原因）。
          *
-         *   内置 Termux bootstrap 里有 337 个 ELF 二进制把前缀 "/data/data/com.termux"
-         *   （21 字符）编译进了字符串表。安装时必须把它**原地**改写成
-         *   "/data/user/0/<包名>"。ELF 字符串表按偏移定位，替换串只要差一个字节，
-         *   后面所有偏移全部错位，二进制即损坏。所以必须满足
-         *       13 + len(applicationId) == 21  →  len(applicationId) == 8
+         * 实测推翻了那个前提（扫描 zip 全部 3473 个文件）：
+         *   含旧前缀的 611 个文件 = 114 个 #! 脚本 + 337 个 ELF + 160 个普通文本，
+         *   而 337 个 ELF **全部且仅仅**把 "<prefix>/files/usr/lib" 放在 DT_RUNPATH 里
+         *   （DT_RPATH 0 个、带路径的 DT_NEEDED 0 个、仅数据段 0 个）。
          *
-         *   "com.zhizhu.zhicode" 是 18 字符 → "/data/user/0/com.zhizhu.zhicode" 是 31 字符。
-         *   RuntimeInstaller 会**明确报错**（不会静默产出损坏文件）：
-         *     - ensureSafePrefixRewrite() 旧/新前缀长度不等 → IllegalStateException
-         *     - replaceAllInPlace() 对每个 bootstrap 文件再次校验 → IllegalStateException
+         * DT_RUNPATH 只是库搜索提示，指向不存在的目录会被动态链接器跳过，
+         * 并继续看 LD_LIBRARY_PATH。所以正确做法是：**ELF 一个字节都不动**，
+         * 只改写文本（文本没有长度约束），库定位交给 LD_LIBRARY_PATH。
          *
-         * 后果：应用可编译、可安装、可启动，但"安装内置 Termux 环境"这一步必然失败。
-         *   不可用：终端页、Bash/RootBash、GitStatus、Delete、Enter/ExitWorktree、
-         *           TermuxDoctor/TermuxRepair、pkg install、沙箱 Termux 桥
-         *   仍可用：模型对话、会话、设置/API/MCP/技能/角色卡/记忆、
-         *           Read/Write/Edit/Glob/Grep/Stat/Mkdir/Move/List/Copy、
-         *           文件与变更面板、AndroidIntent、剪贴板、/web 联网
+         * 因此包名长度自由，这里用你要的 com.zhizhu.code。
          *
-         * 要同时保住运行时与品牌名，只有两条路：
-         *   1) 换成等长的 8 字符 applicationId（如 "zhi.code" → /data/user/0/zhi.code = 21）；
-         *   2) 离线重写那 337 个 ELF 的字符串表（重算 section 偏移与 RIP 相对引用）——
-         *      属于独立工程，且需要 x86_64 宿主才能验证（本机 aarch64，NDK 跑不起来）。
-         *
-         * 这不是设计疏漏，是**有意接受的取舍**，写在这里以免后人误以为是配置错误。
+         * ⚠️ 随之而来的硬依赖：所有执行内置二进制的路径都必须设置
+         *    LD_LIBRARY_PATH=<prefix>/lib
+         * 见 TermuxShellExecutor 与 TermuxTerminalPane（旧代码在前者里刻意 remove 它，
+         * 那是配合等长改写 RUNPATH 的旧设计，现已反转）。
          */
-        applicationId 'com.zhizhu.zhicode'
+        applicationId 'com.zhizhu.code'
         minSdk 24
         targetSdk 28
         versionCode 1
@@ -82,6 +76,17 @@ androidComponents {
             output.outputFileName.set("ZhiCode-${variant.name}.apk")
         }
     }
+}
+
+/*
+ * 这里曾经有一道"applicationId 必须恰好 8 个字符"的构建期守卫。
+ * 它守卫的是一个**已被实测推翻**的前提（见 defaultConfig 里的说明）：
+ * 旧实现对 bootstrap 里的 ELF 做等长前缀改写，所以包名长度被锁死。
+ * 现在 ELF 原样不动、只改写文本，长度限制不复存在，守卫随之删除。
+ */
+def configuredApplicationId = android.defaultConfig.applicationId
+if (configuredApplicationId == null || configuredApplicationId.isEmpty()) {
+    throw new GradleException('app/build.gradle 未设置 applicationId。')
 }
 
 dependencies {

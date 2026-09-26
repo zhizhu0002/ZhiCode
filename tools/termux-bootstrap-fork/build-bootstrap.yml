@@ -1,0 +1,245 @@
+# 放在 fork 的 .github/workflows/build-bootstrap.yml
+#
+# zhizhu0002/termux-packages → Actions → "Build bootstrap" → Run workflow
+#
+# 为什么不用仓库里现成的两个 workflow：
+#   - bootstrap_archives.yml : 有 `if: github.repository == 'termux/termux-packages'`，
+#                              fork 里直接被跳过；且用 generate-bootstraps.sh，
+#                              只从官方 apt 源下 deb，前缀仍是 com.termux。
+#   - packages.yml           : 只编 deb 推 apt 源，不产出 bootstrap zip。
+# 所以这里直接用 build-bootstraps.sh（从源码构建，前缀由 properties.sh 决定）。
+#
+# 前置条件：
+#   1. fork 是 public → Actions 免费（已确认 public）
+#   2. Settings → Actions → General → 允许 Actions（fork 默认关闭，最常见的首步失败）
+#   3. 本文件必须在默认分支 master 上，Run workflow 按钮才会出现
+
+name: Build bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: '包名 / applicationId，同时决定 bootstrap 前缀'
+        required: true
+        default: 'com.zhizhu.code'
+      runner:
+        description: 'runner；ubuntu-26.04 与官方 CI 一致，失败就换 ubuntu-latest'
+        required: true
+        default: 'ubuntu-26.04'
+      additional_packages:
+        description: '额外打包（逗号分隔，留空即可），例如 openssh,git'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 350   # GitHub 托管 runner 硬上限 6 小时，留余量
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 改写 properties.sh（必须恰好 2 行）
+        env:
+          PKG: ${{ inputs.package_name }}
+        run: |
+          set -euo pipefail
+          f=scripts/properties.sh
+          cp "$f" "$f.orig"
+
+          # 与官方 TERMUX_REGEX__APP_PACKAGE_NAME 一致的校验，避免构建到一半才被拒
+          if ! printf '%s' "$PKG" | grep -qE '^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$'; then
+            echo "❌ 包名 '$PKG' 不符合官方校验正则"; exit 1
+          fi
+          echo "包名长度 = ${#PKG}（官方建议 <=21）"
+
+          # 只改这 2 行。前缀靠下面的链条自动派生，所以无需手改任何路径：
+          #   TERMUX_APP__PACKAGE_NAME → TERMUX_APP__DATA_DIR(/data/data/<pkg>)
+          #     → TERMUX__ROOTFS(.../files) → TERMUX__PREFIX(.../files/usr)
+          #     → TERMUX__HOME / TERMUX_APPS_DIR / am socket
+          #
+          # 故意不改 TERMUX_REPO__*：官方注释要求"不自建源就不要改这些值"，
+          # 且 build-bootstraps.sh 不传 -i/-I，对 bootstrap 无影响。
+          sed -i -E "s|^TERMUX_APP__PACKAGE_NAME=.*|TERMUX_APP__PACKAGE_NAME=\"$PKG\"|" "$f"
+          sed -i -E "s|^TERMUX_APP__NAMESPACE=.*|TERMUX_APP__NAMESPACE=\"$PKG\"|"       "$f"
+
+          echo "=== diff ==="
+          diff -u "$f.orig" "$f" || true
+
+          n=$(diff "$f.orig" "$f" | grep -c '^<' || true)
+          echo "被修改行数 = $n"
+          [ "$n" -eq 2 ] || { echo "❌ 改动行数不是 2，中止"; exit 1; }
+          grep -qE "^TERMUX_APP__PACKAGE_NAME=\"$PKG\"\$" "$f" || { echo "❌ 包名未写入"; exit 1; }
+          echo "✅ properties.sh 改写完成"
+
+      - name: 预载镜像 + 清磁盘（官方顺序：先载镜像再清）
+        run: |
+          set -euo pipefail
+          ./scripts/run-docker.sh true
+          CI=true ./scripts/free-space.sh
+          df -h /
+
+      - name: 清理构建目录（替代 -f）
+        run: |
+          set -euo pipefail
+          # 官方帮助原文：
+          #   "If package name is changed, make sure to run
+          #    `./scripts/run-docker.sh ./clean.sh` or pass '-f'"
+          # 两条路只能走 clean.sh，因为 -f 会踩上游一个 bug：
+          #   build-bootstraps.sh:399  if [[ $FORCE_BUILD_PACKAGES == "1" ]]; then
+          #   build-bootstraps.sh:400      rm -f "$TERMUX_BUILT_PACKAGES_DIRECTORY_FOR_ARCH"/*
+          # 而 TERMUX_BUILT_PACKAGES_DIRECTORY_FOR_ARCH 在整个 scripts/ 里
+          # **从未被赋值**，空展开后就是 `rm -f /*`，报
+          #   rm: cannot remove '/bin': Permission denied
+          #   rm: cannot remove '/boot': Is a directory  ... 然后 exit 1
+          # （-f 不抑制 "Permission denied" 与 "Is a directory"，所以必然失败）
+          ./scripts/run-docker.sh ./clean.sh
+
+      - name: 构建 bootstrap
+        env:
+          EXTRA: ${{ inputs.additional_packages }}
+        run: |
+          set -euo pipefail
+          # ⚠️ TERMUX_PACKAGE_MANAGER 必须**传进容器**，光在宿主 export 是无效的。
+          # run-docker.sh:221 的实际调用是：
+          #   docker exec $CI_OPT --env "DOCKER_EXEC_PID_FILE_PATH=..." --interactive \
+          #     $DOCKER_TTY $TERMUX_DOCKER_EXEC_EXTRA_ARGS $CONTAINER_NAME "$@"
+          # docker exec 不继承宿主环境，只能靠 TERMUX_DOCKER_EXEC_EXTRA_ARGS 注入。
+          #
+          # 为什么需要它：build-bootstraps.sh 只 source properties.sh 与
+          # termux_step_handle_buildarch.sh，而该变量两者都没定义
+          # （只有 generate-bootstraps.sh:33 有 ="apt"）。脚本是 set -e 非 -u，
+          # 所以不会报错，只会把空值替换进二阶段脚本：
+          #   export TERMUX_PACKAGE_MANAGER=""     ← 坏掉
+          # 后果：第167行 apt 分支被跳过、第290行 `[ = "pacman" ]` 语法错。
+          #
+          # ── ★ AppArmor 坑：这就是上次构建"编完了却拿不到 zip"的真因 ──────────
+          # run-docker.sh 在 exec 之前一定会加载 scripts/profile-restricted.apparmor：
+          #     deny  /home/builder/termux-packages/[^o]** wlk,
+          #     allow /home/builder/termux-packages/output/** rw,
+          # 意思是"容器进程只能写仓库里的 output/"。于是 build-bootstraps.sh 结尾那句
+          #     mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" "$TERMUX_PACKAGES_DIRECTORY/"
+          # 必然 EACCES：
+          #     mv: cannot create regular file '/home/builder/termux-packages/bootstrap-aarch64.zip': Permission denied
+          # 与 uid 无关：容器里的 builder 就是 1001（Dockerfile useradd -u 1001），
+          # run-docker.sh 的 __change_builder_uid_gid 因此不动作；而 AppArmor 的 deny
+          # 是 LSM 层拦截，root 也照样被拒（日志里那句“Loading restricted AppArmor profile...”）。
+          # 更坑的是该 mv 被 `create_bootstrap_archive "$TERMUX_ARCH" || return $?` 调用，
+          # errexit 被抑制 → 脚本继续打印 "[*] Finished successfully" → EXIT trap 又
+          # rm -rf 掉 BOOTSTRAP_TMPDIR（zip 就在里面）→ 工作区里什么都没有，
+          # 全日志只剩一行 mv 报错，直到最后 ls bootstrap-aarch64.zip 才炸。
+          #
+          # 修法：宿主侧（不受 AppArmor 约束）把 mv 目标改成 output/，
+          # 构建成功后再把 zip 搬回仓库根，后面的「验收」「上传 zip」两步照旧。
+          bb=scripts/build-bootstraps.sh
+          [ -f "$bb" ] || { echo "❌ 找不到 $bb"; exit 1; }
+          n=$(grep -cF '"$TERMUX_PACKAGES_DIRECTORY/"' "$bb" || true)
+          echo "build-bootstraps.sh 的 mv 目标出现次数 = $n（期望 1）"
+          if [ "$n" -ne 1 ]; then
+            echo "❌ 未找到唯一的 mv 目标行，上游脚本可能已改，请人工核对："
+            grep -nF 'TERMUX_PACKAGES_DIRECTORY' "$bb" || true
+            exit 1
+          fi
+          sed -i 's|"\$TERMUX_PACKAGES_DIRECTORY/"|"\$TERMUX_PACKAGES_DIRECTORY/output/"|' "$bb"
+          grep -qF '"$TERMUX_PACKAGES_DIRECTORY/output/"' "$bb" \
+            || { echo "❌ sed 补丁未生效"; exit 1; }
+          grep -nF 'bootstrap-${1}.zip" "$TERMUX_PACKAGES_DIRECTORY/output/"' "$bb" || true
+
+          export TERMUX_DOCKER_EXEC_EXTRA_ARGS="--env TERMUX_PACKAGE_MANAGER=apt"
+
+          args=(--architectures aarch64)
+          if [ -n "${EXTRA//[[:space:]]/}" ]; then
+            args+=(--add "$EXTRA")
+          fi
+          echo "调用: ./scripts/run-docker.sh ./scripts/build-bootstraps.sh ${args[*]}"
+          echo "注入: TERMUX_DOCKER_EXEC_EXTRA_ARGS=$TERMUX_DOCKER_EXEC_EXTRA_ARGS"
+          ./scripts/run-docker.sh ./scripts/build-bootstraps.sh "${args[@]}"
+
+          # 容器只能在 output/ 里落地 zip（见上面的 AppArmor 说明），宿主搬回仓库根。
+          if [ -f "output/bootstrap-aarch64.zip" ]; then
+            mv -f output/bootstrap-aarch64.zip ./bootstrap-aarch64.zip
+          fi
+          # mv 失败时上游只会打一行 "Permission denied" 却仍然报 Finished successfully，
+          # 所以这里必须自己断言产物存在，否则 2 小时构建白跑。
+          [ -f bootstrap-aarch64.zip ] || {
+            echo "❌ 构建结束但仓库根目录没有 bootstrap-aarch64.zip"
+            echo "   容器内 output/ 里有："
+            ls -l output/*.zip 2>/dev/null || echo "   （output/ 里也没有 zip）"
+            exit 1
+          }
+          ls -lh bootstrap-aarch64.zip
+
+      - name: 验收（旧前缀必须为 0）
+        env:
+          PKG: ${{ inputs.package_name }}
+        run: |
+          set -euo pipefail
+          # free-space.sh 会 purge python3，所以只用 unzip/grep/find/wc
+          ls -l bootstrap-aarch64.zip
+
+          rm -rf /tmp/vb && mkdir -p /tmp/vb
+          cd /tmp/vb
+          unzip -q "$GITHUB_WORKSPACE/bootstrap-aarch64.zip"
+
+          total=$(find . -type f | wc -l)
+          old=$(grep -rl --binary-files=text '/data/data/com.termux' . 2>/dev/null | wc -l)
+          new=$(grep -rl --binary-files=text "/data/data/$PKG" . 2>/dev/null | wc -l)
+          sym=$(wc -l < SYMLINKS.txt 2>/dev/null || echo 0)
+
+          echo "文件总数        : $total"
+          echo "旧前缀文件数    : $old   (必须为 0)"
+          echo "新前缀文件数    : $new   (应 > 300)"
+          echo "SYMLINKS.txt 行 : $sym   (应 > 0)"
+          echo "期望前缀        : /data/data/$PKG/files/usr"
+
+          # ★ 二阶段脚本：@占位符必须被正确替换，否则 app 首次启动会坏
+          stage2=$(find . -name 'termux-bootstrap-second-stage.sh' | head -1)
+          echo "二阶段脚本      : ${stage2:-未找到}"
+          if [ -n "$stage2" ]; then
+            echo "--- 头部 ---"
+            head -6 "$stage2"
+            grep -q "^export TERMUX_PACKAGE_MANAGER=\"apt\"\$" "$stage2" \
+              || { echo "❌ TERMUX_PACKAGE_MANAGER 未被正确替换为 apt"; exit 1; }
+            grep -q "^export TERMUX_PREFIX=\"$PKG\|^export TERMUX_PREFIX=\"/data/data/$PKG" "$stage2" \
+              || { echo "⚠️ 二阶段脚本里的 TERMUX_PREFIX 看起来不对（见上方头部）"; exit 1; }
+            if grep -q '@[A-Z_]\{3,\}@' "$stage2"; then
+              echo "❌ 仍有未替换的 @占位符："
+              grep -o '@[A-Z_]\{3,\}@' "$stage2" | sort -u
+              exit 1
+            fi
+            echo "✅ 二阶段脚本占位符全部正确替换"
+          else
+            echo "❌ 未找到二阶段脚本"; exit 1
+          fi
+
+          [ "$total" -gt 500 ] || { echo "❌ 文件数异常，构建可能失败"; exit 1; }
+          [ "$sym" -gt 0 ]     || { echo "❌ 缺 SYMLINKS.txt 或为空"; exit 1; }
+          [ "$new" -gt 300 ]   || { echo "❌ 新前缀命中过少，构建可能没用到新包名"; exit 1; }
+          if [ "$old" -ne 0 ]; then
+            echo "❌ 仍有旧前缀 /data/data/com.termux 残留，示例："
+            grep -rl --binary-files=text '/data/data/com.termux' . 2>/dev/null | head -20
+            echo "   很可能是复用了旧前缀的编译产物，检查依赖是否本地编译"
+            exit 1
+          fi
+          echo "✅ 验收通过：旧前缀已彻底清零"
+
+      - name: 上传 zip
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bootstrap-aarch64-${{ inputs.package_name }}
+          path: bootstrap-aarch64.zip
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: 失败时留下诊断信息
+        if: failure()
+        run: |
+          echo "=== properties.sh 最终状态 ==="
+          grep -nE '^TERMUX_APP__PACKAGE_NAME=|^TERMUX_APP__NAMESPACE=' scripts/properties.sh || true
+          echo "=== 磁盘 ==="
+          df -h / || true

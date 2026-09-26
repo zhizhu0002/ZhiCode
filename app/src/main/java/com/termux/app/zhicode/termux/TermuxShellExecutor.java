@@ -154,10 +154,17 @@ public final class TermuxShellExecutor {
             env.put("HOME", TermuxConstants.TERMUX_HOME_DIR_PATH);
             env.put("PREFIX", prefix);
             env.put("TMPDIR", prefix + "/tmp");
-            // Match current Termux Android 7+ shell semantics: PREFIX/bin only and no LD_LIBRARY_PATH.
-            // Termux ELF binaries use DT_RUNPATH; forcing LD_LIBRARY_PATH can break apt/dpkg/java subprocesses.
+            // 内置 Termux 的 ELF **不再**被改写前缀（见 RuntimeInstaller 的说明）。
+            // 它们内嵌的 DT_RUNPATH 仍指向不存在的 /data/data/com.termux/files/usr/lib，
+            // 而 DT_RUNPATH 只是提示、会被 LD_LIBRARY_PATH 覆盖，所以这里**必须设置**它。
+            //
+            // 注意这与旧代码相反：旧版把 bootstrap 的 ELF 等长改写成真实路径，因此刻意
+            // remove 掉 LD_LIBRARY_PATH（注释原文："Termux ELF binaries use DT_RUNPATH;
+            // forcing LD_LIBRARY_PATH can break apt/dpkg/java subprocesses"）。
+            // 现在 ELF 保持原样，库定位只能靠这个变量——移除它会让所有二进制找不到 libc++/zlib 等。
+            // 实测（本机）：设成 <prefix>/lib 后 bash/sed/awk/grep/find/curl/dpkg/apt 均正常。
+            env.put("LD_LIBRARY_PATH", prefix + "/lib");
             env.put("PATH", prefix + "/bin");
-            env.remove("LD_LIBRARY_PATH");
             env.put("LANG", "en_US.UTF-8");
             env.put("TERM", "xterm-256color");
             env.put("COLORTERM", "truecolor");

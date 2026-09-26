@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.background;
 
+import com.zhizhu.zhicode.compose.BuildConfig;
 import com.termux.shared.termux.TermuxConstants;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -12,7 +13,12 @@ public final class RootKeepAliveController {
     private static final String ADDED_DEVICEIDLE = "added_deviceidle";
     private static final String PREVIOUS_RUN_IN_BACKGROUND = "previous_run_in_background";
     private static final String PREVIOUS_RUN_ANY_IN_BACKGROUND = "previous_run_any_in_background";
-    private static final String PACKAGE = "com.zhizhu.zhicode";
+    /**
+     * 目标包名。引用 BuildConfig.APPLICATION_ID 而不是写字面量：这是要给系统命令行
+     * （cmd deviceidle / cmd appops）用的，一旦与实际包名不符，保活会**静默失效**——
+     * 命令照样返回成功，只是白名单加到了另一个不存在的包上。
+     */
+    private static final String PACKAGE = BuildConfig.APPLICATION_ID;
 
     private RootKeepAliveController() {}
 

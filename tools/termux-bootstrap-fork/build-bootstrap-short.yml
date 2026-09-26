@@ -1,0 +1,68 @@
+# 精简版：贴到 fork 的 .github/workflows/build-bootstrap.yml
+#
+# 用法：GitHub → 你的 fork → Actions → "Build bootstrap" → Run workflow
+# 前置：① Settings → Actions → General → 允许 Actions（fork 默认关闭）
+#       ② 本文件必须在默认分支 master 上，Run workflow 按钮才会出现
+#
+# 说明：只改 2 行（TERMUX_APP__PACKAGE_NAME 决定前缀，TERMUX_APP__NAMESPACE 决定组件类名）。
+# 路径链自动派生：包名 → /data/data/<包名> → /files → /files/usr（bootstrap 的前缀）
+# 故意不改 TERMUX_REPO__*：官方注释要求不自建源就不要动，且 build-bootstraps.sh
+# 不传 -i/-I，对 bootstrap 构建无影响。
+
+name: Build bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: '包名（同时决定 bootstrap 前缀），例如 com.zhizhu.code'
+        required: true
+        default: 'com.zhizhu.code'
+      runner:
+        description: 'runner；ubuntu-26.04 与官方 CI 一致，失败就换 ubuntu-latest'
+        required: true
+        default: 'ubuntu-26.04'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 改写包名（必须恰好 2 行）
+        env:
+          PKG: ${{ inputs.package_name }}
+        run: |
+          set -euo pipefail
+          f=scripts/properties.sh
+          cp "$f" "$f.orig"
+          echo "包名长度 = ${#PKG}"
+          sed -i -E "s|^TERMUX_APP__PACKAGE_NAME=.*|TERMUX_APP__PACKAGE_NAME=\"$PKG\"|" "$f"
+          sed -i -E "s|^TERMUX_APP__NAMESPACE=.*|TERMUX_APP__NAMESPACE=\"$PKG\"|"    "$f"
+          echo "=== diff ==="
+          diff -u "$f.orig" "$f" || true
+          n=$(diff "$f.orig" "$f" | grep -c '^<' || true)
+          echo "被修改行数 = $n"
+          [ "$n" -eq 2 ] || { echo "❌ 改动行数不是 2，中止"; exit 1; }
+
+      - name: 预载镜像 + 清磁盘（官方顺序）
+        run: |
+          set -euo pipefail
+          ./scripts/run-docker.sh true
+          CI=true ./scripts/free-space.sh
+          df -h /
+
+      - name: 构建（约 1~3 小时）
+        run: ./scripts/run-docker.sh ./scripts/build-bootstraps.sh -f --architectures aarch64
+
+      - name: 上传 zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: bootstrap-aarch64
+          path: bootstrap-aarch64.zip
+          if-no-files-found: error
+          retention-days: 30

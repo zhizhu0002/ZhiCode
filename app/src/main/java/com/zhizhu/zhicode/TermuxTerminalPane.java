@@ -287,6 +287,12 @@ public final class TermuxTerminalPane extends FrameLayout implements TerminalVie
         e.put("PREFIX", prefix);
         e.put("TMPDIR", prefix + "/tmp");
         e.put("PATH", prefix + "/bin");
+        // 终端 PTY 直接 exec <prefix>/bin/bash（经 libtermux.so），不走 TermuxShellExecutor，
+        // 所以这条路径必须**单独**设置 LD_LIBRARY_PATH。
+        // 内置 Termux 的 ELF 现在不再被改写前缀（见 RuntimeInstaller），它们内嵌的
+        // DT_RUNPATH 指向不存在的 /data/data/com.termux/files/usr/lib，
+        // 少了这个变量终端里所有二进制都会 CANNOT LINK EXECUTABLE。
+        e.put("LD_LIBRARY_PATH", prefix + "/lib");
         e.put("SHELL", prefix + "/bin/bash");
         e.put("TERM", "xterm-256color");
         e.put("COLORTERM", "truecolor");

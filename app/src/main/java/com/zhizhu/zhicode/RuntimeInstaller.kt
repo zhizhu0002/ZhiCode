@@ -42,12 +42,35 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     companion object {
-        const val BOOTSTRAP_VERSION = "bootstrap-2026.07.26-r1+apt.android-7"
+        /*
+         * 自建 bootstrap（不再是官方 release 那份）。
+         *
+         * 来源：fork 的 zhizhu0002/termux-packages @ 6548df2，用
+         * `scripts/build-bootstraps.sh --architectures aarch64` 从源码构建，
+         * properties.sh 里的 TERMUX_APP__PACKAGE_NAME = com.zhizhu.code，
+         * 因此包内路径全部烘焙为 /data/data/com.zhizhu.code/...。
+         * CI 运行：https://github.com/zhizhu0002/termux-packages/actions/runs/36175482858
+         *
+         * 之后在本地做过两道后处理（见 tools/termux-bootstrap-fork/）：
+         *   1. 裁剪：extract_debs() 会把 output/ 里**每个** deb 都解进归档，而 fork 场景
+         *      下依赖只能全部源码编译，导致 doxygen/python/perl/tcl/tk/X11/fontconfig 等
+         *      纯构建期依赖也进了包（159 包 / 17485 文件 / 122 MB）。
+         *      按运行时依赖闭包裁剪后 → 83 包 / 3504 文件 / 31.6 MB（官方 82 包 / 32.2 MB）。
+         *      工具：tools/termux-bootstrap-fork/prune-bootstrap.js
+         *   2. 修两处上游 bug/残留：
+         *      - 上游 build-bootstraps.sh 把二阶脚本的 @TERMUX_PACKAGE_ARCH@ 替换成了空串
+         *        （函数收 $1，调用处传的是未定义的 $package_arch）→ 已修正为 aarch64
+         *      - termux-exec 的两个**注释**里残留旧前缀 → 已改写为 com.zhizhu.code
+         *
+         * 与官方包的差异仅一处：nano 新版多了 libmagic 依赖（官方那份是 7 月旧版 nano），
+         * 因此我们多 1 个包；官方有的 82 个包我们一个不缺。
+         */
+        const val BOOTSTRAP_VERSION = "bootstrap-2026.09.25-fork6548df2+apt.android-7"
         const val BOOTSTRAP_ASSET = "bootstrap-aarch64.zip"
-        const val BOOTSTRAP_SIZE = 32_176_084L
-        const val BOOTSTRAP_SHA256 = "82aae307c462bc911b02588228714438122e4f7f4492c78d8ab9914e78d10216"
+        const val BOOTSTRAP_SIZE = 33_119_132L
+        const val BOOTSTRAP_SHA256 = "aa3efcfb0fe25e80e1cc00ddfb8b1d919789fc46ce0a239e084618ef09111aff"
         const val BOOTSTRAP_SOURCE =
-            "https://github.com/termux/termux-packages/releases/tag/bootstrap-2026.07.26-r1%2Bapt.android-7"
+            "https://github.com/zhizhu0002/termux-packages/actions/runs/36175482858"
 
         private const val OFFICIAL_MAIN_REPOSITORY = "https://packages.termux.dev/apt/termux-main"
         private const val OFFICIAL_ROOT_REPOSITORY = "https://packages.termux.dev/apt/termux-root"
@@ -115,7 +138,6 @@ class RuntimeInstaller(private val context: Context) {
     @Throws(Exception::class)
     fun install(progress: Progress?) {
         ensureArm64()
-        ensureSafePrefixRewrite()
 
         val files = filesDir()
         val home = File(TermuxConstants.TERMUX_HOME_DIR_PATH)
@@ -140,7 +162,7 @@ class RuntimeInstaller(private val context: Context) {
 
         try {
             report(progress, "正在查询内置 Termux 基础环境…", 5)
-            extractBootstrap(verified, staging)
+            extractBootstrap(verified, staging, progress)
         } finally {
             verified.delete()
         }
@@ -189,20 +211,31 @@ class RuntimeInstaller(private val context: Context) {
         }
     }
 
-    /**
-     * 前缀改写必须等长——见类文档。这里显式拦下，避免静默产出损坏的 ELF。
+    /*
+     * 关于"为什么不再要求前缀等长改写"——这里曾有一道 ensureSafePrefixRewrite() 守卫，
+     * 强制 13 + len(applicationId) == 21（即包名必须 8 字符）。它基于一个**未经实测**的
+     * 假设：bootstrap 的 ELF 把旧前缀嵌在偏移敏感的位置，长度一变即损坏。
+     *
+     * 实测（扫描 bootstrap-aarch64.zip 全部 3473 个文件）推翻了这个假设：
+     *
+     *   含旧前缀的文件 611 个：
+     *     - 脚本(#!)  114  → 纯文本，长度任意
+     *     - ELF       337  → **全部且仅仅**把 "<prefix>/files/usr/lib" 放在 DT_RUNPATH 里
+     *     - 普通文本  160  → 纯文本
+     *   DT_RPATH = 0   其它动态标签(如 DT_NEEDED 带路径) = 0   仅数据段 = 0
+     *
+     * DT_RUNPATH 只是库搜索**提示**：若指向的目录不存在，动态链接器直接跳过它，
+     * 继续看 LD_LIBRARY_PATH。真正**优先于** LD_LIBRARY_PATH 的 DT_RPATH 一个都没有。
+     *
+     * 所以正确做法是：**ELF 一个字节都不动**，只改写文本；库定位交给 LD_LIBRARY_PATH。
+     * 已在设备上验证：ELF 的 RUNPATH 仍指向不存在的 /data/data/com.termux/files/usr/lib，
+     * 仅靠 LD_LIBRARY_PATH 就能正常运行 bash / sed / awk / grep / find / curl / dpkg / apt。
+     *
+     * ⚠️ 因此产生一条**硬依赖**：所有执行内置二进制的路径都必须设置
+     *    LD_LIBRARY_PATH=<prefix>/lib
+     * 见 TermuxShellExecutor 与 TermuxTerminalPane。旧代码在此处刻意 remove 掉该变量，
+     * 那是配合"等长改写 RUNPATH"的设计；现在语义反过来了，必须设置而不是移除。
      */
-    private fun ensureSafePrefixRewrite() {
-        val old = OLD_PREFIX.toByteArray(Charsets.UTF_8)
-        val new = newPrefix().toByteArray(Charsets.UTF_8)
-        if (old.size != new.size) {
-            throw IllegalStateException(
-                "prefix rewrite is not equal-length: '${OLD_PREFIX}' (${old.size}) -> " +
-                    "'${newPrefix()}' (${new.size}). " +
-                    "applicationId 必须恰好 8 个字符，见 app/build.gradle 中的说明。"
-            )
-        }
-    }
 
     // ---------------------------------------------------------------- 解包
 
@@ -242,16 +275,18 @@ class RuntimeInstaller(private val context: Context) {
 
     /**
      * 解包到 [staging]，同时：
-     * 1. 对每个文件的字节做**等长**前缀原地改写；
+     * 1. **ELF 原样写出**（见上方关于 RUNPATH 的说明），只对非 ELF 做前缀改写——文本没有长度约束；
      * 2. 按内容推断可执行位（实测 bootstrap 里 424 个可执行文件全是 ELF 或 `#!` 脚本，零例外）；
      * 3. 收集 [SYMLINKS_ENTRY] 并在全部文件落地后创建符号链接。
      */
     @Throws(Exception::class)
-    private fun extractBootstrap(zip: File, staging: File) {
+    private fun extractBootstrap(zip: File, staging: File, progress: Progress?) {
         val oldBytes = OLD_PREFIX.toByteArray(Charsets.UTF_8)
         val newBytes = newPrefix().toByteArray(Charsets.UTF_8)
         val stagingRoot = staging.canonicalPath
         val symlinkLines = ArrayList<String>()
+        var elfCount = 0
+        var textRewritten = 0
 
         ZipInputStream(FileInputStream(zip)).use { zin ->
             var entry = zin.nextEntry
@@ -264,16 +299,31 @@ class RuntimeInstaller(private val context: Context) {
                     } else {
                         val target = safeBootstrapPath(stagingRoot, name)
                         val data = readAll(zin)
-                        replaceAllInPlace(data, oldBytes, newBytes)
+                        /*
+                         * 这里是整套方案的关键分支：
+                         *   - ELF：**不做任何字节替换**。它引用旧前缀的唯一位置是 DT_RUNPATH，
+                         *     而 DT_RUNPATH 会被 LD_LIBRARY_PATH 覆盖，指向不存在的目录无害。
+                         *   - 非 ELF（脚本/配置/文本）：可以任意长度替换，所以长包名不再受限。
+                         * 若把它改回"所有文件都等长替换"，就会重新引入 8 字符包名的限制。
+                         */
+                        val out = if (isElf(data)) {
+                            elfCount++
+                            data
+                        } else {
+                            val replaced = replaceAll(data, oldBytes, newBytes)
+                            if (replaced !== data) textRewritten++
+                            replaced
+                        }
                         target.parentFile?.mkdirs()
-                        FileOutputStream(target).use { it.write(data) }
-                        target.setExecutable(isExecutableContent(data), false)
+                        FileOutputStream(target).use { it.write(out) }
+                        target.setExecutable(isExecutableContent(out), false)
                     }
                 }
                 zin.closeEntry()
                 entry = zin.nextEntry
             }
         }
+        report(progress, "已解包：ELF 原样 $elfCount 个，文本改写 $textRewritten 个", 30)
 
         for (raw in symlinkLines) {
             val line = raw.trim()
@@ -311,34 +361,51 @@ class RuntimeInstaller(private val context: Context) {
     }
 
     /**
-     * 等长原地替换。长度不等说明调用方漏了 [ensureSafePrefixRewrite]，这里直接拒绝。
+     * **任意长度**的字节替换，返回新数组。
      *
-     * @return 替换次数
+     * 旧实现叫 `replaceAllInPlace`，强制 `old.size == replacement.size`，因为当时要原地改
+     * bootstrap 里的 ELF 字符串表。现在 ELF 已经不再被改写（见 extractBootstrap 的说明），
+     * 这条限制随之取消——**这正是长包名能成立的原因**：文本文件里的路径可以比原来长。
+     *
+     * 无匹配时返回**原数组同一个引用**，调用方可用 `!==` 判断是否真的改过。
      */
-    private fun replaceAllInPlace(data: ByteArray, old: ByteArray, replacement: ByteArray): Int {
-        if (old.isEmpty()) return 0
-        if (old.size != replacement.size) {
-            throw IllegalStateException("prefix rewrite is not equal-length")
-        }
-        var hits = 0
+    private fun replaceAll(data: ByteArray, old: ByteArray, replacement: ByteArray): ByteArray {
+        if (old.isEmpty()) return data
+        var first = indexOf(data, old, 0)
+        if (first < 0) return data
+
+        val out = java.io.ByteArrayOutputStream(data.size + (replacement.size - old.size).coerceAtLeast(0) * 4)
         var i = 0
-        val limit = data.size - old.size
-        while (i <= limit) {
-            var match = true
+        while (first >= 0) {
+            out.write(data, i, first - i)
+            out.write(replacement)
+            i = first + old.size
+            first = indexOf(data, old, i)
+        }
+        out.write(data, i, data.size - i)
+        return out.toByteArray()
+    }
+
+    /** 朴素子串查找。用于小模式（路径）在海量文本里的定位，够快且不引入依赖。 */
+    private fun indexOf(hay: ByteArray, needle: ByteArray, from: Int): Int {
+        val limit = hay.size - needle.size
+        var i = from.coerceAtLeast(0)
+        outer@ while (i <= limit) {
             var j = 0
-            while (j < old.size) {
-                if (data[i + j] != old[j]) { match = false; break }
+            while (j < needle.size) {
+                if (hay[i + j] != needle[j]) { i++; continue@outer }
                 j++
             }
-            if (match) {
-                System.arraycopy(replacement, 0, data, i, replacement.size)
-                hits++
-                i += replacement.size
-            } else {
-                i++
-            }
+            return i
         }
-        return hits
+        return -1
+    }
+
+    /** ELF 魔数判定：这些文件**必须**原样写出。 */
+    private fun isElf(data: ByteArray): Boolean {
+        if (data.size < ELF_MAGIC.size) return false
+        for (k in ELF_MAGIC.indices) if (data[k] != ELF_MAGIC[k]) return false
+        return true
     }
 
     private fun isExecutableContent(data: ByteArray): Boolean {
