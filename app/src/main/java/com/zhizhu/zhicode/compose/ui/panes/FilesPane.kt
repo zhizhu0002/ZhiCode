@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.termux.shared.termux.TermuxConstants
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.model.FileEntry
@@ -162,31 +163,44 @@ private fun FileBreadcrumbBar(
         // 压小 insideMargin，给下面的文件列表让位。
         modifier = Modifier.padding(horizontal = 6.dp, vertical = 0.dp),
         insideMargin = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-        // itemMaxWidth 用 Miuix 的默认值 160dp，不覆盖 —— 每一级都是单独的目录名，
-        // 最长的是包名 `com.zhizhu.code`（16 字符，约 146dp），160dp 放得下。
-        // ⚠️ 别再把它合并成一条完整路径：那是把好几级塞进一个药丸里，
-        // 一定会被省略号截断，反而什么都看不见。
+        // itemMaxWidth 用 Miuix 的默认值 160dp，不覆盖 —— 每一项都是单独的目录名，
+        // 最长的是包名 `com.zhizhu.code`（15 字符，约 146dp），160dp 放得下。
+        // ⚠️ 别改成把好几级拼成一条路径：那一定会被省略号截断，反而什么都看不见。
     )
 }
 
 /**
- * 生成面包屑层级：**一级目录一个项**，从文件系统根开始。
+ * 生成面包屑层级：**一级目录一个项**，从「软件根目录」开始。
  *
  * `/data/user/0/com.zhizhu.code/files/home/workspace`
- *   → `/` `data` `user` `0` `com.zhizhu.code` `files` `home` `workspace`
+ *   → `com.zhizhu.code` `files` `home` `workspace`
  *
- * 之所以不从「软件根目录」开始：上层目录（`/`、`/data`…）在这个应用里读不了，
- * 点进去只会看到空列表；但面包屑的价值就是「一眼看出完整位置 + 任意一级可跳」，
- * 所以路径层级一个不少，上层点不动也无妨（[FileBrowser.children] 对读不到的
- * 目录返回空列表，面板会给出「无法读取」的说明）。
+ * 为什么砍掉前面的 `/data/user/0`：它在应用沙箱里是 `drwx--x--x`
+ * （other 只有 x 没有 r），**列不出来** —— 挂一个点进去只能看到
+ * 「无法读取（权限不足）」的层级，纯粹是噪音。首项文字直接用包名，
+ * 它确实就是软件根目录，语义也对得上。
  *
- * 每一项的 `path` 都是真实存在的层级，点哪一级就回到哪一级。
+ * 路径在应用根**之外**（设置里把项目路径改到了 `/sdcard/...` 等）时，
+ * 没有“包名”可以当起点，就逐级展示真实层级；此时首项是 `/`。
+ *
+ * 每一项的 `path` 都是真实层级，点哪一级就回到哪一级。
  */
 private fun breadcrumbItems(filePath: String): List<BreadcrumbItem> {
     val normalized = filePath.trimEnd('/').ifEmpty { "/" }
-    val items = mutableListOf(BreadcrumbItem(path = "/", text = "/"))
-    var accumulated = ""
-    normalized.trim('/').split('/').filter { it.isNotEmpty() }.forEach { segment ->
+    val appRoot = TermuxConstants.TERMUX_DATA_DIR_PATH.trimEnd('/')
+
+    val start = if (normalized == appRoot || normalized.startsWith("$appRoot/")) appRoot else "/"
+    val rest = when {
+        normalized == start -> ""
+        start == "/" -> normalized.removePrefix("/")
+        else -> normalized.removePrefix("$start/")
+    }
+
+    val items = mutableListOf(
+        BreadcrumbItem(path = start, text = start.substringAfterLast('/').ifEmpty { "/" }),
+    )
+    var accumulated = if (start == "/") "" else start
+    rest.split('/').filter { it.isNotEmpty() }.forEach { segment ->
         accumulated += "/$segment"
         items += BreadcrumbItem(path = accumulated, text = segment)
     }

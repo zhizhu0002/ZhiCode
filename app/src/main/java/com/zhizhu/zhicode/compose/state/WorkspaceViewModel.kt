@@ -209,8 +209,8 @@ class WorkspaceViewModel(
 
     private val _state = MutableStateFlow(
         WorkspaceUiState(
-            // 项目路径是真实工作区（$HOME/workspace），不再是开发本应用时用的那个路径。
-            // 它在运行环境装好后由 [ensureWorkspace] 创建，见那里的说明。
+            // 默认项目路径是 $HOME（Termux 约定），不再是开发本应用时用的那个路径。
+            // 它由装环境时的 RuntimeInstaller 一并建好，见 [ensureWorkspace]。
             projectName = WorkspacePaths.nameOf(WorkspacePaths.defaultProject()),
             projectPath = WorkspacePaths.defaultProject(),
             // 会话列表 / 对话历史 / 任务清单都来自磁盘，这里先给空值，
