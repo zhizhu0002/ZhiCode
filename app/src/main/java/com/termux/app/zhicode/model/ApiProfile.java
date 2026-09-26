@@ -21,7 +21,7 @@ public final class ApiProfile {
         name = "API 配置";
         protocol = "openai-responses";
         baseUrl = "";
-        defaultModel = "gpt-5.6-terra";
+        defaultModel = "";
         revision = 1;
         credentialRevision = 1;
     }

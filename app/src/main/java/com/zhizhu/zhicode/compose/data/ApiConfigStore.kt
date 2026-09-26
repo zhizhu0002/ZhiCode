@@ -73,9 +73,6 @@ internal object ApiConfigStore {
         ApiSettingsStore(context).deleteProfile(profileId)
     }
 
-    /** 官方 API 记录是给新用户直接可用的入口，不允许改名/改地址/删除。 */
-    fun isOfficial(profileId: String): Boolean = ApiSettingsStore.OFFICIAL_PROFILE_ID == profileId
-
     /**
      * 当前生效的配置摘要，用于设置页显示与「为什么调不通」的排查。
      *

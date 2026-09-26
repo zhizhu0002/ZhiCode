@@ -94,6 +94,12 @@ run SessionMarkerMigrationTest "$PROJECT_ROOT"
 # LicenseNoticeStructureTest.java
 run LicenseNoticeStructureTest "$PROJECT_ROOT"
 
+# ---------- 不内置任何厂商端点 ----------
+# 应用不再预置任何厂商地址；这条测试对整个源码树做字面量扫描。
+# 它守的是一类“加一行默认值就够方便”的改动，而那行的后果是把用户流量导向某个具体服务。
+# NoBundledThirdPartyEndpointTest.java
+run NoBundledThirdPartyEndpointTest "$PROJECT_ROOT"
+
 echo "-----"
 echo "通过 $PASS / 失败 $FAIL"
 if [ "$FAIL" -ne 0 ]; then

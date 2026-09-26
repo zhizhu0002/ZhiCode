@@ -13,7 +13,8 @@ public final class SessionConfig {
     public String profileId = "";
     public int profileRevision = 1;
     public int credentialRevision = 1;
-    public String model = "gpt-5.6-terra";
+    /** 模型名由用户在自己的配置里给出；空串表示还没填，由引擎侧报明确错误。 */
+    public String model = "";
     /** Whether image blocks are included in provider requests. */
     public boolean visionEnabled = true;
     public String effort = "high";

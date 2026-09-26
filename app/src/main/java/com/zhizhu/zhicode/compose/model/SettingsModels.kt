@@ -44,7 +44,7 @@ data class ApiProfile(
     val apiKey: String,
     val model: String,
 ) {
-    /** 参考图卡片第二行的 `openai-responses · gpt-5.6-sol` 形式。 */
+    /** 参考图卡片第二行的 `协议名 · 模型名` 形式。 */
     val summary: String get() = "${protocol.label} · ${model.ifBlank { "未设置模型" }}"
 }
 
@@ -351,28 +351,17 @@ data class ModelPickerState(
 )
 
 /**
- * 首次进入时的默认配置：官方 API 一条。
+ * 首次进入时的 API 配置列表：**空**。
  *
- * <p>四个值<b>全部取自引擎侧常量</b>，不在这里重写一份字面量：
- * <ul>
- *   <li>地址与模型名如果各写一份，两边迟早会不一致，而表现是
- *       「界面上看到的和实际请求的不是同一个地方」；</li>
- *   <li>{@code id} 尤其重要 —— 界面判断「是不是官方配置」用的是
- *       [com.termux.app.zhicode.storage.ApiSettingsStore.OFFICIAL_PROFILE_ID]。
- *       这里若用另一个 id，这条默认配置永远不会被识别成官方项，
- *       于是「官方配置不可删」的保护对它不生效。</li>
- * </ul>
+ * <p>以前这里预置一条厂家的「官方 API」。那个做法已经取消，理由有两个：
+ * 一是它等于替某个具体服务做默认入口（并且带推广参数），这该由用户自己选；
+ * 二是任何内置地址都会让「请求到底发到哪里」变得不透明。
+ *
+ * <p>所以应用不再自带任何地址与模型名，全部由用户在设置里新增。
+ * 列表允许为空：[AppSettings.apiProfiles] 与 [AppSettings.activeProfileId] 都跟着空，
+ * 界面据此显示「还没有 API 配置」，而真正发请求前会由引擎侧拦下来并给出明确错误。
  */
-val DEFAULT_API_PROFILES: List<ApiProfile> = listOf(
-    ApiProfile(
-        id = ApiSettingsStore.OFFICIAL_PROFILE_ID,
-        name = "蜘蛛 官方 API",
-        protocol = ApiProtocol.OPENAI_RESPONSES,
-        baseUrl = ApiSettingsStore.OFFICIAL_BASE_URL,
-        apiKey = "",
-        model = ApiSettingsStore.OFFICIAL_DEFAULT_MODEL,
-    ),
-)
+val DEFAULT_API_PROFILES: List<ApiProfile> = emptyList()
 
 /**
  * 原版设置页里**新增的**持久化项。
@@ -395,9 +384,9 @@ data class AppSettings(
     /** 自动压缩上限，取值 50..100（百分比）。 */
     val autoCompactPercent: Int = 80,
     val customSystemPrompt: String = "",
-    /** API 配置记录（列表 + 当前选用）。 */
+    /** API 配置记录（列表 + 当前选用）。列表可以为空 = 还没有配过。 */
     val apiProfiles: List<ApiProfile> = DEFAULT_API_PROFILES,
-    val activeProfileId: String = DEFAULT_API_PROFILES.first().id,
+    val activeProfileId: String = "",
 )
 
 /** 结果数合法区间，原版为 1–10。 */

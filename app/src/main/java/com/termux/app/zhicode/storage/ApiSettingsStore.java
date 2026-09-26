@@ -15,7 +15,6 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 /**
  * 全局设置与 API 配置的持久化。
@@ -25,10 +24,16 @@ import java.util.Map;
  * {@link AndroidSecretStore}，落到 Android Keystore 里。这样即使设置被导出或备份，
  * 也不会连带泄露令牌。{@code ApiProfile} 里没有密钥字段，是刻意的。
  *
- * <h3>「官方配置」是受保护的一条</h3>
- * 它总是存在、总是排在第一位、地址与模型名不可改、也不可删除。
- * 这个约束在三处写入路径上都要成立（保存单个 profile、保存全局设置、规范化列表），
- * 所以实现成<b>一个</b> {@link #enforceOfficialProfile}，避免三份副本将来各自漂移。
+ * <h3>不内置任何 API 配置</h3>
+ * 应用不预置任何厂商地址：所有配置都由用户自己新增。这有两个理由：
+ * 一是替某个服务做默认入口（尤其是带推广参数的）等于替它做导流；
+ * 二是任何内置地址都会让「请求发到哪」这件事变得不透明。
+ * 因此配置列表可以为空，{@link #getActiveProfile()} 返回 null 表示还没有可用配置，
+ * 而“未配置”会由 {@code ApiUrlPolicy} 拦下来并给出明确提示。
+ *
+ * <h3>一次性清除内置端点</h3>
+ * 早期版本内置过一条厂商配置（id、名字里都写着官方）。升级时必须把它删干净，
+ * 否则用户会继续被导向那个地址。见 {@link #purgeBundledEndpoint}。
  *
  * <h3>读取路径不应该写盘</h3>
  * 规范化的结果只在<b>确实变化</b>时才落盘。原先每次 {@code getProfiles()} 都会写一次，
@@ -43,8 +48,6 @@ public final class ApiSettingsStore {
 
     /** 当前 prefs 文件名。由品牌短标识派生，保证与其它模块拼出的名字一致。 */
     private static final String PREFS = TermuxConstants.BRAND_SLUG + "_settings";
-    /** 搬迁来源：只读，首次启动时整体拷一次，之后不再触碰。 */
-    private static final String LEGACY_PREFS = "iq_code_android_settings";
 
     // ------------------------------------------------------------ 存储键
     // 这些键名是持久化契约，改动等于丢掉用户已有设置，因此集中在一处并说明。
@@ -59,7 +62,6 @@ public final class ApiSettingsStore {
     /** 键名与 {@link SessionConfig} 的字段一一对应；改一个就要一起改 {@code loadGlobal/saveGlobal}。 */
     private static final String KEY_PROTOCOL = "protocol";
     private static final String KEY_BASE_URL = "base_url";
-    private static final String KEY_ENDPOINT_CONFIG_VERSION = "api_endpoint_config_version";
     private static final String KEY_MODEL = "model";
     private static final String KEY_VISION_ENABLED = "vision_enabled";
     private static final String KEY_EFFORT = "effort";
@@ -95,71 +97,91 @@ public final class ApiSettingsStore {
      */
     private static final int COMPACTION_LOGIC_VERSION = 2;
 
-    /** 端点配置版本。用于把早期内置的一个第三方地址清掉。 */
-    private static final int API_ENDPOINT_CONFIG_VERSION = 1;
-
-    /** 早期内置的第三方端点。命中就清空，让用户自己填。 */
-    private static final String LEGACY_BUNDLED_HOST = "ctoken.top";
+    /**
+     * 清除内置端点的一次性标记（版本号）。
+     *
+     * <p>与其它版本标记同一套路：<b>一次</b>写完就不再重跑。写成版本号而不是布尔，
+     * 是为了将来如果还需要再清一次别的内置项，直接提升版本号即可。
+     */
+    private static final String KEY_BUNDLED_PURGE = "bundled_endpoint_purge_version";
+    private static final int BUNDLED_PURGE_VERSION = 1;
 
     /** 第 1 版压缩比例，仅用于识别「用户没动过」。 */
     private static final double LEGACY_COMPACT_RATIO = 0.78d;
 
-    // ------------------------------------------------------------ 官方配置
-
-    public static final String OFFICIAL_PROFILE_ID = "zhicode-official";
-    public static final String OFFICIAL_BASE_URL = "https://api.ginka.cloud/";
-    public static final String OFFICIAL_SIGNUP_URL = "https://api.ginka.cloud/sign-up?aff=caHN";
-    public static final String OFFICIAL_DEFAULT_MODEL = "gpt-5.6-sol";
-
-    private static final String OFFICIAL_DISPLAY_NAME = "蜘蛛 官方 API";
-    private static final String OFFICIAL_PROTOCOL = "openai-responses";
+    /**
+     * 判定“这条记录是内置的”所用的名字片段。
+     *
+     * <p>内置记录的展示名一直是「… 官方 API」（早期是另一个产品名），所以名字里带
+     * 这两个词就是它。刻意不在这里写它的域名或 id：那样等于把要删除的东西再复制一份，
+     * 而匹配名字已经能盖住两种来源（从旧版升级来的、以及从别的同源工程迁移来的）。
+     *
+     * <p>已知代价：用户若自己把某个配置改名成含这两个词的，会在这次清理里被删掉。
+     * 只发生一次，而且丢的是一条可以重建的配置，不是用户数据。
+     */
+    private static final String[] BUNDLED_NAME_HINTS = {"官方", "official"};
 
     private final SharedPreferences prefs;
     private final AndroidSecretStore secrets;
 
     public ApiSettingsStore(Context context) {
         Context app = context.getApplicationContext();
-        prefs = openMigrated(app);
+        prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         secrets = new AndroidSecretStore(app);
+        purgeBundledEndpoint();
     }
 
-    // -------------------------------------------------------- 一次性搬迁
+    // -------------------------------------------------- 一次性清除内置端点
 
     /**
-     * 打开当前 prefs；若它是空的而旧文件有内容，则整体搬一次。
+     * 删除内置厂商配置，并清掉可能残留的全局端点。
      *
-     * <p>不删旧文件：万一需要回退版本，旧设置还在。搬迁只在新文件为空时发生，
-     * 所以不会把用户后来的修改用旧值覆盖回去。
+     * <p>要清两处，少一处都会“看起来删掉了，其实还在用”：
+     * <ul>
+     *   <li><b>配置列表</b>里的那条记录；</li>
+     *   <li><b>全局端点</b> {@code base_url}。{@code load()} 在列表非空时会用激活配置覆盖它，
+     *       但列表为空时它就会被直接当作请求地址 —— 那样删了记录却还在往旧地址发请求。</li>
+     * </ul>
+     *
+     * <p>顺带删掉该记录的密钥槽：那条密钥是给那个服务用的，留着没有意义，
+     * 而且用户已经看不到它了，等于一个无法清理的残留密文。
+     *
+     * <p>只清一次（版本标记）。之后每次构造只多读一个 int，不做任何遍历。
      */
-    private static SharedPreferences openMigrated(Context app) {
-        SharedPreferences current = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if (!current.getAll().isEmpty()) return current;
+    private synchronized void purgeBundledEndpoint() {
+        if (prefs.getInt(KEY_BUNDLED_PURGE, 0) >= BUNDLED_PURGE_VERSION) return;
 
-        SharedPreferences legacy = app.getSharedPreferences(LEGACY_PREFS, Context.MODE_PRIVATE);
-        Map<String, ?> entries = legacy.getAll();
-        if (entries.isEmpty()) return current;
-
-        SharedPreferences.Editor editor = current.edit();
-        for (Map.Entry<String, ?> entry : entries.entrySet()) {
-            copyValue(editor, entry.getKey(), entry.getValue());
+        List<ApiProfile> kept = new ArrayList<>();
+        for (ApiProfile profile : readProfiles()) {
+            if (isBundledEndpoint(profile)) {
+                try {
+                    secrets.removeApiKey(profile.id, profile.credentialRevision);
+                } catch (Throwable ignored) {
+                    // 密钥槽删不掉也要继续：留着一个读不到的密文比留着一条可用配置安全。
+                }
+                continue;
+            }
+            kept.add(profile);
         }
-        editor.apply();
-        return current;
+
+        String active = prefs.getString(KEY_ACTIVE_PROFILE, "");
+        if (findProfile(kept, active) == null) active = kept.isEmpty() ? "" : kept.get(0).id;
+        persistProfiles(kept, active);
+
+        // 全局端点一并清空：这是「记录没了但请求还发往旧地址」的唯一原因。
+        prefs.edit()
+                .putString(KEY_BASE_URL, "")
+                .putInt(KEY_BUNDLED_PURGE, BUNDLED_PURGE_VERSION)
+                .apply();
     }
 
-    /** SharedPreferences 的值是若干具体类型，没有通用的 put，只能逐个匹配。 */
-    private static void copyValue(SharedPreferences.Editor editor, String key, Object value) {
-        if (value instanceof Boolean) editor.putBoolean(key, (Boolean) value);
-        else if (value instanceof Integer) editor.putInt(key, (Integer) value);
-        else if (value instanceof Long) editor.putLong(key, (Long) value);
-        else if (value instanceof Float) editor.putFloat(key, (Float) value);
-        else if (value instanceof String) editor.putString(key, (String) value);
-        else if (value instanceof java.util.Set) {
-            @SuppressWarnings("unchecked")
-            java.util.Set<String> strings = (java.util.Set<String>) value;
-            editor.putStringSet(key, strings);
+    /** 是否内置厂商配置：看展示名，不看域名（不把要删的东西再抄一遍）。 */
+    private static boolean isBundledEndpoint(ApiProfile profile) {
+        String name = profile == null || profile.name == null ? "" : profile.name.toLowerCase(Locale.US);
+        for (String hint : BUNDLED_NAME_HINTS) {
+            if (name.contains(hint)) return true;
         }
-        // 其余类型（不存在于本应用的设置里）直接跳过而不是抛错：搬迁失败不该让应用起不来。
+        return false;
     }
 
     // ------------------------------------------------------------ 对外读取
@@ -167,6 +189,15 @@ public final class ApiSettingsStore {
     public synchronized SessionConfig load() {
         SessionConfig config = loadGlobal();
         List<ApiProfile> profiles = normalizedProfiles();
+        if (profiles.isEmpty()) {
+            // 没有配置就把端点字段清空。这里不能只 return config：
+            // 全局 base_url 可能是上一次内置配置留下的值，带着它返回就等于
+            // 「列表里已经没有那条记录了，请求却还发往那个地址」。
+            config.profileId = "";
+            config.baseUrl = "";
+            config.apiKey = "";
+            return config;
+        }
         String activeId = prefs.getString(KEY_ACTIVE_PROFILE, "");
         ApiProfile active = findProfile(profiles, activeId);
         if (active == null) {
@@ -183,8 +214,10 @@ public final class ApiSettingsStore {
         return copies;
     }
 
+    /** 当前生效配置；一条也没有时返回 {@code null}（界面据此显示“未配置”）。 */
     public synchronized ApiProfile getActiveProfile() {
         List<ApiProfile> profiles = getProfiles();
+        if (profiles.isEmpty()) return null;
         ApiProfile active = findProfile(profiles, prefs.getString(KEY_ACTIVE_PROFILE, ""));
         return active == null ? profiles.get(0) : active;
     }
@@ -194,8 +227,10 @@ public final class ApiSettingsStore {
         return profile == null ? null : profile.copy();
     }
 
+    /** 当前生效配置的 id；一条也没有时返回空串。 */
     public synchronized String getActiveProfileId() {
-        return getActiveProfile().id;
+        ApiProfile active = getActiveProfile();
+        return active == null ? "" : active.id;
     }
 
     public synchronized void selectProfile(String profileId) {
@@ -230,9 +265,9 @@ public final class ApiSettingsStore {
         ApiProfile saved = draft.copy();
         if (isBlank(saved.id)) saved.id = new ApiProfile().id;
         saved.name = firstNonBlank(saved.name, "API 配置");
-        saved.protocol = firstNonBlank(saved.protocol, OFFICIAL_PROTOCOL);
+        saved.protocol = firstNonBlank(saved.protocol, new ApiProfile().protocol);
         saved.baseUrl = trimToEmpty(saved.baseUrl);
-        saved.defaultModel = firstNonBlank(saved.defaultModel, "gpt-5.6-terra");
+        saved.defaultModel = trimToEmpty(saved.defaultModel);
 
         if (existing == null) {
             saved.revision = 1;
@@ -245,7 +280,6 @@ public final class ApiSettingsStore {
             if (!sameEndpoint(existing, saved)) saved.revision++;
             replaceAt(profiles, saved);
         }
-        enforceOfficialProfile(saved);
 
         if (replaceKey) {
             if (existing != null) saved.credentialRevision = existing.credentialRevision + 1;
@@ -256,16 +290,15 @@ public final class ApiSettingsStore {
         return saved.copy();
     }
 
+    /** 删除一条配置。允许删到一条不剩 —— “一条都没有”是合法的初始状态。 */
     public synchronized void deleteProfile(String profileId) {
-        if (OFFICIAL_PROFILE_ID.equals(profileId)) throw new IllegalStateException("官方 API 配置不能删除");
         List<ApiProfile> profiles = getProfiles();
-        if (profiles.size() <= 1) throw new IllegalStateException("至少需要保留一个 API 配置");
         ApiProfile profile = findProfile(profiles, profileId);
         if (profile == null) return;
         profiles.remove(profile);
         secrets.removeApiKey(profile.id, profile.credentialRevision);
         String active = prefs.getString(KEY_ACTIVE_PROFILE, "");
-        if (profile.id.equals(active)) active = profiles.get(0).id;
+        if (profile.id.equals(active)) active = profiles.isEmpty() ? "" : profiles.get(0).id;
         persistProfiles(profiles, active);
     }
 
@@ -287,7 +320,6 @@ public final class ApiSettingsStore {
         updated.protocol = firstNonBlank(config.protocol, updated.protocol);
         updated.baseUrl = trimToEmpty(config.baseUrl);
         updated.defaultModel = firstNonBlank(config.model, updated.defaultModel);
-        enforceOfficialProfile(updated);
         if (!sameEndpoint(profile, updated)) updated.revision++;
 
         String previousKey = apiKeyFor(profile);
@@ -365,11 +397,6 @@ public final class ApiSettingsStore {
         config.protocol = prefs.getString(KEY_PROTOCOL, config.protocol);
 
         String baseUrl = trimToEmpty(prefs.getString(KEY_BASE_URL, config.baseUrl));
-        int endpointVersion = prefs.getInt(KEY_ENDPOINT_CONFIG_VERSION, 0);
-        if (endpointVersion < API_ENDPOINT_CONFIG_VERSION && isLegacyBundledEndpoint(baseUrl)) {
-            // 旧版本内置过一个第三方地址；升级时清掉，让用户自己填。
-            baseUrl = "";
-        }
         config.baseUrl = baseUrl;
 
         config.model = prefs.getString(KEY_MODEL, config.model);
@@ -419,7 +446,6 @@ public final class ApiSettingsStore {
         prefs.edit()
                 .putString(KEY_PROTOCOL, config.protocol)
                 .putString(KEY_BASE_URL, trimToEmpty(config.baseUrl))
-                .putInt(KEY_ENDPOINT_CONFIG_VERSION, API_ENDPOINT_CONFIG_VERSION)
                 .putString(KEY_MODEL, config.model)
                 .putBoolean(KEY_VISION_ENABLED, config.visionEnabled)
                 .putString(KEY_EFFORT, config.effort)
@@ -462,17 +488,15 @@ public final class ApiSettingsStore {
             return migrateLegacyProfile(loadGlobal());
         }
 
-        List<ApiProfile> normalized = new ArrayList<>(stored.size() + 1);
-        ApiProfile official = findProfile(stored, OFFICIAL_PROFILE_ID);
-        official = official == null ? officialProfile() : official.copy();
-        enforceOfficialProfile(official);
-        normalized.add(official);
+        // 去重保序：同一个 id 只保留第一个，避开界面上出现两份同名配置。
+        // 不在这里插入任何内置记录 —— 列表可以为空。
+        List<ApiProfile> normalized = new ArrayList<>(stored.size());
         for (ApiProfile profile : stored) {
-            if (!OFFICIAL_PROFILE_ID.equals(profile.id)) normalized.add(profile);
+            if (findProfile(normalized, profile.id) == null) normalized.add(profile);
         }
 
-        String active = prefs.getString(KEY_ACTIVE_PROFILE, OFFICIAL_PROFILE_ID);
-        if (findProfile(normalized, active) == null) active = OFFICIAL_PROFILE_ID;
+        String active = prefs.getString(KEY_ACTIVE_PROFILE, "");
+        if (findProfile(normalized, active) == null) active = normalized.get(0).id;
         if (!profilesJson(normalized).equals(prefs.getString(KEY_PROFILES, ""))
                 || !active.equals(prefs.getString(KEY_ACTIVE_PROFILE, ""))) {
             persistProfiles(normalized, active);
@@ -530,13 +554,12 @@ public final class ApiSettingsStore {
     /**
      * 从「全局设置」迁移出第一份 profile。
      *
-     * <p>只在没有任何 profile 记录时才会被调用。官方配置总是建立，
-     * 另外：如果旧版本里填过地址或密钥，就再补一份「原 API 配置」，
-     * 免得用户升级后以为配置丢了。
+     * <p>只在没有任何 profile 记录时才会被调用。如果旧版设置里填过地址或密钥，
+     * 就把它落成一份「原 API 配置」，免得用户升级后以为配置丢了；
+     * 什么都没填就一份也不建，等用户自己新增。
      */
     private List<ApiProfile> migrateLegacyProfile(SessionConfig legacy) {
         ArrayList<ApiProfile> profiles = new ArrayList<>();
-        profiles.add(officialProfile());
 
         String legacyUrl = trimToEmpty(legacy.baseUrl);
         String legacyKey = trimToEmpty(secrets.getApiKey());
@@ -557,31 +580,8 @@ public final class ApiSettingsStore {
             profiles.add(profile);
             prefs.edit().putString(KEY_MIGRATED_PROFILE, profile.id).apply();
         }
-        persistProfiles(profiles, OFFICIAL_PROFILE_ID);
+        persistProfiles(profiles, profiles.isEmpty() ? "" : profiles.get(0).id);
         return profiles;
-    }
-
-    // ------------------------------------------------------------ 官方配置
-
-    private ApiProfile officialProfile() {
-        ApiProfile profile = new ApiProfile();
-        profile.id = OFFICIAL_PROFILE_ID;
-        profile.protocol = OFFICIAL_PROTOCOL;
-        enforceOfficialProfile(profile);
-        return profile;
-    }
-
-    /**
-     * 把官方配置的不可变字段钉回标准值。
-     *
-     * <p>三处写入路径都会调它，所以写成唯一一份。就地修改传入对象，
-     * 调用方负责是否需要先 copy。
-     */
-    private static void enforceOfficialProfile(ApiProfile profile) {
-        if (!OFFICIAL_PROFILE_ID.equals(profile.id)) return;
-        profile.name = OFFICIAL_DISPLAY_NAME;
-        profile.baseUrl = OFFICIAL_BASE_URL;
-        profile.defaultModel = OFFICIAL_DEFAULT_MODEL;
     }
 
     // ------------------------------------------------------------ 小工具
@@ -647,14 +647,6 @@ public final class ApiSettingsStore {
             i += Character.charCount(codePoint);
         }
         return clean.toString().trim();
-    }
-
-    private static boolean isLegacyBundledEndpoint(String value) {
-        String lower = trimToEmpty(value).toLowerCase(Locale.US);
-        return lower.equals("http://" + LEGACY_BUNDLED_HOST)
-                || lower.startsWith("http://" + LEGACY_BUNDLED_HOST + "/")
-                || lower.equals("https://" + LEGACY_BUNDLED_HOST)
-                || lower.startsWith("https://" + LEGACY_BUNDLED_HOST + "/");
     }
 
     private static boolean isBlank(String value) {

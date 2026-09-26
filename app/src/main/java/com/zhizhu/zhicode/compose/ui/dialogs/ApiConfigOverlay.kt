@@ -111,6 +111,17 @@ private fun ApiProfileList(
             PrimaryButton(text = "新增", onClick = onNew, modifier = Modifier.padding(start = 8.dp))
         },
     ) {
+        if (config.profiles.isEmpty()) {
+            // 空列表是正常的初始状态（应用不再自带任何厂商配置），
+            // 但只显示一行"没有数据"会让人以为坏了。写清下一步做什么。
+            Text(
+                text = "还没有 API 配置。点右上角「新增」填写你自己服务的 Base URL、协议与模型名 —— " +
+                    "应用不预置任何厂商地址，API Key 会存进系统加密存储。",
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = 10.5.sp,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            )
+        }
         config.profiles.forEach { profile ->
             val active = profile.id == config.activeId
             Card(
@@ -147,16 +158,16 @@ private fun ApiProfileList(
                             onClick = { onEdit(profile) },
                             iconSize = 15.dp,
                         )
-                        // 官方 API 记录不允许删除（引擎侧也会抛异常拒绝）。这里直接不画按钮，
-                        // 而不是画出来再报错——禁用态比"点了告诉你不行"更清楚。
-                        if (!com.zhizhu.zhicode.compose.data.ApiConfigStore.isOfficial(profile.id)) {
-                            ZhiIconButton(
-                                icon = ZhiIcons.close,
-                                description = "删除",
-                                onClick = { onDelete(profile.id) },
-                                iconSize = 15.dp,
-                            )
-                        }
+                        // 每条都可以删——包括那条从旧版本留下来的厂商配置。
+                        // 以前这里拦着不画按钮，理由是"引擎会拒绝删除官方记录"；
+                        // 现在没有官方记录这个概念了，禁止删除只剩下一个后果：
+                        // 用户清不掉一个自己不要的地址。
+                        ZhiIconButton(
+                            icon = ZhiIcons.close,
+                            description = "删除",
+                            onClick = { onDelete(profile.id) },
+                            iconSize = 15.dp,
+                        )
                     },
                     onClick = { if (!active) onSelect(profile.id) },
                     insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),

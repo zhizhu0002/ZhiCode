@@ -158,8 +158,8 @@ private fun ModelPickerBody(
 /**
  * 目录里的一行。
  *
- * `displayName` 与 `id` 相同时只显示一次（原版也是这么处理的），
- * 否则每行会变成"gpt-5.6-sol / gpt-5.6-sol"这种重复。
+ * `displayName` 与 `id` 相同时只显示一次，否则每行会重复两遍同一个名字
+ * （服务端常常不给 display_name，那种情况下它会被回落成 id）。
  */
 @Composable
 private fun ModelRow(
