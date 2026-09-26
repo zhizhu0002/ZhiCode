@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import android.content.Context
 import android.content.res.Configuration
 import android.widget.Toast
@@ -172,7 +173,7 @@ internal fun TerminalToolbar(
         Text(
             text = title,
             color = palette.text,
-            fontSize = 12.sp,
+            fontSize = ZhiTextScale.BodySmall,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -213,7 +214,7 @@ private fun GlyphButton(
         Text(
             text = glyph,
             color = color,
-            fontSize = 15.sp,
+            fontSize = ZhiTextScale.Heading,
             textAlign = TextAlign.Center,
         )
     }
@@ -261,7 +262,7 @@ internal fun TerminalExtraKeys(
                         Text(
                             text = key.display,
                             color = if (active) palette.accent else palette.text,
-                            fontSize = 10.sp,
+                            fontSize = ZhiTextScale.Footnote,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             textAlign = TextAlign.Center,
@@ -328,7 +329,7 @@ internal fun BoxScope.TerminalDrawer(
                 Text(
                     text = "Termux sessions",
                     color = palette.text,
-                    fontSize = 14.sp,
+                    fontSize = ZhiTextScale.Subheading,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.fillMaxWidth().height(44.dp).padding(top = 12.dp),
                 )
@@ -380,7 +381,7 @@ private fun SessionRow(
             text = (if (session.selected) "●  " else "○  ") + session.name +
                 "\n    " + (if (session.running) "running" else "finished"),
             color = if (session.selected) palette.text else palette.muted,
-            fontSize = 12.sp,
+            fontSize = ZhiTextScale.BodySmall,
             fontWeight = if (session.selected) FontWeight.Bold else FontWeight.Normal,
             lineHeight = 17.sp,
             maxLines = 2,
@@ -389,7 +390,7 @@ private fun SessionRow(
         Text(
             text = "×",
             color = palette.muted,
-            fontSize = 18.sp,
+            fontSize = ZhiTextScale.TitleSmall,
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .width(38.dp)
@@ -406,7 +407,7 @@ private fun DrawerAction(label: String, palette: Chrome, onClick: () -> Unit) {
     Text(
         text = label,
         color = palette.text,
-        fontSize = 12.sp,
+        fontSize = ZhiTextScale.BodySmall,
         maxLines = 1,
         modifier = Modifier
             .fillMaxWidth()
@@ -432,7 +433,7 @@ internal fun TerminalRuntimeNotice(text: String) {
         Text(
             text = text,
             color = palette.muted,
-            fontSize = 13.sp,
+            fontSize = ZhiTextScale.Body,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(24.dp),
         )
@@ -455,14 +456,14 @@ internal fun TerminalFailure(detail: String, onRetry: () -> Unit) {
         Text(
             text = TermuxTerminalPane.FAILURE_TITLE,
             color = palette.error,
-            fontSize = 15.sp,
+            fontSize = ZhiTextScale.Heading,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
         Text(
             text = detail + TermuxTerminalPane.FAILURE_FOOTNOTE,
             color = palette.muted,
-            fontSize = 11.sp,
+            fontSize = ZhiTextScale.Caption,
             fontFamily = FontFamily.Monospace,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 8.dp),

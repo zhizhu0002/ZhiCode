@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -109,7 +110,7 @@ private fun ModelPickerBody(
             } else {
                 scheme.primary
             },
-            fontSize = 10.5.sp,
+            fontSize = ZhiTextScale.Footnote,
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         )
 
@@ -149,7 +150,7 @@ private fun ModelPickerBody(
             text = "点列表里的模型会填进上面的框；再点「使用模型」才生效。" +
                 "任务正在运行时切换，会在下一轮完整请求生效。",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = 10.5.sp,
+            fontSize = ZhiTextScale.Footnote,
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
         )
     }

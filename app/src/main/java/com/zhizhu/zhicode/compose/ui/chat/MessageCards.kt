@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.chat
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -65,13 +66,13 @@ fun EmptyState() {
         Text(
             text = "想让蜘蛛做什么？",
             color = scheme.onBackground,
-            fontSize = 21.sp,
+            fontSize = ZhiTextScale.Title,
             fontWeight = FontWeight.Bold,
         )
         Text(
             text = "蜘蛛可以读取项目、编辑文件、运行命令，并在内置 Termux 环境中验证修改。",
             color = scheme.onBackgroundVariant,
-            fontSize = 12.sp,
+            fontSize = ZhiTextScale.BodySmall,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp),
         )
     }
@@ -99,7 +100,7 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
         ) {
             Text(
                 text = item.body,
-                fontSize = 14.sp,
+                fontSize = ZhiTextScale.Subheading,
                 fontWeight = FontWeight.Normal,
             )
         }
@@ -164,7 +165,7 @@ fun AssistantCard(
                 Text(
                     text = "▍",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = 12.sp,
+                    fontSize = ZhiTextScale.BodySmall,
                     modifier = Modifier.padding(top = 1.dp),
                 )
             }
@@ -198,7 +199,7 @@ private fun ContextFooter(tokens: Int, window: Int) {
     Text(
         text = label,
         color = color,
-        fontSize = 9.3.sp,
+        fontSize = ZhiTextScale.Micro,
         fontFamily = FontFamily.Monospace,
         modifier = Modifier.padding(top = 5.dp, end = 3.dp),
     )
@@ -228,7 +229,7 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                     Text(
                         text = "思考过程" + (if (item.streaming) " · 进行中" else ""),
                         color = scheme.primary,
-                        fontSize = 11.sp,
+                        fontSize = ZhiTextScale.Caption,
                         modifier = Modifier.padding(start = 5.dp),
                     )
                 }
@@ -245,7 +246,7 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                         Text(
                             text = "· $step",
                             color = scheme.onSurfaceVariantSummary,
-                            fontSize = 11.sp,
+                            fontSize = ZhiTextScale.Caption,
                             modifier = Modifier.padding(start = 6.dp, top = 2.dp),
                         )
                     }
@@ -254,7 +255,7 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                     Text(
                         text = item.thinking,
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = 11.sp,
+                        fontSize = ZhiTextScale.Caption,
                         modifier = Modifier.padding(start = 6.dp, top = 4.dp),
                     )
                 }
@@ -263,7 +264,7 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
             Text(
                 text = item.thinking,
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = 11.sp,
+                fontSize = ZhiTextScale.Caption,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 6.dp),
@@ -321,7 +322,7 @@ fun ToolGroupCard(
             Text(
                 text = if (item.groupCompleted && failed == 0) "已运行 ${item.tools.size} 个工具" else "正在运行工具",
                 color = scheme.onSurface,
-                fontSize = 12.sp,
+                fontSize = ZhiTextScale.BodySmall,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(start = 5.dp),
             )
@@ -333,7 +334,7 @@ fun ToolGroupCard(
             ) {
                 Text(
                     text = "$completed/${item.tools.size}" + if (failed > 0) " · $failed 失败" else "",
-                    fontSize = 10.sp,
+                    fontSize = ZhiTextScale.Footnote,
                 )
             }
         }
@@ -342,7 +343,7 @@ fun ToolGroupCard(
             Text(
                 text = item.groupLabel,
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = 11.sp,
+                fontSize = ZhiTextScale.Caption,
                 modifier = Modifier.padding(start = 18.dp, top = 2.dp),
             )
         }
@@ -411,7 +412,7 @@ private fun ToolRow(
             Text(
                 text = activity.displayName,
                 color = scheme.onSurface,
-                fontSize = 11.5.sp,
+                fontSize = ZhiTextScale.Caption,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -422,7 +423,7 @@ private fun ToolRow(
                 Text(
                     text = "  " + activity.summary,
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = 10.5.sp,
+                    fontSize = ZhiTextScale.Footnote,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -462,7 +463,7 @@ private fun ToolRow(
             Text(
                 text = "  " + activity.summary,
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = 10.5.sp,
+                fontSize = ZhiTextScale.Footnote,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -475,7 +476,7 @@ private fun ToolRow(
             !activity.completed -> Text(
                 text = runningToolLabel(activity),
                 color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
-                fontSize = 9.5.sp,
+                fontSize = ZhiTextScale.Micro,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(start = 23.dp, top = 2.dp),
             )
@@ -483,7 +484,7 @@ private fun ToolRow(
             hasDetails && !activity.expanded -> Text(
                 text = "  ⎿  " + compactToolSummary(activity),
                 color = if (activity.failed) ZhiColors.red() else scheme.onSurfaceVariantSummary,
-                fontSize = 10.sp,
+                fontSize = ZhiTextScale.Footnote,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(start = 23.dp, bottom = 2.dp),
             )
@@ -499,7 +500,7 @@ private fun ToolRow(
             ) {
                 Text(
                     text = activity.output,
-                    fontSize = 10.sp,
+                    fontSize = ZhiTextScale.Footnote,
                     fontFamily = FontFamily.Monospace,
                 )
             }
@@ -595,7 +596,7 @@ private fun DiffCount(label: String, color: Color) {
     Text(
         text = label,
         color = color,
-        fontSize = 9.5.sp,
+        fontSize = ZhiTextScale.Micro,
         fontFamily = FontFamily.Monospace,
         modifier = Modifier.padding(horizontal = 5.dp),
     )
@@ -614,7 +615,7 @@ fun ErrorCard(item: ChatItem) {
             contentColor = scheme.onErrorContainer,
         ),
     ) {
-        Text(text = item.title, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(text = item.title, fontSize = ZhiTextScale.BodySmall, fontWeight = FontWeight.Bold)
         // 错误正文也走 Markdown：`ToolText.friendlyError` 会输出带 `代码` 与列表的
         // 可操作建议，与回复正文保持一致。
         ZhiMarkdown(
@@ -639,7 +640,7 @@ fun InfoCard(item: ChatItem) {
         ),
     ) {
         if (item.title.isNotEmpty()) {
-            Text(text = item.title, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(text = item.title, fontSize = ZhiTextScale.Caption, fontWeight = FontWeight.Bold)
         }
         // 提示正文也走 Markdown。这些内容里大量使用 `反引号` 标记命令与参数，
         // 原先那个"整段变等宽"的启发式太粗（一句里只要有反引号，全段都成等宽），

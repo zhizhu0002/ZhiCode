@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -95,7 +96,7 @@ fun ZhiSidebar(
                             Text(
                                 text = "暂无已保存会话",
                                 color = scheme.onSurfaceVariantSummary,
-                                fontSize = 11.sp,
+                                fontSize = ZhiTextScale.Caption,
                                 modifier = Modifier.padding(start = 10.dp, top = 12.dp),
                             )
                         }
@@ -260,7 +261,7 @@ private fun SessionRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = session.title,
-                    fontSize = 13.sp,
+                    fontSize = ZhiTextScale.Body,
                     fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -272,20 +273,20 @@ private fun SessionRow(
                     Text(
                         text = session.updatedAtLabel,
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = 10.sp,
+                        fontSize = ZhiTextScale.Footnote,
                         maxLines = 1,
                     )
                     Text(
                         text = "· ${session.messageCount} 条",
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = 10.sp,
+                        fontSize = ZhiTextScale.Footnote,
                         maxLines = 1,
                     )
                     if (session.note.isNotEmpty()) {
                         Text(
                             text = "· 备注",
                             color = scheme.primary,
-                            fontSize = 10.sp,
+                            fontSize = ZhiTextScale.Footnote,
                             maxLines = 1,
                         )
                     }

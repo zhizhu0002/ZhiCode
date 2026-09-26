@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -104,7 +105,7 @@ fun AttachFileOverlay(
                             "没有匹配「$query」的文件"
                         },
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = 12.sp,
+                        fontSize = ZhiTextScale.BodySmall,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -148,7 +149,7 @@ private fun AttachHitRow(hit: FileHit, onPick: () -> Unit) {
                 // 文件名单独一行，路径放在下面：长路径截断时至少还能看见文件名
                 Text(
                     text = hit.relative.substringAfterLast('/'),
-                    fontSize = 12.sp,
+                    fontSize = ZhiTextScale.BodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -157,7 +158,7 @@ private fun AttachHitRow(hit: FileHit, onPick: () -> Unit) {
                     Text(
                         text = dir,
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = 10.sp,
+                        fontSize = ZhiTextScale.Footnote,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -166,7 +167,7 @@ private fun AttachHitRow(hit: FileHit, onPick: () -> Unit) {
             Text(
                 text = zhiFormatSize(hit.size),
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = 10.sp,
+                fontSize = ZhiTextScale.Footnote,
                 modifier = Modifier.height(14.dp),
             )
         }

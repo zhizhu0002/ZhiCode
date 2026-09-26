@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -112,7 +113,7 @@ private fun McpServerList(
         Text(
             text = "配置文件：${config.filePath}",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = 9.5.sp,
+            fontSize = ZhiTextScale.Micro,
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         )
 
@@ -122,7 +123,7 @@ private fun McpServerList(
                 text = "当前没有配置 MCP 服务器。点「添加」填入服务器名称与启动命令（stdio）" +
                     "或服务器 URL（HTTP/SSE），保存后 Agent 即可调用该服务器提供的工具。",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = 10.5.sp,
+                fontSize = ZhiTextScale.Footnote,
                 modifier = Modifier.fillMaxWidth(),
             )
             return@DialogShell
@@ -287,7 +288,7 @@ private fun McpServerForm(
                 text = "「名称」用来在 Agent 调用时标识这台服务器，改动名称等于换了一台" +
                     "（原名称的记录会被覆盖）。",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = 10.sp,
+                fontSize = ZhiTextScale.Footnote,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
         }
@@ -301,7 +302,7 @@ private fun FieldError(message: String?) {
     Text(
         text = message,
         color = MiuixTheme.colorScheme.error,
-        fontSize = 10.sp,
+        fontSize = ZhiTextScale.Footnote,
         fontWeight = FontWeight.Medium,
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
     )

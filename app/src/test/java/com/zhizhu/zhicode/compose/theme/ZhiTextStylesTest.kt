@@ -20,9 +20,9 @@ class ZhiTextStylesTest {
     private val expected = listOf(
         "title1" to 21f, "title2" to 17f, "title3" to 15f, "title4" to 14f,
         "main" to 13f, "paragraph" to 13f, "button" to 13f, "headline1" to 13f,
-        "body1" to 12.5f, "headline2" to 12.5f,
-        "body2" to 11.5f, "subtitle" to 11.5f,
-        "footnote1" to 10.5f, "footnote2" to 9.5f,
+        "body1" to 12f, "headline2" to 12f,
+        "body2" to 11f, "subtitle" to 11f,
+        "footnote1" to 10f, "footnote2" to 9.5f,
     )
 
     private fun size(name: String): Float = when (name) {

@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -75,7 +76,7 @@ fun ChangesPane(
                         // 会一口咬定没有变更 —— 明明什么都没查到却给了确定性结论。
                         text = diff.note.ifEmpty { "工作区没有未提交的变更" },
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = 12.sp,
+                        fontSize = ZhiTextScale.BodySmall,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 28.dp),
                     )
@@ -113,19 +114,19 @@ private fun DiffStatBar(diff: DiffState) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "${diff.files.size} 个文件已修改",
-                fontSize = 12.sp,
+                fontSize = ZhiTextScale.BodySmall,
             )
             Box(modifier = Modifier.weight(1f))
             Text(
                 text = "+${diff.additions}",
                 color = ZhiColors.green(),
-                fontSize = 12.sp,
+                fontSize = ZhiTextScale.BodySmall,
                 fontWeight = FontWeight.Medium,
             )
             Text(
                 text = "  −${diff.deletions}",
                 color = ZhiColors.red(),
-                fontSize = 12.sp,
+                fontSize = ZhiTextScale.BodySmall,
                 fontWeight = FontWeight.Medium,
             )
         }
@@ -166,14 +167,14 @@ private fun DiffFileCard(
             )
             Text(
                 text = file.name.substringAfterLast('/'),
-                fontSize = 12.sp,
+                fontSize = ZhiTextScale.BodySmall,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 6.dp).weight(1f),
             )
             if (file.additions > 0) {
-                Text(text = "+${file.additions}", color = ZhiColors.green(), fontSize = 11.sp)
+                Text(text = "+${file.additions}", color = ZhiColors.green(), fontSize = ZhiTextScale.Caption)
             }
             if (file.deletions > 0) {
                 Text(text = " −${file.deletions}", color = ZhiColors.red())
@@ -182,7 +183,7 @@ private fun DiffFileCard(
         Text(
             text = file.name.substringBeforeLast('/', ""),
             color = scheme.onSurfaceVariantSummary,
-            fontSize = 9.5.sp,
+            fontSize = ZhiTextScale.Micro,
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -223,7 +224,7 @@ fun DiffBlock(diff: String, isDark: Boolean, modifier: Modifier = Modifier) {
             Text(
                 text = line.ifEmpty { " " },
                 color = foreground,
-                fontSize = 10.sp,
+                fontSize = ZhiTextScale.Footnote,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
                 overflow = TextOverflow.Clip,

@@ -172,6 +172,9 @@ run ApiWireContractTest "$PROJECT_ROOT"
 # 四个修饰键的读后即清语义。
 # TerminalPaneContractTest.java
 run TerminalPaneContractTest "$PROJECT_ROOT"
+# ---------- 字阶单一来源（防"同一层次的尺寸被逐处手写"再犯） ----------
+# TypographyScaleTest.java
+run TypographyScaleTest "$PROJECT_ROOT"
 
 echo "-----"
 echo "通过 $PASS / 失败 $FAIL"

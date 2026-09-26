@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -95,7 +96,7 @@ private fun MemoryFileList(
                 "「让蜘蛛完善」会让 Agent 读取现有说明与构建清单后直接整理 ZhiCode.md；" +
                 "平时的任务里 Agent 也可以自己用 Read 打开它。",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = 10.sp,
+            fontSize = ZhiTextScale.Footnote,
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
         )
 
@@ -123,7 +124,7 @@ private fun MemoryFileList(
                         Text(
                             text = if (file.exists) "编辑" else "创建",
                             color = scheme.primary,
-                            fontSize = 11.sp,
+                            fontSize = ZhiTextScale.Caption,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(end = 12.dp),
                         )
@@ -155,7 +156,7 @@ private fun MemoryEditorBody(
         Text(
             text = editing.path,
             color = scheme.onSurfaceVariantSummary,
-            fontSize = 9.5.sp,
+            fontSize = ZhiTextScale.Micro,
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         )
         Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
@@ -176,7 +177,7 @@ private fun MemoryEditorBody(
                 "当前 ${editing.body.length} 字"
             },
             color = if (editing.empty) scheme.error else scheme.onSurfaceVariantSummary,
-            fontSize = 10.sp,
+            fontSize = ZhiTextScale.Footnote,
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
         )
     }

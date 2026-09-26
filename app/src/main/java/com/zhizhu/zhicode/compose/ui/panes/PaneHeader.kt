@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -50,14 +51,14 @@ fun PaneHeader(
             Text(
                 text = title,
                 color = scheme.onBackground,
-                fontSize = 12.sp,
+                fontSize = ZhiTextScale.BodySmall,
                 fontWeight = FontWeight.Bold,
             )
             if (subtitle != null) {
                 Text(
                     text = subtitle,
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = 10.sp,
+                    fontSize = ZhiTextScale.Footnote,
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }

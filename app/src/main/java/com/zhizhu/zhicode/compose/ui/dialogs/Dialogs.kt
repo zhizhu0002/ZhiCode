@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Column
@@ -148,7 +149,7 @@ fun PermissionOverlay(
                             containerColor = scheme.errorContainer,
                             contentColor = scheme.error,
                         ) {
-                            Text(text = "高风险", fontSize = 10.sp)
+                            Text(text = "高风险", fontSize = ZhiTextScale.Footnote)
                         }
                     }
                 },
@@ -170,7 +171,7 @@ fun PermissionOverlay(
             ) {
                 Text(
                     text = request.detail,
-                    fontSize = 11.5.sp,
+                    fontSize = ZhiTextScale.Caption,
                     fontFamily = FontFamily.Monospace,
                     textAlign = TextAlign.Start,
                     modifier = Modifier.fillMaxWidth(),
@@ -185,7 +186,7 @@ fun PermissionOverlay(
                 Text(
                     text = "始终允许",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = 12.sp,
+                    fontSize = ZhiTextScale.BodySmall,
                     modifier = Modifier.padding(start = 6.dp),
                 )
             }
@@ -222,7 +223,7 @@ fun PlanApprovalOverlay(
                     Text(
                         text = plan.path,
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = 10.5.sp,
+                        fontSize = ZhiTextScale.Footnote,
                         fontFamily = FontFamily.Monospace,
                         lineHeight = 15.sp,
                         maxLines = 2,
@@ -248,7 +249,7 @@ fun PlanApprovalOverlay(
                     Text(
                         text = plan.permissionNote,
                         color = ZhiColors.amber(),
-                        fontSize = 10.5.sp,
+                        fontSize = ZhiTextScale.Footnote,
                         textAlign = TextAlign.Start,
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                     )
@@ -316,7 +317,7 @@ fun ChoicePickerOverlay(
                     Text(
                         text = picker.prompt,
                         color = scheme.onBackground,
-                        fontSize = 13.5.sp,
+                        fontSize = ZhiTextScale.Subheading,
                         fontWeight = FontWeight.Bold,
                         lineHeight = 20.sp,
                         textAlign = TextAlign.Start,
@@ -465,7 +466,7 @@ fun TaskListOverlay(
                 Text(
                     text = "$done / ${tasks.size} 已完成",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = 11.sp,
+                    fontSize = ZhiTextScale.Caption,
                     modifier = Modifier.padding(bottom = 10.dp),
                 )
 
@@ -485,7 +486,7 @@ fun TaskListOverlay(
                                     } else {
                                         scheme.onSurface
                                     },
-                                    fontSize = 13.5.sp,
+                                    fontSize = ZhiTextScale.Subheading,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(start = 8.dp),
                                 )

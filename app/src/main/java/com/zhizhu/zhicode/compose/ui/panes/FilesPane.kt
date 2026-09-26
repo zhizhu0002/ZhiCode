@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -96,7 +97,7 @@ fun FilesPane(
                                 Text(
                                     text = emptyNote,
                                     color = scheme.onSurfaceVariantSummary,
-                                    fontSize = 11.sp,
+                                    fontSize = ZhiTextScale.Caption,
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
                                 )
@@ -127,14 +128,14 @@ fun FilesPane(
                                 Text(
                                     text = "${index + 1}",
                                     color = scheme.onSurfaceVariantSummary,
-                                    fontSize = 10.sp,
+                                    fontSize = ZhiTextScale.Footnote,
                                     fontFamily = FontFamily.Monospace,
                                     modifier = Modifier.width(26.dp),
                                 )
                                 Text(
                                     text = lines[index].ifEmpty { " " },
                                     color = scheme.onSurface,
-                                    fontSize = 10.sp,
+                                    fontSize = ZhiTextScale.Footnote,
                                     fontFamily = FontFamily.Monospace,
                                 )
                             }
@@ -234,7 +235,7 @@ private fun FileRow(entry: FileEntry, onOpen: () -> Unit) {
             )
             Text(
                 text = entry.name,
-                fontSize = 11.5.sp,
+                fontSize = ZhiTextScale.Caption,
                 fontWeight = if (entry.directory) FontWeight.Medium else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -244,7 +245,7 @@ private fun FileRow(entry: FileEntry, onOpen: () -> Unit) {
                 Text(
                     text = formatSize(entry.size),
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = 9.5.sp,
+                    fontSize = ZhiTextScale.Micro,
                 )
             }
         }

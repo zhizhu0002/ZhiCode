@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.chat
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -118,14 +119,14 @@ private fun CardBody(status: String, tasks: List<AgentTask>, maxTasks: Int) {
             Text(
                 text = "任务进度",
                 color = scheme.onSurface,
-                fontSize = 12.sp,
+                fontSize = ZhiTextScale.BodySmall,
                 fontWeight = FontWeight.Bold,
             )
             Box(modifier = Modifier.weight(1f))
             Text(
                 text = "$done / ${tasks.size}",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = 10.sp,
+                fontSize = ZhiTextScale.Footnote,
             )
         }
         // 进度条平滑推进
@@ -146,7 +147,7 @@ private fun CardBody(status: String, tasks: List<AgentTask>, maxTasks: Int) {
                     Text(
                         text = task.title,
                         color = if (task.state == TaskState.PENDING) scheme.onSurfaceVariantSummary else scheme.onSurface,
-                        fontSize = 12.sp,
+                        fontSize = ZhiTextScale.BodySmall,
                         fontWeight = if (task.state == TaskState.RUNNING) FontWeight.Medium else FontWeight.Normal,
                     )
                     // 卡片里只显示详情首行，完整 Markdown 在详情窗口里看
@@ -155,7 +156,7 @@ private fun CardBody(status: String, tasks: List<AgentTask>, maxTasks: Int) {
                         Text(
                             text = firstLine,
                             color = scheme.onSurfaceVariantSummary,
-                            fontSize = 10.sp,
+                            fontSize = ZhiTextScale.Footnote,
                         )
                     }
                 }
@@ -168,7 +169,7 @@ private fun CardBody(status: String, tasks: List<AgentTask>, maxTasks: Int) {
             Text(
                 text = "还有 $hidden 条 · 点按查看全部",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = 10.sp,
+                fontSize = ZhiTextScale.Footnote,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
@@ -183,13 +184,13 @@ private fun CardBody(status: String, tasks: List<AgentTask>, maxTasks: Int) {
                 Text(
                     text = "计划模式",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = 11.sp,
+                    fontSize = ZhiTextScale.Caption,
                 )
                 Box(modifier = Modifier.weight(1f))
                 Text(
                     text = status,
                     color = scheme.primary,
-                    fontSize = 11.sp,
+                    fontSize = ZhiTextScale.Caption,
                     fontWeight = FontWeight.Medium,
                 )
             }

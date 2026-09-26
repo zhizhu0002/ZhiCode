@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -113,7 +114,7 @@ private fun SkillList(
         Text(
             text = "项目级 .zhicode/skills 与用户级 ~/.zhicode/skills（与引擎 Skill 工具的查找路径一致）",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = 9.5.sp,
+            fontSize = ZhiTextScale.Micro,
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         )
 
@@ -123,7 +124,7 @@ private fun SkillList(
                     "会生成一份带说明的 SKILL.md 模板；写好后 Agent 可通过 Skill 工具加载，" +
                     "也可以用这里的「附加」把内容直接带进下一步任务。",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = 10.5.sp,
+                fontSize = ZhiTextScale.Footnote,
                 modifier = Modifier.fillMaxWidth(),
             )
             return@DialogShell
@@ -209,7 +210,7 @@ private fun SkillCreateForm(
             Text(
                 text = error,
                 color = scheme.error,
-                fontSize = 10.sp,
+                fontSize = ZhiTextScale.Footnote,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             )
@@ -229,7 +230,7 @@ private fun SkillCreateForm(
             text = "名称会成为目录名，只能包含字母、数字、. _ -。" +
                 "如果同名技能已存在，不会覆盖它，而是直接打开现有内容编辑。",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = 10.sp,
+            fontSize = ZhiTextScale.Footnote,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         )
     }
@@ -254,7 +255,7 @@ private fun SkillEditor(
         Text(
             text = target.path,
             color = scheme.onSurfaceVariantSummary,
-            fontSize = 9.5.sp,
+            fontSize = ZhiTextScale.Micro,
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         )
         Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
@@ -272,7 +273,7 @@ private fun SkillEditor(
             text = if (target.empty) "内容为空：保存后会生成一个空的 SKILL.md。"
             else "当前 ${target.body.length} 字。",
             color = if (target.empty) scheme.error else scheme.onSurfaceVariantSummary,
-            fontSize = 10.sp,
+            fontSize = ZhiTextScale.Footnote,
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
         )
     }

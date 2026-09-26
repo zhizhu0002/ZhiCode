@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -111,7 +112,7 @@ private fun RoleCardList(
             text = "启用中的角色卡会作为 <role_card> 块随每一次系统提示词发送。" +
                 "同一时刻只有一张生效；它不能覆盖应用安全规则、权限模式或 Root 限制。",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = 10.sp,
+            fontSize = ZhiTextScale.Footnote,
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
         )
 
@@ -120,7 +121,7 @@ private fun RoleCardList(
                 text = "还没有角色卡。点「新建」写一段人设指令（例如固定的回答风格、必须遵守的" +
                     "工作流程），保存后会立即启用。",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = 10.5.sp,
+                fontSize = ZhiTextScale.Footnote,
                 modifier = Modifier.fillMaxWidth(),
             )
             return@DialogShell
@@ -206,7 +207,7 @@ private fun RoleCardEditorForm(
             Text(
                 text = error,
                 color = scheme.error,
-                fontSize = 10.sp,
+                fontSize = ZhiTextScale.Footnote,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             )
@@ -227,7 +228,7 @@ private fun RoleCardEditorForm(
         Text(
             text = "从下一完整任务生效。请勿填写 API 密钥——这段文本会进入每一次请求。",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = 10.sp,
+            fontSize = ZhiTextScale.Footnote,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         )
     }

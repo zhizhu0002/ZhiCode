@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 
@@ -205,7 +206,7 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
                 Text(
                     text = block.lang,
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = 9.5.sp,
+                    fontSize = ZhiTextScale.Micro,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(bottom = 4.dp),
                 )

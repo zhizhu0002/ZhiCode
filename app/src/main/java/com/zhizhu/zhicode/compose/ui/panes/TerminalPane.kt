@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
@@ -326,7 +327,7 @@ private fun TerminalPlaceholder(
                             Text(
                                 text = line.text.ifEmpty { " " },
                                 color = toneColor(line.tone, scheme.onSurface),
-                                fontSize = 11.sp,
+                                fontSize = ZhiTextScale.Caption,
                                 fontFamily = FontFamily.Monospace,
                             )
                         }
@@ -345,7 +346,7 @@ private fun TerminalPlaceholder(
                     "内置 Termux 环境未就绪，无法启动终端。"
                 },
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = 10.5.sp,
+                fontSize = ZhiTextScale.Footnote,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp),
             )
         }

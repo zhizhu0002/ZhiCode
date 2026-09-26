@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 
@@ -81,7 +82,7 @@ fun EnvironmentOverlay(
                     Text(
                         text = if (runtimeReady) "内置 Termux 环境：已就绪" else "内置 Termux 环境：未安装",
                         color = if (runtimeReady) scheme.primary else scheme.onSurfaceVariantSummary,
-                        fontSize = 12.5.sp,
+                        fontSize = ZhiTextScale.BodySmall,
                     )
                     if (installing) {
                         LinearProgressIndicator(
@@ -94,14 +95,14 @@ fun EnvironmentOverlay(
                         Text(
                             text = if (message.isBlank()) "$progress%" else "$progress% · $message",
                             color = scheme.onSurfaceVariantSummary,
-                            fontSize = 11.sp,
+                            fontSize = ZhiTextScale.Caption,
                             modifier = Modifier.padding(top = 6.dp),
                         )
                     } else if (message.isNotBlank()) {
                         Text(
                             text = message,
                             color = scheme.onSurfaceVariantSummary,
-                            fontSize = 11.sp,
+                            fontSize = ZhiTextScale.Caption,
                             modifier = Modifier.padding(top = 6.dp),
                         )
                     }
@@ -134,7 +135,7 @@ fun EnvironmentOverlay(
                     Text(
                         text = "诊断报告",
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = 11.sp,
+                        fontSize = ZhiTextScale.Caption,
                         modifier = Modifier.fillMaxWidth(0.6f),
                     )
                     TextButton(
@@ -155,7 +156,7 @@ fun EnvironmentOverlay(
                 Text(
                     text = report.ifBlank { "（无内容，点「重新检测」）" },
                     color = scheme.onBackground,
-                    fontSize = 10.sp,
+                    fontSize = ZhiTextScale.Footnote,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.fillMaxWidth(),
                 )

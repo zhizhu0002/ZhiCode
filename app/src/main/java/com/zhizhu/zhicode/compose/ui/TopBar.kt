@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,7 +81,7 @@ fun ZhiTopBar(
                 Text(
                     text = "蜘蛛",
                     color = scheme.onSurface,
-                    fontSize = 15.sp,
+                    fontSize = ZhiTextScale.Heading,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                 )
@@ -91,7 +92,7 @@ fun ZhiTopBar(
                     Text(
                         text = if (state.composerBusy) "● 工作中 · ${state.modelLabel}" else "● ${state.modelLabel}",
                         color = if (state.composerBusy) scheme.primary else scheme.onSurfaceVariantSummary,
-                        fontSize = 11.sp,
+                        fontSize = ZhiTextScale.Caption,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(end = 6.dp),
@@ -111,7 +112,7 @@ fun ZhiTopBar(
                         WorkspaceViewModel.formatTokens(state.contextWindow),
                     onClick = onContextClick,
                     modifier = Modifier.widthIn(min = if (wide) 92.dp else 74.dp),
-                    fontSize = 10.sp,
+                    fontSize = ZhiTextScale.Footnote,
                     containerColor = if (ctxPct >= 90) scheme.errorContainer else Color.Unspecified,
                     contentColor = when {
                         ctxPct >= 90 -> scheme.error
@@ -124,7 +125,7 @@ fun ZhiTopBar(
                     Text(
                         text = state.deviceStatus,
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = 10.5.sp,
+                        fontSize = ZhiTextScale.Footnote,
                         maxLines = 1,
                         modifier = Modifier.padding(start = 8.dp),
                     )

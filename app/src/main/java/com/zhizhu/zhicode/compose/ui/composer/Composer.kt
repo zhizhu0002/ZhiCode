@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.composer
 
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.EaseOutCubic
@@ -178,7 +179,7 @@ fun Composer(
                     insideMargin = DpSize(6.dp, 1.dp),
                     // 常规字重的正文样式：Miuix 主题默认文字样式偏粗，会显得比原版重
                     textStyle = MiuixTheme.textStyles.main.copy(
-                        fontSize = 14.sp,
+                        fontSize = ZhiTextScale.Subheading,
                         fontWeight = FontWeight.Normal,
                     ),
                     // 比原版的 minLines = 2 更矮，只占一行起，随内容长高
@@ -337,7 +338,7 @@ private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
             )
             Text(
                 text = attachment.label,
-                fontSize = 10.sp,
+                fontSize = ZhiTextScale.Footnote,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.width(112.dp).padding(start = 4.dp),

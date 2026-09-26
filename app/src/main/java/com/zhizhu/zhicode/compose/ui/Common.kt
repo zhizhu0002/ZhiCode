@@ -1,4 +1,5 @@
 package com.zhizhu.zhicode.compose.ui
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 
 import androidx.compose.animation.animateColorAsState
@@ -133,7 +134,7 @@ fun ZhiFilledIconButton(
     size: Dp = 34.dp,
     square: Boolean = false,
     glyph: String? = null,
-    glyphSize: TextUnit = 17.sp,
+    glyphSize: TextUnit = ZhiTextScale.TitleSmall,
     /** 前景色。默认 `onPrimary`（配 `primary` 容器）；配 `error` 容器时要传 `onError`。 */
     contentColor: Color = Color.Unspecified,
 ) {
@@ -181,7 +182,7 @@ fun ZhiChip(
     modifier: Modifier = Modifier,
     active: Boolean = false,
     maxLines: Int = 1,
-    fontSize: TextUnit = 11.sp,
+    fontSize: TextUnit = ZhiTextScale.Caption,
     containerColor: Color = Color.Unspecified,
     contentColor: Color = Color.Unspecified,
 ) {
@@ -242,7 +243,7 @@ fun ZhiSmallPill(
     ) {
         Text(
             text = label,
-            fontSize = 10.sp,
+            fontSize = ZhiTextScale.Footnote,
             maxLines = 1,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
@@ -488,7 +489,7 @@ fun ZhiTextDropdownChip(
             Text(
                 text = label,
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = 10.sp,
+                fontSize = ZhiTextScale.Footnote,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
