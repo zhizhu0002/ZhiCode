@@ -200,8 +200,8 @@ class RuntimeInstaller(private val context: Context) {
      */
     fun repairIfInstalled() {
         if (!isInstalled()) return
-        deleteRecursive(stagingDir())
-        deleteRecursive(backupDir())
+        FileTree.deleteRecursive(stagingDir())
+        FileTree.deleteRecursive(backupDir())
         val prefix = prefixDir()
         File(prefix, "tmp").mkdirs()
         File(prefix, "var/cache/apt/archives/partial").mkdirs()
@@ -232,10 +232,15 @@ class RuntimeInstaller(private val context: Context) {
         if (!home.isDirectory && !home.mkdirs()) {
             throw IOException("Cannot create HOME: $home")
         }
-        deleteRecursive(staging)
-        deleteRecursive(backup)
-        if (!staging.mkdirs()) {
-            throw IOException("Cannot create staging prefix: $staging")
+        FileTree.deleteRecursive(staging)
+        FileTree.deleteRecursive(backup)
+        // 判据要说对原因：先确认「上一轮残留真的删掉了」，再建。
+        // 只写 `if (!staging.mkdirs())` 会把「删不干净」报成「建不出来」——
+        // 真机上那句 `Cannot create staging prefix` 就是这么出来的（见 FileTree 的注释）。
+        if (staging.exists() || !staging.mkdirs()) {
+            throw IOException(
+                "Cannot create staging prefix: $staging（上一轮残留未删净：${FileTree.describe(staging)}）",
+            )
         }
 
         report(progress, "正在读取内置 Termux 基础环境…", 1)
@@ -273,8 +278,8 @@ class RuntimeInstaller(private val context: Context) {
         File(home, "tmp").mkdirs()
         File(home, "projects").mkdirs()
 
-        deleteRecursive(staging)
-        deleteRecursive(backup)
+        FileTree.deleteRecursive(staging)
+        FileTree.deleteRecursive(backup)
 
         report(progress, "Termux 已就绪", 100)
     }
@@ -513,7 +518,7 @@ class RuntimeInstaller(private val context: Context) {
     private fun activatePrefix(staging: File, prefix: File, backup: File) {
         val hadPrevious = prefix.exists()
         if (hadPrevious) {
-            deleteRecursive(backup)
+            FileTree.deleteRecursive(backup)
             if (!prefix.renameTo(backup)) {
                 throw IOException("Cannot preserve current Termux prefix: $prefix")
             }
@@ -524,7 +529,7 @@ class RuntimeInstaller(private val context: Context) {
             }
             throw IOException("Cannot activate or restore Termux prefix: $prefix")
         }
-        if (hadPrevious) deleteRecursive(backup)
+        if (hadPrevious) FileTree.deleteRecursive(backup)
     }
 
     // ------------------------------------------------- apt / dpkg 兼容层
@@ -681,14 +686,7 @@ class RuntimeInstaller(private val context: Context) {
         return out.toByteArray()
     }
 
-    private fun deleteRecursive(file: File?) {
-        if (file == null || !file.exists()) return
-        if (file.isDirectory) {
-            val children = file.listFiles()
-            if (children != null) for (child in children) deleteRecursive(child)
-        }
-        kotlin.runCatching { file.delete() }
-    }
+    // 删除目录树统一走 FileTree（符号链接的坑见那里的注释）；本类不再自己实现一份。
 
     private fun report(progress: Progress?, message: String, percent: Int) {
         kotlin.runCatching { progress?.onProgress(message, percent) }

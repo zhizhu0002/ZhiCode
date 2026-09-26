@@ -1361,6 +1361,56 @@ com/zhizhu/zhicode/ZhiDocumentsProvider.java」—— 删文件后忘了同步�
 
 ---
 
+### 真机事故：暂存目录删不掉，报错却说是「建不出来」（已修，待真机复验）
+
+第一次真机自检就暴露了一条只有真机才会走到的路径。
+
+现象（用户截图 + 自己复制出来的自检报告）：
+
+- 报错：`初始化失败：Cannot create staging prefix: /data/user/0/com.zhizhu.code/files/usr-staging`；
+- 可同一份报告里 `PREFIX 存在: true (8 项)`、`bin 条目数: 424`、`bash 可执行=true`、
+  `marker: true`、`dpkg-wrapper: true` —— 环境**是装好的、能用的**；
+- `usr-staging : true`、`usr-backup : true` —— 两个本该在装完时清掉的残留目录都还在。
+
+所以原因**不是**「建不出来」，是**删不干净**。`Os.symlink` 建出的链接里有一部分是悬空的
+（目标是不存在的前缀路径、或在 staging 里解析不到的相对路径），而 `File.exists()` 与
+`File.isDirectory()` **会跟随符号链接**：悬空链接的 `exists()` 是 false，老实现就把它当成
+「不存在」直接 `return`，这些链接**从来没被删过**；父目录因此永远非空、永远删不掉，
+下一轮 `mkdirs()` 返回 false（`mkdirs()` 对已存在的目录也返回 false），
+失败就被报成了「建不出来」——一个把原因说反的消息。
+
+不变更真机就复现出来了（JVM，用一个与老实现逐行等价的函数）：
+
+```
+staging 还在吗  : true
+残留顶层项      : 1
+  bin 里还有 2 项
+    dead-abs  exists=false isSymlink=true delete()=true   ← 被当成「不存在」跳过
+    dead-rel  exists=false isSymlink=true delete()=true   ← 同上
+staging 现在还在吗: true
+mkdirs() 返回    : false   (目录是否已存在=true)
+```
+
+两条链接其实**都删得掉**，只是从没被尝试过。
+
+修法与边界：
+
+- 删除逻辑移到 `FileTree`：**不跟随**地看待每一个目录项（真机走 `Os.lstat`，API 21 就有，
+  而不是要 API 26 的 `java.nio.file` —— 后者是本工程明确不用的，见 `CopyTool` / `TextFiles`）；
+- 只有**真目录**才递归。顺着符号链接递归进去，删的是链接指向的那个目录里的内容
+  （等于删了别人的文件），链接本身 unlink 就够；
+- 删除失败不再静默吞掉，返回 false；`install()` 先确认「上一轮残留真的删掉了」才 `mkdirs()`，
+  删不干净时消息里带上 `残留 N 项（a、b、c 等）`；
+- 单测 `FileTreeTest`（4 项，跑真 JVM 文件系统与真符号链接）**只覆盖递归与「不跟随」这两条
+  共用规则**：JVM 上执行不到 `Os.lstat` 那一支，它的不跟随语义来自 lstat 本身，不是这段代码。
+  变异核对过两次：把递归判定改回 `file.isDirectory()`（跟随链接）→ 1 失败；
+  把存在性判定改回 `file.exists()`（老实现）→ 1 失败。
+- **尚未验证**：修好之后，真机上那两个残留目录是否真的被清掉、初始化是否真的能过 ——
+  这一条只能等真机复验，上面那两句代码级证据都**不能**替代它。
+
+`EnvDoctor` 里那句 `前缀等长 不通过 (21 -> 28)` 是同一类噪音（它按「等长替换」时代的假设写的，
+而现在 ELF 原样、文本任意长度替换，见 `extractBootstrap` 的注释）—— 记在这里，暂不改。
+
 ## 怎么重新验证本文件的每一条
 
 ```bash
@@ -1394,12 +1444,18 @@ bash test-source-no-build.sh
 # 3b. 只跑那一条行为测试（改内嵌载荷时用它，比整套快）
 node app/tests/js/frida-agent-harness.mjs .
 
+# 3c. 「载荷嵌入得对不对」不由上面那条自己说了算：这一条把**真正的 Java** 编译起来跑一次
+#     （text block 的脱缩进与转义由 Java 自己算），再用它抽出的载荷跟 harness 抽的逐字节比。
+#     没有它，两边可以各自「通过」而没人发现它们抽的不是同一份东西。
+node app/tests/js/frida-payload-embedding-check.mjs .
+
 # 4. 行为测试（与上一条互补，不是替代）
 #    上面那套是文本级断言：读源码字符串，能防「重写时漏掉一个分支」，
 #    但证明不了运行时行为 —— 档位映射写错一档、路径去重判断反了，
 #    都不会让编译失败。
 #    api/ 那一层没有任何 android.* 依赖；画布那两层里不碰 View / SharedPreferences 的部分
-#    （applyOperations / export / migrate / defaults）也在这里，见 UiCanvasLogicTest。
+#    （applyOperations / export / migrate / defaults）也在这里，见 UiCanvasLogicTest；
+#    目录树删除（递归 / 不跟随符号链接）见 FileTreeTest —— 它跑真文件系统与真符号链接。
 ./gradlew :app:testDebugUnitTest
 ```
 
