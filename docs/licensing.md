@@ -374,7 +374,23 @@ bash tools/provenance.sh
 # 3. 结构测试里有 LicenseNoticeStructureTest 守着这些文件的存在，
 #    它们不会在下一次重构里被静默删掉
 bash test-source-no-build.sh
+
+# 4. 行为测试（与上一条互补，不是替代）
+#    上面那套是文本级断言：读源码字符串，能防「重写时漏掉一个分支」，
+#    但证明不了运行时行为 —— 档位映射写错一档、路径去重判断反了，
+#    都不会让编译失败。api/ 那一层没有任何 android.* 依赖，所以有真正的 JVM 单测。
+./gradlew :app:testDebugUnitTest
 ```
+
+**两套测试的分工**（判断标准：如果一处改动「写错了也不会编译失败」，它需要的是 JVM 单测）：
+
+| | `app/tests/` + `test-source-no-build.sh` | `app/src/test/` + `testDebugUnitTest` |
+| --- | --- | --- |
+| 层次 | 源码文本断言 | 真跑逻辑 |
+| 依赖 | 只用 JDK 单文件源码模式，零依赖 | `org.json` + JUnit |
+| 速度 | 秒级（不编译工程） | 十几秒（要走 Gradle） |
+| 能防 | 漏分支、契约被改、声明被删 | 计算结果错、边界条件错 |
+| 不能防 | 逻辑写错但不改结构 | 结构性遗漏 |
 
 各项许可的**完整原文**：
 

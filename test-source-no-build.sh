@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 #
-# 蜘蛛沙箱宿主层的结构测试套件（canonical source suite）。
+# 源码级结构测试套件（canonical source suite）。
 #
-# 与官方 IQ Code 的同名脚本等价：逐个执行 app/tests 下的结构测试，参数统一为工程根。
+# 逐个执行 app/tests 下的结构测试，参数统一为工程根。
 # 之所以用脚本而不是 Gradle 任务：这些测试只读源码文本做断言，
 # 不需要编译工程、不需要设备，用 JDK 单文件源码模式直接跑最快。
+#
+# ⚠ 这套测试是**文本级**的：它能防「重写时漏掉一个分支」，但**证明不了运行时行为**。
+#   api/ 那一层是没有 android.* 依赖的纯 Java，另有真正的 JVM 单测：
+#
+#       ./gradlew :app:testDebugUnitTest      # app/src/test，真跑逻辑
+#
+#   两者互补：改 api/ 这类纯逻辑时两个都要跑。判断标准很简单 ——
+#   如果一处改动「写错了也不会编译失败」，那它需要的是 JVM 单测，而不是文本断言。
 #
 # 用法: ./test-source-no-build.sh [工程根]
 set -uo pipefail

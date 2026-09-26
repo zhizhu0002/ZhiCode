@@ -105,4 +105,17 @@ dependencies {
 
     // 原版引擎源码里用到了 androidx.annotation 的 @NonNull/@Nullable 等注解，仅编译期需要
     compileOnly 'androidx.annotation:annotation:1.8.1'
+
+    /*
+     * 真正的 JVM 单测依赖。
+     *
+     * app/tests/ 下那批是「文本级」断言：用 javac 直接编译、零依赖、只读源码字符串。
+     * 它们能防「重写时漏掉一个分支」，但证明不了运行时行为 —— 而这正是重写 api/
+     * 协议层最需要的东西（SSE 解析、档位映射这类逻辑，错一个小分支不会编译失败）。
+     *
+     * api/ 那一层是**完全没有 android.* import** 的纯 Java，所以可以直接在 JVM 上跑：
+     * org.json 提供真实实现（不是 android.jar 里的抛异常桩），junit 提供断言框架。
+     */
+    testImplementation 'org.json:json:20240303'
+    testImplementation 'junit:junit:4.13.2'
 }
