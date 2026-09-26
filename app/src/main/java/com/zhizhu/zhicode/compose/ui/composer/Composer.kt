@@ -50,7 +50,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
-import com.zhizhu.zhicode.compose.ui.ZhiDropdownChip
+import com.zhizhu.zhicode.compose.ui.ZhiTextDropdownChip
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.FloatingToolbar
@@ -268,20 +268,34 @@ fun Composer(
                     )
                 }
 
-                // 三个下拉都走 Miuix OverlayDropdownPreference（转发层 ZhiDropdownChip）。
-                // 选中即生效，不再弹"选完再提交"的选择器。
-                ZhiDropdownChip(
-                    title = state.permissionMode.label,
-                    items = PermissionMode.entries.map { it.label },
-                    selectedIndex = PermissionMode.entries.indexOf(state.permissionMode),
-                    onSelect = { onPermissionSelected(PermissionMode.entries[it]) },
+                // 两个下拉 chip 的**外观与旁边的模型药丸完全一致**（10sp / 28dp /
+                // 透明底 + 折叠箭头）。别换成 Miuix 的 OverlayDropdownPreference：
+                // 那是 16sp / 40dp 的"设置行"，放进这条 34dp 的页脚会撑高整行、
+                // 把标签挤到折行（实测过一次）。
+                //
+                // 三者共用 OverlayIconDropdownMenu：它的 content 可以是任意可组合内容，
+                // 所以 `+` 放图标、这两个放"文字 + 箭头"，弹出菜单是同一套原生样式。
+                ZhiTextDropdownChip(
+                    label = state.permissionMode.label,
+                    items = PermissionMode.entries.map { mode ->
+                        ZhiMenuItem(
+                            text = mode.label,
+                            summary = mode.detail,
+                            selected = mode == state.permissionMode,
+                            onClick = { onPermissionSelected(mode) },
+                        )
+                    },
                     modifier = Modifier.weight(1f),
                 )
-                ZhiDropdownChip(
-                    title = "推理：${state.effort.label}",
-                    items = EffortLevel.entries.map { it.label },
-                    selectedIndex = EffortLevel.entries.indexOf(state.effort),
-                    onSelect = { onEffortSelected(EffortLevel.entries[it]) },
+                ZhiTextDropdownChip(
+                    label = "推理：${state.effort.label}",
+                    items = EffortLevel.entries.map { level ->
+                        ZhiMenuItem(
+                            text = level.label,
+                            selected = level == state.effort,
+                            onClick = { onEffortSelected(level) },
+                        )
+                    },
                     modifier = Modifier.weight(1f),
                 )
                 // 模型这一项**不是**下拉：它要异步拉目录、还要写回配置记录，

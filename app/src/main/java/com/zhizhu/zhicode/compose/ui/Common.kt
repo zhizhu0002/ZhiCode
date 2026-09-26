@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -39,7 +41,6 @@ import top.yukonga.miuix.kmp.basic.TabRowWithContour
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.VerticalDivider
 import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
-import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
@@ -373,18 +374,29 @@ data class ZhiMenuItem(
     val summary: String? = null,
     /** 条目左侧的图标。传 null 就不显示。 */
     val icon: ImageVector? = null,
+    /** 单选场景：当前项会在弹出列表里打勾。 */
+    val selected: Boolean = false,
     val onClick: () -> Unit,
 )
 
 /**
- * 图标按钮 + 展开的动作菜单。转发到 Miuix **`OverlayIconDropdownMenu`**。
+ * 触发按钮 + 展开的动作菜单。转发到 Miuix **`OverlayIconDropdownMenu`**。
  *
- * 用于输入器的 `+`：点一下展开一组动作（附加文件 / 技能 / 文件工作区 / 图片）。
+ * ## 为什么两个 chip 也用它，而不用 `OverlayDropdownPreference`
+ *
+ * 后者是「设置行」形态：内部是 `BasicComponent` + `Button`，字号取主题的
+ * `body1`（**16sp**）、按钮最小高 `ButtonDefaults.MinHeight`（40dp）。
+ * 而输入器页脚那一行只有 34dp（同类元素 `ZhiSmallPill` 是 10sp / 28dp），
+ * 放在一起就是"格格不入"：字大一截、高度溢出、标签被挤到折行。
+ *
+ * 官方文档对 `content` 的说明是「按钮内显示的图标（**或其他可组合内容**）」，
+ * 所以这里把它当"任意触发内容"用：`+` 传一个图标，两个 chip 传
+ * 与 `ZhiSmallPill` 完全同款的文字 + 折叠箭头。这样三者在同一行里尺寸一致。
  *
  * ⚠️ **必须位于 Miuix `Scaffold` 内** —— `Overlay*` 系列靠 Scaffold 提供的
  * `MiuixPopupHost` 渲染弹出内容（官方文档「使用前提」）。本工程根部就是它。
  *
- * 默认尺寸按 34dp 给：Miuix `IconButtonDefaults` 是 40dp 正圆，
+ * 默认尺寸给 34dp：Miuix `IconButtonDefaults` 是 40dp 正圆，
  * 而输入器页脚那一行只有 34dp 高，用默认值会把行撑高。
  */
 @Composable
@@ -392,6 +404,10 @@ fun ZhiIconDropdownMenu(
     items: List<ZhiMenuItem>,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    minHeight: Dp = 34.dp,
+    minWidth: Dp = 34.dp,
+    cornerRadius: Dp = minHeight / 2,
+    backgroundColor: Color = Color.Unspecified,
     content: @Composable () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -415,6 +431,7 @@ fun ZhiIconDropdownMenu(
             DropdownItem(
                 text = item.text,
                 summary = item.summary,
+                selected = item.selected,
                 onClick = item.onClick,
                 icon = iconSlot,
             )
@@ -424,54 +441,68 @@ fun ZhiIconDropdownMenu(
         entry = entry,
         modifier = modifier,
         enabled = enabled,
-        minHeight = 34.dp,
-        minWidth = 34.dp,
-        cornerRadius = 17.dp,
+        minHeight = minHeight,
+        minWidth = minWidth,
+        cornerRadius = cornerRadius,
+        backgroundColor = backgroundColor,
         content = content,
     )
 }
 
 /**
- * 单项下拉选择器。转发到 Miuix **`OverlayDropdownPreference`**。
+ * 文字下拉 chip：外观与 [ZhiSmallPill] **完全一致**（10sp / 28dp / 透明底 + 折叠箭头），
+ * 点一下展开选项。
  *
- * 用于输入器底部的权限 / 推理两个 chip：它们是「从固定几项里选一个」，
- * 选中即生效 —— 正好是 DropdownPreference 的语义，不需要"选完再提交"。
+ * 用于输入器页脚的权限 / 推理 —— 旁边就是同款的模型药丸，三者必须看起来是一套。
  *
- * ## 两个必须知道的约束
+ * 选中即生效，不需要"选完再提交"那一层（对应 [WorkspaceViewModel.setPermissionMode]
+ * / `setEffort`）。
  *
- * - **必须位于 Miuix `Scaffold` 内**。`Overlay*` 系列靠 Scaffold 提供的
- *   `MiuixPopupHost` 渲染弹出内容（官方文档「使用前提」）。
- *   本工程的 AppScaffold 根部就是 Miuix `Scaffold`。
- * - **`title` 就是按钮上显示的文字**，`showValue` 控制要不要在右侧再重复一遍当前值。
- *   这里传 `showValue = false`：调用方直接把当前值编进 `title`（如「推理：自动」），
- *   再显示一次是重复。
- *
- * @param title 按钮上的文字。
- * @param items 选项文字，顺序必须与 [selectedIndex] 的取值空间一致。
- * @param selectedIndex 当前选中项下标。
- * @param onSelect 选中回调（收到的是下标）。
+ * ⚠️ 别换回 `OverlayDropdownPreference`：它是 16sp / 40dp 的"设置行"，
+ * 放到这条 34dp 的页脚里会撑高整行、把标签挤到折行。
  */
 @Composable
-fun ZhiDropdownChip(
-    title: String,
-    items: List<String>,
-    selectedIndex: Int,
-    onSelect: (Int) -> Unit,
+fun ZhiTextDropdownChip(
+    label: String,
+    items: List<ZhiMenuItem>,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    OverlayDropdownPreference(
-        title = title,
+    val scheme = MiuixTheme.colorScheme
+    ZhiIconDropdownMenu(
         items = items,
-        selectedIndex = selectedIndex,
-        onSelectedIndexChange = { onSelect(it) },
         modifier = modifier,
-        // footer 那一行只有 34dp 高，默认的 BasicComponent 内边距会把三列挤到换行。
-        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
         enabled = enabled,
-        showValue = false,
-    )
+        minHeight = PillHeight,
+        // 宽度交给外层的 weight(1f)：这里放开最小宽，否则三列会被 Miuix 默认的
+        // 40dp 下限顶出去
+        minWidth = 0.dp,
+        cornerRadius = PillHeight / 2,
+        // 透明底：底色是输入器那块 FloatingToolbar，chip 自己不该再画一层
+        backgroundColor = Color.Transparent,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = label,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Icon(
+                imageVector = ZhiIcons.chevronDown,
+                contentDescription = null,
+                tint = scheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(start = 2.dp).size(11.dp),
+            )
+        }
+    }
 }
+
 
 /**
  * 人类可读的字节数。
