@@ -31,6 +31,7 @@ import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
+import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -139,7 +140,11 @@ fun AssistantCard(
             color = ZhiColors.cardSurface(),
             contentColor = scheme.onSurface,
         ),
-        pressFeedbackType = PressFeedbackType.Sink,
+        // ⚠️ 必须是 None，别改成 Sink。
+        // 这张卡只有**长按**才有动作（打开消息操作菜单），短按什么都不发生。
+        // 而 Sink 的反馈是"按下即缩放"，于是短按也会看到整块卡片缩放一下、
+        // 松手却没有反应 —— 看起来像卡了点不动，也把阅读中的正文整块顶得晃动。
+        pressFeedbackType = PressFeedbackType.None,
     ) {
         Column(
             modifier = Modifier
@@ -151,14 +156,18 @@ fun AssistantCard(
             if (item.thinking.isNotEmpty() || item.processSteps.isNotEmpty()) {
                 ThinkingPanel(item = item, onToggle = onToggleThinking)
             }
-            Text(
-                text = if (item.streaming) item.body + " ▍" else item.body,
-                color = scheme.onSurface,
-                fontSize = 14.sp,
-                // 常规字重：原版 Java 用 TextView 默认字重，Miuix 主题的默认
-                // 文字样式偏粗，不显式指定会显得比原版重。
-                fontWeight = FontWeight.Normal,
-            )
+            // 正文走 Markdown（标题/列表/代码块/表格/引用/链接…）。
+            // 流式光标用一个独立的 Text 尾随，而不是拼进 Markdown 源里 ——
+            // 拼进去的话光标会被当成行内内容参与解析（例如紧跟在 ` 后面会变成代码）。
+            ZhiMarkdown(source = item.body, bodyFontSize = 14.sp)
+            if (item.streaming) {
+                Text(
+                    text = "▍",
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 1.dp),
+                )
+            }
             if (!item.streaming && item.contextTokens >= 0) {
                 ContextFooter(
                     tokens = item.contextTokens,
@@ -606,7 +615,13 @@ fun ErrorCard(item: ChatItem) {
         ),
     ) {
         Text(text = item.title, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        Text(text = item.body, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
+        // 错误正文也走 Markdown：`ToolText.friendlyError` 会输出带 `代码` 与列表的
+        // 可操作建议，与回复正文保持一致。
+        ZhiMarkdown(
+            source = item.body,
+            bodyFontSize = 13.sp,
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }
 
@@ -626,10 +641,12 @@ fun InfoCard(item: ChatItem) {
         if (item.title.isNotEmpty()) {
             Text(text = item.title, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
-        Text(
-            text = item.body,
-            fontSize = 12.sp,
-            fontFamily = if (item.body.contains('`')) FontFamily.Monospace else FontFamily.Default,
+        // 提示正文也走 Markdown。这些内容里大量使用 `反引号` 标记命令与参数，
+        // 原先那个"整段变等宽"的启发式太粗（一句里只要有反引号，全段都成等宽），
+        // 现在由行内解析只给反引号包住的部分加等宽 + 底色。
+        ZhiMarkdown(
+            source = item.body,
+            bodyFontSize = 12.sp,
             modifier = Modifier.padding(top = 3.dp),
         )
     }
