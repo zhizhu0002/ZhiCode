@@ -276,6 +276,49 @@ public final class TermuxTerminalPane extends FrameLayout
         if (path != null && new File(path).isDirectory()) nextSessionWorkingDirectory = path;
     }
 
+    /**
+     * 让当前终端重新渲染一次。**配置变化后必须调**。
+     *
+     * <h3>为什么需要它（这是真机上报回来的一个 bug）</h3>
+     * 上游 {@link TerminalView} 的渲染依赖它自己的 {@code mEmulator}，而那个字段：
+     * <ul>
+     *   <li>在 {@code attachSession()} 里被置为 {@code null}，紧接着调一次 {@code updateSize()}；</li>
+     *   <li>只在 {@code updateSize()} 里被设回来，而 {@code updateSize()} 在
+     *       「宽或高为 0」或「还没有会话」时**静默返回**；</li>
+     *   <li>{@code onDraw()} 在 {@code mEmulator == null} 时**只画一块纯黑**。</li>
+     * </ul>
+     * 于是只要 attach 发生在视图还没有尺寸的那一刻，屏幕就一直是纯黑的空白；
+     * 而唯一能把 {@code mEmulator} 设回来的入口 {@code updateSize()} 只在
+     * {@code onSizeChanged} 里被调 —— 配置变化（旋转）后如果尺寸恰好不再变化，
+     * 它就再也不会被调。
+     *
+     * <p>真机上的表现正是：旋转后终端一片空白，切到别的标签再切回来又恢复正常
+     * （重新挂载会重新触发尺寸回调）。这个方法把那条「碰巧能恢复」的路径变成确定行为。
+     *
+     * <p>刻意**不碰会话与 PTY**：只让渲染重新对齐一次。没挂上就重挂，挂上了就重新量一次尺寸。
+     */
+    public void refreshTerminal() {
+        TerminalView view = terminalView;
+        TerminalSession session = current();
+        if (view == null || session == null) return;
+        if (view.getCurrentSession() != session) {
+            // 视图上的会话不是当前会话（例如新会话还没挂上去）→ 重走一次挂载。
+            selectSession(selected);
+            return;
+        }
+        // post 而不是直接调：这里可能仍在布局过程中，尺寸要等这一帧结束才定下来。
+        view.post(view::updateSize);
+        view.onScreenUpdated();
+        view.invalidate();
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        // 旋转/换主题：视图树会收到这个分发，让终端重新对齐一次尺寸。
+        refreshTerminal();
+    }
+
     public void newSession() {
         if (!runtime.isInstalled()) {
             showRuntimeNotice();
@@ -334,6 +377,9 @@ public final class TermuxTerminalPane extends FrameLayout
                 view.onScreenUpdated();
                 view.requestFocus();
                 view.postDelayed(TermuxTerminalPane.this::showKeyboard, 180);
+                // attach 时视图可能还没有尺寸（那时 TerminalView 的 mEmulator 会保持 null，
+                // 屏幕画成纯黑）。再确认一次：尺寸已经定下来就立刻量一次。
+                refreshTerminal();
             } catch (Throwable error) {
                 Log.e(LOG_TAG, "Failed to attach native Termux PTY", error);
                 if (terminalView == view) showTerminalFailure(error);

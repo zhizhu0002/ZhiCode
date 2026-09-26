@@ -184,6 +184,29 @@ public final class TerminalPaneContractTest {
                 && hostSquashed.contains("if(terminalView!=view||selected!=index||index>=sessions.size())return;"),
             "attach 必须在 post 里做且有三重校验：早 attach 会让 JNI 错误从 onSizeChanged 逃出去杀掉 Activity");
 
+        // ---- 4b. 配置变化后必须重新对齐渲染（真机上报回来的 bug） ----
+        //
+        // 上游 TerminalView 的 mEmulator 只在 updateSize() 里被设上，而 updateSize() 在
+        // 「宽或高为 0」时静默返回；onDraw() 在 mEmulator == null 时只画一块纯黑。
+        // 于是 attach 发生在视图还没有尺寸的那一刻，屏幕就一直是空白，而唯一的补救入口
+        // updateSize() 只在 onSizeChanged 里被调 —— 旋转后尺寸恰好不再变化就不会再被调。
+        // 真机上的表现：旋转后终端一片空白，切到别的标签再切回来才恢复。
+        // 这类回归只在配置变化时复现，文本断言是唯一能守住它的地方。
+        require(hostSquashed.contains("publicvoidrefreshTerminal()"),
+            "宿主必须提供 refreshTerminal()：它是配置变化后重新对齐渲染的入口");
+        require(hostSquashed.contains("view.post(view::updateSize)"),
+            "refreshTerminal 必须重新量一次尺寸（mEmulator 只有 updateSize 会设）");
+        require(hostSquashed.contains("view.getCurrentSession()!=session"),
+            "refreshTerminal 必须处理「视图上挂的不是当前会话」这一支（否则重挂不上）");
+        require(hostSquashed.contains("publicvoidonConfigurationChanged(")
+                && hostSquashed.contains("super.onConfigurationChanged(configuration);"),
+            "宿主必须实现 onConfigurationChanged 兜底");
+        require(squash(paneCode).contains("key(configuration){AndroidView("),
+            "AndroidView 必须随配置重建（key(configuration)）：这是「切走再切回能恢复」那条"
+                + "已知可行路径的确定化");
+        require(paneCode.contains("LaunchedEffect(configuration) { pane.refreshTerminal() }"),
+            "配置变化后必须主动调一次 refreshTerminal");
+
         // ---- 5. 属性解析：续行与 back-key ----
         require(hostSquashed.contains("if(trimmed.endsWith(\"\\\\\"))"),
             "termux.properties 的续行（行尾反斜杠）必须仍然处理");

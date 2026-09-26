@@ -20,11 +20,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.graphics.Color
@@ -157,6 +159,17 @@ private fun RealTerminalPane(
     // -1 = 没在改名。存下标而不是布尔值：长按哪一行就要改哪一行。
     var renamingIndex by remember { mutableStateOf(-1) }
 
+    // 配置变化（旋转、换主题）后让终端重新对齐一次尺寸。
+    //
+    // MainActivity 声明了 configChanges，所以旋转**不会**重建 Activity，组合也不会重来；
+    // 而终端能不能画出来，取决于上游 TerminalView 内部那个 mEmulator 有没有被设上 ——
+    // 它只在尺寸变化时被设，尺寸恰好不变就一直是 null，屏幕就一直是纯黑空白。
+    // 真机上确实这样表现过：旋转后空白，切到别的标签再切回来才恢复
+    // （重新挂载会重新触发尺寸回调）。所以这里主动走一次：
+    // key(...) 让 AndroidView 节点随配置重建，LaunchedEffect 再补一次渲染对齐。
+    val configuration = LocalConfiguration.current
+    LaunchedEffect(configuration) { pane.refreshTerminal() }
+
     val selectedIndex = state.sessions.indexOfFirst { it.selected }
 
     Surface(modifier = modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
@@ -181,14 +194,16 @@ private fun RealTerminalPane(
                         when {
                             failure != null -> TerminalFailure(failure, onRetry = { pane.retryTerminal() })
                             notice != null -> TerminalRuntimeNotice(notice)
-                            else -> AndroidView(
-                                factory = {
-                                    // 可能还挂在上一轮的容器上（旧 AndroidView 尚未 dispose），先摘干净
-                                    detachFromParent(pane)
-                                    pane
-                                },
-                                modifier = Modifier.fillMaxSize(),
-                            )
+                            else -> key(configuration) {
+                                AndroidView(
+                                    factory = {
+                                        // 可能还挂在上一轮的容器上（旧 AndroidView 尚未 dispose），先摘干净
+                                        detachFromParent(pane)
+                                        pane
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
                         }
                     }
                     TerminalExtraKeys(state) { action ->
