@@ -133,6 +133,11 @@ run FridaScriptBootstrapRegressionTest "$PROJECT_ROOT"
 # 一律证明不了 —— 那些要在 IQ 沙箱里跑起来才知道。
 run_node frida-agent-harness "$PROJECT_ROOT"
 
+# 再用**真正的 Java** 抽一次同一份载荷，逐字节比对 —— 保证行为测试测的载荷
+# 与设备上执行的是同一份（harness 自己实现的 text block 还原规则若与 Java 不一致，
+# 两边会各自「通过」而没人发现）。
+run_node frida-payload-embedding-check "$PROJECT_ROOT"
+
 # ---------- 数据层的格式迁移 ----------
 # 内部续跑标记会写进持久化历史，改名后若只认新标记，
 # 旧会话里的续跑指令会变成可编辑的「人类发言」。这种回归只在旧数据上出现，
