@@ -33,7 +33,6 @@ import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.model.SessionSummary
-import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -58,7 +57,6 @@ fun ZhiSidebar(
     onOpenSession: (SessionSummary) -> Unit,
     onSessionActions: (SessionSummary) -> Unit,
     onDeleteSession: (SessionSummary) -> Unit,
-    onSelectTab: (WorkspaceTab) -> Unit,
     onRoleCard: () -> Unit,
     onSkills: () -> Unit,
     onSandbox: () -> Unit,
@@ -114,25 +112,10 @@ fun ZhiSidebar(
                 }
             }
 
+            // 工作区里**不再重复**放「变更 / 终端 / 文件」——
+            // 这三个本来就是工作区标签页，顶栏那排按键组（窄屏）与右侧副栏（宽屏）
+            // 已经能切了，侧栏再列一遍既是重复入口，也把这张卡撑得很长。
             SidebarSection(title = "工作区") {
-                SidebarAction(
-                    label = "变更",
-                    icon = ZhiIcons.changes,
-                    active = state.tab == WorkspaceTab.CHANGES,
-                    onClick = { onSelectTab(WorkspaceTab.CHANGES) },
-                )
-                SidebarAction(
-                    label = "终端",
-                    icon = ZhiIcons.terminal,
-                    active = state.tab == WorkspaceTab.TERMINAL,
-                    onClick = { onSelectTab(WorkspaceTab.TERMINAL) },
-                )
-                SidebarAction(
-                    label = "文件",
-                    icon = ZhiIcons.files,
-                    active = state.tab == WorkspaceTab.FILES,
-                    onClick = { onSelectTab(WorkspaceTab.FILES) },
-                )
                 SidebarAction(label = "技能", icon = ZhiIcons.skill, onClick = onSkills)
                 SidebarAction(label = "自定义角色卡", icon = ZhiIcons.roleCard, onClick = onRoleCard)
                 SidebarAction(label = "IQ 沙箱", icon = ZhiIcons.sandbox, onClick = onSandbox)
@@ -219,8 +202,12 @@ private fun SidebarAction(
     // 没有背景色参数，而选中态需要一个随主题变化的底色。
     Card(
         onClick = onClick,
-        // BasicComponent 内置 heightIn(min = 56.dp)，侧栏空间紧张，用外层
-        // heightIn(max = …) 把行高压到 38dp（约束会被内层取 min 后收敛）。
+        // BasicComponent 内置 heightIn(min = 56.dp)，侧栏不需要那么高，
+        // 用外层 heightIn(max = …) 收敛。
+        //
+        // ⚠️ 别把这两个值再压小：`PressFeedbackType.Sink` 的反馈是**内容下沉**，
+        // 行高太扁 + 内边距为 0 时整个动画几乎看不出来，看起来像"没有按压反馈"。
+        // 之前压到 34dp / vertical = 0dp 就是这个结果。
         modifier = modifier.fillMaxWidth().heightIn(max = SidebarRowMaxHeight),
         cornerRadius = ZhiRadius.card,
         insideMargin = PaddingValues(0.dp),
@@ -236,12 +223,13 @@ private fun SidebarAction(
                         imageVector = it,
                         contentDescription = null,
                         tint = foreground,
-                        modifier = Modifier.size(15.dp),
+                        modifier = Modifier.size(16.dp),
                     )
                 }
             },
-            // 点击由外层 Card 处理：这里再传一次 onClick 会形成嵌套可点区域
-            insideMargin = PaddingValues(horizontal = 7.dp, vertical = 0.dp),
+            // 点击由外层 Card 处理：这里再传一次 onClick 会形成嵌套可点区域。
+            // vertical 不能为 0：要给 Sink 的下沉动画留出空间。
+            insideMargin = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
         )
     }
 }
@@ -261,7 +249,7 @@ private fun SessionRow(
         onLongPress = onActions,
         modifier = Modifier.fillMaxWidth().heightIn(max = SessionRowMaxHeight),
         cornerRadius = ZhiRadius.card,
-        insideMargin = PaddingValues(start = 6.dp, end = 2.dp, top = 1.dp, bottom = 1.dp),
+        insideMargin = PaddingValues(start = 6.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
         colors = CardDefaults.defaultColors(
             color = if (active) ZhiColors.cardInnerSurface() else Color.Transparent,
             contentColor = if (session.busy) scheme.primary else scheme.onSurface,
@@ -322,7 +310,7 @@ private fun SessionRow(
  * `bipush 56` → `heightIn`），而侧栏要在有限高度里塞下尽可能多的会话，
  * 所以从外面再套一层 `heightIn(max = …)`：内层的 min 会被外层 max 收敛下来。
  */
-private val SidebarRowMaxHeight = 34.dp
+private val SidebarRowMaxHeight = 42.dp
 
 /** 会话行最大高度（标题 + 元信息两行）。 */
-private val SessionRowMaxHeight = 46.dp
+private val SessionRowMaxHeight = 58.dp

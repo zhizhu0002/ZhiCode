@@ -143,6 +143,17 @@ class WorkspaceViewModel(
     private var pendingPermissionId: String? = null
 
     /**
+     * 当前这一轮属于哪个会话（`activeSessionId` 的快照）。
+     *
+     * 用途只有一个：错误迟到时判断它该不该落到**现在**这个会话里。
+     * 用户在等待回复时切走会话，这一轮会被 `engine.cancel()` 打断，但错误回调
+     * 仍可能之后到达；没有这个标记就会把错误卡写进新会话（详见 [finishTurnWithError]）。
+     *
+     * 为 null 表示"当前没有归属待判定的回合"，此时不拦截。
+     */
+    private var turnSessionId: String? = null
+
+    /**
      * 正在进行的「提问」流程。
      *
      * 引擎的 `AskUserQuestion` 可以一次带多个问题，界面是**分步**展示的，
@@ -920,6 +931,9 @@ class WorkspaceViewModel(
      * 不需要重启应用就能在下一轮生效。
      */
     private fun startTurn(prompt: String, extraContent: JSONArray? = null) {
+        // 记下这一轮属于哪个会话。放在这里而不是各调用点：`startTurn` 是**唯一漏斗**
+        // （普通消息与 /init 都走它），只需维护一处；错误迟到时靠它判断该不该落地。
+        turnSessionId = _state.value.activeSessionId
         val configured = runCatching { engine.configure(engineOverrides()) }
         if (configured.isFailure) {
             // 配置阶段就失败（例如 SharedPreferences 损坏）时不要静默：
@@ -1438,8 +1452,27 @@ class WorkspaceViewModel(
 
     // ---------- 引擎事件用到的内部工具 ----------
 
-    /** 一轮以错误收尾：收尾气泡、落一条错误卡、把忙碌态清干净。 */
+    /**
+     * 一轮以错误收尾：收尾气泡、落一条错误卡、把忙碌态清干净。
+     *
+     * ## 为什么开头要校验会话归属
+     *
+     * 报错可能是**迟到**的：用户在等待回复时切到了别的会话（或点了新会话），
+     * 这一轮随即被 `engine.cancel()` 打断，而错误回调仍可能在之后到达。
+     * `ZhiEngineController` 的代际校验能挡掉一部分，但 `startTurn` 这条路径是
+     * 同步调用的、不经过代际门，而且 `_state` 此刻已经是**新会话**的 ——
+     * 于是错误卡会落到新会话里，看起来像"串台"。
+     *
+     * 所以这里再按会话 id 兜一道：本轮所属的会话已经不是当前会话时，直接丢弃，
+     * 不去污染新会话。（用户的预期是"错误应当出现在出问题的那个会话里"，
+     * 但它已经不在前台、内存里也没有它的 transcript，落不进去；
+     * 丢掉比串台正确 —— 那个会话下次打开时会从自己的文件重建。）
+     */
     private fun finishTurnWithError(text: String) {
+        val owner = turnSessionId
+        turnSessionId = null
+        if (owner != null && owner != _state.value.activeSessionId) return
+
         finalizeStreaming(keepIfEmpty = false)
         _state.update { s ->
             s.copy(
@@ -2549,6 +2582,8 @@ class WorkspaceViewModel(
     fun newSession() {
         engine.resetConversation()
         discardStreamingAssistant()
+        // 上一轮即使还在跑也已经不属于任何会话了，清掉归属标记避免误拦。
+        turnSessionId = null
         currentGroupId = null
         liveTools.clear()
         progressBuffers.clear()
@@ -2592,6 +2627,9 @@ class WorkspaceViewModel(
         // transcript 里写（引擎的 cancel 会连带取消三个门控）。
         engine.cancel()
         discardStreamingAssistant()
+        // 切走会话：上一轮的迟到事件一律不应再落到新会话里。
+        // 注意这里**不要**把 turnSessionId 置 null —— 置空等于关掉拦截。
+        // 保留了旧值，[finishTurnWithError] 才能看出"归属 ≠ 当前"并丢弃。
         currentGroupId = null
         liveTools.clear()
         progressBuffers.clear()

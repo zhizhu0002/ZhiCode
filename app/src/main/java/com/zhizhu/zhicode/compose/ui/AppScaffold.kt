@@ -791,10 +791,6 @@ private fun ZhiSidebarHost(
         onOpenSession = viewModel::openSession,
         onSessionActions = viewModel::showSessionActions,
         onDeleteSession = { viewModel.deleteSession(it.id) },
-        onSelectTab = { tab ->
-            viewModel.selectTab(tab)
-            viewModel.closeSidebar()
-        },
         onSkills = viewModel::openSkills,
         onRoleCard = viewModel::openRoleCards,
         onSandbox = { viewModel.openSandbox() },

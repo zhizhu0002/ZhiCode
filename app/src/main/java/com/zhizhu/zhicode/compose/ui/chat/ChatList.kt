@@ -11,6 +11,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
@@ -39,12 +45,58 @@ fun ChatList(
     topInset: Dp = 0.dp,
 ) {
     val listState = rememberLazyListState()
+    val currentState by rememberUpdatedState(state)
 
-    // 自动吸底：新增消息或工作状态变化时滚到最后一项
-    LaunchedEffect(state.transcript.size, state.workingStatus) {
-        val leading = if (state.transcript.isEmpty()) 1 else 0
-        val lastIndex = leading + state.transcript.size
-        if (lastIndex > 0) listState.animateScrollToItem(lastIndex)
+    /*
+     * 是否“贴着底部”。
+     *
+     * 只在贴底时自动跟随：用户往上翻看历史时，不能因为模型还在流式输出就把他拽回去。
+     * 末尾那个固定高度的占位 Box 很小，所以“它可见”就等价于“已经在底部附近”。
+     */
+    val followTail by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf true
+            lastVisible.index >= info.totalItemsCount - 1
+        }
+    }
+
+    /*
+     * 上一次已处理的会话 id。
+     *
+     * 切会话 / 新会话时要**无条件**回到底部（新打开的会话应该从底部看起），
+     * 而流式过程中只在用户本来就贴底时才跟随。
+     * 两者用同一个标记区分：`activeSessionId` 变了就是“换会话了”，无条件滚。
+     */
+    var lastSessionId by remember { mutableStateOf(state.activeSessionId) }
+
+    /*
+     * 自动吸底。
+     *
+     * 原先只以 `transcript.size` 为键 —— 而流式输出时**条数不变、只有正文在长**，
+     * 所以整个回复过程里列表都不会跟随，必须手动往下滑。
+     * 现在把末尾那条的正文长度、思考长度、工具条数也算进键里，才能跟着流式内容走。
+     *
+     * 用 `scrollToItem`（瞬时）而不是 `animateScrollToItem`：流式内容是连续增长的，
+     * 每一步都起一个动画会互相打断、看起来反而在抖。
+     */
+    LaunchedEffect(
+        state.transcript.size,
+        state.transcript.lastOrNull()?.body?.length,
+        state.transcript.lastOrNull()?.thinking?.length,
+        state.transcript.lastOrNull()?.tools?.size,
+        state.activeSessionId,
+        state.workingStatus,
+    ) {
+        val s = currentState
+        val size = s.transcript.size
+        // 空态时它会占一项（索引 0）；末尾还有一项固定高度的占位 Box
+        val leading = if (size == 0) 1 else 0
+        val tailIndex = leading + size
+        val switched = s.activeSessionId != lastSessionId
+        lastSessionId = s.activeSessionId
+        if (tailIndex <= 0) return@LaunchedEffect
+        if (switched || followTail) listState.scrollToItem(tailIndex)
     }
 
     Box(modifier = modifier.fillMaxSize()) {
