@@ -799,27 +799,39 @@ opt optString optInt optBoolean optLong optDouble optJSONObject optJSONArray`，
 
 ```
  语句  声明  骨架 字面量 语句占比  文件
-  127    125    186     43     26%  core/ZhiCodeEngine.java
-   71     52     73      8     35%  tasks/TaskStore.java
-   62     36     51     33     34%  core/ContextCompactor.java
-   54     16     96     74     22%  api/OpenAIResponsesProvider.java
-   42     22     55     22     30%  tools/AndroidIntentBridge.java
-   41     20     30     11     40%  tools/UnifiedDiff.java
-   38     60     66     25     20%  termux/TermuxShellExecutor.java
-   34     21     63     33     23%  api/OpenAIChatCompletionsProvider.java
-   32     18     42      1     34%  storage/ApiSettingsStore.java
-   27     14     31      2     36%  (zhizhu) ZhiFileProvider.java
+   174     76    188     43     36%  core/ZhiCodeEngine.java
+    79     44     73      8     39%  tasks/TaskStore.java
+    62     35     52     28     35%  core/ContextCompactor.java
+    59      9     98     74     25%  api/OpenAIResponsesProvider.java
+    55     43     66     25     29%  termux/TermuxShellExecutor.java
+    49     14     56     19     36%  tools/AndroidIntentBridge.java
+    42     19     30     11     41%  tools/UnifiedDiff.java
+    41     13     64     33     27%  api/OpenAIChatCompletionsProvider.java
+    38      5     53      4     38%  (zhizhu) TermuxTerminalPane.java
+    34     16     42      0     37%  storage/ApiSettingsStore.java
 ```
 
 这一列与人工判读的顺序一致得多：前十个文件正是真正还留着「读起来像原版」的判断与动作
-的地方，而 `PlanWorkflowState`（17）、`PlanApprovalGate`（22）、`HttpRequestTracker`（15）
+的地方，而 `PlanWorkflowState`（17）、`PlanApprovalGate`（16）、`HttpRequestTracker`（21）
 这些批 H 文件退到了中段。`SandboxKeeper`、`SandboxShell` 的语句行是 0，
 `SandboxFrida` 的 75 行里有 43 行曾经是内嵌脚本的大串（字面量桶）——
 那一段已经重写掉了（净相同行 2157 → 2118），过程与代价见下面「内嵌 Frida 载荷」一节。
 
-（这四个文件在这一笔 `JsonItems` 之后都降了：ZhiCodeEngine 138 → 127、
-ContextCompactor 74 → 62、OpenAIResponsesProvider 70 → 54、
-OpenAIChatCompletionsProvider 39 → 34 —— 这一族模板正是最后那几行「读起来像原版」的语句。）
+**这张表被返工过一次，原因值得记下来**：它原先写的是 `ZhiCodeEngine 127/125/186`，
+那是 `cc76333`（把 217 行从声明桶挪回语句桶）**之前**的分类器算出来的，
+而那次修分类器时只重算了正文里的四个桶，没有重算这张按文件的表。
+实测核对：同一个文件、同样 481 行共享，旧分类器（`CLASSIFY` 688 字节）给出
+`127/125/186/43`，当前（1043 字节）给出 `174/76/188/43`。
+所以「138 → 127」这类历史对照也跟着错了：口径变了之后是 **138 → 174**
+（不是因为多了代码，而是那些行本来就该算语句）。
+教训与本文别处记过的是同一个：**同一份规则改过之后，所有引用它的数字都要重算**——
+只改正文、不改表，就会留下一张看起来权威、实际来自另一个口径的表。
+
+（这一族模板在 `JsonItems` 那一笔之后确实降过：`ContextCompactor` 74 → 62、
+`OpenAIResponsesProvider` 70 → 54。`OpenAIChatCompletionsProvider` 的 34 是旧口径的数，
+换成当前分类器是 **41**：同一个文件、同样 151 行共享，旧分类器给 `T=34 D=21`，
+当前给 `T=41 D=13` —— 那 7 行本来就在，只是原先被数进了声明桶。
+这正是上面那句「规则改过之后所有引用它的数字都要重算」的又一个例子。）
 
 
 ### 批 F（2/6）：终端面板改用 Compose 重写（已完成，待真机复验）
