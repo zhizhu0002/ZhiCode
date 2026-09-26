@@ -152,14 +152,14 @@ Termux 集成层                       35       8734           2063
 Compose 界面层                      57      15427              0
 其它                                8       1980           1138
 Agent 工具                         44       5673            933
-Agent 核心                          9       3398           1063
+Agent 核心                          9       3436            855
 沙箱宿主层                            16       4716            563
-合计                              192      47322          13034
+合计                              192      47551          12841
 
-已是我们自己的:        34288 行
-逐行相同合计:          13034 行
+已是我们自己的:        34710 行
+逐行相同合计:          12841 行
   其中 Termux 上游:     7274 行（Termux 自己的代码，与独立性无关）
-  真正属于 IQ Code:     5760 行
+  真正属于 IQ Code:     5567 行
 ```
 
 ### 这个数字曾经是错的（记下来，因为它会再次发生）
@@ -271,9 +271,8 @@ Agent 核心                          9       3398           1063
 
 | 相同 | 原版 | 现在 | 重合 | 文件 | 处置 |
 | --- | --- | --- | --- | --- | --- |
-| 1233 → 492 | 1245 | 2094 | 23.5% | `com/termux/app/zhicode/core/ZhiCodeEngine.java` | 批 D（已重写） |
-| 565 | 583 | 592 | 95.4% | `com/zhizhu/zhicode/TermuxTerminalPane.java` | 批 F |
-| 388 | 390 | 390 | 99.5% | `com/termux/app/zhicode/core/ContextCompactor.java` | 批 D |
+| 1233 → 492 | 1245 | 2094 | 23.5% | `com/termux/app/zhicode/core/ZhiCodeEngine.java` | 批 D（已重写） || 565 | 583 | 592 | 95.4% | `com/zhizhu/zhicode/TermuxTerminalPane.java` | 批 F |
+| 388 → 195 | 390 | 619 | 31.5% | `com/termux/app/zhicode/core/ContextCompactor.java` | 批 D（已重写） |
 | 310 | 310 | 310 | 100.0% | `com/zhizhu/zhicode/UiMotion.java` | 批 F |
 | 256 | 622 | 929 | 27.6% | `com/termux/app/zhicode/api/OpenAIResponsesProvider.java` | 批 B（已重写） |
 | 204 | 354 | 545 | 37.4% | `com/termux/app/zhicode/tasks/TaskStore.java` | 批 E（已重写） |
@@ -421,10 +420,26 @@ runAgent        异常分类（取消 vs 真错误）与收尾
 写在了函数旁边，例如「`continue` 会执行 `turn++`」「工具结果即使被取消也要写回」
 「提交压缩前必须比对历史」—— 这些是改动这个文件时最容易踩坏、而踩坏了不一定报错的地方。
 
-### 批 D（2/2）：`core/ContextCompactor.java`（未开始）
+### 批 D（2/2）：`core/ContextCompactor.java`（已完成）
 
-388 行重合、99.5%。它负责上下文压缩的切点计算、摘要提示词组装与结果解析，
-是批 D 的另一半。
+388 → 195 行重合（99.5% → 31.5%）。它负责压缩的切点计算、摘要提示词组装与结果解析。
+
+这一块的特别之处在于：它产出的东西几乎全是**给模型看的**（摘要提示词、压缩后的上下文
+包裹格式、被缩减过的历史），而且改坏了不会报错 —— 只会让摘要质量悄悄变差。
+
+所以这里用的办法与 `SystemPromptBuilder` 那次一样，但做得更硬：
+
+1. 先写一个一次性探针，把**重写前**的实现对同一组输入（覆盖 text / thinking / tool_use /
+   tool_result / image 五种块）的完整输出原样 dump 出来；
+2. 把 dump 存成 `app/src/test/resources/compaction-prompt-baseline.txt`；
+3. 重写之后，由 `ContextCompactionTextTest` 重新生成同一份 dump 并与基线逐字比较。
+
+这条断言是长期保留的 —— 以后再动这个文件，提示词改了一个字都会红。
+基线文件里存的就是那些句子本身，可以直接查阅，不需要相信任何人的描述。
+
+除此之外的处理：三个重试档位（正文 30k/14k/8k、工具 8k/3.5k/2k）从内联三目改成数组；
+摘要提示词的九条要求从九行 `append` 改成一份 `SUMMARY_SECTIONS` 数组（它是一份清单，
+要能一眼看出有没有漏掉某一类信息）；逐消息、逐块的 token 估算各拆成一个方法。
 
 ### 批 B：`api/` 协议层（已完成）
 

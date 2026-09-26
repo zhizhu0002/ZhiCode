@@ -1,0 +1,82 @@
+### prompt(custom=empty, recent=true)
+CRITICAL: Respond with TEXT ONLY. Do not call any tool. Tool calls will be rejected.
+Your entire response must contain an <analysis> drafting block followed by one <summary> block.
+
+Create a detailed, technically accurate continuity summary of the conversation prefix above. Newer messages are preserved verbatim after this summary, so summarize only the prefix you saw.
+In <analysis>, inspect the messages chronologically and verify requests, decisions, code, files, errors, fixes, user corrections, pending work, and exact current state.
+
+In <summary>, use these sections:
+1. Primary Request and Intent
+2. Key Technical Concepts and Decisions
+3. Files and Code Sections (paths, functions, edits, and essential snippets)
+4. Errors, Failed Attempts, and Fixes
+5. Problem Solving and Verified Results
+6. All User Messages (exclude tool results)
+7. Pending Tasks
+8. Current Work and Exact State
+9. Direct Next Step, only if it follows the latest request
+
+Preserve concrete commands, file paths, identifiers, constraints, test results, and unresolved blockers. Do not invent completion. Match the conversation's language where practical.
+
+REMINDER: no tools. Return only <analysis>...</analysis><summary>...</summary>.
+### prompt(custom=empty, recent=false)
+CRITICAL: Respond with TEXT ONLY. Do not call any tool. Tool calls will be rejected.
+Your entire response must contain an <analysis> drafting block followed by one <summary> block.
+
+Create a detailed, technically accurate continuity summary of the conversation prefix above. The summary will replace the conversation shown above.
+In <analysis>, inspect the messages chronologically and verify requests, decisions, code, files, errors, fixes, user corrections, pending work, and exact current state.
+
+In <summary>, use these sections:
+1. Primary Request and Intent
+2. Key Technical Concepts and Decisions
+3. Files and Code Sections (paths, functions, edits, and essential snippets)
+4. Errors, Failed Attempts, and Fixes
+5. Problem Solving and Verified Results
+6. All User Messages (exclude tool results)
+7. Pending Tasks
+8. Current Work and Exact State
+9. Direct Next Step, only if it follows the latest request
+
+Preserve concrete commands, file paths, identifiers, constraints, test results, and unresolved blockers. Do not invent completion. Match the conversation's language where practical.
+
+REMINDER: no tools. Return only <analysis>...</analysis><summary>...</summary>.
+### prompt(custom=中文重点, recent=true)
+CRITICAL: Respond with TEXT ONLY. Do not call any tool. Tool calls will be rejected.
+Your entire response must contain an <analysis> drafting block followed by one <summary> block.
+
+Create a detailed, technically accurate continuity summary of the conversation prefix above. Newer messages are preserved verbatim after this summary, so summarize only the prefix you saw.
+In <analysis>, inspect the messages chronologically and verify requests, decisions, code, files, errors, fixes, user corrections, pending work, and exact current state.
+
+In <summary>, use these sections:
+1. Primary Request and Intent
+2. Key Technical Concepts and Decisions
+3. Files and Code Sections (paths, functions, edits, and essential snippets)
+4. Errors, Failed Attempts, and Fixes
+5. Problem Solving and Verified Results
+6. All User Messages (exclude tool results)
+7. Pending Tasks
+8. Current Work and Exact State
+9. Direct Next Step, only if it follows the latest request
+
+Preserve concrete commands, file paths, identifiers, constraints, test results, and unresolved blockers. Do not invent completion. Match the conversation's language where practical.
+
+<additional_compact_instructions>
+重点保留测试结果与文件路径
+</additional_compact_instructions>
+
+REMINDER: no tools. Return only <analysis>...</analysis><summary>...</summary>.
+### compactedMessages
+{"role":"user","content":[{"text":"<context_summary>\nThis session continues from an earlier conversation. The model-generated summary below covers the compacted prefix.\n\nSUMMARY-BODY\n<\/context_summary>\n\n<continuation_instruction>Continue seamlessly from this context. Do not acknowledge or recap the summary; resume the current task directly. Recent messages follow verbatim.<\/continuation_instruction>","type":"text"}]}
+{"role":"assistant","content":[{"text":"第二轮回复","type":"text"},{"source":"x","type":"image"}]}
+{"role":"user","content":[{"text":"第二条人类发言","type":"text"}]}
+{"role":"assistant","content":[{"text":"第三轮回复","type":"text"}]}
+### summaryMessages(attempt=0)
+{"role":"user","content":[{"text":"第一条人类发言","type":"text"}]}
+{"role":"assistant","content":[{"text":"assistant 正文","type":"text"},{"input":{"file_path":"/tmp/a"},"name":"Read","id":"call_1","type":"tool_use"}]}
+{"role":"user","content":[{"tool_use_id":"call_1","type":"tool_result","content":"工具输出"}]}
+{"role":"user","content":[{"text":"CRITICAL: Respond with TEXT ONLY. Do not call any tool. Tool calls will be rejected.\nYour entire response must contain an <analysis> drafting block followed by one <summary> block.\n\nCreate a detailed, technically accurate continuity summary of the conversation prefix above. Newer messages are preserved verbatim after this summary, so summarize only the prefix you saw.\nIn <analysis>, inspect the messages chronologically and verify requests, decisions, code, files, errors, fixes, user corrections, pending work, and exact current state.\n\nIn <summary>, use these sections:\n1. Primary Request and Intent\n2. Key Technical Concepts and Decisions\n3. Files and Code Sections (paths, functions, edits, and essential snippets)\n4. Errors, Failed Attempts, and Fixes\n5. Problem Solving and Verified Results\n6. All User Messages (exclude tool results)\n7. Pending Tasks\n8. Current Work and Exact State\n9. Direct Next Step, only if it follows the latest request\n\nPreserve concrete commands, file paths, identifiers, constraints, test results, and unresolved blockers. Do not invent completion. Match the conversation's language where practical.\n\nREMINDER: no tools. Return only <analysis>...<\/analysis><summary>...<\/summary>.","type":"text"}]}
+### summaryMessages(attempt=2)
+{"role":"user","content":[{"text":"第一条人类发言","type":"text"}]}
+{"role":"assistant","content":[{"text":"assistant 正文","type":"text"},{"input":{"file_path":"/tmp/a"},"name":"Read","id":"call_1","type":"tool_use"}]}
+{"role":"user","content":[{"tool_use_id":"call_1","type":"tool_result","content":"工具输出"}]}
+{"role":"user","content":[{"text":"CRITICAL: Respond with TEXT ONLY. Do not call any tool. Tool calls will be rejected.\nYour entire response must contain an <analysis> drafting block followed by one <summary> block.\n\nCreate a detailed, technically accurate continuity summary of the conversation prefix above. Newer messages are preserved verbatim after this summary, so summarize only the prefix you saw.\nIn <analysis>, inspect the messages chronologically and verify requests, decisions, code, files, errors, fixes, user corrections, pending work, and exact current state.\n\nIn <summary>, use these sections:\n1. Primary Request and Intent\n2. Key Technical Concepts and Decisions\n3. Files and Code Sections (paths, functions, edits, and essential snippets)\n4. Errors, Failed Attempts, and Fixes\n5. Problem Solving and Verified Results\n6. All User Messages (exclude tool results)\n7. Pending Tasks\n8. Current Work and Exact State\n9. Direct Next Step, only if it follows the latest request\n\nPreserve concrete commands, file paths, identifiers, constraints, test results, and unresolved blockers. Do not invent completion. Match the conversation's language where practical.\n\n<additional_compact_instructions>\nX\n<\/additional_compact_instructions>\n\nREMINDER: no tools. Return only <analysis>...<\/analysis><summary>...<\/summary>.","type":"text"}]}
