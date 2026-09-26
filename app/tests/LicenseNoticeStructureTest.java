@@ -130,6 +130,11 @@ public final class LicenseNoticeStructureTest {
                 "扣减规则必须指向可核对的审计文件（列出每个被扣的串出现在哪几个文件）");
         require(analysis.contains("PROVENANCE_SHAPE"),
                 "验证清单必须列出语句行收敛度的度量模式，否则「还能省多少行」这条结论无法重跑");
+        // 4d. 结论里最容易被含糊过去的一句是「剩下这些已经没得改了」。
+        //     它必须连带一份可逐条读的清单，否则读者只能相信一句话。
+        require(analysis.contains("build/provenance-unique-shapes.txt"),
+                "「剩下这些没有第二种写法」必须连到逐行清单（build/provenance-unique-shapes.txt），"
+                        + "否则这句结论无从核对");
 
         // 6. 本测试自身必须被 canonical suite 执行，否则它只是一份摆设
         String script = read(root, "test-source-no-build.sh");

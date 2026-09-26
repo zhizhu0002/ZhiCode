@@ -504,7 +504,9 @@ SHAPE_OF='
   }
   /^=== / { f = substr($0, 5); nf++; F[nf] = f; next }
   # HAS[f,c]：这一行在归一化前是否真的调用了方法 —— 由 shapeOf 通过 HADCALL 带出来
-  { c = ++C[f]; S[f, c] = shapeOf($0); HAS[f, c] = HADCALL }
+  # ORI[f,c]：原样留一份原文。只统计形状是不够的 —— 「这条能不能换个写法」是人的判断，
+  #   判断的对象是那一行代码本身，而形状已经被归一化抹掉了名字与字符串。
+  { c = ++C[f]; S[f, c] = shapeOf($0); HAS[f, c] = HADCALL; ORI[f, c] = $0 }
   END {
     # ---- 单行形状：只统计，不计入收益
     for (i = 1; i <= nf; i++) {
@@ -514,6 +516,19 @@ SHAPE_OF='
     for (k in single) {
       if (single[k] >= 2) { repShapes++; repLines += single[k] }
       else { onceShapes++; onceLines += single[k] }
+    }
+
+    # ---- 只出现一次的形状，逐行导出（附文件名与原文）。
+    # 为什么要导出：这一类**不能**靠收敛压掉（没有第二处可以合），只能逐条人读判断
+    # 「这一行有没有第二种写法」。没有这份清单，那句结论就无从核对。
+    # 注意它按**形状**唯一来筛：两行原文不同、形状相同（只是变量名不同）也只算一次出现。
+    if (uniqout != "") {
+      for (i = 1; i <= nf; i++) {
+        g = F[i]
+        for (j = 1; j <= C[g]; j++) {
+          if (single[S[g, j]] == 1) print g "\t" ORI[g, j] >> uniqout
+        }
+      }
     }
 
     # ---- 连续 2~4 行窗口计数；key 存下来供后面复用，避免重复拼接
@@ -576,16 +591,24 @@ SHAPE_OF='
 '
 
 # 用法: PROVENANCE_SHAPE=1 bash tools/provenance.sh
+#      PROVENANCE_SHAPE_UNIQUE=1 另外导出「只出现一次的形状」的逐行清单
+#      （那一类只能逐条人读判「有没有第二种写法」，不能靠收敛压掉）
 if [ "${PROVENANCE_SHAPE:-0}" = "1" ]; then
     SHAPE_OUT="$PROJECT_ROOT/build/provenance-shapes.txt"
+    UNIQUE_OUT="$PROJECT_ROOT/build/provenance-unique-shapes.txt"
     SHAPE_TOP="${PROVENANCE_SHAPE_TOP:-10}"
     DETAIL="$WORK/shape-candidates.tsv"
     : > "$DETAIL"
     mkdir -p "$(dirname "$SHAPE_OUT")"
+    UNIQ_VAR=""
+    if [ "${PROVENANCE_SHAPE_UNIQUE:-0}" = "1" ]; then
+        : > "$UNIQUE_OUT"
+        UNIQ_VAR="$UNIQUE_OUT"
+    fi
 
     echo
     echo "形状收敛度量（与文件无关，只看「同一件事被写了几遍」）："
-    awk -v detail="$DETAIL" "$SHAPE_OF" "$STATEMENT_LINES"
+    awk -v detail="$DETAIL" -v uniqout="$UNIQ_VAR" "$SHAPE_OF" "$STATEMENT_LINES"
     echo
     echo "重复出现的多行模板（窗口 4 / 3 / 2 行，各取前 $SHAPE_TOP 项）："
     printf "%8s %4s %6s %6s  %s\n" "可省" "行数" "出现" "文件" "模板形状（<T>=类型 <v>=变量 #=数字）"
@@ -608,6 +631,9 @@ if [ "${PROVENANCE_SHAPE:-0}" = "1" ]; then
         sort -k4,4nr "$DETAIL"
     } > "$SHAPE_OUT"
     printf '  候选明细全文: %s\n' "$SHAPE_OUT"
+    if [ -n "$UNIQ_VAR" ]; then
+        printf '  只出现一次的形状（逐行，可逐条读）: %s\n' "$UNIQUE_OUT"
+    fi
 fi
 
 # 按**语句行**排序的清单 —— 这才是排批次该看的那一列。

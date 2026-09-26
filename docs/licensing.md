@@ -333,6 +333,52 @@ for (JSONObject message : JsonItems.of(messages)) {
 （`build/check-index-use.awk` 与 `build/rewrite-json-loops.awk` 是一次性工具，在 `build/` 下，
 不进仓库 —— 它们要说明的事情已经写在这一节里。）
 
+### 423 行「只出现一次的形状」逐条判读的结果
+
+工具报「可省 0 行」之后，语句桶剩下的 423 行是逐条读过的 —— 清单由
+`PROVENANCE_SHAPE=1 PROVENANCE_SHAPE_UNIQUE=1 bash tools/provenance.sh` 导出到
+`build/provenance-unique-shapes.txt`（每行带文件名，共 423 行）。
+
+**先说清这 423 行是按什么筛出来的**：形状完全相同的行会被算进「重复」那一档，
+所以这 423 行**在结构上彼此不同** —— 这是算法的定义决定的，不是巧合。
+这既说明「没有剩下可收敛的重复」，也说明下面那张表要一个个看类别，不能只看总数。
+
+| 类别 | 行数 | 有第二种写法吗 | 判读 |
+| --- | --- | --- | --- |
+| 局部变量初始化（`T x = expr;`） | 118 | 有（内联、改名） | **不改**：内联只在这条语句只被用一次时成立，而改的后果是把一行变成主语义里的一小段 —— 可读性换数字 |
+| 卫语句 `if (…)` | 98 | 很少 | **不改**：每一条都是具体的业务条件（`if (status < 200 \|\| status >= 300)`）。它的内容是那个条件本身，换写法只能靠取反或改成三目，两者都让意图更难读 |
+| 其它语句（方法调用等） | 65 | 有个别 | 见下面「唯一一处真正像重复的地方」 |
+| `return` 表达式 | 46 | 很少 | **不改**：同上，内容是表达式本身 |
+| 单行方法（`m() { return …; }`） | 30 | **没有** | 方法名是公开面（`isIdle()`、`exitCode()`、`permissionKind()`），名字不能合并；body 只有这一种写法 |
+| 字段/常量声明并赋值 | 27 | 没有 | `private final JSONArray messages = new JSONArray();` —— 唯一写法 |
+| 控制流骨架 | 23 | 没有 | `} else {`、`switch (key) {`、`for (…) {` 行 |
+| 构造期 `this.x = y` | 13 | 没有 | 与上面同理 |
+| 其它声明 | 3 | 没有 | |
+
+这 423 行里**唯一有实质重复嫌疑的地方**是三处「把一个数组的元素全部追加到另一个数组」：
+
+```java
+for (int i = 0; i < restored.length(); i++) messages.put(restored.getJSONObject(i));   // ZhiCodeEngine
+for (int i = 0; i < extra.length(); i++) additionalToolContent.put(extra.get(i));      // ZhiCodeEngine
+for (int i = 0; i < plan.recent.length(); i++) out.put(plan.recent.getJSONObject(i));  // ContextCompactor
+```
+
+**它们看着可以收成一个 helper，但不能收。** 前两行的 `getJSONObject` 在遇到非对象元素时
+**抛 JSONException**，第三行的 `get` 什么都能放 —— 也就是说「跳过非对象」与「遇到非对象就抛」
+是两种不同的行为，而这三处**刻意选了不同的那一种**。收成一个 helper 必须给一个
+`strict` 开关，那等于把三行变成「一个带开关的 helper + 三处调用」，行更多、且把
+「这里到底要不要容忍畸形数据」这个决定藏进了一个参数里。所以留着。
+
+另外两处**不属于本任务**：`UiCanvasStore`（11 行压缩写法，最长一行 507 字符）与
+`UiCanvasController`（1 行，233 字符）—— 它们是全工程唯一还在用「一行塞十几个语句」写法的
+文件，也确实是原样保留的残留。这两处已单列为批 F 的收尾（见下文批 F 一节），因为
+要改的不是这几行，是整个文件的写法。
+
+**这一节的结论**：语句桶里「同一件事被写几遍」的部分已经收完（`可省 0 行`），
+剩下 423 行逐条读过之后，**没有一行是「因为没想到更好的写法才与上游相同」** ——
+它们或是 Java 里写同一件事的唯一写法，或是改了就只为让那一行看起来不一样。
+也就是说：**再往下压语句桶，收益已经不是代码质量，只是数字。**
+
 ### 这个数字曾经是错的（记下来，因为它会再次发生）
 
 上一版这里写的是「真正属于 IQ Code: 8644 行」。那个数字**低估了 1488 行**，
@@ -1016,9 +1062,12 @@ find . -maxdepth 2 -name LICENSE -o -maxdepth 2 -name NOTICE | grep -v '/build/'
 #    默认一份输出就够看结论：汇总表 + 四桶构成 + 可扣行 + 净相同行 + 漏算自检
 #    （有 ⚠ 就说明数字被低估）
 bash tools/provenance.sh
-#    下面四个是叠加口径，按需要加：
+#    下面几个是叠加口径，按需要加：
 PROVENANCE_COMPOSITION=1 bash tools/provenance.sh   # 追加语句行去重种数 + 语句行全文
 PROVENANCE_SHAPE=1      bash tools/provenance.sh    # 语句行还能收敛多少（多行模板，给的是上限）
+PROVENANCE_SHAPE=1 PROVENANCE_SHAPE_UNIQUE=1 bash tools/provenance.sh
+                                                    # 再加「只出现一次的形状」逐行清单 ——
+                                                    # 「这一行有没有第二种写法」靠它逐条读
 PROVENANCE_ALGORITHM=1  bash tools/provenance.sh    # 按语句行排序的清单（排下一批看这个）
 PROVENANCE_PER_FILE=1   bash tools/provenance.sh    # 按重合行数排序（历史口径，仅作参考）
 
