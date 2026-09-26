@@ -56,9 +56,17 @@ public final class SandboxFrida {
     /** 拷贝 Gadget 的缓冲区；Gadget 约数十 MB，用大块减少系统调用次数。 */
     private static final int COPY_BUFFER_BYTES = 128 * 1024;
 
-    private static final String GADGET_FILE = "libiqfrida.so";
-    private static final String CONFIG_FILE = "libiqfrida.config";
-    private static final String SCRIPT_FILE = "iq-agent.js";
+    private static final String GADGET_FILE = "libzhifrida.so";
+    /**
+     * Gadget 按「自己的文件名换个后缀」找配置文件，所以两者必须同步改。
+     *
+     * <p>不能写成 {@code libzhifrida.config.so}：那是把 Gadget 打进 APK 的
+     * {@code lib/<abi>/} 时才用的兼容名，从私有目录直接 {@code System.load}
+     * 时要的是裸 {@code .config}。
+     */
+    private static final String CONFIG_FILE = "libzhifrida.config";
+    /** 桥脚本名，由 {@code interaction.path} 以相对 Gadget 目录的方式引用。 */
+    private static final String SCRIPT_FILE = "zhi-agent.js";
     private static final String MAILBOX_FILE = "command.json";
     private static final String MAILBOX_TMP = "command.tmp";
     private static final String READY_FILE = "ready.json";

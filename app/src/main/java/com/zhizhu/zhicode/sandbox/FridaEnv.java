@@ -48,9 +48,27 @@ public final class FridaEnv {
     private static final int MAX_STATE_BYTES = 1024 * 1024;
 
     private static final String DIR_ROOT = "sandbox/frida";
-    private static final String GADGET_FILE = "libiqfrida.so";
+    private static final String GADGET_FILE = "libzhifrida.so";
+
+    /**
+     * Gadget 主副本的旧文件名，仅用于一次性改名迁移。
+     *
+     * <p>Frida Gadget 按「自己的文件名换个后缀」找配置文件（{@code libzhifrida.so}
+     * 配 {@code libzhifrida.config}），所以主副本、各 session 目录里的拷贝、
+     * 以及配置名必须同步改，不能只改一半。
+     */
+    private static final String LEGACY_GADGET_FILE = "libiqfrida.so";
+
     private static final String MARKER_FILE = "installed.json";
     private static final String AUTO_ATTACH_FILE = "auto-attach.json";
+
+    /**
+     * 旧名迁移是否已经在本进程里试过。
+     *
+     * <p>每个进程各看一次就够：迁移本身是幂等的（新名已存在就什么都不做），
+     * 但不必每次取路径都去 stat 两个文件。
+     */
+    private static volatile boolean legacyNameChecked;
 
     private FridaEnv() {}
 
@@ -62,7 +80,39 @@ public final class FridaEnv {
 
     /** 主副本：安装动作的落点，也是各 guest session 的拷贝源。 */
     public static File masterGadget(Context context) {
+        migrateLegacyGadgetName(context);
         return new File(versionDir(context), GADGET_FILE);
+    }
+
+    /**
+     * 把改名前的 Gadget 主副本改成当前名。
+     *
+     * <p>为什么必须迁移而不是「让用户重装一遍」：这是一份几十 MB 的下载产物，
+     * 重装要求重新走网络与 SHA-256 校验。同一目录内 rename 不搬数据、且是原子的，
+     * 代价只是两次 stat。不迁移而直接改常量名，用户会看到
+     * 「Gadget 未安装」并被迫重下一次。
+     *
+     * <p>新名已存在时不碰旧文件：说明装过两次，此时以新名为准；
+     * 旧的那份留着（无法判断谁更新，删掉反而有风险）。
+     * 它不会干扰 {@link #isInstalled}，因为那里只看新名这一个路径。
+     *
+     * <p>迁移失败时不做任何补救：{@code isInstalled()} 会如实返回 false，
+     * Agent 侧看到的就是「未安装」，可以重新安装。
+     * 把失败伪装成成功才是真正有害的。
+     */
+    private static void migrateLegacyGadgetName(Context context) {
+        if (legacyNameChecked) return;
+        synchronized (FridaEnv.class) {
+            if (legacyNameChecked) return;
+            try {
+                File current = new File(versionDir(context), GADGET_FILE);
+                File legacy = new File(versionDir(context), LEGACY_GADGET_FILE);
+                if (!current.exists() && legacy.isFile()) legacy.renameTo(current);
+            } catch (Throwable ignored) {
+                // 路径不可写等环境问题：保持现状，让安装流程重新走一遍。
+            }
+            legacyNameChecked = true;
+        }
     }
 
     /** 安装完成标记，记录压缩包摘要与时间，供事后追溯「装的是哪一份」。 */
