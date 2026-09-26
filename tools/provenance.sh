@@ -6,6 +6,10 @@
 # 归一化只抹命名，不动代码形态 —— 所以「相同」意味着代码本身没被改写。
 #
 # 需要本机存在原版：projects/IQ-Code-Android
+#
+# 汇总表下面会给出**净相同行** = 逐行相同 - 骨架行 - 跨组件协议串行。
+# 「差多少才叫独立」看的是这个数：前两类行不是「别人的代码」，任何人在这个需求下都会那么写。
+#
 # 用法: bash tools/provenance.sh
 set -uo pipefail
 
@@ -269,17 +273,91 @@ CLASSIFY='
   }
 '
 
-# 用法: PROVENANCE_COMPOSITION=1 bash tools/provenance.sh
+# ------------------------------------------------------------ 跨组件协议串
 #
-# SHAPE 模式要用到这里产出的语句行全文（$STATEMENT_LINES），所以它隐含 COMPOSITION ——
-# 这样 diff 循环在脚本里仍然只有这一处，与下面「分类器只此一份」是同一个理由。
-if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ] || [ "${PROVENANCE_SHAPE:-0}" = "1" ]; then
-    # 这份全文要能被人拿去逐条看，所以不能放在 $WORK 里 ——
-    # 那个目录在脚本退出时被 trap 删掉，打印出来的路径到时已经不存在了。
-    STATEMENT_LINES="$PROJECT_ROOT/build/provenance-statement-lines.txt"
-    mkdir -p "$(dirname "$STATEMENT_LINES")"
-    : > "$STATEMENT_LINES"
-    : > "$WORK/comp-counts.txt"
+# 「逐行相同」这个数字本身不够用：它把 `import android.os.Process;`、`}`、`return out;`
+# 与真正的算法代码算在同一格里。要回答「还差多少才叫独立」，必须把**不构成派生的行**扣掉。
+#
+# 可扣的只有两类，规则刻意窄到可以人工核对（声明行与语句行**永远**不扣）：
+#   1. 骨架行：整行只有括号分号、import/package、javadoc。
+#      任何 Java/Kotlin 文件都长这样，与原版相同不说明任何问题。
+#   2. 跨组件协议串行：该行的**每一个**字符串字面量都在本工程 >=2 个文件里出现。
+#      这些串是「两个组件按同一个名字对齐」（宿主 / Agent 工具 / Frida 脚本 / 持久化键名），
+#      改了会让两边对不上 —— 那是协议，不是表达。
+#
+# 这一条是**规则**，不是事后挑数字：脚本会把每个被扣的串连同它出现的文件写进 build/ 供核对
+# （「对齐的另外两处」要能被指出来，而不是让你相信这条规则）。
+# 已知的松处：一句用户可见的文案若恰好出现在两个文件里，也会被算进这一类 —— 所以净数字
+# 要连同那份审计文件一起看，不能只看一个数。
+#
+# 提取用**归一化后**的内容，与比对时看到的是同一份文字（否则 `"蜘蛛"` 这类串会对不上）。
+PROTO_AUDIT="$PROJECT_ROOT/build/provenance-protocol-strings.txt"
+PROTO_LIST="$WORK/protocol-strings.txt"
+: > "$WORK/string-files.tsv"
+while IFS= read -r f; do
+    case "$f" in
+        ./com/termux/terminal/*|./com/termux/view/*|./com/termux/shared/*) continue ;;
+    esac
+    normalize "$f" | awk -v file="${f#./}" '
+        {
+          while (match($0, /"[^"]*"/)) {
+            print substr($0, RSTART, RLENGTH) "\t" file
+            $0 = substr($0, RSTART + RLENGTH)
+          }
+        }' >> "$WORK/string-files.tsv"
+done < <(find . -name '*.java' -o -name '*.kt')
+
+# 三个条件同时成立才判为「协议串」—— 少任何一个都会把不该扣的行扣掉：
+#   1. 在本工程 >=2 个文件里出现：它存在的理由是「两个组件按同一个名字对齐」；
+#   2. 不是空串 ""：空串不表达任何东西，但它出现在 97 个文件里，
+#      只按第 1 条判会一次多扣几十行（第一版就是这么错的，实测多扣 344 行）；
+#   3. 全 ASCII 且至少含一个字母或数字：本工程里的中文串是**用户可见文案**，
+#      那是可以改写的（重写文案正是要做的事），所以它属于「还要重写」，不属于「可扣」。
+#      只由符号组成的串（", "、":"）是分隔符，同样**不扣** —— 宁可把数字算高。
+sort -u "$WORK/string-files.tsv" | awk -F'\t' '
+    {
+      files[$1] = files[$1] (files[$1] == "" ? "" : " ") $2
+      n[$1]++
+    }
+    END {
+      for (s in n) {
+        if (n[s] < 2) continue
+        # 先把转义序列摘掉再找字母数字：否则 `"\n"`（21 个文件里都出现）会因为那个 n
+        # 被当成「含字母的名字」而被扣 —— 它其实和 `","` 一样是分隔符。
+        plain = s
+        gsub(/\\[^"\\]/, "", plain)
+        ok = (s != "\"\"" && s ~ /^"[ -~]*"$/ && plain ~ /[A-Za-z0-9]/)
+        printf "%s\t%s\t%d\t%s\n", (ok ? "P" : "X"), s, n[s], files[s]
+      }
+    }' | sort > "$WORK/strings-classified.tsv"
+
+awk -F'\t' '$1 == "P" { print $2 }' "$WORK/strings-classified.tsv" > "$PROTO_LIST"
+
+mkdir -p "$(dirname "$PROTO_AUDIT")"
+{
+    echo "# 被判为「跨组件协议串」的字符串字面量（默认运行即写，供核对）"
+    echo "# 规则: 在本工程 >=2 个文件里出现 + 非空 + 全 ASCII + 至少含一个字母/数字。列: 串<TAB>文件数<TAB>出现的文件"
+    echo "# 这些串所在的残留行会从「逐行相同」里扣除。若某一行本该改、却出现在此，就是这条规则太松。"
+    awk -F'\t' '$1 == "P" { printf "%s\t%d\t%s\n", $2, $3, $4 }' "$WORK/strings-classified.tsv" | sort -k2,2nr
+    echo "#"
+    echo "# 下面是**没有被扣**的重复串（中文文案 / 空串 / 纯符号）。它们留在净相同行里，"
+    echo "# 也就是仍然要重写或被论证 —— 列在这里是为了让人能检查「是不是有协议串被漏掉了」。"
+    awk -F'\t' '$1 == "X" { printf "%s\t%d\t%s\n", $2, $3, $4 }' "$WORK/strings-classified.tsv" | sort -k2,2nr
+} > "$PROTO_AUDIT"
+
+# 这一段**始终执行**：净相同行是要放在汇总表下面的头条数字，不能只在一个模式里出现。
+# 语句行全文的 dump 才是有开关的那部分（它很大，只有逐条核对时才需要）。
+#
+# 用法: PROVENANCE_COMPOSITION=1 bash tools/provenance.sh   # 追加语句行全文 + 去重种数
+#      SHAPE 模式要用到这里产出的语句行全文（$STATEMENT_LINES），所以它隐含 COMPOSITION ——
+#      这样 diff 循环在脚本里仍然只有这一处，与「分类器只此一份」是同一个理由。
+#
+# 语句行全文不能放在 $WORK 里 —— 那个目录在脚本退出时被 trap 删掉，
+# 打印出来的路径到时已经不存在了（这个坑踩过一次：承诺「供逐条核对」而文件已删）。
+STATEMENT_LINES="$PROJECT_ROOT/build/provenance-statement-lines.txt"
+mkdir -p "$(dirname "$STATEMENT_LINES")"
+: > "$STATEMENT_LINES"
+: > "$WORK/comp-counts.txt"
     while IFS='|' read -r rel counterpart theirs ours shared; do
         [ -n "$rel" ] || continue
         case "$rel" in
@@ -292,19 +370,42 @@ if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ] || [ "${PROVENANCE_SHAPE:-0}" = "1" 
              --new-group-format='' --changed-group-format='' \
              "$WORK/comp-theirs.txt" "$WORK/comp-ours.txt" \
             | awk "$CLASSIFY" > "$WORK/comp-classified.txt"
-        awk -F'|' '{ c[$1]++ }
-             END { printf "%d %d %d %d\n", c["S"] + 0, c["L"] + 0, c["D"] + 0, c["T"] + 0 }' \
-            "$WORK/comp-classified.txt" >> "$WORK/comp-counts.txt"
-        # 语句桶全文要按文件分段留下名字。没有文件名的清单是没法逐条核对的 ——
-        # 「这句话到底是从哪来的」是看这份清单的唯一理由。
-        grep '^T|' "$WORK/comp-classified.txt" | cut -d'|' -f2- > "$WORK/comp-statements.txt"
-        if [ -s "$WORK/comp-statements.txt" ]; then
-            printf '=== %s\n' "$rel" >> "$STATEMENT_LINES"
-            cat "$WORK/comp-statements.txt" >> "$STATEMENT_LINES"
+        # 五个数：骨架 / 字面量 / 声明 / 语句 / 其中可扣的字面量行（跨组件协议串）。
+        # 第五个数是 L 的**子集**，不是另加一桶 —— 合计仍然是前四个之和。
+        awk -F'|' -v proto="$PROTO_LIST" '
+            BEGIN { while ((getline s < proto) > 0) PROTO[s] = 1 }
+            # 该行算「跨组件协议串行」吗：它必须至少含一个字符串，
+            # 且**每一个**字符串都在 >=2 个文件里出现过。有一个不是，这行就不能扣。
+            function deductibleL(text,   n, s, ok) {
+              n = 0; ok = 1
+              while (match(text, /"[^"]*"/)) {
+                n++
+                s = substr(text, RSTART, RLENGTH)
+                if (!(s in PROTO)) { ok = 0; break }
+                text = substr(text, RSTART + RLENGTH)
+              }
+              return (n > 0 && ok)
+            }
+            {
+              if ($1 == "S") s++
+              else if ($1 == "L") { l++; if (deductibleL(substr($0, 3))) p++ }
+              else if ($1 == "D") d++
+              else t++
+            }
+            END { printf "%d %d %d %d %d\n", s + 0, l + 0, d + 0, t + 0, p + 0 }
+            ' "$WORK/comp-classified.txt" >> "$WORK/comp-counts.txt"
+        if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ] || [ "${PROVENANCE_SHAPE:-0}" = "1" ]; then
+            # 语句桶全文要按文件分段留下名字。没有文件名的清单是没法逐条核对的 ——
+            # 「这句话到底是从哪来的」是看这份清单的唯一理由。
+            grep '^T|' "$WORK/comp-classified.txt" | cut -d'|' -f2- > "$WORK/comp-statements.txt"
+            if [ -s "$WORK/comp-statements.txt" ]; then
+                printf '=== %s\n' "$rel" >> "$STATEMENT_LINES"
+                cat "$WORK/comp-statements.txt" >> "$STATEMENT_LINES"
+            fi
         fi
     done < "$REPORT"
 
-    awk '{ s += $1; l += $2; d += $3; t += $4 }
+    awk '{ s += $1; l += $2; d += $3; t += $4; p += $5 }
          END {
            printf "\n残留构成（只看非 Termux 上游的文件）：\n"
            printf "  骨架行（括号分号 / import / javadoc）:      %5d 行\n", s
@@ -312,17 +413,24 @@ if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ] || [ "${PROVENANCE_SHAPE:-0}" = "1" 
            printf "  声明行（字段、签名、注解、静态常量）:        %5d 行\n", d
            printf "  语句行（有判断与动作 —— 最该重写的地方）:    %5d 行\n", t
            printf "  合计:                                        %5d 行\n", s + l + d + t
+           printf "\n  可以扣掉的（不构成「留着别人的代码」）：\n"
+           printf "    骨架行（任何 Java 文件都长这样）:           %5d 行\n", s
+           printf "    跨组件协议串行（>=2 个文件按同一名字对齐）:  %5d 行\n", p
+           printf "    可扣合计:                                  %5d 行\n", s + p
+           printf "  净相同行（合计 - 可扣 = 还差多少）:          %5d 行\n", s + l + d + t - s - p
          }' "$WORK/comp-counts.txt"
-    # 去重后那一个数：原版里大量「语句行」是同一个写法被反复写（十几个同形 getter、
-    # 一张 switch 的几十个 case）。逐条核对时看的是形状，所以这个数比上面的 t 更接近
-    # 「还剩多少种要重写的东西」。
-    dedup=$(grep -v '^=== ' "$STATEMENT_LINES" | sort -u | grep -c .)
-    # 注意：格式串必须用单引号、参数跟在空格之后。写成 printf "…", "$x" 时那个逗号
-    # 会紧贴在右引号后、被 shell 拼进格式串本身 —— 格式串末尾多一个逗号，而它在 \n 之后
-    # 又没有换行，于是会被下一行输出接到行首（这个坑本文件里踩过两次）。
-    printf '  其中去重后只有:                              %5d 种\n' "${dedup:-0}"
-    printf '  「语句行」全文（按文件分段）: %s\n' "$STATEMENT_LINES"
-fi
+    printf '  协议串审计（每个被扣的串出现在哪几个文件）: %s\n' "$PROTO_AUDIT"
+    if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ] || [ "${PROVENANCE_SHAPE:-0}" = "1" ]; then
+        # 去重后那一个数：原版里大量「语句行」是同一个写法被反复写（十几个同形 getter、
+        # 一张 switch 的几十个 case）。逐条核对时看的是形状，所以这个数比上面的 t 更接近
+        # 「还剩多少种要重写的东西」。
+        dedup=$(grep -v '^=== ' "$STATEMENT_LINES" | sort -u | grep -c .)
+        # 注意：格式串必须用单引号、参数跟在空格之后。写成 printf "…", "$x" 时那个逗号
+        # 会紧贴在右引号后、被 shell 拼进格式串本身 —— 格式串末尾多一个逗号，而它在 \n 之后
+        # 又没有换行，于是会被下一行输出接到行首（这个坑本文件里踩过两次）。
+        printf '  其中去重后只有:                              %5d 种\n' "${dedup:-0}"
+        printf '  「语句行」全文（按文件分段）: %s\n' "$STATEMENT_LINES"
+    fi
 
 # ------------------------------------------------------------ 形状收敛度量
 #

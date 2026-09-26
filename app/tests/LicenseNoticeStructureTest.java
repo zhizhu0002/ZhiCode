@@ -21,6 +21,9 @@ import java.nio.file.Paths;
  *   <li>原作者对本工程改写与发行的许可**被记录下来**。这条义务如今建立在
  *       「作者许可」而不是「许可原文的强制条款」之上，记录一丢，
  *       整件事就只剩一句无法核对的话。</li>
+ *   <li>「独立于 IQ Code 还差多少」有一个可核对的数字（净相同行），
+ *       且它的**扣减规则**与审计文件写在明处 —— 一个自己定规则、自己给自己打分的
+ *       数字比没有数字更危险。</li>
  * </ol>
  */
 public final class LicenseNoticeStructureTest {
@@ -115,6 +118,18 @@ public final class LicenseNoticeStructureTest {
                 "许可记录必须写明「不强制要求随附版权声明」，否则无法判断我们为什么仍保留致谢");
         require(analysis.contains("自愿"),
                 "记录里必须说明保留署名是自愿致谢，而不是尚在生效的义务");
+
+        // 4c. 「独立于 IQ Code 还差多少」必须是一个可核对的数字，不能是一句感觉。
+        //     这个数字是「净相同行」= 逐行相同 − 骨架行 − 跨组件协议串行。
+        //     它的危险之处在于**规则是自己定的**：把扣减范围放宽一点，数字就好看一点。
+        //     所以这里不只钉那个数，还钉住「规则与审计文件必须写在明处」——
+        //     没有审计文件的扣减没人能推翻，那就是自己给自己打分。
+        require(analysis.contains("净相同行"),
+                "docs/licensing.md 必须给出「净相同行」——否则「还差多少才叫独立」无法判断");
+        require(analysis.contains("provenance-protocol-strings.txt"),
+                "扣减规则必须指向可核对的审计文件（列出每个被扣的串出现在哪几个文件）");
+        require(analysis.contains("PROVENANCE_SHAPE"),
+                "验证清单必须列出语句行收敛度的度量模式，否则「还能省多少行」这条结论无法重跑");
 
         // 6. 本测试自身必须被 canonical suite 执行，否则它只是一份摆设
         String script = read(root, "test-source-no-build.sh");
