@@ -199,7 +199,7 @@ public final class AndroidIntentBridge {
         try {
             Intent install = new Intent(source);
             Uri uri = install.getData();
-            if (uri == null) return ToolExecutionResult.error("安装 APK 需要 path 或 uri");
+            if (uri == null) return ToolExecutionResult.error("安装 APK 必须给出 path 或 uri");
 
             Uri shared = toShareableUri(uri);
             if (shared == null) return ToolExecutionResult.error("APK 路径为空");
@@ -256,7 +256,7 @@ public final class AndroidIntentBridge {
         if (opened.isError) {
             PENDING_APK_INSTALL.set(null);
             clearRememberedApk();
-            return ToolExecutionResult.error("无法打开“安装未知应用”授权页：" + opened.content);
+            return ToolExecutionResult.error("打不开「安装未知应用」授权页面：" + opened.content);
         }
         return ToolExecutionResult.ok(
             "已打开“允许来自此来源的应用”授权页；开启后返回蜘蛛，将自动继续安装 APK。");
@@ -511,7 +511,7 @@ public final class AndroidIntentBridge {
                 return ToolExecutionResult.error(
                     "没有应用可以处理这个 Android Intent：" + intent.toUri(0));
             }
-            return ToolExecutionResult.error("Android Intent 失败：" + readable(error));
+            return ToolExecutionResult.error("Android Intent 调用失败：" + readable(error));
         }
         return ToolExecutionResult.ok("已通过蜘蛛应用进程启动：" + intent.toUri(0));
     }

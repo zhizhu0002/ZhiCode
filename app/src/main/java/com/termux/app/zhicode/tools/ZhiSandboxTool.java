@@ -169,7 +169,7 @@ public final class ZhiSandboxTool implements ZhiTool {
     private ToolExecutionResult install(String path) throws Exception {
         if (path == null || path.trim().isEmpty()) return ToolExecutionResult.error("install 需要 path");
         File apk = new File(path);
-        if (!apk.isFile()) return ToolExecutionResult.error("APK 不存在: " + path);
+        if (!apk.isFile()) return ToolExecutionResult.error("找不到 APK：" + path);
 
         PackageInfo info = context.getPackageManager()
                 .getPackageArchiveInfo(apk.getAbsolutePath(), PackageManager.GET_ACTIVITIES);

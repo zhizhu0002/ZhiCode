@@ -194,7 +194,7 @@ public final class ZhiFileProvider extends ContentProvider {
         }
         try {
             List<String> segments = uri.getPathSegments();
-            if (segments == null || segments.isEmpty()) throw new FileNotFoundException("URI 缺少路径");
+            if (segments == null || segments.isEmpty()) throw new FileNotFoundException("该 URI 里没有路径");
 
             File root = rootFor(segments, context);
             int firstRelative = isSharedStorage(segments) ? 2 : 1;

@@ -370,9 +370,13 @@ mkdir -p "$(dirname "$PROTO_AUDIT")"
 # 打印出来的路径到时已经不存在了（这个坑踩过一次：承诺「供逐条核对」而文件已删）。
 STATEMENT_LINES="$PROJECT_ROOT/build/provenance-statement-lines.txt"
 DECLARATION_LINES="$PROJECT_ROOT/build/provenance-declaration-lines.txt"
+PROTO_LINES="$PROJECT_ROOT/build/provenance-literal-protocol.txt"
+USER_LINES="$PROJECT_ROOT/build/provenance-literal-usertext.txt"
 mkdir -p "$(dirname "$STATEMENT_LINES")"
 : > "$STATEMENT_LINES"
 : > "$DECLARATION_LINES"
+: > "$PROTO_LINES"
+: > "$USER_LINES"
 : > "$WORK/comp-counts.txt"
     while IFS='|' read -r rel counterpart theirs ours shared; do
         [ -n "$rel" ] || continue
@@ -429,6 +433,43 @@ mkdir -p "$(dirname "$STATEMENT_LINES")"
                 cat "$WORK/comp-declarations.txt" >> "$DECLARATION_LINES"
             fi
         fi
+        # 字面量桶要**分两类**留下：可扣的（协议串）与不可扣的（用户可见文案）。
+        # 理由：这一桶是「还能往下压」的主要通道，而两类行的处置完全相反 ——
+        # 协议串改了会让两个组件对不上（所以已经扣掉了），文案改了才是我们要的。
+        # 不分开写，读的人就得自己拿 PROTO_LIST 去判，而那份清单在别处。
+        if [ "${PROVENANCE_LITERALS:-0}" = "1" ]; then
+            # 这两个临时文件必须**每轮清空**：awk 用的是 `>>` 追加，
+            # 不清空的话它们会跨文件累积，然后被重复追加进最终清单 ——
+            # 第一版就是这么错的，513 行的桶报出了 12945 行（平方级放大）。
+            : > "$WORK/lit-proto.txt"
+            : > "$WORK/lit-user.txt"
+            awk -F'|' -v proto="$PROTO_LIST" '
+                BEGIN { while ((getline s < proto) > 0) PROTO[s] = 1 }
+                function allProto(text,   n, s, ok) {
+                  n = 0; ok = 1
+                  while (match(text, /"[^"]*"/)) {
+                    n++
+                    s = substr(text, RSTART, RLENGTH)
+                    if (!(s in PROTO)) { ok = 0; break }
+                    text = substr(text, RSTART + RLENGTH)
+                  }
+                  return (n > 0 && ok)
+                }
+                $1 == "L" {
+                  text = substr($0, 3)
+                  if (allProto(text)) print "P|" text >> pfile
+                  else print "U|" text >> ufile
+                }
+                ' pfile="$WORK/lit-proto.txt" ufile="$WORK/lit-user.txt" "$WORK/comp-classified.txt"
+            if [ -s "$WORK/lit-proto.txt" ]; then
+                printf '=== %s\n' "$rel" >> "$PROTO_LINES"
+                cat "$WORK/lit-proto.txt" >> "$PROTO_LINES"
+            fi
+            if [ -s "$WORK/lit-user.txt" ]; then
+                printf '=== %s\n' "$rel" >> "$USER_LINES"
+                cat "$WORK/lit-user.txt" >> "$USER_LINES"
+            fi
+        fi
     done < "$REPORT"
 
     awk '{ s += $1; l += $2; d += $3; t += $4; p += $5 }
@@ -469,6 +510,19 @@ mkdir -p "$(dirname "$STATEMENT_LINES")"
         decl=$(grep -v '^=== ' "$DECLARATION_LINES" | grep -c .)
         printf '  声明行全文（按文件分段）: %s\n' "$DECLARATION_LINES"
         printf '    共 %d 行\n' "${decl:-0}"
+    fi
+
+    # 字面量桶的两份清单。为什么必须分两份：协议串与用户可见文案的处置**相反** ——
+    # 前者改了会让两个组件对不上（所以它已经从净相同行里扣掉了），
+    # 后者改了才是我们要的结果。混在一起列，读者就得自己拿协议串清单去判。
+    # 用法: PROVENANCE_LITERALS=1 bash tools/provenance.sh
+    if [ "${PROVENANCE_LITERALS:-0}" = "1" ]; then
+        np=$(grep -v '^=== ' "$PROTO_LINES" | grep -c .)
+        nu=$(grep -v '^=== ' "$USER_LINES" | grep -c .)
+        printf '  字面量桶 · 可扣的协议串行: %s\n' "$PROTO_LINES"
+        printf '    共 %d 行（已从净相同行扣除，**不该动**）\n' "${np:-0}"
+        printf '  字面量桶 · 不可扣的其余行: %s\n' "$USER_LINES"
+        printf '    共 %d 行（含用户可见文案与模型可见提示词 —— 这是还能往下压的部分）\n' "${nu:-0}"
     fi
 
 # ------------------------------------------------------------ 形状收敛度量

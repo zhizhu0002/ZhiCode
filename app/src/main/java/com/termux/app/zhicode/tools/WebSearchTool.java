@@ -121,7 +121,7 @@ public final class WebSearchTool implements ZhiTool {
             return ToolExecutionResult.error("联网搜索已在设置中关闭。可输入 /web on 开启。 ");
         }
         String query = input.optString("query", "").trim();
-        if (query.isEmpty()) return ToolExecutionResult.error("query 不能为空");
+        if (query.isEmpty()) return ToolExecutionResult.error("缺少 query 参数");
 
         int wanted = clamp(input.optInt("max_results", config.webSearchMaxResults));
         String provider = providerName(config);
@@ -169,7 +169,7 @@ public final class WebSearchTool implements ZhiTool {
         }
         // 明确指路下一步：搜索只给摘要，模型常常需要正文才能真正回答问题，
         // 而它默认会想再搜一次。
-        out.append("如需阅读网页正文，请对目标 URL 调用 WebFetch。");
+        out.append("要读网页正文，请对该 URL 调用 WebFetch。");
         return out.toString();
     }
 

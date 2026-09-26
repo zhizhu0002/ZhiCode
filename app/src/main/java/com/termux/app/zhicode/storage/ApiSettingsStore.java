@@ -666,7 +666,7 @@ public final class ApiSettingsStore {
 
         if (!legacyUrl.isEmpty() || !legacyKey.isEmpty()) {
             ApiProfile profile = new ApiProfile();
-            profile.name = "原 API 配置";
+            profile.name = "内置 API 配置";
             profile.protocol = firstNonBlank(legacy.protocol, profile.protocol);
             profile.baseUrl = legacyUrl;
             profile.defaultModel = firstNonBlank(legacy.model, profile.defaultModel);

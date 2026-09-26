@@ -909,7 +909,7 @@ public final class SessionStore {
      * <p>命中重复一律拒绝，而不是取第一个：出现重复说明这个引用本身已经不可信。
      */
     private static int findTarget(List<JsonLine> lines, MessageReference target) throws Exception {
-        if (target.contentHash.trim().isEmpty()) throw new IllegalArgumentException("消息引用缺少内容校验");
+        if (target.contentHash.trim().isEmpty()) throw new IllegalArgumentException("该消息引用没有内容校验值");
         boolean byId = !target.messageId.trim().isEmpty();
         if (!byId && target.legacyRowIndex < 0) throw new IllegalArgumentException("消息引用缺少稳定位置");
 
@@ -920,7 +920,7 @@ public final class SessionStore {
                 if (!RowType.MESSAGE.equals(line.json.optString(Field.TYPE, ""))) continue;
                 if (target.messageId.equals(line.json.optString(Field.MESSAGE_ID, ""))) occurrences++;
             }
-            if (occurrences > 1) throw new IllegalStateException("消息标识重复，已拒绝修改");
+            if (occurrences > 1) throw new IllegalStateException("消息标识出现重复，修改已拒绝");
         }
 
         int match = -1;
@@ -936,7 +936,7 @@ public final class SessionStore {
                             && target.legacyRowIndex == candidate.legacyRowIndex
                             && target.contentHash.equals(candidate.contentHash);
             if (!matches) continue;
-            if (match >= 0) throw new IllegalStateException("消息标识重复，已拒绝修改");
+            if (match >= 0) throw new IllegalStateException("消息标识出现重复，修改已拒绝");
             match = i;
         }
         return match;

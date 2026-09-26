@@ -132,7 +132,7 @@ public final class SandboxConsole {
             File file = eventFile;
             if (file != null && file.exists()) file.delete();
         }
-        event("沙箱日志已清空");
+        event("已清空沙箱日志");
     }
 
     /**

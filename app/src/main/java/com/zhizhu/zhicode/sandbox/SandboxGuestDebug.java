@@ -457,7 +457,7 @@ final class SandboxGuestDebug {
     private static JSONObject memoryWrite(Context context, String addressText, String encoded, String format) throws Exception {
         long address = Codec.parseAddress(addressText);
         byte[] data = Codec.decode(encoded, Codec.normalizeFormat(format));
-        if (data.length == 0) throw new IllegalArgumentException("写入数据不能为空");
+        if (data.length == 0) throw new IllegalArgumentException("待写入的数据为空");
         if (data.length > MAX_WRITE_BYTES) {
             throw new IllegalArgumentException("单次最多写入 " + MAX_WRITE_BYTES + " 字节");
         }

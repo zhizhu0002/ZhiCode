@@ -265,12 +265,12 @@ final class ContextCompactor {
      * 含糊其辞会让人在错误的方向上试。
      */
     static String extractSummary(AssistantTurn turn) {
-        if (turn == null) throw new IllegalStateException("压缩失败：模型没有返回结果");
+        if (turn == null) throw new IllegalStateException("压缩未完成：模型没有返回任何内容");
         if ("max_tokens".equals(turn.stopReason)) {
-            throw new IllegalStateException("压缩中断：摘要达到输出上限，请调高最大输出 token 后重试");
+            throw new IllegalStateException("压缩未完成：摘要用满了输出上限，请调高最大输出 token 再试");
         }
         if (!turn.toolCalls.isEmpty()) {
-            throw new IllegalStateException("压缩失败：摘要模型错误地尝试调用工具");
+            throw new IllegalStateException("压缩未完成：摘要模型不该调用工具，但它调用了");
         }
 
         StringBuilder text = new StringBuilder();
@@ -283,11 +283,11 @@ final class ContextCompactor {
         }
 
         String formatted = formatSummary(text.toString());
-        if (formatted.isEmpty()) throw new IllegalStateException("压缩失败：模型响应中没有有效摘要文本");
+        if (formatted.isEmpty()) throw new IllegalStateException("压缩未完成：模型响应里没有可用的摘要文本");
         String lower = formatted.toLowerCase(Locale.US);
         if (lower.startsWith("api error") || lower.startsWith("error:")) {
             // 有些提供方会把错误正文当成正常回复返回。当成摘要存下去，上下文里就留下了一条错误。
-            throw new IllegalStateException("压缩失败：" + formatted);
+            throw new IllegalStateException("压缩未完成：" + formatted);
         }
         return formatted;
     }

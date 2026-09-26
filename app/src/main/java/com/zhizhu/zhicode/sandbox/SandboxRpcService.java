@@ -128,12 +128,12 @@ public final class SandboxRpcService extends ContentProvider {
                         .put("show_floating_log", SandboxPrefs.isFloatingLogEnabled(getContext()));
 
             case ACTION_SET_FLOATING_LOG: {
-                if (!in.has("show_floating_log")) throw new IllegalArgumentException("需要 show_floating_log");
+                if (!in.has("show_floating_log")) throw new IllegalArgumentException("缺少 show_floating_log 参数");
                 return out.put("show_floating_log", ZhiSandbox.setFloatingLogEnabled(in.getBoolean("show_floating_log")));
             }
 
             case ACTION_SET_HIDE_ROOT: {
-                if (!in.has("hide_root")) throw new IllegalArgumentException("需要 hide_root");
+                if (!in.has("hide_root")) throw new IllegalArgumentException("缺少 hide_root 参数");
                 boolean changed = ZhiSandbox.setRootHidden(in.getBoolean("hide_root"));
                 // 同时回读生效值：改设置可能因「仍有 guest 在跑」而没落盘，
                 // 只回 {changed} 会让调用方以为开关已经切过去了。
@@ -150,7 +150,7 @@ public final class SandboxRpcService extends ContentProvider {
 
             case ACTION_INSTALL: {
                 File apk = new File(in.optString("path", ""));
-                if (!apk.isFile()) throw new IllegalArgumentException("APK 不存在: " + apk);
+                if (!apk.isFile()) throw new IllegalArgumentException("找不到 APK：" + apk);
                 InstallResult result = ZhiSandbox.install(apk);
                 if (result == null) throw new IllegalStateException("沙箱安装没有返回结果");
                 return out.put("success", result.success)

@@ -116,7 +116,7 @@ final class SandboxFrida {
         File ready = new File(dir, READY_FILE);
         long deadline = SystemClock.uptimeMillis() + LOAD_TIMEOUT_MS;
         while (SystemClock.uptimeMillis() < deadline && !ready.isFile()) Thread.sleep(READY_POLL_MS);
-        if (!ready.isFile()) throw new IllegalStateException("Frida Gadget 已加载但脚本桥未就绪");
+        if (!ready.isFile()) throw new IllegalStateException("Frida Gadget 已加载，但脚本桥还没就绪");
 
         loaded = true;
         sessionDir = dir;

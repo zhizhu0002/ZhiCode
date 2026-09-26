@@ -132,7 +132,7 @@ public final class FridaEnv {
      */
     public static synchronized JSONObject setAutoAttach(Context context, String packageName, boolean enabled) throws Exception {
         String pkg = trimToEmpty(packageName);
-        if (pkg.isEmpty()) throw new IllegalArgumentException("package 不能为空");
+        if (pkg.isEmpty()) throw new IllegalArgumentException("缺少 package 参数");
 
         JSONObject state = readAutoAttach(context);
         // 格式号对不上说明是旧版遗留，直接重开一份，不把旧状态携带过来。
@@ -184,7 +184,7 @@ public final class FridaEnv {
         File curl = termuxBinary("curl");
         File xz = termuxBinary("xz");
         if (!curl.isFile() || !xz.isFile()) {
-            throw new IllegalStateException("内置 Termux runtime 尚未就绪，Frida 安装需要 curl 与 xz");
+            throw new IllegalStateException("内置 Termux runtime 还没就绪：安装 Frida 需要 curl 与 xz");
         }
 
         File archive = new File(cacheDir, "frida-gadget-" + VERSION + "-android-arm64.so.xz");

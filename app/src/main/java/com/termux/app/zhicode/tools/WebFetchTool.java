@@ -125,7 +125,7 @@ public final class WebFetchTool implements ZhiTool {
             }
             return ToolExecutionResult.ok(render(url, readBody(connection, contentType, maxChars), maxChars));
         }
-        return ToolExecutionResult.error("网页重定向次数过多");
+        return ToolExecutionResult.error("网页重定向次数超出上限");
     }
 
     // ------------------------------------------------------------------ 网络
