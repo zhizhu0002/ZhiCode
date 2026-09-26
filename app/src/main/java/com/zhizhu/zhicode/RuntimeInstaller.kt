@@ -55,7 +55,7 @@ class RuntimeInstaller(private val context: Context) {
          *   1. 裁剪：extract_debs() 会把 output/ 里**每个** deb 都解进归档，而 fork 场景
          *      下依赖只能全部源码编译，导致 doxygen/python/perl/tcl/tk/X11/fontconfig 等
          *      纯构建期依赖也进了包（159 包 / 17485 文件 / 122 MB）。
-         *      按运行时依赖闭包裁剪后 → 83 包 / 3504 文件 / 31.6 MB（官方 82 包 / 32.2 MB）。
+         *      按运行时依赖闭包裁剪后 → 85 包 / 3515 文件 / 31.9 MB（官方 82 包 / 32.2 MB）。
          *      工具：tools/termux-bootstrap-fork/prune-bootstrap.js
          *   2. 修两处上游 bug/残留：
          *      - 上游 build-bootstraps.sh 把二阶脚本的 @TERMUX_PACKAGE_ARCH@ 替换成了空串
@@ -64,11 +64,26 @@ class RuntimeInstaller(private val context: Context) {
          *
          * 与官方包的差异仅一处：nano 新版多了 libmagic 依赖（官方那份是 7 月旧版 nano），
          * 因此我们多 1 个包；官方有的 82 个包我们一个不缺。
+         *
+         * ## 为什么是 85 个包（上一版是 83）
+         *
+         * 只按 Depends: 算闭包**不够**：fork 的单容器构建会让包链接到它没声明的库。
+         * 实例：util-linux 的 bin/lsns 实际链接 libmount.so，而 util-linux 的 Depends
+         * 里没有 libmount，libmount 是独立包 → 被裁掉 → **lsns 变成
+         * CANNOT LINK EXECUTABLE**，且裁剪过程不报任何错。
+         *
+         * 所以裁剪工具现在会真的解析每个保留 ELF 的 DT_NEEDED（自己读 ELF 小节头，
+         * 不依赖 readelf），把缺失库的提供者拉回闭包直到不动点。
+         * 实测拉回 libmount + libblkid（83 → 85，+366 KB）。
+         * 结果：**bin/ 下 184 个 ELF 的动态依赖全部可在 bootstrap 内解析**。
+         *
+         * 注意 bin/mount、bin/lsblk、bin/cfdisk 这类命令不在包里是**正常的** ——
+         * 它们属于 util-linux 的子包 mount-utils / blk-utils / fdisk，不在运行时闭包里。
          */
-        const val BOOTSTRAP_VERSION = "bootstrap-2026.09.25-fork6548df2+apt.android-7"
+        const val BOOTSTRAP_VERSION = "bootstrap-2026.09.25-fork6548df2+apt.android-7+prune2"
         const val BOOTSTRAP_ASSET = "bootstrap-aarch64.zip"
-        const val BOOTSTRAP_SIZE = 33_119_132L
-        const val BOOTSTRAP_SHA256 = "aa3efcfb0fe25e80e1cc00ddfb8b1d919789fc46ce0a239e084618ef09111aff"
+        const val BOOTSTRAP_SIZE = 33_485_088L
+        const val BOOTSTRAP_SHA256 = "543464f1b5b7ebedaebc5482ef0d55220a158bd0d9c9d39676da2a912f4a4c72"
         const val BOOTSTRAP_SOURCE =
             "https://github.com/zhizhu0002/termux-packages/actions/runs/36175482858"
 
