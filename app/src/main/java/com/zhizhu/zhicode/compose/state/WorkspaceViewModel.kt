@@ -3385,8 +3385,8 @@ class WorkspaceViewModel(
          * 而它明确要求限制调研范围、禁止起子 Agent，措辞改动会改变实际行为，
          * 所以不翻译、不改写。
          *
-         * 文件名必须改 —— 它会让模型去写 `IQ.md`，而界面读的是 `ZhiCode.md`，
-         * 那样 `/init` 看起来会“什么都不做”。文件名的读取兼容见 `MemoryStore`。
+         * 目标文件名必须是 `ZhiCode.md`：写别的名字会让界面在另一个文件上找它，
+         * `/init` 看起来就成了「什么都不做」。
          */
         private const val INIT_INSTRUCTION =
             "This is the built-in fast /init maintenance command. Do not enter plan mode, create tasks, " +

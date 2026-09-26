@@ -31,7 +31,7 @@ import java.nio.charset.StandardCharsets;
  * 请求： 命令方把 {"id","op","payload"} 原子写入 command.json
  * 响应： 脚本把 {"id","ok","result"|"error"} 写入 response-&lt;id&gt;.json
  * 就绪： 脚本在 rpc.exports.init 结束时写 ready.json
- * 静默： 脚本的异步事件（IQ.emit / watch）追加到 events.log
+ * 静默： 脚本的异步事件（Zhi.emit / watch）追加到 events.log
  * </pre>
  * 每个请求用唯一 id 与独立响应文件，因此<b>并发请求不会串线</b>；
  * Java 侧仍对 command(...) 加锁，因为 command.json 是单一信箱，
@@ -227,7 +227,7 @@ public final class SandboxFrida {
     }
 
     /**
-     * 读走脚本累积的异步事件（{@code IQ.emit} 与内存 watch 都写这里）。
+     * 读走脚本累积的异步事件（{@code Zhi.emit} 与内存 watch 都写这里）。
      *
      * <p>只截尾部而不是整个文件：这段文本会被塞进 Agent 的上下文，
      * 超长时<em>最新</em>的事件显然比最早的有用。
@@ -320,28 +320,29 @@ public final class SandboxFrida {
      * Frida agent 源码。写成字符串常量而不是放在 assets 里，是因为 Gadget 的
      * Script 交互要求脚本就是一个同目录的文件，而这份内容必须在进程内即可生成。
      *
-     * <p><b>归属说明（重要）</b>：下面的 JS 是从 IQ Code 原样保留的 agent 载荷，
-     * 属于<b>故意的冻结资源</b>，不是本次重写的对象。原因是它是一份对外契约：
+     * <p><b>归属说明（重要）</b>：下面的 JS 载荷本身是从外部引入的，属于<b>冻结资源</b>，
+     * 不是本次重写的对象。取这个决定的理由是它是一份对外契约：
      * <ul>
-     *   <li>{@code IQ.emit} / {@code IQ.hooks} / {@code IQ.scan} 三个注入 API 名
-     *       同时被工具 schema 与注入脚本引用，改名等于破坏 Agent 的既有用法；</li>
      *   <li>{@code rpc.exports} / 信箱文件名 / ready 标记是 Java 侧与本脚本的协议边界，
      *       改一侧就必须同步改另一侧；</li>
      *   <li>它的行为细节（有界扫描、部分失败可返回、legacy scanSync 重写、
      *       eval 沙箱与超时）都有回归断言盯着，重写只会引入行为漂移。</li>
      * </ul>
-     * 因此这里只做了一件事：把它的<b>装载方式</b>（谁写、写去哪、何时清信箱）
-     * 纳入本类的重写范围，而载荷本身保持字节不变。
+     * 因此这里只做了两件事：把它的<b>装载方式</b>（谁写、写去哪、何时清信箱）
+     * 纳入本类的重写范围；以及把注入对象的<b>名字</b>从旧品牌标识改成当前的
+     * （{@code Zhi.emit} / {@code Zhi.hooks} / {@code Zhi.scan}）——名字不是行为，
+     * 但会被写进工具 schema 与系统提示词，所以改名必须三处同步，不能只改一处。
+     * 载荷的行为字节保持不变。
      */
     private static String agentScript(File dir) {
         String base = js(dir.getAbsolutePath());
         return "rpc.exports={\n" +
             "init(){let I=\"" + base + "\";\n" +
             "const CMD=I+'/command.json'; const READY=I+'/ready.json'; const EVENTS=I+'/events.log';\n" +
-            "const hooks=new Map(); const watches=new Map(); const active=new Map(); let lastId=''; const MAX_SCAN_MATCHES=2048; const DEFAULT_SCAN_MATCHES=256; const SCAN_SYNC_ERROR='Memory.scanSync is disabled in frida_eval; use Debug action=frida_scan or await IQ.scan(options).';\n" +
+            "const hooks=new Map(); const watches=new Map(); const active=new Map(); let lastId=''; const MAX_SCAN_MATCHES=2048; const DEFAULT_SCAN_MATCHES=256; const SCAN_SYNC_ERROR='Memory.scanSync is disabled in frida_eval; use Debug action=frida_scan or await Zhi.scan(options).';\n" +
             "function jsonSafe(v,depth,seen){ depth=depth||0; seen=seen||new Set(); if(v===undefined||v===null)return null; if(typeof v==='bigint')return v.toString(); if(typeof v==='string')return v.length>262144?v.slice(0,262144)+'…[truncated]':v; if(typeof v!=='object')return v; if(v&&v.constructor&&v.constructor.name==='NativePointer')return v.toString(); if(depth>=8)return '[depth-limit]'; if(seen.has(v))return '[circular]'; seen.add(v); try{ if(Array.isArray(v)){const n=Math.min(v.length,2048),a=[];for(let i=0;i<n;i++)a.push(jsonSafe(v[i],depth+1,seen));if(v.length>n)a.push('[+'+(v.length-n)+' more]');return a;} const o={}; let count=0; for(const k in v){if(count++>=256){o.__truncated__=true;break;}try{o[k]=jsonSafe(v[k],depth+1,seen);}catch(e){o[k]='[unserializable]';}} return o;} finally{seen.delete(v);} }\n" +
             "function emit(v){ try{ const f=new File(EVENTS,'a'); f.write(JSON.stringify({ts:Date.now(),value:jsonSafe(v)})+'\\n'); f.flush(); f.close(); }catch(_){} }\n" +
-            "const IQ={emit, hooks, watches, ptr:(v)=>ptr(v), module:(n)=>Process.getModuleByName(n)};\n" +
+            "const Zhi={emit, hooks, watches, ptr:(v)=>ptr(v), module:(n)=>Process.getModuleByName(n)};\n" +
             "function hex(ab){ if(ab===null)return ''; const a=new Uint8Array(ab); let s=''; for(let i=0;i<a.length;i++)s+=a[i].toString(16).padStart(2,'0'); return s;}\n" +
             "function bytes(s){ s=String(s||'').replace(/0x/g,'').replace(/[^0-9a-f]/gi,''); if(s.length%2)throw new Error('hex length must be even'); const a=new Uint8Array(s.length/2); for(let i=0;i<a.length;i++)a[i]=parseInt(s.substr(i*2,2),16); return a;}\n" +
             "function pointerDistance(start,end){const n=parseInt(end.sub(start).toString(),16);if(!Number.isSafeInteger(n)||n<0)throw new Error('scan range is too large');return n;}\n" +
@@ -354,7 +355,7 @@ public final class SandboxFrida {
             "function readableSlices(start,end){const ranges=Process.enumerateRanges({protection:'r--',coalesce:false}).slice().sort((a,b)=>a.base.compare(b.base));const out=[];let floor=start;for(const range of ranges){const rangeEnd=range.base.add(range.size);if(rangeEnd.compare(floor)<=0||range.base.compare(end)>=0)continue;const sliceStart=range.base.compare(floor)<0?floor:range.base;const sliceEnd=rangeEnd.compare(end)>0?end:rangeEnd;if(sliceStart.compare(sliceEnd)<0){out.push({base:sliceStart,size:pointerDistance(sliceStart,sliceEnd)});floor=sliceEnd;if(floor.compare(end)>=0)break;}}return out;}\n" +
             "function scanBlock(base,size,pattern,state){return new Promise(resolve=>{let settled=false;try{Memory.scan(base,size,pattern,{onMatch(address,matchSize){const key=address.toString()+':'+matchSize;if(state.seen.has(key))state.duplicateMatches++;else{state.seen.add(key);state.matches.push({address:address.toString(),size:matchSize});}if(state.matches.length>=state.max){state.capped=true;return 'stop';}},onError(reason){if(!settled){settled=true;resolve({ok:false,error:String(reason)});}},onComplete(){if(!settled){settled=true;resolve({ok:true});}}});}catch(error){if(!settled){settled=true;resolve({ok:false,error:String(error)});}}});}\n" +
             "async function safeScan(options,outerDeadline){const p=options||{};const target=resolveScanTarget(p);const pattern=String(p.pattern||'').trim();if(!pattern)throw new Error('scan pattern is empty');const patternSize=validateScanPattern(pattern);if(patternSize>8388608)throw new Error('scan pattern is too large');const max=boundedInteger(p.max,DEFAULT_SCAN_MATCHES,1,MAX_SCAN_MATCHES);const requestedChunk=boundedInteger(p.chunk_size,4194304,65536,8388608);const chunkSize=Math.min(8388608,Math.max(requestedChunk,patternSize*2));const timeoutMs=boundedInteger(p.timeout_ms,30000,1000,120000);const localDeadline=Date.now()+timeoutMs;const deadline=Number.isFinite(outerDeadline)?Math.min(localDeadline,outerDeadline):localDeadline;const state={seen:new Set(),matches:[],max,capped:false,duplicateMatches:0};const errors=[];let errorCount=0,attempted=0,scanned=0,skipped=0,failedSize=0;let cursor=target.base,timedOut=false,mappingChanged=false;while(cursor.compare(target.end)<0&&!state.capped){if(Date.now()>=deadline){timedOut=true;break;}if(!moduleUnchanged(target)){mappingChanged=true;break;}const slices=readableSlices(cursor,target.end);if(slices.length===0){skipped+=pointerDistance(cursor,target.end);cursor=target.end;break;}let refresh=false;for(const slice of slices){if(cursor.compare(slice.base)<0){skipped+=pointerDistance(cursor,slice.base);cursor=slice.base;}const sliceEnd=slice.base.add(slice.size);let firstBlock=true;while(cursor.compare(sliceEnd)<0){if(Date.now()>=deadline){timedOut=true;break;}if(!moduleUnchanged(target)){mappingChanged=true;break;}const overlap=firstBlock?0:patternSize-1;const blockBase=overlap>0?cursor.sub(overlap):cursor;const part=Math.min(chunkSize,pointerDistance(blockBase,sliceEnd));const nextCursor=blockBase.add(part);const advance=pointerDistance(cursor,nextCursor);if(advance<=0)throw new Error('scan chunk made no progress');attempted+=part;const result=await scanBlock(blockBase,part,pattern,state);cursor=nextCursor;firstBlock=false;if(result.ok){if(!state.capped)scanned+=advance;}else{failedSize+=advance;errorCount++;if(errors.length<128)errors.push({address:blockBase.toString(),size:part,error:result.error});refresh=true;}if(state.capped||timedOut||mappingChanged||refresh)break;await new Promise(resolve=>setImmediate(resolve));}if(state.capped||timedOut||mappingChanged||refresh)break;}if(state.capped||timedOut||mappingChanged)break;if(refresh){await new Promise(resolve=>setImmediate(resolve));continue;}if(cursor.compare(target.end)<0){skipped+=pointerDistance(cursor,target.end);cursor=target.end;}}const stopReason=state.capped?'max_matches':timedOut?'timeout':mappingChanged?'mapping_changed':errorCount>0?'scan_errors':'complete';return {base:target.base.toString(),size:target.size,module:target.module||null,pattern_size:patternSize,chunk_size:chunkSize,chunk_overlap:patternSize-1,timeout_ms:timeoutMs,max_matches:max,attempted,scanned,skipped,failed_size:failedSize,match_count:state.matches.length,duplicate_matches:state.duplicateMatches,error_count:errorCount,errors_truncated:errorCount>errors.length,errors,complete:stopReason==='complete'&&cursor.compare(target.end)>=0,stop_reason:stopReason,matches:state.matches};}\n" +
-            "IQ.scan=(options)=>safeScan(options||{});\n" +
+            "Zhi.scan=(options)=>safeScan(options||{});\n" +
             "async function run(c){ const p=c.payload||{}; switch(c.op){\n" +
             "case 'ping': return {pid:Process.id,arch:Process.arch,platform:Process.platform,page_size:Process.pageSize};\n" +
             "case 'modules': return Process.enumerateModules().map(m=>({name:m.name,base:m.base.toString(),size:m.size,path:m.path}));\n" +
@@ -369,7 +370,7 @@ public final class SandboxFrida {
             "case 'watch_stop_all': { for(const timer of watches.values())try{clearInterval(timer);}catch(_){} const count=watches.size; watches.clear(); return {stopped:count}; }\n" +
             "case 'export': { const m=p.module?Process.getModuleByName(String(p.module)):null; const a=m?m.findExportByName(String(p.name)):Module.findGlobalExportByName(String(p.name)); return {address:a?a.toString():null}; }\n" +
             "case 'hook_detach_all': { for(const h of hooks.values()){try{h.detach();}catch(_){}} hooks.clear(); Interceptor.detachAll(); return {detached:true}; }\n" +
-            "case 'eval': { const source=rewriteLegacyScan(String(p.script||'')); const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor; const fn=new AsyncFunction('IQ','Process','Module','Memory','MemoryAccessMonitor','Interceptor','Stalker','Thread','DebugSymbol','Backtracer','NativeFunction','NativeCallback','CModule','ptr','__legacyScan','\"use strict\";\\n'+source); const ms=Math.max(1000,Math.min(120000,Number(p.timeout_ms||30000))); const deadline=Date.now()+ms; const evalIQ=Object.assign({},IQ,{scan:(options)=>safeScan(options||{},deadline)}); const evalMemory=new Proxy(Memory,{get(target,property){if(property==='scanSync')return (a,n,pattern)=>legacyScan(a,n,pattern,deadline);return target[property];},set(target,property,value){target[property]=value;return true;}}); let timer; try{const value=await Promise.race([Promise.resolve(fn(evalIQ,Process,Module,evalMemory,MemoryAccessMonitor,Interceptor,Stalker,Thread,DebugSymbol,Backtracer,NativeFunction,NativeCallback,CModule,ptr,(a,n,pattern)=>legacyScan(a,n,pattern,deadline))),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('frida_eval deadline exceeded: '+ms+'ms')),ms);})]); return {value:jsonSafe(value)};} finally{if(timer!==undefined)clearTimeout(timer);} }\n" +
+            "case 'eval': { const source=rewriteLegacyScan(String(p.script||'')); const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor; const fn=new AsyncFunction('Zhi','Process','Module','Memory','MemoryAccessMonitor','Interceptor','Stalker','Thread','DebugSymbol','Backtracer','NativeFunction','NativeCallback','CModule','ptr','__legacyScan','\"use strict\";\\n'+source); const ms=Math.max(1000,Math.min(120000,Number(p.timeout_ms||30000))); const deadline=Date.now()+ms; const evalZhi=Object.assign({},Zhi,{scan:(options)=>safeScan(options||{},deadline)}); const evalMemory=new Proxy(Memory,{get(target,property){if(property==='scanSync')return (a,n,pattern)=>legacyScan(a,n,pattern,deadline);return target[property];},set(target,property,value){target[property]=value;return true;}}); let timer; try{const value=await Promise.race([Promise.resolve(fn(evalZhi,Process,Module,evalMemory,MemoryAccessMonitor,Interceptor,Stalker,Thread,DebugSymbol,Backtracer,NativeFunction,NativeCallback,CModule,ptr,(a,n,pattern)=>legacyScan(a,n,pattern,deadline))),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('frida_eval deadline exceeded: '+ms+'ms')),ms);})]); return {value:jsonSafe(value)};} finally{if(timer!==undefined)clearTimeout(timer);} }\n" +
             "default: throw new Error('unknown Frida op: '+c.op); }}\n" +
             "function finish(c,out){ try{File.writeAllText(I+'/response-'+c.id+'.json',JSON.stringify(out));}catch(e){emit({type:'response_write_error',id:c.id,error:String(e)});} active.delete(c.id); }\nfunction start(c){ if(active.has(c.id))return; active.set(c.id,true); const out={id:c.id,ok:true}; Promise.resolve().then(()=>run(c)).then(v=>{out.result=jsonSafe(v);},e=>{out.ok=false;out.error=String(e&&e.stack?e.stack:e);}).then(()=>finish(c,out),e=>{out.ok=false;out.error=String(e);finish(c,out);}); }\nfunction tick(){ let c; try{c=JSON.parse(File.readAllText(CMD));}catch(_){return;} if(!c||!c.id||c.id===lastId)return; lastId=c.id; start(c); }\n" +
             "File.writeAllText(READY,'1');\n" +

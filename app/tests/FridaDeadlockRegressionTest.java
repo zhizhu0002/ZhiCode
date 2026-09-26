@@ -39,12 +39,12 @@ public final class FridaDeadlockRegressionTest {
                 && bridge.contains("Memory.scanSync compatibility scan stopped")
                 && bridge.contains("if(property==='scanSync')"),
             "eval must translate legacy scanSync calls to bounded async scans");
-        require(bridge.contains("IQ.scan=(options)=>safeScan(options||{})")
-                && bridge.contains("Object.assign({},IQ,{scan:(options)=>safeScan(options||{},deadline)})"),
+        require(bridge.contains("Zhi.scan=(options)=>safeScan(options||{})")
+                && bridge.contains("Object.assign({},Zhi,{scan:(options)=>safeScan(options||{},deadline)})"),
             "eval must expose the same scanner under its own deadline");
         require(bridge.contains("frida_eval deadline exceeded"),"eval deadline missing");
         require(bridge.contains("[circular]"),"bounded/circular JSON serialization missing");
-        require(tool.contains("hard-capped at 2048")&&tool.contains("await IQ.scan(options)"),"tool schema must describe the scan cap and safe eval API");
+        require(tool.contains("hard-capped at 2048")&&tool.contains("await Zhi.scan(options)"),"tool schema must describe the scan cap and safe eval API");
         // 断言「两层超时都留了余量、且脚本侧上限低于 Java 侧」这个语义，
         // 而不是 fridaPayload.put("timeout_ms",runtimeTimeoutMs) 这一种书写形态。
         String toolFlat=squash(tool);
@@ -52,7 +52,7 @@ public final class FridaDeadlockRegressionTest {
                 && toolFlat.contains("commandTimeoutMs=Math.min(FRIDA_COMMAND_MAX_TIMEOUT_MS,runtimeTimeoutMs+FRIDA_TIMEOUT_HEADROOM_MS)"),
             "the Java command timeout must leave room for a structured Frida deadline response");
         require(prompt.contains("always use Debug action=frida_scan instead of Memory.scanSync")
-                && prompt.contains("await IQ.scan(options)")
+                && prompt.contains("await Zhi.scan(options)")
                 && prompt.contains("Legacy Memory.scanSync calls are translated")
                 && prompt.contains("complete, stop_reason, and errors"),
             "Agent prompt must teach bounded async scan compatibility");

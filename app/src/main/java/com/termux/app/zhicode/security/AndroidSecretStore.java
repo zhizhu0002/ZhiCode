@@ -21,23 +21,21 @@ import javax.crypto.spec.GCMParameterSpec;
  * 密钥本体由系统持有，且不随应用数据备份流出（Keystore 的密钥不可导出）。
  * 我们只存密文与 IV。这样即使有人读到了应用私有目录，也拿不到明文令牌。
  *
- * <h3>两种存放形态，都必须保留</h3>
+ * <h3>两种存放形态</h3>
  * <ul>
  *   <li><b>按 profile 分槽</b>（{@link #setApiKey(String, int, String)}）：
  *       一个 profile 一个密钥。{@code credentialRevision} 参与槽名，
  *       因此「换掉某 profile 的密钥」= 换一个新槽，旧密文自然被弃用，
  *       不需要原地覆盖。</li>
- *   <li><b>单一旧槽</b>（{@link #setApiKey(String)}）：早期版本只有一个密钥。
- *       保留它是因为 {@code ApiSettingsStore} 的迁移逻辑要读它，
- *       把老用户的密钥搬进 profile 分槽。删掉它等于让老用户重新填一次密钥。</li>
+ *   <li><b>单一槽</b>（{@link #setApiKey(String)}）：多 profile 之前的形态，
+ *       那时候只有一份密钥、键名固定。{@code ApiSettingsStore} 的旧配置迁移
+ *       与回退读取仍会用到它。</li>
  * </ul>
  *
- * <h3>关于命名的搬迁</h3>
- * Keystore 别名与 SharedPreferences 文件名里原先带有旧品牌标识。
- * 它们是持久化标识，改名会让已存的密钥失效，所以这里做了搬迁：
- * 新的标识为当前值，同时保留旧标识作为<b>只读</b>来源；
- * 一旦在旧位置找到数据，就用旧别名解出来、再用新别名写回去。
- * 因此改名对用户是无感的，而不是「升级后密钥没了、请重新填写」。
+ * <h3>命名</h3>
+ * Keystore 别名与 SharedPreferences 文件名都用当前品牌标识。
+ * 它们是持久化标识：改这些名字会让已存的密钥再也解不出来，
+ * 所以只在前缀上保持一致（{@code zhicode_}），不再引入别名。
  *
  * <h3>读失败必须能与「没设置」区分</h3>
  * 原先两者都返回空串。这在真实场景里会误导：设备凭据变更后 Keystore 里的密钥会被作废，
@@ -48,17 +46,13 @@ public final class AndroidSecretStore {
 
     private static final String KEYSTORE = "AndroidKeyStore";
 
-    /** 当前 Keystore 别名与 prefs 文件名。 */
+    /** Keystore 别名与 prefs 文件名。 */
     private static final String KEY_ALIAS = "zhicode_api_key_v1";
     private static final String PREFS = "zhicode_secrets";
 
-    /** 搬迁来源：只读，不写入。 */
-    private static final String LEGACY_KEY_ALIAS = "iq_code_android_api_key_v1";
-    private static final String LEGACY_PREFS = "iq_code_android_secrets";
-
-    /** 单一旧槽的键名。 */
-    private static final String LEGACY_VALUE_KEY = "api_key_ciphertext";
-    private static final String LEGACY_IV_KEY = "api_key_iv";
+    /** 一个槽的两个键名：密文与 IV。 */
+    private static final String VALUE_KEY = "api_key_ciphertext";
+    private static final String IV_KEY = "api_key_iv";
 
     private static final String CIPHER = "AES/GCM/NoPadding";
     /** GCM 认证标签长度（位）。128 是常规取值。 */
@@ -79,14 +73,18 @@ public final class AndroidSecretStore {
         this.context = context.getApplicationContext();
     }
 
-    // ------------------------------------------------------------ 单一旧槽
+    // ------------------------------------------------------------ 单一槽
+    //
+    // “单一槽”是还没有多 profile 时的位置：那时候只有一份 API Key，键名固定。
+    // 现在读写都走 profile 分槽，但这两个方法仍被 ApiSettingsStore 的旧配置迁移
+    // 与回退读取使用（旧配置列表里可能还有一条没有 profileId 的记录），所以保留。
 
     public synchronized void setApiKey(String value) throws Exception {
-        write(PREFS, LEGACY_VALUE_KEY, LEGACY_IV_KEY, value);
+        write(PREFS, VALUE_KEY, IV_KEY, value);
     }
 
     public synchronized String getApiKey() {
-        return readWithMigration(LEGACY_VALUE_KEY, LEGACY_IV_KEY);
+        return readWithFallback(VALUE_KEY, IV_KEY);
     }
 
     // ------------------------------------------------------------ profile 分槽
@@ -98,16 +96,12 @@ public final class AndroidSecretStore {
 
     public synchronized String getApiKey(String profileId, int credentialRevision) {
         String slot = slotOf(profileId, credentialRevision);
-        return readWithMigration(slotValueKey(slot), slotIvKey(slot));
+        return readWithFallback(slotValueKey(slot), slotIvKey(slot));
     }
 
     public synchronized void removeApiKey(String profileId, int credentialRevision) {
         String slot = slotOf(profileId, credentialRevision);
-        String valueKey = slotValueKey(slot);
-        String ivKey = slotIvKey(slot);
-        preferences(PREFS).edit().remove(valueKey).remove(ivKey).apply();
-        // 旧位置也清掉：否则搬迁逻辑会在下一次读取时把刚删掉的密钥搬回来。
-        preferences(LEGACY_PREFS).edit().remove(valueKey).remove(ivKey).apply();
+        preferences(PREFS).edit().remove(slotValueKey(slot)).remove(slotIvKey(slot)).apply();
     }
 
     // ---------------------------------------------------------------- 写入
@@ -155,22 +149,15 @@ public final class AndroidSecretStore {
 
     // ---------------------------------------------------------------- 读取
 
-    /** 先读当前位置；没有则尝试旧位置，命中就搬到新位置。 */
-    private String readWithMigration(String valueKey, String ivKey) {
+    /**
+     * 读一个槽。
+     *
+     * <p>只看当前 prefs：本工程不再有“另一个 prefs 文件里那份同名密钥”这种历史，
+     * 唯一可能缺失的情况是用户从没填过，那就返回空串。
+     */
+    private String readWithFallback(String valueKey, String ivKey) {
         String found = read(preferences(PREFS), KEY_ALIAS, valueKey, ivKey);
-        if (found != null) return found;
-
-        SharedPreferences legacy = preferences(LEGACY_PREFS);
-        if (!legacy.contains(valueKey)) return "";
-        String migrated = read(legacy, LEGACY_KEY_ALIAS, valueKey, ivKey);
-        if (migrated == null || migrated.isEmpty()) return "";
-        // 搬到新位置。搬失败也不算错：本次已经读到值了，下次再试。
-        try {
-            write(PREFS, valueKey, ivKey, migrated);
-        } catch (Exception moveFailed) {
-            recordError("密钥搬迁失败", moveFailed);
-        }
-        return migrated;
+        return found == null ? "" : found;
     }
 
     /**

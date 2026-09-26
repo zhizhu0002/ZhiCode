@@ -12,7 +12,7 @@
     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
     <!--
-      以下是原版 IQ Code 实际使用的权限集，移植后原样保留：
+      以下是本应用实际使用的权限集，移植时原样保留了上游那份清单：
       - INTERNET            模型 API / WebSearch / WebFetch
       - SYSTEM_ALERT_WINDOW 悬浮窗（FloatingOverlayService）
       - WAKE_LOCK           保活与 Agent 运行期唤醒锁
@@ -69,8 +69,8 @@
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
 
         <!--
-          与官方 IQ Code 对齐：把 AndroidX Startup 自动并进来的这两个组件摘掉。
-          官方把它们列为**沙箱进程隔离的必要条件**（见官方 app/tests/SandboxProcessIsolationStructureTest）。
+          与上游实现对齐：把 AndroidX Startup 自动并进来的这两个组件摘掉。
+          上游把它们列为**沙箱进程隔离的必要条件**（见 app/tests/SandboxProcessIsolationStructureTest）。
 
           InitializationProvider 是个 ContentProvider，而 ContentProvider 的创建时机在
           `Application.attachBaseContext` 之后、`Application.onCreate` **之前**。
@@ -154,7 +154,7 @@
             android:windowSoftInputMode="adjustResize" />
 
         <!--
-          调试 guest 期间的前台保活。guest Activity 会盖住 IQ Code，
+          调试 guest 期间的前台保活。guest Activity 会盖住主界面，
           没有它主进程会被系统回收，Agent/工具链会随之中断。
         -->
         <service

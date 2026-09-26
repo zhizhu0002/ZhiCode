@@ -8,7 +8,6 @@ import com.zhizhu.zhicode.sandbox.SandboxConsole
 import com.zhizhu.zhicode.sandbox.SandboxProcess
 import com.zhizhu.zhicode.sandbox.SandboxStage
 import com.zhizhu.zhicode.sandbox.SandboxShell
-import com.termux.app.zhicode.storage.LegacyDataMigration
 import com.termux.shared.termux.TermuxConstants
 
 /**
@@ -18,7 +17,7 @@ import com.termux.shared.termux.TermuxConstants
  *
  * 1. **配置 Termux 路径**。`TermuxConstants` 是全部路径的单一来源（35 处引用），
  *    必须在任何引擎/终端类被加载前用本应用自己的包名与私有目录初始化。
- *    晚一步就会有人读到兜底的 `com.iqge` 路径。
+ *    晚一步就会有人读到兜底的默认路径。
  * 2. **安装崩溃日志**。放在 `attachBaseContext` 里，早于 ContentProvider 创建，
  *    否则启动期崩溃抓不到。
  * 3. **蜘蛛沙箱（BlackBox）只挂在沙箱自己的进程里**（`:zhisandbox` / `:black` / `:p0..:p49`）。
@@ -37,12 +36,6 @@ class ZhiCodeApplication : Application() {
 
         // 必须是第一个动作：后面所有路径都依赖它
         TermuxConstants.configure(base)
-
-        // 紧跟在 configure 之后、任何读写数据目录的代码之前。
-        // 它把 HOME 下的旧品牌名目录一次性搬成新名（幂等），
-        // 否则用户已有的会话、任务、技能、MCP 配置会“消失”。
-        val migrated = LegacyDataMigration.run()
-        if (migrated.isNotEmpty()) android.util.Log.i("ZhiCode", migrated)
 
         SandboxConsole.init(base)
         // 阶段日志按 pid 分文件，必须尽早初始化：引擎 attach/create 的每一步都靠它留痕，

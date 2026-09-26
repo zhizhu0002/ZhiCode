@@ -115,12 +115,7 @@ private fun MemoryFileList(
                     titleColor = BasicComponentDefaults.titleColor(
                         color = if (file.exists) scheme.onBackground else scheme.onSurfaceVariantSummary,
                     ),
-                    summary = if (file.legacySource == null) {
-                        "${file.sizeLabel} · ${file.path}"
-                    } else {
-                        // 内容来自旧文件：把两件事都写出来，别让用户以为自己在编辑一个不存在的路径。
-                        "${file.sizeLabel} · 当前读自旧文件 ${file.legacySource}，保存会写入 ${file.path}"
-                    },
+                    summary = "${file.sizeLabel} · ${file.path}",
                     summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
                     endActions = {
                         // 未创建的文件也给编辑按钮：点进去就是一份空编辑器（新建）。

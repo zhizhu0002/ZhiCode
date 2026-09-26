@@ -200,42 +200,44 @@ Agent 核心                          8       1985            680
 
 **没有重写的部分，如实说明：**
 
-- `SandboxFrida` 里那段 agent JS 是**刻意冻结**的。它是对外契约：
-  `IQ.emit` / `IQ.hooks` / `IQ.scan` 三个注入 API 名同时被工具 schema 与注入脚本引用，
-  `rpc.exports`、信箱文件名、ready 标记是 Java 与脚本之间的协议边界。
-  该类的 22.2% 主要就是这段必须保留的载荷。
-  （Gadget 的**磁盘文件名**已改为 `libzhifrida.so` / `libzhifrida.config` / `zhi-agent.js`，
-  而注入 API 名保持原样：它们不是品牌串，是已经写在工具 schema 与系统提示词里的契約。）
+- `SandboxFrida` 里那段 agent JS 的**载荷行为**是**刻意冻结**的：`rpc.exports`、
+  信箱文件名、ready 标记是 Java 与脚本之间的协议边界，改一侧必须同步改另一侧；
+  它的行为细节（有界扫描、部分失败可返回、legacy scanSync 重写、eval 沙箱与超时）
+  都有回归断言盯着，重写只会引入行为漂移。
+  该类的 22.2% 主要就是这段载荷。
+  **改过的只有名字**：注入对象由旧品牌标识改为 `Zhi`（`Zhi.emit` / `Zhi.hooks` /
+  `Zhi.scan`），磁盘文件名改为 `libzhifrida.so` / `libzhifrida.config` / `zhi-agent.js`。
+  名字不是行为，但它会同时出现在工具 schema 与系统提示词里，所以三处必须一起改。
 - **Agent 运行时仍在进行中**，是当前比例最高的残留区（见下文「仍然剩下的」）。
 
-### 改名迁移（A–D，已完成）
+### 改名与旧数据（A–D 与阶段 0.5）
 
-把仍活着的旧品牌串改成「蜘蛛 / zhicode」。**只改名，不改行为**。
-下面几处是例外——它们是已经落盘的用户数据或已经写死的对外契约，改了就读不到了：
+把源码里旧品牌相关的字符串全部清掉，**只改名，不改行为**。
+到阶段 0.5 结束时，源码（`app/src/main`）里已经**一个都不剩**：
+`iq_code_*`、`<iq_internal_continue>`、`.iq`、`IQ.md`、`libiqfrida*`、`iq-agent.js`、
+`ctoken.top`、`com.iqge`、`iqcode-*`、以及 `IQ.emit/hooks/scan` 全部消失。
 
-| 位置 | 内容 | 为什么不能改 |
-| --- | --- | --- |
-| `AndroidSecretStore` | `iq_code_android_secrets` / `iq_code_android_api_key_v1` | 用户机器上的 API Key 就在这两个名字下，改名 = 读不到 |
-| `ApiSettingsStore` | `iq_code_android_settings` | 同上，设置会全部看起来「没配置过」 |
-| `SessionStore` | `<iq_internal_continue>`、`_iq_compacted_input` | 老会话里已经写进去的标记；不认它就会把那段字当成用户消息显示出来 |
-| `TermuxConstants` | `LEGACY_DATA_DIR_NAME = ".iq"` 等 | 它本身就是旧名，用途就是兼容读取 |
-| `SandboxFrida` | `IQ.emit` / `IQ.hooks` / `IQ.scan` | 注入脚本 API 名，同时写在工具 schema 与系统提示词里 |
-| 各处 | `com.iqge` | 是**另一个应用**的包名，不是我们的品牌；路径伪装与文档 provider 需要它 |
+**代价是明确接受的**：为了不留任何旧名字，历史上那几处「只读兼容」被一并删除。
+这意味着从更早版本升级上来时，旧名字下的设置、API Key 与旧会话里的内部续跑标记
+不再被识别。取舍理由是不留旧品牌标识这件事优先。
 
 各项改动的具体内容：
 
 - **A（`7a390a9`）** 品牌串与线程名，并修掉两个真 bug：
   `iq-patch-deb` 这个脚本名从来没存在过（正确名由 `BRAND_SLUG` 派生），
   以及 `KeepAliveService` 写的是旧 prefs、导致关掉保活不会生效。
-- **B（`312c89c`）** `$HOME/.iq` → `$HOME/.zhicode`（**整体 rename**，不是两处都读）、
-  `IQ.md` → `ZhiCode.md`。用户**项目目录**里的 `.iq` 不动（那是他的版本库），
-  读取端改成新名优先、旧名兜底。
-  这里有个容易漏的点：`/init` 指令里的目标文件名如果不改，
-  模型会去写 `IQ.md` 而界面读的是 `ZhiCode.md`，看起来就像「`/init` 什么都没做」。
+- **B（`312c89c`）** 数据目录改名与记忆文件改名。
 - **C（`3829aa9`）** `LocalIqDark`、空态文案、注释里的旧产品名。
-- **D（`53be6c3`）** Gadget 磁盘文件名 `libiqfrida.so` → `libzhifrida.so`（及同名 `.config`、`iq-agent.js`）。
-  主副本是几十 MB 的下载产物，所以加了就地 rename 迁移，不让用户重下。
+- **D（`53be6c3`）** Gadget 磁盘文件名 `libiqfrida.so` → `libzhifrida.so`。
+- **阶段 0（`12e019c`）** 下线内置的厂商 API 配置（`OFFICIAL_*` 常量、注册链接、
+  「不可删/不可改」保护），并加了一次性清除 + `NoBundledThirdPartyEndpointTest`。
+- **阶段 0.5** 清除全部旧品牌残留：所有「只读兼容」与迁移逻辑删除，
+  `LegacyDataMigration` 整个删掉，数据目录候选列表收敛为单一位置，
+  注入脚本对象名改为 `Zhi`。
 
+**一处仍然保留的引用**：`THIRD-PARTY-LICENSES/IQ-Code-MIT.txt` 与 `NOTICE` 里
+对 IQ Code 的署名。这不是残留，是 MIT 的硬性要求（版权声明必须随附）。
+等到「仍与原版逐行相同的行数」降到 0 之后再考虑是否撤销，届时需要单独确认。
 ### 仍然剩下的（按重合行数排序）
 
 `PROVENANCE_PER_FILE=1 bash tools/provenance.sh` 会打印完整清单。当前最前面的几项：

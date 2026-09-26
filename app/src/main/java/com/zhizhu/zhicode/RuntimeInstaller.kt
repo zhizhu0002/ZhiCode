@@ -17,8 +17,8 @@ import java.util.zip.ZipInputStream
 /**
  * 内置 Termux 运行环境的安装器。
  *
- * <p>本类替代原版 `iqcode-termux-compat.jar` 里的同名类。原版那个是刻意的 binary-only 组件，
- * 且把 `com.iqge` 写死在字节码里（`OLD`/`NEW` 是 `static final byte[]`），无法用于独立包名，
+ * <p>本类是一个 binary-only 兼容层的替代实现。那个组件把安装流程与两个绝对路径
+ * 写死在字节码里（`OLD`/`NEW` 是 `static final byte[]`），无法用于独立包名，
  * 所以这里按它的可观测行为 1:1 重写并参数化。行为规格来自对原字节码的反汇编：
  *
  * - 常量：`bootstrap-aarch64.zip`、32,176,084 字节、sha256 `82aae307…0216`；

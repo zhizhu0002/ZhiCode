@@ -13,17 +13,13 @@ import java.nio.charset.StandardCharsets;
 /**
  * 载入一个技能（{@code SKILL.md}）的正文。
  *
- * <h3>为什么要查四个位置</h3>
- * 技能可以是「某个项目专用」的，也可以是「所有项目通用」的；而两者都可能存在
- * 改名前后两份目录（{@code .zhicode} 与 {@code .iq}）。用户项目里的目录属于
- * 用户的版本库，我们无权搬动，所以只能都查一遍。
+ * <h3>查两个位置</h3>
+ * 技能可以是「某个项目专用」的，也可以是「所有项目通用」的，所以两处都要查。
  *
  * <p>优先级按「越具体越优先」排列：
  * <ol>
- *   <li>{@code <项目>/.zhicode/skills/<名>/SKILL.md} —— 当前名，项目级</li>
- *   <li>{@code <项目>/.iq/skills/<名>/SKILL.md} —— 旧名，项目级</li>
- *   <li>{@code $HOME/.zhicode/skills/<名>/SKILL.md} —— 当前名，用户级</li>
- *   <li>{@code $HOME/.iq/skills/<名>/SKILL.md} —— 旧名，用户级</li>
+ *   <li>{@code <项目>/.zhicode/skills/<名>/SKILL.md} —— 项目级</li>
+ *   <li>{@code $HOME/.zhicode/skills/<名>/SKILL.md} —— 用户级</li>
  * </ol>
  * 同一个技能名在两处都有时，项目级的那份生效。
  */
@@ -75,9 +71,7 @@ public final class SkillTool implements ZhiTool {
                 : new File(config.projectDirectory);
         File[] candidates = {
                 project == null ? null : new File(project, TermuxConstants.DATA_DIR_NAME + "/" + SKILLS_DIR + "/" + name + "/" + SKILL_FILE),
-                project == null ? null : new File(project, TermuxConstants.LEGACY_DATA_DIR_NAME + "/" + SKILLS_DIR + "/" + name + "/" + SKILL_FILE),
                 new File(new File(TermuxConstants.dataDir(), SKILLS_DIR), name + "/" + SKILL_FILE),
-                new File(new File(TermuxConstants.legacyDataDir(), SKILLS_DIR), name + "/" + SKILL_FILE),
         };
 
         for (File file : candidates) {

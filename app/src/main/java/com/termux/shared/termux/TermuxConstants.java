@@ -9,15 +9,14 @@ import java.io.File;
 /**
  * 内置 Termux 运行环境的路径单一来源。
  *
- * <p>原版（IQ-Code-Android）把 {@code com.iqge} 的绝对路径写成了 {@code static final} 字符串常量。
- * 那种写法有两个致命问题，本工程必须避开：
+ * <p>路径写成 {@code static final} 字符串常量有两个致命问题，本工程必须避开：
  *
  * <ol>
  *   <li><b>会被 javac 内联。</b>{@code static final String X = "字面量";} 是「编译期常量」，
  *       javac 会把值直接内联进全部调用点（本工程有 35 处）。一旦内联，运行期改这个字段毫无作用。
  *       所以这里刻意**不加 final**，让调用点编译成真实的 {@code getstatic} 字段读取。</li>
- *   <li><b>绑死了包名。</b>本工程是独立软件，包名是 {@code com.zhizhu.zhicode.compose}，
- *       数据目录是它自己的私有目录，绝不能再用 {@code /data/user/0/com.iqge}。</li>
+ *   <li><b>绑死了包名。</b>路径必须是运行期从当前应用上下文算出来的，
+ *       不能写成一个固定应用的私有目录。</li>
  * </ol>
  *
  * <p>用法：在 {@code Application.attachBaseContext()} 里第一时间调用 {@link #configure}，
@@ -74,55 +73,26 @@ public final class TermuxConstants {
     public static String TERMUX_BASH_PATH = TERMUX_BIN_PREFIX_DIR_PATH + "/bash";
 
     // ------------------------------------------------------------ 数据目录命名
-    // 这两个名字与三处约定绑定，改动必须同时处理兼容：
-    //   1. HOME 下是我们自己的目录，可以一次性搬迁；
-    //   2. 用户项目目录里的同名子目录属于用户的 git 仓库，**不能**动它们，
-    //      因此读取时新名优先、旧名兜底（见 dataDirCandidatesIn）。
-
-    /** 数据目录名（当前）。 */
-    public static final String DATA_DIR_NAME = "." + BRAND_SLUG;
 
     /**
-     * 数据目录名（上一个产品名，只读兼容）。
+     * 数据目录名，HOME 与用户项目目录下都用它。
      *
-     * <p>保留它是因为用户机器上已经存在 {@code $HOME/.iq} 下的全部数据
-     * （会话、任务、技能、项目计划、MCP 配置）。改名而不认旧名 = 用户数据凭空消失。
+     * <p>一个名字、一个位置，读取端不再有多候选：应用只认这一处。
+     * 这样「数据到底存在哪」是唯一的，不会出现「界面读 A、引擎写 B」。
      */
-    public static final String LEGACY_DATA_DIR_NAME = ".iq";
+    public static final String DATA_DIR_NAME = "." + BRAND_SLUG;
 
-    /** 记忆文件的新名字。 */
+    /** 记忆文件的名字（放在数据目录根下，或用户项目根下）。 */
     public static final String MEMORY_FILE_NAME = "ZhiCode.md";
-    /** 记忆文件的旧名字，只读兼容。 */
-    public static final String LEGACY_MEMORY_FILE_NAME = "IQ.md";
 
-    /** HOME 下的数据目录（当前名）。 */
+    /** HOME 下的数据目录。 */
     public static File dataDir() {
         return new File(TERMUX_HOME_DIR_PATH, DATA_DIR_NAME);
     }
 
-    /** HOME 下的数据目录（旧名）。 */
-    public static File legacyDataDir() {
-        return new File(TERMUX_HOME_DIR_PATH, LEGACY_DATA_DIR_NAME);
-    }
-
-    /** 某个作用域下的数据目录（当前名）。{@code scope} 可以是 HOME，也可以是用户的项目目录。 */
+    /** 某个作用域下的数据目录。{@code scope} 可以是 HOME，也可以是用户的项目目录。 */
     public static File dataDirIn(File scope) {
         return new File(scope, DATA_DIR_NAME);
-    }
-
-    /** 某个作用域下的数据目录（旧名）。 */
-    public static File legacyDataDirIn(File scope) {
-        return new File(scope, LEGACY_DATA_DIR_NAME);
-    }
-
-    /**
-     * 读取时用的候选目录，顺序为「新名优先，旧名兜底」。
-     *
-     * <p>用于用户项目目录：我们无权把 {@code <project>/.iq} 搬成
-     * {@code <project>/.zhicode}（那会改到用户的版本库），所以让读取端同时看两处。
-     */
-    public static File[] dataDirCandidatesIn(File scope) {
-        return new File[]{dataDirIn(scope), legacyDataDirIn(scope)};
     }
 
     // ------------------------------------------------------------------ 便捷对象

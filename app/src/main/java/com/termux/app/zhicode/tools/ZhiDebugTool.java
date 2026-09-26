@@ -174,7 +174,7 @@ public final class ZhiDebugTool implements ZhiTool {
             properties.put("module", ToolSchemas.string("Frida module name used for module-scoped scan/export. For frida_scan, module is mutually exclusive with address/size."));
             properties.put("protection", ToolSchemas.string("Frida memory protection such as r--, rw-, r-x or rwx."));
             properties.put("name", ToolSchemas.string("Export/symbol name for frida_export."));
-            properties.put("script", ToolSchemas.string("JavaScript body for frida_eval inside the selected 蜘蛛沙箱 Guest. Memory.scanSync is translated to a bounded async scan; prefer Debug frida_scan or await IQ.scan(options) IQ.emit(value) appends events; IQ.hooks retains Interceptor handles."));
+            properties.put("script", ToolSchemas.string("JavaScript body for frida_eval inside the selected 蜘蛛沙箱 Guest. Memory.scanSync is translated to a bounded async scan; prefer Debug frida_scan or await Zhi.scan(options) Zhi.emit(value) appends events; Zhi.hooks retains Interceptor handles."));
             properties.put("max", ToolSchemas.integer("Maximum Frida rows/matches. frida_scan is hard-capped at 2048; default 256 to prevent hit explosion.", 1));
             properties.put("chunk_size", ToolSchemas.integer("frida_scan chunk bytes. Runtime clamps to 64 KiB..8 MiB; default 4 MiB so long scans yield between chunks.", 65536));
             properties.put("max_chars", ToolSchemas.integer("Maximum Frida event log characters.", 1));

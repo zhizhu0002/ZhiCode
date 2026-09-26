@@ -153,17 +153,11 @@ public final class SubagentManager {
         return b.toString();
     }
     /**
-     * 读技能正文。
-     *
-     * <p>HOME 下的新名与旧名都看一遍：新名是当前写入位置，旧名用于兼容
-     * 用户在改名之前就已经放好的技能（HOME 是我们的目录，会做一次性搬迁，
-     * 但搬迁失败时这里仍应读得到）。
+     * 读技能正文。只有 HOME 下的数据目录一个位置。
      */
     private String readSkill(String name){
-        for(File dir:new File[]{new File(TermuxConstants.dataDir(),"skills"),new File(TermuxConstants.legacyDataDir(),"skills")}){
-            File f=new File(dir,name+"/SKILL.md");
-            try{if(f.isFile())return readFileText(f);}catch(Exception ignored){}
-        }
+        File f=new File(new File(TermuxConstants.dataDir(),"skills"),name+"/SKILL.md");
+        try{if(f.isFile())return readFileText(f);}catch(Exception ignored){}
         return "";
     }
 

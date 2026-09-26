@@ -109,15 +109,6 @@ public final class SessionStore {
      */
     private static final String INTERNAL_CONTINUE_MARKER = "<zhicode_internal_continue>";
 
-    /**
-     * 旧版内部续跑标记。
-     *
-     * <p>必须继续识别它：已经存下来的会话里用的是这个串，只认新标记的话，
-     * 用户打开旧会话时会看到一堆「Previous model output stopped because of…」
-     * 混在正常对话里，而且可以编辑。识别两个、只写新的，是不丢历史的搬迁方式。
-     */
-    private static final String LEGACY_INTERNAL_CONTINUE_MARKER = "<iq_internal_continue>";
-
     // ------------------------------------------------------------ 单例式表
 
     /** 按规范路径串行化同一文件的读写。跨进程由「追加 + 原子替换」保证。 */
@@ -251,25 +242,9 @@ public final class SessionStore {
 
     // ------------------------------------------------------------ 路径
 
-    /** 旧版全局会话目录。仅用于迁移与兼容读取，新会话不再写这里。 */
-    public static File sessionDirectory() {
-        return new File(TermuxConstants.legacyDataDir(), "sessions");
-    }
-
     /** 按项目分目录的根。 */
     public static File projectsDirectory() {
         return new File(TermuxConstants.dataDir(), "projects");
-    }
-
-    /**
-     * 按项目分目录的根（旧名），只读兼容。
-     *
-     * <p>正常启动时 {@code $HOME/.iq} 会被整体搬成 {@code $HOME/.zhicode}，
-     * 所以它通常不存在。它存在只有一种可能：搬迁没成功（权限、跨设备）。
-     * 此时若只认新名，用户会以为历史会话全丢了 —— 所以列表与删除都要认这两处。
-     */
-    public static File legacyProjectsDirectory() {
-        return new File(TermuxConstants.legacyDataDir(), "projects");
     }
 
     /** 某项目的会话目录；顺带确保它存在并刷新项目索引。 */
@@ -534,12 +509,10 @@ public final class SessionStore {
 
     // ------------------------------------------------------------ 列表与摘要
 
-    /** 全部会话（旧全局目录 + 新旧两个项目根），按活跃时间倒序。 */
+    /** 全部会话（各项目目录），按活跃时间倒序。 */
     public static List<SessionSummary> listSessions() {
         List<SessionSummary> out = new ArrayList<>();
-        addSummaries(out, sessionDirectory());
         addProjectDirectories(out, projectsDirectory());
-        addProjectDirectories(out, legacyProjectsDirectory());
         Collections.sort(out, (a, b) -> Long.compare(b.activityModifiedAt, a.activityModifiedAt));
         return out;
     }
@@ -547,30 +520,12 @@ public final class SessionStore {
     /**
      * 只列某个项目的会话。
      *
-     * <p>三处都要扫：新项目根、旧项目根（搬迁未完成时数据还在这里），
-     * 以及旧全局目录里属于本项目的文件 —— 启动迁移有可能搬不动某个文件，
-     * 那些会话如果不再列出来，用户会以为丢了。
+     * <p>{@code sessionDirectory(project)} 会顺带建出目录并刷新项目索引，
+     * 所以这里用它，而不是自己拼一条路径。
      */
     public static List<SessionSummary> listSessions(String projectDirectory) {
-        String wanted = canonicalProject(projectDirectory);
-        String key = projectKey(wanted);
         List<SessionSummary> out = new ArrayList<>();
-        // 当前名用 sessionDirectory(...)：它顺带确保目录与项目索引存在（原有行为，
-        // 不要在改名时顺手丢掉）。旧名只读，不创建。
-        addSummaries(out, sessionDirectory(wanted));
-        addSummaries(out, new File(legacyProjectsDirectory(), key));
-
-        File[] legacy = sessionDirectory().listFiles((directory, name) -> name.endsWith(SESSION_SUFFIX));
-        if (legacy != null) {
-            for (File file : legacy) {
-                try {
-                    SessionSummary summary = summarize(file);
-                    if (sameProject(wanted, summary.project)) out.add(summary);
-                } catch (Exception ignored) {
-                    // 单个文件坏掉不该让整个列表失败。
-                }
-            }
-        }
+        addSummaries(out, sessionDirectory(canonicalProject(projectDirectory)));
         Collections.sort(out, (a, b) -> Long.compare(b.modifiedAt, a.modifiedAt));
         return out;
     }
@@ -647,83 +602,27 @@ public final class SessionStore {
         }
     }
 
-    // ------------------------------------------------------------ 迁移
-
-    /**
-     * 把旧全局目录里的会话搬到各自项目目录下。只做一次，且在任何引擎打开会话之前完成 ——
-     * 这样搬动文件不会让一个正在运行的运行时找不到自己的历史。
-     *
-     * @param preferred 当前记录的「上次会话」文件，若它被搬走则返回新路径
-     * @return 迁移后的「上次会话」路径
-     */
-    public static synchronized File migrateLegacySessions(File preferred) {
-        File[] files = sessionDirectory().listFiles((directory, name) -> name.endsWith(SESSION_SUFFIX));
-        if (files == null || files.length == 0) return preferred;
-
-        File resolved = preferred;
-        for (File source : files) {
-            try {
-                SessionSummary summary = summarize(source);
-                // 起始行里没有项目信息时搬不了（不知道该放哪个目录），原样留着。
-                if (summary.project.trim().isEmpty()) continue;
-
-                File target = new File(sessionDirectory(summary.project), source.getName());
-                if (target.exists()) {
-                    // 目标重名：加一段随机后缀，绝不覆盖。
-                    target = new File(target.getParentFile(),
-                            source.getName().replace(SESSION_SUFFIX, "-legacy-" + UUID.randomUUID().toString().substring(0, 6) + SESSION_SUFFIX));
-                }
-
-                boolean moved = source.renameTo(target);
-                if (!moved) {
-                    // rename 失败（跨文件系统、权限）时退回复制。
-                    // 复制到 .migrating 再改名，中途失败不会留下一个看起来完整的半份文件。
-                    File partial = new File(target.getParentFile(), target.getName() + ".migrating");
-                    try {
-                        copyFile(source, partial);
-                        moved = partial.isFile() && partial.length() == source.length()
-                                && partial.renameTo(target) && source.delete();
-                        if (!moved) {
-                            partial.delete();
-                            target.delete();
-                        }
-                    } catch (Exception copyFailed) {
-                        partial.delete();
-                        target.delete();
-                        moved = false;
-                    }
-                }
-                if (moved && preferred != null && sameFile(preferred, source)) resolved = target;
-            } catch (Exception ignored) {
-                // 一个文件搬不动不影响其余文件。
-            }
-        }
-        return resolved;
-    }
-
     // ------------------------------------------------------------ 删除
 
     /**
      * 删除一次会话。
      *
-     * <p>只允许删两个位置下的 {@code .jsonl}：旧全局目录，以及
-     * {@code projects/<项目键>/} 的直接子文件。这道检查是在防「路径来自界面」的场景 ——
-     * 一个被拼错的路径不该让这个接口变成任意文件删除器。
+     * <p>只允许删 {@code projects/<项目键>/} 的直接子 {@code .jsonl} 文件。
+     * 这道检查是在防「路径来自界面」的场景 —— 一个被拼错的路径不该让这个方法
+     * 变成任意文件删除器。
      */
     public static boolean deleteSession(File file) {
         if (file == null) return false;
         try {
-            File legacy = sessionDirectory().getCanonicalFile();
             File projects = projectsDirectory().getCanonicalFile();
             File target = file.getCanonicalFile();
 
             File parent = target.getParentFile();
-            boolean legacySession = parent != null && parent.equals(legacy);
             boolean projectSession = under(projects, target)
                     && parent != null
                     && parent.getParentFile() != null
                     && parent.getParentFile().equals(projects);
-            if ((!legacySession && !projectSession) || !target.getName().endsWith(SESSION_SUFFIX)) return false;
+            if (!projectSession || !target.getName().endsWith(SESSION_SUFFIX)) return false;
 
             synchronized (fileLock(target)) {
                 return !target.exists() || target.delete();
@@ -1024,14 +923,10 @@ public final class SessionStore {
 
     /**
      * 这段文本是不是我们自己注入的内部标记。
-     *
-     * <p>同时识别新旧的续跑标记：旧会话里存的是旧标记，只认新的会让这些内容
-     * 变成「可编辑的用户发言」，进而成为会话标题。
      */
     private static boolean isInternalMarkerText(String text) {
         return text.startsWith(CONTEXT_SUMMARY_MARKER)
-                || text.startsWith(INTERNAL_CONTINUE_MARKER)
-                || text.startsWith(LEGACY_INTERNAL_CONTINUE_MARKER);
+                || text.startsWith(INTERNAL_CONTINUE_MARKER);
     }
 
     /**
@@ -1281,18 +1176,6 @@ public final class SessionStore {
         }
     }
 
-    private static void copyFile(File from, File to) throws Exception {
-        File parent = to.getParentFile();
-        if (parent != null) parent.mkdirs();
-        try (FileInputStream in = new FileInputStream(from);
-             FileOutputStream out = new FileOutputStream(to, false)) {
-            byte[] buffer = new byte[32768];
-            int read;
-            while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
-            out.getFD().sync();
-        }
-    }
-
     /**
      * 同一文件的进程内锁。
      *
@@ -1307,18 +1190,6 @@ public final class SessionStore {
     }
 
     // ------------------------------------------------------------ 判定工具
-
-    private static boolean sameProject(String left, String right) {
-        return canonicalProject(left).equals(canonicalProject(right));
-    }
-
-    private static boolean sameFile(File left, File right) {
-        try {
-            return left.getCanonicalFile().equals(right.getCanonicalFile());
-        } catch (Exception e) {
-            return left.getAbsolutePath().equals(right.getAbsolutePath());
-        }
-    }
 
     /** child 是否位于 root 之下（不含 root 自身）。 */
     private static boolean under(File root, File child) {

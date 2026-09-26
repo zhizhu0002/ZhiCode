@@ -65,7 +65,7 @@ object EnvDoctor {
      * 本应用是跑在 蜘蛛沙箱（BlackBox）里，还是直接跑在真机上。
      *
      * 这一条直接决定内置 Termux 能不能装：沙箱会把数据目录虚拟化成
-     * `/data/user/0/com.iqge/blackbox/data/user/0/<pkg>`，前缀长度对不上，
+     * `/data/user/0/<宿主包名>/blackbox/data/user/0/<pkg>`，前缀长度对不上，
      * bootstrap 里 337 个 ELF 就不能安全改写。所以必须在真机上装。
      */
     private fun runtimeShape(context: Context): String {

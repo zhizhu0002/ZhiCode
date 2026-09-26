@@ -54,7 +54,7 @@ public final class ZhiDocumentsProvider extends DocumentsProvider {
         if (files != null) {
             Arrays.sort(files, Comparator.comparing(File::getName, String.CASE_INSENSITIVE_ORDER));
             for (File file : files) {
-                if (file.getName().equals(TermuxConstants.DATA_DIR_NAME) || file.getName().equals(TermuxConstants.LEGACY_DATA_DIR_NAME)) continue;
+                if (file.getName().equals(TermuxConstants.DATA_DIR_NAME)) continue;
                 try { include(cursor, canonicalUnderRoot(file), parentDocumentId + "/" + file.getName()); }
                 catch (FileNotFoundException ignored) { }
             }

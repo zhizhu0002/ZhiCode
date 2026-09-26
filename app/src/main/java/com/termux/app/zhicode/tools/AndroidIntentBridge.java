@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * Starts Android activities from 蜘蛛的 own application process.
  *
  * Embedded Termux binaries execute as Linux subprocesses. Calling Android's `am` implementation
- * from there can fail when its caller-package identity does not match the custom com.iqge UID.
+ * from there can fail when its caller-package identity does not match the app's own UID.
  * This bridge deliberately performs Context.startActivity() in the 蜘蛛 Java process instead.
  */
 public final class AndroidIntentBridge {

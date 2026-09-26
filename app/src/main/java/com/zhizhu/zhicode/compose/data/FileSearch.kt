@@ -52,7 +52,7 @@ internal object FileSearch {
         "build", "node_modules", "__pycache__", "venv", ".venv",
         "target", "dist", "out", "bin", "obj",
         // 会话/技能/记忆都存在这里，对"附加给模型看的项目文件"没意义
-        ".iq", ".zhicode",
+        ".zhicode",
     )
 
     /**

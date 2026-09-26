@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * MCP 服务器配置的持久化，落在 {@code ~/.zhicode/mcp.json}（旧位置 {@code ~/.iq/mcp.json} 只读兼容）。
+ * MCP 服务器配置的持久化，落在 {@code ~/.zhicode/mcp.json}。
  *
  * <h3>这里最重要的一件事：坏文件绝不能变成「没有配置」</h3>
  * 调用方的固定流程是「{@link #load()} → 改 → {@link #save(List)}」。
@@ -110,8 +110,6 @@ public final class McpConfigStore {
     private final File file;
 
     public McpConfigStore() {
-        // 目录名取自 TermuxConstants：HOME 是我们的目录，启动时会做一次性搬迁
-        // （$HOME/.iq -> $HOME/.zhicode），因此这里直接用新名即可。
         File directory = TermuxConstants.dataDir();
         directory.mkdirs();
         file = new File(directory, CONFIG_FILE);
@@ -119,17 +117,6 @@ public final class McpConfigStore {
 
     public File getFile() {
         return file;
-    }
-
-    /**
-     * 旧位置的文件，仅用于搬迁。
-     *
-     * <p>正常情况下 {@code $HOME/.iq} 已被整体搬成 {@code $HOME/.zhicode}，
-     * 这个文件不存在。它存在只有一种可能：搬迁没能完成（权限、跨设备），
-     * 此时读取必须回退到它，否则用户的 MCP 配置会看起来“没了”。
-     */
-    private File legacyFile() {
-        return new File(TermuxConstants.legacyDataDir(), CONFIG_FILE);
     }
 
     /**
@@ -141,7 +128,7 @@ public final class McpConfigStore {
      */
     public synchronized List<Server> load() {
         List<Server> servers = new ArrayList<>();
-        File source = file.isFile() ? file : legacyFile();
+        File source = file;
         if (!source.isFile()) {
             recordFailure("");
             return servers;

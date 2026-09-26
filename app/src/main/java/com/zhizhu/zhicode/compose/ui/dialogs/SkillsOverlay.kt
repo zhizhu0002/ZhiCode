@@ -40,7 +40,7 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  * ## 这里的操作是"真的"
  *
  * 技能目录与引擎 `SkillTool` 的查找路径完全一致（项目级 `<project>/.zhicode/skills`、
- * 用户级 `$HOME/.zhicode/skills`；旧名 `.iq` 也仍可读），所以在这里建好的技能，Agent 下一次就能用 `Skill`
+ * 用户级 `$HOME/.zhicode/skills`），所以在这里建好的技能，Agent 下一次就能用 `Skill`
  * 工具加载；「附加」则把内容直接拼进下一条请求。
  */
 @Composable
@@ -111,7 +111,7 @@ private fun SkillList(
         },
     ) {
         Text(
-            text = "项目级 .zhicode/skills 与用户级 ~/.zhicode/skills（与引擎 Skill 工具的查找路径一致，旧名 .iq 仍可读）",
+            text = "项目级 .zhicode/skills 与用户级 ~/.zhicode/skills（与引擎 Skill 工具的查找路径一致）",
             color = scheme.onSurfaceVariantSummary,
             fontSize = 9.5.sp,
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),

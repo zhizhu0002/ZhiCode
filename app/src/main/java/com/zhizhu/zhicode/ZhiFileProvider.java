@@ -30,8 +30,8 @@ public final class ZhiFileProvider extends ContentProvider {
      * Authority must be unique across the whole device, so it is derived from the
      * actual applicationId instead of being hardcoded.
      *
-     * Hardcoding "com.zhizhu.zhicode.fileprovider" (as the original app does) breaks installation
-     * whenever the original com.iqge build is also present: two packages may not own the
+     * Hardcoding a fixed authority string (as vendored app code does) breaks installation
+     * when another build of this app is also present: two packages may not own the
      * same provider authority, and the installer rejects the second one with
      * INSTALL_FAILED_CONFLICTING_PROVIDER before any of our code runs.
      *

@@ -299,16 +299,12 @@ enum class MemoryScope(val label: String) {
 
 /**
  * 一个记忆文件在列表里的展示信息。
- *
- * [path] 是写入目标（当前名）。[legacySource] 不为空表示"当前读到的内容来自旧文件"，
- * 因为新文件还没有 —— 界面要把这件事说出来，不能让路径和内容对不上。
  */
 data class MemoryFile(
     val scope: MemoryScope,
     val path: String,
     val exists: Boolean,
     val sizeLabel: String,
-    val legacySource: String? = null,
 )
 
 /** 记忆面板状态：`editing != null` 即编辑器，否则列表。 */
