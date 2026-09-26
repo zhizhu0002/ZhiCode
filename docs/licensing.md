@@ -153,16 +153,16 @@ Compose 界面层                      57      15427              0
 其它                                8       2326            855
 Agent 工具                         44       5673            933
 Agent 核心                          9       3629            867
-沙箱宿主层                            16       4716            563
-合计                              192      48492          12424
+沙箱宿主层                            16       4728            533
+合计                              192      48504          12394
 
-已是我们自己的:        36068 行
-逐行相同合计:          12424 行
+已是我们自己的:        36110 行
+逐行相同合计:          12394 行
   其中 Termux 上游:     7274 行（Termux 自己的代码，与独立性无关）
-  真正属于 IQ Code:     5150 行
+  真正属于 IQ Code:     5120 行
 ```
 
-### 这 5150 行是什么（`PROVENANCE_COMPOSITION=1`）
+### 这 5120 行是什么（`PROVENANCE_COMPOSITION=1`）
 
 「逐行相同」这个数字本身不够用：它把 `import android.os.Process;`、`}`、`return out;`
 与真正的算法代码算在同一格里。把这个数字当成「还抄了多少」，会得出一个偏大得多的结论
@@ -170,25 +170,25 @@ Agent 核心                          9       3629            867
 分类规则简单到可以人工核对：
 
 ```
-骨架行（括号分号 / import / javadoc 分隔符）: 2135 行
-含字面量的行（协议键名与用户可见文案）:      608 行
-其它行（仍需逐条看的地方）:                  2407 行
-合计:                                        5150 行
+骨架行（括号分号 / import / javadoc 分隔符）: 2134 行
+含字面量的行（协议键名与用户可见文案）:      595 行
+其它行（仍需逐条看的地方）:                  2391 行
+合计:                                        5120 行
 ```
 
 三桶的含义与可否归零：
 
 | 桶 | 行数 | 能不能归零 | 为什么 |
 | --- | --- | --- | --- |
-| 骨架 | 2135 | **不能** | 任何 Java 文件都以 `import …` 开头、以 `}` 结尾。把这些行改得不一样等于删 import 或往里塞噪声 —— 两者都不是我们想要的 |
-| 字面量 | 608 | **不能** | JSON 字段名、动作名是跨组件协议（宿主 `SandboxGuestHost`、Agent 工具、Frida 脚本三方对齐），改了会让两边对不上；用户可见文案是刻意逐字保留的 |
-| 其它 | 2407 | 能，而且应该压 | 这才是「读起来还像原版」的地方 |
+| 骨架 | 2134 | **不能** | 任何 Java 文件都以 `import …` 开头、以 `}` 结尾。把这些行改得不一样等于删 import 或往里塞噪声 —— 两者都不是我们想要的 |
+| 字面量 | 595 | **不能** | JSON 字段名、动作名是跨组件协议（宿主 `SandboxGuestHost`、Agent 工具、Frida 脚本三方对齐），改了会让两边对不上；用户可见文案是刻意逐字保留的 |
+| 其它 | 2391 | 能，而且应该压 | 这才是「读起来还像原版」的地方 |
 
 第三桶里占了绝大多数的是声明与签名，例如 `public final String id;`、
 `public static List<AgentDefinition> loadAll(String projectDirectory) {`、
 `if (files == null) return;`、`try (FileOutputStream out = new FileOutputStream(file, false)) {`。
 它们相同不是因为抄，而是因为**这是 Java 里写同一件事的唯一写法**。
-所以「压」的目标不是把 2407 变成 0，而是把里面真正有判断与结构的行重写完——
+所以「压」的目标不是把 2391 变成 0，而是把里面真正有判断与结构的行重写完——
 那之后剩下的会是语言本身的形状。
 
 脚本会把第三桶全文写到 `build/provenance-other-lines.txt` 并打印路径，供逐条核对
@@ -196,7 +196,7 @@ Agent 核心                          9       3629            867
 
 **这个路径以前是打不开的**：第三桶原先写在 `mktemp -d` 建的工作目录里，而脚本
 退出时会 `trap` 把它整个删掉 —— 于是「供逐条核对」是一句空头承诺，打印出来的路径
-在下一行就已经不存在了。现在它固定写到工程内的 `build/` 下（2407 行，已验证留存）。
+在下一行就已经不存在了。现在它固定写到工程内的 `build/` 下（2391 行，已验证留存）。
 
 ### 这个数字曾经是错的（记下来，因为它会再次发生）
 
@@ -317,7 +317,7 @@ Agent 核心                          9       3629            867
 | 156 | 451 | 596 | 26.2% | `com/termux/app/zhicode/api/OpenAIChatCompletionsProvider.java` | 已重写 |
 | 141 | 310 | 607 | 23.2% | `com/termux/app/zhicode/tools/AndroidIntentBridge.java` | 已重写 |
 | 122 | 257 | 460 | 26.5% | `com/termux/app/zhicode/api/AnthropicMessagesProvider.java` | 已重写 |
-| 119 | 288 | 572 | 20.8% | `com/zhizhu/zhicode/sandbox/SandboxGuestDebug.java` | 已重写；余量是动作名与 JSON 键（协议） |
+| 89 | 288 | 584 | 15.2% | `com/zhizhu/zhicode/sandbox/SandboxGuestDebug.java` | 已重写（批 I）；余量是动作名与 JSON 键（协议） |
 | 104 | 310 | 392 | 26.5% | `com/zhizhu/zhicode/UiMotion.java` | 已重写（批 F 1/6） |
 | 102 | 181 | 319 | 32.0% | `com/termux/app/zhicode/tools/UnifiedDiff.java` | 已重写 |
 | 100 | 139 | 207 | 48.3% | `com/termux/app/zhicode/model/PlanWorkflowState.java` | 已重写（批 H）；余量见下节，是声明与签名 |
@@ -371,6 +371,55 @@ Agent 核心                          9       3629            867
 「公开面大、逻辑少」的数据类排到前面 —— 而恰恰是这类文件最没得改。
 下一步该按「相同行里有多少是算法」排序，不是按重合率。
 
+
+
+### 批 I：沙箱宿主层（已完成，但只有一件真正可改）
+
+沙箱宿主层 14 个文件合计 563 行相同。这些文件全都改过名
+（`SandboxGuestDebug` ← `SandboxProcessDebug`、`ZhiSandbox` ← `IQSandboxEngine` 等），
+所以必须走 `PAIRS` 配对表，按路径找是找不到的。
+
+先用三桶口径逐文件量了一遍，**结果决定了这一批只做了一个文件**：
+
+| 文件（现在 ← 原版） | 相同 | 骨架 | 字面量 | 其它 |
+| --- | --- | --- | --- | --- |
+| `SandboxGuestDebug` ← `SandboxProcessDebug` | 119 | 51 | 34 | **34** |
+| `SandboxFrida` ← `SandboxFridaBridge` | 75 | 21 | 43 | 11 |
+| `SandboxGuestHost` ← `SandboxAgentBridge` | 53 | 45 | 0 | 8 |
+| `ZhiSandbox` ← `IQSandboxEngine` | 46 | 36 | 0 | 10 |
+| `SandboxRpcService` ← `SandboxControlProvider` | 42 | 27 | 7 | 8 |
+| `SandboxConsole` ← `SandboxDebugLog` | 37 | 19 | 2 | 16 |
+| `SandboxBoard` ← `SandboxDashboardActivity` | 37 | 33 | 0 | 4 |
+| `SandboxPrefs` ← `SandboxSettingsStore` | 33 | 19 | 0 | 14 |
+| `FridaEnv` ← `FridaRuntimeManager` | 31 | 21 | 6 | 4 |
+| `SandboxOverlay` ← `SandboxFloatingController` | 24 | 16 | 0 | 8 |
+| `SandboxShell` ← `SandboxTermuxBridge` | 23 | 23 | 0 | **0** |
+| `SandboxProcess` ← `SandboxProcessRole` | 18 | 11 | 1 | 6 |
+| `SandboxRpc` ← `SandboxHostClient` | 13 | 9 | 0 | 4 |
+| `SandboxKeeper` ← `SandboxGuardService` | 12 | 12 | 0 | **0** |
+| 合计 | 563 | 343 | 93 | **127** |
+
+两个文件（`SandboxShell`、`SandboxKeeper`）的相同行**全是括号与 import**。
+把这 127 行按内容打出来看，绝大多数是 `break;`（13 个）、`return true;`、
+`try {`、`case MotionEvent.ACTION_DOWN:`、方法签名与字段声明。
+真正的算法只有十来行，而且都是绕不开的：`System.load(canonical);`、
+`Runtime.getRuntime().gc();`、`while ((b = in.read()) != -1 && b != 0) out.write(b);`
+
+所以只改了一个：**`SandboxGuestDebug` 的 13 分支 switch**。
+`dispatch()` 原先是一个十三个 case 的 switch，而每个 case 做的都是同一件事——
+算一个值、放进同一个信封、`break`。同一件事写十三遍的代价不是长度，
+而是「加一个动作要动四行、还得自己找对位置」。现在是一张
+`Map<String, Route>` 路由表（键名 + 算法），加一个动作只加一行。
+
+这一处就吃掉了这一批的大部分余量：
+
+    相同行   119 → 89
+    其它桶    34 → 18
+    沙箱宿主层 563 → 533
+
+**剩下的 93 行没有再动**，因为它们要么是协议串（动作名、JSON 键，宿主与 Agent 工具
+按同一份名字对齐，改了会让两边对不上），要么是 `return true;` 这种没有第二种写法的行。
+为了把数字压低去重排一个 `try` 的位置，只会让代码变难看。
 
 
 ### 批 E（1/3、2/3）：终端执行器、任务存储与提示词装配（已完成）

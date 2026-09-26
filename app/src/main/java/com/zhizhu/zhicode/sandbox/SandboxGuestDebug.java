@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -75,6 +76,74 @@ public final class SandboxGuestDebug {
 
     // ------------------------------------------------------------------ 分发
 
+    /** 一个调试动作：算出要写进信封的那个值。 */
+    private interface Action {
+        Object run(Context context, JSONObject args) throws Exception;
+    }
+
+    /** 一个动作写进信封的键，与它的算法。 */
+    private static final class Route {
+        final String key;
+        final Action action;
+
+        Route(String key, Action action) {
+            this.key = key;
+            this.action = action;
+        }
+    }
+
+    /**
+     * 动作名 → 路由。
+     *
+     * <p>原先这里是一个十三个分支的 switch，而每个分支做的都是同一件事：
+     * 算一个值、放进同一个信封、{@code break}。同一件事写十三遍的代价不是长度，
+     * 而是「加一个动作要动四行，且必须自己找对位置」；现在加一行就够。
+     *
+     * <p>键名与动作名是跨进程协议：宿主 {@link SandboxGuestHost} 与 Agent 侧的
+     * {@code ZhiDebugTool} 按同一份名字调用、按同一份键名取值。改这里等于改协议。
+     */
+    private static final Map<String, Route> ROUTES = new HashMap<>();
+
+    static {
+        ROUTES.put("proc_info", new Route("info", (context, args) -> info(context)));
+        ROUTES.put("proc_maps", new Route("maps", (context, args) -> maps(
+                args.optString("filter", ""),
+                clamp(args.optInt("max_lines", 1600), 1, MAX_MAP_LINES))));
+        ROUTES.put("proc_modules", new Route("modules", (context, args) -> modules(
+                args.optString("filter", ""),
+                clamp(args.optInt("max_modules", 400), 1, MAX_MODULES))));
+        ROUTES.put("proc_threads", new Route("threads", (context, args) -> threads()));
+        ROUTES.put("proc_memory_read", new Route("memory", (context, args) -> memoryRead(context,
+                args.optString("address", ""),
+                clamp(args.optInt("size", DEFAULT_READ_SIZE), 1, MAX_WRITE_BYTES),
+                args.optString("format", "hex"))));
+        ROUTES.put("proc_memory_write", new Route("memory", (context, args) -> memoryWrite(context,
+                args.optString("address", ""),
+                args.optString("data", ""),
+                args.optString("format", "hex"))));
+        ROUTES.put("proc_load_library", new Route("injection",
+                (context, args) -> loadLibrary(context, args.optString("path", ""))));
+        ROUTES.put("proc_thread_dump", new Route("thread_dump", (context, args) -> threadDump()));
+        ROUTES.put("proc_gc", new Route("message", (context, args) -> {
+            Runtime.getRuntime().gc();
+            return "GC 已请求";
+        }));
+        ROUTES.put("proc_frida_status",
+                new Route("frida", (context, args) -> SandboxFrida.status(context)));
+        ROUTES.put("proc_frida_load",
+                new Route("frida", (context, args) -> SandboxFrida.load(context)));
+        ROUTES.put("proc_frida_command", new Route("frida", (context, args) -> SandboxFrida.command(
+                context,
+                args.optString("op", ""),
+                args.optJSONObject("frida_payload"),
+                clamp(args.optInt("timeout_ms", 10_000), 1_000, 120_000))));
+        ROUTES.put("proc_frida_events", new Route("events", (context, args) -> SandboxFrida.events(
+                clamp(args.optInt("max_chars", 200_000), 1_024, 1_000_000))));
+    }
+
+    /** 收到不认识的动作用它拼提示。动作名是协议，对不上说明两侧版本不一致。 */
+    private static final String UNKNOWN_ACTION = "未知进程调试动作: ";
+
     /**
      * 在一个已选定的 guest 进程内执行一次调试动作。
      *
@@ -82,65 +151,14 @@ public final class SandboxGuestDebug {
      * {@code {"ok":false,...}} 信封，因此这里不做吞异常的兜底，避免把失败伪装成成功。
      */
     public static JSONObject dispatch(Context context, String action, JSONObject args) throws Exception {
-        final JSONObject out = envelope();
-        final String op = action == null ? "" : action;
-        final JSONObject p = args == null ? new JSONObject() : args;
-        switch (op) {
-            case "proc_info":
-                out.put("info", info(context));
-                break;
-            case "proc_maps":
-                out.put("maps", maps(p.optString("filter", ""),
-                        clamp(p.optInt("max_lines", 1600), 1, MAX_MAP_LINES)));
-                break;
-            case "proc_modules":
-                out.put("modules", modules(p.optString("filter", ""),
-                        clamp(p.optInt("max_modules", 400), 1, MAX_MODULES)));
-                break;
-            case "proc_threads":
-                out.put("threads", threads());
-                break;
-            case "proc_memory_read":
-                out.put("memory", memoryRead(context,
-                        p.optString("address", ""),
-                        clamp(p.optInt("size", DEFAULT_READ_SIZE), 1, MAX_WRITE_BYTES),
-                        p.optString("format", "hex")));
-                break;
-            case "proc_memory_write":
-                out.put("memory", memoryWrite(context,
-                        p.optString("address", ""),
-                        p.optString("data", ""),
-                        p.optString("format", "hex")));
-                break;
-            case "proc_load_library":
-                out.put("injection", loadLibrary(context, p.optString("path", "")));
-                break;
-            case "proc_thread_dump":
-                out.put("thread_dump", threadDump());
-                break;
-            case "proc_gc":
-                Runtime.getRuntime().gc();
-                out.put("message", "GC 已请求");
-                break;
-            case "proc_frida_status":
-                out.put("frida", SandboxFrida.status(context));
-                break;
-            case "proc_frida_load":
-                out.put("frida", SandboxFrida.load(context));
-                break;
-            case "proc_frida_command":
-                out.put("frida", SandboxFrida.command(context,
-                        p.optString("op", ""),
-                        p.optJSONObject("frida_payload"),
-                        clamp(p.optInt("timeout_ms", 10_000), 1_000, 120_000)));
-                break;
-            case "proc_frida_events":
-                out.put("events", SandboxFrida.events(clamp(p.optInt("max_chars", 200_000), 1_024, 1_000_000)));
-                break;
-            default:
-                out.put("ok", false).put("error", "未知进程调试动作: " + op);
+        String op = action == null ? "" : action;
+        JSONObject p = args == null ? new JSONObject() : args;
+        Route route = ROUTES.get(op);
+        if (route == null) {
+            return envelope().put("ok", false).put("error", UNKNOWN_ACTION + op);
         }
-        return out;
+        // 信封先建、再算值：与原先 switch 里的求值顺序一致，值算不出来时信封作废。
+        return envelope().put(route.key, route.action.run(context, p));
     }
 
     /** 每个响应的公共头：是谁、属于哪个虚拟包与虚拟进程。 */
