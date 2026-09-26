@@ -181,7 +181,7 @@ public class ApiSseBehaviourTest {
     }
 
     /** 收集全部流式回调，便于断言「内容既进了最终结果、也逐段通知了界面」。 */
-    private static final class Recorder implements ModelProvider.StreamListener {
+    private static final class Recorder implements StreamListener {
         final StringBuilder text = new StringBuilder();
         final StringBuilder thinking = new StringBuilder();
         final List<String> toolDeltas = new ArrayList<>();
@@ -390,7 +390,7 @@ public class ApiSseBehaviourTest {
                     .createMessage(config("openai-responses", baseUrl), "sys", new JSONArray(), new JSONArray(),
                             new Recorder());
             fail("缺少 response.completed 时必须报错");
-        } catch (ModelProvider.StreamFailure failure) {
+        } catch (StreamFailure failure) {
             // 断言的是**结构化**的失败码，不是消息文本 —— 而这里藏着一个真实的差异：
             // Responses 用 StreamFailure.code 表达「可重试」；另外两家
             // （Anthropic / Chat）抛的是 IllegalStateException，把 "stream_read_error"

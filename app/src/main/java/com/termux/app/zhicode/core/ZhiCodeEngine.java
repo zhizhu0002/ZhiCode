@@ -5,6 +5,8 @@ import android.os.PowerManager;
 
 import com.termux.app.zhicode.api.ModelProvider;
 import com.termux.app.zhicode.api.ModelProviders;
+import com.termux.app.zhicode.api.StreamFailure;
+import com.termux.app.zhicode.api.StreamListener;
 import com.termux.app.zhicode.agents.AgentDefinition;
 import com.termux.app.zhicode.agents.AgentTask;
 import com.termux.app.zhicode.agents.SubagentManager;
@@ -435,7 +437,7 @@ public final class ZhiCodeEngine {
                 ModelProvider provider = providerOverride != null ? providerOverride : ModelProviders.forConfig(requestConfig);
                 repairToolHistory("Recovered an incomplete tool call before an API request.", true);
                 final StringBuilder streamedText = new StringBuilder();
-                ModelProvider.StreamListener streamListener = new ModelProvider.StreamListener() {
+                StreamListener streamListener = new StreamListener() {
                     @Override public void onTextDelta(String text) {
                         if (text != null) streamedText.append(text);
                         if (listener != null) listener.onTextDelta(text);
@@ -624,7 +626,7 @@ public final class ZhiCodeEngine {
     }
 
     private AssistantTurn requestModelWithRetry(SessionConfig requestConfig, ModelProvider provider, String system,
-                                                ModelProvider.StreamListener streamListener,
+                                                StreamListener streamListener,
                                                 StringBuilder streamedText) throws Exception {
         boolean historyRepairAttempted=false;
         boolean transportRetryAttempted=false;
@@ -660,8 +662,8 @@ public final class ZhiCodeEngine {
     private static boolean isRetryableTransportFailure(Throwable error){
         Throwable current=error;
         while(current!=null){
-            if(current instanceof ModelProvider.StreamFailure){
-                String code=((ModelProvider.StreamFailure)current).code.toLowerCase(Locale.US);
+            if(current instanceof StreamFailure){
+                String code=((StreamFailure)current).code.toLowerCase(Locale.US);
                 if(code.equals("request_timeout")||code.equals("stream_read_error")||code.equals("server_error")||code.equals("service_unavailable")||code.equals("temporarily_unavailable")||code.equals("connection_reset")||code.equals("unexpected_eof"))return true;
             }
             String message=current.getMessage()==null?"":current.getMessage().toLowerCase(Locale.US);
@@ -891,7 +893,7 @@ public final class ZhiCodeEngine {
         summaryConfig.renewTransportSession();
 
         ModelProvider provider = providerOverride != null ? providerOverride : ModelProviders.forConfig(summaryConfig);
-        ModelProvider.StreamListener silentSummaryListener = new ModelProvider.StreamListener() {
+        StreamListener silentSummaryListener = new StreamListener() {
             @Override public void onTextDelta(String text) { }
             @Override public void onThinkingDelta(String thinking) { }
             @Override public void onToolInputDelta(String id, String name, String partialJson) { }

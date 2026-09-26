@@ -148,7 +148,7 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
      * 于是一个全大写的地址会被判成「没带 /v1」而再拼一次。
      */
     private static String chatEndpoint(String baseUrl) {
-        String base = stripTrailingSlash(baseUrl);
+        String base = ApiEndpointResolver.stripTrailingSlash(baseUrl);
         String lower = base.toLowerCase(Locale.ROOT);
         if (lower.endsWith("/chat/completions")) return base;
         if (lower.endsWith("/v1")) return base + "/chat/completions";
@@ -643,12 +643,6 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
                 return new JSONObject();
             }
         }
-    }
-
-    private static String stripTrailingSlash(String url) {
-        String out = url == null ? "" : url.trim();
-        while (out.endsWith("/")) out = out.substring(0, out.length() - 1);
-        return out;
     }
 
     private static String readAll(InputStream in) throws Exception {

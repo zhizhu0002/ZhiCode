@@ -16,14 +16,13 @@ import java.util.Locale;
  * 而那种失败表现为「模型列表拉不到」，很难联想到是地址拼重了。
  *
  * <p>判断用不区分大小写的比较，同时也要跳过末尾斜杠：
- * 用户可能填 {@code https://host/V1/}。
+ * 用户可能填 {@code https://host/V1/}。注意**只影响判断，不改写**：
+ * 大小写是用户自己填的，我们没资格替他改（{@code /V1/models} 是原样保留的）。
+ *
+ * <p>协议名到端点的对应关系由 {@link ApiProtocol} 决定 —— 那里也是
+ * 「哪些协议名是认识的」的唯一出处，见 {@link #modelCatalogEndpoint(SessionConfig)}。
  */
 public final class ApiEndpointResolver {
-
-    /** 协议名。与 {@link ModelProviders} 使用同一组取值。 */
-    public static final String PROTOCOL_ANTHROPIC = "anthropic";
-    public static final String PROTOCOL_OPENAI_CHAT = "openai-chat";
-    public static final String PROTOCOL_OPENAI_RESPONSES = "openai-responses";
 
     private static final String VERSION_SEGMENT = "v1";
     private static final String MODELS_PATH = "models";
@@ -34,20 +33,26 @@ public final class ApiEndpointResolver {
      * 模型目录端点。
      *
      * <p>三种协议都走同一个 {@code /v1/models}：这既是 OpenAI 的约定，
-     * 也是 Anthropic 与各兼容网关广为接受的路径。
+     * 也是 Anthropic 与各兼容网关广为接受的路径。将来若出现没有标准目录接口的协议，
+     * 在 {@link ApiProtocol} 上加一项并在这里排除即可。
+     *
+     * <p>先校验地址、再判断协议，这个顺序是刻意的：地址没配是**配置缺失**，
+     * 报出来用户才知道要去填；协议不认识是**能力缺失**，此时返回空串让界面
+     * 回落到手填模型名。若反过来，一个「协议不认识 + 地址没填」的配置会得到
+     * 「该协议没有目录接口」，用户会以为是协议的问题。
      *
      * @return 端点 URL；协议没有可用的目录接口时返回空串（调用方据此跳过这次请求，
      *         而不是去请求一个猜出来的地址）
      */
     public static String modelCatalogEndpoint(SessionConfig config) {
         String base = stripTrailingSlash(ApiUrlPolicy.requireBaseUrl(config));
-        String protocol = config == null || config.protocol == null ? "" : config.protocol;
-        if (PROTOCOL_ANTHROPIC.equals(protocol)
-                || PROTOCOL_OPENAI_CHAT.equals(protocol)
-                || PROTOCOL_OPENAI_RESPONSES.equals(protocol)) {
-            return appendVersionedPath(base, MODELS_PATH);
-        }
-        return "";
+        if (protocolOf(config) == null) return "";
+        return withVersionSegment(base, MODELS_PATH);
+    }
+
+    /** 读取配置里的协议；{@code config} 为空或协议未收录都返回 {@code null}。 */
+    private static ApiProtocol protocolOf(SessionConfig config) {
+        return ApiProtocol.fromWire(config == null ? null : config.protocol);
     }
 
     /**
@@ -55,18 +60,19 @@ public final class ApiEndpointResolver {
      *
      * <p>用循环而不是 {@code replaceAll("/+$", "")}：后者会为正则付出编译代价，
      * 而这里每拼一个端点都要调用一次。
+     *
+     * <p>{@code null} 与空白都归到空串 —— 拼端点失败应当报出「地址没配」，
+     * 而不是在某个深处抛一个 NPE。
      */
-    public static String stripTrailingSlash(String base) {
+    static String stripTrailingSlash(String base) {
         String out = base == null ? "" : base.trim();
         while (out.endsWith("/")) out = out.substring(0, out.length() - 1);
         return out;
     }
 
     /** 基址已含 {@code /v1} 时直接拼路径，否则先补上版本段。 */
-    private static String appendVersionedPath(String base, String path) {
-        String lower = base.toLowerCase(Locale.US);
-        return lower.endsWith("/" + VERSION_SEGMENT)
-                ? base + "/" + path
-                : base + "/" + VERSION_SEGMENT + "/" + path;
+    private static String withVersionSegment(String base, String path) {
+        boolean versioned = base.toLowerCase(Locale.US).endsWith("/" + VERSION_SEGMENT);
+        return versioned ? base + "/" + path : base + "/" + VERSION_SEGMENT + "/" + path;
     }
 }

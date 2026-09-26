@@ -48,6 +48,13 @@ public final class ApiWireContractTest {
         String urlPolicy = read(root, dir + "ApiUrlPolicy.java");
         String providers = read(root, dir + "ModelProviders.java");
         String iface = read(root, dir + "ModelProvider.java");
+        // 这三个曾经是 ModelProvider / HttpRequestTracker 里的嵌套类型与内联字符串。
+        // 提出去之后，断言的方向也跟着改：不再要求「必须写在哪一个文件里」，
+        // 而是要求「这些契约必须存在」—— 文件怎么分是我们的自由，
+        // 线上契约（失败码取值、回调集合、协议名）不是。
+        String failureCodes = read(root, dir + "RequestFailure.java");
+        String listener = read(root, dir + "StreamListener.java");
+        String protocol = read(root, dir + "ApiProtocol.java");
         String reasoning = read(root, dir + "compat/ReasoningMapper.java");
 
         // 读到的内容必须像样，否则下面「没找到坏东西」的结论毫无意义。
@@ -159,21 +166,25 @@ public final class ApiWireContractTest {
         require(tracker.contains("CONNECT_TIMEOUT_MS") && tracker.contains("READ_IDLE_TIMEOUT_MS"),
                 "连接与读空闲超时必须集中在一处");
         for (String code : new String[]{"request_timeout", "unexpected_eof", "connection_reset"}) {
-            require(tracker.contains(code), "HttpRequestTracker 必须产出失败码 " + code);
+            require(failureCodes.contains(code), "失败码的取值是契约，必须存在: " + code);
         }
         require(iface.contains("cancelRequest"), "ModelProvider 接口必须保留 cancelRequest");
-        require(iface.contains("createMessage") && iface.contains("StreamListener"),
+        require(iface.contains("createMessage"),
                 "ModelProvider 接口的核心方法签名是契约，不得改动");
+        for (String callback : new String[]{"onTextDelta", "onThinkingDelta", "onToolInputDelta", "onUsage"}) {
+            require(listener.contains(callback), "StreamListener 必须保留回调 " + callback);
+        }
 
         // --------------------------------------------------------- 协议路由
-        // 五个别名都要能路由。前三个用 ApiEndpointResolver 的常量而不是字面量
-        // （那正是我们希望的写法，所以断言常量引用而不是字符串），
-        // 后两个是只在路由层存在的别名，仍然内联。
-        require(providers.contains("PROTOCOL_OPENAI_RESPONSES") && providers.contains("PROTOCOL_OPENAI_CHAT")
-                        && providers.contains("PROTOCOL_ANTHROPIC"),
-                "ModelProviders 必须通过 ApiEndpointResolver 的协议常量路由");
-        require(providers.contains("\"codex-responses\"") && providers.contains("\"openai-compatible\""),
-                "ModelProviders 必须认识 codex-responses 与 openai-compatible 两个别名");
+        // 路由行为本身由 JVM 单测（ApiPureLogicTest.forConfig_*）覆盖：
+        // 那是真正的行为断言，比在这里找字符串可靠得多。
+        // 这里只钉住不能变的东西：**协议名是存盘格式的一部分**。
+        for (String wire : new String[]{"anthropic", "openai-chat", "openai-responses",
+                "codex-responses", "openai-compatible"}) {
+            require(protocol.contains(wire), "协议名的取值是持久化契约，必须存在: " + wire);
+        }
+        require(providers.contains("ApiProtocol") && !providers.contains("\"anthropic\""),
+                "ModelProviders 必须通过 ApiProtocol 分派，不得再内联协议名字面量");
         require(providers.contains("IllegalArgumentException"),
                 "未知协议必须报错而不是回落到某个默认协议");
 

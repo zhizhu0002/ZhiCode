@@ -9,10 +9,17 @@ import com.termux.app.zhicode.model.SessionConfig;
  * 流式解析。早期版本是靠外部 CLI 跑的，那会让传输受制于外部程序是否安装、
  * 也为注入提供了入口。
  *
- * <p>协议名是持久化配置的一部分（存在用户设置里），所以这些字面量不能随意改；
- * 见 {@code ApiEndpointResolver} 里同一组常量。
+ * <p>「协议名 → 实现」的对应关系写成一个 {@code switch} 表达式而不是一串
+ * {@code equals} 判断：{@link ApiProtocol} 是枚举，枚举的 {@code switch} 要求覆盖
+ * 每个取值，所以**将来加了协议却忘了在这里分派**会直接编译不过。
+ * 用字符串判断时漏掉一个分支不会报错，只会表现为「报文发错了格式」。
+ *
+ * <p>每次调用都新建实例，**不做缓存**：取消请求靠的是 provider 实例上的
+ * {@link HttpRequestTracker}，缓存实例会让子代理与主循环互相取消对方的在途请求。
  */
 public final class ModelProviders {
+
+    private static final String UNSUPPORTED = "这个协议还没有 Java 原生实现: ";
 
     private ModelProviders() {}
 
@@ -22,21 +29,16 @@ public final class ModelProviders {
      *         另一种格式，服务端返回的解析错误与真正的原因（协议名写错）对不上。
      */
     public static ModelProvider forConfig(SessionConfig config) {
-        String protocol = config == null || config.protocol == null
-                ? ApiEndpointResolver.PROTOCOL_ANTHROPIC
-                : config.protocol;
-        // codex-responses 与 openai-responses 是同一套报文格式的两个入口名：
-        // 后者是标准 OpenAI 路径，前者是同类服务的另一种叫法。
-        if (ApiEndpointResolver.PROTOCOL_OPENAI_RESPONSES.equals(protocol) || "codex-responses".equals(protocol)) {
-            return new OpenAIResponsesProvider();
-        }
-        // openai-compatible 面向自建/第三方网关，报文与 openai-chat 一致。
-        if ("openai-compatible".equals(protocol) || ApiEndpointResolver.PROTOCOL_OPENAI_CHAT.equals(protocol)) {
-            return new OpenAIChatCompletionsProvider();
-        }
-        if (ApiEndpointResolver.PROTOCOL_ANTHROPIC.equals(protocol)) {
-            return new AnthropicMessagesProvider();
-        }
-        throw new IllegalArgumentException("这个协议还没有 Java 原生实现: " + protocol);
+        String wire = config == null ? null : config.protocol;
+        // 只有「配置里根本没有协议这个字段」才回落到 Anthropic。
+        // 空串不算「没有」：那是配置里写着一个空值，属于不认识的值，应当报错。
+        if (wire == null) return new AnthropicMessagesProvider();
+        ApiProtocol protocol = ApiProtocol.fromWire(wire);
+        if (protocol == null) throw new IllegalArgumentException(UNSUPPORTED + wire);
+        return switch (protocol) {
+            case ANTHROPIC -> new AnthropicMessagesProvider();
+            case OPENAI_CHAT -> new OpenAIChatCompletionsProvider();
+            case OPENAI_RESPONSES -> new OpenAIResponsesProvider();
+        };
     }
 }

@@ -139,7 +139,7 @@ public final class OpenAIResponsesProvider implements ModelProvider {
     private static HttpURLConnection openConnection(String baseUrl, SessionConfig config,
                                                     boolean codex) throws IOException {
         String path = codex ? "/responses" : "/v1/responses";
-        HttpURLConnection conn = (HttpURLConnection) new URL(stripTrailingSlash(baseUrl) + path).openConnection();
+        HttpURLConnection conn = (HttpURLConnection) new URL(ApiEndpointResolver.stripTrailingSlash(baseUrl) + path).openConnection();
         conn.setRequestMethod("POST");
         conn.setDoOutput(true);
         conn.setUseCaches(false);
@@ -1004,12 +1004,6 @@ public final class OpenAIResponsesProvider implements ModelProvider {
                 return new JSONObject();
             }
         }
-    }
-
-    private static String stripTrailingSlash(String url) {
-        String out = url == null ? "" : url.trim();
-        while (out.endsWith("/")) out = out.substring(0, out.length() - 1);
-        return out;
     }
 
     private static String readAll(InputStream in) throws Exception {

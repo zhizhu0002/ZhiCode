@@ -148,18 +148,18 @@ bootstrap 里的程序许可各自适用，且要求源码对接收者可得。
 ```
 归属区域                             文件         行数   仍与 IQCode 相同
 Termux 上游（非 IQ Code）             23       7394           7274
-Termux 集成层                       30       5839           3822
+Termux 集成层                       34       6955           2867
 Compose 界面层                      57      15427              0
 其它                                8       1924           1194
 Agent 工具                         43       2965           2095
-Agent 核心                          8       1985           1918
+Agent 核心                          8       1987           1913
 沙箱宿主层                            16       4716            563
-合计                              185      40250          16866
+合计                              189      41368          15906
 
-已是我们自己的:        23384 行
-逐行相同合计:          16866 行
+已是我们自己的:        25462 行
+逐行相同合计:          15906 行
   其中 Termux 上游:     7274 行（Termux 自己的代码，与独立性无关）
-  真正属于 IQ Code:     9592 行
+  真正属于 IQ Code:     8632 行
 ```
 ```
 
@@ -272,21 +272,61 @@ Agent 核心                          8       1985           1918
 
 | 相同 | 原版 | 现在 | 重合 | 文件 | 处置 |
 | --- | --- | --- | --- | --- | --- |
-| 2453 | 2453 | 2453 | 100% | `com/termux/terminal/TerminalEmulator.java` | Termux 上游，**保持原样** |
-| 1297 | 1297 | 1297 | 100% | `com/termux/view/TerminalView.java` | 同上 |
-| **1238** | **1245** | **1248** | **99.2%** | `com/termux/app/zhicode/core/ZhiCodeEngine.java` | **批 D，优先** |
-| 621 | 622 | 622 | 99.8% | `api/OpenAIResponsesProvider.java` | 批 B |
+| **1233** | **1245** | **1250** | **98.6%** | `core/ZhiCodeEngine.java` | **批 D，优先** |
 | 565 | 583 | 592 | 95.4% | `com/zhizhu/zhicode/TermuxTerminalPane.java` | 批 F |
-| 552 | 552 | 552 | 100% | `com/termux/terminal/WcWidth.java` | Termux 上游 |
-| 449 | 451 | 451 | 99.6% | `api/OpenAIChatCompletionsProvider.java` | 批 B |
-| 444 | 444 | 444 | 100% | `com/termux/terminal/TerminalBuffer.java` | Termux 上游 |
 | 435 | 468 | 475 | 91.6% | `termux/TermuxShellExecutor.java` | 批 E |
 | 388 | 390 | 390 | 99.5% | `core/ContextCompactor.java` | 批 D |
 | 352 | 354 | 354 | 99.4% | `tasks/TaskStore.java` | 批 E |
 | 310 | 310 | 310 | 100% | `com/zhizhu/zhicode/UiMotion.java` | 批 F |
 | 297 | 310 | 311 | 95.5% | `tools/AndroidIntentBridge.java` | 批 E |
-| 254 | 257 | 257 | 98.8% | `api/AnthropicMessagesProvider.java` | 批 B |
-| 240 | 241 | 241 | 99.6% | `com/zhizhu/zhicode/MarkdownRenderer.java` | **已删**（批 A） |
+| 284 | 642 | 1104 | 25.7% | `storage/SessionStore.java` | 批 E（已重写） |
+| 256 | 622 | 929 | 27.6% | `api/OpenAIResponsesProvider.java` | 批 B（已重写） |
+| 183 | 197 | 202 | 90.6% | `tools/BashTool.java` | 批 C |
+| 181 | 181 | 181 | 100% | `tools/UnifiedDiff.java` | 批 C |
+| 166 | 167 | 167 | 99.4% | `tools/WebSearchTool.java` | 批 C |
+| 156 | 451 | 596 | 26.2% | `api/OpenAIChatCompletionsProvider.java` | 批 B（已重写） |
+| 148 | 155 | 162 | 91.4% | `agents/SubagentManager.java` | 批 G |
+| 139 | 139 | 139 | 100% | `model/PlanWorkflowState.java` | 批 C |
+| 130 | 136 | 178 | 73.0% | `com/zhizhu/zhicode/ZhiFileProvider.java` | 批 E |
+| 126 | 134 | 137 | 92.0% | `agents/AgentDefinitionLoader.java` | 批 G |
+| 122 | 257 | 460 | 26.5% | `api/AnthropicMessagesProvider.java` | 批 B（已重写） |
+| 110 | 110 | 110 | 100% | `tools/MultiEditTool.java` | 批 C |
+| 98 | 98 | 98 | 100% | `core/PlanApprovalGate.java` | 批 D |
+| 96 | 98 | 99 | 97.0% | `model/SessionConfig.java` | 批 C，**只改实现不动字段名** |
+| 27 | 27 | 27 | 100% | `tools/ZhiTool.java`（接口） | 批 C，**只改实现不动签名** |
+
+### 批 B：`api/` 协议层（进行中）
+
+这一批针对工程里「最不该看着像原版」的地方 —— 协议层是纯粹的技术实现：
+没有界面、没有用户可见的取舍，写出来长什么样完全取决于写的人。
+
+已经重写完的（每一条都是先写契约断言、再改实现）：
+
+| 文件 | 重合行 | 现在 | 做了什么 |
+| --- | --- | --- | --- |
+| `api/compat/ReasoningMapper.java` | 97% → 16.4% | 档位映射拆成明确的分档表，删掉两个零调用的死方法 |
+| `api/AnthropicMessagesProvider.java` | 98.8% → 26.5% | 传输 / `StreamDecoder` / 块累积器三层 |
+| `api/OpenAIChatCompletionsProvider.java` | 99.6% → 26.2% | 统一流式与非流式的字段读取，抽出 `HistoryMapper` |
+| `api/OpenAIResponsesProvider.java` | 99.8% → 27.6% | `HistoryBuilder` / `StreamDecoder` / `KeyIndex` 四层 |
+| `api/ModelCatalogClient.java` | 100% → 21.4% | 网络与解析分开；协议名不再内联 |
+| `api/HttpRequestTracker.java` | 88% → 39.6% | 失败归类提成纯函数 `RequestFailure` |
+| `api/ModelProvider.java` | 100% → 26.9% | 接口只留两个方法，两个嵌套类型提成顶层 |
+
+顺带做掉的重复：`stripTrailingSlash` 原来在四个文件里各有一份（三个 provider 各私有
+一份 + 端点类一份），现在只剩 `ApiEndpointResolver` 里那一份。它们其实并不完全一样 ——
+Anthropic 那份遇到 `null` 会抛 NPE，另两份返回空串；合并时取了后者
+（更宽容，且没有任何调用点依赖那个 NPE）。
+
+另外两个协议名常量集合并成了一个枚举 `ApiProtocol`。原来「协议名 → 实现」和
+「协议名 → 目录端点」是两条各自内联字符串的 `if` 链，而协议名是**存盘格式的一部分**，
+写错一处不会编译失败，只会表现为「报文格式对不上、服务端报解析错误」。
+收进枚举之后，「认识的协议」只有一处定义，而且 `switch` 覆盖枚举要求列全，
+将来加了协议却忘了分派会直接编译不过。
+
+小文件的重合率有**下限**：`api/ApiUrlPolicy.java` 从 43% 降到 18.5%，剩下的 10 行是
+`package`、两个 `import`、类声明、`return base;` 这种「一行只干一件事」的行 ——
+任何人在这个需求下都会写出同样的形状。判断「改没改写」不能只看百分比，
+要看**算法与结构**：上表里降到大件的都换了结构，剩下的百分比都落在这类不可避免的行上。
 
 ### 批 A：删掉的死代码（已完成）
 
@@ -307,7 +347,6 @@ Agent 核心                          8       1985           1918
 度量工具的自检立刻起了作用：它报出「PAIRS 里的本工程文件不存在:
 com/zhizhu/zhicode/ZhiDocumentsProvider.java」—— 删文件后忘了同步配对表，
 正是这类自检要防的静默失真。
-| 27 | 27 | 27 | 100% | `tools/ZhiTool.java`（接口） | 批 C，**只改实现不动签名** |
 
 三点必须说清楚：
 

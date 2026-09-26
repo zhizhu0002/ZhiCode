@@ -1,11 +1,7 @@
 package com.termux.app.zhicode.api;
 
-import java.io.EOFException;
 import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.net.SocketException;
-import java.net.SocketTimeoutException;
-import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -29,6 +25,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>键是 {@link Thread} 本身，它在 {@code ConcurrentHashMap} 里按身份比较；
  * 线程结束后条目仍会留在表里，因此每次 {@link Scope#close()} 都必须移除自己那一条。
+ *
+ * <p>失败归类本身在 {@link RequestFailure} 里：那是纯函数，不需要连接就能测。
  */
 final class HttpRequestTracker {
 
@@ -44,13 +42,7 @@ final class HttpRequestTracker {
      */
     static final int READ_IDLE_TIMEOUT_MS = 300_000;
 
-    /** 已回服务端得到的失败码之一。 */
-    private static final String FAILURE_TIMEOUT = "request_timeout";
-    private static final String FAILURE_EOF = "unexpected_eof";
-    private static final String FAILURE_RESET = "connection_reset";
-    private static final String FAILURE_STREAM = "stream_read_error";
-    private static final String FAILURE_UNKNOWN = "network_error";
-
+    /** 每个工作线程至多一条在途记录。 */
     private final ConcurrentHashMap<Thread, Scope> active = new ConcurrentHashMap<>();
 
     /**
@@ -69,14 +61,14 @@ final class HttpRequestTracker {
 
         Thread worker = Thread.currentThread();
         Scope scope = new Scope(worker, connection);
-        Scope previous = active.put(worker, scope);
-        if (previous != null) previous.cancel();
+        // 先登记、再废弃旧的。反过来的话，旧记录的清理可能把刚登记的这条一起断掉。
+        Scope stale = active.put(worker, scope);
+        if (stale != null) stale.cancel();
 
         // 登记与被取消之间存在竞态：cancel(worker) 可能在 put 之后、这里检查之前跑完。
         // 所以取消后要再确认一次，两种情况都按「本次请求作废」处理。
         if (worker.isInterrupted() || scope.isClosed()) {
-            active.remove(worker, scope);
-            scope.cancel();
+            scope.close();
             throw new InterruptedException("ZhiCode request interrupted");
         }
         return scope;
@@ -99,20 +91,22 @@ final class HttpRequestTracker {
      *
      * <p>{@link AutoCloseable} 是为了让调用方用 try-with-resources 表达
      * 「这段代码结束时请求就结束了」，避免忘记从表里摘掉自己。
+     *
+     * <p>非静态内部类是有意的：{@link #close()} 需要从注册表里摘掉自己。
      */
     final class Scope implements AutoCloseable {
 
         private final Thread worker;
         private final HttpURLConnection connection;
+
+        /** 是否已经断过。见 {@link #cancel()}。 */
         private final AtomicBoolean closed = new AtomicBoolean();
 
         /**
          * 是否已经开始收到响应体。
          *
-         * <p>它决定「同一种 IOException 该报成什么」：连接建立阶段读超时是
-         * {@code request_timeout}，而响应中途读失败是 {@code stream_read_error} ——
-         * 前者用户该重试，后者说明回答被打断、可能已经收到部分内容。两者对上层
-         * 的处理方式不同，所以必须区分。
+         * <p>它决定「同一种 IOException 该报成什么」，判断规则见
+         * {@link RequestFailure#code(boolean, IOException)}。
          */
         private volatile boolean responseStarted;
 
@@ -129,27 +123,15 @@ final class HttpRequestTracker {
         /**
          * 把一次 IO 失败归类成机器可读的码；返回空串表示「这是一次未分类的失败」。
          *
-         * <p>顺序有意义：已经收到响应就不该再报「超时」，即便异常类型恰好是超时 ——
-         * 那种情况下对用户有用的信息是「回答被截断了」，而不是「请求超时」。
+         * @see RequestFailure#code(boolean, IOException)
          */
         String failureCode(IOException error) {
-            if (responseStarted) return FAILURE_STREAM;
-            if (error instanceof SocketTimeoutException) return FAILURE_TIMEOUT;
-            if (error instanceof EOFException) return FAILURE_EOF;
-            String message = error.getMessage() == null ? "" : error.getMessage().toLowerCase(Locale.US);
-            if (error instanceof SocketException
-                    && (message.contains("reset") || message.contains("closed") || message.contains("broken pipe"))) {
-                return FAILURE_RESET;
-            }
-            return "";
+            return RequestFailure.code(responseStarted, error);
         }
 
         /** 给人看的失败说明。未分类的失败回落到 {@code network_error}。 */
         String failureMessage(IOException error) {
-            String code = failureCode(error);
-            String message = error.getMessage();
-            return (code.isEmpty() ? FAILURE_UNKNOWN : code) + ": "
-                    + (message == null || message.isEmpty() ? "network I/O failed" : message);
+            return RequestFailure.describe(responseStarted, error);
         }
 
         boolean isClosed() {

@@ -53,7 +53,14 @@ import java.util.TreeMap;
  */
 public final class AnthropicMessagesProvider implements ModelProvider {
 
-    private static final String API_VERSION = "2023-06-01";
+    /**
+     * {@code anthropic-version} 的取值。
+     *
+     * <p>包内可见而不是 private：{@link ModelCatalogClient} 拉模型目录时也要带同一个版本头。
+     * 这个字符串是线上契约（服务端按它选报文格式），两处各写一份迟早会不一致。
+     */
+    static final String API_VERSION = "2023-06-01";
+
     private static final String MESSAGES_PATH = "/v1/messages";
     private static final String USER_AGENT = "ZhiCodeAndroid-JavaNative/0.15";
 
@@ -136,7 +143,7 @@ public final class AnthropicMessagesProvider implements ModelProvider {
     }
 
     private static HttpURLConnection openConnection(String baseUrl, SessionConfig config) throws IOException {
-        String endpoint = stripTrailingSlash(baseUrl) + MESSAGES_PATH;
+        String endpoint = ApiEndpointResolver.stripTrailingSlash(baseUrl) + MESSAGES_PATH;
         HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
         conn.setRequestMethod("POST");
         conn.setDoOutput(true);
@@ -502,12 +509,6 @@ public final class AnthropicMessagesProvider implements ModelProvider {
                 return new JSONObject();
             }
         }
-    }
-
-    private static String stripTrailingSlash(String url) {
-        String out = url.trim();
-        while (out.endsWith("/")) out = out.substring(0, out.length() - 1);
-        return out;
     }
 
     private static String readAll(InputStream in) throws Exception {
