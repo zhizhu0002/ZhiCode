@@ -270,7 +270,10 @@ CLASSIFY='
 '
 
 # 用法: PROVENANCE_COMPOSITION=1 bash tools/provenance.sh
-if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ]; then
+#
+# SHAPE 模式要用到这里产出的语句行全文（$STATEMENT_LINES），所以它隐含 COMPOSITION ——
+# 这样 diff 循环在脚本里仍然只有这一处，与下面「分类器只此一份」是同一个理由。
+if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ] || [ "${PROVENANCE_SHAPE:-0}" = "1" ]; then
     # 这份全文要能被人拿去逐条看，所以不能放在 $WORK 里 ——
     # 那个目录在脚本退出时被 trap 删掉，打印出来的路径到时已经不存在了。
     STATEMENT_LINES="$PROJECT_ROOT/build/provenance-statement-lines.txt"
@@ -314,8 +317,189 @@ if [ "${PROVENANCE_COMPOSITION:-0}" = "1" ]; then
     # 一张 switch 的几十个 case）。逐条核对时看的是形状，所以这个数比上面的 t 更接近
     # 「还剩多少种要重写的东西」。
     dedup=$(grep -v '^=== ' "$STATEMENT_LINES" | sort -u | grep -c .)
-    printf "  其中去重后只有:                              %5d 种\n", "${dedup:-0}"
-    printf "  「语句行」全文（按文件分段）: %s\n", "$STATEMENT_LINES"
+    # 注意：格式串必须用单引号、参数跟在空格之后。写成 printf "…", "$x" 时那个逗号
+    # 会紧贴在右引号后、被 shell 拼进格式串本身 —— 格式串末尾多一个逗号，而它在 \n 之后
+    # 又没有换行，于是会被下一行输出接到行首（这个坑本文件里踩过两次）。
+    printf '  其中去重后只有:                              %5d 种\n' "${dedup:-0}"
+    printf '  「语句行」全文（按文件分段）: %s\n' "$STATEMENT_LINES"
+fi
+
+# ------------------------------------------------------------ 形状收敛度量
+#
+# 要回答的是：剩下的语句行里，有多少是**同一件事被写了几遍** —— 那是唯一一种
+# 「收敛就能省行」的余量，也是唯一值得再投入重写的理由。
+#
+# 为什么必须扫**连续多行**窗口，而不是统计单行形状：
+#   `if (x == null) continue;` 本身就是一行，重复二十次也只是二十行。
+#   把它提取成一个 helper 之后是「一个 helper + 二十个调用点」，行数**更多**。
+#   所以单行形状的重复度只能说明「模板化程度」，不能算收益（下面的摘要里单独列出）。
+#   真正能省行的是**多行模板**（取值 → 判空 → 用），它在语句清单里表现为几行连续重复。
+#   因此这里扫长度 2~4 的连续窗口，再按「极大窗口」汇总，避免 2 行窗口被算进 4 行模板里。
+#
+# 两个局限（必须与数字一起读，否则会高估收益）：
+#   1. 窗口取自 diff 的**未变块**流，可能跨过已经被我们改写过的行 ——
+#      也就是说窗口里相邻的两行在源文件里未必真的相邻。这里给的邻接性是**近似**的，
+#      只能当排序指标；真正动手前必须去读源文件确认。
+#   2. 只出现一次的形状里，既有「Java 里只有这一种写法」的惯用法，也有真正独有的逻辑。
+#      「这段能不能换个写法」是人的判断，度量分不出来（能收敛的行要人去读）。
+#   3. 归一化把字段名也抹掉了，于是「连续几行字段赋值」也会长得一样。那不是模板
+#      —— 每一行赋的是**不同**字段，没有共同的「体」可以提取。所以窗口里若
+#      **没有任何一行在调用方法**，就不计入收益（见 countable()）。这是规则，不是事后挑数字。
+#   所以下面那个合计是**上限**（天花板），不是可完成的工作量。
+#
+# 用法: PROVENANCE_SHAPE=1 bash tools/provenance.sh
+#      PROVENANCE_SHAPE_TOP=20 可调每档列出的条数（默认 10）
+SHAPE_OF='
+  function shapeOf(line,   out, pre, w, rest, nxt, r) {
+    HADCALL = 0
+    # 1) 去掉字符串字面量的内容（保留引号，看得出「这里有个字符串参数」）
+    gsub(/"[^"]*"/, "\"\"", line)
+    # 2) 一趟扫标识符，扫过的部分不回扫 —— 否则 <T>/<v> 里的字母会被再当成标识符
+    out = ""
+    while (match(line, /[A-Za-z_][A-Za-z0-9_]*/)) {
+      pre  = substr(line, 1, RSTART - 1)
+      w    = substr(line, RSTART, RLENGTH)
+      rest = substr(line, RSTART + RLENGTH)
+      nxt  = substr(rest, 1, 1)
+      if (w in KW)                      r = w    # 关键字原样
+      else if (nxt == "(") { r = w; HADCALL = 1 }   # 方法/构造器名：形状的实质；顺便标记「这行真的在调用」
+      else if (w ~ /^[A-Z][A-Z0-9_]*$/) r = w    # 常量（IDLE / UTF_8 / ACTION_VIEW）
+      else if (w ~ /^[A-Z]/)            r = "<T>" # 类型
+      else                              r = "<v>" # 变量/字段
+      out = out pre r
+      line = rest
+    }
+    out = out line
+    # 3) 数字 → #。必须放在标识符那一趟**之后**：若先换成 <n>，那个 n 会被当成变量名
+    gsub(/[0-9]+/, "#", out)
+    gsub(/[ \t]+/, " ", out)
+    sub(/^ /, "", out)
+    sub(/ $/, "", out)
+    return out
+  }
+
+  # 「能计数的窗口」= 出现 >=3 次、且窗口里至少有一行**真的在调用方法**（HADCALL）。
+  # 为什么加后一个条件：连续几行字段赋值（this.id = id; this.rev = rev; …）归一化之后长得
+  # 一模一样，但它们不是模板 —— 每一行赋的是**不同**字段，没有共同的「体」可以提取，
+  # 收敛它们只会让代码更难读。所以这类窗口不计入收益。
+  function countable(L, g, j,   m, wk) {
+    if (j < 1 || j + L - 1 > C[g]) return 0
+    wk = WK[L SUBSEP g SUBSEP j]
+    if (wk == "" || W[wk] < 3) return 0
+    for (m = 0; m < L; m++) if (HAS[g, j + m]) return 1
+    return 0
+  }
+
+  BEGIN {
+    n = split("if else for while do return throw catch switch case default new instanceof break continue try finally class interface extends implements public private protected static final void int long boolean double float char byte short true false null this super throws synchronized abstract native package import enum assert in volatile transient strictfp", kw, " ")
+    for (i = 1; i <= n; i++) KW[kw[i]] = 1
+  }
+  /^=== / { f = substr($0, 5); nf++; F[nf] = f; next }
+  # HAS[f,c]：这一行在归一化前是否真的调用了方法 —— 由 shapeOf 通过 HADCALL 带出来
+  { c = ++C[f]; S[f, c] = shapeOf($0); HAS[f, c] = HADCALL }
+  END {
+    # ---- 单行形状：只统计，不计入收益
+    for (i = 1; i <= nf; i++) {
+      g = F[i]
+      for (j = 1; j <= C[g]; j++) single[S[g, j]]++
+    }
+    for (k in single) {
+      if (single[k] >= 2) { repShapes++; repLines += single[k] }
+      else { onceShapes++; onceLines += single[k] }
+    }
+
+    # ---- 连续 2~4 行窗口计数；key 存下来供后面复用，避免重复拼接
+    for (i = 1; i <= nf; i++) {
+      g = F[i]
+      for (L = 2; L <= 4; L++) {
+        for (j = 1; j + L - 1 <= C[g]; j++) {
+          key = S[g, j]
+          for (m = 2; m <= L; m++) key = key SUBSEP S[g, j + m - 1]
+          wk = L SUBSEP key
+          if (!(wk in LW)) { LW[wk] = L; SHAPE[wk] = key }
+          W[wk]++
+          WK[L SUBSEP g SUBSEP j] = wk
+          for (m = 0; m < L; m++) if (HAS[g, j + m]) HASW[wk] = 1
+          fk = wk SUBSEP g
+          if (!(fk in seenFile)) { seenFile[fk] = 1; WFILE[wk]++ }
+        }
+      }
+    }
+
+    # ---- 极大窗口的贪心汇总：只算「不被更长的计数窗口包含」的那些，且每个形状只计一次
+    total = 0; maximalShapes = 0
+    for (i = 1; i <= nf; i++) {
+      g = F[i]
+      for (j = 1; j <= C[g]; j++) {
+        for (L = 4; L >= 2; L--) {
+          if (!countable(L, g, j)) continue
+          # 被更长的计数窗口包住（左边多一行、或右边多一行）就不算极大
+          if (L < 4 && (countable(L + 1, g, j - 1) || countable(L + 1, g, j))) continue
+          wk = WK[L SUBSEP g SUBSEP j]
+          if (wk in counted) continue
+          counted[wk] = 1
+          sv = (L - 1) * W[wk] - (L + 2)
+          if (sv > 0) { total += sv; maximalShapes++ }
+        }
+      }
+    }
+
+    # ---- 候选明细（供 shell 排序）。只列出现 >= 3 次的。
+    excluded = 0
+    for (wk in W) {
+      if (W[wk] < 3) continue
+      L = LW[wk]
+      sv = (L - 1) * W[wk] - (L + 2)
+      if (sv < 0) sv = 0
+      body = (wk in HASW) ? 1 : 0
+      if (!body) excluded++
+      shape = SHAPE[wk]
+      gsub(SUBSEP, " ;; ", shape)
+      printf "%d\t%d\t%d\t%d\t%d\t%s\n", L, W[wk], WFILE[wk], sv, body, shape >> detail
+    }
+
+    printf "语句行总数: %d 行 / %d 个文件\n", onceLines + repLines, nf
+    printf "  属于「出现 >=2 次的单行形状」: %5d 行（%d 种）—— 单行重复不省行，只看模板化程度\n", repLines, repShapes
+    printf "  只出现一次的独立形状:          %5d 行（%d 种）\n", onceLines, onceShapes
+    printf "\n估算可省语句行上限: %d 行（来自 %d 个极大模板形状，彼此不重叠）\n", total, maximalShapes
+    printf "  另有 %d 个重复窗口已排除：它们全是赋值/声明，没有共同的「体」可提取\n", excluded
+    printf "省行公式: (窗口行数 - 1) x 出现次数 - (窗口行数 + 2)\n"
+  }
+'
+
+# 用法: PROVENANCE_SHAPE=1 bash tools/provenance.sh
+if [ "${PROVENANCE_SHAPE:-0}" = "1" ]; then
+    SHAPE_OUT="$PROJECT_ROOT/build/provenance-shapes.txt"
+    SHAPE_TOP="${PROVENANCE_SHAPE_TOP:-10}"
+    DETAIL="$WORK/shape-candidates.tsv"
+    : > "$DETAIL"
+    mkdir -p "$(dirname "$SHAPE_OUT")"
+
+    echo
+    echo "形状收敛度量（与文件无关，只看「同一件事被写了几遍」）："
+    awk -v detail="$DETAIL" "$SHAPE_OF" "$STATEMENT_LINES"
+    echo
+    echo "重复出现的多行模板（窗口 4 / 3 / 2 行，各取前 $SHAPE_TOP 项）："
+    printf "%8s %4s %6s %6s  %s\n" "可省" "行数" "出现" "文件" "模板形状（<T>=类型 <v>=变量 #=数字）"
+    for L in 4 3 2; do
+        awk -F'\t' -v L="$L" '$1 == L && $5 == 1 { printf "%8d %4d %6d %6d  %s\n", $4, $1, $2, $3, $6 }' "$DETAIL" \
+            | sort -k1,1nr | head -"$SHAPE_TOP"
+    done
+    echo
+    echo "  每一行都是一处「可以收敛成 helper」的地方，「可省」是估算值。"
+    echo "  两个局限（别当承诺看）："
+    echo "   1) 窗口取自 diff 的未变块，可能跨过已被改写的行 —— 邻接性是近似的，"
+    echo "      动手前必须读源文件确认这几行真的连在一起。"
+    echo "   2) 只出现一次的形状里，惯用法与真正独有的逻辑混在一起；"
+    echo "      「这段能不能换个写法」度量分不出来。"
+    echo "   所以上面那个上限是天花板，不是可完成的工作量。"
+    {
+        echo "# 形状收敛度量（PROVENANCE_SHAPE=1 bash tools/provenance.sh）"
+        echo "# 列: 窗口行数<TAB>出现次数<TAB>涉及文件数<TAB>估算可省行数<TAB>是否模板(1/0)<TAB>形状"
+        echo "# 局限见 tools/provenance.sh 里的注释：邻接性是近似的；合计是上限。"
+        sort -k4,4nr "$DETAIL"
+    } > "$SHAPE_OUT"
+    printf '  候选明细全文: %s\n' "$SHAPE_OUT"
 fi
 
 # 按**语句行**排序的清单 —— 这才是排批次该看的那一列。
