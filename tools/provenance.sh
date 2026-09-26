@@ -238,11 +238,11 @@ END {
 #             任何 Java/Kotlin 文件都长这样，与原版相同不说明任何问题。
 #   字面量 L —— 含双引号字符串的行。协议键名（JSON 字段、动作名）与用户可见文案属于
 #             契约，改了会让两个组件对不上；这一桶要逐条看过，不能只看总数。
-#   声明 D —— 既没有控制流、也没有赋值或方法调用的行：字段、方法签名、注解。
-#             它们相同不是因为抄，而是因为「写同一件事只有这一种写法」。
+#   声明 D —— 剩下的：既没有控制流、也没有赋值或方法调用的行。也就是字段、方法签名、
+#             注解、内部类声明。
 #             全大写名的静态常量（`public static final Status IDLE = Status.IDLE;`，也就是
 #             枚举成员那种写法）也算在这一桶：赋值号在，但它没有判断与动作。
-#   语句 T —— 剩下的，也就是有判断与动作的行。**这一桶才是排批次该看的那个数**。
+#   语句 T —— 有判断与动作的行。**这一桶才是排批次该看的那个数**。
 #             注意它**不区分**「一行一个方法体的 getter」与真正的分支逻辑 ——
 #             `public boolean isIdle() { return status == Status.IDLE; }` 也在里面。
 #             所以 T 和 composition 模式打印的「去重后」两个数要一起看：原版里大量相同行
@@ -251,22 +251,36 @@ END {
 # 第三桶的存在是有来历的：最初只分三桶（骨架/字面量/其它），而「其它」里混着大量
 # `public final String planFile;` 这类声明，导致 PlanWorkflowState 看起来有 70 行
 # 「其它行、占比 70%」—— 与人工查阅的结论（真正算法只有 4~6 行）差了一个数量级。
+#
+# 这个分类器出过一次错，值得记下来：`try {`、`/**`、`break;`、`i++;`、`foo();`
+# 这些行原先都落进了 D 桶 —— 因为语句规则要求「命中关键字 / 有赋值 / 调用了 11 个白名单
+# 方法名之一」，而这五类一条都不满足（`try`/`break`/`continue` 根本不在关键字表里；
+# 无参调用没有点号；`i++` 没有赋值号）。于是 D 桶里混进了 217 行语句与骨架，
+# 而文档据此写下的结论「声明桶基本不能归零」就落在一个不成立的桶上。
+# 现在补三条规则：关键字表加 try/finally/break/continue/do；`/**` 归骨架；
+# 「以标识符加点号或括号开头、以分号结尾」与「含 ++/--」都算语句。
+# 教训与上面「规则只此一份」是同一个：**桶的规则要能被人工核对，而核对的对象是行**。
 CLASSIFY='
   BEGIN {
-    kw = "(^|[^A-Za-z0-9_])(if|for|while|return|throw|catch|switch|case|else|new|instanceof)([^A-Za-z0-9_]|$)"
+    kw = "(^|[^A-Za-z0-9_])(if|for|while|return|throw|catch|switch|case|else|new|instanceof|try|finally|break|continue|do)([^A-Za-z0-9_]|$)"
   }
   {
     line = $0
-    if (line ~ /^[{}();,\[\] ]*$/ || line ~ /^import / || line ~ /^package / || line ~ /^\*/) {
+    if (line ~ /^[{}();,\[\] ]*$/ || line ~ /^import / || line ~ /^package / || line ~ /^\*/ || line ~ /^\/\*/) {
       print "S|" line; next
     }
     if (line ~ /"[^"]*"/) { print "L|" line; next }
     if (line ~ /static final [A-Za-z0-9_<>\[\]]+ [A-Z][A-Z0-9_]* = /) {
       print "D|" line; next
     }
+    # 「标识符紧跟点号或括号、且以分号结尾」= 一条调用语句（`foo();`、`requests.cancel(w);`）。
+    # 要求紧跟点号/括号是为了不误伤声明：`void onUsage(long a, long b);` 里 void 后面是空格。
     if (line ~ kw || line ~ /&&/ || line ~ /\|\|/ || line ~ /->/ \
         || line ~ /(^|[^=!<>])=([^=]|$)/ \
-        || line ~ /\.(put|get|add|set|remove|append|write|read|apply|of|run|call)\(/) {
+        || line ~ /\.(put|get|add|set|remove|append|write|read|apply|of|run|call)\(/ \
+        || (line ~ /^[ \t]*[a-z][A-Za-z0-9_]*[.(]/ && line ~ /;[ \t]*$/) \
+        || line ~ /^[ \t]*synchronized[ \t]*\(.*\)[ \t]*\{$/ \
+        || line ~ /(\+\+|--)/) {
       print "T|" line; next
     }
     print "D|" line
@@ -355,8 +369,10 @@ mkdir -p "$(dirname "$PROTO_AUDIT")"
 # 语句行全文不能放在 $WORK 里 —— 那个目录在脚本退出时被 trap 删掉，
 # 打印出来的路径到时已经不存在了（这个坑踩过一次：承诺「供逐条核对」而文件已删）。
 STATEMENT_LINES="$PROJECT_ROOT/build/provenance-statement-lines.txt"
+DECLARATION_LINES="$PROJECT_ROOT/build/provenance-declaration-lines.txt"
 mkdir -p "$(dirname "$STATEMENT_LINES")"
 : > "$STATEMENT_LINES"
+: > "$DECLARATION_LINES"
 : > "$WORK/comp-counts.txt"
     while IFS='|' read -r rel counterpart theirs ours shared; do
         [ -n "$rel" ] || continue
@@ -403,6 +419,16 @@ mkdir -p "$(dirname "$STATEMENT_LINES")"
                 cat "$WORK/comp-statements.txt" >> "$STATEMENT_LINES"
             fi
         fi
+        # 声明桶也留一份全文。理由与语句桶不同：语句桶是为了逐条判「能不能换个写法」，
+        # 声明桶是为了逐条判「公开面能不能收窄」—— 两件事看的行不一样
+        # （前者的内容是表达式，后者的内容是签名与字段的可视性）。
+        if [ "${PROVENANCE_DECLARATIONS:-0}" = "1" ]; then
+            grep '^D|' "$WORK/comp-classified.txt" | cut -d'|' -f2- > "$WORK/comp-declarations.txt"
+            if [ -s "$WORK/comp-declarations.txt" ]; then
+                printf '=== %s\n' "$rel" >> "$DECLARATION_LINES"
+                cat "$WORK/comp-declarations.txt" >> "$DECLARATION_LINES"
+            fi
+        fi
     done < "$REPORT"
 
     awk '{ s += $1; l += $2; d += $3; t += $4; p += $5 }
@@ -430,6 +456,19 @@ mkdir -p "$(dirname "$STATEMENT_LINES")"
         # 又没有换行，于是会被下一行输出接到行首（这个坑本文件里踩过两次）。
         printf '  其中去重后只有:                              %5d 种\n' "${dedup:-0}"
         printf '  「语句行」全文（按文件分段）: %s\n' "$STATEMENT_LINES"
+    fi
+
+    # 声明桶也留一份全文。理由与语句桶不同：语句桶是为了逐条判「能不能换个写法」，
+    # 声明桶是为了逐条判「公开面能不能收窄」—— 两件事看的行不一样
+    # （前者的内容是表达式，后者的内容是签名与字段的可视性）。
+    # 声明桶不参与「收敛」：它们没有共同的「体」可提取（连续几行字段赋值长得一样，
+    # 但每行赋的是不同字段），所以这份全文的用途是逐条判读，不是排序。
+    #
+    # 用法: PROVENANCE_DECLARATIONS=1 bash tools/provenance.sh
+    if [ "${PROVENANCE_DECLARATIONS:-0}" = "1" ]; then
+        decl=$(grep -v '^=== ' "$DECLARATION_LINES" | grep -c .)
+        printf '  声明行全文（按文件分段）: %s\n' "$DECLARATION_LINES"
+        printf '    共 %d 行\n' "${decl:-0}"
     fi
 
 # ------------------------------------------------------------ 形状收敛度量
