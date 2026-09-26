@@ -1,0 +1,232 @@
+# 许可与归属
+
+本文件记录**这些结论是怎么得出的**，而不只是结论本身。许可判断的价值在于可核对：
+如果某天上游改了许可，你应当能拿这里的每一条重新验证一遍。
+
+结论性的清单在 [`NOTICE`](../NOTICE)，许可原文在 [`THIRD-PARTY-LICENSES/`](../THIRD-PARTY-LICENSES)。
+
+---
+
+## 一句话结论
+
+蜘蛛自己的代码用 **MIT**。发行物里另有 Apache-2.0 组件与一批各自许可的
+Termux 二进制程序，但**本项目整体不必转为 GPL**。
+
+---
+
+## 为什么不必是 GPL —— 这一步曾经看起来是反的
+
+第一眼看到工程里有 `libtermux.so` 和一个 33 MB 的 Termux bootstrap 时，
+结论很像是「这必须是 GPLv3」。实际查下来不是，原因是两个组件分属两条不同的线：
+
+### 1. `libtermux.so` 是 Apache-2.0，不是 GPL
+
+它是唯一一个**被链接进本应用进程**的原生库（`System.load`）。
+如果它是 GPL，整份应用就是衍生作品，本工程就必须 GPL 化。
+
+判断依据：
+
+```bash
+# 看它导出什么符号，据此确定它对应上游哪个文件
+tr -c '[:print:]' '\n' < app/src/main/jniLibs/arm64-v8a/libtermux.so \
+  | grep -aE '.{6,}' | head
+```
+
+输出里有：
+
+```
+Java_com_termux_terminal_JNI_createSubprocess
+Java_com_termux_terminal_JNI_setPtyWindowSize
+Java_com_termux_terminal_JNI_setPtyUTF8Mode
+Java_com_termux_terminal_JNI_waitFor
+Java_com_termux_terminal_JNI_close
+Cannot open /dev/ptmx
+```
+
+这组符号名对应 `termux-app` 的 `terminal-emulator` 子库
+（该库的 `JNI.java` 里声明的正是这几个 native 方法）。
+
+而 `termux-app` 根 `LICENSE.md` 原文写着：
+
+> The `termux/termux-app` repository is released under [GPLv3 only] license.
+>
+> ### Exceptions
+>
+> - [Terminal Emulator for Android](https://github.com/jackpal/Android-Terminal-Emulator)
+>   code is used which is released under [Apache 2.0] license.
+>   Check [`terminal-view`](terminal-view) and [`terminal-emulator`](terminal-emulator) libraries.
+
+`libtermux.so`、`com/termux/terminal/`、`com/termux/view/` 全部落在
+这个例外里 → **Apache-2.0**。
+
+### 2. bootstrap 里是独立程序，与我们是聚合关系
+
+`app/src/main/assets/bootstrap-aarch64.zip` 解压后有 4,533 个文件，
+里面确实是 GPL 程序（`bash` 880 KB、`coreutils`、`sed` 等）。
+但它们是**独立可执行文件**，由本应用以子进程方式启动：
+
+```
+Spider 进程  ──fork/exec──▶  $PREFIX/bin/bash（GPLv3，独立进程）
+```
+
+GPL 明确允许把 GPL 程序与其它许可的程序聚合（aggregate）分发，
+只要聚合体里每一部分仍受各自许可约束。这与「把 GPL 库链接进同一个进程」
+是两件不同的事。前者不产生衍生作品，后者会。
+
+对照第 1 点：`libtermux.so` 走的是后一条路（链接进进程），
+但它恰好是 Apache-2.0 —— 所以两条链路都不产生 GPL 传染。
+
+**因此 MIT 是安全的。**
+
+### 一处仍需自己确认的事
+
+bootstrap 里的程序许可各自适用，且要求源码对接收者可得。
+出处是 `termux-packages` 与本工程的 fork 配方
+（见 [`tools/termux-bootstrap-fork/`](../tools/termux-bootstrap-fork)，
+含构建工作流 `build-bootstrap.yml` 与验收脚本 `VerifyBootstrap.java`）。
+**发行时请确认这份源码对接收者可达。**
+
+---
+
+## 为什么「重写」不能免除署名义务
+
+这是本次工作中最容易搞错的一点：
+
+> MIT 允许使用、复制、修改、合并、发布、再分发、再授权、出售。
+> 它唯一的硬性要求是：版权声明与许可声明必须
+> 「included in all copies or substantial portions of the Software」。
+
+所以：
+
+- 用 IQ Code 的代码 → 不用重写也合法；
+- 改名发行 → 合法；
+- **重写 → 也不免除署名义务**，只要分发物里还留着它的代码。
+
+「重写」解决的是**归属清楚**（谁写的、改了多少），
+不是**免除署名**。两件事不要混。
+
+---
+
+## 度量：怎么知道还留着多少别人的代码
+
+用 [`tools/provenance.sh`](../tools/provenance.sh)。它的做法是：
+
+1. 把两棵树的包名、品牌、类名做**归一化**（`com.zhizhu.zhicode`→`com.iqge`、
+   `Zhi`→`IQ`、`蜘蛛`→`IQ Code` 等）；
+2. 按映射路径逐文件比对**逐行相同**的行数。
+
+关键是**只抹命名、不动代码形态** —— 因此「相同」意味着代码本身没被改写，
+而不只是「看起来像」。
+
+### 这个脚本本身出过三次错，都是同一类
+
+它曾把「改了文件名的类」算成「无对应文件」，于是重合度**误报为 0**。
+三次分别是：
+
+| 第几次 | 范围 | 后果 |
+| --- | --- | --- |
+| 1 | 沙箱层 14 个改了名的类 | 沙箱层重合度误报成 0 |
+| 2 | 修好第 1 次时又按路径算了一遍 | 文件数与行数虚增到 203 / 40572 |
+| 3 | Agent 工具层 2 个改了名的类 | `tools/` 目录的重合度误报成 0 |
+
+现在配对表是四元组（本工程目录 | 原版目录 | 本工程文件名 | 原版文件名），
+同时用 `RENAMED_BASENAMES` 把这些名字从按路径的循环里排除，避免重复计数。
+
+**这类错误的危害不在于数字难看，而在于它让「未来是否漂移」变得不可检测**——
+一个恒报 0 的区域，永远不会提醒你它的重合度回升了。
+
+验证脚本是否还在正确工作：把一个上游文件当成我们自己的去比对，
+结果应当是接近 100%（我们的实现里做过这个反向验证：
+
+```
+自比对: 93 行中相同 93 行
+```
+
+）。
+
+### 当前数字（2026 年，本轮重写后）
+
+```
+归属区域                    文件    行数   仍与 IQCode 相同
+Termux 上游（非 IQ Code）     23    7377        7274
+Termux 集成层                30    4625        4579
+Compose 界面层               57   15401           0
+其它                        12    2472        1502
+Agent 工具                   43    2837        2088
+Agent 核心                    8    1946         688
+沙箱宿主层                   16    4528         595
+合计                       189   39186       16726
+
+真正属于 IQ Code: 9452 行（其中 Termux 上游 7274 行只是同一来源，与独立性无关）
+```
+
+**沙箱宿主层已从 96% 降到 13.1%**，逐个类的数字：
+
+| 类 | 原版行 | 现在行 | 重合 |
+| --- | --- | --- | --- |
+| `SandboxGuestHost` | 299 | 886 | 6.0% |
+| `SandboxBoard` | 193 | 727 | 5.1% |
+| `ZhiSandboxTool` | 93 | 290 | 5.9% |
+| `ZhiDebugTool` | 179 | 435 | 7.1% |
+| `SandboxGuestDebug` | 288 | 572 | 20.8% |
+| `SandboxKeeper` | 34 | 99 | 12.1% |
+| `FridaEnv` | 135 | 289 | 10.7% |
+| `SandboxShell` | 102 | 270 | 8.5% |
+| `SandboxOverlay` | 104 | 281 | 8.5% |
+| `ZhiSandbox` | 190 | 332 | 13.9% |
+| `SandboxPrefs` | 96 | 146 | 22.6% |
+| `SandboxFrida` | 141 | 330 | 22.7% |
+| `SandboxProcess` | 40 | 69 | 26.1% |
+| `SandboxRpc` | 29 | 45 | 28.9% |
+| `SandboxRpcService` | 110 | 158 | 38.6% |
+| `SandboxConsole` | 78 | 121 | 41.3% |
+| `SandboxStage` | — | 110 | 新文件 |
+| `SandboxPalette` | — | 93 | 新文件 |
+
+**没有重写的部分，如实说明：**
+
+- `SandboxFrida` 里那段 agent JS 是**刻意冻结**的。它是对外契约：
+  `IQ.emit` / `IQ.hooks` / `IQ.scan` 三个注入 API 名同时被工具 schema 与注入脚本引用，
+  `rpc.exports`、信箱文件名、ready 标记是 Java 与脚本之间的协议边界。
+  该类的 22.7% 主要就是这段必须保留的载荷。
+- `SandboxConsole`（41.3%）与 `SandboxRpcService`（38.6%）只做过改名与字段增删，
+  没有整份重写。它们是小型的事件日志与动作分发类。
+- **Agent 运行时（约 9,400 行）尚未重写**，是当前比例最高的残留区。
+
+---
+
+## 怎么重新验证本文件的每一条
+
+```bash
+# 1. 各模块是否都带了许可文件
+find . -maxdepth 2 -name LICENSE -o -maxdepth 2 -name NOTICE | grep -v '/build/'
+
+# 2. 归属度量（需要本机有原版 IQ Code）
+bash tools/provenance.sh
+
+# 3. 结构测试里有 LicenseNoticeStructureTest 守着这些文件的存在，
+#    它们不会在下一次重构里被静默删掉
+bash test-source-no-build.sh
+```
+
+各项许可的**完整原文**：
+
+| 组件 | 许可 | 原文位置 |
+| --- | --- | --- |
+| BlackBox (Bcore / black-reflection / compiler) | Apache-2.0 | `Bcore/LICENSE` 等三个模块目录，以及 `THIRD-PARTY-LICENSES/Apache-2.0.txt` |
+| Termux terminal-emulator / terminal-view / libtermux.so | Apache-2.0 | `THIRD-PARTY-LICENSES/Apache-2.0.txt` |
+| termux-shared `TermuxConstants.java` | MIT | `THIRD-PARTY-LICENSES/MIT.txt` |
+| IQ Code | MIT (© 2026 IQge) | `THIRD-PARTY-LICENSES/IQ-Code-MIT.txt` |
+| Termux bootstrap（bash / coreutils / apt / …） | 各自许可 | 各自程序与 `termux-packages` |
+| 蜘蛛自身 | MIT | `LICENSE` |
+
+---
+
+## 发行前还需处理
+
+1. **把版权主体填成真实名称。** `LICENSE` 与 `THIRD-PARTY-LICENSES/MIT.txt` 里
+   目前写的是占位符 `蜘蛛 (ZhiCode) contributors`。
+2. **确认 bootstrap 的源码对接收者可达**（见上文「一处仍需自己确认的事」）。
+3. **`NOTICE` 提到但不覆盖**：通过 Gradle 引入的 Miuix、AndroidX、Compose 构件
+   会随 APK 一并分发，其许可原文随构件本身提供。若要做正式发行，
+   建议在「关于」页里放一份可滚动查看的完整许可列表。

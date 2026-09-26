@@ -81,6 +81,12 @@ run FridaGadgetConfigRegressionTest "$PROJECT_ROOT"
 # FridaScriptBootstrapRegressionTest.java
 run FridaScriptBootstrapRegressionTest "$PROJECT_ROOT"
 
+# ---------- 许可与归属 ----------
+# 这些声明是纯附加的：删掉它们编译照过、功能照跑、别的测试也照过，
+# 所以要有一条测试专门盯着，否则只能等到别人指出侵权时才发现。
+# LicenseNoticeStructureTest.java
+run LicenseNoticeStructureTest "$PROJECT_ROOT"
+
 echo "-----"
 echo "通过 $PASS / 失败 $FAIL"
 if [ "$FAIL" -ne 0 ]; then

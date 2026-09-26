@@ -1,0 +1,45 @@
+Bcore — BlackBox 虚拟运行时（引擎主体）
+================================================================
+
+本模块属于 BlackBox 虚拟化引擎，**不是蜘蛛自己的代码**。
+
+来源 : https://github.com/ALEX5402/NewBlackbox
+       （BlackBox 血统；原始仓库 FBlackBox/BlackBox 已由作者删除源码）
+许可 : Apache License 2.0（见同目录 LICENSE）
+
+本模块的职责：
+  guest 进程管理、Activity/Service/ActivityManager 代理、系统服务 hook、包管理
+
+
+Apache-2.0 第 4 条要求的修改声明
+----------------------------------------------------------------
+
+蜘蛛在本模块中做了修改，未改动任何许可或版权声明，也未删除上游文件。
+可核对的主要修改点：
+
+  1. 新增 SandboxContract.java
+     src/main/java/top/niunaijun/blackbox/SandboxContract.java
+
+     把「沙箱控制器进程名」收敛成单一来源。改之前，这个串在引擎与
+     宿主层各写一份，任一处漏改就会出现「进程起了但没人应答」这类
+     难以定位的问题。刻意设计为编译期常量并**不**挂在 BlackBoxCore 上，
+     因为在主进程读 BlackBoxCore 的字段会触发它的静态初始化，
+     把整个 BlackBox 拉进本该干净的主进程。
+
+  2. BlackBoxCore.java
+
+     - 新增 sandboxControllerProcessName()，返回
+       getHostPkg() + SandboxContract.CONTROLLER_PROCESS_SUFFIX；
+     - hookless 控制器初始化分支改为与上述单一来源比较；
+     - 启动阶段记录（writeStartupStage）按 pid 分文件。
+       原先写单一文件，多进程并发时后写的会冲掉先写的，
+       这正是「卡在哪一步」查不出来的原因；
+     - 一处日志文案中的旧品牌名改为蜘蛛。
+
+  3. src/main/AndroidManifest.xml
+
+     控制器进程名由 :iqsandbox 改为 :zhisandbox，与 Bcore 清单、
+     宿主清单三处保持一致（有结构测试守着这条不变式）。
+
+上游仓库只带 LICENSE，没有 NOTICE 文件，因此没有需要原样保留的 NOTICE。
+Apache-2.0 全文见同目录 LICENSE。
