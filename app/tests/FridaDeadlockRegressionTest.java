@@ -94,17 +94,24 @@ public final class FridaDeadlockRegressionTest {
         require(commandMax >= scriptMax,
                 "Java 侧等待上限（" + commandMax + "）必须不低于脚本侧上限（" + scriptMax + "）");
 
-        // 3. 已知缺口，记录在案：**请求到顶**时余量恰好为 0。
-        //    输入被钳到 FRIDA_COMMAND_MAX_TIMEOUT_MS（120000），Java 的等待上限也被钳到
-        //    同一个值，于是 `min(120000, 120000 + 1500) = 120000` —— 与脚本自己算出的
-        //    截止时间**同一时刻**。请求低于 118500 时余量正常（1500），只有到顶这一格没有。
-        //    修法是把「输入钳位」与「等待上限」拆成两个常量（等待上限要更大），
-        //    但那是改运行时行为、且只能在真机上验，所以这里只把它量出来、不擅自改。
-        long ceilingGap = commandMax - scriptMax;
-        require(ceilingGap >= 0, "两个上限的大小关系反了");
-        require(bridge.contains("const SCAN_TIMEOUT_MAX = " + scriptMax + ";")
-                        || scriptMax > 0,
-                "脚本侧超时上限的解析结果不稳定（" + scriptMax + "）：这条断言会静默失去作用");
+        // 3. 真正要守的是这一条**紧约束**：请求被钳到的上限加上余量，必须仍装得进
+        //    Java 的等待上限里。装不进的话，请求一变大 Java 就会与脚本同时放弃 ——
+        //    于是 Agent 只能看到一句 timeout，看不到 stop_reason 与部分命中。
+        //
+        //    这里纠正一处我自己写错的记录：先前这个文件里写着「请求到顶时余量恰好为 0，
+        //    与脚本的截止时间同一时刻」。那是**错的** —— 请求被钳到的是
+        //    FRIDA_MAX_TIMEOUT_MS（118000），不是 FRIDA_COMMAND_MAX_TIMEOUT_MS（120000）：
+        //        请求 999999999 → runtime = min(118000, …) = 118000
+        //                      → 等待   = min(120000, 118000+1500) = 119500   余量 1500
+        //    两个数看起来只差一点，结论却相反。所以现在按**数值关系**断言，
+        //    而不是像原先那样只比两个上限的大小（那一条恒真，等于没断言）。
+        long requestMax = constant(tool, "FRIDA_MAX_TIMEOUT_MS");
+        long waitMax = Math.min(commandMax, requestMax + headroom);
+        long ceilingGap = waitMax - requestMax;
+        require(ceilingGap >= headroom,
+                "请求到顶时 Java 必须仍留出完整余量：请求上限 " + requestMax + " + 余量 " + headroom
+                        + " = " + (requestMax + headroom) + " 必须 ≤ 等待上限 " + commandMax
+                        + "（当前余量只有 " + ceilingGap + "）");
 
         // 3. frida_eval 的超时有一个**做不到**的一半，必须写在载荷里让人看见：
         //    JS 没有抢占，同步死循环会把 guest 卡死，连脚本自己的 deadline 都轮不到
