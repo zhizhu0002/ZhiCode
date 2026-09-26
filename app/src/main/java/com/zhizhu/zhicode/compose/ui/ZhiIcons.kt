@@ -15,20 +15,16 @@ import top.yukonga.miuix.kmp.icon.extended.ExpandLess
 import top.yukonga.miuix.kmp.icon.extended.ExpandMore
 import top.yukonga.miuix.kmp.icon.extended.File
 import top.yukonga.miuix.kmp.icon.extended.Folder
-import top.yukonga.miuix.kmp.icon.extended.Forward
 import top.yukonga.miuix.kmp.icon.extended.Home
 import top.yukonga.miuix.kmp.icon.extended.Info
 import top.yukonga.miuix.kmp.icon.extended.Layers
 import top.yukonga.miuix.kmp.icon.extended.Messages
 import top.yukonga.miuix.kmp.icon.extended.Help
 import top.yukonga.miuix.kmp.icon.extended.More
-import top.yukonga.miuix.kmp.icon.extended.MoreCircle
 import top.yukonga.miuix.kmp.icon.extended.MoveFile
-import top.yukonga.miuix.kmp.icon.extended.Notes
 import top.yukonga.miuix.kmp.icon.extended.Ok
 import top.yukonga.miuix.kmp.icon.extended.Pause
 import top.yukonga.miuix.kmp.icon.extended.Refresh
-import top.yukonga.miuix.kmp.icon.extended.Replace
 import top.yukonga.miuix.kmp.icon.extended.Search
 import top.yukonga.miuix.kmp.icon.extended.Send
 import top.yukonga.miuix.kmp.icon.extended.Settings
@@ -37,8 +33,11 @@ import top.yukonga.miuix.kmp.icon.extended.Tasks
 import top.yukonga.miuix.kmp.icon.extended.Theme
 
 /**
- * 全局图标集：统一走 Miuix 图标库（`top.yukonga.miuix.kmp.icon`）。
+ * 全局图标集：绝大多数图标取自 Miuix 图标库（`top.yukonga.miuix.kmp.icon`），
  * 原来用字符字形（☰ ▣ ⚙ ＋ ↑ ■ ⌄ › 等）的位置全部换成这里的矢量图标。
+ *
+ * 库中确实没有的语义（上/右箭头、空心圆、终端、diff、历史）走 [ZhiVectorIcons] 自绘，
+ * 不再拿不相干的图标凑合；详见该文件顶部对 Miuix 风格与填充规则的实测说明。
  */
 object ZhiIcons {
     private val set = MiuixIcons.Regular
@@ -51,13 +50,16 @@ object ZhiIcons {
 
     // 工作区
     val chat: ImageVector get() = set.Messages
-    val changes: ImageVector get() = set.Replace
-    val terminal: ImageVector get() = set.Notes
+    /** 变更 / diff。原先借 `Replace`（替换），不像 diff，现自绘。 */
+    val changes: ImageVector get() = ZhiVectorIcons.Diff
+    /** 终端。原先借 `Notes`（笔记），语义不符，现自绘。 */
+    val terminal: ImageVector get() = ZhiVectorIcons.Terminal
     val files: ImageVector get() = set.Folder
 
     // 侧栏
     val newSession: ImageVector get() = set.AddCircle
-    val projectHistory: ImageVector get() = set.Refresh
+    /** 项目历史。原先借 `Refresh`（刷新），语义偏了，现自绘时钟。 */
+    val projectHistory: ImageVector get() = ZhiVectorIcons.History
     val projectPath: ImageVector get() = set.Home
     val roleCard: ImageVector get() = set.ContactsCircle
 
@@ -71,8 +73,8 @@ object ZhiIcons {
     val send: ImageVector get() = set.Send
     val stop: ImageVector get() = set.Pause
 
-    /** 发送键用的 `→` 箭头（图标库里没有 ArrowRight，`Forward` 就是右向箭头）。 */
-    val arrowRight: ImageVector get() = set.Forward
+    /** 发送键用的 `→` 箭头。库中没有 ArrowRight，原先借 `Forward`（转发），现自绘。 */
+    val arrowRight: ImageVector get() = ZhiVectorIcons.ArrowRight
 
     // 通用
     val close: ImageVector get() = set.Close
@@ -86,11 +88,8 @@ object ZhiIcons {
     /** 面板标题栏的「清屏」。 */
     val clear: ImageVector get() = set.Clear
 
-    /**
-     * 面板标题栏的「上一级」。
-     * 图标库没有 ArrowUp，`ExpandLess`（^ 形）是语义最接近的现成图标。
-     */
-    val upLevel: ImageVector get() = set.ExpandLess
+    /** 面板标题栏的「上一级」。库中没有真箭头，原先借 `ExpandLess`（^ 形），现自绘。 */
+    val upLevel: ImageVector get() = ZhiVectorIcons.ArrowUp
 
     /** 消息 / 工具行的「更多操作」（对应原版的 ⋯）。 */
     val more: ImageVector get() = set.More
@@ -105,9 +104,9 @@ object ZhiIcons {
 
     /**
      * 任务清单里"还没开始"的空心圈。
-     * 图标库没有 RadioButtonUnchecked 这类现成空心圆，`MoreCircle` 是唯一的外圆圈图形。
+     * 库中没有空心圆，原先借 `MoreCircle`（外圈带点），现自绘真正的空心圆环。
      */
-    val pending: ImageVector get() = set.MoreCircle
+    val pending: ImageVector get() = ZhiVectorIcons.RadioButtonUnchecked
 
     /** 等待授权：`Help`（圆圈里的问号）比 `Info` 更贴近"需要你决定"。 */
     val awaiting: ImageVector get() = set.Help
