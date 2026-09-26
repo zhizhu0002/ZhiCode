@@ -44,6 +44,40 @@ run() {
     fi
 }
 
+# 用 node 跑的测试：这些断言的对象是 JS 载荷的行为，不是源码文本。
+#
+# node 缺失时**明确失败**，不静默跳过 —— 「工具不在就跳过」会让套件在别人的机器上
+# 一路绿，而那正是它什么都没测的意思（本仓库已经记过一次同类错误：断言看着在守，
+# 其实守的是一句话）。用 `timeout` 兜住：载荷里若有同步死循环，它会把事件循环卡死，
+# 连它自己的超时都不会触发，只能由外层掐掉。
+run_node() {
+    local name="$1"
+    local root="$2"
+    local file="$TESTS_DIR/js/$name.mjs"
+    if ! command -v node >/dev/null 2>&1; then
+        echo "FAIL  $name（缺 node：这些行为断言只能用 JS 引擎跑）"
+        FAIL=$((FAIL + 1))
+        FAILED_NAMES="$FAILED_NAMES $name(no-node)"
+        return
+    fi
+    if [ ! -f "$file" ]; then
+        echo "FAIL  $name（缺少 $file）"
+        FAIL=$((FAIL + 1))
+        FAILED_NAMES="$FAILED_NAMES $name(missing)"
+        return
+    fi
+    local output
+    if output=$(timeout 120 node "$file" "$root" 2>&1); then
+        echo "PASS  $name"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL  $name"
+        echo "$output" | sed 's/^/      /' | head -8
+        FAIL=$((FAIL + 1))
+        FAILED_NAMES="$FAILED_NAMES $name"
+    fi
+}
+
 # ---------- 宿主层架构（本次重写建立的不变式） ----------
 # SandboxHostArchitectureTest.java
 run SandboxHostArchitectureTest "$PROJECT_ROOT"
@@ -88,6 +122,16 @@ run FridaDeadlockRegressionTest "$PROJECT_ROOT"
 run FridaGadgetConfigRegressionTest "$PROJECT_ROOT"
 # FridaScriptBootstrapRegressionTest.java
 run FridaScriptBootstrapRegressionTest "$PROJECT_ROOT"
+
+# ---------- 内嵌 Frida 载荷的**行为**（这是上面几个 Frida 测试守不到的那一半）----------
+# 上面那些断言读的是源码文本，例如 contains("boundedInteger(p.chunk_size,4194304,65536,8388608)")
+# —— 改一个空格就红，而真正的行为漂移（某块读不了就整条命令失败、上限停止条件反了、
+# 重叠把 scanned 算多了、命中被重复报出没去重）它一个也拦不住。
+# 这一条把载荷从 Java 源码里抽出来，用桩替换 Frida 宿主对象，按它自己的信箱协议
+# 发命令读响应，对返回值做断言。
+# 局限写在那个文件里：真实的 Gadget 载入、Interceptor/Stalker、真实 Memory.scan
+# 一律证明不了 —— 那些要在 IQ 沙箱里跑起来才知道。
+run_node frida-agent-harness "$PROJECT_ROOT"
 
 # ---------- 数据层的格式迁移 ----------
 # 内部续跑标记会写进持久化历史，改名后若只认新标记，

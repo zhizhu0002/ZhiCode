@@ -320,19 +320,24 @@ final class SandboxFrida {
      * Frida agent 源码。写成字符串常量而不是放在 assets 里，是因为 Gadget 的
      * Script 交互要求脚本就是一个同目录的文件，而这份内容必须在进程内即可生成。
      *
-     * <p><b>归属说明（重要）</b>：下面的 JS 载荷本身是从外部引入的，属于<b>冻结资源</b>，
-     * 不是本次重写的对象。取这个决定的理由是它是一份对外契约：
-     * <ul>
-     *   <li>{@code rpc.exports} / 信箱文件名 / ready 标记是 Java 侧与本脚本的协议边界，
-     *       改一侧就必须同步改另一侧；</li>
-     *   <li>它的行为细节（有界扫描、部分失败可返回、legacy scanSync 重写、
-     *       eval 沙箱与超时）都有回归断言盯着，重写只会引入行为漂移。</li>
-     * </ul>
-     * 因此这里只做了两件事：把它的<b>装载方式</b>（谁写、写去哪、何时清信箱）
-     * 纳入本类的重写范围；以及把注入对象的<b>名字</b>从旧品牌标识改成当前的
-     * （{@code Zhi.emit} / {@code Zhi.hooks} / {@code Zhi.scan}）——名字不是行为，
-     * 但会被写进工具 schema 与系统提示词，所以改名必须三处同步，不能只改一处。
-     * 载荷的行为字节保持不变。
+     * <p><b>归属（这里曾经写过一句不成立的话，记下来）</b>：这段载荷与
+     * {@code IQ-Code-Android/app/src/main/java/com/iqge/sandbox/SandboxFridaBridge.java}
+     * 里 {@code bridgeScript} 的返回串<b>同文</b> —— 把品牌名对齐（{@code Zhi} ↔ {@code IQ}）
+     * 之后逐行相同，唯一的差别是注入对象那一行的名字（{@code const Zhi=…}）
+     * 与 eval 那行的形参名。也就是说它<b>不是</b>「从外部引入的冻结资源」，
+     * 而是原版的代码留在本文件里，并且照旧计入「净相同行」。
+     *
+     * <p>本类此前用一句注释把它声明成「冻结资源，不是本次重写的对象」。
+     * 那正是本工程明确要防的写法：<b>一句注释就能让度量里的对象自己消失</b>。
+     * （Termux 上游那七千多行确实被单列，但那是按写明的规则、且有独立的来源与许可；
+     * 这里当初没有那样的依据，写下的却是一样的结论。）所以它现在是重写对象。
+     *
+     * <p>另一半是仍然成立的：{@code rpc.exports} / 信箱文件名 / ready 标记是 Java 侧与
+     * 本脚本的协议边界，改一侧就必须同步改另一侧；不变量由
+     * {@code FridaScriptBootstrapRegressionTest}、{@code FridaDeadlockRegressionTest}
+     * 与 {@code app/tests/js/frida-agent-harness.mjs} 一起守着。装载方式（谁写、写去哪、
+     * 何时清信箱）属于本类的重写范围。注入对象的名字（{@code Zhi.emit} / {@code Zhi.hooks} /
+     * {@code Zhi.scan}）不是行为，但会被写进工具 schema 与系统提示词，所以改名必须三处同步。
      */
     private static String agentScript(File dir) {
         String base = js(dir.getAbsolutePath());
