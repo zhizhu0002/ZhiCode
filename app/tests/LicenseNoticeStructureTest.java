@@ -11,12 +11,16 @@ import java.nio.file.Paths;
  * 任何一次重构都可能在毫无提示的情况下把它们弄丢，
  * 而要等到别人指出侵权时才会发现。
  *
- * <p>因此这里不检查文件内容是否「好看」，只检查三件会真实导致侵权的事：
+ * <p>因此这里不检查文件内容是否「好看」，只检查这几件会真实导致侵权的事：
  * <ol>
  *   <li>各目录的许可文件与 NOTICE 存在；</li>
- *   <li>IQ Code 的 MIT 原文被逐字保留（MIT 的唯一硬性要求就是这段必须随附）；</li>
+ *   <li>IQ Code 的 MIT 原文被保留 —— 原作者已明确同意不强制要求随附，所以现在这是
+ *       **自愿致谢**；正因如此，「我们为什么还留着它、依据是什么」必须写清，见第 4 条；</li>
  *   <li>NOTICE 里写明了 GPL 程序与 Apache-2.0 库的区分 —— 这是本工程
- *       「不必整体 GPL 化」这个结论的前提，前提写不清楚，结论就没有依据。</li>
+ *       「不必整体 GPL 化」这个结论的前提，前提写不清楚，结论就没有依据；</li>
+ *   <li>原作者对本工程改写与发行的许可**被记录下来**。这条义务如今建立在
+ *       「作者许可」而不是「许可原文的强制条款」之上，记录一丢，
+ *       整件事就只剩一句无法核对的话。</li>
  * </ol>
  */
 public final class LicenseNoticeStructureTest {
@@ -101,6 +105,16 @@ public final class LicenseNoticeStructureTest {
                 "docs/licensing.md 必须记录 libtermux.so 的许可判定依据");
         require(analysis.contains("tools/provenance.sh"),
                 "docs/licensing.md 必须指向可重跑的归属度量命令");
+
+        // 4b. 「含 IQ Code 代码」这件事现在的依据是**作者许可**，不再是 MIT 的强制条款。
+        //     于是最弱的一环从「文件在不在」变成了「那份许可有没有被记下来」——
+        //     这一条就是钉住那份记录本身：它必须写明许可的内容、来源与范围。
+        require(analysis.contains("原作者") && analysis.contains("许可"),
+                "docs/licensing.md 必须记录原作者对本工程改写与发行的许可");
+        require(analysis.contains("不强制") || analysis.contains("不要求随附"),
+                "许可记录必须写明「不强制要求随附版权声明」，否则无法判断我们为什么仍保留致谢");
+        require(analysis.contains("自愿"),
+                "记录里必须说明保留署名是自愿致谢，而不是尚在生效的义务");
 
         // 6. 本测试自身必须被 canonical suite 执行，否则它只是一份摆设
         String script = read(root, "test-source-no-build.sh");

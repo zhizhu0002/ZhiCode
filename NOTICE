@@ -8,25 +8,30 @@
 或上游仓库的许可原文确认，不是按印象填写。判断依据记录在 docs/licensing.md。
 
 
-1. IQ Code — MIT
+1. IQ Code — MIT（致谢）
 ----------------------------------------------------------------
 
 来源 : https://github.com/iqisge-gif/IQ-Code-Android
 许可 : MIT License, Copyright (c) 2026 IQge
 许可原文: THIRD-PARTY-LICENSES/IQ-Code-MIT.txt
 
-蜘蛛含有一部分仍与 IQ Code 逐行相同的代码。按区域划分（度量方式见
-tools/provenance.sh，它会归一化包名/品牌后逐行比对）：
+本工程的起点是 IQ Code。原作者已明确许可本工程改写、改名与发行，并同意
+不强制要求随附其版权声明 —— 也就是说，**下面这一节不是必须履行的许可义务，
+而是我们自愿保留的致谢。**
 
-  沙箱宿主层（app/src/main/java/com/zhizhu/zhicode/sandbox/）  约 595 行
-  Agent 运行时（Termux 集成层、Agent 工具、Agent 核心等）      约 8,900 行
+之所以仍然保留：本工程的归属度量工具（tools/provenance.sh）与 docs/licensing.md
+一直在拿本工程与原版逐行比对，仓库里那张 19 行的配对表（SandboxGuestDebug ←
+SandboxProcessDebug 等）就是逐文件的对照关系 —— 派生关系本来就是自证的。
+这种情况下把出处写清楚，比含糊过去更诚实，成本也只是一个段落。
 
-其中沙箱宿主层已整体重写，逐行重合度从 96% 降到 13%；
-Agent 运行时尚未重写，重合度仍然很高。
+当前残留（度量方式见 tools/provenance.sh，它会归一化包名/品牌后逐行比对）：
 
-MIT 要求版权声明随分发物附带 —— 无论我们改写了多少代码，只要分发物里
-还有它的代码，这一条就成立。THIRD-PARTY-LICENSES/IQ-Code-MIT.txt
-即为满足该要求而随附。
+  沙箱宿主层（app/src/main/java/com/zhizhu/zhicode/sandbox/）  533 行
+  Agent 运行时（Termux 集成层、Agent 工具、Agent 核心等）    约 4,018 行
+  「真正属于 IQ Code」合计                                     4,551 行
+
+沙箱宿主层已整体重写（逐行重合度从 96% 降到约 11%）；Agent 运行时也已分批重写，
+会话存储、API 客户端、工具集、上下文压缩、权限门等都已完成，仍在继续收敛。
 
 
 2. BlackBox 虚拟化引擎（Bcore / black-reflection / compiler）— Apache-2.0

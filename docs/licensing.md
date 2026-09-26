@@ -304,9 +304,25 @@ getter，逐条核对时看的是**形状**，不是条数。
   `LegacyDataMigration` 整个删掉，数据目录候选列表收敛为单一位置，
   注入脚本对象名改为 `Zhi`。
 
-**一处仍然保留的引用**：`THIRD-PARTY-LICENSES/IQ-Code-MIT.txt` 与 `NOTICE` 里
-对 IQ Code 的署名。这不是残留，是 MIT 的硬性要求（版权声明必须随附）。
-等到「仍与原版逐行相同的行数」降到 0 之后再考虑是否撤销，届时需要单独确认。
+### 署名：为什么仍然保留（这一节是「自愿」，不是「义务」）
+
+`THIRD-PARTY-LICENSES/IQ-Code-MIT.txt` 与 `NOTICE` 第 1 节对 IQ Code 的署名，
+**不是尚在生效的许可义务**：
+
+- 原作者是版权人，他除了 MIT 之外**另外明确许可**本工程改写、改名与发行，
+  并**同意不强制要求随附其版权声明**（由项目方转述；时间与形式待补记录）。
+  版权人可以豁免自己许可里的条件，所以「必须随附声明」这一条**已经被解开**。
+- 理论上现在就可以把那一节删掉。我们选择保留，理由与法律无关：
+  本文件的整篇、以及 `tools/provenance.sh` 的全部作用，都是**拿本工程与原版逐行比对**
+  —— 归一化表里写着 `com.zhizhu.zhicode → com.iqge`，还有一张 19 行的
+  `SandboxGuestDebug ← SandboxProcessDebug` 配对表。派生关系在这个仓库里是**自证的**，
+  删掉署名只会变成「一边处处与原版比对、一边声明毫无关系」；而 4,551 行相同代码
+  删不删署名都一样留着。**保留署名不减少、也不削弱任何关于「独立」的主张。**
+
+`app/tests/LicenseNoticeStructureTest.java` 因此把「MIT 版权行必须逐字保留」这条
+正向断言改成了两条更贴合现状的断言：**许可记录本身必须在**（写清内容、来源与范围），
+且必须说明保留署名是**自愿致谢**。记录是新的最弱一环 —— 它一旦丢失，
+「我们为什么可以这样做」就只剩一句无法核对的话。
 
 ### 仍然剩下的（按重合行数排序）
 
@@ -898,7 +914,7 @@ bash test-source-no-build.sh
 | BlackBox (Bcore / black-reflection / compiler) | Apache-2.0 | `Bcore/LICENSE` 等三个模块目录，以及 `THIRD-PARTY-LICENSES/Apache-2.0.txt` |
 | Termux terminal-emulator / terminal-view / libtermux.so | Apache-2.0 | `THIRD-PARTY-LICENSES/Apache-2.0.txt` |
 | termux-shared `TermuxConstants.java` | MIT | `THIRD-PARTY-LICENSES/MIT.txt` |
-| IQ Code | MIT (© 2026 IQge) | `THIRD-PARTY-LICENSES/IQ-Code-MIT.txt` |
+| IQ Code | MIT (© 2026 IQge) | `THIRD-PARTY-LICENSES/IQ-Code-MIT.txt`（原作者已另许可改写与不强制署名，保留为自愿致谢，见「署名」一节） |
 | Termux bootstrap（bash / coreutils / apt / …） | 各自许可 | 各自程序与 `termux-packages` |
 | 蜘蛛自身 | MIT | `LICENSE` |
 

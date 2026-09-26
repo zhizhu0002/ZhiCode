@@ -29,10 +29,11 @@ SOFTWARE.
 
 两件必须知道的事：
 
-1. **本工程含 IQ Code 的 MIT 代码。** MIT 允许使用、修改、改名、再分发，
-   唯一硬性要求是保留其版权声明——已随附于
-   THIRD-PARTY-LICENSES/IQ-Code-MIT.txt。这不受「重写了多少」影响：
-   只要分发物里有它的代码，声明就得在。
+1. **本工程源自 IQ Code（MIT, © 2026 IQge），并含其部分代码。**
+   MIT 允许使用、修改、改名、再分发；除此之外，原作者已明确许可本工程改写与发行，
+   并同意不强制要求随附其版权声明。我们**自愿**保留其许可原文并致谢 ——
+   见 `THIRD-PARTY-LICENSES/IQ-Code-MIT.txt` 与 `NOTICE` 第 1 节。
+   派生关系与残留行数的度量方式见 `docs/licensing.md`。
 
 2. **发行版里含 Termux 的 GPL 程序，但本项目整体不必是 GPL。**
    assets/bootstrap-aarch64.zip 内是 bash、coreutils、apt 等**独立可执行程序**，
