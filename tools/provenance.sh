@@ -41,13 +41,18 @@ normalize() {
 REPORT="$WORK/report.txt"
 : > "$REPORT"
 
-# 改了文件名的类（沙箱层 + Agent 工具层）：这些走后面的配对表，
+# 改了文件名的类：这些走后面的配对表（PAIRS），
 # 必须在按路径的循环里跳过，否则会被算两遍、把文件数与行数虚增。
+#
+# 这一份名单**只是**为了让按路径的循环跳过它们；真正决定「谁和谁配对」的是 PAIRS。
+# 两者必须一致 —— 名单里有、PAIRS 里没有的条目会让该文件在两条路径上都被跳过，
+# 于是它的重合度被静默算成 0。下面的自检就是为了让这种情况报出来。
 RENAMED_BASENAMES="SandboxGuestHost.java SandboxGuestDebug.java SandboxFrida.java FridaEnv.java
 SandboxBoard.java SandboxOverlay.java SandboxKeeper.java SandboxShell.java
 SandboxRpcService.java SandboxPrefs.java SandboxConsole.java SandboxRpc.java
 SandboxProcess.java ZhiSandbox.java
-ZhiSandboxTool.java ZhiDebugTool.java"
+ZhiSandboxTool.java ZhiDebugTool.java
+ZhiCodeEngine.java ZhiTool.java ZhiDocumentsProvider.java ZhiFileProvider.java"
 
 is_renamed() {
     local base="$1"
@@ -108,6 +113,10 @@ com/zhizhu/zhicode/sandbox|com/iqge/sandbox|SandboxProcess.java|SandboxProcessRo
 com/zhizhu/zhicode/sandbox|com/iqge/sandbox|ZhiSandbox.java|IQSandboxEngine.java
 com/termux/app/zhicode/tools|com/termux/app/iqcode/tools|ZhiSandboxTool.java|IQSandboxTool.java
 com/termux/app/zhicode/tools|com/termux/app/iqcode/tools|ZhiDebugTool.java|IQDebugTool.java
+com/termux/app/zhicode/core|com/termux/app/iqcode/core|ZhiCodeEngine.java|IQCodeEngine.java
+com/termux/app/zhicode/tools|com/termux/app/iqcode/tools|ZhiTool.java|IQTool.java
+com/zhizhu/zhicode|com/iqge|ZhiDocumentsProvider.java|IqDocumentsProvider.java
+com/zhizhu/zhicode|com/iqge|ZhiFileProvider.java|IqFileProvider.java
 "
 
 pair_renamed_in() {
@@ -128,6 +137,60 @@ while IFS='|' read -r ourDir theirDir ourName theirName; do
     [ -n "$ourDir" ] || continue
     pair_renamed_in "$ourDir" "$theirDir" "$ourName" "$theirName"
 done <<< "$PAIRS"
+
+# ------------------------------------------------------------ 漏算自检
+#
+# 这个脚本出过的最大一次错是：路径映射只在「文件名不变」时成立，于是改了类名、
+# 因而文件名也变了的文件被静默算成 0 重合。当时最大的一个文件（1353 行、约 96% 相同）
+# 就这样在全表里显示为 0，直接导致排批次排错了对象。
+#
+# 有两种漏法，各查一遍：
+#   (a) 文件在 RENAMED_BASENAMES 里（所以按路径的循环跳过了它），但 PAIRS 里没有它
+#       —— 它不会出现在报告的任何一行里，从总数上静默消失；
+#   (b) 配对表里的本工程文件或原版文件根本不存在 —— pair_renamed_in 会直接 return 0，
+#       看着像「无对应文件」，其实是名字写错了。
+unpaired=0
+warn() {
+    unpaired=$((unpaired + 1))
+    printf '⚠ %s\n' "$1" >&2
+}
+
+# (a) 两份名单必须一致。
+for name in $RENAMED_BASENAMES; do
+    if ! printf '%s\n' "$PAIRS" | grep -q "|$name|"; then
+        warn "改名的 $name 在 RENAMED_BASENAMES 里但没有 PAIRS 配对，它的重合度被静默算成 0"
+    fi
+done
+
+# (b) 配对表指向的文件必须真的存在。
+while IFS='|' read -r ourDir theirDir ourName theirName; do
+    [ -n "$ourDir" ] || continue
+    [ -f "$OUR/$ourDir/$ourName" ] || warn "PAIRS 里的本工程文件不存在: $ourDir/$ourName"
+    [ -f "$OFF/$theirDir/$theirName" ] || warn "PAIRS 里的原版文件不存在: $theirDir/$theirName"
+done <<< "$PAIRS"
+
+# (c) 没进跳过名单、映射后也找不到对应文件的行：去掉 Zhi/IQ 前后缀再找一次。
+#     找到就说明它其实是个改了名的文件。
+while IFS='|' read -r rel counterpart theirs ours shared; do
+    [ -n "$rel" ] || continue
+    [ "$theirs" = "0" ] && [ "$ours" != "0" ] || continue
+    base=$(basename "$rel")
+    dir=$(dirname "$rel")
+    stem="${base%.*}"
+    ext="${base##*.}"
+    for prefix in Zhi IQ; do
+        candidate="$dir/$prefix$stem.$ext"
+        if [ -f "$OFF/$candidate" ]; then
+            warn "未配对: $rel —— 按品牌前缀找得到原版 $candidate，应当加进 PAIRS"
+            break
+        fi
+    done
+done < "$REPORT"
+
+if [ "$unpaired" -gt 0 ]; then
+    echo >&2
+    echo "⚠ 共 $unpaired 处，上面的重合度数字不可信（被低估）。修好再重跑。" >&2
+fi
 
 awk -F'|' '
 function area(path) {

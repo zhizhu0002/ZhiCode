@@ -145,24 +145,50 @@ bootstrap 里的程序许可各自适用，且要求源码对接收者可得。
 ）。
 
 ### 当前数字（2026 年，本轮重写后）
-
 ```
 归属区域                             文件         行数   仍与 IQCode 相同
-Termux 上游（非 IQ Code）             23       7420           7274
-Termux 集成层                       31       6075           3833
-Compose 界面层                      57      15515              0
-其它                               12       2476           1499
-Agent 工具                         43       2971           2069
-Agent 核心                          8       1985            680
-沙箱宿主层                            16       4761            563
-合计                              190      41203          15918
+Termux 上游（非 IQ Code）             23       7394           7274
+Termux 集成层                       30       5839           3822
+Compose 界面层                      57      15427              0
+其它                               12       2476           1734
+Agent 工具                         43       2965           2095
+Agent 核心                          8       1985           1918
+沙箱宿主层                            16       4716            563
+合计                              189      40802          17406
 
-已是我们自己的:        25285 行
-逐行相同合计:          15918 行
+已是我们自己的:        23396 行
+逐行相同合计:          17406 行
   其中 Termux 上游:     7274 行（Termux 自己的代码，与独立性无关）
-  真正属于 IQ Code:     8644 行
+  真正属于 IQ Code:    10132 行
+```
 
-**一个重要的范围澄清**：重合行数最大的那些文件**不是 IQ Code 的代码**：
+### 这个数字曾经是错的（记下来，因为它会再次发生）
+
+上一版这里写的是「真正属于 IQ Code: 8644 行」。那个数字**低估了 1488 行**，
+原因是 `tools/provenance.sh` 的路径映射只在「文件名不变」时成立：
+一个文件如果改了类名、因而**文件名也变了**（`ZhiCodeEngine` 对 `IQCodeEngine`），
+它既被跳过名单排除、又不在配对表里，于是**不出现在报告的任何一行里**，
+从总数上静默消失。被这样漏掉的四个文件是：
+
+| 文件 | 行数 | 当时被记为 |
+| --- | --- | --- |
+| `core/ZhiCodeEngine.java` | 1353 | 0 重合（实测 1238 行相同，99.2%） |
+| `com/zhizhu/zhicode/ZhiTool.java` | 33 | 0 |
+| `com/zhizhu/zhicode/ZhiDocumentsProvider.java` | 126 | 0 |
+| `com/zhizhu/zhicode/ZhiFileProvider.java` | 199 | 0 |
+
+最严重的是第一个：它是全工程最大的单文件、且几乎整文件与原版逐行相同，
+却因为这条漏算在表里显示为 0 —— 按这张表排批次会**正好把最大的一块漏掉**。
+
+现在脚本加了两条自检，都是「宁可吵闹也不静默」：
+1. 跳过名单（`RENAMED_BASENAMES`）与配对表（`PAIRS`）必须一致，
+   名单里有而配对表里没有的，直接打警告；
+2. 配对表指向的本工程/原版文件必须真的存在，写错名字会报出来。
+
+两条都做了反向验证：删掉 `ZhiCodeEngine` 的配对 → 报「静默算成 0」；
+把原版文件名改成 `IQCodeEnginTypo.java` → 报「原版文件不存在」；恢复后无警告。
+
+**一个重要的范围澄清**：重合行数最大的那些文件里有相当一部分**不是 IQ Code 的代码**：
 
 ```
 2453 行  com/termux/terminal/TerminalEmulator.java
@@ -185,14 +211,14 @@ Agent 核心                          8       1985            680
 | `SandboxGuestHost` | 299 | 886 | 53 | 6.0% |
 | `SandboxOverlay` | 104 | 281 | 24 | 8.5% |
 | `SandboxShell` | 102 | 270 | 23 | 8.5% |
-| `FridaEnv` | 135 | 335 | 31 | 9.3% |
+| `FridaEnv` | 135 | 289 | 31 | 10.7% |
 | `SandboxKeeper` | 34 | 99 | 12 | 12.1% |
 | `ZhiSandbox` | 190 | 332 | 46 | 13.9% |
 | `SandboxRpcService` | 110 | 246 | 42 | 17.1% |
 | `SandboxConsole` | 78 | 212 | 37 | 17.5% |
 | `SandboxGuestDebug` | 288 | 572 | 119 | 20.8% |
 | `SandboxPrefs` | 96 | 146 | 33 | 22.6% |
-| `SandboxFrida` | 141 | 338 | 75 | 22.2% |
+| `SandboxFrida` | 141 | 339 | 75 | 22.1% |
 | `SandboxProcess` | 40 | 69 | 18 | 26.1% |
 | `SandboxRpc` | 29 | 45 | 13 | 28.9% |
 | `SandboxStage` | — | 110 | — | 新文件 |
@@ -204,7 +230,7 @@ Agent 核心                          8       1985            680
   信箱文件名、ready 标记是 Java 与脚本之间的协议边界，改一侧必须同步改另一侧；
   它的行为细节（有界扫描、部分失败可返回、legacy scanSync 重写、eval 沙箱与超时）
   都有回归断言盯着，重写只会引入行为漂移。
-  该类的 22.2% 主要就是这段载荷。
+  该类的 22.1% 主要就是这段载荷。
   **改过的只有名字**：注入对象由旧品牌标识改为 `Zhi`（`Zhi.emit` / `Zhi.hooks` /
   `Zhi.scan`），磁盘文件名改为 `libzhifrida.so` / `libzhifrida.config` / `zhi-agent.js`。
   名字不是行为，但它会同时出现在工具 schema 与系统提示词里，所以三处必须一起改。
@@ -238,33 +264,39 @@ Agent 核心                          8       1985            680
 **一处仍然保留的引用**：`THIRD-PARTY-LICENSES/IQ-Code-MIT.txt` 与 `NOTICE` 里
 对 IQ Code 的署名。这不是残留，是 MIT 的硬性要求（版权声明必须随附）。
 等到「仍与原版逐行相同的行数」降到 0 之后再考虑是否撤销，届时需要单独确认。
+
 ### 仍然剩下的（按重合行数排序）
 
 `PROVENANCE_PER_FILE=1 bash tools/provenance.sh` 会打印完整清单。当前最前面的几项：
 
-| 相同 | 原版 | 现在 | 重合 | 文件 |
-| --- | --- | --- | --- | --- |
-| 2453 | 2453 | 2453 | 100% | `com/termux/terminal/TerminalEmulator.java` — Termux 上游，**应当原样** |
-| 1297 | 1297 | 1297 | 100% | `com/termux/view/TerminalView.java` — 同上 |
-| 621 | 622 | 622 | 99.8% | `api/OpenAIResponsesProvider.java` |
-| 565 | 583 | 592 | 95.4% | `com/zhizhu/zhicode/TermuxTerminalPane.java` |
-| 449 | 451 | 451 | 99.6% | `api/OpenAIChatCompletionsProvider.java` |
-| 435 | 468 | 475 | 91.6% | `termux/TermuxShellExecutor.java` |
-| 388 | 390 | 390 | 99.5% | `core/ContextCompactor.java` |
-| 352 | 354 | 354 | 99.4% | `tasks/TaskStore.java` |
-| 310 | 310 | 310 | 100% | `com/zhizhu/zhicode/UiMotion.java` |
-| 254 | 257 | 257 | 98.8% | `api/AnthropicMessagesProvider.java` |
-| 240 | 241 | 241 | 99.6% | `com/zhizhu/zhicode/MarkdownRenderer.java` |
-| 298 | 310 | 311 | 95.8% | `tools/AndroidIntentBridge.java` |
-| 285 | 642 | 1221 | 23.3% | `storage/SessionStore.java`（已重写，仅列作对照） |
+| 相同 | 原版 | 现在 | 重合 | 文件 | 处置 |
+| --- | --- | --- | --- | --- | --- |
+| 2453 | 2453 | 2453 | 100% | `com/termux/terminal/TerminalEmulator.java` | Termux 上游，**保持原样** |
+| 1297 | 1297 | 1297 | 100% | `com/termux/view/TerminalView.java` | 同上 |
+| **1238** | **1245** | **1248** | **99.2%** | `com/termux/app/zhicode/core/ZhiCodeEngine.java` | **批 D，优先** |
+| 621 | 622 | 622 | 99.8% | `api/OpenAIResponsesProvider.java` | 批 B |
+| 565 | 583 | 592 | 95.4% | `com/zhizhu/zhicode/TermuxTerminalPane.java` | 批 F |
+| 552 | 552 | 552 | 100% | `com/termux/terminal/WcWidth.java` | Termux 上游 |
+| 449 | 451 | 451 | 99.6% | `api/OpenAIChatCompletionsProvider.java` | 批 B |
+| 444 | 444 | 444 | 100% | `com/termux/terminal/TerminalBuffer.java` | Termux 上游 |
+| 435 | 468 | 475 | 91.6% | `termux/TermuxShellExecutor.java` | 批 E |
+| 388 | 390 | 390 | 99.5% | `core/ContextCompactor.java` | 批 D |
+| 352 | 354 | 354 | 99.4% | `tasks/TaskStore.java` | 批 E |
+| 310 | 310 | 310 | 100% | `com/zhizhu/zhicode/UiMotion.java` | 批 F |
+| 297 | 310 | 311 | 95.5% | `tools/AndroidIntentBridge.java` | 批 E |
+| 254 | 257 | 257 | 98.8% | `api/AnthropicMessagesProvider.java` | 批 B |
+| 240 | 241 | 241 | 99.6% | `com/zhizhu/zhicode/MarkdownRenderer.java` | 批 A（疑死代码） |
+| 27 | 27 | 27 | 100% | `tools/ZhiTool.java`（接口） | 批 C，**只改实现不动签名** |
 
-两点必须说清楚：
+三点必须说清楚：
 
 1. 头部那些 Termux 文件重合 100% 是**正确状态**，不是漏洞。
    它们由 Apache-2.0 授权且已在 `NOTICE` 里声明，重写它们既无意义也是错的。
-2. 真正剩下、值得处理的是 `api/` 请求层与 Compose 界面层的几个大文件，
-   它们目前几乎是原样保留的。全部逐行相同行数、扣除 Termux 上游之后是 **8644 行**。
-
+2. 排在最前面的**不是** `api/`，而是 `core/ZhiCodeEngine.java`（1238 行、99.2%）。
+   它此前因为度量工具的漏算显示为 0，是全工程最大的单块残留。**应最先处理**。
+   （它同样出现在 `ZhiTool.java`：27 行、100%，但那是接口，按约定只改实现不动签名。）
+3. 真正剩下、值得处理的是 `core/`、`api/` 与 Compose 界面层的几个大文件，
+   它们目前几乎是原样保留的。全部逐行相同行数、扣除 Termux 上游之后是 **10132 行**。
 ### 数据层（已完成）
 
 | 类 | 原版行 | 现在行 | 相同行 | 重合 |
@@ -305,7 +337,7 @@ Agent 核心                          8       1985            680
 
 ### 沙箱宿主层（已完成，含 Agent 侧两个工具类）
 
-16 个文件，563 / 4761 行 = **11.8%**（从重写前的 96% 降下来）：
+16 个文件，563 / 4716 行 = **11.9%**（从重写前的 96% 降下来）：
 
 ---
 
