@@ -288,7 +288,7 @@ final class ContextCompactor {
                         JSONObject copy = new JSONObject(block.toString());
                         String input = String.valueOf(block.opt("input"));
                         if (input.length() > toolLimit) {
-                            copy.put("input", new JSONObject().put("_iq_compacted_input", headTail(input, toolLimit)));
+                            copy.put("input", new JSONObject().put("_zhicode_compacted_input", headTail(input, toolLimit)));
                         }
                         content.put(copy);
                     } else {

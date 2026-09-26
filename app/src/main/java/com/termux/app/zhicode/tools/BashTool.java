@@ -105,10 +105,15 @@ public final class BashTool implements ZhiTool {
 
         // An interrupted install or an upstream .deb that still contains /data/data/com.termux can
         // leave dpkg in a half-configured state. Repair the cached archives and retry once. Do not
-        // retry ordinary network/404/GPG failures: those should be surfaced to IQ/user directly.
+        // retry ordinary network/404/GPG failures: those should be surfaced to the user directly.
+        //
+        // 脚本名必须由 BRAND_SLUG 派生：它由 RuntimeInstaller 安装为 bin/<slug>-patch-deb。
+        // 这里原先写的是另一个名字，`[ -x ... ]` 于是恒假 —— 整个补丁步骤静默跳过，
+        // 表现为「修了但没修好」，而且没有任何报错。
         if (packageCommand && result.exitCode != 0 && !result.timedOut && looksLikePrefixOrDpkgStateFailure(output)) {
+            String patcher = "$PREFIX/bin/" + TermuxConstants.BRAND_SLUG + "-patch-deb";
             String repair = "set +e; " +
-                "if [ -x \"$PREFIX/bin/iq-patch-deb\" ]; then find \"$PREFIX/var/cache/apt/archives\" -maxdepth 1 -type f -name '*.deb' -exec \"$PREFIX/bin/iq-patch-deb\" {} + 2>/dev/null; fi; " +
+                "if [ -x \"" + patcher + "\" ]; then find \"$PREFIX/var/cache/apt/archives\" -maxdepth 1 -type f -name '*.deb' -exec \"" + patcher + "\" {} + 2>/dev/null; fi; " +
                 "dpkg --configure -a; " +
                 "apt-get -f install -y";
             if (progress != null) progress.onProgress("\n[ZhiCode package compatibility repair]\n", true, 0);

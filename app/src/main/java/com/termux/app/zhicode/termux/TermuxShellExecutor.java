@@ -205,16 +205,16 @@ public final class TermuxShellExecutor {
             final Process child = process;
             stdout = new Capture(child.getInputStream(), false, listener, startedAt);
             stderr = new Capture(child.getErrorStream(), true, listener, startedAt);
-            outThread = new Thread(stdout, "iq-bash-stdout");
-            errThread = new Thread(stderr, "iq-bash-stderr");
+            outThread = new Thread(stdout, "zhi-bash-stdout");
+            errThread = new Thread(stderr, "zhi-bash-stderr");
             outThread.start(); errThread.start();
 
             waiter = new Thread(() -> {
                 try { completion.publishProcessExit(child.waitFor()); }
                 catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
-            }, "iq-bash-waiter");
+            }, "zhi-bash-waiter");
             controlWatcher = new ControlWatcher(controlFile, controlToken, completion);
-            controlThread = new Thread(controlWatcher, "iq-bash-control");
+            controlThread = new Thread(controlWatcher, "zhi-bash-control");
             waiter.start(); controlThread.start();
 
             boolean finished = false;
@@ -449,7 +449,7 @@ public final class TermuxShellExecutor {
         if(!root){terminateProcessTree(pid,fallback,null,null);return;}
         if(pid>1)try{
             String kill="killtree(){ for child in $(cat /proc/$1/task/$1/children 2>/dev/null); do killtree $child; done; kill -TERM $1 2>/dev/null; }; killtree "+pid+"; sleep 0.2; kill -KILL "+pid+" 2>/dev/null || true";
-            Process k=new ProcessBuilder(findSuBinary(),"-c",kill).start();Thread waiter=new Thread(()->{try{k.waitFor();}catch(InterruptedException e){Thread.currentThread().interrupt();}},"iq-root-kill-waiter");waiter.start();waiter.join(2000);k.destroy();
+            Process k=new ProcessBuilder(findSuBinary(),"-c",kill).start();Thread waiter=new Thread(()->{try{k.waitFor();}catch(InterruptedException e){Thread.currentThread().interrupt();}},"zhi-root-kill-waiter");waiter.start();waiter.join(2000);k.destroy();
         }catch(Throwable ignored){}
         try{fallback.destroy();}catch(Throwable ignored){}
     }
@@ -464,7 +464,7 @@ public final class TermuxShellExecutor {
         try {
             String kill="kill -TERM -"+pid+" 2>/dev/null || true; sleep 0.2; kill -KILL -"+pid+" 2>/dev/null || true";
             Process command=new ProcessBuilder(findSuBinary(),"-c",kill).start();
-            Thread waiter=new Thread(()->{try{command.waitFor();}catch(InterruptedException e){Thread.currentThread().interrupt();}},"iq-root-group-kill-waiter");
+            Thread waiter=new Thread(()->{try{command.waitFor();}catch(InterruptedException e){Thread.currentThread().interrupt();}},"zhi-root-group-kill-waiter");
             waiter.start(); waiter.join(2000); command.destroy();
         } catch (Throwable ignored) { }
     }

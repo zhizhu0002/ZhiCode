@@ -969,7 +969,7 @@ class WorkspaceViewModel(
 
     private fun runInitPrompt() {
         if (engine.isBusy()) {
-            appendInfo("初始化项目说明", "IQ 正在执行任务，请先等待或停止当前任务。")
+            appendInfo("初始化项目说明", "蜘蛛正在执行任务，请先等待或停止当前任务。")
             return
         }
         runCatching { engine.cancelPlanModeFromUi("/init 使用快速直接模式") }
@@ -1200,7 +1200,7 @@ class WorkspaceViewModel(
                     transcript = s.transcript + ChatItem(
                         id = id,
                         kind = ChatKind.ASSISTANT,
-                        title = "IQ",
+                        title = "蜘蛛",
                         body = delta,
                         streaming = true,
                         processSteps = listOf("开始分析请求"),
@@ -1454,7 +1454,7 @@ class WorkspaceViewModel(
                 choicePicker = ChoicePickerState(
                     title = question.optString("header", "问题"),
                     intent = ChoiceIntent.QUESTION,
-                    prompt = question.optString("question", "IQ 应该怎么做？"),
+                    prompt = question.optString("question", "蜘蛛应该怎么做？"),
                     options = choices,
                     allowFreeForm = true,
                     freeFormHint = "其他回答…",
@@ -1491,7 +1491,7 @@ class WorkspaceViewModel(
         pendingQuestions = null
         _state.update { it.copy(choicePicker = null) }
         engine.respondQuestion(flow.requestId, JSONObject())
-        appendInfo("已跳过提问", "IQ 的提问被跳过，它会按「未选择」继续。")
+        appendInfo("已跳过提问", "蜘蛛的提问被跳过，它会按「未选择」继续。")
     }
 
     override fun onEnginePlanApprovalRequest(request: EnginePlanApproval) {

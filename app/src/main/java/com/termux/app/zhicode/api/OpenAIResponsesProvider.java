@@ -99,7 +99,7 @@ public final class OpenAIResponsesProvider implements ModelProvider {
         conn.setRequestProperty("accept", "text/event-stream");
         conn.setRequestProperty("authorization", "Bearer " + config.apiKey);
         conn.setRequestProperty("user-agent", codex
-            ? "codex_cli_rs/" + CODEX_TRANSLATOR_VERSION + " (iq-code-translation)"
+            ? "codex_cli_rs/" + CODEX_TRANSLATOR_VERSION + " (zhicode-translation)"
             : "ZhiCodeAndroid-JavaNative/0.15");
         if (codex) {
             String session = nonEmpty(config.sessionId) ? config.sessionId : UUID.randomUUID().toString();

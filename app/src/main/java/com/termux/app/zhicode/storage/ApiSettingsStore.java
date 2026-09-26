@@ -41,8 +41,8 @@ import java.util.Map;
  */
 public final class ApiSettingsStore {
 
-    /** 当前 prefs 文件名。 */
-    private static final String PREFS = "zhicode_settings";
+    /** 当前 prefs 文件名。由品牌短标识派生，保证与其它模块拼出的名字一致。 */
+    private static final String PREFS = TermuxConstants.BRAND_SLUG + "_settings";
     /** 搬迁来源：只读，首次启动时整体拷一次，之后不再触碰。 */
     private static final String LEGACY_PREFS = "iq_code_android_settings";
 
@@ -334,6 +334,28 @@ public final class ApiSettingsStore {
 
     public synchronized String getActiveRoleCardId() {
         return prefs.getString(KEY_ACTIVE_ROLE_CARD, "");
+    }
+
+    /**
+     * 只写「强制后台保活」这一个开关，供 {@code KeepAliveService} 在自我停止时回调。
+     *
+     * <p>存在的理由是一个真实的缺陷：{@code KeepAliveService} 曾经自己拼出
+     * prefs 文件名与键名直接写盘，而它写的是<b>旧版</b> prefs 文件
+     * （搬迁用的那个只读来源）。结果是「用户从通知里停掉保活 → 开关并没有被关掉 →
+     * 下次启动界面仍显示开启」。键属于本类，写入就该由本类负责，
+     * 否则键名一旦改动就会有第二次同样的漂移。
+     *
+     * <p>只改这一个键、不经过 {@link #save(SessionConfig)}：服务停止时只关心
+     * 「开关归位」，重新读写整份设置既多余，也可能把界面尚未保存的草稿覆盖掉。
+     */
+    public static void setForcedKeepAliveEnabled(Context context, boolean enabled) {
+        if (context == null) return;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_FORCED_KEEP_ALIVE, enabled)
+                .apply();
     }
 
     // ------------------------------------------------------------ 全局字段

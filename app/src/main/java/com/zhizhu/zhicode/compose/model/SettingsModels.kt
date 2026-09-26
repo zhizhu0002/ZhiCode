@@ -1,5 +1,7 @@
 package com.zhizhu.zhicode.compose.model
 
+import com.termux.app.zhicode.storage.ApiSettingsStore
+
 /**
  * 设置页的 6 个分类，对齐原版 `MainActivity.showSettings()` 的分类 Tab。
  *
@@ -342,15 +344,27 @@ data class ModelPickerState(
     val models: List<ModelOption> = emptyList(),
 )
 
-/** 首次进入时的示例记录，对齐参考图的「蜘蛛 官方 API / openai-responses · gpt-5.6-sol」。 */
+/**
+ * 首次进入时的默认配置：官方 API 一条。
+ *
+ * <p>四个值<b>全部取自引擎侧常量</b>，不在这里重写一份字面量：
+ * <ul>
+ *   <li>地址与模型名如果各写一份，两边迟早会不一致，而表现是
+ *       「界面上看到的和实际请求的不是同一个地方」；</li>
+ *   <li>{@code id} 尤其重要 —— 界面判断「是不是官方配置」用的是
+ *       [com.termux.app.zhicode.storage.ApiSettingsStore.OFFICIAL_PROFILE_ID]。
+ *       这里若用另一个 id，这条默认配置永远不会被识别成官方项，
+ *       于是「官方配置不可删」的保护对它不生效。</li>
+ * </ul>
+ */
 val DEFAULT_API_PROFILES: List<ApiProfile> = listOf(
     ApiProfile(
-        id = "api-official",
+        id = ApiSettingsStore.OFFICIAL_PROFILE_ID,
         name = "蜘蛛 官方 API",
         protocol = ApiProtocol.OPENAI_RESPONSES,
-        baseUrl = "https://api.iqcode.dev/v1",
+        baseUrl = ApiSettingsStore.OFFICIAL_BASE_URL,
         apiKey = "",
-        model = "gpt-5.6-sol",
+        model = ApiSettingsStore.OFFICIAL_DEFAULT_MODEL,
     ),
 )
 

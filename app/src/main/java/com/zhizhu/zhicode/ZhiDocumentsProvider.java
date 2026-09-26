@@ -18,7 +18,7 @@ import java.util.Locale;
 
 /** Read-only project DocumentsProvider discoverable by document-aware file managers. */
 public final class ZhiDocumentsProvider extends DocumentsProvider {
-    private static final String ROOT_ID = "iq-projects";
+    private static final String ROOT_ID = "zhi-projects";
     private static final String ROOT_DOCUMENT_ID = "projects";
 
     @Override public boolean onCreate() { return true; }

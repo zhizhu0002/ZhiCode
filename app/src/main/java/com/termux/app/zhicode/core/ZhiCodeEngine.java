@@ -73,7 +73,7 @@ public final class ZhiCodeEngine {
         }
     }
 
-    private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> new Thread(r, "iq-java-agent"));
+    private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> new Thread(r, "zhi-java-agent"));
     private final Context appContext;
     private final ToolRegistry tools;
     private final boolean subagentMode;
@@ -397,7 +397,7 @@ public final class ZhiCodeEngine {
         final JSONArray extras = extraContent == null ? new JSONArray() : cloneArray(extraContent);
         if (!busy.compareAndSet(false, true)) {
             if (steerPrompt(prompt, extras)) return;
-            throw new IllegalStateException("IQ is already working");
+            throw new IllegalStateException("ZhiCode is already working");
         }
         final SessionConfig turnConfig = config.copy();
         final String turnId = java.util.UUID.randomUUID().toString();

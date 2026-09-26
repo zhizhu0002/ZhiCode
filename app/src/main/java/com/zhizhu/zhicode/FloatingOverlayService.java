@@ -48,7 +48,7 @@ public final class FloatingOverlayService extends Service {
     private void showBall() {
         removeBall();
         ball = new TextView(this);
-        ball.setText("IQ");
+        ball.setText("蜘蛛");
         ball.setTextColor(Color.WHITE);
         ball.setTextSize(12);
         ball.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);

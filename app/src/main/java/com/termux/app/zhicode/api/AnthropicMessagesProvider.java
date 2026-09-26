@@ -99,7 +99,7 @@ public final class AnthropicMessagesProvider implements ModelProvider {
             request.markResponseStarted();
             if (status < 200 || status >= 300) {
                 String error = readAll(conn.getErrorStream());
-                throw new IllegalStateException("IQ API HTTP " + status + ": " + truncate(error, 12000));
+                throw new IllegalStateException("ZhiCode API HTTP " + status + ": " + truncate(error, 12000));
             }
 
             try (BufferedReader reader = new BufferedReader(
@@ -107,7 +107,7 @@ public final class AnthropicMessagesProvider implements ModelProvider {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (Thread.currentThread().isInterrupted()) {
-                    throw new InterruptedException("IQ request interrupted");
+                    throw new InterruptedException("ZhiCode request interrupted");
                 }
                 if (line.startsWith("event:")) {
                     eventName = line.substring(6).trim();

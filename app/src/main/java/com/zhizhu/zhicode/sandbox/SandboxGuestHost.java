@@ -121,7 +121,7 @@ public final class SandboxGuestHost {
     // ------------------------------------------------------------ 抓帧状态
 
     private static final ExecutorService CAPTURE_IO = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "iq-sandbox-capture-io");
+        Thread t = new Thread(r, "zhi-sandbox-capture-io");
         t.setDaemon(true);
         return t;
     });
@@ -267,7 +267,7 @@ public final class SandboxGuestHost {
                 out = error(e);
             }
             writeResult(context, id, out);
-        }, "iq-sandbox-proc-debug").start();
+        }, "zhi-sandbox-proc-debug").start();
     }
 
     /** UI 类动作：只有持有前台 guest Activity 的进程处理。 */
@@ -618,7 +618,7 @@ public final class SandboxGuestHost {
                 }
 
                 Bitmap bitmap = Bitmap.createBitmap(size[0], size[1], Bitmap.Config.ARGB_8888);
-                pixelThread = new HandlerThread("iq-sandbox-pixelcopy");
+                pixelThread = new HandlerThread("zhi-sandbox-pixelcopy");
                 pixelThread.start();
                 try {
                     PixelCopy.request(activity.getWindow(), bitmap, result -> {

@@ -69,7 +69,7 @@ fun EmptyState() {
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "IQ 可以读取项目、编辑文件、运行命令，并在内置 Termux 环境中验证修改。",
+            text = "蜘蛛可以读取项目、编辑文件、运行命令，并在内置 Termux 环境中验证修改。",
             color = scheme.onBackgroundVariant,
             fontSize = 12.sp,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp),

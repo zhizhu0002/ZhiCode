@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
 
+import com.termux.app.zhicode.storage.ApiSettingsStore;
 import com.zhizhu.zhicode.compose.HostRefs;
 
 import java.util.concurrent.ExecutorService;
@@ -48,7 +49,10 @@ public final class KeepAliveService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? ACTION_START : intent.getAction();
         if (ACTION_STOP.equals(action)) {
-            getSharedPreferences("iq_code_android_settings",MODE_PRIVATE).edit().putBoolean("forced_keep_alive_enabled",false).apply();
+            // 走 ApiSettingsStore 而不是自己拼 prefs 名与键名。
+            // 原先这里写的是旧版 prefs 文件（搬迁用的只读来源），于是
+            // 「从通知里停掉保活」并不会把开关关掉，下次启动界面还显示开启。
+            ApiSettingsStore.setForcedKeepAliveEnabled(this, false);
             stopForeground(true);
             if(wakeLock!=null&&wakeLock.isHeld())wakeLock.release();
             worker.execute(()->{RootKeepAliveController.revoke(this);stopSelf();});

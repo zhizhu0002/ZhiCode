@@ -40,7 +40,7 @@ public final class SubagentManager {
     private final ModelProvider providerOverride;
     private final PermissionRelay permissionRelay;
     private final QuestionRelay questionRelay;
-    private final ExecutorService executor=Executors.newCachedThreadPool(r->{Thread t=new Thread(r,"iq-subagent");t.setDaemon(true);return t;});
+    private final ExecutorService executor=Executors.newCachedThreadPool(r->{Thread t=new Thread(r,"zhi-subagent");t.setDaemon(true);return t;});
     private final Map<String,AgentTask> tasks=new ConcurrentHashMap<>();
 
     public SubagentManager(Context context, ModelProvider providerOverride, PermissionRelay permissionRelay, QuestionRelay questionRelay){this.context=context.getApplicationContext();this.providerOverride=providerOverride;this.permissionRelay=permissionRelay;this.questionRelay=questionRelay;}
