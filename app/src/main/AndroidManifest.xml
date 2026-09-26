@@ -68,6 +68,25 @@
         android:extractNativeLibs="true"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
 
+        <!--
+          与官方 IQ Code 对齐：把 AndroidX Startup 自动并进来的这两个组件摘掉。
+          官方把它们列为**沙箱进程隔离的必要条件**（见官方 app/tests/SandboxProcessIsolationStructureTest）。
+
+          InitializationProvider 是个 ContentProvider，而 ContentProvider 的创建时机在
+          `Application.attachBaseContext` 之后、`Application.onCreate` **之前**。
+          它会带起三个 initializer：
+            - EmojiCompatInitializer        起后台线程加载 emoji 字体，走 IO
+            - ProcessLifecycleInitializer   初始化 ProcessLifecycleOwner / LifecycleDispatcher
+            - ProfileInstallerInitializer   调度 baseline profile 写入
+          这些在沙箱宿主里既无必要，也会让启动期多出一条不受控的 IO/线程路径。
+
+          安全性已核实：本工程源码、Miuix 全部 7 个 artifact 都不引用
+          EmojiCompat / ProcessLifecycleOwner（Compose 的 EmojiCompat 用法有 isConfigured() 门控），
+          摘掉后只是不再做 emoji span 处理，不影响功能。
+        -->
+        <provider android:name="androidx.startup.InitializationProvider" tools:node="remove" />
+        <receiver android:name="androidx.profileinstaller.ProfileInstallReceiver" tools:node="remove" />
+
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
