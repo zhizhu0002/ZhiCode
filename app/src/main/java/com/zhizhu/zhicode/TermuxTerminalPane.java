@@ -3,23 +3,13 @@ package com.zhizhu.zhicode;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
-
-import com.zhizhu.zhicode.sandbox.SandboxShell;
 import android.graphics.Color;
-import android.graphics.Typeface;
+import android.os.PowerManager;
 import android.util.Log;
-import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
-import android.view.View;
-import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -31,6 +21,7 @@ import com.termux.terminal.TerminalSessionClient;
 import com.termux.terminal.TextStyle;
 import com.termux.view.TerminalView;
 import com.termux.view.TerminalViewClient;
+import com.zhizhu.zhicode.sandbox.SandboxShell;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -40,6 +31,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,495 +39,435 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Upstream Termux TerminalView + TerminalEmulator + JNI PTY embedded in the ZhiCode workspace.
- * The surrounding chrome follows Termux's terminal interaction model: left session drawer,
- * native text selection/copy-paste, two-row extra keys, volume Ctrl/Fn mappings and IME input.
- * No proot and no TextView terminal emulation.
+ * 终端面板的 Android 侧宿主：持有真实 PTY 会话，并把可观察状态交给 Compose 渲染。
+ *
+ * <h3>为什么它只剩这些</h3>
+ * 这个类以前连工具栏、会话抽屉、两行扩展键、两个对话框、主题刷色一起做了 ——
+ * 六百多行纯 Java 拼 View 的界面代码，与界面上方那一行 Compose 标题栏割裂，
+ * 而且和原版逐行相同（重合度一度是 95.4%，全工程最大的一块）。
+ *
+ * <p>现在界面全在 `compose/ui/panes/TerminalChrome.kt` 与 `TerminalDialogs.kt`，
+ * 本类只做三件 Compose 做不了的事：
+ * <ol>
+ *   <li><b>PTY 本身</b>：拿 {@link JNI} 加载 {@code libtermux.so}、按环境变量数组起
+ *       {@link TerminalSession}，并持有会话列表。</li>
+ *   <li><b>承载上游 {@link TerminalView}</b>：它是 Terminalux 的 Canvas 逐字符渲染器
+ *       （CSI 解析、文本选择、缩放手势），属 Termux 上游，不重写。
+ *       本类作为它的父容器被 Compose 的 `AndroidView` 挂载。</li>
+ *   <li><b>两个 Client 接口</b>：{@link TerminalViewClient} 与 {@link TerminalSessionClient}
+ *       由 TerminalView 反过来调用，只能在 View 进程一侧实现。</li>
+ * </ol>
+ *
+ * <h3>状态怎么交给 Compose</h3>
+ * {@link #state()} 返回一份不可变快照，{@link #addObserver} 登记变更回调。
+ * 用的是「快照 + 回调」而不是 Compose 的 `StateFlow`：本类是 Java，
+ * 而 `StateFlow` 是 Kotlin 类型，从 Java 构造它要绕到 `StateFlowKt` 去 ——
+ * 那等于让这个最底层的宿主反过来依赖界面框架。
+ *
+ * <p>**只有低频变化才会回调**：{@link #onTextChanged} 是每次按键回声/每条命令输出都会触发的
+ * 高频回调，它只负责让 TerminalView 重画，**不**通知观察者 —— 否则每敲一个字符都要重建
+ * 一次快照并驱动一整轮 Compose 重组。标题、会话增删、锁定键、通知文案这些低频变化才通知。
+ *
+ * <h3>不动的三处</h3>
+ * <ol>
+ *   <li>{@link #environmentArray()} 逐字保留，尤其 {@code LD_LIBRARY_PATH}：
+ *       内置 Termux 的 ELF 内嵌 {@code DT_RUNPATH} 指向并不存在的
+ *       {@code /data/data/com.termux/files/usr/lib}（见 {@link RuntimeInstaller}），
+ *       少了这个变量终端里所有二进制都会 `CANNOT LINK EXECUTABLE`。</li>
+ *   <li>{@link #selectSession} 必须等 TerminalView 完成首次 layout 才 attach。
+ *       早 attach 会在 `onSizeChanged` 里立刻算行列并加载 {@code libtermux.so}，
+ *       那时本视图还没被插进父容器，任何 JNI 错误都会从 `onSizeChanged` 逃出去
+ *       **杀掉整个 Activity**（这个崩溃真实发生过）。</li>
+ *   <li>{@link #applyTerminalPalette} 的深色档色值表逐字节不变。浅色档那张表
+ *       是历史上写下的但走不到（原先唯一的入口 {@code applyTheme} 没有任何调用方），
+ *       本类**不**把它接上：终端跟随主题要单独定，现在接上等于在重写里夹带外观变更。</li>
+ * </ol>
  */
-public final class TermuxTerminalPane extends FrameLayout implements TerminalViewClient, TerminalSessionClient {
-    private int BG, BAR, DRAWER_BG, KEY_BG, DIVIDER, SELECTED_BG, TEXT, MUTED, ACCENT, ERROR;
-    private boolean neonTheme, lightTheme;
-    private static final String DEFAULT_EXTRA_KEYS = "[['ESC','/',{key: '-', popup: '|'},'HOME','UP','END','PGUP'], ['TAB','CTRL','ALT','LEFT','DOWN','RIGHT','PGDN']]";
+public final class TermuxTerminalPane extends FrameLayout
+        implements TerminalViewClient, TerminalSessionClient {
+
+    private static final String LOG_TAG = "ZhiTerminal";
+
+    /** 未配置 `extra-keys` 时的扩展键矩阵（Termux 默认布局）。 */
+    private static final String DEFAULT_EXTRA_KEYS =
+        "[['ESC','/',{key: '-', popup: '|'},'HOME','UP','END','PGUP'], ['TAB','CTRL','ALT','LEFT','DOWN','RIGHT','PGDN']]";
+
+    /** `extra-keys` 解析失败时的兜底行。与上面那个串保持同一份布局。 */
+    private static final String[] DEFAULT_ROW_TOP = {"ESC", "/", "-", "HOME", "UP", "END", "PGUP"};
+    private static final String[] DEFAULT_ROW_BOTTOM = {"TAB", "CTRL", "ALT", "LEFT", "DOWN", "RIGHT", "PGDN"};
+
+    /** 终端字号范围（与 `changeFont` 的上下界一致，单位 sp）。 */
+    private static final float MIN_TEXT_SP = 8f;
+    private static final float MAX_TEXT_SP = 32f;
+
+    private static final String SHELL_NAME = "bash";
+    private static final String SESSION_NAME_PREFIX = "bash ";
+    private static final int SCROLLBACK_LINES = 5000;
+    private static final String TERMINAL_TITLE_FALLBACK = "Terminal";
+    private static final String PROPERTIES_FILE = "/.termux/termux.properties";
+    private static final String WAKELOCK_SUFFIX = ":terminal";
+
+    /** 环境未就绪时的说明。刻意指路而不是说"正在准备"，见原实现的说明。 */
+    private static final String RUNTIME_NOTICE =
+        "内置 Termux 环境尚未就绪。\n请先在侧栏「准备内置 Termux 环境」里初始化，完成后这里就是可输入的真实终端。";
+    /** PTY 失败界面的固定文字。Compose 侧按 [State.failureDetail] 是否存在决定要不要显示。 */
+    public static final String FAILURE_TITLE = "Terminal failed to start";
+    public static final String FAILURE_FOOTNOTE =
+        "\n\nThe app stayed open so you can repair the runtime instead of crashing.";
+    private static final String FAILURE_UNKNOWN = "Unknown PTY error";
+
+    // ------------------------------------------------------------------ 交给 Compose 的快照
+
+    /** 一个扩展键：显示什么、按下时发什么。 */
+    public static final class ExtraKey {
+        public final String display;
+        /** 交给 {@link #sendExtraKey} 的动作名；可能是宏（按空白切分后逐个发）。 */
+        public final String action;
+
+        ExtraKey(String display, String action) {
+            this.display = display;
+            this.action = action;
+        }
+    }
+
+    /** 会话列表里的一行。 */
+    public static final class SessionInfo {
+        public final String name;
+        public final boolean running;
+        public final boolean selected;
+
+        SessionInfo(String name, boolean running, boolean selected) {
+            this.name = name;
+            this.running = running;
+            this.selected = selected;
+        }
+    }
+
+    /**
+     * 一次完整快照。字段全是 public final 且不含可变集合，Compose 侧可直接读。
+     *
+     * <p>{@link #extraKeys} 是「行 → 键」的两级列表，构建后不再修改。
+     */
+    public static final class State {
+        public final List<SessionInfo> sessions;
+        public final String title;
+        /** 环境未就绪的说明；为空表示环境正常。 */
+        public final String runtimeNotice;
+        /** PTY 启动失败的详情（含 cause 链）；为空表示没失败。 */
+        public final String failureDetail;
+        public final boolean ctrl;
+        public final boolean alt;
+        public final boolean shift;
+        public final boolean fn;
+        public final boolean backMapsEscape;
+        public final float textSp;
+        public final List<List<ExtraKey>> extraKeys;
+        public final boolean wakeLockHeld;
+
+        State(List<SessionInfo> sessions, String title, String runtimeNotice, String failureDetail,
+              boolean ctrl, boolean alt, boolean shift, boolean fn, boolean backMapsEscape,
+              float textSp, List<List<ExtraKey>> extraKeys, boolean wakeLockHeld) {
+            this.sessions = sessions;
+            this.title = title;
+            this.runtimeNotice = runtimeNotice;
+            this.failureDetail = failureDetail;
+            this.ctrl = ctrl;
+            this.alt = alt;
+            this.shift = shift;
+            this.fn = fn;
+            this.backMapsEscape = backMapsEscape;
+            this.textSp = textSp;
+            this.extraKeys = extraKeys;
+            this.wakeLockHeld = wakeLockHeld;
+        }
+    }
 
     private final RuntimeInstaller runtime;
     private final List<TerminalSession> sessions = new ArrayList<>();
-    private final LinearLayout content;
-    private final LinearLayout toolbar;
-    private final FrameLayout terminalHost;
-    private final LinearLayout extraKeysHost;
-    private final LinearLayout drawer;
-    private final LinearLayout drawerSessions;
-    private final View drawerScrim;
-    private final TextView title;
-    private final TextView drawerTitle;
-    private final View drawerDivider;
+    private final List<Runnable> observers = new ArrayList<>();
+
+    /** 构建后不再修改；`reloadProperties` 换的是整个引用。 */
+    private volatile List<List<ExtraKey>> extraKeys = Collections.emptyList();
+
     private TerminalView terminalView;
     private int selected = -1;
     private float terminalTextSp = 14f;
-    private boolean ctrl, alt, shift, fn;
-    private boolean drawerOpen;
+    private boolean ctrl;
+    private boolean alt;
+    private boolean shift;
+    private boolean fn;
     private boolean backMapsEscape;
-    private android.os.PowerManager.WakeLock wakeLock;
-    private Throwable nativeLoadError;
+    private PowerManager.WakeLock wakeLock;
+
+    /** 环境未就绪的说明；为空表示环境正常。 */
+    private String runtimeNotice;
+    /** PTY 失败详情；为空表示没失败。 */
+    private String failureDetail;
+
     private String nextSessionWorkingDirectory = TermuxConstants.TERMUX_HOME_DIR_PATH;
 
     public TermuxTerminalPane(Context context, RuntimeInstaller runtime) {
-        this(context,runtime,false,false);
-    }
-
-    public TermuxTerminalPane(Context context, RuntimeInstaller runtime, boolean neonTheme) {
-        this(context,runtime,neonTheme,false);
-    }
-
-    public TermuxTerminalPane(Context context, RuntimeInstaller runtime, boolean neonTheme, boolean lightTheme) {
         super(context);
         this.runtime = runtime;
-        applyPaletteValues(neonTheme,lightTheme);
-        setBackgroundColor(BG);
-        setLayoutParams(new ViewGroup.LayoutParams(-1, -1));
+        // 上游 TerminalView 自己会按模拟器的背景色绘制，这里的底色只在
+        // 「还没有会话 / 会话已退出」的空档里露出来，取 ANSI 调色板的 0 号色（黑）。
+        setBackgroundColor(Color.BLACK);
 
-        content = new LinearLayout(context);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setBackgroundColor(BG);
-        addView(content, new FrameLayout.LayoutParams(-1, -1));
+        if (runtime.isInstalled()) {
+            newSession();
+        } else {
+            showRuntimeNotice();
+        }
+        reloadProperties();
+    }
 
-        toolbar = new LinearLayout(context);
-        toolbar.setOrientation(LinearLayout.HORIZONTAL);
-        toolbar.setGravity(Gravity.CENTER_VERTICAL);
-        toolbar.setPadding(dp(4), 0, dp(4), 0);
-        toolbar.setBackgroundColor(BAR);
-        toolbar.addView(action("☰", v -> toggleDrawer()), lp(dp(44), dp(42)));
-        title = label("Terminal", 12, TEXT, true);
-        title.setGravity(Gravity.CENTER_VERTICAL);
-        toolbar.addView(title, new LinearLayout.LayoutParams(0, dp(42), 1));
-        toolbar.addView(action("⌨", v -> toggleKeyboard()), lp(dp(40), dp(36)));
-        toolbar.addView(action("⋮", v -> showQuickActions()), lp(dp(40), dp(36)));
-        content.addView(toolbar, new LinearLayout.LayoutParams(-1, dp(42)));
+    // ------------------------------------------------------------------ 状态分发
 
-        terminalHost = new FrameLayout(context);
-        terminalHost.setBackgroundColor(BG);
-        content.addView(terminalHost, new LinearLayout.LayoutParams(-1, 0, 1));
+    /** 当前快照。每次调用都新建，不做缓存 —— 它只在低频变化时被读一次。 */
+    public State state() {
+        List<SessionInfo> rows = new ArrayList<>(sessions.size());
+        for (int i = 0; i < sessions.size(); i++) {
+            TerminalSession session = sessions.get(i);
+            String name = session.mSessionName == null
+                ? "session " + (i + 1)
+                : session.mSessionName;
+            rows.add(new SessionInfo(name, session.isRunning(), i == selected));
+        }
+        return new State(rows, currentTitle(), runtimeNotice, failureDetail,
+            ctrl, alt, shift, fn, backMapsEscape, terminalTextSp, extraKeys,
+            wakeLock != null && wakeLock.isHeld());
+    }
 
-        extraKeysHost = new LinearLayout(context);
-        extraKeysHost.setOrientation(LinearLayout.VERTICAL);
-        extraKeysHost.setBackgroundColor(BAR);
-        UiMotion.enableLayoutChanges(extraKeysHost);
-        boolean landscape=getResources().getConfiguration().orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE;
-        content.addView(extraKeysHost, new LinearLayout.LayoutParams(-1, dp(landscape?68:82)));
+    /** 登记变更回调。回调在主线程执行（本类的所有状态变化都发生在主线程）。 */
+    public void addObserver(Runnable observer) {
+        if (observer != null && !observers.contains(observer)) observers.add(observer);
+    }
 
-        // Tiny left-edge gesture target, matching the discoverability of Termux's session drawer.
-        View edge = new View(context);
-        FrameLayout.LayoutParams edgeLp = new FrameLayout.LayoutParams(dp(18), -1, Gravity.LEFT);
-        edge.setOnTouchListener(new OnTouchListener() {
-            float downX;
-            @Override public boolean onTouch(View v, MotionEvent e) {
-                if (e.getActionMasked() == MotionEvent.ACTION_DOWN) { downX = e.getX(); return true; }
-                if (e.getActionMasked() == MotionEvent.ACTION_UP) { if (e.getX() - downX > dp(4)) openDrawer(); return true; }
-                return true;
+    public void removeObserver(Runnable observer) {
+        observers.remove(observer);
+    }
+
+    /**
+     * 状态变了。
+     *
+     * <p>遍历前先复制一份：观察者里很可能有 Compose 的 `DisposableEffect`，
+     * 它会在回调中（间接地）注销自己，那会让正在遍历的列表被改。
+     */
+    private void notifyStateChanged() {
+        if (observers.isEmpty()) return;
+        for (Runnable observer : new ArrayList<>(observers)) {
+            try {
+                observer.run();
+            } catch (Throwable error) {
+                Log.e(LOG_TAG, "terminal state observer failed", error);
             }
-        });
-        addView(edge, edgeLp);
-
-        drawerScrim = new View(context);
-        drawerScrim.setBackgroundColor(Color.argb(150, 0, 0, 0));
-        drawerScrim.setVisibility(GONE);
-        drawerScrim.setAlpha(0f);
-        drawerScrim.setOnClickListener(v -> closeDrawer());
-        addView(drawerScrim, new FrameLayout.LayoutParams(-1, -1));
-
-        drawer = new LinearLayout(context);
-        drawer.setOrientation(LinearLayout.VERTICAL);
-        drawer.setBackgroundColor(DRAWER_BG);
-        drawer.setPadding(dp(10), dp(12), dp(10), dp(10));
-        FrameLayout.LayoutParams dlp = new FrameLayout.LayoutParams(dp(286), -1, Gravity.LEFT);
-        drawer.setVisibility(GONE);
-        addView(drawer, dlp);
-
-        drawerTitle = label("Termux sessions", 14, TEXT, true);
-        drawerTitle.setGravity(Gravity.CENTER_VERTICAL);
-        drawer.addView(drawerTitle, new LinearLayout.LayoutParams(-1, dp(44)));
-        drawer.addView(drawerAction("＋  New session", v -> { newSession(); closeDrawer(); }), new LinearLayout.LayoutParams(-1, dp(42)));
-
-        drawerDivider = new View(context); drawerDivider.setBackgroundColor(DIVIDER);
-        LinearLayout.LayoutParams lineLp = new LinearLayout.LayoutParams(-1, 1); lineLp.setMargins(0, dp(7), 0, dp(7));
-        drawer.addView(drawerDivider, lineLp);
-
-        ScrollView scroll = new ScrollView(context);
-        drawerSessions = new LinearLayout(context);
-        drawerSessions.setOrientation(LinearLayout.VERTICAL);
-        UiMotion.enableLayoutChanges(drawerSessions);
-        scroll.addView(drawerSessions, new ScrollView.LayoutParams(-1, -2));
-        drawer.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        drawer.addView(drawerAction("⌨  Toggle keyboard", v -> { toggleKeyboard(); closeDrawer(); }), new LinearLayout.LayoutParams(-1, dp(40)));
-        drawer.addView(drawerAction("↻  Reload properties", v -> { reloadProperties(); closeDrawer(); }), new LinearLayout.LayoutParams(-1, dp(40)));
-
-        nativeLoadError = preloadNativePty();
-        reloadProperties();
-        UiMotion.bindInteractive(content);
-        if (runtime.isInstalled()) newSession(); else showRuntimeMessage();
-    }
-
-    public void onRuntimeReady() { if (sessions.isEmpty()) newSession(); }
-    public void setNextSessionWorkingDirectory(String path) { if(path!=null && new File(path).isDirectory()) nextSessionWorkingDirectory=path; }
-    public void setKeyboardOffset(int offset,boolean animate){
-        int target=Math.max(0,offset);
-        if(terminalHost.getPaddingBottom()!=target){
-            terminalHost.setClipToPadding(target>0);
-            terminalHost.setPadding(0,0,0,target);
-        }
-        if(animate){
-            extraKeysHost.animate().cancel();
-            extraKeysHost.animate().translationY(-target).setDuration(180L).setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
-        }else if(extraKeysHost.getTranslationY()!=-target)extraKeysHost.setTranslationY(-target);
-    }
-
-    /** Recolors both Termux chrome and live emulator palettes without restarting PTYs or losing scrollback. */
-    public void applyTheme(boolean neon) { applyTheme(neon,false); }
-
-    public void applyTheme(boolean neon,boolean light) {
-        if (neon == neonTheme && light == lightTheme) { applyTerminalPaletteToSessions(); return; }
-        int oldText=TEXT,oldMuted=MUTED,oldAccent=ACCENT,oldError=ERROR;
-        applyPaletteValues(neon,light);
-        setBackgroundColor(BG);content.setBackgroundColor(BG);terminalHost.setBackgroundColor(BG);
-        toolbar.setBackgroundColor(BAR);extraKeysHost.setBackgroundColor(BAR);drawer.setBackgroundColor(DRAWER_BG);
-        drawerDivider.setBackgroundColor(DIVIDER);
-        recolorTextTree(this,oldText,oldMuted,oldAccent,oldError);
-        reloadProperties();
-        applyTerminalPaletteToSessions();
-        refreshDrawerSessions();
-        if(terminalView!=null){terminalView.onScreenUpdated();terminalView.invalidate();}
-        UiMotion.themeChanged(content);
-    }
-
-    private void applyPaletteValues(boolean neon,boolean light) {
-        neonTheme=neon;lightTheme=light;
-        if(light){
-            BG=Color.rgb(246,248,252);BAR=Color.WHITE;DRAWER_BG=Color.rgb(238,242,248);
-            KEY_BG=Color.rgb(231,235,243);DIVIDER=Color.rgb(216,222,232);SELECTED_BG=Color.rgb(225,230,245);
-            TEXT=Color.rgb(29,36,51);MUTED=Color.rgb(99,112,132);ACCENT=Color.rgb(83,91,214);ERROR=Color.rgb(194,65,75);
-        }else if(neon){
-            BG=Color.rgb(4,9,20);BAR=Color.rgb(12,20,42);DRAWER_BG=Color.rgb(13,23,43);
-            KEY_BG=Color.rgb(26,35,64);DIVIDER=Color.rgb(51,62,91);SELECTED_BG=Color.rgb(42,43,83);
-            TEXT=Color.rgb(244,243,255);MUTED=Color.rgb(142,149,179);ACCENT=Color.rgb(142,78,255);ERROR=Color.rgb(255,111,132);
-        }else{
-            BG=Color.rgb(0,0,0);BAR=Color.rgb(18,18,18);DRAWER_BG=Color.rgb(28,28,28);
-            KEY_BG=Color.rgb(34,34,34);DIVIDER=Color.rgb(58,58,58);SELECTED_BG=Color.rgb(44,44,44);
-            TEXT=Color.rgb(238,238,238);MUTED=Color.rgb(158,158,158);ACCENT=Color.rgb(217,119,87);ERROR=Color.rgb(214,120,111);
         }
     }
 
-    private void recolorTextTree(View view,int oldText,int oldMuted,int oldAccent,int oldError){
-        if(view instanceof TextView){TextView t=(TextView)view;int color=t.getCurrentTextColor();
-            if(color==oldText)t.setTextColor(TEXT);else if(color==oldMuted)t.setTextColor(MUTED);
-            else if(color==oldAccent)t.setTextColor(ACCENT);else if(color==oldError)t.setTextColor(ERROR);
+    // ------------------------------------------------------------------ 对外动作（Compose 调用）
+
+    /** 环境准备就绪时调用；没有会话就起一个。 */
+    public void onRuntimeReady() {
+        if (sessions.isEmpty()) newSession();
+    }
+
+    /** 项目目录变化：下一次新建会话用它当工作目录。目录不存在则忽略。 */
+    public void setNextSessionWorkingDirectory(String path) {
+        if (path != null && new File(path).isDirectory()) nextSessionWorkingDirectory = path;
+    }
+
+    public void newSession() {
+        if (!runtime.isInstalled()) {
+            showRuntimeNotice();
+            return;
         }
-        if(view instanceof ViewGroup){ViewGroup g=(ViewGroup)view;for(int i=0;i<g.getChildCount();i++)recolorTextTree(g.getChildAt(i),oldText,oldMuted,oldAccent,oldError);}
-    }
-
-    public void closeAll() {
-        try { if (wakeLock != null && wakeLock.isHeld()) wakeLock.release(); } catch (Throwable ignored) {}
-        for (TerminalSession s : new ArrayList<>(sessions)) try { s.finishIfRunning(); } catch (Throwable ignored) {}
-        sessions.clear(); selected = -1;
-    }
-
-    private void showRuntimeMessage() {
-        terminalHost.removeAllViews();
-        // 本应用的运行环境是**用户点按钮触发**安装的，不是自动准备中。
-        // 原版这里写的是"正在准备…第一次启动只需本地解压"，会让人干等一件
-        // 实际没在发生的事，所以改成指路：去哪里把它装上。
-        TextView t = label("内置 Termux 环境尚未就绪。\n请先在侧栏「准备内置 Termux 环境」里初始化，完成后这里就是可输入的真实终端。", 13, MUTED, false);
-        t.setGravity(Gravity.CENTER); t.setPadding(dp(24), dp(24), dp(24), dp(24));
-        terminalHost.addView(t, new FrameLayout.LayoutParams(-1, -1));
-        UiMotion.pageIn(t);
-    }
-
-    private void newSession() {
-        if (!runtime.isInstalled()) { showRuntimeMessage(); return; }
-        nativeLoadError = preloadNativePty();
-        if (nativeLoadError != null) { showTerminalFailure(nativeLoadError); return; }
-        String shell = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/bash";
-        if (!new File(shell).isFile()) { showRuntimeMessage(); return; }
-        String cwd = new File(nextSessionWorkingDirectory).isDirectory() ? nextSessionWorkingDirectory : TermuxConstants.TERMUX_HOME_DIR_PATH;
+        failureDetail = null;
+        Throwable loadError = preloadNativePty();
+        if (loadError != null) {
+            showTerminalFailure(loadError);
+            return;
+        }
+        String shell = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/" + SHELL_NAME;
+        if (!new File(shell).isFile()) {
+            showRuntimeNotice();
+            return;
+        }
+        String cwd = new File(nextSessionWorkingDirectory).isDirectory()
+            ? nextSessionWorkingDirectory
+            : TermuxConstants.TERMUX_HOME_DIR_PATH;
         String[] args = new String[]{shell, "-l"};
-        TerminalSession session = new TerminalSession(shell, cwd, args, environmentArray(), 5000, this);
-        session.mSessionName = "bash " + (sessions.size() + 1);
+
+        // 前面几道关都过了，说明环境和 PTY 都是好的：把之前的"未就绪"提示撤掉。
+        runtimeNotice = null;
+
+        TerminalSession session = new TerminalSession(shell, cwd, args, environmentArray(),
+            SCROLLBACK_LINES, this);
+        session.mSessionName = SESSION_NAME_PREFIX + (sessions.size() + 1);
         sessions.add(session);
         applyTerminalPalette(session);
         selectSession(sessions.size() - 1);
-        refreshDrawerSessions();
     }
 
-    private Throwable preloadNativePty() {
-        try {
-            if (JNI.isLoaded()) return null;
-            String dir = getContext().getApplicationInfo().nativeLibraryDir;
-            File library = new File(dir, "libtermux.so");
-            if (!library.isFile()) throw new UnsatisfiedLinkError("libtermux.so is missing from nativeLibraryDir: " + library);
-            JNI.load(library.getAbsolutePath());
-            return null;
-        } catch (Throwable t) {
-            Log.e("ZhiTerminal", "Could not load libtermux.so", t);
-            return t;
-        }
-    }
-
-    private String[] environmentArray() {
-        SandboxShell.ensureCliInstalled(getContext());
-        Map<String,String> e = new LinkedHashMap<>();
-        String prefix = TermuxConstants.TERMUX_PREFIX_DIR_PATH;
-        e.put("HOME", TermuxConstants.TERMUX_HOME_DIR_PATH);
-        e.put("PREFIX", prefix);
-        e.put("TMPDIR", prefix + "/tmp");
-        e.put("PATH", prefix + "/bin");
-        // 终端 PTY 直接 exec <prefix>/bin/bash（经 libtermux.so），不走 TermuxShellExecutor，
-        // 所以这条路径必须**单独**设置 LD_LIBRARY_PATH。
-        // 内置 Termux 的 ELF 现在不再被改写前缀（见 RuntimeInstaller），它们内嵌的
-        // DT_RUNPATH 指向不存在的 /data/data/com.termux/files/usr/lib，
-        // 少了这个变量终端里所有二进制都会 CANNOT LINK EXECUTABLE。
-        e.put("LD_LIBRARY_PATH", prefix + "/lib");
-        e.put("SHELL", prefix + "/bin/bash");
-        e.put("TERM", "xterm-256color");
-        e.put("COLORTERM", "truecolor");
-        e.put("LANG", "en_US.UTF-8");
-        e.put("TERMUX_VERSION", "0.118.3");
-        e.put("TERMUX_APP__PACKAGE_NAME", getContext().getPackageName());
-        e.put("TERMUX_APP__PACKAGE_MANAGER", "apt");
-        e.put("TERMUX_APP__PACKAGE_VARIANT", "apt-android-7");
-        e.put("TERMUX_APP__FILES_DIR", TermuxConstants.TERMUX_FILES_DIR_PATH);
-        e.put("TERMUX_APP__DATA_DIR", TermuxConstants.TERMUX_DATA_DIR_PATH);
-        e.put("TERMUX_APP__LEGACY_DATA_DIR", TermuxConstants.TERMUX_DATA_DIR_PATH);
-        e.put("TERMUX_APP__PID", Integer.toString(android.os.Process.myPid()));
-        e.put("TERMUX_APP__UID", Integer.toString(android.os.Process.myUid()));
-        e.put("TERMUX_APP__TARGET_SDK", "28");
-        e.put("TERMUX_MAIN_PACKAGE_FORMAT", "debian");
-        e.put("TERMUX_PKG_NO_MIRROR_SELECT", "1");
-        e.put("TERMUX_APK_RELEASE", "ZHICODE");
-        e.put("TERMUX__HOME", TermuxConstants.TERMUX_HOME_DIR_PATH);
-        e.put("TERMUX__PREFIX", prefix);
-        e.put("TERMUX__ROOTFS_DIR", TermuxConstants.TERMUX_FILES_DIR_PATH);
-        e.put("TERMUX__ROOTFS", TermuxConstants.TERMUX_FILES_DIR_PATH);
-        e.put("ZHICODE_APP", "1");
-        e.put("ZHICODE_TERMINAL_SESSION", "1");
-        e.put("ZHICODE_SANDBOX_BRIDGE_DIR", SandboxShell.bridgeDir(getContext()));
-        e.put("ZHICODE_APK_PATH", getContext().getApplicationInfo().sourceDir);
-        List<String> out = new ArrayList<>();
-        for (Map.Entry<String,String> x : e.entrySet()) out.add(x.getKey() + "=" + x.getValue());
-        return out.toArray(new String[0]);
-    }
-
-    private void selectSession(int index) {
+    public void selectSession(int index) {
         if (index < 0 || index >= sessions.size()) return;
         selected = index;
-        terminalHost.removeAllViews();
+        failureDetail = null;
+        removeAllViews();
 
-        // Important: do not attach the PTY before TerminalView has completed its first layout.
-        // attachSession() immediately calculates rows/columns and loads libtermux.so. In the old
-        // build this happened while the pane was still being inserted into another FrameLayout,
-        // so any JNI/runtime error escaped from onSizeChanged and killed the whole Activity.
+        // 关键：TerminalView 完成首次 layout 之前不能 attach PTY（见类注释）。
         final TerminalView view = new TerminalView(getContext(), null);
         view.setTerminalViewClient(this);
         view.setTextSize(spPx(terminalTextSp));
-        view.setFocusable(true); view.setFocusableInTouchMode(true);
+        view.setFocusable(true);
+        view.setFocusableInTouchMode(true);
         terminalView = view;
-        terminalHost.addView(view, new FrameLayout.LayoutParams(-1, -1));
-        UiMotion.pageIn(view);
-        updateTitle();
-        refreshDrawerSessions();
+        addView(view, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        notifyStateChanged();
 
         view.post(() -> {
+            // 三道校验：这三件事在 post 落地前都可能已经变了。
             if (terminalView != view || selected != index || index >= sessions.size()) return;
             try {
-                TerminalSession attached=sessions.get(index);
+                TerminalSession attached = sessions.get(index);
                 view.attachSession(attached);
                 applyTerminalPalette(attached);
                 view.onScreenUpdated();
                 view.requestFocus();
-                view.postDelayed(this::showKeyboard, 180);
+                view.postDelayed(TermuxTerminalPane.this::showKeyboard, 180);
             } catch (Throwable error) {
-                Log.e("ZhiTerminal", "Failed to attach native Termux PTY", error);
+                Log.e(LOG_TAG, "Failed to attach native Termux PTY", error);
                 if (terminalView == view) showTerminalFailure(error);
             }
         });
     }
 
-    private void showTerminalFailure(Throwable error) {
-        terminalHost.removeAllViews();
-        terminalView = null;
-        LinearLayout box = new LinearLayout(getContext()); box.setOrientation(LinearLayout.VERTICAL); box.setGravity(Gravity.CENTER);
-        box.setPadding(dp(22),dp(22),dp(22),dp(22)); box.setBackgroundColor(BG);
-        TextView h=label("Terminal failed to start",15,ERROR,true);h.setGravity(Gravity.CENTER);box.addView(h,new LinearLayout.LayoutParams(-1,dp(36)));
-        String detail=terminalErrorDetail(error);
-        TextView m=label(detail+"\n\nThe app stayed open so you can repair the runtime instead of crashing.",11,MUTED,false);
-        m.setTypeface(Typeface.MONOSPACE);m.setTextIsSelectable(true);m.setGravity(Gravity.CENTER);box.addView(m,new LinearLayout.LayoutParams(-1,-2));
-        TextView retry=drawerAction("↻  Retry terminal",v->selectSession(Math.max(0,selected)));retry.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(dp(180),dp(42));rp.setMargins(0,dp(16),0,0);box.addView(retry,rp);
-        terminalHost.addView(box,new FrameLayout.LayoutParams(-1,-1));
-        UiMotion.bindInteractive(box);
-        UiMotion.pageIn(box);
-    }
-
-    private String terminalErrorDetail(Throwable error) {
-        if (error == null) return "Unknown PTY error";
-        StringBuilder b = new StringBuilder();
-        Throwable t = error; int depth = 0;
-        while (t != null && depth++ < 5) {
-            if (b.length() > 0) b.append("\ncaused by: ");
-            b.append(t.getClass().getSimpleName()).append(": ").append(String.valueOf(t.getMessage()));
-            t = t.getCause();
+    /**
+     * 重试当前终端（"Terminal failed to start" 界面上那个按钮）。
+     *
+     * <p>没有会话时改为新建：原实现无论何种失败都调 `selectSession(max(0, selected))`，
+     * 而 `libtermux.so` 加载失败时列表本来就是空的，那个调用会立刻被"下标越界"
+     * 挡回去 —— 也就是说这种情况下**重试按钮什么都不会发生**。这里补上这一支。
+     */
+    public void retryTerminal() {
+        if (sessions.isEmpty()) {
+            newSession();
+        } else {
+            selectSession(Math.max(0, selected));
         }
-        Throwable load = JNI.getLoadError();
-        if (load != null && load != error) b.append("\nloader: ").append(load.getClass().getSimpleName()).append(": ").append(String.valueOf(load.getMessage()));
-        return b.toString();
     }
 
-    private void updateTitle() {
-        TerminalSession s = current();
-        String t = s == null ? null : s.getTitle();
-        if (t == null || t.trim().isEmpty()) t = s == null ? "Terminal" : s.mSessionName;
-        String next=t == null || t.trim().isEmpty() ? "Terminal" : t;
-        if(!String.valueOf(title.getText()).equals(next)){title.setText(next);UiMotion.contentUpdated(title,false);}
-    }
-
-    private void refreshDrawerSessions() {
-        if (drawerSessions == null) return;
-        drawerSessions.removeAllViews();
-        for (int i = 0; i < sessions.size(); i++) {
-            final int idx = i;
-            TerminalSession s = sessions.get(i);
-            String n = s.mSessionName == null ? "session " + (i + 1) : s.mSessionName;
-            String sub = s.isRunning() ? "running" : "finished";
-            LinearLayout row = new LinearLayout(getContext()); row.setOrientation(LinearLayout.HORIZONTAL); row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(8), dp(5), dp(4), dp(5));
-            if (i == selected) row.setBackgroundColor(SELECTED_BG);
-            TextView text = label((i == selected ? "●  " : "○  ") + n + "\n    " + sub, 12, i == selected ? TEXT : MUTED, i == selected);
-            row.addView(text, new LinearLayout.LayoutParams(0, dp(52), 1));
-            TextView close = label("×", 18, MUTED, false); close.setGravity(Gravity.CENTER); close.setOnClickListener(v -> closeSession(idx));
-            row.addView(close, new LinearLayout.LayoutParams(dp(38), dp(42)));
-            row.setOnClickListener(v -> { selectSession(idx); closeDrawer(); });
-            row.setOnLongClickListener(v -> { selected = idx; renameSession(); return true; });
-            drawerSessions.addView(row, new LinearLayout.LayoutParams(-1, dp(58)));
-        }
-        UiMotion.bindInteractive(drawerSessions);
-    }
-
-    private void closeSession(int index) {
+    /**
+     * 关闭一个会话。
+     *
+     * <p>关掉最后一个时会自动新建一个：否则终端变成一块什么都没有的黑框，
+     * 用户还得自己去找「新建会话」——而他在这一步的意图明显是"继续用终端"。
+     */
+    public void closeSession(int index) {
         if (index < 0 || index >= sessions.size()) return;
-        try { sessions.get(index).finishIfRunning(); } catch (Throwable ignored) {}
+        try {
+            sessions.get(index).finishIfRunning();
+        } catch (Throwable ignored) {
+            // 会话可能已经自己退出了，重复 finish 抛异常不代表这次操作失败。
+        }
         sessions.remove(index);
-        if (sessions.isEmpty()) { selected = -1; terminalHost.removeAllViews(); newSession(); }
-        else selectSession(Math.min(index, sessions.size() - 1));
-        refreshDrawerSessions();
+        if (sessions.isEmpty()) {
+            selected = -1;
+            removeAllViews();
+            terminalView = null;
+            newSession();
+        } else {
+            selectSession(Math.min(index, sessions.size() - 1));
+        }
+        notifyStateChanged();
     }
 
-    private void openDrawer() {
-        if (drawerOpen) return;
-        drawerOpen = true;
-        UiMotion.drawerIn(drawerScrim,drawer,286f);
-        refreshDrawerSessions();
+    /**
+     * 给会话改名。
+     *
+     * @return 是否真的改了（空名字会被拒绝，与原实现一致）
+     */
+    public boolean renameSession(int index, String name) {
+        if (index < 0 || index >= sessions.size()) return false;
+        String trimmed = name == null ? "" : name.trim();
+        if (trimmed.isEmpty()) return false;
+        sessions.get(index).mSessionName = trimmed;
+        notifyStateChanged();
+        return true;
     }
 
-    private void closeDrawer() {
-        if (!drawerOpen) return;
-        drawerOpen = false;
-        UiMotion.drawerOut(drawerScrim,drawer,286f,null);
+    public void resetTerminal() {
+        TerminalSession session = current();
+        if (session != null) session.reset();
     }
 
-    private void toggleDrawer() { if (drawerOpen) closeDrawer(); else openDrawer(); }
+    /** 杀掉当前 shell 进程（会话本身留在列表里，显示为已停止）。 */
+    public void killShell() {
+        TerminalSession session = current();
+        if (session != null) session.finishIfRunning();
+    }
 
-    private void reloadProperties() {
+    public void changeFont(int delta) {
+        terminalTextSp = Math.max(MIN_TEXT_SP, Math.min(MAX_TEXT_SP, terminalTextSp + delta));
+        if (terminalView != null) terminalView.setTextSize(spPx(terminalTextSp));
+        notifyStateChanged();
+    }
+
+    /** 把一个锁定的修饰键置反。 */
+    private void toggleLatch(String upper) {
+        switch (upper) {
+            case "CTRL": ctrl = !ctrl; break;
+            case "ALT": alt = !alt; break;
+            case "SHIFT": shift = !shift; break;
+            case "FN": fn = !fn; break;
+            default: return;
+        }
+        notifyStateChanged();
+    }
+
+    public void reloadProperties() {
         backMapsEscape = false;
-        String matrix = readTermuxProperty("extra-keys");
         String back = readTermuxProperty("back-key");
         if (back != null) backMapsEscape = "escape".equalsIgnoreCase(back.trim());
-        buildExtraKeys(matrix == null || matrix.trim().isEmpty() ? DEFAULT_EXTRA_KEYS : matrix);
+        String matrix = readTermuxProperty("extra-keys");
+        parseExtraKeys(matrix == null || matrix.trim().isEmpty() ? DEFAULT_EXTRA_KEYS : matrix);
+        notifyStateChanged();
     }
 
-    private String readTermuxProperty(String wanted) {
-        File f = new File(TermuxConstants.TERMUX_HOME_DIR_PATH + "/.termux/termux.properties");
-        if (!f.isFile()) return null;
-        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
-            String line; StringBuilder pending = new StringBuilder();
-            while ((line = r.readLine()) != null) {
-                String trimmed = line.trim();
-                if (trimmed.startsWith("#") || trimmed.isEmpty()) continue;
-                if (pending.length() > 0) pending.append(trimmed); else pending.append(line);
-                if (trimmed.endsWith("\\")) { pending.setLength(pending.length() - 1); continue; }
-                String full = pending.toString(); pending.setLength(0);
-                int eq = full.indexOf('='); if (eq < 0) continue;
-                if (wanted.equals(full.substring(0, eq).trim())) return full.substring(eq + 1).trim();
-            }
-        } catch (Exception ignored) {}
-        return null;
-    }
-
-    private void buildExtraKeys(String source) {
-        if (extraKeysHost == null) return;
-        extraKeysHost.removeAllViews();
-        try {
-            String normalized = source.replace('\'', '"');
-            Pattern p = Pattern.compile("([\\{,]\\s*)(key|popup|macro|display)\\s*:");
-            Matcher m = p.matcher(normalized); normalized = m.replaceAll("$1\"$2\":");
-            JSONArray matrix = new JSONArray(normalized);
-            for (int i = 0; i < matrix.length(); i++) {
-                JSONArray row = matrix.getJSONArray(i);
-                LinearLayout r = extraKeyRow();
-                for (int j = 0; j < row.length(); j++) {
-                    Object item = row.get(j); String key; String display;
-                    if (item instanceof JSONObject) {
-                        JSONObject o = (JSONObject)item;
-                        key = o.optString("key", o.optString("macro", ""));
-                        display = o.optString("display", displayName(key));
-                    } else { key = String.valueOf(item); display = displayName(key); }
-                    final String action = key;
-                    TextView b = key(display);
-                    b.setOnClickListener(v -> handleExtraKey(action, b));
-                    r.addView(b, new LinearLayout.LayoutParams(0, -1, 1));
-                }
-                extraKeysHost.addView(r, new LinearLayout.LayoutParams(-1, 0, 1));
-            }
-            if (matrix.length() == 0) buildDefaultExtraKeys();
-        } catch (Exception e) { buildDefaultExtraKeys(); }
-        UiMotion.bindInteractive(extraKeysHost);
-        UiMotion.staggerChildren(extraKeysHost,3);
-    }
-
-    private void buildDefaultExtraKeys() {
-        extraKeysHost.removeAllViews();
-        String[][] rows = {{"ESC","/","-","HOME","UP","END","PGUP"},{"TAB","CTRL","ALT","LEFT","DOWN","RIGHT","PGDN"}};
-        for (String[] row : rows) {
-            LinearLayout r = extraKeyRow();
-            for (String k : row) { final String action = k; TextView b = key(displayName(k)); b.setOnClickListener(v -> handleExtraKey(action, b)); r.addView(b, new LinearLayout.LayoutParams(0, -1, 1)); }
-            extraKeysHost.addView(r, new LinearLayout.LayoutParams(-1, 0, 1));
-        }
-    }
-
-    private LinearLayout extraKeyRow() {
-        LinearLayout row = new LinearLayout(getContext()); row.setOrientation(LinearLayout.HORIZONTAL); row.setGravity(Gravity.CENTER_VERTICAL); row.setPadding(dp(3), dp(2), dp(3), dp(2)); row.setBackgroundColor(BAR); return row;
-    }
-
-    private String displayName(String key) {
-        if (key == null) return "";
-        switch (key.toUpperCase()) {
-            case "LEFT": return "←"; case "RIGHT": return "→"; case "UP": return "↑"; case "DOWN": return "↓";
-            default: return key;
-        }
-    }
-
-    private void handleExtraKey(String raw, TextView source) {
+    /**
+     * 按下扩展键。
+     *
+     * @param raw 键的**动作名**（不是显示名）；含空白时按宏处理，逐个递归发出去
+     */
+    public void sendExtraKey(String raw) {
         if (raw == null) return;
-        String k = raw.trim(); String upper = k.toUpperCase();
-        if (upper.contains(" ")) { for (String token : k.split("\\s+")) handleExtraKey(token, source); return; }
+        String key = raw.trim();
+        String upper = key.toUpperCase();
+
+        // 宏：`extra-keys` 里可以写 "CTRL c" 这种一串动作，按空白切开逐个执行。
+        if (upper.contains(" ")) {
+            for (String token : key.split("\\s+")) sendExtraKey(token);
+            return;
+        }
         switch (upper) {
-            case "CTRL": ctrl = !ctrl; source.setTextColor(ctrl ? ACCENT : TEXT); UiMotion.contentUpdated(source,true); return;
-            case "ALT": alt = !alt; source.setTextColor(alt ? ACCENT : TEXT); UiMotion.contentUpdated(source,true); return;
-            case "SHIFT": shift = !shift; source.setTextColor(shift ? ACCENT : TEXT); UiMotion.contentUpdated(source,true); return;
-            case "FN": fn = !fn; source.setTextColor(fn ? ACCENT : TEXT); UiMotion.contentUpdated(source,true); return;
-            case "KEYBOARD": toggleKeyboard(); return;
-            case "DRAWER": openDrawer(); return;
+            case "CTRL":
+            case "ALT":
+            case "SHIFT":
+            case "FN":
+                toggleLatch(upper);
+                return;
+            case "KEYBOARD":
+                toggleKeyboard();
+                return;
+            case "DRAWER":
+                // 抽屉现在由 Compose 画，动作也从 Compose 直接触发；
+                // 属性文件里写了 DRAWER 就当没写，不能让它悄悄什么都不做。
+                Log.w(LOG_TAG, "extra-keys 里的 DRAWER 已由 Compose 接管，这里不再处理");
+                return;
             case "ESC": write("\u001b"); return;
             case "TAB": write("\t"); return;
             case "ENTER": write("\r"); return;
-            case "BKSP": case "BACKSPACE": write("\u007f"); return;
+            case "BKSP":
+            case "BACKSPACE": write("\u007f"); return;
             case "HOME": write("\u001b[H"); return;
             case "END": write("\u001b[F"); return;
             case "PGUP": write("\u001b[5~"); return;
@@ -544,110 +476,584 @@ public final class TermuxTerminalPane extends FrameLayout implements TerminalVie
             case "RIGHT": write("\u001b[C"); return;
             case "UP": write("\u001b[A"); return;
             case "DOWN": write("\u001b[B"); return;
-            default: write(k);
+            default: write(key);
         }
     }
 
-    private TextView key(String s) { TextView t = label(s, 10, TEXT, true); t.setGravity(Gravity.CENTER); t.setBackgroundColor(KEY_BG); t.setPadding(dp(2), 0, dp(2), 0); return t; }
+    public void showKeyboard() {
+        if (terminalView == null) return;
+        terminalView.requestFocus();
+        InputMethodManager imm =
+            (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) imm.showSoftInput(terminalView, InputMethodManager.SHOW_IMPLICIT);
+    }
 
-    private void write(String s) {
-        TerminalSession x = current(); if (x == null) return;
-        byte[] b = s.getBytes(StandardCharsets.UTF_8); x.write(b, 0, b.length);
+    public void toggleKeyboard() {
+        if (terminalView == null) return;
+        terminalView.requestFocus();
+        InputMethodManager imm =
+            (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) imm.toggleSoftInput(InputMethodManager.SHOW_IMPLICIT, 0);
+    }
+
+    /** 复制终端的当前选区。返回给用户看的提示，没选到东西时返回 null。 */
+    public String copySelection() {
+        if (terminalView == null) return null;
+        String text = terminalView.getSelectedText();
+        if (text == null || text.isEmpty()) return null;
+        clipboard().setPrimaryClip(ClipData.newPlainText("terminal", text));
+        return "Copied";
+    }
+
+    /** 把剪贴板内容写进当前会话。 */
+    public void pasteFromClipboard() {
+        ClipboardManager manager = clipboard();
+        if (!manager.hasPrimaryClip() || manager.getPrimaryClip() == null) return;
+        if (manager.getPrimaryClip().getItemCount() <= 0) return;
+        CharSequence text = manager.getPrimaryClip().getItemAt(0).coerceToText(getContext());
+        TerminalSession session = current();
+        if (text == null || session == null) return;
+        byte[] bytes = text.toString().getBytes(StandardCharsets.UTF_8);
+        session.write(bytes, 0, bytes.length);
+    }
+
+    /**
+     * 置反 WakeLock。
+     *
+     * @return 给用户看的提示（成功与失败都有）；拿不到 PowerManager 时返回 null
+     */
+    public String toggleWakeLock() {
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) {
+                wakeLock.release();
+                notifyStateChanged();
+                return "Wake lock released";
+            }
+            PowerManager manager =
+                (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+            if (manager == null) return null;
+            wakeLock = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
+                TermuxConstants.BRAND_SLUG + WAKELOCK_SUFFIX);
+            wakeLock.acquire();
+            notifyStateChanged();
+            return "Wake lock acquired";
+        } catch (Throwable error) {
+            return "Wake lock: " + error.getMessage();
+        }
+    }
+
+    /** 释放所有会话与 WakeLock。Activity 真正销毁时调用。 */
+    public void closeAll() {
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        } catch (Throwable ignored) {
+            // WakeLock 可能已经被系统回收；这里不应该阻止会话清理。
+        }
+        for (TerminalSession session : new ArrayList<>(sessions)) {
+            try {
+                session.finishIfRunning();
+            } catch (Throwable ignored) {
+                // 同上：清理阶段不因为单个会话失败而中断。
+            }
+        }
+        sessions.clear();
+        selected = -1;
+        removeAllViews();
+        terminalView = null;
+        notifyStateChanged();
+    }
+
+    // ------------------------------------------------------------------ 内部：通知与失败
+
+    private void showRuntimeNotice() {
+        runtimeNotice = RUNTIME_NOTICE;
+        failureDetail = null;
+        removeAllViews();
+        terminalView = null;
+        notifyStateChanged();
+    }
+
+    private void showTerminalFailure(Throwable error) {
+        failureDetail = terminalErrorDetail(error);
+        runtimeNotice = null;
+        removeAllViews();
+        terminalView = null;
+        notifyStateChanged();
+    }
+
+    /**
+     * 失败详情：cause 链（最多 5 层）+ 加载器自己的错误。
+     *
+     * <p>只返回详情：标题与脚注是 [FAILURE_TITLE] / [FAILURE_FOOTNOTE]，
+     * 三者样式不同（标题粗体、详情等宽且可选中），拼成一个串会丢掉这个区别。
+     */
+    private String terminalErrorDetail(Throwable error) {
+        if (error == null) return FAILURE_UNKNOWN;
+        StringBuilder builder = new StringBuilder();
+        Throwable current = error;
+        int depth = 0;
+        while (current != null && depth++ < 5) {
+            if (builder.length() > 0) builder.append("\ncaused by: ");
+            builder.append(current.getClass().getSimpleName())
+                .append(": ")
+                .append(String.valueOf(current.getMessage()));
+            current = current.getCause();
+        }
+        Throwable loadError = JNI.getLoadError();
+        if (loadError != null && loadError != error) {
+            builder.append("\nloader: ")
+                .append(loadError.getClass().getSimpleName())
+                .append(": ")
+                .append(String.valueOf(loadError.getMessage()));
+        }
+        return builder.toString();
+    }
+
+    /** 标题栏要显示的文字：优先 shell 报的标题，退回会话名，再退回 "Terminal"。 */
+    private String currentTitle() {
+        TerminalSession session = current();
+        if (session == null) return TERMINAL_TITLE_FALLBACK;
+        String title = session.getTitle();
+        if (title == null || title.trim().isEmpty()) title = session.mSessionName;
+        if (title == null || title.trim().isEmpty()) return TERMINAL_TITLE_FALLBACK;
+        return title;
+    }
+
+    // ------------------------------------------------------------------ 内部：PTY 与运行环境
+
+    private TerminalSession current() {
+        return selected >= 0 && selected < sessions.size() ? sessions.get(selected) : null;
+    }
+
+    private Throwable preloadNativePty() {
+        try {
+            if (JNI.isLoaded()) return null;
+            String dir = getContext().getApplicationInfo().nativeLibraryDir;
+            File library = new File(dir, "libtermux.so");
+            if (!library.isFile()) {
+                throw new UnsatisfiedLinkError(
+                    "libtermux.so is missing from nativeLibraryDir: " + library);
+            }
+            JNI.load(library.getAbsolutePath());
+            return null;
+        } catch (Throwable error) {
+            Log.e(LOG_TAG, "Could not load libtermux.so", error);
+            return error;
+        }
+    }
+
+    private String[] environmentArray() {
+        SandboxShell.ensureCliInstalled(getContext());
+        Map<String, String> env = new LinkedHashMap<>();
+        String prefix = TermuxConstants.TERMUX_PREFIX_DIR_PATH;
+        env.put("HOME", TermuxConstants.TERMUX_HOME_DIR_PATH);
+        env.put("PREFIX", prefix);
+        env.put("TMPDIR", prefix + "/tmp");
+        env.put("PATH", prefix + "/bin");
+        // 终端 PTY 直接 exec <prefix>/bin/bash（经 libtermux.so），不走 TermuxShellExecutor，
+        // 所以这条路径必须**单独**设置 LD_LIBRARY_PATH。
+        // 内置 Termux 的 ELF 不会被改写前缀（见 RuntimeInstaller），它们内嵌的
+        // DT_RUNPATH 指向不存在的 /data/data/com.termux/files/usr/lib，
+        // 少了这个变量终端里所有二进制都会 CANNOT LINK EXECUTABLE。
+        env.put("LD_LIBRARY_PATH", prefix + "/lib");
+        env.put("SHELL", prefix + "/bin/bash");
+        env.put("TERM", "xterm-256color");
+        env.put("COLORTERM", "truecolor");
+        env.put("LANG", "en_US.UTF-8");
+        env.put("TERMUX_VERSION", "0.118.3");
+        env.put("TERMUX_APP__PACKAGE_NAME", getContext().getPackageName());
+        env.put("TERMUX_APP__PACKAGE_MANAGER", "apt");
+        env.put("TERMUX_APP__PACKAGE_VARIANT", "apt-android-7");
+        env.put("TERMUX_APP__FILES_DIR", TermuxConstants.TERMUX_FILES_DIR_PATH);
+        env.put("TERMUX_APP__DATA_DIR", TermuxConstants.TERMUX_DATA_DIR_PATH);
+        env.put("TERMUX_APP__LEGACY_DATA_DIR", TermuxConstants.TERMUX_DATA_DIR_PATH);
+        env.put("TERMUX_APP__PID", Integer.toString(android.os.Process.myPid()));
+        env.put("TERMUX_APP__UID", Integer.toString(android.os.Process.myUid()));
+        env.put("TERMUX_APP__TARGET_SDK", "28");
+        env.put("TERMUX_MAIN_PACKAGE_FORMAT", "debian");
+        env.put("TERMUX_PKG_NO_MIRROR_SELECT", "1");
+        env.put("TERMUX_APK_RELEASE", "ZHICODE");
+        env.put("TERMUX__HOME", TermuxConstants.TERMUX_HOME_DIR_PATH);
+        env.put("TERMUX__PREFIX", prefix);
+        env.put("TERMUX__ROOTFS_DIR", TermuxConstants.TERMUX_FILES_DIR_PATH);
+        env.put("TERMUX__ROOTFS", TermuxConstants.TERMUX_FILES_DIR_PATH);
+        env.put("ZHICODE_APP", "1");
+        env.put("ZHICODE_TERMINAL_SESSION", "1");
+        env.put("ZHICODE_SANDBOX_BRIDGE_DIR", SandboxShell.bridgeDir(getContext()));
+        env.put("ZHICODE_APK_PATH", getContext().getApplicationInfo().sourceDir);
+
+        List<String> out = new ArrayList<>();
+        for (Map.Entry<String, String> entry : env.entrySet()) {
+            out.add(entry.getKey() + "=" + entry.getValue());
+        }
+        return out.toArray(new String[0]);
+    }
+
+    private void write(String text) {
+        TerminalSession session = current();
+        if (session == null) return;
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        session.write(bytes, 0, bytes.length);
+        // 修饰键是"按一次管一个键"，发完就清 —— TerminalView 也是这么读的
+        // （readControlKey 等方法的读后即清语义）。
         ctrl = alt = shift = fn = false;
+        notifyStateChanged();
     }
 
-    private void applyTerminalPaletteToSessions(){for(TerminalSession session:sessions)applyTerminalPalette(session);}
+    private ClipboardManager clipboard() {
+        return (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+    }
 
-    private void applyTerminalPalette(TerminalSession session){
-        if(session==null||session.getEmulator()==null)return;
-        int[] colors=session.getEmulator().mColors.mCurrentColors;
-        if(lightTheme){
-            colors[0]=BG;colors[1]=Color.rgb(185,28,28);colors[2]=Color.rgb(22,115,76);colors[3]=Color.rgb(161,98,7);
-            colors[4]=Color.rgb(29,78,216);colors[5]=Color.rgb(126,34,206);colors[6]=Color.rgb(8,126,153);colors[7]=TEXT;
-            colors[8]=MUTED;colors[9]=Color.rgb(180,35,46);colors[10]=Color.rgb(22,115,76);colors[11]=Color.rgb(161,98,7);
-            colors[12]=Color.rgb(29,78,216);colors[13]=Color.rgb(126,34,206);colors[14]=Color.rgb(8,126,153);colors[15]=TEXT;
-            colors[TextStyle.COLOR_INDEX_FOREGROUND]=TEXT;colors[TextStyle.COLOR_INDEX_BACKGROUND]=BG;colors[TextStyle.COLOR_INDEX_CURSOR]=ACCENT;return;
+    private int spPx(float sp) {
+        return (int) (sp * getResources().getDisplayMetrics().scaledDensity + 0.5f);
+    }
+
+    // ------------------------------------------------------------------ 内部：属性与扩展键
+
+    private void parseExtraKeys(String source) {
+        try {
+            // 属性文件里的矩阵是 JS 风格（键名不加引号），先补上引号再交给 JSON。
+            String normalized = source.replace('\'', '"');
+            Pattern pattern = Pattern.compile("([\\{,]\\s*)(key|popup|macro|display)\\s*:");
+            Matcher matcher = pattern.matcher(normalized);
+            normalized = matcher.replaceAll("$1\"$2\":");
+
+            JSONArray matrix = new JSONArray(normalized);
+            List<List<ExtraKey>> rows = new ArrayList<>();
+            for (int i = 0; i < matrix.length(); i++) {
+                JSONArray row = matrix.getJSONArray(i);
+                List<ExtraKey> keys = new ArrayList<>();
+                for (int j = 0; j < row.length(); j++) {
+                    Object item = row.get(j);
+                    String action;
+                    String display;
+                    if (item instanceof JSONObject) {
+                        JSONObject object = (JSONObject) item;
+                        action = object.optString("key", object.optString("macro", ""));
+                        display = object.optString("display", displayName(action));
+                    } else {
+                        action = String.valueOf(item);
+                        display = displayName(action);
+                    }
+                    keys.add(new ExtraKey(display, action));
+                }
+                rows.add(Collections.unmodifiableList(keys));
+            }
+            extraKeys = rows.isEmpty() ? defaultExtraKeys() : Collections.unmodifiableList(rows);
+        } catch (Exception parseError) {
+            // 属性文件写坏了就退回默认布局：终端必须始终可用，
+            // 不能因为一个配置文件让扩展键整行消失。
+            extraKeys = defaultExtraKeys();
         }
-        // Keep ANSI meaning intact while harmonising its core dark/bright colors with the selected UI.
-        colors[0]=BG;colors[1]=neonTheme?Color.rgb(229,88,112):Color.rgb(205,0,0);
-        colors[2]=neonTheme?Color.rgb(28,190,145):Color.rgb(0,205,0);
-        colors[3]=neonTheme?Color.rgb(232,185,92):Color.rgb(205,205,0);
-        colors[4]=neonTheme?Color.rgb(101,153,255):Color.rgb(100,149,237);
-        colors[5]=neonTheme?Color.rgb(190,126,255):Color.rgb(205,0,205);
-        colors[6]=neonTheme?Color.rgb(55,205,216):Color.rgb(0,205,205);colors[7]=TEXT;
-        colors[8]=MUTED;colors[9]=ERROR;colors[10]=neonTheme?Color.rgb(72,226,181):Color.rgb(0,255,0);
-        colors[11]=neonTheme?Color.rgb(255,214,119):Color.rgb(255,255,0);
-        colors[12]=neonTheme?Color.rgb(122,151,255):Color.rgb(92,92,255);
-        colors[13]=neonTheme?Color.rgb(210,154,255):Color.rgb(255,0,255);
-        colors[14]=neonTheme?Color.rgb(83,226,236):Color.rgb(0,255,255);colors[15]=Color.WHITE;
-        colors[TextStyle.COLOR_INDEX_FOREGROUND]=TEXT;
-        colors[TextStyle.COLOR_INDEX_BACKGROUND]=BG;
-        colors[TextStyle.COLOR_INDEX_CURSOR]=neonTheme?Color.rgb(164,132,255):Color.WHITE;
     }
 
-    public void requestKeyboard() { if (terminalView != null) terminalView.postDelayed(this::showKeyboard, 80); }
-    private void showKeyboard() { if (terminalView == null) return; terminalView.requestFocus(); InputMethodManager imm = (InputMethodManager)getContext().getSystemService(Context.INPUT_METHOD_SERVICE); if (imm != null) imm.showSoftInput(terminalView, InputMethodManager.SHOW_IMPLICIT); }
-    private void toggleKeyboard() { if (terminalView == null) return; terminalView.requestFocus(); InputMethodManager imm = (InputMethodManager)getContext().getSystemService(Context.INPUT_METHOD_SERVICE); if (imm != null) imm.toggleSoftInput(InputMethodManager.SHOW_IMPLICIT, 0); }
-    private void changeFont(int delta) { terminalTextSp = Math.max(8f, Math.min(32f, terminalTextSp + delta)); if (terminalView != null) terminalView.setTextSize(spPx(terminalTextSp)); }
-
-    private void showQuickActions() {
-        android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(getContext());
-        String[] items = {"Paste", "Copy selection", "Reset terminal", "New session", "Rename session", "Close session", "Kill shell", "Font smaller", "Font larger", "Reload termux.properties", "Toggle wake lock"};
-        android.app.AlertDialog dialog=b.setTitle("Terminal").setItems(items, (d,w) -> { TerminalSession s = current(); switch (w) {
-            case 0: onPasteTextFromClipboard(s); break; case 1: copySelection(); break; case 2: if (s != null) s.reset(); break;
-            case 3: newSession(); break; case 4: renameSession(); break; case 5: closeSession(selected); break; case 6: if (s != null) s.finishIfRunning(); break;
-            case 7: changeFont(-1); break; case 8: changeFont(1); break; case 9: reloadProperties(); break; case 10: toggleWakeLock(); break;
-        }}).create();dialog.show();if(dialog.getWindow()!=null){UiMotion.bindInteractive(dialog.getWindow().getDecorView());UiMotion.dialogIn(dialog.getWindow().getDecorView());}
+    private List<List<ExtraKey>> defaultExtraKeys() {
+        List<List<ExtraKey>> rows = new ArrayList<>();
+        rows.add(expandDefaultRow(DEFAULT_ROW_TOP));
+        rows.add(expandDefaultRow(DEFAULT_ROW_BOTTOM));
+        return Collections.unmodifiableList(rows);
     }
 
-    private void renameSession() { TerminalSession s = current(); if (s == null) return; final android.widget.EditText e = new android.widget.EditText(getContext()); e.setSingleLine(true); e.setText(s.mSessionName); android.app.AlertDialog dialog=new android.app.AlertDialog.Builder(getContext()).setTitle("Rename session").setView(e).setNegativeButton("Cancel", null).setPositiveButton("Rename", (d,w) -> { String n = e.getText().toString().trim(); if (!n.isEmpty()) s.mSessionName = n; updateTitle(); refreshDrawerSessions(); }).create();dialog.show();if(dialog.getWindow()!=null){UiMotion.bindInteractive(dialog.getWindow().getDecorView());UiMotion.dialogIn(dialog.getWindow().getDecorView());} }
-    private void toggleWakeLock() { try { if (wakeLock != null && wakeLock.isHeld()) { wakeLock.release(); toast("Wake lock released"); } else { android.os.PowerManager pm = (android.os.PowerManager)getContext().getSystemService(Context.POWER_SERVICE); wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, TermuxConstants.BRAND_SLUG + ":terminal"); wakeLock.acquire(); toast("Wake lock acquired"); } } catch (Throwable e) { toast("Wake lock: " + e.getMessage()); } }
-    private void copySelection() { if (terminalView == null) return; String s = terminalView.getSelectedText(); if (s == null || s.isEmpty()) return; ClipboardManager cm = (ClipboardManager)getContext().getSystemService(Context.CLIPBOARD_SERVICE); cm.setPrimaryClip(ClipData.newPlainText("terminal", s)); toast("Copied"); }
-    private TerminalSession current() { return selected >= 0 && selected < sessions.size() ? sessions.get(selected) : null; }
+    private List<ExtraKey> expandDefaultRow(String[] row) {
+        List<ExtraKey> keys = new ArrayList<>(row.length);
+        for (String key : row) keys.add(new ExtraKey(displayName(key), key));
+        return Collections.unmodifiableList(keys);
+    }
 
-    // TerminalSessionClient
-    @Override public void onTextChanged(@NonNull TerminalSession s) { if (s == current() && terminalView != null) terminalView.onScreenUpdated(); }
-    @Override public void onTitleChanged(@NonNull TerminalSession s) { if (s == current()) updateTitle(); if(drawerOpen)refreshDrawerSessions(); }
-    @Override public void onSessionFinished(@NonNull TerminalSession s) { if(drawerOpen)refreshDrawerSessions(); }
-    @Override public void onCopyTextToClipboard(@NonNull TerminalSession s, String text) { ClipboardManager cm = (ClipboardManager)getContext().getSystemService(Context.CLIPBOARD_SERVICE); cm.setPrimaryClip(ClipData.newPlainText("terminal", text)); }
-    @Override public void onPasteTextFromClipboard(@Nullable TerminalSession s) { ClipboardManager cm = (ClipboardManager)getContext().getSystemService(Context.CLIPBOARD_SERVICE); if (cm.hasPrimaryClip() && cm.getPrimaryClip() != null && cm.getPrimaryClip().getItemCount() > 0) { CharSequence x = cm.getPrimaryClip().getItemAt(0).coerceToText(getContext()); if (x != null && s != null) { byte[] b = x.toString().getBytes(StandardCharsets.UTF_8); s.write(b, 0, b.length); } } }
-    @Override public void onBell(@NonNull TerminalSession s) { performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP); }
-    @Override public void onColorsChanged(@NonNull TerminalSession s) { if (terminalView != null) terminalView.invalidate(); }
-    @Override public void onTerminalCursorStateChange(boolean state) { if (terminalView != null) terminalView.invalidate(); }
-    @Override public void setTerminalShellPid(@NonNull TerminalSession s, int pid) {}
-    @Override public Integer getTerminalCursorStyle() { return null; }
+    /** 方向键在界面上显示成箭头，其余显示原名。 */
+    private String displayName(String key) {
+        if (key == null) return "";
+        switch (key.toUpperCase()) {
+            case "LEFT": return "←";
+            case "RIGHT": return "→";
+            case "UP": return "↑";
+            case "DOWN": return "↓";
+            default: return key;
+        }
+    }
 
-    // TerminalViewClient
-    @Override public float onScale(float scale) { if (scale > 1.04f) changeFont(1); else if (scale < 0.96f) changeFont(-1); return 1f; }
-    @Override public void onSingleTapUp(MotionEvent e) { showKeyboard(); }
-    @Override public boolean shouldBackButtonBeMappedToEscape() { return backMapsEscape; }
-    @Override public boolean shouldEnforceCharBasedInput() { return true; }
-    @Override public boolean shouldUseCtrlSpaceWorkaround() { return false; }
-    @Override public boolean isTerminalViewSelected() { return terminalView != null && terminalView.hasFocus(); }
-    @Override public void copyModeChanged(boolean copyMode) {}
-    @Override public boolean onKeyDown(int keyCode, KeyEvent e, TerminalSession s) { if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) { ctrl = true; return true; } if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) { fn = true; return true; } return false; }
-    @Override public boolean onKeyUp(int keyCode, KeyEvent e) { if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) { ctrl = false; return true; } if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) { fn = false; return true; } return false; }
-    @Override public boolean onLongPress(MotionEvent e) { return false; }
-    @Override public boolean readControlKey() { boolean v = ctrl; ctrl = false; return v; }
-    @Override public boolean readAltKey() { boolean v = alt; alt = false; return v; }
-    @Override public boolean readShiftKey() { boolean v = shift; shift = false; return v; }
-    @Override public boolean readFnKey() { boolean v = fn; fn = false; return v; }
-    @Override public boolean onCodePoint(int codePoint, boolean ctrlDown, TerminalSession s) { return false; }
-    @Override public void onEmulatorSet() {}
+    /**
+     * 读一行 `~/.termux/termux.properties`。
+     *
+     * <p>要处理**续行**（行尾 `\`）：属性值里允许把长矩阵折成多行，
+     * 只按行切会把 JSON 截断，表现为"扩展键恢复成了默认布局"。
+     */
+    private String readTermuxProperty(String wanted) {
+        File file = new File(TermuxConstants.TERMUX_HOME_DIR_PATH + PROPERTIES_FILE);
+        if (!file.isFile()) return null;
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line;
+            StringBuilder pending = new StringBuilder();
+            while ((line = reader.readLine()) != null) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("#") || trimmed.isEmpty()) continue;
+                pending.append(pending.length() > 0 ? trimmed : line);
+                if (trimmed.endsWith("\\")) {
+                    pending.setLength(pending.length() - 1);
+                    continue;
+                }
+                String full = pending.toString();
+                pending.setLength(0);
+                int equals = full.indexOf('=');
+                if (equals < 0) continue;
+                if (wanted.equals(full.substring(0, equals).trim())) {
+                    return full.substring(equals + 1).trim();
+                }
+            }
+        } catch (Exception ignored) {
+            // 读不了就当作没配置：调用方会退回默认值。
+        }
+        return null;
+    }
 
-    @Override public void logError(String tag, String message) { Log.e(tag, message); }
-    @Override public void logWarn(String tag, String message) { Log.w(tag, message); }
-    @Override public void logInfo(String tag, String message) { Log.i(tag, message); }
-    @Override public void logDebug(String tag, String message) { Log.d(tag, message); }
-    @Override public void logVerbose(String tag, String message) { Log.v(tag, message); }
-    @Override public void logStackTraceWithMessage(String tag, String message, Exception e) { Log.e(tag, message, e); }
-    @Override public void logStackTrace(String tag, Exception e) { Log.e(tag, "terminal", e); }
+    // ------------------------------------------------------------------ 调色板
 
-    private TextView drawerAction(String s, OnClickListener l) { TextView t = label(s, 12, TEXT, false); t.setGravity(Gravity.CENTER_VERTICAL); t.setPadding(dp(8), 0, dp(8), 0); t.setOnClickListener(l); return t; }
-    private TextView action(String s, OnClickListener l) { TextView t = label(s, 17, TEXT, false); t.setGravity(Gravity.CENTER); t.setOnClickListener(l); return t; }
-    private TextView label(String s, float sp, int color, boolean bold) { TextView t = new TextView(getContext()); t.setText(s); t.setTextSize(sp); t.setTextColor(color); if (bold) t.setTypeface(Typeface.DEFAULT_BOLD); return t; }
-    private LinearLayout.LayoutParams lp(int w, int h) { return new LinearLayout.LayoutParams(w, h); }
-    private int dp(int v) { return (int)(v * getResources().getDisplayMetrics().density + 0.5f); }
-    private int spPx(float sp) { return (int)(sp * getResources().getDisplayMetrics().scaledDensity + 0.5f); }
-    private void toast(String s) { Toast.makeText(getContext(), s, Toast.LENGTH_SHORT).show(); }
+    /**
+     * 把 ANSI 调色板写进模拟器。
+     *
+     * <p>只走深色档：浅色档那张表是历史上写下的，但唯一入口 `applyTheme` 没有任何调用方，
+     * 也就是说**终端从来没有跟随过应用主题**。本类保持这个行为不变 ——
+     * 让终端跟随主题是一次可见的外观变更，应该单独做，不该夹在结构重写里。
+     */
+    private void applyTerminalPalette(TerminalSession session) {
+        if (session == null || session.getEmulator() == null) return;
+        int[] colors = session.getEmulator().mColors.mCurrentColors;
+        colors[0] = Color.rgb(0, 0, 0);
+        colors[1] = Color.rgb(205, 0, 0);
+        colors[2] = Color.rgb(0, 205, 0);
+        colors[3] = Color.rgb(205, 205, 0);
+        colors[4] = Color.rgb(100, 149, 237);
+        colors[5] = Color.rgb(205, 0, 205);
+        colors[6] = Color.rgb(0, 205, 205);
+        colors[7] = Color.rgb(238, 238, 238);
+        colors[8] = Color.rgb(158, 158, 158);
+        colors[9] = Color.rgb(214, 120, 111);
+        colors[10] = Color.rgb(0, 255, 0);
+        colors[11] = Color.rgb(255, 255, 0);
+        colors[12] = Color.rgb(92, 92, 255);
+        colors[13] = Color.rgb(255, 0, 255);
+        colors[14] = Color.rgb(0, 255, 255);
+        colors[15] = Color.WHITE;
+        colors[TextStyle.COLOR_INDEX_FOREGROUND] = Color.rgb(238, 238, 238);
+        colors[TextStyle.COLOR_INDEX_BACKGROUND] = Color.rgb(0, 0, 0);
+        colors[TextStyle.COLOR_INDEX_CURSOR] = Color.WHITE;
+    }
+
+    // ------------------------------------------------------------------ TerminalSessionClient
+
+    @Override
+    public void onTextChanged(@NonNull TerminalSession session) {
+        // 高频回调：只让 TerminalView 重画，**不**通知观察者（见类注释）。
+        if (session == current() && terminalView != null) terminalView.onScreenUpdated();
+    }
+
+    @Override
+    public void onTitleChanged(@NonNull TerminalSession session) {
+        if (session == current()) notifyStateChanged();
+    }
+
+    @Override
+    public void onSessionFinished(@NonNull TerminalSession session) {
+        notifyStateChanged();
+    }
+
+    @Override
+    public void onCopyTextToClipboard(@NonNull TerminalSession session, String text) {
+        clipboard().setPrimaryClip(ClipData.newPlainText("terminal", text));
+    }
+
+    @Override
+    public void onPasteTextFromClipboard(@Nullable TerminalSession session) {
+        if (session == null) return;
+        ClipboardManager manager = clipboard();
+        if (!manager.hasPrimaryClip() || manager.getPrimaryClip() == null) return;
+        if (manager.getPrimaryClip().getItemCount() <= 0) return;
+        CharSequence text = manager.getPrimaryClip().getItemAt(0).coerceToText(getContext());
+        if (text == null) return;
+        byte[] bytes = text.toString().getBytes(StandardCharsets.UTF_8);
+        session.write(bytes, 0, bytes.length);
+    }
+
+    @Override
+    public void onBell(@NonNull TerminalSession session) {
+        performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);
+    }
+
+    @Override
+    public void onColorsChanged(@NonNull TerminalSession session) {
+        if (terminalView != null) terminalView.invalidate();
+    }
+
+    @Override
+    public void onTerminalCursorStateChange(boolean state) {
+        if (terminalView != null) terminalView.invalidate();
+    }
+
+    @Override
+    public void setTerminalShellPid(@NonNull TerminalSession session, int pid) {
+        // 不需要：PTY 就活在本进程里。
+    }
+
+    @Override
+    public Integer getTerminalCursorStyle() {
+        return null;
+    }
+
+    // ------------------------------------------------------------------ TerminalViewClient
+
+    @Override
+    public float onScale(float scale) {
+        if (scale > 1.04f) {
+            changeFont(1);
+        } else if (scale < 0.96f) {
+            changeFont(-1);
+        }
+        return 1f;
+    }
+
+    @Override
+    public void onSingleTapUp(MotionEvent event) {
+        showKeyboard();
+    }
+
+    @Override
+    public boolean shouldBackButtonBeMappedToEscape() {
+        return backMapsEscape;
+    }
+
+    @Override
+    public boolean shouldEnforceCharBasedInput() {
+        return true;
+    }
+
+    @Override
+    public boolean shouldUseCtrlSpaceWorkaround() {
+        return false;
+    }
+
+    @Override
+    public boolean isTerminalViewSelected() {
+        return terminalView != null && terminalView.hasFocus();
+    }
+
+    @Override
+    public void copyModeChanged(boolean copyMode) {
+        // 选区状态由 TerminalView 自己管，界面不需要跟着变。
+    }
+
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event, TerminalSession session) {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            ctrl = true;
+            notifyStateChanged();
+            return true;
+        }
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            fn = true;
+            notifyStateChanged();
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            ctrl = false;
+            notifyStateChanged();
+            return true;
+        }
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            fn = false;
+            notifyStateChanged();
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean onLongPress(MotionEvent event) {
+        return false;
+    }
+
+    @Override
+    public boolean readControlKey() {
+        boolean value = ctrl;
+        ctrl = false;
+        // 被 TerminalView 读走就等于这个锁定键用掉了：界面上的高亮必须跟着落下，
+        // 否则会停在上一次按下时的"已激活"颜色上。
+        if (value) notifyStateChanged();
+        return value;
+    }
+
+    @Override
+    public boolean readAltKey() {
+        boolean value = alt;
+        alt = false;
+        if (value) notifyStateChanged();
+        return value;
+    }
+
+    @Override
+    public boolean readShiftKey() {
+        boolean value = shift;
+        shift = false;
+        if (value) notifyStateChanged();
+        return value;
+    }
+
+    @Override
+    public boolean readFnKey() {
+        boolean value = fn;
+        fn = false;
+        if (value) notifyStateChanged();
+        return value;
+    }
+
+    @Override
+    public boolean onCodePoint(int codePoint, boolean ctrlDown, TerminalSession session) {
+        return false;
+    }
+
+    @Override
+    public void onEmulatorSet() {
+        // 不需要：调色板在 attach 之后由 applyTerminalPalette 直接写入。
+    }
+
+    // ------------------------------------------------------------------ 日志
+
+    @Override
+    public void logError(String tag, String message) {
+        Log.e(tag, message);
+    }
+
+    @Override
+    public void logWarn(String tag, String message) {
+        Log.w(tag, message);
+    }
+
+    @Override
+    public void logInfo(String tag, String message) {
+        Log.i(tag, message);
+    }
+
+    @Override
+    public void logDebug(String tag, String message) {
+        Log.d(tag, message);
+    }
+
+    @Override
+    public void logVerbose(String tag, String message) {
+        Log.v(tag, message);
+    }
+
+    @Override
+    public void logStackTraceWithMessage(String tag, String message, Exception error) {
+        Log.e(tag, message, error);
+    }
+
+    @Override
+    public void logStackTrace(String tag, Exception error) {
+        Log.e(tag, "terminal", error);
+    }
 }

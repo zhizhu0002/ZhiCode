@@ -19,7 +19,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -117,6 +120,14 @@ fun interface TerminalHolder {
  *
  * 唯一需要防御的是“同一个 View 不能有两个父节点”：切回来时新的 AndroidView 可能
  * 先建立、旧的还没来得及 dispose，所以 attach 前再摘一次（[detachFromParent]）。
+ *
+ * <h3>外壳为什么是 Compose 了</h3>
+ * 工具栏、抽屉、扩展键、两个对话框原来全在 `TermuxTerminalPane` 里用 Java 拼 View，
+ * 与它正上方那行 Compose 标题栏割裂，而且整块和原版逐行相同（95.4%）。
+ * 现在壳在 [TerminalToolbar] / [TerminalDrawer] / [TerminalExtraKeys] /
+ * [TerminalQuickActionsDialog] 里，宿主只剩下 PTY 与上游 `TerminalView`
+ * （由中间那个 [AndroidView] 承载）。**渲染层仍然是上游 View**：
+ * `TerminalView` 靠 Canvas 逐字符绘制 + CSI 解析 + 选区手势，重写收益低风险高。
  */
 @Composable
 private fun RealTerminalPane(
@@ -128,6 +139,7 @@ private fun RealTerminalPane(
     val context = LocalContext.current
     // remember 只是避免每次重组都调一次 obtain；真正的实例缓存由 holder 负责。
     val pane = remember(terminalHolder) { terminalHolder.obtain(context) }
+    val state by rememberTerminalState(pane)
 
     // 项目目录变化时同步给终端（下一次新建会话用它当工作目录）。
     LaunchedEffect(workingDirectory) {
@@ -140,22 +152,112 @@ private fun RealTerminalPane(
         onDispose { detachFromParent(pane) }
     }
 
+    var drawerOpen by remember { mutableStateOf(false) }
+    var quickActionsOpen by remember { mutableStateOf(false) }
+    // -1 = 没在改名。存下标而不是布尔值：长按哪一行就要改哪一行。
+    var renamingIndex by remember { mutableStateOf(-1) }
+
+    val selectedIndex = state.sessions.indexOfFirst { it.selected }
+
     Surface(modifier = modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
         Column(modifier = Modifier.fillMaxSize()) {
             PaneHeader(
                 title = "终端",
                 subtitle = projectName,
             )
-            AndroidView(
-                factory = {
-                    // 可能还挂在上一轮的容器上（旧 AndroidView 尚未 dispose），先摘干净
-                    detachFromParent(pane)
-                    pane
-                },
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            )
+            // 抽屉要盖住"工具栏 + 终端 + 扩展键"这三段（和原实现一样，
+            // 它当时是往面板的 FrameLayout 里加一层全高视图），所以这三段同处一个 Box。
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    TerminalToolbar(
+                        title = state.title,
+                        onMenu = { drawerOpen = true },
+                        onKeyboard = { pane.toggleKeyboard() },
+                        onMore = { quickActionsOpen = true },
+                    )
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        val failure = state.failureDetail
+                        val notice = state.runtimeNotice
+                        when {
+                            failure != null -> TerminalFailure(failure, onRetry = { pane.retryTerminal() })
+                            notice != null -> TerminalRuntimeNotice(notice)
+                            else -> AndroidView(
+                                factory = {
+                                    // 可能还挂在上一轮的容器上（旧 AndroidView 尚未 dispose），先摘干净
+                                    detachFromParent(pane)
+                                    pane
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                    TerminalExtraKeys(state) { action ->
+                        // DRAWER 的目标是 Compose 自己这个抽屉，宿主碰不到它，
+                        // 所以在这一层拦下来 —— 属性文件里写 `DRAWER` 仍然有效。
+                        if (action.trim().uppercase() == "DRAWER") {
+                            drawerOpen = true
+                        } else {
+                            pane.sendExtraKey(action)
+                        }
+                    }
+                }
+                TerminalDrawer(
+                    open = drawerOpen,
+                    state = state,
+                    onDismiss = { drawerOpen = false },
+                    onSelect = { index ->
+                        pane.selectSession(index)
+                        drawerOpen = false
+                    },
+                    onNewSession = {
+                        pane.newSession()
+                        drawerOpen = false
+                    },
+                    onCloseSession = { index -> pane.closeSession(index) },
+                    onRenameSession = { index -> renamingIndex = index },
+                    onToggleKeyboard = {
+                        pane.toggleKeyboard()
+                        drawerOpen = false
+                    },
+                    onReloadProperties = {
+                        pane.reloadProperties()
+                        drawerOpen = false
+                    },
+                )
+            }
         }
     }
+
+    TerminalQuickActionsDialog(
+        show = quickActionsOpen,
+        onDismiss = { quickActionsOpen = false },
+        onAction = { index ->
+            // 下标顺序与 [QuickActions] 一一对应，两边都不能重排。
+            when (index) {
+                0 -> pane.pasteFromClipboard()
+                1 -> toast(context, pane.copySelection())
+                2 -> pane.resetTerminal()
+                3 -> pane.newSession()
+                4 -> if (selectedIndex >= 0) renamingIndex = selectedIndex
+                5 -> pane.closeSession(selectedIndex)
+                6 -> pane.killShell()
+                7 -> pane.changeFont(-1)
+                8 -> pane.changeFont(1)
+                9 -> pane.reloadProperties()
+                10 -> toast(context, pane.toggleWakeLock())
+            }
+        },
+    )
+
+    TerminalRenameDialog(
+        show = renamingIndex >= 0,
+        initial = state.sessions.getOrNull(renamingIndex)?.name ?: "",
+        onDismiss = { renamingIndex = -1 },
+        onConfirm = { name ->
+            pane.renameSession(renamingIndex, name)
+            renamingIndex = -1
+        },
+    )
 }
 
 /** 把一个 View 从它当前的父容器上摘下来（没父容器就什么都不做）。 */

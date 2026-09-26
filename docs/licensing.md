@@ -149,20 +149,20 @@ bootstrap 里的程序许可各自适用，且要求源码对接收者可得。
 归属区域                             文件         行数   仍与 IQCode 相同
 Termux 上游（非 IQ Code）             23       7394           7274
 Termux 集成层                       35       9327           1932
-Compose 界面层                      57      15427              0
-其它                                8       2326            855
+Compose 界面层                      59      16115              0
+其它                                7       2287            286
 Agent 工具                         44       5673            933
 Agent 核心                          9       3629            867
 沙箱宿主层                            16       4728            533
-合计                              192      48504          12394
+合计                              193      49153          11825
 
-已是我们自己的:        36110 行
-逐行相同合计:          12394 行
+已是我们自己的:        37328 行
+逐行相同合计:          11825 行
   其中 Termux 上游:     7274 行（Termux 自己的代码，与独立性无关）
-  真正属于 IQ Code:     5120 行
+  真正属于 IQ Code:     4551 行
 ```
 
-### 这 5120 行是什么（`PROVENANCE_COMPOSITION=1`）
+### 这 4551 行是什么（`PROVENANCE_COMPOSITION=1`）
 
 「逐行相同」这个数字本身不够用：它把 `import android.os.Process;`、`}`、`return out;`
 与真正的算法代码算在同一格里。把这个数字当成「还抄了多少」，会得出一个偏大得多的结论
@@ -170,25 +170,25 @@ Agent 核心                          9       3629            867
 分类规则简单到可以人工核对：
 
 ```
-骨架行（括号分号 / import / javadoc 分隔符）: 2134 行
-含字面量的行（协议键名与用户可见文案）:      595 行
-其它行（仍需逐条看的地方）:                  2391 行
-合计:                                        5120 行
+骨架行（括号分号 / import / javadoc 分隔符）: 2057 行
+含字面量的行（协议键名与用户可见文案）:      515 行
+其它行（仍需逐条看的地方）:                  1979 行
+合计:                                        4551 行
 ```
 
 三桶的含义与可否归零：
 
 | 桶 | 行数 | 能不能归零 | 为什么 |
 | --- | --- | --- | --- |
-| 骨架 | 2134 | **不能** | 任何 Java 文件都以 `import …` 开头、以 `}` 结尾。把这些行改得不一样等于删 import 或往里塞噪声 —— 两者都不是我们想要的 |
-| 字面量 | 595 | **不能** | JSON 字段名、动作名是跨组件协议（宿主 `SandboxGuestHost`、Agent 工具、Frida 脚本三方对齐），改了会让两边对不上；用户可见文案是刻意逐字保留的 |
-| 其它 | 2391 | 能，而且应该压 | 这才是「读起来还像原版」的地方 |
+| 骨架 | 2057 | **不能** | 任何 Java 文件都以 `import …` 开头、以 `}` 结尾。把这些行改得不一样等于删 import 或往里塞噪声 —— 两者都不是我们想要的 |
+| 字面量 | 515 | **不能** | JSON 字段名、动作名是跨组件协议（宿主 `SandboxGuestHost`、Agent 工具、Frida 脚本三方对齐），改了会让两边对不上；用户可见文案是刻意逐字保留的 |
+| 其它 | 1979 | 能，而且应该压 | 这才是「读起来还像原版」的地方 |
 
 第三桶里占了绝大多数的是声明与签名，例如 `public final String id;`、
 `public static List<AgentDefinition> loadAll(String projectDirectory) {`、
 `if (files == null) return;`、`try (FileOutputStream out = new FileOutputStream(file, false)) {`。
 它们相同不是因为抄，而是因为**这是 Java 里写同一件事的唯一写法**。
-所以「压」的目标不是把 2391 变成 0，而是把里面真正有判断与结构的行重写完——
+所以「压」的目标不是把 1979 变成 0，而是把里面真正有判断与结构的行重写完——
 那之后剩下的会是语言本身的形状。
 
 脚本会把第三桶全文写到 `build/provenance-other-lines.txt` 并打印路径，供逐条核对
@@ -196,7 +196,7 @@ Agent 核心                          9       3629            867
 
 **这个路径以前是打不开的**：第三桶原先写在 `mktemp -d` 建的工作目录里，而脚本
 退出时会 `trap` 把它整个删掉 —— 于是「供逐条核对」是一句空头承诺，打印出来的路径
-在下一行就已经不存在了。现在它固定写到工程内的 `build/` 下（2391 行，已验证留存）。
+在下一行就已经不存在了。现在它固定写到工程内的 `build/` 下（1979 行，已验证留存）。
 
 ### 这个数字曾经是错的（记下来，因为它会再次发生）
 
@@ -307,7 +307,6 @@ Agent 核心                          9       3629            867
 
 | 相同 | 原版 | 现在 | 重合 | 文件 | 处置 |
 | --- | --- | --- | --- | --- | --- |
-| 565 | 583 | 592 | 95.4% | `com/zhizhu/zhicode/TermuxTerminalPane.java` | **批 F(2/6)，全工程最大一块，待定方向** |
 | 492 | 1245 | 2094 | 23.5% | `com/termux/app/zhicode/core/ZhiCodeEngine.java` | 已重写；余量是 Listener 接口与用户可见文案 |
 | 256 | 622 | 929 | 27.6% | `com/termux/app/zhicode/api/OpenAIResponsesProvider.java` | 已重写 |
 | 204 | 354 | 545 | 37.4% | `com/termux/app/zhicode/tasks/TaskStore.java` | 已重写 |
@@ -317,17 +316,77 @@ Agent 核心                          9       3629            867
 | 156 | 451 | 596 | 26.2% | `com/termux/app/zhicode/api/OpenAIChatCompletionsProvider.java` | 已重写 |
 | 141 | 310 | 607 | 23.2% | `com/termux/app/zhicode/tools/AndroidIntentBridge.java` | 已重写 |
 | 122 | 257 | 460 | 26.5% | `com/termux/app/zhicode/api/AnthropicMessagesProvider.java` | 已重写 |
-| 89 | 288 | 584 | 15.2% | `com/zhizhu/zhicode/sandbox/SandboxGuestDebug.java` | 已重写（批 I）；余量是动作名与 JSON 键（协议） |
-| 104 | 310 | 392 | 26.5% | `com/zhizhu/zhicode/UiMotion.java` | 已重写（批 F 1/6） |
 | 102 | 181 | 319 | 32.0% | `com/termux/app/zhicode/tools/UnifiedDiff.java` | 已重写 |
 | 100 | 139 | 207 | 48.3% | `com/termux/app/zhicode/model/PlanWorkflowState.java` | 已重写（批 H）；余量见下节，是声明与签名 |
+| 100 | 583 | 945 | 10.6% | `com/zhizhu/zhicode/TermuxTerminalPane.java` | **已重写（批 F 2/6）；余量是 31 行 import + 只能在 View 侧写的 PTY 调用** |
 | 93 | 331 | 699 | 13.3% | `com/termux/app/zhicode/storage/ApiSettingsStore.java` | 已重写 |
+| 89 | 288 | 584 | 15.2% | `com/zhizhu/zhicode/sandbox/SandboxGuestDebug.java` | 已重写（批 I）；余量是动作名与 JSON 键（协议） |
 | 75 | 141 | 339 | 22.1% | `com/zhizhu/zhicode/sandbox/SandboxFrida.java` | 已重写；余量主要是内嵌 Frida 脚本的大串 |
 | 75 | 98 | 152 | 49.3% | `com/termux/app/zhicode/core/PlanApprovalGate.java` | 已重写（批 H）；同上 |
 | 74 | 136 | 234 | 31.6% | `com/zhizhu/zhicode/ZhiFileProvider.java` | 已重写 |
 | 53 | 299 | 886 | 6.0% | `com/zhizhu/zhicode/sandbox/SandboxGuestHost.java` | 已重写 |
 | 50 | 76 | 130 | 38.5% | `com/termux/app/zhicode/api/HttpRequestTracker.java` | 已重写（批 H）；同上 |
 | 46 | 55 | 120 | 38.3% | `com/termux/app/zhicode/termux/BashCompletionCoordinator.java` | 已重写（批 H）；同上 |
+
+
+### 批 F（2/6）：终端面板改用 Compose 重写（已完成，待真机复验）
+
+这一块是**全工程最大的单个残留**：`com/zhizhu/zhicode/TermuxTerminalPane.java`
+583 行里有 565 行与原版逐行相同（95.4%）。拆开看它由两部分组成：
+
+- **外壳**：工具栏、左边缘手势、会话抽屉、两行扩展键、快捷动作与重命名两个对话框、
+  主题刷色、`termux.properties` 读取 —— 全是 IQ Code 自己写的界面代码；
+- **终端本体**：Termux 上游的 `TerminalView`（Canvas 逐字符绘制 + CSI 解析 + 选区 +
+  缩放手势，2453+1297 行，属那 7274 行 Termux 上游代码）。
+
+所以重写的是**外壳**，终端本体仍然由 `AndroidView` 承载（`TerminalPane.kt` 里早就写明
+「不把 TerminalView 重写成 Compose」，这个判断继续有效）。
+
+**另一个发现**：`UiMotion.java` 的全部 25 个调用点**都在这个文件里**。
+外壳一改成 Compose，它就成了死代码 —— 于是它连同 104 行重合一起被删除。
+`UiMotion` 的职责（进场动画、按压反馈、抽屉滑动）现在由 `ZhiMotion` + Compose 的
+`AnimatedVisibility` / `animateDpAsState` 承担。
+
+结构：
+
+```
+compose/ui/panes/TerminalChrome.kt    工具栏 / 抽屉 / 扩展键 / 两种失败占位 / 状态接线
+compose/ui/panes/TerminalDialogs.kt   快捷动作（11 项）与重命名
+compose/ui/panes/TerminalPane.kt      接线（TerminalHolder 签名未变）
+com/zhizhu/zhicode/TermuxTerminalPane.java   只剩 PTY：会话列表、JNI、环境变量、
+                                             WakeLock、剪贴板、ANSI 调色板、两个 Client 接口
+```
+
+宿主对 Compose 的接口是「**不可变快照 + 变更回调**」而不是 `StateFlow`：
+它是 Java，而 `StateFlow` 是 Kotlin 类型，从 Java 构造要绕到 `StateFlowKt` ——
+那等于让最底层的宿主反过来依赖界面框架。回调只发**低频**变化：
+`onTextChanged`（每次按键回声都触发）只负责让 `TerminalView` 重画，**不**通知观察者，
+否则每敲一个字符就要重建快照并驱动一整轮 Compose 重组。
+
+结果：
+
+| | 重合行 | 现在行数 |
+| --- | --- | --- |
+| `TermuxTerminalPane.java` | 565 → **100** | 592 → 945 |
+| `UiMotion.java` | 104 → **0**（文件已删） | 392 → 0 |
+| 全工程「真正属于 IQ Code」 | 5120 → **4551** | |
+
+那剩下的 100 行是：31 行 `import`、若干 `}`、字段与构造器声明，以及
+**只能在 View 一侧写**的 PTY 调用 —— `new TerminalView(getContext(), null)`、
+`view.attachSession(attached)`、`view.post(...)` 里的三重校验、`JSONArray` 解析骨架。
+这些相同不是因为抄，而是因为它们就是「在 View 里驱动这个上游渲染器」的唯一写法。
+文件行数涨了（592 → 945）是刻意的：注释写明了每处不许改的原因。
+
+**外观只动了一处**：外壳配色改为跟随深浅主题（原先写死深色档）。深色档色值与改动前
+逐字节相同（就是 `applyPaletteValues` 的那张表），浅色档启用了原作者写下但从未走到过的那张。
+终端的 ANSI 调色板**没动** —— 让它跟随主题是另一次可见变更，不夹在结构重写里做。
+
+**验证**：新增 `app/tests/TerminalPaneContractTest.java`（文本级第 23 条），钉住三件
+「改坏了不报错、只会在真机上表现为终端不好用」的事：12 个扩展键的转义字节（用解码后的
+字面量做**相邻性**检查，所以 ESC 与 TAB 的序列被互换会被抓出来）、11 项快捷动作的标签
+与顺序（调用方按下标分发，重排会让「字体变大」点成「杀掉 shell」）、四个修饰键的
+读后即清语义。另有编译、JVM 单测、provenance 全量重跑。
+**UI 行为尚未验证**：沙箱与真机的逐步比对在下面「验证」一节里另有记录。
 
 
 ### 批 H 的结论与预期相反：这四个文件已经没得改了

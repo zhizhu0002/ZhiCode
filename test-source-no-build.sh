@@ -115,6 +115,15 @@ run NoBundledThirdPartyEndpointTest "$PROJECT_ROOT"
 # ApiWireContractTest.java
 run ApiWireContractTest "$PROJECT_ROOT"
 
+# ---------- 终端面板的行为契约 ----------
+# 终端外壳改用 Compose 重写（批 F 2/6）。它是全工程唯一一块「重写后无法用单测
+# 证明行为没变」的地方：手势 + IME + PTY 的组合，编译通过只能说明类型对得上。
+# 这里钉住三件改坏了不报错、只会在真机上表现为"终端不好用"的东西：
+# 12 个扩展键的转义字节、11 项快捷动作的标签与顺序（调用方按下标分发）、
+# 四个修饰键的读后即清语义。
+# TerminalPaneContractTest.java
+run TerminalPaneContractTest "$PROJECT_ROOT"
+
 echo "-----"
 echo "通过 $PASS / 失败 $FAIL"
 if [ "$FAIL" -ne 0 ]; then
