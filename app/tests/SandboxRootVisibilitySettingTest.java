@@ -53,9 +53,11 @@ public final class SandboxRootVisibilitySettingTest {
                 "the private sandbox RPC must expose the effective setting");
         require(dashboard.contains("new Switch(this)") && dashboard.contains("隐藏 Root"),
                 "the sandbox dashboard must expose a Root hiding switch");
+        // 用 squash 比较：断言的是「回滚语义」（切走时禁用并压住交互，失败时恢复），
+        // 不该被 setRootSwitch(previous, false) 这类逗号后的空格写法左右。
         require(dashboard.contains("所有正在运行的 Guest 将停止")
-                        && dashboard.contains("setRootSwitch(previous,false)")
-                        && dashboard.contains("setRootSwitch(previous,true)"),
+                        && has(dashboard, "setRootSwitch(previous,false)")
+                        && has(dashboard, "setRootSwitch(previous,true)"),
                 "the switch must confirm restart semantics, disable in flight, and restore on failure");
 
         require(testScript.contains("SandboxRootVisibilitySettingTest.java")

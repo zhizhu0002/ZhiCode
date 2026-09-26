@@ -1,16 +1,16 @@
 package com.zhizhu.zhicode.sandbox;
 
-import com.termux.shared.termux.TermuxConstants;
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.os.Handler;
-import android.os.Looper;
-import android.content.Intent;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -21,93 +21,298 @@ import android.widget.TextView;
 
 import com.zhizhu.zhicode.compose.MainActivity;
 
-/** Tiny host-owned overlay injected into every resumed virtual Activity. No SYSTEM_ALERT_WINDOW is required. */
+/**
+ * 注入到每个虚拟 Activity 上的沙箱控制栏。
+ *
+ * <p><b>为什么是注入而不是悬浮窗。</b>它直接 {@code addContentView} 到 guest 的 decor 上，
+ * 属于该 Activity 的视图树，因此<b>不需要 SYSTEM_ALERT_WINDOW</b>，也不会在 guest 被系统
+ * 销毁后残留成孤儿窗口。代价是每个 resumed 的虚拟 Activity 都要注入一次 ——
+ * 由 {@link ZhiSandbox} 的生命周期回调负责，并且用 {@link #TAG} 去重，
+ * 避免同一个 decor 上叠出多层。
+ *
+ * <p>收起时只是一个圆形气泡；点一下展开成「日志 / 返回 / 停止」三个动作：
+ * <ul>
+ *   <li><b>日志</b>：弹出可复制、可刷新的日志面板（内容来自 {@link SandboxConsole#snapshot}）</li>
+ *   <li><b>返回</b>：回到蜘蛛界面</li>
+ *   <li><b>停止</b>：停掉当前 guest 并收回控制栏</li>
+ * </ul>
+ * 拖动只移动整个面板；位移小于 {@link #TAP_SLOP_DP} 视为点击。
+ */
 public final class SandboxOverlay {
-    public static final Integer OVERLAY_TAG=0x49515342; // "IQSB"
-    private SandboxOverlay(){}
 
-    public static void attach(Activity activity,String pkg){
-        if(activity==null||activity.isFinishing())return;
-        SandboxConsole.event("准备添加日志悬浮窗: "+pkg+" / "+activity.getClass().getName());
-        activity.runOnUiThread(()->{
-            View decor=activity.getWindow().getDecorView(); if(!(decor instanceof ViewGroup))return;
-            ViewGroup root=(ViewGroup)decor; if(root.findViewWithTag(OVERLAY_TAG)!=null)return;
-            boolean day="day".equals(activity.getSharedPreferences(TermuxConstants.BRAND_SLUG + "_ui_preferences",0).getString("ui_theme","classic"));
-            boolean neon="neon-purple".equals(activity.getSharedPreferences(TermuxConstants.BRAND_SLUG + "_ui_preferences",0).getString("ui_theme","classic"));
-            int panelColor=day?0xF2FFFFFF:neon?0xE51A2237:0xF222201D;
-            int buttonText=day?0xFF1D2433:Color.WHITE;
-            LinearLayout panel=new LinearLayout(activity); panel.setTag(OVERLAY_TAG); panel.setOrientation(LinearLayout.HORIZONTAL); panel.setGravity(Gravity.CENTER_VERTICAL);
-            panel.setPadding(dp(activity,6),dp(activity,4),dp(activity,6),dp(activity,4)); panel.setBackground(bg(panelColor,18)); panel.setElevation(dp(activity,14));
-            TextView bubble=button(activity,"IQ",day?0xFF535BD6:neon?0xFF9CB4FF:0xFFD97757); panel.addView(bubble,new LinearLayout.LayoutParams(dp(activity,42),dp(activity,36)));
-            TextView log=button(activity,"日志",buttonText); panel.addView(log,new LinearLayout.LayoutParams(dp(activity,48),dp(activity,36)));
-            TextView back=button(activity,"返回",buttonText); panel.addView(back,new LinearLayout.LayoutParams(dp(activity,48),dp(activity,36)));
-            TextView stop=button(activity,"停止",day?0xFFC2414B:0xFFFF9AA8); panel.addView(stop,new LinearLayout.LayoutParams(dp(activity,48),dp(activity,36)));
-            log.setVisibility(View.GONE); back.setVisibility(View.GONE); stop.setVisibility(View.GONE);
-            final float[] drag={0,0,0,0,0,0}; final Runnable[] frame={null};
-            bubble.setOnTouchListener((v,e)->{switch(e.getActionMasked()){
+    /** 视图标记。用于在 decor 上查找与去重（同一个 decor 只允许一层）。 */
+    public static final Integer OVERLAY_TAG = 0x5A484942; // "ZHIB"
+
+
+    /** 位移小于这个值（dp）视为点击而非拖动。 */
+    private static final int TAP_SLOP_DP = 10;
+    private static final int CORNER_RADIUS_DP = 18;
+    private static final int PANEL_PADDING_DP = 6;
+    private static final int PANEL_PADDING_VERTICAL_DP = 4;
+    private static final int BUBBLE_WIDTH_DP = 42;
+    private static final int ACTION_WIDTH_DP = 48;
+    private static final int HEIGHT_DP = 36;
+    private static final int START_X_DP = 10;
+    private static final int START_Y_DP = 36;
+
+    private SandboxOverlay() {}
+
+    /** 在 {@code activity} 上挂控制栏。幂等：已挂过则直接返回。 */
+    public static void attach(Activity activity, String guestPackage) {
+        if (activity == null || activity.isFinishing()) return;
+        SandboxConsole.event("准备添加沙箱控制栏: " + guestPackage + " / " + activity.getClass().getName());
+        activity.runOnUiThread(() -> {
+            View decor = activity.getWindow().getDecorView();
+            if (!(decor instanceof ViewGroup)) return;
+            ViewGroup root = (ViewGroup) decor;
+            if (root.findViewWithTag(OVERLAY_TAG) != null) return;
+
+            View panel = buildPanel(activity, guestPackage);
+            activity.addContentView(panel, new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            panel.setX(dp(activity, START_X_DP));
+            panel.setY(dp(activity, START_Y_DP));
+        });
+    }
+
+    /** 摘掉控制栏。安全：未挂载时什么都不做。 */
+    static void detach(Activity activity) {
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            View decor = activity.getWindow().getDecorView();
+            if (!(decor instanceof ViewGroup)) return;
+            View panel = ((ViewGroup) decor).findViewWithTag(OVERLAY_TAG);
+            if (panel == null) return;
+            if (panel.getParent() instanceof ViewGroup) {
+                ((ViewGroup) panel.getParent()).removeView(panel);
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------ 面板构建
+
+    private static View buildPanel(Activity activity, String guestPackage) {
+        SandboxPalette palette = SandboxPalette.resolve(activity);
+
+        LinearLayout panel = new LinearLayout(activity);
+        panel.setTag(OVERLAY_TAG);
+        panel.setOrientation(LinearLayout.HORIZONTAL);
+        panel.setGravity(Gravity.CENTER_VERTICAL);
+        panel.setPadding(dp(activity, PANEL_PADDING_DP), dp(activity, PANEL_PADDING_VERTICAL_DP),
+                dp(activity, PANEL_PADDING_DP), dp(activity, PANEL_PADDING_VERTICAL_DP));
+        panel.setBackground(rounded(palette.surface, CORNER_RADIUS_DP));
+        panel.setElevation(dp(activity, 14));
+
+        TextView bubble = action(activity, "蜘蛛", palette.accent);
+        TextView log = action(activity, "日志", palette.text);
+        TextView back = action(activity, "返回", palette.text);
+        TextView stop = action(activity, "停止", palette.danger);
+
+        panel.addView(bubble, new LinearLayout.LayoutParams(dp(activity, BUBBLE_WIDTH_DP), dp(activity, HEIGHT_DP)));
+        panel.addView(log, new LinearLayout.LayoutParams(dp(activity, ACTION_WIDTH_DP), dp(activity, HEIGHT_DP)));
+        panel.addView(back, new LinearLayout.LayoutParams(dp(activity, ACTION_WIDTH_DP), dp(activity, HEIGHT_DP)));
+        panel.addView(stop, new LinearLayout.LayoutParams(dp(activity, ACTION_WIDTH_DP), dp(activity, HEIGHT_DP)));
+
+        // 展开态在首次渲染时保持收起
+        log.setVisibility(View.GONE);
+        back.setVisibility(View.GONE);
+        stop.setVisibility(View.GONE);
+
+        installDrag(activity, panel, bubble, log, back, stop);
+        log.setOnClickListener(v -> showLog(activity));
+        back.setOnClickListener(v -> returnToHost(activity));
+        stop.setOnClickListener(v -> {
+            new Thread(() -> {
+                try {
+                    ZhiSandbox.stop(guestPackage);
+                    SandboxKeeper.stop(activity);
+                } catch (Throwable error) {
+                    SandboxConsole.event("停止 guest 失败: " + error);
+                }
+                activity.runOnUiThread(() -> {
+                    detach(activity);
+                    returnToHost(activity);
+                });
+            }, "zhi-sandbox-stop").start();
+        });
+        return panel;
+    }
+
+    /**
+     * 拖动只在气泡上生效 —— 三个动作按钮仍走各自的点击。
+     *
+     * <p>移动量按「手指原始坐标的增量」算，而不是 getX/getY：
+     * 后者是相对父容器的坐标，会和面板自身的 translation 互相干扰，拖起来会漂。
+     */
+    private static void installDrag(Activity activity, View panel, View handle,
+                                    View log, View back, View stop) {
+        final DragState state = new DragState();
+        handle.setOnTouchListener((view, event) -> {
+            switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    drag[0]=e.getRawX();drag[1]=e.getRawY();drag[2]=panel.getTranslationX();drag[3]=panel.getTranslationY();drag[4]=drag[0];drag[5]=drag[1];
-                    v.getParent().requestDisallowInterceptTouchEvent(true);
+                    state.begin(event.getRawX(), event.getRawY(), panel);
+                    // 阻止 ScrollView 之类的祖先抢走手势
+                    view.getParent().requestDisallowInterceptTouchEvent(true);
                     return true;
                 case MotionEvent.ACTION_MOVE:
-                    drag[4]=e.getRawX();drag[5]=e.getRawY();
-                    if(frame[0]==null){frame[0]=()->{frame[0]=null;panel.setTranslationX(drag[2]+drag[4]-drag[0]);panel.setTranslationY(drag[3]+drag[5]-drag[1]);};panel.postOnAnimation(frame[0]);}
+                    state.move(event.getRawX(), event.getRawY());
+                    state.schedule(panel);
                     return true;
                 case MotionEvent.ACTION_UP:
-                    if(frame[0]!=null){panel.removeCallbacks(frame[0]);frame[0]=null;}
-                    panel.setTranslationX(drag[2]+drag[4]-drag[0]);panel.setTranslationY(drag[3]+drag[5]-drag[1]);
-                    panel.setLayerType(View.LAYER_TYPE_NONE,null);
-                    if(Math.abs(drag[4]-drag[0])<10&&Math.abs(drag[5]-drag[1])<10){boolean expand=log.getVisibility()!=View.VISIBLE;log.setVisibility(expand?View.VISIBLE:View.GONE);back.setVisibility(expand?View.VISIBLE:View.GONE);stop.setVisibility(expand?View.VISIBLE:View.GONE);}
+                    state.cancelPending(panel);
+                    state.apply(panel);
+                    if (state.isTap(event.getRawX(), event.getRawY(), dp(activity, TAP_SLOP_DP))) {
+                        toggleExpanded(log, back, stop);
+                    }
                     return true;
                 case MotionEvent.ACTION_CANCEL:
-                    if(frame[0]!=null){panel.removeCallbacks(frame[0]);frame[0]=null;}
-                    panel.setLayerType(View.LAYER_TYPE_NONE,null);
+                    state.cancelPending(panel);
                     return true;
-            }return false;});
-            log.setOnClickListener(v->showLog(activity)); back.setOnClickListener(v->openIQ(activity,false));
-            stop.setOnClickListener(v->{new Thread(()->{try{ZhiSandbox.stop(pkg);SandboxKeeper.stop(activity);}catch(Throwable ignored){} activity.runOnUiThread(()->openIQ(activity,false));},"iq-sandbox-stop").start();});
-            activity.addContentView(panel,new ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,ViewGroup.LayoutParams.WRAP_CONTENT));
-            panel.setX(dp(activity,10)); panel.setY(dp(activity,36));
+                default:
+                    return false;
+            }
         });
     }
 
-    static void detach(Activity activity){
-        if(activity==null)return;
-        activity.runOnUiThread(()->{
-            ViewGroup root=(ViewGroup)activity.getWindow().getDecorView();
-            View panel=root.findViewWithTag(OVERLAY_TAG);
-            if(panel!=null)root.removeView(panel);
-        });
+    private static void toggleExpanded(View log, View back, View stop) {
+        boolean expand = log.getVisibility() != View.VISIBLE;
+        int target = expand ? View.VISIBLE : View.GONE;
+        log.setVisibility(target);
+        back.setVisibility(target);
+        stop.setVisibility(target);
     }
 
-    private static void showLog(Activity activity){
-        TextView body=text(activity,"正在读取日志…");
-        body.setTypeface(Typeface.MONOSPACE); body.setTextIsSelectable(true); body.setGravity(Gravity.TOP);
-        ScrollView scroll=new ScrollView(activity); scroll.setPadding(dp(activity,8),dp(activity,4),dp(activity,8),dp(activity,4)); scroll.addView(body);
-        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("蜘蛛沙箱日志")
-                .setView(scroll).setNegativeButton("关闭",null).setNeutralButton("复制全部",null)
-                .setPositiveButton("刷新",null).create();
-        dialog.setOnShowListener(v->{
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(x->{
-                ClipboardManager cm=(ClipboardManager)activity.getSystemService(Activity.CLIPBOARD_SERVICE);
-                if(cm!=null)cm.setPrimaryClip(ClipData.newPlainText("蜘蛛沙箱 log",body.getText()));
+    private static void returnToHost(Activity activity) {
+        Intent intent = new Intent(activity, MainActivity.class).addFlags(
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        intent.putExtra("zhisandbox_return", true);
+        activity.startActivity(intent);
+    }
+
+    // ------------------------------------------------------------------ 日志面板
+
+    private static void showLog(Activity activity) {
+        TextView body = new TextView(activity);
+        body.setText("正在读取日志…");
+        body.setTextColor(Color.WHITE);
+        body.setTextSize(10);
+        body.setTypeface(Typeface.MONOSPACE);
+        body.setTextIsSelectable(true);
+        body.setGravity(Gravity.TOP);
+
+        int pad = dp(activity, 8);
+        ScrollView scroll = new ScrollView(activity);
+        scroll.setPadding(pad, dp(activity, 4), pad, dp(activity, 4));
+        scroll.addView(body);
+
+        AlertDialog dialog = new AlertDialog.Builder(activity)
+                .setTitle("蜘蛛沙箱日志")
+                .setView(scroll)
+                .setNegativeButton("关闭", null)
+                .setNeutralButton("复制全部", null)
+                .setPositiveButton("刷新", null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                ClipboardManager clipboard =
+                        (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+                if (clipboard != null) {
+                    clipboard.setPrimaryClip(ClipData.newPlainText("蜘蛛沙箱日志", body.getText()));
+                }
             });
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x->loadLog(activity,body));
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> loadLog(activity, body));
         });
-        dialog.show(); loadLog(activity,body);
+        dialog.show();
+        loadLog(activity, body);
     }
 
-    private static void loadLog(Activity activity,TextView body){
-        new Thread(()->{String value;try{value=SandboxConsole.snapshot(activity.getApplicationContext());}catch(Throwable e){value="读取日志失败: "+e;}String result=value;new Handler(Looper.getMainLooper()).post(()->{if(body.getWindowToken()!=null)body.setText(result);});},"iq-sandbox-log").start();
+    /** 日志在后台线程采集（要读文件 + 跑 logcat），回主线程前确认视图还挂着。 */
+    private static void loadLog(Activity activity, TextView body) {
+        new Thread(() -> {
+            String text;
+            try {
+                text = SandboxConsole.snapshot(activity.getApplicationContext());
+            } catch (Throwable error) {
+                text = "读取日志失败: " + error;
+            }
+            final String result = text;
+            new Handler(Looper.getMainLooper()).post(() -> {
+                if (body.getWindowToken() != null) body.setText(result);
+            });
+        }, "zhi-sandbox-log").start();
     }
 
-    private static TextView text(Activity activity,String value){TextView t=new TextView(activity);t.setText(value);t.setTextColor(Color.WHITE);t.setTextSize(10);return t;}
+    // ------------------------------------------------------------------ 小工具
 
-    private static void openIQ(Activity a,boolean debug){
-        Intent i=new Intent(a,debug?SandboxBoard.class:MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        i.putExtra("iq_sandbox_return",true); a.startActivity(i);
+    private static TextView action(Activity activity, String label, int color) {
+        TextView view = new TextView(activity);
+        view.setText(label);
+        view.setTextColor(color);
+        view.setTextSize(11);
+        view.setTypeface(Typeface.DEFAULT_BOLD);
+        view.setGravity(Gravity.CENTER);
+        return view;
     }
-    private static TextView button(Activity a,String s,int color){TextView t=new TextView(a);t.setText(s);t.setTextColor(color);t.setTextSize(11);t.setTypeface(Typeface.DEFAULT_BOLD);t.setGravity(Gravity.CENTER);return t;}
-    private static GradientDrawable bg(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(radius);return d;}
-    private static int dp(Activity a,float v){return (int)(v*a.getResources().getDisplayMetrics().density+0.5f);}
+
+    private static GradientDrawable rounded(int color, int radiusDp) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(radiusDp);
+        return drawable;
+    }
+
+    private static int dp(Activity activity, float value) {
+        return (int) (value * activity.getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    /** 拖动状态。抽出来是因为匿名监听器里需要一个可变的引用位。 */
+    private static final class DragState {
+        private float downRawX, downRawY;
+        private float startTranslationX, startTranslationY;
+        private float currentRawX, currentRawY;
+        private Runnable pendingFrame;
+
+        void begin(float rawX, float rawY, View panel) {
+            downRawX = rawX;
+            downRawY = rawY;
+            currentRawX = rawX;
+            currentRawY = rawY;
+            startTranslationX = panel.getTranslationX();
+            startTranslationY = panel.getTranslationY();
+        }
+
+        void move(float rawX, float rawY) {
+            currentRawX = rawX;
+            currentRawY = rawY;
+        }
+
+        /** 每帧只应用一次位置更新：连续 MOVE 事件不会各自触发一次布局。 */
+        void schedule(View panel) {
+            if (pendingFrame != null) return;
+            pendingFrame = () -> {
+                pendingFrame = null;
+                apply(panel);
+            };
+            panel.postOnAnimation(pendingFrame);
+        }
+
+        void cancelPending(View panel) {
+            if (pendingFrame != null) {
+                panel.removeCallbacks(pendingFrame);
+                pendingFrame = null;
+            }
+        }
+
+        void apply(View panel) {
+            panel.setTranslationX(startTranslationX + currentRawX - downRawX);
+            panel.setTranslationY(startTranslationY + currentRawY - downRawY);
+        }
+
+        boolean isTap(float rawX, float rawY, int slopPx) {
+            return Math.abs(rawX - downRawX) < slopPx && Math.abs(rawY - downRawY) < slopPx;
+        }
+    }
+
 }

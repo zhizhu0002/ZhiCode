@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# 度量「蜘蛛工程有多少代码仍与 IQ Code 逐行相同」。
+#
+# 做法：把两棵树的包名/品牌/类名归一化后，按映射路径逐文件比对「逐行相同」的行数。
+# 归一化只抹命名，不动代码形态 —— 所以「相同」意味着代码本身没被改写。
+#
+# 需要本机存在原版：projects/IQ-Code-Android
+# 用法: bash tools/provenance.sh
+set -uo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OUR="$PROJECT_ROOT/app/src/main/java"
+OFF="${IQCODE_ORIGINAL:-$(cd "$PROJECT_ROOT/.." && pwd)/IQ-Code-Android}/app/src/main/java"
+
+if [ ! -d "$OFF" ]; then
+    echo "找不到原版 IQ Code: $OFF" >&2
+    echo "可用 IQCODE_ORIGINAL=<path> 指定其工程根。" >&2
+    exit 2
+fi
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+# 去掉缩进差异与空行
+squash() { tr -s ' \t' ' ' | sed 's/^ //; s/ $//' | grep -v '^$'; }
+
+# 只抹命名与品牌，不动代码形态
+normalize() {
+    sed -e 's/com\.zhizhu\.zhicode/com.iqge/g' \
+        -e 's/com\.termux\.app\.zhicode/com.termux.app.iqcode/g' \
+        -e 's/ZhiCodeEngine/IQCodeEngine/g' \
+        -e 's/ZhiSandboxTool/IQSandboxTool/g' \
+        -e 's/ZhiDebugTool/IQDebugTool/g' \
+        -e 's/zhisandbox/iqsandbox/g' -e 's/zhidebug/iqdebug/g' \
+        -e 's/ZHICODE_SANDBOX/IQGE_SANDBOX/g' \
+        -e 's/ZhiCode/IQCode/g' -e 's/Zhi/IQ/g' \
+        -e 's/蜘蛛/IQ Code/g' "$1"
+}
+
+REPORT="$WORK/report.txt"
+: > "$REPORT"
+
+cd "$OUR"
+while IFS= read -r rel; do
+    case "$rel" in
+        com/zhizhu/zhicode/*)     counterpart="com/iqge/${rel#com/zhizhu/zhicode/}" ;;
+        com/termux/app/zhicode/*) counterpart="com/termux/app/iqcode/${rel#com/termux/app/zhicode/}" ;;
+        *)                        counterpart="$rel" ;;
+    esac
+
+    normalize "$OUR/$rel" | squash > "$WORK/ours.txt"
+    ours=$(wc -l < "$WORK/ours.txt")
+
+    if [ -f "$OFF/$counterpart" ]; then
+        squash < "$OFF/$counterpart" > "$WORK/theirs.txt"
+        theirs=$(wc -l < "$WORK/theirs.txt")
+        shared=$(diff --unchanged-group-format='%=' --old-group-format='' \
+                      --new-group-format='' --changed-group-format='' \
+                      "$WORK/theirs.txt" "$WORK/ours.txt" | grep -c .)
+        shared=${shared:-0}
+    else
+        theirs=0; shared=0
+    fi
+    echo "$rel|$counterpart|$theirs|$ours|$shared" >> "$REPORT"
+done < <(find . -name '*.java' -o -name '*.kt' | sed 's#^\./##')
+
+awk -F'|' '
+function area(path) {
+  if (path ~ /^com\/termux\/(terminal|view|shared)\//)      return "Termux 上游（非 IQ Code）"
+  if (path ~ /zhicode\/sandbox\//)                          return "沙箱宿主层"
+  if (path ~ /zhicode\/compose\//)                           return "Compose 界面层"
+  if (path ~ /termux\/app\/zhicode\/tools\//)                return "Agent 工具"
+  if (path ~ /termux\/app\/zhicode\/core\//)                 return "Agent 核心"
+  if (path ~ /termux\/app\/zhicode\/background\//)           return "后台保活"
+  if (path ~ /termux\/app\/zhicode\//)                       return "Termux 集成层"
+  return "其它"
+}
+{
+  a = area($1)
+  files[a]++; ours[a] += $4; shared[a] += $5; theirs[a] += $3
+  total_files++; total_ours += $4; total_shared += $5
+  if ($5 > 0) iqcode_lines += $5
+}
+END {
+  printf "%-28s %6s %10s %14s\n", "归属区域", "文件", "行数", "仍与 IQCode 相同"
+  for (a in files)
+    printf "%-28s %6d %10d %14d\n", a, files[a], ours[a], shared[a]
+  printf "%-28s %6d %10d %14d\n", "合计", total_files, total_ours, total_shared
+  printf "\n"
+  termux_upstream = shared["Termux 上游（非 IQ Code）"]
+  printf "已是我们自己的:        %d 行\n", total_ours - total_shared
+  printf "逐行相同合计:          %d 行\n", total_shared
+  printf "  其中 Termux 上游:     %d 行（Termux 自己的代码，与独立性无关）\n", termux_upstream
+  printf "  真正属于 IQ Code:     %d 行\n", total_shared - termux_upstream
+}
+' "$REPORT"
