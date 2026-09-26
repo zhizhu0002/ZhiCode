@@ -100,6 +100,13 @@ run LicenseNoticeStructureTest "$PROJECT_ROOT"
 # NoBundledThirdPartyEndpointTest.java
 run NoBundledThirdPartyEndpointTest "$PROJECT_ROOT"
 
+# ---------- api/ 的线协议契约 ----------
+# 这一层要被重写，而现有测试里只有两行碰过它。重写流式解析器最容易犯的错不是编译不过，
+# 而是静默漏掉一个分支（少认一个事件类型、少读一个字段、终止标记判断反了）——
+# 那在上层只表现为「回复不完整」或「工具调用丢参数」，很难定位。
+# ApiWireContractTest.java
+run ApiWireContractTest "$PROJECT_ROOT"
+
 echo "-----"
 echo "通过 $PASS / 失败 $FAIL"
 if [ "$FAIL" -ne 0 ]; then
