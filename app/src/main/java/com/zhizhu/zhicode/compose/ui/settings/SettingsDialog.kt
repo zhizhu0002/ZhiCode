@@ -39,7 +39,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * IQ Code 设置页：标题 + × / 分类 Tab / 设置行 / 取消·保存。
+ * 蜘蛛 设置页：标题 + × / 分类 Tab / 设置行 / 取消·保存。
  *
  * ## 设置行不是手写的
  *

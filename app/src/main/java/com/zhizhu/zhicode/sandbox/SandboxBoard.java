@@ -38,7 +38,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Human-facing sandbox manager intentionally hosted in IQ Code's stable main process.
+ * Human-facing sandbox manager intentionally hosted in 蜘蛛的 stable main process.
  * BlackBox itself lives behind SandboxRpcService in :zhisandbox. If the backend
  * process dies, this Activity stays alive and shows the startup stage instead of
  * disappearing with the backend.
@@ -86,7 +86,7 @@ public final class SandboxBoard extends Activity {
         LinearLayout root=vbox();root.setPadding(dp(16),dp(14),dp(16),dp(14));root.setBackgroundColor(BG);
         LinearLayout top=hbox();top.setGravity(Gravity.CENTER_VERTICAL);
         TextView back=button("←",TEXT);back.setOnClickListener(v->finish());top.addView(back,lp(dp(42),dp(40)));
-        TextView title=text("IQ 沙箱",22,TEXT);title.setTypeface(Typeface.DEFAULT_BOLD);top.addView(title,new LinearLayout.LayoutParams(0,dp(42),1));
+        TextView title=text("蜘蛛沙箱",22,TEXT);title.setTypeface(Typeface.DEFAULT_BOLD);top.addView(title,new LinearLayout.LayoutParams(0,dp(42),1));
         TextView debug=button("诊断",ACCENT);debug.setOnClickListener(v->showDebug());top.addView(debug,lp(dp(72),dp(40)));root.addView(top,lp(-1,dp(48)));
         status=text("正在连接沙箱后端…",11,GREEN);status.setPadding(0,dp(10),0,dp(10));root.addView(status,lp(-1,dp(54)));
         LinearLayout rootSetting=hbox();rootSetting.setGravity(Gravity.CENTER_VERTICAL);TextView rootLabel=text("隐藏 Root",13,TEXT);rootSetting.addView(rootLabel,new LinearLayout.LayoutParams(0,dp(44),1));rootHideSwitch=new Switch(this);rootHideSwitch.setChecked(true);rootHideSwitch.setEnabled(false);rootHideSwitch.setOnCheckedChangeListener((button,hidden)->{if(!syncingRootSwitch)confirmRootVisibilityChange(hidden);});rootSetting.addView(rootHideSwitch,lp(dp(64),dp(44)));root.addView(rootSetting,lp(-1,dp(48)));
@@ -181,7 +181,7 @@ public final class SandboxBoard extends Activity {
     private View appRow(String pkg){
         LinearLayout card=vbox();card.setPadding(dp(12),dp(10),dp(12),dp(10));card.setBackground(round(CARD,16));
         TextView name=text(pkg,14,TEXT);name.setTypeface(Typeface.DEFAULT_BOLD);card.addView(name,lp(-1,dp(34)));
-        LinearLayout row=hbox();Button run=action("运行");run.setOnClickListener(v->rpcAction("launch",pkg,"已启动"));row.addView(run,new LinearLayout.LayoutParams(0,dp(40),1));Button stop=action("停止");stop.setOnClickListener(v->rpcAction("stop",pkg,"已停止"));row.addView(stop,new LinearLayout.LayoutParams(0,dp(40),1));Button clear=action("清数据");clear.setOnClickListener(v->confirm("清除沙箱数据？",()->rpcAction("clear_data",pkg,"已清除")));row.addView(clear,new LinearLayout.LayoutParams(0,dp(40),1));Button del=action("卸载");del.setTextColor(RED);del.setOnClickListener(v->confirm("从 IQ 沙箱卸载？",()->rpcAction("uninstall",pkg,"已卸载")));row.addView(del,new LinearLayout.LayoutParams(0,dp(40),1));card.addView(row,lp(-1,dp(44)));
+        LinearLayout row=hbox();Button run=action("运行");run.setOnClickListener(v->rpcAction("launch",pkg,"已启动"));row.addView(run,new LinearLayout.LayoutParams(0,dp(40),1));Button stop=action("停止");stop.setOnClickListener(v->rpcAction("stop",pkg,"已停止"));row.addView(stop,new LinearLayout.LayoutParams(0,dp(40),1));Button clear=action("清数据");clear.setOnClickListener(v->confirm("清除沙箱数据？",()->rpcAction("clear_data",pkg,"已清除")));row.addView(clear,new LinearLayout.LayoutParams(0,dp(40),1));Button del=action("卸载");del.setTextColor(RED);del.setOnClickListener(v->confirm("从 蜘蛛沙箱卸载？",()->rpcAction("uninstall",pkg,"已卸载")));row.addView(del,new LinearLayout.LayoutParams(0,dp(40),1));card.addView(row,lp(-1,dp(44)));
         LinearLayout dbg=hbox();Button proc=action("进程 / SO 基址");proc.setOnClickListener(v->showProcesses(pkg));dbg.addView(proc,new LinearLayout.LayoutParams(0,dp(40),1));Button frida=action("Frida 动态调试");frida.setOnClickListener(v->fridaFor(pkg));dbg.addView(frida,new LinearLayout.LayoutParams(0,dp(40),1));card.addView(dbg,lp(-1,dp(42)));
         LinearLayout.LayoutParams p=lp(-1,-2);p.setMargins(0,0,0,dp(10));card.setLayoutParams(p);return card;
     }
@@ -204,7 +204,7 @@ public final class SandboxBoard extends Activity {
         if(status!=null)status.setText("正在读取诊断信息…");
         worker.execute(()->{
             String s=SandboxConsole.snapshot(this)+"\n===== STARTUP STAGE =====\n"+readStartupStage();
-            runOnUiThread(()->{if(!destroyed)showMonoDialog("IQ 沙箱诊断",s);});
+            runOnUiThread(()->{if(!destroyed)showMonoDialog("蜘蛛沙箱诊断",s);});
         });
     }
     private String readStartupStage(){File f=new File(getFilesDir(),"sandbox/startup-stage.txt");if(!f.isFile())return "(尚无后端启动记录)";try(FileInputStream in=new FileInputStream(f)){byte[] b=new byte[(int)Math.min(f.length(),8192)];int n=in.read(b);return n<=0?"(空)":new String(b,0,n,StandardCharsets.UTF_8).trim();}catch(Throwable e){return "读取失败: "+e;}}

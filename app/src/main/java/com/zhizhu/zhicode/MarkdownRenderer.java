@@ -28,7 +28,7 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Compact native Markdown renderer modeled after IQ Code's text-first transcript. */
+/** Compact native Markdown renderer modeled after 蜘蛛的 text-first transcript. */
 public final class MarkdownRenderer {
     /** Immutable renderer palette: no process-global theme mutation while a transcript is rebuilding. */
     private static final class Palette {
@@ -107,7 +107,7 @@ public final class MarkdownRenderer {
      * visible in chat.
      *
      * This parser intentionally stays small and Android-native, but covers the
-     * syntax IQ Code emits most often: code, bold, italic, strike-through and
+     * syntax 蜘蛛 emits most often: code, bold, italic, strike-through and
      * links. Nested emphasis is supported recursively.
      */
     public static CharSequence inlineText(String src){ return inline(src,CLASSIC); }

@@ -342,7 +342,7 @@ data class ModelPickerState(
     val models: List<ModelOption> = emptyList(),
 )
 
-/** 首次进入时的示例记录，对齐参考图的「IQ Code 官方 API / openai-responses · gpt-5.6-sol」。 */
+/** 首次进入时的示例记录，对齐参考图的「蜘蛛 官方 API / openai-responses · gpt-5.6-sol」。 */
 val DEFAULT_API_PROFILES: List<ApiProfile> = listOf(
     ApiProfile(
         id = "api-official",

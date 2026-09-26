@@ -84,13 +84,13 @@ public final class SandboxOverlay {
         TextView body=text(activity,"正在读取日志…");
         body.setTypeface(Typeface.MONOSPACE); body.setTextIsSelectable(true); body.setGravity(Gravity.TOP);
         ScrollView scroll=new ScrollView(activity); scroll.setPadding(dp(activity,8),dp(activity,4),dp(activity,8),dp(activity,4)); scroll.addView(body);
-        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("IQ 沙箱日志")
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("蜘蛛沙箱日志")
                 .setView(scroll).setNegativeButton("关闭",null).setNeutralButton("复制全部",null)
                 .setPositiveButton("刷新",null).create();
         dialog.setOnShowListener(v->{
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(x->{
                 ClipboardManager cm=(ClipboardManager)activity.getSystemService(Activity.CLIPBOARD_SERVICE);
-                if(cm!=null)cm.setPrimaryClip(ClipData.newPlainText("IQ Sandbox log",body.getText()));
+                if(cm!=null)cm.setPrimaryClip(ClipData.newPlainText("蜘蛛沙箱 log",body.getText()));
             });
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(x->loadLog(activity,body));
         });

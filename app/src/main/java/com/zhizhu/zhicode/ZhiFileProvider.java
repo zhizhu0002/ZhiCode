@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Read-only content provider used when IQ Code hands a locally built APK or another file to
+ * Read-only content provider used when 蜘蛛 hands a locally built APK or another file to
  * Android. It intentionally exposes only explicitly supported roots and rejects path traversal.
  */
 public final class ZhiFileProvider extends ContentProvider {

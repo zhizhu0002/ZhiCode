@@ -15,7 +15,7 @@ import java.security.MessageDigest;
 import java.util.Locale;
 
 /**
- * Installs the official arm64 Frida Gadget into IQ Code private storage on demand.
+ * Installs the official arm64 Frida Gadget into 蜘蛛 private storage on demand.
  *
  * The binary is intentionally not fetched from an arbitrary mirror. The URL and SHA-256 are
  * pinned to an official frida/frida GitHub release. The embedded Termux curl+xz toolchain does

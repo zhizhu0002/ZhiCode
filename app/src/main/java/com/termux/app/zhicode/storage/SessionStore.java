@@ -29,7 +29,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Persistent IQ Code Android sessions. Like Claude Code, every canonical project path owns its
+ * Persistent 蜘蛛 Android sessions. Like Claude Code, every canonical project path owns its
  * own history namespace under ~/.iq/projects/<path-key>; JSONL stays human-readable and portable.
  */
 public final class SessionStore {

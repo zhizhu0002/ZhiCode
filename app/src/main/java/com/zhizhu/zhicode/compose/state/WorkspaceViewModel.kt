@@ -118,7 +118,7 @@ class WorkspaceViewModel(
     /** 内置 Termux 环境安装器（第一次使用前会解压 32MB 的 bootstrap）。 */
     private val installer = RuntimeInstaller(application)
 
-    /** 真实 IQ Code 引擎。懒创建，第一次发消息时才初始化。 */
+    /** 真实 蜘蛛 引擎。懒创建，第一次发消息时才初始化。 */
     private val engine = ZhiEngineController(application, this)
 
     // ------------------------------------------------------------------
@@ -883,7 +883,7 @@ class WorkspaceViewModel(
     fun closeMemory() = _state.update { it.copy(memory = null) }
 
     /**
-     * 打开 IQ 沙箱管理界面（`SandboxBoard`）。
+     * 打开 蜘蛛沙箱管理界面（`SandboxBoard`）。
      *
      * 与「环境弹窗」不同，这里**不能**只改本进程的 UI 状态：沙箱引擎整个跑在
      * `:zhisandbox` 进程里，管理界面通过 `${applicationId}.sandbox.control` 这个同 UID
@@ -905,7 +905,7 @@ class WorkspaceViewModel(
         }
         started.onFailure { error ->
             appendInfo(
-                "无法打开 IQ 沙箱",
+                "无法打开 蜘蛛沙箱",
                 "启动沙箱管理界面失败：${error.javaClass.simpleName}: ${error.message ?: "未知原因"}\n\n" +
                     "沙箱引擎运行在 :zhisandbox 进程，界面必须由系统拉起而无法在本进程内绘制。",
             )

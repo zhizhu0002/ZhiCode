@@ -24,7 +24,7 @@ import java.util.Comparator;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Same-UID file bridge that makes IQ Sandbox/Debug callable from the embedded Termux shell.
+ * Same-UID file bridge that makes 蜘蛛沙箱/Debug callable from the embedded Termux shell.
  * It does not require adb, an exported Android component, a network socket, or root.
  */
 public final class SandboxShell {
@@ -43,7 +43,7 @@ public final class SandboxShell {
     public static void ensureCliInstalled(Context context){
         try{
             File bin=new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH);if(!bin.isDirectory())return;
-            writeScript(new File(bin,"iqsandbox"),"Sandbox");writeScript(new File(bin,"iqdebug"),"Debug");
+            writeScript(new File(bin,"zhisandbox"),"Sandbox");writeScript(new File(bin,"zhidebug"),"Debug");
         }catch(Throwable e){SandboxConsole.event("Termux 沙箱 CLI 安装失败: "+e);}
     }
 
@@ -104,7 +104,7 @@ public final class SandboxShell {
             "TMP=\"$REQ.tmp.$$\"\n"+
             "printf '%s\\n%s\\n%s\\n%s' \"$TOOL\" \"$ACTION\" \"$TARGET\" \"$PAYLOAD\" >\"$TMP\" && mv \"$TMP\" \"$REQ\"\n"+
             "i=0; while [ $i -lt 240 ]; do if [ -f \"$RES\" ]; then CODE=$(head -n 1 \"$RES\" 2>/dev/null || echo 1); tail -n +2 \"$RES\" 2>/dev/null; rm -f \"$RES\"; case \"$CODE\" in 0) exit 0;; *) exit 1;; esac; fi; sleep 0.05; i=$((i+1)); done\n"+
-            "rm -f \"$REQ\" \"$RES\"; echo 'IQ Sandbox bridge timeout' >&2; exit 124\n";
+            "rm -f \"$REQ\" \"$RES\"; echo '蜘蛛沙箱 bridge timeout' >&2; exit 124\n";
         byte[] data=script.getBytes(StandardCharsets.UTF_8);
         if(file.isFile()){
             try{if(read(file).equals(script)){file.setExecutable(true,false);return;}}catch(Throwable ignored){}

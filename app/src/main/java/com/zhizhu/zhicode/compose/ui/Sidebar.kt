@@ -45,7 +45,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /**
- * 侧栏，对应原 IQ Code 的 buildSidebar() / sessionRow()。
+ * 侧栏，对应原 蜘蛛 的 buildSidebar() / sessionRow()。
  * 宽屏时作为常驻栏，窄屏时放进 OverlayBottomSheet。
  */
 @Composable
@@ -118,7 +118,7 @@ fun ZhiSidebar(
             SidebarSection(title = "工作区") {
                 SidebarAction(label = "技能", icon = ZhiIcons.skill, onClick = onSkills)
                 SidebarAction(label = "自定义角色卡", icon = ZhiIcons.roleCard, onClick = onRoleCard)
-                SidebarAction(label = "IQ 沙箱", icon = ZhiIcons.sandbox, onClick = onSandbox)
+                SidebarAction(label = "蜘蛛沙箱", icon = ZhiIcons.sandbox, onClick = onSandbox)
             }
 
             SidebarSection {

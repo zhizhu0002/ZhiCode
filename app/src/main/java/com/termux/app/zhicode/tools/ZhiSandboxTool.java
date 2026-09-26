@@ -24,7 +24,7 @@ public final class ZhiSandboxTool implements ZhiTool {
     private final Context context;
     public ZhiSandboxTool(Context context){this.context=context.getApplicationContext();}
     @Override public String name(){return "Sandbox";}
-    @Override public String description(){return "Control IQ Sandbox apps/UI; install targets sandbox only, never the phone.";}
+    @Override public String description(){return "Control 蜘蛛沙箱 apps/UI; install targets sandbox only, never the phone.";}
     @Override public PermissionKind permissionKind(){return PermissionKind.SYSTEM;}
     @Override public JSONObject inputSchema(){
         try{JSONObject p=new JSONObject();
@@ -44,7 +44,7 @@ public final class ZhiSandboxTool implements ZhiTool {
         String action=in.optString("action","").trim().toLowerCase();
         try{
             switch(action){
-                case "status": { JSONObject r=host("status",new JSONObject()); return result(r,"IQ Sandbox 状态"); }
+                case "status": { JSONObject r=host("status",new JSONObject()); return result(r,"蜘蛛沙箱 状态"); }
                 case "list": return ToolExecutionResult.ok(listApps());
                 case "install": return install(in.optString("path",""));
                 case "launch": {String p=reqPkg(in);JSONObject r=host("launch",new JSONObject().put("package",p));return r.optBoolean("ok")&&r.optBoolean("success")?ToolExecutionResult.ok("已启动沙箱应用: "+p):ToolExecutionResult.error(r.optString("error",r.optString("message","沙箱没有找到可启动 Activity: "+p)));}
@@ -62,12 +62,12 @@ public final class ZhiSandboxTool implements ZhiTool {
     private ToolExecutionResult install(String path)throws Exception{
         if(path==null||path.trim().isEmpty())return ToolExecutionResult.error("install 需要 path");File apk=new File(path);if(!apk.isFile())return ToolExecutionResult.error("APK 不存在: "+path);
         PackageInfo pi=context.getPackageManager().getPackageArchiveInfo(apk.getAbsolutePath(),PackageManager.GET_ACTIVITIES);if(pi==null||pi.packageName==null)return ToolExecutionResult.error("不是有效普通 APK: "+path);
-        if(context.getPackageName().equals(pi.packageName))return ToolExecutionResult.error("不能把蜘蛛自身安装进 IQ 沙箱");
+        if(context.getPackageName().equals(pi.packageName))return ToolExecutionResult.error("不能把蜘蛛自身安装进 蜘蛛沙箱");
         JSONObject r=host("install",new JSONObject().put("path",apk.getAbsolutePath()));
         if(!r.optBoolean("ok"))return ToolExecutionResult.error(r.optString("error",r.toString()));
-        return r.optBoolean("success")?ToolExecutionResult.ok("已安装到 IQ Sandbox: "+r.optString("package",pi.packageName)):ToolExecutionResult.error("沙箱安装失败: "+r.optString("message",r.toString()));
+        return r.optBoolean("success")?ToolExecutionResult.ok("已安装到 蜘蛛沙箱: "+r.optString("package",pi.packageName)):ToolExecutionResult.error("沙箱安装失败: "+r.optString("message",r.toString()));
     }
-    private String listApps()throws Exception{JSONObject r=host("list",new JSONObject());if(!r.optBoolean("ok"))throw new IllegalStateException(r.optString("error",r.toString()));JSONArray apps=r.optJSONArray("apps");StringBuilder b=new StringBuilder();int n=apps==null?0:apps.length();b.append("IQ Sandbox 已安装 ").append(n).append(" 个应用\n");for(int i=0;i<n;i++){String pkg=apps.optJSONObject(i).optString("package","");b.append("- ").append(pkg).append('\n');}return b.toString();}
+    private String listApps()throws Exception{JSONObject r=host("list",new JSONObject());if(!r.optBoolean("ok"))throw new IllegalStateException(r.optString("error",r.toString()));JSONArray apps=r.optJSONArray("apps");StringBuilder b=new StringBuilder();int n=apps==null?0:apps.length();b.append("蜘蛛沙箱 已安装 ").append(n).append(" 个应用\n");for(int i=0;i<n;i++){String pkg=apps.optJSONObject(i).optString("package","");b.append("- ").append(pkg).append('\n');}return b.toString();}
     private JSONObject host(String action,JSONObject payload){return SandboxRpc.call(context,action,payload);}
     private static ToolExecutionResult result(JSONObject r,String success){return r.optBoolean("ok",false)?ToolExecutionResult.ok(success+"\n"+r.toString()):ToolExecutionResult.error(r.optString("error",r.toString()));}
     private ToolExecutionResult control(String action,JSONObject in)throws Exception{

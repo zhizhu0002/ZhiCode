@@ -1,6 +1,6 @@
 package com.zhizhu.zhicode.compose.model
 
-/** 对话流中的条目类型。对应原 IQ Code 的 ChatItem 分类。 */
+/** 对话流中的条目类型。对应原 蜘蛛 的 ChatItem 分类。 */
 enum class ChatKind { USER, ASSISTANT, TOOL_GROUP, ERROR, INFO }
 
 /** 工具类别，用于聚合卡的文案（"搜索 N 个模式 / 读取 N 个文件"）。 */
@@ -346,7 +346,7 @@ data class WorkspaceUiState(
         get() = if (contextWindow <= 0) 0f else (contextTokens.toFloat() / contextWindow).coerceIn(0f, 1f)
 }
 
-/** 与原 IQ Code 一致的斜杠命令表（/help 显示，面板按前缀过滤）。 */
+/** 与原 蜘蛛 一致的斜杠命令表（/help 显示，面板按前缀过滤）。 */
 val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/help", "查看全部蜘蛛指令"),
     SlashCommand("/compact", "模型语义压缩；可追加摘要侧重点"),
@@ -362,7 +362,7 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/mcp", "配置和管理 MCP 服务器"),
     SlashCommand("/web", "联网搜索设置；也可直接输入 /web 搜索词"),
     SlashCommand("/terminal", "打开内置 Termux 终端"),
-    SlashCommand("/sandbox", "打开 IQ 沙箱；Agent 可安装、运行和调试虚拟 APK"),
+    SlashCommand("/sandbox", "打开 蜘蛛沙箱；Agent 可安装、运行和调试虚拟 APK"),
     SlashCommand("/diff", "打开 Claude Code 风格代码修改 Diff"),
     SlashCommand("/changes", "打开 Git 变更与 Diff"),
     SlashCommand("/files", "打开项目文件与代码编辑器"),

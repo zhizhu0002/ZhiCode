@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.WeakHashMap;
 
 /**
- * One motion language for the native IQ Code workspace.
+ * One motion language for the native 蜘蛛 workspace.
  *
  * The helpers deliberately animate only compositor-friendly properties (alpha,
  * translation and scale).  High-frequency surfaces such as TerminalView are

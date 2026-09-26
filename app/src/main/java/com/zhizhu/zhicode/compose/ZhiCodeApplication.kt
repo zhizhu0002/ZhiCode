@@ -20,7 +20,7 @@ import com.termux.shared.termux.TermuxConstants
  *    晚一步就会有人读到兜底的 `com.iqge` 路径。
  * 2. **安装崩溃日志**。放在 `attachBaseContext` 里，早于 ContentProvider 创建，
  *    否则启动期崩溃抓不到。
- * 3. **IQ 沙箱（BlackBox）只挂在沙箱自己的进程里**（`:zhisandbox` / `:black` / `:p0..:p49`）。
+ * 3. **蜘蛛沙箱（BlackBox）只挂在沙箱自己的进程里**（`:zhisandbox` / `:black` / `:p0..:p49`）。
  *    主进程刻意不 attach：沙箱要 hook ART、替换一堆系统服务，任何一处失败
  *    在启动期都会把整个应用带走；隔离在 guest 进程里，崩了只影响那一个 guest，
  *    编辑器与 Agent 执行链不受影响。判定见 [SandboxProcess]。

@@ -11,7 +11,7 @@ import org.json.JSONObject;
  * {@link SandboxRpcService}。
  *
  * <p>authority 由<b>运行时真实包名</b>派生，不写死。provider authority 是设备全局的：
- * 若把包名写死，本应用与另一个同源构建（例如原始 IQ Code）同时安装时，
+ * 若把包名写死，本应用与另一个同源构建（例如原始 蜘蛛）同时安装时，
  * 第二份会直接报 {@code INSTALL_FAILED_CONFLICTING_PROVIDER}。
  * 清单里声明的 {@code ${applicationId}.sandbox.control} 与本方法必须一致。
  */

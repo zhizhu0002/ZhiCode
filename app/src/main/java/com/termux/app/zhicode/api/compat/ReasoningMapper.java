@@ -3,7 +3,7 @@ package com.termux.app.zhicode.api.compat;
 import java.util.Locale;
 
 /**
- * Java port of src/services/api/compat/reasoning.ts from the supplied IQ Code tree.
+ * Java port of src/services/api/compat/reasoning.ts from the supplied 蜘蛛 tree.
  *
  * Important wire invariant for Responses/Codex: max and ultra are never silently
  * downgraded. xxhigh is the one intentional local alias and is sent as xhigh.

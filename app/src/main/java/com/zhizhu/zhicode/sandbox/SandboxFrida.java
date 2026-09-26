@@ -13,7 +13,7 @@ import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
- * In-process Frida Gadget bridge for one IQ Sandbox guest PID.
+ * In-process Frida Gadget bridge for one 蜘蛛沙箱 guest PID.
  *
  * Gadget runs in autonomous Script mode. A tiny resident bridge polls a private command file,
  * executes Frida-native operations in the guest process, and writes JSON replies. This gives the

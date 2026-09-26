@@ -26,12 +26,12 @@ import java.util.Map;
 import top.niunaijun.blackbox.app.BActivityThread;
 
 /**
- * In-process debugger for IQ Sandbox guest processes.
+ * In-process debugger for 蜘蛛沙箱 guest processes.
  *
  * This class intentionally operates only on /proc/self and code loaded into the current
  * virtual process. The main Agent selects a concrete sandbox PID through SandboxGuestHost,
  * then that process performs the operation on itself. This keeps raw memory/debug operations
- * scoped to IQ Sandbox instead of turning IQ Code into a system-wide injector.
+ * scoped to 蜘蛛沙箱 instead of turning 蜘蛛 into a system-wide injector.
  */
 public final class SandboxGuestDebug {
     private static final int MAX_MAP_CHARS = 512_000;

@@ -29,11 +29,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Starts Android activities from IQ Code's own application process.
+ * Starts Android activities from 蜘蛛的 own application process.
  *
  * Embedded Termux binaries execute as Linux subprocesses. Calling Android's `am` implementation
  * from there can fail when its caller-package identity does not match the custom com.iqge UID.
- * This bridge deliberately performs Context.startActivity() in the IQ Code Java process instead.
+ * This bridge deliberately performs Context.startActivity() in the 蜘蛛 Java process instead.
  */
 public final class AndroidIntentBridge {
     private static final String APK_MIME = "application/vnd.android.package-archive";

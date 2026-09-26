@@ -28,7 +28,7 @@ import top.yukonga.miuix.kmp.basic.TooltipBox
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 顶栏，逐项对应原 IQ Code 的 buildGlobalBar()：
+ * 顶栏，逐项对应原 蜘蛛 的 buildGlobalBar()：
  * 侧栏入口 · 品牌名 · 模型状态 · 上下文 chip · 设备时间 · 主题切换 · 悬浮球 · 设置。
  *
  * 原版是手写 LinearLayout 行，这里保持同样的单行紧凑结构（48dp）；

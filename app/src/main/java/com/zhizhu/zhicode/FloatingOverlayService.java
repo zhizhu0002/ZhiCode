@@ -15,7 +15,7 @@ import android.view.Gravity;
 import android.view.WindowManager;
 import android.widget.TextView;
 
-/** Displays only the collapsed IQ Code floating ball. */
+/** Displays only the collapsed 蜘蛛 floating ball. */
 public final class FloatingOverlayService extends Service {
     private WindowManager windowManager;
     private TextView ball;
