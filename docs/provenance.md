@@ -1,5 +1,17 @@
 # 蜘蛛工程的代码归属与许可
 
+> **历史文档（重写开始前的规划），不要当现状读。**
+>
+> 本文里的数字、批次编号与结论都已被后来的工作取代。**现行唯一来源是
+> `docs/licensing.md`** —— 那里的数字每次改动前由 `bash tools/provenance.sh` 重新量过，
+> 批次编号也与本文不同（本文的 A–I 是**旧编号**，与现在的批 A/B/… 不是一回事）。
+> 保留本文只为记录当时的判断依据；若两者冲突，以 `docs/licensing.md` 为准。
+>
+> 已知已过时之处（不再逐处改写，只列出来免得误读）：
+> - 第二节的「约 8,821 行 / 约 90 个文件」→ 现为 **4,551 行**（Termux 上游 7,274 行不变）；
+> - 第四节的 A–I 批次表 → 旧编号，勿与现行批次对照；
+> - 第四节的「F–I 共约 11,400 行」→ 估计值，实际远低于此。
+
 本文记录**实测**的代码归属现状、许可义务、以及"独立于 IQ Code"的完整工作量。
 所有数字都可用 `tools/provenance.sh` 复现。
 
@@ -28,19 +40,24 @@ MIT 唯一的硬性要求：
 > The above copyright notice and this permission notice shall be **included in all
 > copies or substantial portions** of the Software.
 
-### 当前缺口
+### 当时的三处缺口（都已补上）
 
-- 蜘蛛工程**没有 `LICENSE` 文件**。
-- `Bcore/`、`black-reflection/`、`compiler/` 三个模块**都没有自己的许可文件**
-  （BlackBox 上游是 Apache-2.0，同样要求保留声明）。
-- `README.md` 写明「用 Kotlin + Compose + Miuix **重写的** IQ Code 主界面」，
-  即自认为衍生作品，却没有附上游的版权声明。
+- ~~蜘蛛工程没有 `LICENSE` 文件~~ → 已有 `LICENSE`（MIT，© 2026 zhizhu0002）。
+- ~~`Bcore/`、`black-reflection/`、`compiler/` 三个模块都没有自己的许可文件~~
+  → 三个模块各自都补上了 `LICENSE` 与 `NOTICE`（BlackBox 上游是 Apache-2.0，
+  要求保留声明与修改声明）。
+- ~~README 自认为衍生作品、却没附上游的版权声明~~ → `NOTICE` 与
+  `THIRD-PARTY-LICENSES/` 已建立；本节下面的判断依据因此**仍然适用**，只是缺口已闭合。
 
 ### 一个必须说清的点
 
 **重写代码并不免除这个义务。** 只要分发物里仍含 IQ Code 的代码，
 就要附它的版权声明。只有做到 100% 不残留其代码才免掉 ——
 那等于把 Agent 运行时整个重做（见第四节）。
+
+> 注（后续补充）：以上是**只读许可原文**时的推论，逻辑仍然成立。后来原作者已明确
+> 许可本工程改写，且同意不强制要求随附其版权声明 —— 这一新事实如何处置（我们仍然
+> 保留致谢）见 `docs/licensing.md` 的「署名」一节。
 
 **结论：合规的最小动作是「补 LICENSE 与 NOTICE」，而不是重写。**
 重写是产品/工程层面的目标，与合规无关。
@@ -83,6 +100,8 @@ MIT 唯一的硬性要求：
 
 16,095 − 7,274（Termux 上游）= **约 8,821 行 / 约 90 个文件。**
 
+> 这个数是当时的，已过时：现行数字是 **4,551 行**（见 `docs/licensing.md`）。
+
 集中在 Agent 运行时：会话存储、API 客户端、工具集、上下文压缩、权限门、Termux 集成。
 
 ## 三、引擎层的 IQ Code 补丁
@@ -118,7 +137,7 @@ MIT 唯一的硬性要求：
 
 每批的验证方式一致：
 1. `./gradlew :app:compileDebugJavaWithJavac`
-2. `bash test-source-no-build.sh`（18 个结构测试全过）
+2. `bash test-source-no-build.sh`（结构测试全过；当时 18 个，现为 23 个）
 3. 归一化重合度复查（应显著下降）
 
 ### 对 Agent 运行时的坦白评估
@@ -147,6 +166,6 @@ F–I 四批共约 11,400 行，是把这个应用**再做一遍**：
 # 归属度量测（需要本机存在原版 projects/IQ-Code-Android）
 bash tools/provenance.sh
 
-# 结构测试（18 个，纯源码断言，不需要设备）
+# 结构测试（纯源码断言，不需要设备；当时 18 个，现为 23 个）
 bash test-source-no-build.sh
 ```
