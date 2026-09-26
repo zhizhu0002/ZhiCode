@@ -92,3 +92,73 @@ java app/tests/<Test>.java <归一化工程根>
 
 四个断言"必须存在"的不变式（进程角色、进程隔离、启动竞态、WebView/网络透传）
 在重写后必须仍然通过。
+
+## 第一次端到端实跑（2026-09-26 23:2x）
+
+在此之前，全部批次只验证过「编译 + JVM 单测 + 文本级断言」。这一节记录第一次把
+包真的装进 IQ Sandbox 并跑起来的观察结果，以及**没跑到的部分**。
+
+做了什么：
+
+```
+./gradlew :app:assembleDebug                → ZhiCode-debug.apk（47 MB）
+iqsandbox install → launch com.zhizhu.code  → 启动成功
+screenshot / dump_ui                         → 见下
+Debug process_list                           → 见下
+```
+
+观察到的事实：
+
+| 项 | 结果 |
+| --- | --- |
+| 启动 | `MainActivity` 起来，进程 `com.zhizhu.code`（pid 2178） |
+| 首屏渲染 | 完整：顶栏（蜘蛛 / 0/200k / 三个图标）、四个标签、欢迎语、输入器 |
+| 四个标签 | 「对话」「终端」切换均正常渲染 |
+| 终端标签 | `TermuxTerminalPane` 经 Compose 互操作嵌入，会话条 / 终端 / 键盘行齐全 |
+| guest 进程 | `com.zhizhu.code:zhisandbox`、`com.zhizhu.code:black` 各自在跑 |
+| guest shell | guest 的 `bash` 已 fork 出来（pid 2444），并给出了提示符 `bash-5.3$` |
+
+**这一条值得单独说**：guest 里的 `bash` 能起来并输出提示符，说明 guest 侧的
+`fork/exec`、bootstrap 前缀、`LD_LIBRARY_PATH`（重写时保留了它 —— 内置 ELF 的
+`DT_RUNPATH` 指向 `/data/data/com.termux/...`）这一整套是通的。
+
+### 发现的问题：guest 里 login shell 读不到 profile
+
+终端第一行输出是：
+
+```
+bash: /data/data/com.zhizhu.code/files/usr/etc/profile: Permission denied
+```
+
+排查结论是**沙箱路径虚拟化导致的，不是我们代码的缺陷**：
+
+- BlackBox 为 guest 造的虚拟数据目录是
+  `/data/user/0/com.iqge/blackbox/data/user/0/com.zhizhu.code/files`；
+- 应用内部按 `Context.getFilesDir()` 拼出来的 `PREFIX` 是
+  `/data/data/com.zhizhu.code/files/usr`（`TermuxConstants` 第 67/140 行的组合结果）；
+- 我这个进程（uid 10330，与 guest 同 UID）去 `stat /data/data/com.zhizhu.code`
+  得到的是 **EACCES 而不是 ENOENT** —— 说明那条路径存在、但被 SELinux 挡住；
+- 证据：`ls` 报 `Permission denied`，而 `find` 在另一个根下**找不到**任何
+  `com.zhizhu.code/files/usr/etc/profile`；
+- 而 guest 自己跑 `bash -l` 时，凭同样的 `PREFIX` 能启动（说明它能穿越），
+  但读 `$PREFIX/etc/profile` 仍被拒。
+
+也就是说：guest 侧「按 `PREFIX` 取文件」与「内核实际解析该路径」这两件事在
+BlackBox 内部并不一致。同一类问题很可能也影响 `apt`（它要读 `$PREFIX/etc/apt/*`）。
+
+**尚未定位到可修的一步**，因此这一条记为已知问题，不做猜测性修改。
+要继续查的方向：guest 进程里 `ls -la $PREFIX/etc/` 的实际结果、
+`/proc/self/mountinfo` 里有没有 BlackBox 的 bind mount、以及 BlackBox 的
+`BActivityThread` 是否提供「按虚拟路径读文件」的接口。
+
+### 明确没有验证的部分
+
+以下**一次都没有跑过**，不得据本节推断它们可用：
+
+- 任何真实模型请求（会话内没有配置 API Key，界面显示「未配置」）；
+- 工具调用（Read/Bash/Edit…）在沙箱内的实际执行；
+- 计划模式、权限询问、子代理、后台任务的前台/后台路径；
+- Frida 调试桥（`frida_install` / `frida_load` / `frida_eval`）；
+- `Debug scope=host`（需要 Agent Root，本会话为关闭状态）；
+- 真机（非沙箱）上的任何一次运行。
+
