@@ -47,7 +47,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Upstream Termux TerminalView + TerminalEmulator + JNI PTY embedded in the IQ workspace.
+ * Upstream Termux TerminalView + TerminalEmulator + JNI PTY embedded in the ZhiCode workspace.
  * The surrounding chrome follows Termux's terminal interaction model: left session drawer,
  * native text selection/copy-paste, two-row extra keys, volume Ctrl/Fn mappings and IME input.
  * No proot and no TextView terminal emulation.

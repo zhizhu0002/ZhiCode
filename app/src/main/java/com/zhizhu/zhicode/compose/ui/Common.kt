@@ -51,7 +51,7 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  * 现已全部换成 Miuix 自己的组件，好处是按压反馈、涟漪、圆角(squircle)、
  * 主题色解析都由 Miuix 负责，和 HyperOS 原生观感一致。
  *
- * 保留 `Iq*` 包装只是为了给调用点一个稳定的签名，内部不再有自绘逻辑。
+ * 保留 `Zhi*` 包装只是为了给调用点一个稳定的签名，内部不再有自绘逻辑。
  */
 
 /** 顶栏 chip 的固定高度；胶囊半径由它推出来。 */

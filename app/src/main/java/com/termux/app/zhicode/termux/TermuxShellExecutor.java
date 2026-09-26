@@ -24,7 +24,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.locks.ReentrantLock;
 
-/** Executes IQ Bash-tool commands directly in the embedded Termux Bionic userspace. No proot. */
+/** Executes ZhiCode Bash-tool commands directly in the embedded Termux Bionic userspace. No proot. */
 public final class TermuxShellExecutor {
     public static final int DEFAULT_TIMEOUT_MS = 120_000;
     public static final int MAX_CAPTURE_CHARS = 2_000_000;

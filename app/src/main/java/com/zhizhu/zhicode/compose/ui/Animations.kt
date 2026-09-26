@@ -12,7 +12,7 @@ import androidx.compose.animation.core.tween
  *
  * 统一时长/缓动，避免各处动画节奏不一致。
  *
- * 注意：这里**不再提供**自写的按压缩放修饰符（原 `iqPressScale` / `ZhiPressable`）。
+ * 注意：这里**不再提供**自写的按压缩放修饰符（原 `pressScale` / `ZhiPressable`）。
  * 交互反馈现在全部由 Miuix 组件自带（`Card` 的 `pressFeedbackType`、
  * `IconButton` 的涟漪、`Surface(onClick)` 的按下态），
  * 自写缩放与 Miuix 反馈叠加会出现"双重按压"，所以已移除。

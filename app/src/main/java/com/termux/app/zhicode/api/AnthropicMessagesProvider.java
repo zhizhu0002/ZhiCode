@@ -22,7 +22,7 @@ import java.util.Map;
 import java.util.TreeMap;
 
 /**
- * Java/Android implementation of the IQ Messages streaming transport.
+ * Java/Android implementation of the ZhiCode Messages streaming transport.
  * No Bun/Node/TypeScript runtime is involved: SSE is decoded directly here.
  */
 public final class AnthropicMessagesProvider implements ModelProvider {

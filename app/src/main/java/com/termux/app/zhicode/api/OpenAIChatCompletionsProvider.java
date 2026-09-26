@@ -33,7 +33,7 @@ import java.util.UUID;
  * - image_url content parts (including data URLs)
  * - common reasoning_content/reasoning fields used by compatible gateways
  *
- * The engine itself keeps one normalized IQ/Anthropic-shaped history. This class
+ * The engine itself keeps one normalized ZhiCode/Anthropic-shaped history. This class
  * translates that normalized history at the transport boundary only.
  */
 public final class OpenAIChatCompletionsProvider implements ModelProvider {
@@ -161,7 +161,7 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
         return out;
     }
 
-    /** Converts the normalized IQ message history into Chat Completions messages. */
+    /** Converts the normalized ZhiCode message history into Chat Completions messages. */
     private static JSONArray mapMessages(String systemPrompt, JSONArray messages) throws Exception {
         JSONArray out = new JSONArray();
         if (systemPrompt != null && !systemPrompt.trim().isEmpty()) {

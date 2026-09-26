@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
-import com.zhizhu.zhicode.compose.theme.LocalIqDark
+import com.zhizhu.zhicode.compose.theme.LocalZhiDark
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
@@ -109,10 +109,10 @@ fun ZhiCodeApp(viewModel: WorkspaceViewModel = rememberWorkspaceViewModel()) {
     }
     val colors = if (isDark) darkColorScheme() else lightColorScheme()
 
-    // LocalIqDark 必须**先**提供，之后才能求任何 ZhiColors 层级色：
-    // 这些色函数靠 LocalIqDark 判断深浅，读早了会拿到默认值 false（浅色），
+    // LocalZhiDark 必须**先**提供，之后才能求任何 ZhiColors 层级色：
+    // 这些色函数靠 LocalZhiDark 判断深浅，读早了会拿到默认值 false（浅色），
     // 于是深色模式下背板被设成浅灰、弹窗整片发白。
-    CompositionLocalProvider(LocalIqDark provides isDark) {
+    CompositionLocalProvider(LocalZhiDark provides isDark) {
         // 主背板 = 灰（深色 #242424 / 浅色 #EDEDED），侧栏与面板则用纯黑/纯白。
         // 两者是互换过的层级：背板退后，板块站出来。
         // 之所以要覆盖主题的 background：Miuix 浅色方案里 background / surface /

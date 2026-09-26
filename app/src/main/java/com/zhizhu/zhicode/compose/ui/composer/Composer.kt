@@ -166,7 +166,7 @@ fun Composer(
                 TextField(
                     value = state.composerText,
                     onValueChange = onTextChange,
-                    label = "描述任务或向 IQ 提问",
+                    label = "描述任务或向蜘蛛提问",
                     useLabelAsPlaceholder = true,
                     // 透明容器 + 透明描边：只留外层方角框
                     colors = TextFieldDefaults.textFieldColors(

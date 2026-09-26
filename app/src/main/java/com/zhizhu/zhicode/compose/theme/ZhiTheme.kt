@@ -13,7 +13,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 由 `ZhiCodeApp` 提供。存在的理由是 [ZhiColors] 里的层级色必须知道深浅，
  * 而它不能去读 `MiuixTheme.colorScheme.background`（那个值已被本工程覆盖，会形成循环）。
  */
-val LocalIqDark = compositionLocalOf { false }
+val LocalZhiDark = compositionLocalOf { false }
 
 /**
  * 全局统一圆角。
@@ -106,11 +106,11 @@ object ZhiColors {
      * 本工程会把主题的 `background` 覆盖成 [backdrop]，那样就形成了循环依赖 ——
      * 在 `darkColorScheme` 下求值时会读到 Miuix 的*默认*（浅色）方案，
      * 于是深色模式整套层级色都取到浅色分支（面板变白、卡片变浅灰）。
-     * 所以改由 [LocalIqDark] 显式提供。
+     * 所以改由 [LocalZhiDark] 显式提供。
      */
     @Composable
     @ReadOnlyComposable
-    fun isDark(): Boolean = LocalIqDark.current
+    fun isDark(): Boolean = LocalZhiDark.current
 
     /** 成功 / 新增（diff 的 `+`、工具完成的 ✓、运行环境就绪）。 */
     @Composable

@@ -193,7 +193,7 @@ public final class AndroidIntentBridge {
             .remove(PENDING_APK_URI).apply();
     }
 
-    /** Return null when this is not a simple `am start` command that IQ should intercept. */
+    /** Return null when this is not a simple `am start` command that ZhiCode should intercept. */
     public ToolExecutionResult tryExecuteAmStart(String command) {
         if (command == null) return null;
         String trimmed = command.trim();

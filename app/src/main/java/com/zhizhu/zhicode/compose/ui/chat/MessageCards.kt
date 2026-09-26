@@ -45,9 +45,9 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
 /**
  * 对话流里的卡片全部改用 Miuix [Card]：
  * 圆角、按压下沉(pressFeedbackType)、按下态与主题色解析都交给 Miuix，
- * 不再手写 `Box + clip + background + iqPressScale`。
+ * 不再手写 `Box + clip + background + pressScale`。
  *
- * 用 Card 的地方**不要**再叠 `iqPressScale`，否则会和 Miuix 的按压反馈打架。
+ * 用 Card 的地方**不要**再叠按压缩放修饰符，否则会和 Miuix 的按压反馈打架。
  */
 private val BubbleMargin = PaddingValues(horizontal = 12.dp, vertical = 9.dp)
 private val MessageMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
@@ -63,7 +63,7 @@ fun EmptyState() {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "想让 IQ 做什么？",
+            text = "想让蜘蛛做什么？",
             color = scheme.onBackground,
             fontSize = 21.sp,
             fontWeight = FontWeight.Bold,
