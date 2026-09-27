@@ -185,6 +185,11 @@ run AnchoredMenuStructureTest "$PROJECT_ROOT"
 # LayoutConsistencyTest.java
 run LayoutConsistencyTest "$PROJECT_ROOT"
 run R8ConfigTest "$PROJECT_ROOT"
+# ---------- 弹窗内滚动嵌套（防「点开某个弹窗直接闪退」重犯） ----------
+# 用户报告过「添加 MCP 服务器崩溃」，真因是 DialogShell 的 body 已带 verticalScroll，
+# 而表单里又套了一层 —— 编译通过、只有测量时才抛 Infinity maximum height constraints。
+# DialogScrollNestingTest.java
+run DialogScrollNestingTest "$PROJECT_ROOT"
 
 echo "-----"
 echo "通过 $PASS / 失败 $FAIL"

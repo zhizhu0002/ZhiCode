@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -196,9 +194,11 @@ private fun McpServerForm(
             )
         },
     ) {
-        androidx.compose.foundation.layout.Column(
-            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-        ) {
+        // 这里**不能**再套一层 verticalScroll：DialogShell 已经把 body 放进竖向滚动容器，
+        // 嵌套会让内层拿到无限大高度约束，Compose 直接抛 IllegalStateException
+        // （Vertically scrollable component was measured with an infinity maximum height
+        // constraints），main 线程崩溃、进程被杀。表单变长由外层滚动负责。
+        androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
             ZhiTextField(
                 value = draft.name,
                 onValueChange = { v -> onChange { it.copy(name = v) } },

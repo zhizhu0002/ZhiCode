@@ -6,8 +6,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -159,7 +157,8 @@ private fun MemoryEditorBody(
             fontSize = ZhiTextScale.Micro,
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         )
-        Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+        // 同上：DialogShell 的 body 已经是竖向滚动容器，这里再套一层会崩溃。
+        Column(modifier = Modifier.fillMaxWidth()) {
             ZhiTextField(
                 value = editing.body,
                 onValueChange = onBodyChange,
