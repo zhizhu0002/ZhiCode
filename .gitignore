@@ -18,3 +18,8 @@ tools/termux-bootstrap-fork/*.class
 
 # Kotlin 会话目录（IDE / 编译器插件生成）
 .kotlin/
+
+# Release 签名配置与密钥库：绝不进版本库
+# （密钥库本体在仓库之外 ~/.android-keys/，这里再兜一道）
+release.properties
+*.jks

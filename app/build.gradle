@@ -5,6 +5,34 @@ plugins {
     id 'org.jetbrains.kotlin.plugin.compose'
 }
 
+/*
+ * ---- Release 签名配置 ----
+ *
+ * 密钥库与口令**都不进版本库**（见 .gitignore）：签名密钥一旦公开，任何人都能
+ * 伪造以本应用名义发布的更新，而 Android 只认签名、不认人。
+ *
+ * 所以这里从**仓库之外**读取，按优先级：release.properties（本机专属，已忽略）
+ * → 环境变量（CI 用）。两者都读不到就**跳过 release 签名** —— 别人 clone 之后
+ * `assembleRelease` 仍然能跑通（产物未签名），不会因为缺密钥而构建失败。
+ */
+def releasePropsFile = rootProject.file('release.properties')
+def releaseProps = new Properties()
+if (releasePropsFile.exists()) {
+    releasePropsFile.withInputStream { releaseProps.load(it) }
+}
+
+def releaseStorePath = releaseProps.getProperty('storeFile') ?: System.getenv('ZHICODE_STORE_FILE')
+def releaseStorePassword = releaseProps.getProperty('storePassword') ?: System.getenv('ZHICODE_STORE_PASSWORD')
+def releaseKeyAlias = releaseProps.getProperty('keyAlias') ?: System.getenv('ZHICODE_KEY_ALIAS')
+def releaseKeyPassword = releaseProps.getProperty('keyPassword') ?: System.getenv('ZHICODE_KEY_PASSWORD')
+
+def releaseStoreFile = releaseStorePath ? rootProject.file(releaseStorePath) : null
+def hasReleaseSigning = releaseStoreFile?.exists() && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+
+if (releaseStorePath && !releaseStoreFile?.exists()) {
+    logger.warn("release.properties 指向的密钥库不存在：${releaseStoreFile}；release 产物将未签名")
+}
+
 android {
     namespace 'com.zhizhu.zhicode.compose'
     compileSdk 37
@@ -67,6 +95,52 @@ android {
     androidResources { noCompress 'zip' }
 
     lint { abortOnError false; checkReleaseBuilds false }
+
+    /*
+     * Release 签名。只在密钥库可用时声明 —— 见文件开头那段说明。
+     *
+     * ## 为什么是 v2，以及为什么关掉 v1
+     *
+     * 要求：release 用 **APK Signature Scheme v2**。
+     *
+     * v2 校验的是**整个 APK 文件**（而不只是 JAR 条目），因此能挡住 v1 时代那类
+     * 「改一个字节仍能通过校验」的篡改；v1 是给 API 24 以前的老系统用的，
+     * 而本工程 `minSdk 24`，**所有目标设备都支持 v2**，v1 只会多留一份可被
+     * Janus 之类问题利用的旧式签名。所以 v1 关掉。
+     *
+     * v3 / v4 也显式关掉：
+     *  - v3 是「密钥轮换」用的，现在用不到，留着会让产物多一份签名信息；
+     *  - v4 会额外生成 `.idsig` 文件（增量安装用），发布物里不需要。
+     * 将来若确实要轮换密钥，再把 v3 打开即可。
+     */
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile releaseStoreFile
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                enableV1Signing false
+                enableV2Signing true
+                enableV3Signing false
+                enableV4Signing false
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            } else {
+                logger.warn('未找到 release 密钥库，release 产物将**未签名**'
+                        + '（把 release.properties 填好即可，见 README 的许可/发布一节）')
+            }
+            // 刻意不开启 minify/shrinkResources：本工程大量依赖反射与
+            // 原生 hook（Bcore / Frida / Termux），混淆会踩到找不到的类，
+            // 而那不是这次要动的东西。
+        }
+    }
 }
 
 // AGP 9 移除了 applicationVariants，改用 androidComponents API 定制输出文件名

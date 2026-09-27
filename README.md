@@ -320,6 +320,39 @@ grep -rcE '\.background\(|RoundedCornerShape\(' --include=*.kt \
 bash test-source-no-build.sh
 ```
 
+## 发布与签名
+
+```bash
+./gradlew :app:assembleRelease --offline
+# 产物：app/build/outputs/apk/release/ZhiCode-release.apk
+```
+
+**签名方案：只启用 APK Signature Scheme v2**（v1/v3/v4 都关）。
+v2 校验的是整个 APK 文件而不是 JAR 条目，能挡住 v1 时代「改一个字节仍通过校验」
+那类篡改；而 `minSdk 24` 起所有目标设备都支持 v2，所以 v1 没有必要，留着只会
+多一份可被旧式攻击面利用的签名。可用 `apksigner` 复核：
+
+```bash
+$ANDROID_HOME/build-tools/<版本>/apksigner verify --verbose app/build/outputs/apk/release/ZhiCode-release.apk
+# Verified using v2 scheme (APK Signature Scheme v2): true
+```
+
+签名信息只保留 `CN=zhizhu0002`（自签证书，RSA 4096 / SHA256withRSA，有效期 30 年）。
+
+### 密钥不进版本库
+
+签名配置从**仓库之外**读取，按优先级：
+
+1. `release.properties`（本机专属，**已加入 .gitignore**）
+2. 环境变量：`ZHICODE_STORE_FILE` / `ZHICODE_STORE_PASSWORD` / `ZHICODE_KEY_ALIAS` / `ZHICODE_KEY_PASSWORD`（CI 用）
+
+两者都读不到时，`assembleRelease` **仍能构建**，只是产物未签名并打印一条告警 ——
+别人 clone 之后不会因为缺密钥而卡住。
+
+> ⚠️ **密钥库与口令必须单独备份**（密钥库放在仓库之外，例如 `~/.android-keys/`）。
+> Android 只认签名、不认人：密钥丢了就**再也发不出同一个应用的更新** ——
+> 签名不同的 APK 无法覆盖安装，用户必须先卸载，等于清空他们的数据。
+
 ## 许可
 
 - **本工程自身代码：MIT**，见 [`LICENSE`](LICENSE)。
