@@ -231,6 +231,50 @@ $ANDROID_HOME/build-tools/<版本>/apksigner verify --verbose app/build/outputs/
 `ZHICODE_KEY_PASSWORD`（CI 用）。两者都读不到时，`assembleRelease` **仍能构建**，只是产物未签名
 并打印一条告警 —— 别人 clone 之后不会因为缺密钥而卡住。
 
+### CI 签名（缺 secret 会直接失败）
+
+`.github/workflows/build.yml` 用的 secret 名与 `ControlLayoutConverter` 一致，两个仓库配一次即可：
+
+| secret | 值 |
+| --- | --- |
+| `RELEASE_KEYSTORE` | 密钥库的 base64，**单行**：`base64 -w0 ~/.android-keys/zhicode-release.jks` |
+| `KEYSTORE_PASSWORD` | `release.properties` 里的 `storePassword` |
+| `KEY_ALIAS` | 同上，`keyAlias` |
+| `KEY_PASSWORD` | 同上，`keyPassword` |
+
+添加到 **仓库 → Settings → Secrets and variables → Actions → New repository secret**。
+
+**四个缺任何一个，CI 会在开始构建前直接失败**，而不是产出一个「看起来正常、其实没签名」的 release
+包。原来是后者：CI 全绿，下载下来的 APK 却没有签名 —— 属于「失败静默通过」，所以改成失败要响。
+唯一例外是 **fork 的 PR**（GitHub 不给 fork 传 secret），那种情况只警告，产物名带 `-unsigned` 后缀。
+
+CI 里 release 产物**总是**构建（映射表因此始终有），并额外断言：签名是 v2-only（v1/v3/v4 均为 false）、
+签名者 `CN=zhizhu0002`、签名者数量为 1。换一把密钥签出来的包与已发布版本签名不符，用户无法覆盖安装，
+这几条断言把那种事故挡在发布之前。
+
+### ⚠️ 本机用环境变量签名：先 `--stop`，否则会静默签不上
+
+签名配置通过环境变量 `ZHICODE_*` 交给 `app/build.gradle`，而 **Gradle 守护进程不会接收客户端新加的
+环境变量**。实测（用 init 脚本打印 `System.getenv`）：
+
+| 场景 | `System.getenv("ZHICODE_STORE_FILE")` |
+| --- | --- |
+| 守护进程先启动（当时没这些变量） | `null` |
+| **复用**该守护进程，客户端这次带上变量 | **`null`** ← 变量没传进去 |
+| `--no-daemon`（全新进程） | 正常读到 |
+
+后果很隐蔽：构建**成功**，只是产物未签名，而本机没人替你验证。所以本机用环境变量签名时要先
+
+```bash
+./gradlew --stop        # 让下一个构建重新拉起守护进程，带上新变量
+```
+
+或者直接给那一次构建加 `--no-daemon`。**用 `release.properties`（文件）不受影响** —— 文件是守护进程
+自己去读的，这也是本机推荐的做法。
+
+CI 不受这个问题困扰：`ZHICODE_*` 声明在**作业级** `env` 里，本作业第一个 `gradlew` 启动守护进程时
+就已经带着它们了（放步骤级就会踩上面那个坑，workflow 里有同样的说明）。
+
 > ⚠️ **密钥库与口令必须单独备份**（放在仓库之外，例如 `~/.android-keys/`）。
 > Android 只认签名、不认人：密钥丢了就**再也发不出同一个应用的更新** —— 签名不同的 APK 无法覆盖
 > 安装，用户必须先卸载，等于清空他们的数据。
