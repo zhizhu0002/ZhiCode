@@ -184,6 +184,7 @@ run AnchoredMenuStructureTest "$PROJECT_ROOT"
 # ---------- 写死的几何（长按触发 · 气泡宽度 · 弹窗宽度） ----------
 # LayoutConsistencyTest.java
 run LayoutConsistencyTest "$PROJECT_ROOT"
+run R8ConfigTest "$PROJECT_ROOT"
 
 echo "-----"
 echo "通过 $PASS / 失败 $FAIL"

@@ -41,6 +41,35 @@
 # 产物：app/build/outputs/apk/debug/ZhiCode-debug.apk
 ```
 
+### release 开 R8（混淆 + 资源压缩）
+
+`release` 构建开着 `minifyEnabled true` + `shrinkResources true`，实测体积
+**43,210,837 → 35,911,932 字节（−16.9%）**。
+
+本工程有反射与原生 hook，所以规则不是照抄模板，`app/proguard-rules.pro` 里每条
+规则前面都写了它挡的是什么：
+
+- **JNI 名字绑定**。`app/src/main/jniLibs/arm64-v8a/libtermux.so` 是预编译产物，
+  导出符号写死为 `Java_com_termux_terminal_JNI_createSubprocess` 这种形式。
+  R8 改名后终端**永远起不来**，报运行时 `UnsatisfiedLinkError` 而不是编译错误。
+  除了 `-keepclasseswithmembernames class * { native <methods>; }`，还必须整类
+  keep `com.termux.terminal.JNI` —— 它的方法只被原生侧符号引用，Java 代码里
+  看不到调用者，会被当死代码删掉。
+- **注解驱动的反射**。Bcore 的 black-reflection 按 `@BClass` / `@BMethod(name = …)`
+  反射成员。这几条 keep **原先只写在 `Bcore/proguard-rules.pro`**，而那个文件只作用于
+  Bcore 自己的构建；作为库被依赖时传给使用方的是 `consumer-rules.pro`。
+  这是个真实缺口，已补齐（见 `Bcore/consumer-rules.pro` 注释）。
+- **`-dontwarn`**。Bcore 要 hook 的本来就是 `android.jar` 里不存在的类
+  （`ActivityThread`、`ServiceManager`、`dalvik.system.*`），R8 报的 "Missing class"
+  是假警报，运行时一定存在。
+
+验证方式：开 R8 后重新构建并**在沙箱里实测** —— 应用启动、Compose 界面与资源完整、
+终端出 `bash-5.3$` 并能执行命令（覆盖 `createSubprocess` / `setPtyWindowSize` /
+`waitFor` / `close`），签名仍是 v2-only。
+
+> 保留行号（`-keepattributes SourceFile, LineNumberTable`）是有意的：混淆后的崩溃栈
+> 若没有行号，拿到手也定位不了。代价几 KB。
+
 工具链：
 
 - Gradle wrapper **9.3.1**、AGP **9.1.1**、Kotlin **2.4.0** + compose 编译器插件 **2.4.0**
@@ -315,6 +344,7 @@ grep -rcE '\.background\(|RoundedCornerShape\(' --include=*.kt \
 | `TextFieldConventionTest` | 绕过 `ZhiTextField` 直接用裸输入框（会丢文字色 / 光标位置） |
 | `AnchoredMenuStructureTest` | 长按菜单接线断裂；观察器**消费事件**（会顶掉点击与无障碍语义） |
 | `LayoutConsistencyTest` | 弹窗宽度/边距写字面量、气泡用强制比例宽度、触发方式写成点击 |
+| `R8ConfigTest` | R8 被关掉、JNI 按名字绑定的 keep 被删、blackreflection 的 consumer 规则漏失 |
 
 ```
 bash test-source-no-build.sh
@@ -326,6 +356,10 @@ bash test-source-no-build.sh
 ./gradlew :app:assembleRelease --offline
 # 产物：app/build/outputs/apk/release/ZhiCode-release.apk
 ```
+
+该构建开着 R8（混淆 + 资源压缩），体积见上一节；混淆映射表在
+`app/build/outputs/mapping/release/mapping.txt`，**发版时要一并留存** ——
+没有它，用户报的崩溃栈无法还原成源码位置。
 
 **签名方案：只启用 APK Signature Scheme v2**（v1/v3/v4 都关）。
 v2 校验的是整个 APK 文件而不是 JAR 条目，能挡住 v1 时代「改一个字节仍通过校验」

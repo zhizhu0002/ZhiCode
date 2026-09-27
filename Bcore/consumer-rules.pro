@@ -26,3 +26,37 @@
 -keep class android.** {*; }
 -keep class com.android.** {*; }
 
+# ---------------------------------------------------------------------------
+# black-reflection（Bcore 的 implementation 依赖，会一起进**使用方**的 R8）
+# ---------------------------------------------------------------------------
+#
+# 这几条原先只写在 Bcore/proguard-rules.pro 里，而那个文件只作用于 Bcore **自己**
+# 的构建 —— 作为库被依赖时传给使用方的是本文件（见 Bcore/build.gradle 的
+# `consumerProguardFiles`）。于是使用方一开 R8 就会把 black-reflection 的东西
+# 混淆掉，而它是**按注解驱动、靠名字反射**取方法与字段的：
+#
+#     @BClass / @BMethod(name = "xxx")  →  运行时按字符串找成员
+#
+# 名字一改，反射就找不到，表现是启动或进沙箱时抛 NoSuchMethodException，
+# 而不是编译错误。所以这几条必须在使用方可见的规则里。
+-keep class top.niunaijun.blackreflection.** {*;}
+-keep @top.niunaijun.blackreflection.annotation.BClass class * {*;}
+-keep @top.niunaijun.blackreflection.annotation.BClassName class * {*;}
+-keep @top.niunaijun.blackreflection.annotation.BClassNameNotProcess class * {*;}
+-keepclasseswithmembernames class * {
+    @top.niunaijun.blackreflection.annotation.BField.* <methods>;
+    @top.niunaijun.blackreflection.annotation.BFieldNotProcess.* <methods>;
+    @top.niunaijun.blackreflection.annotation.BFieldSetNotProcess.* <methods>;
+    @top.niunaijun.blackreflection.annotation.BFieldCheckNotProcess.* <methods>;
+    @top.niunaijun.blackreflection.annotation.BMethod.* <methods>;
+    @top.niunaijun.blackreflection.annotation.BStaticField.* <methods>;
+    @top.niunaijun.blackreflection.annotation.BStaticMethod.* <methods>;
+    @top.niunaijun.blackreflection.annotation.BMethodCheckNotProcess.* <methods>;
+    @top.niunaijun.blackreflection.annotation.BConstructor.* <methods>;
+    @top.niunaijun.blackreflection.annotation.BConstructorNotProcess.* <methods>;
+}
+
+# 注解本身要在运行时可读（black-reflection 靠读注解决定反射哪个成员）。
+# 少了这条，注解会在压缩阶段被当成"没人读"而丢掉属性。
+-keepattributes *Annotation*, RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations, AnnotationDefault, Signature, InnerClasses, EnclosingMethod
+

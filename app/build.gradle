@@ -136,9 +136,19 @@ android {
                 logger.warn('未找到 release 密钥库，release 产物将**未签名**'
                         + '（把 release.properties 填好即可，见 README 的许可/发布一节）')
             }
-            // 刻意不开启 minify/shrinkResources：本工程大量依赖反射与
-            // 原生 hook（Bcore / Frida / Termux），混淆会踩到找不到的类，
-            // 而那不是这次要动的东西。
+            /*
+             * R8：开混淆 + 开资源压缩。
+             *
+             * 本工程确实有反射与原生 hook（Bcore / black-reflection / Termux PTY），
+             * 所以规则不能照抄模板，得逐条对着**真实调用点**写 —— 具体理由都在
+             * app/proguard-rules.pro 里，每条规则前面都写了它挡的是什么。
+             *
+             * useProguard 的等价物（R8 的 full mode）由 AGP 自行决定，这里不瞎设；
+             * 也不开 -dontoptimize，让 R8 正常做内联与裁剪，体积才是开 R8 的意义。
+             */
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }
