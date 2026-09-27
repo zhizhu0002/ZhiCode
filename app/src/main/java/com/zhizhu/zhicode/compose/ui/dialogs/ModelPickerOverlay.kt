@@ -24,18 +24,20 @@ import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
+import top.yukonga.miuix.kmp.basic.DropdownDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
-import androidx.compose.ui.state.ToggleableState
 
 /**
  * 模型选择面板。
@@ -178,10 +180,16 @@ private fun ModelRow(
         summary = if (duplicated) null else option.id,
         summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
         startAction = {
-            // 不要用 Modifier.size(...) 压小：Miuix Checkbox 的尺寸与圆角是内部写死的，
-            // 压小会把方框变成圆点（理由与截图见 Dialogs.kt 里的同一处）。
+            // 选中标记跟 Miuix 下拉列表一致：Check 图标 + 它自己的尺寸常量。
+            // 不用 Checkbox（固定 26dp 且是圆的，配 11~13sp 行文字偏大），
+            // 理由详见 Dialogs.kt 里的同一处注释。
             if (selected) {
-                Checkbox(state = ToggleableState.On, onClick = {})
+                Icon(
+                    imageVector = MiuixIcons.Basic.Check,
+                    contentDescription = null,
+                    tint = scheme.primary,
+                    modifier = Modifier.size(DropdownDefaults.CheckIconSize),
+                )
             }
         },
         onClick = onPick,

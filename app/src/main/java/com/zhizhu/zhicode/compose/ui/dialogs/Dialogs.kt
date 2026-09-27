@@ -19,7 +19,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -39,6 +38,10 @@ import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
+import top.yukonga.miuix.kmp.basic.DropdownDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -47,7 +50,6 @@ import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Switch
@@ -75,7 +77,8 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
  * ## 手写降到最低
  *
  * - 列表行 → Miuix [BasicComponent]（`title` / `summary` / `startAction` / `endActions`）
- * - 选中指示 → Miuix [Checkbox]（未选中时 `RadioButton` 完全不画，只剩空白）
+ * - 选中指示 → Miuix [Icon] + `MiuixIcons.Basic.Check`（与库自己的下拉列表一致）。
+ *   不用 [Checkbox]：它固定 26dp 且是圆的，配 11~13sp 的行文字明显偏大。
  * - 主按钮 → Miuix [Button] + [ButtonDefaults.buttonColorsPrimary]
  * - 次要按钮 → Miuix [Button] + `buttonColors`（与主按钮同形状、只有配色不同）
  * - 开关 → Miuix [Switch]
@@ -388,20 +391,24 @@ fun ChoicePickerOverlay(
                             color = scheme.onSurfaceVariantSummary,
                         ),
                         // 左侧选择控件。Miuix `RadioButton` 未选中时不画任何东西，
-                        // 只剩一块空白，所以这里用 `Checkbox`：未选中也有一个可见的方框。
-                        // 颜色全部走 Miuix 默认，避免手挑颜色在动态取色下失配。
-                        // 点击只更新本地选中态，等提交才回调 ViewModel。
+                        // 选择标记用 Miuix 自己的 Check 图标，和 Miuix 的做法对齐 ——
+                        // 它的下拉列表（`DropdownImpl`）用的就是 `MiuixIcons.Basic.Check`
+                        // 配 `DropdownDefaults.CheckIconSize`，不是 Checkbox。
                         //
-                        // ⚠️ 这里**不要**加 `Modifier.size(...)`：Miuix `Checkbox`
-                        // 没有尺寸参数（javap 实测签名只有 state/onClick/modifier/
-                        // colors/enabled，`CheckboxDefaults` 也不提供尺寸），它的
-                        // 绘制尺寸与圆角是内部写死的。外面压小之后圆角超过半宽，
-                        // 方框会被压成一个圆点 —— 实测截图里就是几个灰色圆点，
-                        // 完全看不出是复选项。
+                        // 为什么不用 Checkbox：stable 0.9.4 里它**固定 26dp 而且是圆的**
+                        // （源码 `requiredSize(26.dp)` + `clip(CircleShape)`；`requiredSize`
+                        // 在调用方 modifier 之后，所以外面也压不动）。26dp 配 11~13sp
+                        // 的行文字会明显偏大。
+                        //
+                        // 整行的点击由 BasicComponent 的 onClick 负责，这个图标只是状态
+                        // 指示、不承载交互语义；未选中时用透明 tint 占住同一位置，
+                        // 免得行高随选中状态跳动。
                         startAction = {
-                            Checkbox(
-                                state = if (checked) ToggleableState.On else ToggleableState.Off,
-                                onClick = toggle,
+                            Icon(
+                                imageVector = MiuixIcons.Basic.Check,
+                                contentDescription = null,
+                                tint = if (checked) scheme.primary else Color.Transparent,
+                                modifier = Modifier.size(DropdownDefaults.CheckIconSize),
                             )
                         },
                         onClick = toggle,

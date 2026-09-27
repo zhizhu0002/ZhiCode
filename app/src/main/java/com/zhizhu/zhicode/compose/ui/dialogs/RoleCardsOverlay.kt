@@ -11,7 +11,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -21,11 +20,14 @@ import com.zhizhu.zhicode.compose.model.RoleCardsState
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
+import top.yukonga.miuix.kmp.basic.DropdownDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
@@ -149,8 +151,15 @@ private fun RoleCardList(
                         summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
                         startAction = {
                             // 未启用的留一个空位保持左对齐一致（与 API 配置列表同样的处理）。
-                            // 不要用 Modifier.size(...) 压小 Checkbox，理由见 Dialogs.kt 同一处。
-                            if (active) Checkbox(state = ToggleableState.On, onClick = {})
+                            // 选中标记用 Check 图标而非 Checkbox，理由见 Dialogs.kt 同一处。
+                            if (active) {
+                                Icon(
+                                    imageVector = MiuixIcons.Basic.Check,
+                                    contentDescription = null,
+                                    tint = scheme.primary,
+                                    modifier = Modifier.size(DropdownDefaults.CheckIconSize),
+                                )
+                            }
                         },
                         endActions = {
                             ZhiIconButton(icon = ZhiIcons.edit, description = "编辑", onClick = { onEdit(card) }, iconSize = 15.dp)

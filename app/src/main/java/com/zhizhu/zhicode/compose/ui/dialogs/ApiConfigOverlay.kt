@@ -27,17 +27,19 @@ import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import top.yukonga.miuix.kmp.basic.DropdownDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
-import androidx.compose.ui.state.ToggleableState
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 
@@ -142,13 +144,16 @@ private fun ApiProfileList(
                     ),
                     summary = profile.summary,
                     summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
-                    // 选中的那条用勾表示"当前生效"，未选中的给一个空位保持左对齐一致
+                    // 选中的那条用勾表示"当前生效"，未选中的给一个空位保持左对齐一致。
+                    // 用 Miuix 的 Check 图标而不是 Checkbox：后者固定 26dp 且是圆的，
+                    // 配 11~13sp 的行文字偏大（理由详见 Dialogs.kt 里的同一处注释）。
                     startAction = {
                         if (active) {
-                            Checkbox(
-                                state = ToggleableState.On,
-                                onClick = {},
-                                modifier = Modifier.size(20.dp),
+                            Icon(
+                                imageVector = MiuixIcons.Basic.Check,
+                                contentDescription = null,
+                                tint = scheme.primary,
+                                modifier = Modifier.size(DropdownDefaults.CheckIconSize),
                             )
                         }
                     },
