@@ -46,6 +46,23 @@ public final class AnchoredMenuStructureTest {
         return noBlock.replaceAll("(?m)//[^\\n]*", " ");
     }
 
+    /** 取某个函数/函数的实现片段（从签名出现处到配对的花括号结束）。 */
+    private static String bodyOf(String code, String signature) {
+        int at = code.indexOf(signature);
+        if (at < 0) return "";
+        int depth = 0;
+        boolean seenBrace = false;
+        for (int i = at; i < code.length(); i++) {
+            char c = code.charAt(i);
+            if (c == '{') { depth++; seenBrace = true; }
+            else if (c == '}') {
+                depth--;
+                if (seenBrace && depth == 0) return code.substring(at, i + 1);
+            }
+        }
+        return code.substring(at);
+    }
+
     private static List<String> kotlinSources(String root, String dir) throws Exception {
         try (Stream<Path> walk = Files.walk(Paths.get(root, dir))) {
             return walk.filter(p -> p.toString().endsWith(".kt"))
@@ -89,6 +106,27 @@ public final class AnchoredMenuStructureTest {
                         + "为 true；将来按分组拆成两个 entry，默认值就变 false，"
                         + "表现是「点了不收」，而这不是编译错误。");
 
+        // ---- 3b. 手指追踪：只观察、绝不消费 -----------------------------------
+        require(common.contains("fun Modifier.zhiObservePointer("),
+                COMMON + " 必须定义 zhiObservePointer（长按菜单要跟随手指）");
+        String observer = bodyOf(common, "fun Modifier.zhiObservePointer(");
+        require(observer.contains("PointerEventPass.Initial"),
+                "zhiObservePointer 必须用 PointerEventPass.Initial：先于子组件看到事件，"
+                        + "这样不抢手势也能拿到坐标");
+        // 这条是本次最关键的守卫：一旦消费事件，Card 自己的点击/长按与无障碍语义
+        // 全部失效，而界面只是"点了没反应"，没有任何编译错误。
+        require(!observer.contains("consume"),
+                "zhiObservePointer 里**绝不能**出现 consume()：它必须是只读观察者。"
+                        + "消费事件会顶掉 Card 的 combinedClickable —— 侧栏的「点击打开会话」"
+                        + "与卡片的「长按出菜单」会一起失效，且不会有编译错误。");
+
+        // 手指偏移必须在**非空**时才施加：0 位移会把锚点拉回条目左上角，反而跑偏
+        String menu = bodyOf(common, "fun ZhiAnchoredActionMenu(");
+        require(menu.contains("fingerOffset == null"),
+                "ZhiAnchoredActionMenu 必须在 fingerOffset 非空时才施加位移");
+        require(menu.contains("absoluteOffset"),
+                "手指位置是绝对像素，必须用 absoluteOffset（offset 在 RTL 下会镜像）");
+
         // OverlayDropdownPopup 只允许出现在转发层（与 TextField 同一套约定）
         List<String> popupUsers = new ArrayList<>();
         for (String file : kotlinSources(root, SRC)) {
@@ -109,11 +147,20 @@ public final class AnchoredMenuStructureTest {
             require(text.contains("anchoredMenu("),
                     file + " 只是声明了 anchoredMenu 却没在条目里调用它，"
                             + "菜单将无处渲染");
+            // 手指追踪也必须挂上：只传插槽不挂观察者的话，菜单会退化成"贴条目"，
+            // 不报错但不符合"跟随手指"的要求。
+            require(text.contains("rememberFingerTracker()"),
+                    file + " 必须为每一条挂 rememberFingerTracker()，否则拿不到手指位置");
+            require(text.contains("finger.modifier"),
+                    file + " 必须把 finger.modifier 挂到条目上（只 remember 不挂 = 永远收不到事件）");
         }
         String sidebar = stripComments(read(root, SIDEBAR));
-        require(sidebar.contains("anchoredMenu(session.id)"),
-                SIDEBAR + " 必须在会话条目里用 anchoredMenu(session.id) 调用"
-                        + "（参数即锚点标识，只有被长按那一条会认领）");
+        require(sidebar.contains("anchoredMenu(session.id, fingerOffset)"),
+                SIDEBAR + " 必须在会话条目里用 anchoredMenu(session.id, fingerOffset) 调用"
+                        + "（两个参数分别是锚点标识与手指位置）");
+        String chatList = stripComments(read(root, CHAT_LIST));
+        require(chatList.contains("anchoredMenu(item.id, fingerOffset)"),
+                CHAT_LIST + " 必须在消息条目里用 anchoredMenu(item.id, fingerOffset) 调用");
 
         // ---- 5. AppScaffold 必须按 isActionMenu 让位 ------------------------
         String scaffold = stripComments(read(root, APP_SCAFFOLD));

@@ -20,10 +20,12 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
+import com.zhizhu.zhicode.compose.ui.rememberFingerTracker
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 
@@ -55,10 +57,13 @@ fun ChatList(
     onToggleThinking: (String) -> Unit,
     onMessageActions: (ChatItem) -> Unit,
     /**
-     * 长按动作菜单的宿主插槽：在**每一项自己的布局里**调用，菜单就会锚在那一项上
-     * 弹出（见 `ZhiAnchoredActionMenu`）。参数是该项的 id，只有被长按那一项会认领。
+     * 长按动作菜单的宿主插槽。在**每一项自己的布局里**调用，菜单就会贴那一项弹出
+     * （见 `ZhiAnchoredActionMenu`）。
+     *
+     * 第二个参数是**手指位置**（相对该项）：非空时菜单从那一点长出来，
+     * 而不是固定贴条目的边。
      */
-    anchoredMenu: @Composable (String) -> Unit,
+    anchoredMenu: @Composable (String, DpOffset?) -> Unit,
     modifier: Modifier = Modifier,
     /**
      * 列表底部预留的高度。悬浮的任务/状态卡会盖住列表下部，
@@ -168,27 +173,47 @@ fun ChatList(
                 // "想让蜘蛛做什么？"互相穿透、错位，看起来像渲染 bug。
                 // 删除单条消息时瞬间消失没有观感损失（用户主动触发，预期即时），
                 // 换掉这个交集比留着更划算。
-                Box(modifier = Modifier.animateItem(fadeOutSpec = null).padding(end = 14.dp)) {
+                // 手指位置追踪：挂在这一项的 Box 上，于是记录到的坐标就是
+                // 「相对这一项」的，与 anchoredMenu 的锚点是同一个坐标系。
+                // 它是**只读观察者**，不会抢走卡片自己的点击/长按与无障碍语义。
+                val finger = rememberFingerTracker()
+                // 长按触发的那一刻把手指位置定格下来。用 state 而不是直接读
+                // finger.offset()：菜单显示期间要一直用它定位，而手指已经抬起了。
+                var fingerOffset by remember { mutableStateOf<DpOffset?>(null) }
+                Box(
+                    modifier = Modifier
+                        .animateItem(fadeOutSpec = null)
+                        .padding(end = 14.dp)
+                        .then(finger.modifier),
+                ) {
                     when (item.kind) {
-                        ChatKind.USER -> UserBubble(item) { onMessageActions(item) }
+                        ChatKind.USER -> UserBubble(item) {
+                            fingerOffset = finger.offset()
+                            onMessageActions(item)
+                        }
                         ChatKind.ASSISTANT -> AssistantCard(
                             item = item,
                             onToggleThinking = { onToggleThinking(item.id) },
-                            onLongPress = { onMessageActions(item) },
+                            onLongPress = {
+                                fingerOffset = finger.offset()
+                                onMessageActions(item)
+                            },
                         )
                         ChatKind.TOOL_GROUP -> ToolGroupCard(
                             item = item,
                             onToggleTool = onToggleTool,
                             onToggleGroup = { expanded -> onToggleGroup(item.id, expanded) },
-                            onActions = { onMessageActions(item) },
+                            onActions = {
+                                fingerOffset = finger.offset()
+                                onMessageActions(item)
+                            },
                         )
                         ChatKind.ERROR -> ErrorCard(item)
                         ChatKind.INFO -> InfoCard(item)
                     }
-                    // 长按动作菜单（Miuix 下拉菜单）挂在这一项自己的 Box 里，
-                    // 这样它天然锚在**被长按的那一项**上，而不是弹到屏幕正中。
-                    // 参数传该项 id：列表里只有它会认领这份菜单。
-                    anchoredMenu(item.id)
+                    // 菜单挂在这一项自己的 Box 里，并用手指位置作偏移 ——
+                    // 于是它从**手指那一点**长出来，而不是贴条目边界。
+                    anchoredMenu(item.id, fingerOffset)
                 }
             }
             // 任务进度与工作状态**不放在滚动区**（对应原版把它们挂在固定的

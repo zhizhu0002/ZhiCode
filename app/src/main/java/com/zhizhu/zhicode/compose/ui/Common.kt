@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -26,6 +27,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -627,19 +634,123 @@ fun ZhiTextField(
 }
 
 /**
+ * 手指位置的**只读**观察者。
+ *
+ * ## 为什么不用「换掉手势」的办法
+ *
+ * 要让长按菜单从手指处长出来就得拿到手指坐标，而 Miuix `Card` 的 `onLongPress`
+ * 不给坐标。直觉做法是把手势换成
+ * `detectTapGestures(onLongPress = { offset -> … })` —— 但那会**顶掉**
+ * 组件自己的 `combinedClickable`，连带丢掉两样东西：
+ *
+ * - **点击行为**。侧栏那一条是「点击打开会话 + 长按出菜单」，两者都要在；
+ * - **无障碍语义**。长按动作不再是组件声明的，而是一个裸手势。
+ *
+ * 所以这里走 `PointerEventPass.Initial`：**先于子组件看到事件，但绝不消费**。
+ * 事件原封不动继续下传，`Card` 的 `combinedClickable` 完全不受影响。
+ *
+ * ⚠️ **绝不要在这里调用 `consume()`**。加了就会把点击与长按一起吞掉，
+ * 而界面只是"点了没反应"，没有任何编译错误 —— `AnchoredMenuStructureTest`
+ * 专门钉住这一条。
+ *
+ * ## 为什么写普通字段而不是 `State`
+ *
+ * 回调在**每次指针移动**（含滚动）时都会触发。若写进 `mutableStateOf`，滚动一屏
+ * 就要重组几百次。这里只更新一个普通对象，值在长按回调触发时读一次即可 ——
+ * 全程零重组。
+ */
+fun Modifier.zhiObservePointer(onPosition: (Offset) -> Unit): Modifier =
+    pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                // Initial：先于子组件拿到事件；不消费，于是子组件照常处理。
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.lastOrNull() ?: continue
+                onPosition(change.position)
+            }
+        }
+    }
+
+/**
+ * 手指位置的**普通**持有对象（不是 `State`，理由见 [zhiObservePointer]）。
+ *
+ * 长按是「先按下、再等待」，所以触发时读到的是**最后一次指针事件**的位置 ——
+ * 对长按来说就是手指按住不放的那个点。
+ */
+class FingerPosition {
+    /** 最近一次指针事件的位置；从未收到事件时为 `Offset.Unspecified`。 */
+    var value: Offset = Offset.Unspecified
+        internal set
+
+    internal fun record(position: Offset) {
+        value = position
+    }
+}
+
+/**
+ * 长按动作菜单用的**手指位置追踪器**：[modifier] 挂到条目上，[offset] 在长按
+ * 触发时读出手指位置。
+ *
+ * 分成两个成员是刻意的：
+ * - [modifier] 是**只读观察者**（见 [zhiObservePointer]），只写普通字段，
+ *   所以滚动期间不产生重组；
+ * - [offset] 在**触发时**才把 px 换算成 `DpOffset`，所以滚动期间连单位换算都没有；
+ *   尚未收到过指针事件时返回 null，调用点据此退回「贴条目锚定」。
+ */
+class FingerTracker internal constructor(
+    private val holder: FingerPosition,
+    private val density: Density,
+    /** 观察者修饰符，由调用点挂到被长按的那一项上。 */
+    val modifier: Modifier,
+) {
+    /** 手指位置（相对挂载的那一项）；从未收到指针事件时为 null。 */
+    fun offset(): DpOffset? {
+        val position = holder.value
+        if (position == Offset.Unspecified) return null
+        return with(density) { DpOffset(position.x.toDp(), position.y.toDp()) }
+    }
+}
+
+/** 记住一个 [FingerTracker]。把它的 [FingerTracker.modifier] 挂到条目上即可。 */
+@Composable
+fun rememberFingerTracker(): FingerTracker {
+    val density = LocalDensity.current
+    val holder = remember { FingerPosition() }
+    val observer = remember {
+        Modifier.zhiObservePointer { position -> holder.record(position) }
+    }
+    return remember(density, observer) { FingerTracker(holder, density, observer) }
+}
+
+/**
  * **贴住某一项弹出**的动作菜单（长按菜单）。
  *
  * ## 为什么用它，而不是居中对话框
  *
  * 长按一条消息 / 一条会话时，"会弹在屏幕正中"与手指所在的位置完全无关，
  * 而动作又是针对**那一项**的 —— 位置与语义对不上。所以改成 Miuix 的下拉
- * 菜单组件：把它放进被长按那一项的布局里，它就会锚在那一项上弹出。
+ * 菜单组件：把它放进被长按那一项的布局里，它就会锚在那一项上弹出；
+ * 再配合 [fingerOffset]，就能锚在**手指**上。
  *
  * ## 转发到 `OverlayDropdownPopup`
  *
  * 上游源码（`miuix-preference/.../popup/OverlayDropdownPopup.kt`）对这个组件的
  * 说明里明确写了「Entries without selection state **can be used as action menus**」，
  * 它就是为动作菜单准备的：分组分隔线、按压触感、点击后收起都由它负责。
+ *
+ * ## `fingerOffset` 是怎么让面板跟手的
+ *
+ * 面板位置不是我们算的。Miuix 的 `ListPopupLayout` 用一个零尺寸 `Spacer` 的
+ * `parentLayoutCoordinates.positionInWindow()` 取**调用处那一层**的窗口坐标
+ * 当作锚点边界（核过 v0.9.4 源码；`OverlayDropdownPopup` **没有** popupModifier 参数）。
+ * 所以只要给这里的外层 [Box] 加位移，锚点就跟着动、面板自然跟过去，
+ * 并且仍然保留库自带的「下方空间不足则翻到上方」与「贴边内收」。
+ *
+ * 用 `absoluteOffset` 而不是 `offset`：手指位置是从指针事件里读出来的**绝对**像素，
+ * 不该在 RTL 布局下被镜像。
+ *
+ * ⚠️ 偏移为空时**不要**施加 0 位移：那会把锚点拉回条目左上角，反而跑偏。
+ * 为空就什么都不加，退回「贴条目锚定」。
  *
  * ⚠️ **`collapseOnSelection` 必须显式传 true**。
  * 它的默认值是 `entries.size <= 1`，而本工程恰好只建**一个** entry
@@ -653,8 +764,7 @@ fun ZhiTextField(
  * ## 调用点
  *
  * 只应由"被长按的那一项"调用（见 `ChatList` 的每项 Box 与 `Sidebar` 的 `SessionRow`），
- * 这样锚点天然就是那一项的边界 —— 不需要把任何坐标从手势里传出来，
- * 也就不会因为滚动、内边距或坐标空间不一致而锚偏。
+ * 这样锚点天然就是那一项，手指偏移也是相对那一项量的，两者不会错位。
  */
 @Composable
 fun ZhiAnchoredActionMenu(
@@ -662,6 +772,8 @@ fun ZhiAnchoredActionMenu(
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 手指位置（相对被长按的那一项）。为空则退回「贴条目锚定」。 */
+    fingerOffset: DpOffset? = null,
 ) {
     if (labels.isEmpty()) return
     // 每次重组重建即可：OverlayDropdownPopup 内部用 rememberUpdatedState(entries)
@@ -674,7 +786,13 @@ fun ZhiAnchoredActionMenu(
             },
         ),
     )
-    Box(modifier) {
+    // 锚点跟着手指走：位移加在**这一层**（弹层取的就是它的父坐标）。
+    val anchorModifier = if (fingerOffset == null) {
+        Modifier
+    } else {
+        Modifier.absoluteOffset(x = fingerOffset.x, y = fingerOffset.y)
+    }
+    Box(modifier.then(anchorModifier)) {
         OverlayDropdownPopup(
             entries = entries,
             show = true,

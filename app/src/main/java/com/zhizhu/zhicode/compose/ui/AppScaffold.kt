@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
@@ -620,8 +621,10 @@ private fun ChatArea(
             },
             onToggleThinking = viewModel::toggleThinking,
             onMessageActions = viewModel::showMessageActions,
-            // 长按消息的动作菜单：由那一条消息自己渲染（贴它弹出）
-            anchoredMenu = { anchorId -> ZhiAnchoredMenuHost(state, viewModel, anchorId) },
+            // 长按消息的动作菜单：由那一条消息自己渲染（从手指位置长出来）
+            anchoredMenu = { anchorId, fingerOffset ->
+                ZhiAnchoredMenuHost(state, viewModel, anchorId, fingerOffset)
+            },
             modifier = glass.capture(Modifier.fillMaxSize()),
             // 底部预留出悬浮层的高度，让被盖住的内容也能滑上来；
             // 顶部预留头部高度，让内容能滚到悬浮头部下面被模糊。
@@ -819,6 +822,7 @@ private fun ZhiAnchoredMenuHost(
     state: WorkspaceUiState,
     viewModel: WorkspaceViewModel,
     anchorId: String,
+    fingerOffset: DpOffset?,
 ) {
     val picker = state.choicePicker ?: return
     if (!picker.isActionMenu || picker.anchorId != anchorId) return
@@ -826,6 +830,8 @@ private fun ZhiAnchoredMenuHost(
         labels = picker.options.map { it.label },
         onSelect = viewModel::onChoiceSelected,
         onDismiss = viewModel::dismissChoicePicker,
+        // 非空时面板从**手指那一点**长出来；为空则退回贴条目锚定。
+        fingerOffset = fingerOffset,
     )
 }
 
@@ -843,8 +849,10 @@ private fun ZhiSidebarHost(
         onOpenSession = viewModel::openSession,
         onSessionActions = viewModel::showSessionActions,
         onDeleteSession = { viewModel.deleteSession(it.id) },
-        // 长按会话的动作菜单：由侧栏里那一条会话自己渲染（贴它弹出）
-        anchoredMenu = { anchorId -> ZhiAnchoredMenuHost(state, viewModel, anchorId) },
+        // 长按会话的动作菜单：由侧栏里那一条会话自己渲染（从手指位置长出来）
+        anchoredMenu = { anchorId, fingerOffset ->
+            ZhiAnchoredMenuHost(state, viewModel, anchorId, fingerOffset)
+        },
         onSkills = viewModel::openSkills,
         onRoleCard = viewModel::openRoleCards,
         onSandbox = { viewModel.openSandbox() },

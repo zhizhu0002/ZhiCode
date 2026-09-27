@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -30,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.theme.ZhiColors
@@ -60,11 +62,13 @@ fun ZhiSidebar(
     onSessionActions: (SessionSummary) -> Unit,
     onDeleteSession: (SessionSummary) -> Unit,
     /**
-     * 长按动作菜单的宿主插槽：在**每一条会话自己的布局里**调用，菜单就会锚在
-     * 那一条上弹出（见 `ZhiAnchoredActionMenu`）。参数是会话 id，
-     * 只有被长按那一条会认领。
+     * 长按动作菜单的宿主插槽。在**每一条会话自己的布局里**调用，菜单就会贴那一条
+     * 弹出（见 `ZhiAnchoredActionMenu`）。
+     *
+     * 第一个参数是会话 id（只有被长按那一条会认领）；第二个是**手指位置**
+     * （相对该条），非空时菜单从那一点长出来。
      */
-    anchoredMenu: @Composable (String) -> Unit,
+    anchoredMenu: @Composable (String, DpOffset?) -> Unit,
     onRoleCard: () -> Unit,
     onSkills: () -> Unit,
     onSandbox: () -> Unit,
@@ -251,19 +255,26 @@ private fun SessionRow(
     onOpen: () -> Unit,
     onActions: () -> Unit,
     onDelete: () -> Unit,
-    anchoredMenu: @Composable (String) -> Unit,
+    anchoredMenu: @Composable (String, DpOffset?) -> Unit,
 ) {
-    // 外面这层 Box 只为托住长按菜单：菜单作为它的子项就会锚在这**一条会话**上
-    // （而不是弹到屏幕正中）。它不参与布局，Card 依旧 fillMaxWidth。
-    Box {
+    // 只读观察者：不会抢走卡片自己的「点击打开会话」与长按（也不影响无障碍语义）。
+    val finger = rememberFingerTracker()
+    // 长按那一刻定格手指位置：菜单显示期间手指已经抬起，必须留住这个值。
+    var fingerOffset by remember { mutableStateOf<DpOffset?>(null) }
+    // 外面这层 Box 只为托住长按菜单与手指追踪：菜单作为它的子项就会用**相对这一条**
+    // 的偏移定位（与观察者同一个坐标系）。它不参与布局，Card 依旧 fillMaxWidth。
+    Box(modifier = finger.modifier) {
         SessionRowCard(
             session = session,
             active = active,
             onOpen = onOpen,
-            onActions = onActions,
+            onActions = {
+                fingerOffset = finger.offset()
+                onActions()
+            },
             onDelete = onDelete,
         )
-        anchoredMenu(session.id)
+        anchoredMenu(session.id, fingerOffset)
     }
 }
 
