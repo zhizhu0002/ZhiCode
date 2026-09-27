@@ -1,9 +1,9 @@
-# 蜘蛛 (ZhiCode)
+# ZhiCode
 
 一个 **Android 上的编码 Agent**：Kotlin + Jetpack Compose + [Miuix](https://github.com/compose-miuix-ui/miuix)，
 应用内自带一套 Termux 环境与一个 Android 虚拟化沙箱，可以直接在手机上跑命令、改代码、装/调试 APK。
 
-包名 `com.zhizhu.code`，应用名「蜘蛛」。
+包名 `com.zhizhu.code`，应用名「」。
 
 ## 它现在是什么
 
