@@ -28,6 +28,40 @@ bash test-source-no-build.sh
 
 确实需要例外时，**加进白名单并写明理由**，不要改断言本身。
 
+## 关于提交历史（一次已完成的改写）
+
+开源前对历史做过**一次**改写，两件事一起做：
+
+1. **统一身份**：全部 136 条提交的作者与提交者统一为
+   `zhizhu0002 <zhizhu0002@users.noreply.github.com>`。
+   改写前存在 5 种身份（其中 87 条是 `IQ Code Agent <agent@iqge.local>`）。
+2. **去掉 bootstrap 的重复版本**：`app/src/main/assets/bootstrap-aarch64.zip`
+   约 33MB 且是压缩数据、git 做不出有效 delta，历史里每留一版就实打实再占一份。
+   历史上一共有 **4 个**版本，把其中 2 个统一到当前版本后：
+   `.git` **68M → 37M**（省约 31MB），**提交数不变（136）**。
+
+所以如果你看到：
+
+- 所有提交都是同一个人 —— 这是有意的，不是伪造多人协作；
+- 那个 zip 在历史大多数提交里内容完全一样 —— 也是有意去重。
+
+**但不是历史上每一版都变成了同一份**：改写只合并了 2 个版本，另一个早期版本
+（`4cb25af`，33,119,132 字节，2026-09-26 的 8 条提交使用）**原样保留** ——
+它是历史上最早的**真实** bootstrap，且在 pack 里已被存成 delta、实际只占约 2.3MB，
+为这点空间抹掉一个真实历史版本不划算。
+
+> 这个脚本最初把 `4cb25af` 误判为「94KB 占位文件」，原因是**误读了
+> `git verify-pack -v` 的 size 列** —— 对 deltified 对象，那一列给的是 delta 的大小，
+> 不是对象本身的大小。判断大小请一律用 `git cat-file -s <sha>`。
+> 详情写在 `tools/rewrite-history-index-filter.sh` 的头部。
+
+改写脚本与完整的验证步骤见 [`tools/rewrite-history-index-filter.sh`](tools/rewrite-history-index-filter.sh)
+（含「改写后必须核对 `HEAD^{tree}` 哈希不变」这条要求）。
+
+⚠️ **改写会改掉全部提交哈希。** 已经 clone 过的人再拉取会冲突，
+必须重新 clone。仓库内 `git config user.name/user.email` 也一并设成了统一身份 ——
+如果你本地用别的身份提交，历史会重新变成两种身份。
+
 ## 不要顺手做的事
 
 - **不要顺手重构**。改动范围尽量贴着你修的那个问题。这个仓库的注释里记了大量「为什么不是另一种写法」，
