@@ -64,7 +64,7 @@
     <application
         android:name=".ZhiCodeApplication"
         android:allowBackup="false"
-        android:label="蜘蛛"
+        android:label="ZhiCode"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true"

@@ -75,7 +75,7 @@ fun EmptyState() {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "想让蜘蛛做什么？",
+            text = "想让智蛛做什么？",
             color = scheme.onBackground,
             fontSize = ZhiTextScale.Title,
             fontWeight = FontWeight.Bold,

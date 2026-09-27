@@ -237,7 +237,7 @@ public final class McpRuntime {
             .put("protocolVersion", PROTOCOL_VERSION)
             .put("capabilities", new JSONObject())
             .put("clientInfo", new JSONObject()
-                .put("name", "蜘蛛")
+                .put("name", "ZhiCode")
                 .put("version", BuildConfig.VERSION_NAME));
     }
 
