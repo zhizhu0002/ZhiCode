@@ -233,29 +233,36 @@ fun Composer(
                 //
                 // ⚠️ 它必须位于 Miuix `Scaffold` 内 —— Overlay 系列靠 Scaffold 提供的
                 // MiuixPopupHost 渲染弹出内容。本工程根部就是 Scaffold。
+                // ⚠️ 这里的 summary **必须短**（几个字，不要写成句子）。
+                // 弹出面板的宽度是**内容撑出来的**：Miuix 用
+                // `DropdownDefaults.MaxItemTextWidth`（实测 216dp）限行内容宽，
+                // 再加左右各 `InsideHorizontalPadding`（20dp），所以一条长文案
+                // 就能把面板撑到约 256dp —— 在这台 411dp 宽的设备上是 62%。
+                // 面板本身没有宽度参数可调（`OverlayIconDropdownMenu` 的
+                // `minWidth` 是给触发按钮的），所以**缩短文案是唯一不偏离库默认的收窄办法**。
                 ZhiIconDropdownMenu(
                     items = listOf(
                         ZhiMenuItem(
                             text = "附加项目文件",
-                            summary = "搜索项目文件，可多次附加到下一条消息",
+                            summary = "搜索并附加",
                             icon = ZhiIcons.file,
                             onClick = onAttachFile,
                         ),
                         ZhiMenuItem(
                             text = "Skill 管理器",
-                            summary = "查看、编辑、新建、删除并附加 SKILL.md",
+                            summary = "查看与编辑",
                             icon = ZhiIcons.skill,
                             onClick = onOpenSkills,
                         ),
                         ZhiMenuItem(
                             text = "打开文件工作区",
-                            summary = "浏览项目文件并查看内容",
+                            summary = "浏览与查看",
                             icon = ZhiIcons.files,
                             onClick = onOpenFilesTab,
                         ),
                         ZhiMenuItem(
                             text = "上传照片",
-                            summary = "从相册或文件中选择图片，作为视觉上下文发送",
+                            summary = "作为视觉输入",
                             icon = ZhiIcons.floatingBall,
                             onClick = onPickImage,
                         ),
