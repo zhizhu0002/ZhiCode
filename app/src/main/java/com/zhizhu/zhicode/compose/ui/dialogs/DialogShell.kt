@@ -57,6 +57,40 @@ internal val DialogWideOutsideMargin = DpSize(18.dp, 12.dp)
 internal val DialogWideInsideMargin = DpSize(14.dp, 14.dp)
 
 /**
+ * 弹窗宽度档位。**三档，够用就不要再加。**
+ *
+ * 收敛之前全工程有四个互不相同、也没有规则的 `maxWidth`：560 / 620 / 640 / 860。
+ * 后果是「太窄」与「太宽」并存 —— 模型选择与终端命名两个弹窗明显比其他窄一截，
+ * 而设置页又宽出一大截，看起来不像一套东西。
+ *
+ * ## 为什么不直接用 Miuix 的默认值
+ *
+ * Miuix `DialogDefaults.MaxWidth` 实测是 **420dp**（连同 `outsideMargin = 12`、
+ * `insideMargin = 24`，在 360dp 宽的手机上内容区只剩 288dp）。本工程当初**有意**
+ * 覆盖它把弹窗放宽，理由写在 [DialogWideOutsideMargin] 的注释里。
+ * 按 Miuix skill 决策顺序的第 1 条「保留目标工程已有的有意约定」，这里**保留加宽**，
+ * 只把散落的四个字面量收敛成有名字的三档 —— 与工程既有的 `ZhiRadius`、
+ * `ZhiTextScale` 是同一类收敛。
+ *
+ * [Regular] 是默认档：**拿不准就用它**，这样新加的弹窗不会再多出一个宽度。
+ */
+internal object ZhiDialogWidth {
+
+    /** 内容很少的小选择器、单行命名。 */
+    val Compact = 560.dp
+
+    /** 表单与列表的默认档（绝大多数弹窗）。 */
+    val Regular = 640.dp
+
+    /**
+     * 内容宽或多列的页面级弹窗（设置页）。
+     *
+     * 手机竖屏下它会被可用宽截断，所以这不是"更宽的弹窗"，而是"宽屏时不显得挤"。
+     */
+    val Wide = 860.dp
+}
+
+/**
  * 弹窗内容的外壳：左对齐标题 + 固定说明 + 中间内容区 + 底部固定按钮区。
  *
  * 这里以前还嵌套了一层 `MiuixTheme`，用一套弹窗专用的紧凑字阶把字号整体收小

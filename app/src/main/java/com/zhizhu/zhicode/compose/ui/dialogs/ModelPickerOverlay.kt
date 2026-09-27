@@ -69,7 +69,7 @@ fun ModelPickerOverlay(
         show = picker != null,
         onDismissRequest = onDismiss,
         largeScreen = true,
-        maxWidth = 560.dp,
+        maxWidth = ZhiDialogWidth.Compact,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {

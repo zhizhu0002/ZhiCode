@@ -66,7 +66,7 @@ fun McpConfigOverlay(
         show = config != null,
         onDismissRequest = onDismiss,
         largeScreen = true,
-        maxWidth = 640.dp,
+        maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {

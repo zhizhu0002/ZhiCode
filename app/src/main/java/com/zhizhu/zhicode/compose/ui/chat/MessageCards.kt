@@ -6,6 +6,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +54,15 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  */
 private val BubbleMargin = PaddingValues(horizontal = 12.dp, vertical = 9.dp)
 private val MessageMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+
+/**
+ * 用户气泡宽度占可用宽的比例（**上限**，不是固定值）。
+ *
+ * 用 `widthIn(max = …)` 而不是 `fillMaxWidth(0.86f)`：后者是**强制**占 86%，
+ * 于是内容只有「1」这种短消息也会被撑成几乎整行宽的蓝条，看起来像一条色带
+ * 而不是一个气泡。改成上限之后，短消息收成合适宽度、长消息仍然封顶。
+ */
+private val BubbleMaxWidthFraction = 0.86f
 private val GroupMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
 private val RowMargin = PaddingValues(horizontal = 9.dp, vertical = 7.dp)
 
@@ -82,27 +93,44 @@ fun EmptyState() {
 @Composable
 fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        horizontalArrangement = Arrangement.End,
-    ) {
+    // 需要可用宽度才能把气泡宽度表达成「上限 = 可用宽 × 比例」。
+    // BoxWithConstraints 是 Compose 布局原语（skill 决策顺序第 4 条），
+    // 比手写 onSizeChanged 更直接，也不会多一次重组。
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val maxBubbleWidth = maxWidth * BubbleMaxWidthFraction
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            horizontalArrangement = Arrangement.End,
+        ) {
         Card(
-            onClick = onLongPress,
-            modifier = Modifier.fillMaxWidth(0.86f),
+            // ⚠️ 必须是 onLongPress，**不要**写回 onClick。
+            // 这里曾经是 `onClick = onLongPress`，于是短按一下就弹菜单，
+            // 而函数文档与 AssistantCard 都是「长按」—— 同一段代码自相矛盾。
+            // Miuix `Card` 内部用 combinedClickable 且 `isClickable = hasOnClick || hasLongPress`
+            // （核过 v0.9.4 源码），所以只给 onLongPress 是被正确支持的。
+            onLongPress = onLongPress,
+            // 宽度 = 「内容自适应，上限 86%」：先按可用宽取 86% 作为**上限**，
+            // 再让内容自己决定实际宽度。
+            // 之前是 `fillMaxWidth(0.86f)` —— 那是**强制** 86%，于是像「1」这样的
+            // 短消息也会撑成一条几乎整行宽的蓝条。见根部的 BoxWithConstraints。
+            modifier = Modifier.widthIn(max = maxBubbleWidth),
             cornerRadius = ZhiRadius.card,
             insideMargin = BubbleMargin,
             colors = CardDefaults.defaultColors(
                 color = scheme.primaryContainer,
                 contentColor = scheme.onPrimaryContainer,
             ),
-            pressFeedbackType = PressFeedbackType.Sink,
-            holdDownState = true,
+            // ⚠️ 必须是 None，理由与 AssistantCard 完全相同：
+            // 这张卡只有**长按**才有动作，而 Sink 是「按下即缩放」，
+            // 短按也会看到整块气泡缩放一下、松手却没有反应 —— 像卡了点不动。
+            pressFeedbackType = PressFeedbackType.None,
         ) {
             Text(
                 text = item.body,
                 fontSize = ZhiTextScale.Subheading,
                 fontWeight = FontWeight.Normal,
             )
+        }
         }
     }
 }

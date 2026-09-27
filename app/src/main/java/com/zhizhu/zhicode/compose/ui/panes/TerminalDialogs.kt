@@ -18,6 +18,7 @@ import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
@@ -60,7 +61,7 @@ internal fun TerminalQuickActionsDialog(
         show = show,
         onDismissRequest = onDismiss,
         largeScreen = true,
-        maxWidth = 560.dp,
+        maxWidth = ZhiDialogWidth.Compact,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
@@ -107,7 +108,7 @@ internal fun TerminalRenameDialog(
         show = show,
         onDismissRequest = onDismiss,
         largeScreen = true,
-        maxWidth = 560.dp,
+        maxWidth = ZhiDialogWidth.Compact,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {

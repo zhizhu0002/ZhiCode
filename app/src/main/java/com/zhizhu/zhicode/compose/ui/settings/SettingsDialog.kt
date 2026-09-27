@@ -32,6 +32,7 @@ import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
 import com.zhizhu.zhicode.compose.ui.ZhiSegmentedTabs
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -71,7 +72,7 @@ fun SettingsDialog(
         show = draft != null,
         onDismissRequest = onDismiss,
         largeScreen = true,
-        maxWidth = 860.dp,
+        maxWidth = ZhiDialogWidth.Wide,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {

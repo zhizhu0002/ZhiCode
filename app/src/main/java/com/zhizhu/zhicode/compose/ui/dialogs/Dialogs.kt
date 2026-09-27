@@ -110,7 +110,7 @@ fun PermissionOverlay(
         show = request != null,
         onDismissRequest = onDeny,
         largeScreen = true,
-        maxWidth = 560.dp,
+        maxWidth = ZhiDialogWidth.Compact,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
@@ -213,7 +213,7 @@ fun PlanApprovalOverlay(
         show = plan != null,
         onDismissRequest = onRevise,
         largeScreen = true,
-        maxWidth = 640.dp,
+        maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
@@ -308,7 +308,7 @@ fun ChoicePickerOverlay(
         show = picker != null,
         onDismissRequest = onDismiss,
         largeScreen = true,
-        maxWidth = 640.dp,
+        maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
@@ -446,7 +446,7 @@ fun TaskListOverlay(
 
         onDismissRequest = onDismiss,
         largeScreen = true,
-        maxWidth = 620.dp,
+        maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {

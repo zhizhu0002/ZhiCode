@@ -64,7 +64,7 @@ fun RoleCardsOverlay(
         show = state != null,
         onDismissRequest = onDismiss,
         largeScreen = true,
-        maxWidth = 640.dp,
+        maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
