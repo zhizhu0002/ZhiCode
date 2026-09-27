@@ -105,7 +105,7 @@ internal object SessionReader {
                                 ChatItem(
                                     id = id("a"),
                                     kind = ChatKind.ASSISTANT,
-                                    title = "蜘蛛",
+                                    title = "智蛛",
                                     body = body.toString(),
                                     thinking = thinking.toString(),
                                 ),

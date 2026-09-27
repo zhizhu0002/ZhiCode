@@ -80,8 +80,8 @@ public final class SandboxKeeper extends Service {
     private void createChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID, "蜘蛛沙箱保活", NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("沙箱应用运行期间保持蜘蛛 Agent 执行链存活");
+                CHANNEL_ID, "ZhiCode 沙箱保活", NotificationManager.IMPORTANCE_LOW);
+        channel.setDescription("沙箱应用运行期间保持 ZhiCode Agent 执行链存活");
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (manager != null) manager.createNotificationChannel(channel);
     }
@@ -102,8 +102,8 @@ public final class SandboxKeeper extends Service {
                 : new Notification.Builder(this);
         return builder
                 .setSmallIcon(android.R.drawable.stat_notify_more)
-                .setContentTitle("蜘蛛沙箱正在运行")
-                .setContentText("Agent 保持在线 · 点击返回蜘蛛")
+                .setContentTitle("ZhiCode 沙箱正在运行")
+                .setContentText("Agent 保持在线 · 点击返回 ZhiCode")
                 .setOngoing(true)
                 .setContentIntent(openIntent)
                 .addAction(new Notification.Action.Builder(

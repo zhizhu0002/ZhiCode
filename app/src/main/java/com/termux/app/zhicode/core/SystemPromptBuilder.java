@@ -57,15 +57,15 @@ public final class SystemPromptBuilder {
         "For opening a browser/URL, launching another phone app, or opening an Android system screen, "
             + "use AndroidIntent. Never use Bash `am start` for this; ZhiCode must launch it from the "
             + "ZhiCode app process so Android sees the correct caller identity.",
-        "APK installation has two distinct targets: the real phone and 蜘蛛沙箱. Never silently choose "
+        "APK installation has two distinct targets: the real phone and ZhiCode 沙箱. Never silently choose "
             + "the real phone and never install to both. If the user explicitly says 本机/真机/手机/system/host, "
-            + "use the real-phone path. If they explicitly say 沙箱/容器/virtual/蜘蛛沙箱, use Sandbox "
+            + "use the real-phone path. If they explicitly say 沙箱/容器/virtual/ZhiCode 沙箱, use Sandbox "
             + "action=install. If the target is ambiguous, call AskUserQuestion before installing and offer "
-            + "exactly two choices: `蜘蛛沙箱（隔离运行，推荐用于测试/调试）` and `本机 Android` .",
+            + "exactly two choices: `ZhiCode 沙箱（隔离运行，推荐用于测试/调试）` and `本机 Android` .",
         "For a real-phone APK install: first verify the APK exists. When Agent Root is enabled and the "
             + "user selected the real phone, prefer Root with Android `pm install -r` (and report the actual "
             + "result). When Root is disabled or unavailable, use AndroidIntent operation=install_apk so "
-            + "Android's package installer handles it. Never use Root to install an APK into 蜘蛛沙箱.",
+            + "Android's package installer handles it. Never use Root to install an APK into ZhiCode 沙箱.",
         "For sandbox testing/debugging, use Sandbox install -> launch, then dump_ui/screenshot/"
             + "debug_snapshot as needed. Sandbox screenshot uses the Guest Window compositor path (PixelCopy) "
             + "first so SurfaceView/OpenGL/Vulkan/video layers are captured when Android permits it; "
@@ -77,14 +77,14 @@ public final class SystemPromptBuilder {
         "Launching a sandbox APK can place its virtual Activity in front of ZhiCode, but the coding "
             + "Agent/tool worker continues independently of MainActivity visibility. The guest window has an "
             + "injected ZhiCode control bar for the human to return to ZhiCode, view logs, or stop the guest. "
-            + "蜘蛛沙箱 also starts a foreground guard service while a guest is launched so the main ZhiCode "
+            + "ZhiCode 沙箱 also starts a foreground guard service while a guest is launched so the main ZhiCode "
             + "Agent process stays alive while MainActivity is paused. Do not treat MainActivity.onPause as "
             + "task cancellation.",
         "If sandboxAgentFullAccess is enabled in ZhiCode settings, Sandbox and Debug calls with "
             + "scope=sandbox are user-preauthorized and must not ask for repeated tool permission confirmations. "
             + "This bypass is strictly sandbox-scoped: Debug scope=host and Root remain under their normal "
             + "permission gates.",
-        "Native/process debugging is unified through Debug. For an 蜘蛛沙箱 APK use scope=sandbox. Start "
+        "Native/process debugging is unified through Debug. For an ZhiCode 沙箱 APK use scope=sandbox. Start "
             + "with action=process_list and the exact package. For simple inspection use "
             + "modules/maps/threads/thread_dump. memory_read/memory_write is routed through the in-process "
             + "Frida safety channel. /proc/self/mem and Unsafe raw copying are intentionally disabled because "
@@ -93,7 +93,7 @@ public final class SystemPromptBuilder {
         "For live/dynamic native instrumentation, prefer the embedded Frida path: frida_runtime_status -> "
             + "frida_install only if missing -> frida_load for the exact package/PID -> "
             + "frida_modules/frida_ranges/frida_read/frida_write/frida_scan/frida_protect/frida_patch/frida_export. "
-            + "frida_eval executes Frida JavaScript inside that selected 蜘蛛沙箱 Guest process and may use "
+            + "frida_eval executes Frida JavaScript inside that selected ZhiCode 沙箱 Guest process and may use "
             + "Process, Module, Memory, Interceptor, Stalker, Thread, DebugSymbol, NativeFunction, NativeCallback "
             + "and ptr. frida_read/frida_write default to Frida volatile memory access for a live process. Use "
             + "frida_watch to continuously observe a mapped address; changes are appended as memory_watch events "
@@ -109,7 +109,7 @@ public final class SystemPromptBuilder {
             + "APIs and narrow the range/module with distinctive long patterns. The integrated Frida 17 runtime does "
             + "not assume Java.perform/frida-java-bridge is bundled, so do not invent Java-bridge availability. If "
             + "startup-time native hooks are required, use frida_auto_attach enabled=true for that exact sandbox "
-            + "package and restart the Guest; 蜘蛛沙箱 will load Gadget before the virtual Application.onCreate callback.",
+            + "package and restart the Guest; ZhiCode 沙箱 will load Gadget before the virtual Application.onCreate callback.",
         "load_library performs a controlled in-process System.load into the selected Guest PID and accepts "
             + "only .so files in ZhiCode private storage. Re-read modules/maps after loading because addresses can "
             + "change between launches. Never guess a PID or reuse a stale base address after the Guest restarts. "
@@ -122,7 +122,7 @@ public final class SystemPromptBuilder {
         "The embedded Termux shell is wired to the same sandbox backend. `zhisandbox <action> [package] [json]` "
             + "controls installs/launch/UI/log actions and `zhidebug <action> [package-or-pid] [json]` uses the same "
             + "Debug/Frida bridge, including frida_* actions. Prefer these commands over adb for the built-in "
-            + "container; their state is shared with the Agent and visible in the 蜘蛛 sandbox panel.",
+            + "container; their state is shared with the Agent and visible in the ZhiCode sandbox panel.",
         "Use WebSearch for current or external information, then WebFetch only for the most relevant HTTPS "
             + "pages. Cite result URLs in the final answer when web research materially supports a claim. Do not "
             + "invent web findings if a request fails.",

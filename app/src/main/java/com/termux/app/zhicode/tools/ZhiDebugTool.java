@@ -21,7 +21,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Agent 用来调试蜘蛛沙箱进程的工具，附带一条需要 Root 的真机路径。
+ * Agent 用来调试ZhiCode 沙箱进程的工具，附带一条需要 Root 的真机路径。
  *
  * <h3>两个 scope，两条完全不同的权限路径</h3>
  * <ul>
@@ -146,7 +146,7 @@ public final class ZhiDebugTool implements ZhiTool {
 
     @Override
     public String description() {
-        return "Inspect/debug 蜘蛛沙箱 processes via Frida; scope=host requires Root.";
+        return "Inspect/debug ZhiCode 沙箱 processes via Frida; scope=host requires Root.";
     }
 
     @Override
@@ -161,7 +161,7 @@ public final class ZhiDebugTool implements ZhiTool {
             properties.put("scope", ToolSchemas.string("sandbox (default) or host."));
             properties.put("action", ToolSchemas.string("process_list, process_info, maps, modules, threads, memory_read, memory_write, load_library, thread_dump, gc, signal, frida_runtime_status, frida_install, frida_auto_attach, frida_status, frida_load, frida_modules, frida_ranges, frida_read, frida_write, frida_scan, frida_protect, frida_patch, frida_export, frida_watch, frida_watch_stop, frida_watch_stop_all, frida_eval, frida_events, frida_detach_all"));
             properties.put("package", ToolSchemas.string("Guest package for sandbox scope, or Android package for host PID resolution."));
-            properties.put("pid", ToolSchemas.integer("Concrete process id. For sandbox this must be one of the package's 蜘蛛沙箱 guest PIDs.", 1));
+            properties.put("pid", ToolSchemas.integer("Concrete process id. For sandbox this must be one of the package's ZhiCode 沙箱 guest PIDs.", 1));
             properties.put("filter", ToolSchemas.string("Optional substring filter for maps/modules."));
             properties.put("address", ToolSchemas.string("Hex virtual address. frida_scan uses address together with size when module is omitted."));
             properties.put("size", ToolSchemas.integer("Byte count. memory_read is capped at 65536; frida_scan accepts a larger scan window split across current readable mappings.", 1));
@@ -175,7 +175,7 @@ public final class ZhiDebugTool implements ZhiTool {
             properties.put("module", ToolSchemas.string("Frida module name used for module-scoped scan/export. For frida_scan, module is mutually exclusive with address/size."));
             properties.put("protection", ToolSchemas.string("Frida memory protection such as r--, rw-, r-x or rwx."));
             properties.put("name", ToolSchemas.string("Export/symbol name for frida_export."));
-            properties.put("script", ToolSchemas.string("JavaScript body for frida_eval inside the selected 蜘蛛沙箱 Guest. Memory.scanSync is translated to a bounded async scan; prefer Debug frida_scan or await Zhi.scan(options) Zhi.emit(value) appends events; Zhi.hooks retains Interceptor handles."));
+            properties.put("script", ToolSchemas.string("JavaScript body for frida_eval inside the selected ZhiCode 沙箱 Guest. Memory.scanSync is translated to a bounded async scan; prefer Debug frida_scan or await Zhi.scan(options) Zhi.emit(value) appends events; Zhi.hooks retains Interceptor handles."));
             properties.put("max", ToolSchemas.integer("Maximum Frida rows/matches. frida_scan is hard-capped at 2048; default 256 to prevent hit explosion.", 1));
             properties.put("chunk_size", ToolSchemas.integer("frida_scan chunk bytes. Runtime clamps to 64 KiB..8 MiB; default 4 MiB so long scans yield between chunks.", 65536));
             properties.put("max_chars", ToolSchemas.integer("Maximum Frida event log characters.", 1));
@@ -231,7 +231,7 @@ public final class ZhiDebugTool implements ZhiTool {
         String bridgeAction = BRIDGE_ACTIONS.get(action);
         if (bridgeAction == null) {
             if ("signal".equals(action)) {
-                return ToolExecutionResult.error("sandbox signal 请使用 Sandbox stop；原始 signal 不直接开放，避免误杀整个蜘蛛虚拟进程池");
+                return ToolExecutionResult.error("sandbox signal 请使用 Sandbox stop；原始 signal 不直接开放，避免误杀整个 ZhiCode 虚拟进程池");
             }
             return ToolExecutionResult.error("未知 sandbox Debug action: " + action);
         }
@@ -322,7 +322,7 @@ public final class ZhiDebugTool implements ZhiTool {
             for (JSONObject process : JsonItems.of(processes)) {
                 if (process.optInt("pid", -1) == requested) return requested;
             }
-            throw new SecurityException("PID " + requested + " 不属于当前 蜘蛛沙箱 包 " + pkg);
+            throw new SecurityException("PID " + requested + " 不属于当前 ZhiCode 沙箱 包 " + pkg);
         }
         for (JSONObject process : JsonItems.of(processes)) {
             if (pkg.equals(process.optString("process", ""))) return process.optInt("pid", -1);
@@ -342,10 +342,10 @@ public final class ZhiDebugTool implements ZhiTool {
      */
     private ToolExecutionResult host(SessionConfig config, String action, JSONObject in) throws Exception {
         if (config == null || !config.rootExecutionEnabled) {
-            return ToolExecutionResult.error("host 进程调试需要先在蜘蛛设置中开启 Agent Root");
+            return ToolExecutionResult.error("host 进程调试需要先在 ZhiCode 设置中开启 Agent Root");
         }
         if ("memory_read".equals(action) || "memory_write".equals(action) || "load_library".equals(action)) {
-            return ToolExecutionResult.error("真机 raw memory/远程库注入不由 Debug 自动执行。该能力仅对 蜘蛛沙箱 Guest 内置开放；如确实要调试自有真机进程，请显式使用 Root + 你安装的 lldb/gdb/frida 工具链。");
+            return ToolExecutionResult.error("真机 raw memory/远程库注入不由 Debug 自动执行。该能力仅对 ZhiCode 沙箱 Guest 内置开放；如确实要调试自有真机进程，请显式使用 Root + 你安装的 lldb/gdb/frida 工具链。");
         }
         if ("process_list".equals(action)) {
             return rootCommand("ps -A -o PID,UID,NAME,ARGS 2>/dev/null || ps -A", config.projectDirectory, HOST_COMMAND_TIMEOUT_MS);

@@ -79,7 +79,7 @@ fun ZhiTopBar(
                 }
 
                 Text(
-                    text = "蜘蛛",
+                    text = "ZhiCode",
                     color = scheme.onSurface,
                     fontSize = ZhiTextScale.Heading,
                     fontWeight = FontWeight.Bold,

@@ -178,7 +178,7 @@ public final class TermuxShellExecutor {
             packageLockHeld = PACKAGE_TRANSACTION.tryLock();
             if (!packageLockHeld) {
                 return new Result(EXIT_PACKAGE_BUSY, "",
-                    "[ZhiCode] 已有蜘蛛包管理任务正在运行。不会再启动第二个 apt/pkg/dpkg，"
+                    "[ZhiCode] 已有 ZhiCode 包管理任务正在运行。不会再启动第二个 apt/pkg/dpkg，"
                         + "请等待当前任务完成或先停止它。\n", false);
             }
             cleanupOrphanedPackageManagers(listener);
@@ -940,7 +940,7 @@ public final class TermuxShellExecutor {
             if (file.isFile() && file.canExecute()) return candidate;
         }
         throw new IllegalStateException(
-            "未找到 Magisk/KernelSU 的 su；设备可能没有 Root，或尚未授予蜘蛛 Root 权限");
+            "未找到 Magisk/KernelSU 的 su；设备可能没有 Root，或尚未授予 ZhiCode Root 权限");
     }
 
     /** 单引号包裹 + 内层单引号转义。命令与路径都可能含空格或引号。 */

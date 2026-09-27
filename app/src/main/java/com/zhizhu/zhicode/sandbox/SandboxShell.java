@@ -292,7 +292,7 @@ public final class SandboxShell {
                 + "  i=$((i+1))\n"
                 + "done\n"
                 + "rm -f \"$REQ\" \"$RES\"\n"
-                + "echo '蜘蛛沙箱 bridge timeout' >&2\n"
+                + "echo 'ZhiCode 沙箱 bridge timeout' >&2\n"
                 + "exit 124\n";
     }
 }

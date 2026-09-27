@@ -126,7 +126,7 @@
             android:stopWithTask="false" />
 
         <!--
-          蜘蛛沙箱（BlackBox 虚拟 Android 运行时宿主）—— Phase 7。
+          ZhiCode 沙箱（BlackBox 虚拟 Android 运行时宿主）—— Phase 7。
 
           这三项是**宿主自己**的声明；Bcore 库自带的清单（DaemonService、
           SystemCallProvider、ProxyVpnService、LauncherActivity，以及 :p0..:p49 的

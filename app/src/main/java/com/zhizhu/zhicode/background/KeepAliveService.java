@@ -49,11 +49,11 @@ public final class KeepAliveService extends Service {
 
     private static final String EXTRA_ROOT = "root";
     private static final String CHANNEL_ID = "zhicode_keep_alive";
-    private static final String CHANNEL_NAME = "蜘蛛后台保活";
+    private static final String CHANNEL_NAME = "ZhiCode 后台保活";
     private static final int NOTIFICATION_ID = 19001;
     private static final String WAKELOCK_TAG = "ZhiCode:KeepAlive";
 
-    private static final String TITLE = "蜘蛛正在后台保活";
+    private static final String TITLE = "ZhiCode 正在后台保活";
     private static final String STARTED_TEXT = "强制后台保活已开启";
     private static final String STOP_ACTION_LABEL = "停止保活";
 

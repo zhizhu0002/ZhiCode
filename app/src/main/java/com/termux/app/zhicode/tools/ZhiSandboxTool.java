@@ -18,7 +18,7 @@ import java.io.File;
 import java.io.FileInputStream;
 
 /**
- * Agent 用来操作蜘蛛沙箱的入口。
+ * Agent 用来操作ZhiCode 沙箱的入口。
  *
  * <h3>这个工具只碰沙箱，不碰真机</h3>
  * install 的落点永远是沙箱；即便调用者给了一个真机 APK 路径，
@@ -68,7 +68,7 @@ public final class ZhiSandboxTool implements ZhiTool {
 
     @Override
     public String description() {
-        return "Control 蜘蛛沙箱 apps/UI; install targets sandbox only, never the phone.";
+        return "Control ZhiCode 沙箱 apps/UI; install targets sandbox only, never the phone.";
     }
 
     @Override
@@ -104,7 +104,7 @@ public final class ZhiSandboxTool implements ZhiTool {
         try {
             switch (action) {
                 case "status":
-                    return withStatus(host("status", new JSONObject()), "蜘蛛沙箱 状态");
+                    return withStatus(host("status", new JSONObject()), "ZhiCode 沙箱 状态");
                 case "list":
                     return ToolExecutionResult.ok(listApps());
                 case "install":
@@ -175,7 +175,7 @@ public final class ZhiSandboxTool implements ZhiTool {
                 .getPackageArchiveInfo(apk.getAbsolutePath(), PackageManager.GET_ACTIVITIES);
         if (info == null || info.packageName == null) return ToolExecutionResult.error("不是有效普通 APK: " + path);
         if (context.getPackageName().equals(info.packageName)) {
-            return ToolExecutionResult.error("不能把蜘蛛自身安装进 蜘蛛沙箱");
+            return ToolExecutionResult.error("不能把 ZhiCode 自身安装进 ZhiCode 沙箱");
         }
 
         JSONObject response = host("install", new JSONObject().put("path", apk.getAbsolutePath()));
@@ -183,7 +183,7 @@ public final class ZhiSandboxTool implements ZhiTool {
             return ToolExecutionResult.error(response.optString("error", response.toString()));
         }
         if (response.optBoolean("success")) {
-            return ToolExecutionResult.ok("已安装到 蜘蛛沙箱: " + response.optString("package", info.packageName));
+            return ToolExecutionResult.ok("已安装到 ZhiCode 沙箱: " + response.optString("package", info.packageName));
         }
         return ToolExecutionResult.error("沙箱安装失败: " + response.optString("message", response.toString()));
     }
@@ -196,7 +196,7 @@ public final class ZhiSandboxTool implements ZhiTool {
         JSONArray apps = response.optJSONArray("apps");
         int count = apps == null ? 0 : apps.length();
         StringBuilder out = new StringBuilder();
-        out.append("蜘蛛沙箱 已安装 ").append(count).append(" 个应用\n");
+        out.append("ZhiCode 沙箱 已安装 ").append(count).append(" 个应用\n");
         for (int i = 0; i < count; i++) {
             out.append("- ").append(apps.optJSONObject(i).optString("package", "")).append('\n');
         }

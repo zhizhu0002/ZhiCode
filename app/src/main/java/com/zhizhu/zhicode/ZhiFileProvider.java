@@ -86,7 +86,7 @@ public final class ZhiFileProvider extends ContentProvider {
             out.appendPath(SEGMENT_CACHE);
             appendRelative(out, cache, file);
         } else {
-            throw new SecurityException("只允许分享手机共享存储、蜘蛛 HOME 或缓存中的文件：" + file);
+            throw new SecurityException("只允许分享手机共享存储、ZhiCode HOME 或缓存中的文件：" + file);
         }
         return out.build();
     }
@@ -190,7 +190,7 @@ public final class ZhiFileProvider extends ContentProvider {
         Context context = getContext();
         if (uri == null || !"content".equalsIgnoreCase(uri.getScheme()) || context == null
             || !authority(context).equals(uri.getAuthority())) {
-            throw new SecurityException("无效蜘蛛 content URI");
+            throw new SecurityException("无效的 ZhiCode content URI");
         }
         try {
             List<String> segments = uri.getPathSegments();

@@ -103,7 +103,7 @@ final class SandboxOverlay {
         panel.setBackground(rounded(palette.surface, CORNER_RADIUS_DP));
         panel.setElevation(dp(activity, 14));
 
-        TextView bubble = action(activity, "蜘蛛", palette.accent);
+        TextView bubble = action(activity, "ZhiCode", palette.accent);
         TextView log = action(activity, "日志", palette.text);
         TextView back = action(activity, "返回", palette.text);
         TextView stop = action(activity, "停止", palette.danger);
@@ -208,7 +208,7 @@ final class SandboxOverlay {
         scroll.addView(body);
 
         AlertDialog dialog = new AlertDialog.Builder(activity)
-                .setTitle("蜘蛛沙箱日志")
+                .setTitle("ZhiCode 沙箱日志")
                 .setView(scroll)
                 .setNegativeButton("关闭", null)
                 .setNeutralButton("复制全部", null)
@@ -219,7 +219,7 @@ final class SandboxOverlay {
                 ClipboardManager clipboard =
                         (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
                 if (clipboard != null) {
-                    clipboard.setPrimaryClip(ClipData.newPlainText("蜘蛛沙箱日志", body.getText()));
+                    clipboard.setPrimaryClip(ClipData.newPlainText("ZhiCode 沙箱日志", body.getText()));
                 }
             });
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> loadLog(activity, body));

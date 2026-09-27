@@ -110,7 +110,7 @@ public final class SandboxConsole {
     /** 完整诊断快照：环境、各进程阶段、事件时间线、logcat tail。 */
     public static String snapshot(Context context) {
         StringBuilder text = new StringBuilder(MAX_TEXT + 1024);
-        text.append("蜘蛛沙箱 调试快照\n")
+        text.append("ZhiCode 沙箱 调试快照\n")
                 .append("Android ").append(Build.VERSION.RELEASE)
                 .append(" (API ").append(Build.VERSION.SDK_INT).append(")\n")
                 .append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append('\n')

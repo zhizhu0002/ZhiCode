@@ -79,7 +79,7 @@ fun SettingsDialog(
         if (draft == null) return@OverlayDialog
 
         DialogShell(
-            title = "蜘蛛设置",
+            title = "ZhiCode 设置",
             titleAction = {
                 IconButton(onClick = { onDismiss() }) {
                     Icon(

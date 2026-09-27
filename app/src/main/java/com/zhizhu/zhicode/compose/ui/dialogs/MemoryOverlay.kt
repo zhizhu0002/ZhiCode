@@ -88,12 +88,12 @@ private fun MemoryFileList(
         groupBody = true,
         actions = {
             SecondaryButton(text = "关闭", onClick = onClose)
-            PrimaryButton(text = "让蜘蛛完善", onClick = onRunInit, modifier = Modifier.padding(start = 8.dp))
+            PrimaryButton(text = "让智蛛完善", onClick = onRunInit, modifier = Modifier.padding(start = 8.dp))
         },
     ) {
         Text(
             text = "项目级与用户级两份说明文件。写入后**不会**自动注入模型——" +
-                "「让蜘蛛完善」会让 Agent 读取现有说明与构建清单后直接整理 ZhiCode.md；" +
+                "「让智蛛完善」会让 Agent 读取现有说明与构建清单后直接整理 ZhiCode.md；" +
                 "平时的任务里 Agent 也可以自己用 Read 打开它。",
             color = scheme.onSurfaceVariantSummary,
             fontSize = ZhiTextScale.Footnote,

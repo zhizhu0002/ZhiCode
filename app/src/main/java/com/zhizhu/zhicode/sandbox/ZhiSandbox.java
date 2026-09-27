@@ -28,7 +28,7 @@ import top.niunaijun.blackbox.entity.pm.InstallResult;
 import top.niunaijun.blackbox.fake.frameworks.BActivityManager;
 
 /**
- * 蜘蛛沙箱引擎门面。
+ * ZhiCode 沙箱引擎门面。
  *
  * <p>对外<b>只暴露这一个入口</b>：宿主层其它类不允许直接触碰 {@code BlackBoxCore}。
  * 这样引擎的调用面收敛成一份可审计的清单，引擎版本变动时只需要改这一处。

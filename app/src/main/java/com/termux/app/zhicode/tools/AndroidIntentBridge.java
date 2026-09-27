@@ -57,7 +57,7 @@ public final class AndroidIntentBridge {
     /** 主线程投递的超时。超过它说明主线程被卡住了（而不是意图启动失败）。 */
     private static final int START_TIMEOUT_SECONDS = 8;
     /** 分享给安装器的 URI 用的标签，只影响系统界面上的显示。 */
-    private static final String APK_CLIP_LABEL = "蜘蛛 APK";
+    private static final String APK_CLIP_LABEL = "ZhiCode APK";
     /** Android 8 起安装未知来源应用需要单独授权。 */
     private static final int API_UNKNOWN_SOURCES = 26;
 
@@ -259,7 +259,7 @@ public final class AndroidIntentBridge {
             return ToolExecutionResult.error("打不开「安装未知应用」授权页面：" + opened.content);
         }
         return ToolExecutionResult.ok(
-            "已打开“允许来自此来源的应用”授权页；开启后返回蜘蛛，将自动继续安装 APK。");
+            "已打开“允许来自此来源的应用”授权页；开启后返回 ZhiCode，将自动继续安装 APK。");
     }
 
     /**
@@ -513,7 +513,7 @@ public final class AndroidIntentBridge {
             }
             return ToolExecutionResult.error("Android Intent 调用失败：" + readable(error));
         }
-        return ToolExecutionResult.ok("已通过蜘蛛应用进程启动：" + intent.toUri(0));
+        return ToolExecutionResult.ok("已通过 ZhiCode 应用进程启动：" + intent.toUri(0));
     }
 
     // ============================================================ 小工具

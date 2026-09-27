@@ -884,7 +884,7 @@ class WorkspaceViewModel(
     fun closeMemory() = _state.update { it.copy(memory = null) }
 
     /**
-     * 打开 蜘蛛沙箱管理界面（`SandboxBoard`）。
+     * 打开 ZhiCode 沙箱管理界面（`SandboxBoard`）。
      *
      * 与「环境弹窗」不同，这里**不能**只改本进程的 UI 状态：沙箱引擎整个跑在
      * `:zhisandbox` 进程里，管理界面通过 `${applicationId}.sandbox.control` 这个同 UID
@@ -906,7 +906,7 @@ class WorkspaceViewModel(
         }
         started.onFailure { error ->
             appendInfo(
-                "无法打开 蜘蛛沙箱",
+                "无法打开 ZhiCode 沙箱",
                 "启动沙箱管理界面失败：${error.javaClass.simpleName}: ${error.message ?: "未知原因"}\n\n" +
                     "沙箱引擎运行在 :zhisandbox 进程，界面必须由系统拉起而无法在本进程内绘制。",
             )
@@ -970,7 +970,7 @@ class WorkspaceViewModel(
 
     private fun runInitPrompt() {
         if (engine.isBusy()) {
-            appendInfo("初始化项目说明", "蜘蛛正在执行任务，请先等待或停止当前任务。")
+            appendInfo("初始化项目说明", "智蛛正在执行任务，请先等待或停止当前任务。")
             return
         }
         runCatching { engine.cancelPlanModeFromUi("/init 使用快速直接模式") }
@@ -1201,7 +1201,7 @@ class WorkspaceViewModel(
                     transcript = s.transcript + ChatItem(
                         id = id,
                         kind = ChatKind.ASSISTANT,
-                        title = "蜘蛛",
+                        title = "智蛛",
                         body = delta,
                         streaming = true,
                         processSteps = listOf("开始分析请求"),
@@ -1455,7 +1455,7 @@ class WorkspaceViewModel(
                 choicePicker = ChoicePickerState(
                     title = question.optString("header", "问题"),
                     intent = ChoiceIntent.QUESTION,
-                    prompt = question.optString("question", "蜘蛛应该怎么做？"),
+                    prompt = question.optString("question", "智蛛应该怎么做？"),
                     options = choices,
                     allowFreeForm = true,
                     freeFormHint = "其他回答…",
@@ -1492,7 +1492,7 @@ class WorkspaceViewModel(
         pendingQuestions = null
         _state.update { it.copy(choicePicker = null) }
         engine.respondQuestion(flow.requestId, JSONObject())
-        appendInfo("已跳过提问", "蜘蛛的提问被跳过，它会按「未选择」继续。")
+        appendInfo("已跳过提问", "智蛛的提问被跳过，它会按「未选择」继续。")
     }
 
     override fun onEnginePlanApprovalRequest(request: EnginePlanApproval) {
@@ -1754,12 +1754,12 @@ class WorkspaceViewModel(
     }
 
     private fun subtitleFor(tool: String): String = when (tool) {
-        "Root" -> "高风险：蜘蛛请求以 Android uid 0 执行系统命令"
-        "Bash" -> "蜘蛛请求在本地 Termux 环境中执行以下命令"
-        "AndroidIntent" -> "蜘蛛请求通过 Android 应用进程打开手机 App、网页或系统页面"
-        "Write", "Edit", "MultiEdit" -> "蜘蛛请求修改项目中的文件"
-        "Delete" -> "蜘蛛请求删除项目中的文件或目录"
-        else -> "蜘蛛请求调用工具 $tool"
+        "Root" -> "高风险：智蛛请求以 Android uid 0 执行系统命令"
+        "Bash" -> "智蛛请求在本地 Termux 环境中执行以下命令"
+        "AndroidIntent" -> "智蛛请求通过 Android 应用进程打开手机 App、网页或系统页面"
+        "Write", "Edit", "MultiEdit" -> "智蛛请求修改项目中的文件"
+        "Delete" -> "智蛛请求删除项目中的文件或目录"
+        else -> "智蛛请求调用工具 $tool"
     }
 
     // ---------- 斜杠命令 ----------
@@ -2587,7 +2587,7 @@ class WorkspaceViewModel(
             }
             else -> item.body
         }
-        copyText(text, "蜘蛛消息")
+        copyText(text, "智蛛消息")
     }
 
     /** `/copy`：复制最近一条助手回复。 */
@@ -2599,7 +2599,7 @@ class WorkspaceViewModel(
             _state.update { it.copy(message = "还没有可复制的回复") }
             return
         }
-        copyText(latest.body, "蜘蛛回复")
+        copyText(latest.body, "智蛛回复")
     }
 
     private fun copyText(text: String, label: String) {
@@ -3065,7 +3065,7 @@ class WorkspaceViewModel(
     private fun buildEnvironmentReport(): String = runCatching {
         EnvDoctor.report(getApplication()) + bootstrapVersionSection()
     }.getOrElse { error ->
-        "# 蜘蛛 · 环境自检\n\n" +
+        "# ZhiCode · 环境自检\n\n" +
             "自检本身失败了：\n" +
             "${error.javaClass.name}: ${error.message}\n\n" +
             "堆栈：\n" +
@@ -3187,7 +3187,7 @@ class WorkspaceViewModel(
         val text = _state.value.environmentReport.ifBlank { buildEnvironmentReport() }
         val clipboard = app.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             ?: return false
-        clipboard.setPrimaryClip(ClipData.newPlainText("蜘蛛环境自检", text))
+        clipboard.setPrimaryClip(ClipData.newPlainText("ZhiCode 环境自检", text))
         _state.update { it.copy(message = "环境自检报告已复制") }
         return true
     }

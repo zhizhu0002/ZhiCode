@@ -13,7 +13,7 @@ import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
- * 蜘蛛沙箱单个 guest 进程内的 Frida Gadget 桥。
+ * ZhiCode 沙箱单个 guest 进程内的 Frida Gadget 桥。
  *
  * <p>Gadget 以 autonomous Script 模式运行：它自己在进程里拉起一个常驻脚本，
  * 脚本循环读一个私有命令文件、执行 Frida 原生操作、把 JSON 结果写回响应文件。

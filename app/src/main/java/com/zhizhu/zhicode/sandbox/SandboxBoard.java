@@ -140,7 +140,7 @@ public final class SandboxBoard extends Activity {
         back.setOnClickListener(v -> finish());
         header.addView(back, fixed(dp(42), dp(40)));
 
-        TextView title = label("蜘蛛沙箱", 22, palette.text);
+        TextView title = label("ZhiCode 沙箱", 22, palette.text);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         header.addView(title, new LinearLayout.LayoutParams(0, dp(42), 1));
 
@@ -420,7 +420,7 @@ public final class SandboxBoard extends Activity {
         addWeighted(lifecycle, lifecycleButton("清数据", palette.text,
                 () -> confirm("清除沙箱数据？", () -> rpcAction("clear_data", pkg, "已清除"))));
         addWeighted(lifecycle, lifecycleButton("卸载", palette.danger,
-                () -> confirm("从蜘蛛沙箱卸载？", () -> rpcAction("uninstall", pkg, "已卸载"))));
+                () -> confirm("从ZhiCode 沙箱卸载？", () -> rpcAction("uninstall", pkg, "已卸载"))));
         card.addView(lifecycle, fixed(-1, dp(44)));
 
         LinearLayout debugging = row();
@@ -515,7 +515,7 @@ public final class SandboxBoard extends Activity {
                 throw new IllegalArgumentException("不是有效普通 APK");
             }
             if (getPackageName().equals(info.packageName)) {
-                throw new IllegalArgumentException("不能导入蜘蛛自身");
+                throw new IllegalArgumentException("不能导入 ZhiCode 自身");
             }
 
             JSONObject response = SandboxRpc.call(this, "install",
@@ -680,7 +680,7 @@ public final class SandboxBoard extends Activity {
             text.append(readStartupStage());
             String body = text.toString();
             runOnUiThread(() -> {
-                if (!destroyed) showMonospaceDialog("蜘蛛沙箱诊断", body);
+                if (!destroyed) showMonospaceDialog("ZhiCode 沙箱诊断", body);
             });
         });
     }

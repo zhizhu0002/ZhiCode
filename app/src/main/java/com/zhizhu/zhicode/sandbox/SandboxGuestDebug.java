@@ -27,12 +27,12 @@ import java.util.Map;
 import top.niunaijun.blackbox.app.BActivityThread;
 
 /**
- * 蜘蛛沙箱 guest 进程内的自省与调试后端。
+ * ZhiCode 沙箱 guest 进程内的自省与调试后端。
  *
  * <p>本类只读 {@code /proc/self}，只操作「当前虚拟进程自己」的内存与已加载镜像。
  * 主 Agent 先在宿主侧选定一个具体的沙箱 PID（见 {@link SandboxGuestHost}），
  * 广播落到那个进程里，再由该进程对自己执行动作。这条约束把原始内存/注入能力
- * 关在蜘蛛沙箱内部，而不是让蜘蛛变成一台全系统注入器。
+ * 关在 ZhiCode 沙箱内部，而不是让 ZhiCode 变成一台全系统注入器。
  *
  * <p>设计上的三条硬边界，任何改动都不应放宽：
  * <ol>

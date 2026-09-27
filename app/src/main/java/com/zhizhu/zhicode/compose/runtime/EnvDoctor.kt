@@ -24,7 +24,7 @@ object EnvDoctor {
 
     fun report(context: Context): String {
         val sb = StringBuilder()
-        sb.appendLine("# 蜘蛛 · 环境自检")
+        sb.appendLine("# ZhiCode · 环境自检")
         sb.appendLine()
 
         buildInfo(context, sb)
@@ -62,7 +62,7 @@ object EnvDoctor {
     }
 
     /**
-     * 本应用是跑在 蜘蛛沙箱（BlackBox）里，还是直接跑在真机上。
+     * 本应用是跑在 ZhiCode 沙箱（BlackBox）里，还是直接跑在真机上。
      *
      * 这一条直接决定内置 Termux 能不能装：沙箱会把数据目录虚拟化成
      * `/data/user/0/<宿主包名>/blackbox/data/user/0/<pkg>`，前缀长度对不上，
@@ -71,7 +71,7 @@ object EnvDoctor {
     private fun runtimeShape(context: Context): String {
         val dataDir = context.applicationInfo?.dataDir.orEmpty()
         return if (dataDir.contains("blackbox")) {
-            "蜘蛛沙箱内（数据目录被虚拟化，内置 Termux 无法在此安装，请在真机上验证）"
+            "ZhiCode 沙箱内（数据目录被虚拟化，内置 Termux 无法在此安装，请在真机上验证）"
         } else {
             "真机/独立运行"
         }

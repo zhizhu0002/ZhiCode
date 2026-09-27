@@ -59,7 +59,7 @@ enum class PermissionMode(val label: String, val detail: String) {
     ASK("每次询问", "每个工具调用都需要你确认"),
     ACCEPT_EDITS("自动编辑", "自动允许文件编辑，其他调用仍需确认"),
     PLAN("规划", "先产出计划，批准后再执行"),
-    AUTO("自动", "由蜘蛛判断哪些调用需要确认"),
+    AUTO("自动", "由智蛛判断哪些调用需要确认"),
     DONT_ASK("不询问", "不再弹出确认，高风险操作仍会提示"),
     BYPASS("跳过权限", "跳过全部权限检查，仅限受信环境"),
 }
@@ -367,7 +367,7 @@ data class WorkspaceUiState(
 
 /** 与原 蜘蛛 一致的斜杠命令表（/help 显示，面板按前缀过滤）。 */
 val SLASH_COMMANDS: List<SlashCommand> = listOf(
-    SlashCommand("/help", "查看全部蜘蛛指令"),
+    SlashCommand("/help", "查看全部智蛛指令"),
     SlashCommand("/compact", "模型语义压缩；可追加摘要侧重点"),
     SlashCommand("/context", "查看或设置上下文窗口，例如 /context 1m"),
     SlashCommand("/clear", "清空当前对话并开始新会话"),
@@ -381,7 +381,7 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/mcp", "配置和管理 MCP 服务器"),
     SlashCommand("/web", "联网搜索设置；也可直接输入 /web 搜索词"),
     SlashCommand("/terminal", "打开内置 Termux 终端"),
-    SlashCommand("/sandbox", "打开 蜘蛛沙箱；Agent 可安装、运行和调试虚拟 APK"),
+    SlashCommand("/sandbox", "打开 ZhiCode 沙箱；Agent 可安装、运行和调试虚拟 APK"),
     SlashCommand("/diff", "打开 Claude Code 风格代码修改 Diff"),
     SlashCommand("/changes", "打开 Git 变更与 Diff"),
     SlashCommand("/files", "打开项目文件与代码编辑器"),
@@ -391,12 +391,12 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/status", "查看模型、项目、上下文、运行时和会话状态"),
     SlashCommand("/stats", "查看当前会话与运行状态"),
     SlashCommand("/usage", "查看当前上下文使用情况"),
-    SlashCommand("/copy", "复制最近一条蜘蛛回复"),
+    SlashCommand("/copy", "复制最近一条智蛛回复"),
     SlashCommand("/plan", "进入计划模式；/plan off 退出"),
-    SlashCommand("/config", "打开蜘蛛设置"),
+    SlashCommand("/config", "打开 ZhiCode 设置"),
     SlashCommand("/canvas", "打开运行时 UI 画布自定义"),
     SlashCommand("/memory", "打开项目或用户 ZhiCode.md 记忆"),
-    SlashCommand("/init", "让蜘蛛初始化或完善项目 ZhiCode.md"),
+    SlashCommand("/init", "让智蛛初始化或完善项目 ZhiCode.md"),
     SlashCommand("/tasks", "查看 Android Agent 的任务与会话文件"),
     SlashCommand("/agents", "管理内置、项目、用户和正在运行的子 Agent"),
     SlashCommand("/cancel", "停止当前正在执行的 Agent 回合"),

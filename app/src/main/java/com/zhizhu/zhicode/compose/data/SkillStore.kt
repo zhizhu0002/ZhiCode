@@ -163,7 +163,7 @@ internal object SkillStore {
         |
         |# $name
         |
-        |在这里编写给蜘蛛的技能说明。
+        |在这里编写给智蛛的技能说明。
         |
     """.trimMargin()
 

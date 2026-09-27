@@ -131,7 +131,7 @@ fun ZhiSidebar(
             SidebarSection(title = "工作区") {
                 SidebarAction(label = "技能", icon = ZhiIcons.skill, onClick = onSkills)
                 SidebarAction(label = "自定义角色卡", icon = ZhiIcons.roleCard, onClick = onRoleCard)
-                SidebarAction(label = "蜘蛛沙箱", icon = ZhiIcons.sandbox, onClick = onSandbox)
+                SidebarAction(label = "ZhiCode 沙箱", icon = ZhiIcons.sandbox, onClick = onSandbox)
             }
 
             SidebarSection {
