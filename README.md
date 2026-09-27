@@ -1,57 +1,70 @@
-# IQ-Code-Compose
+# 蜘蛛 (ZhiCode)
 
-用 **Kotlin + Jetpack Compose + Miuix** 重写的 IQ Code 主界面。
+一个 **Android 上的编码 Agent**：Kotlin + Jetpack Compose + [Miuix](https://github.com/compose-miuix-ui/miuix)，
+应用内自带一套 Termux 环境与一个 Android 虚拟化沙箱，可以直接在手机上跑命令、改代码、装/调试 APK。
 
-目标是把 `IQ-Code-Android`（纯 Java 程序化构建 UI，`MainActivity.java` 单文件 5158 行 / 391 KB）
-的界面结构，用 Miuix 组件重做一遍，观感保持一致。
+包名 `com.zhizhu.code`，应用名「蜘蛛」。
 
-## 当前状态
+## 它现在是什么
 
-第一期：**主界面全量壳 + 内存 Mock 数据**。
+**不是 UI 原型**。真实引擎、真实环境、真实沙箱都已经接上：
 
-已完成并在 IQ 沙箱逐屏截图验证：
+| 能力 | 实现 |
+| --- | --- |
+| Agent 引擎 | `core/ZhiCodeEngine.java`（流式、工具调用、子代理、steering、视觉消息过滤） |
+| 模型接入 | `api/` 下的 OpenAI Responses / Chat Completions 等协议适配，支持自定义 `Base URL` 与明文 HTTP 开关 |
+| 内置终端 | 自带 Termux bootstrap（`RuntimeInstaller` 解压 32MB）→ 真实 PTY（`TerminalSession`） |
+| 虚拟化沙箱 | `Bcore/`（BlackBox 血统）—— 免安装运行 APK、Frida 注入、原生调试 |
+| MCP | `McpStore` / `McpConfigStore` / `McpRuntime` |
+| 技能 / 角色卡 / 记忆 | `SkillStore`、`RoleCardStore`、`MemoryStore` |
+| 会话与任务 | `SessionStore`、`TaskStore`、`PlanStore` |
+| 界面 | 全部走 Miuix 组件，语义色与字阶集中在 `ZhiColors` / `ZhiTextScale` / `ZhiRadius` / `ZhiDialogWidth` |
 
-| 区域 | 对应原版方法 | 状态 |
-| --- | --- | --- |
-| 顶栏 | `buildGlobalBar()` | ✅ 品牌名 / 模型状态 / 上下文 chip / 设备时间 / 主题切换 / 悬浮球 / 设置 |
-| 工作区 Tab | `buildWorkspaceTabs()` | ✅ 对话 / 变更 / 终端 / 文件 |
-| 对话流 | `renderChat()` `addChatView()` | ✅ 空态 / 用户气泡 / 助手卡 / 工具卡 / 折叠工具组 / 思考面板 / 上下文页脚 / 工作指示器 |
-| Agent 进度卡 | `AgentProgressView` | ✅ 任务清单 + 进度条 + 计划状态 |
-| 输入器 | `buildComposer()` | ✅ 多行输入 / 附件条 / 权限·推理·模型 chips / 发送 / 停止 |
-| 斜杠命令面板 | `updateSlashPalette()` | ✅ 34 条命令按前缀过滤，与原版命令表一致 |
-| 侧栏 | `buildSidebar()` `sessionRow()` | ✅ 新会话 / 项目上下文 / 切换路径 / 会话列表 / 工作区入口 / 运行环境 / 设置 |
-| 变更面板 | `renderChanges()` `colorDiff()` | ✅ diff 逐行着色（+绿 / −红 / @@强调）+ `+N −M` 统计 |
-| 终端面板 | `renderTerminal()` | ⚠️ 只还原外观（等宽缓冲 + 输入行），**未接真实 PTY** |
-| 文件面板 | `renderFiles()` | ✅ 目录浏览 + 面包屑 + 只读代码查看（带行号） |
-| 授权 / 计划 / 选择器弹窗 | `showPermissionDialog()` `showPlanApprovalDialog()` `showChoicePicker()` | ✅ |
+界面层的约定（都带守卫测试，见下文「质量守卫」）：
+
+- 输入框统一走 `ZhiTextField`（显式文字色 + 光标落末尾）
+- 长按动作菜单走 `ZhiAnchoredActionMenu`（Miuix 下拉菜单，从手指位置展开）
+- Miuix 组件的转发集中在 `compose/ui/Common.kt`，调用点不直接引库
 
 ## 明确未做
 
-- **真实 Agent / LLM 引擎**：全部是 Mock（`MockWorkspaceRepository` 模拟流式回复与工具进度）。
-- **真实 Termux PTY**：终端面板是只读占位。
-- **真实 Git 读取 / 文件读写**：变更与文件面板用假数据，文件面板只读。
-- **设置页全量表单**：原版的设置页有多组 Spinner / 调色板 / API Profile 管理，本期只在侧栏与顶栏留入口（落到 `/config`）。
-- **悬浮球、IQ 沙箱仪表盘、Frida/Debug 界面**。
-- **IQ Code 的三套自定义调色板**（经典 / 夜间 / dark-neon）：本期按设计改为 **Miuix 原生主题**，跟随系统深浅色并动态取色。
+- **悬浮球、Frida/Debug 图形界面**：调试走 `iqdebug` / Debug 工具，没有独立的仪表盘页面。
+- **原版 IQ Code 的三套自定义调色板**（经典 / 夜间 / dark-neon）：这里按 Miuix 的
+  **原生主题**走，跟随系统深浅色。
+- **iOS / 桌面端**：只针对 Android。
+- 部分原版设置项仍未搬过来（`SettingsRows.kt` 里能直接看到当前覆盖到的那些）。
 
 ## 构建
 
 ```bash
-cd ~/projects/IQ-Code-Compose
 ./gradlew :app:assembleDebug --offline
-# 产物：app/build/outputs/apk/debug/IQCodeCompose-debug.apk
+# 产物：app/build/outputs/apk/debug/ZhiCode-debug.apk
 ```
 
-工具链（与本机已缓存的版本严格对应，注意 Termux 环境的两处特殊设置）：
+工具链：
 
 - Gradle wrapper **9.3.1**、AGP **9.1.1**、Kotlin **2.4.0** + compose 编译器插件 **2.4.0**
 - `compileSdk 37` / `minSdk 24` / `targetSdk 28`
-- `gradle.properties` 里**必须**有：
-  ```
-  android.aapt2FromMavenOverride=/data/user/0/com.iqge/files/usr/bin/aapt2
-  android.suppressUnsupportedCompileSdk=37
-  ```
 - 依赖 Miuix **0.9.4**：`top.yukonga.miuix.kmp:miuix-{ui,core,icons,preference,shader,squircle}`
+- `gradle.properties` 里的 `android.suppressUnsupportedCompileSdk=37` 是必须的
+  （compileSdk 37 比 AGP 9.1.1 认识的更高）
+
+### 只有 Termux / bionic 环境才需要的一处设置
+
+AGP 自带的 aapt2 在 Termux（bionic libc）里跑不起来，必须换成 Termux 的 aapt2。
+**这属于本机配置，不在仓库里** —— 它是一条绝对路径，提交进仓库会让别人 clone 之后
+构建指向一个不存在的文件。
+
+在 Termux 上开发时，写进**用户级**配置（不进版本库）：
+
+```bash
+# ~/.gradle/gradle.properties
+android.aapt2FromMavenOverride=$PREFIX/bin/aapt2
+```
+
+也可以临时用命令行传：`./gradlew :app:assembleDebug -Pandroid.aapt2FromMavenOverride=$PREFIX/bin/aapt2`。
+
+普通 Linux / macOS / Windows 开发机**不需要**这一项。
 
 ### 为什么是 AGP 9 / Gradle 9
 
@@ -69,18 +82,19 @@ cd ~/projects/IQ-Code-Compose
 ## 代码结构
 
 ```
-app/src/main/java/com/iqge/iqcode/compose/
-  MainActivity.kt                     ComponentActivity → setContent { IqCodeApp() }
-  theme/IqTheme.kt                    Dimens 尺度常量 + IqColors（diff 用绿/红，Miuix 原生色板没有）
+app/src/main/java/com/zhizhu/zhicode/compose/
+  MainActivity.kt                     ComponentActivity → setContent { ZhiCodeApp() }
+  theme/ZhiTheme.kt                   ZhiColors / ZhiRadius / ZhiMotion + 深浅色装配
+  theme/ZhiTextStyles.kt             应用自有紧凑字阶（ZhiTextScale + zhiTextStyles()）
   model/UiModels.kt                   ChatItem / ToolActivity / SessionSummary / WorkspaceTab /
                                       PermissionMode / EffortLevel / SLASH_COMMANDS 等
-  data/WorkspaceRepository.kt         数据来源接口（真实引擎的接入点）
-  data/MockWorkspaceRepository.kt     内存 Mock：假会话、假 diff、假文件树、模拟流式与工具序列
-  state/WorkspaceViewModel.kt         StateFlow<WorkspaceUiState>，全部交互入口
-  ui/Animations.kt                    IqMotion 动画时长/缓动常量 + iqPressScale / IqPressable
-  ui/IqIcons.kt                       图标统一出口，全部取自 MiuixIcons.Regular
-  ui/ButtonGroup.kt                   IqButtonGroup / IqButtonGroupBar（分段按键组）
-  ui/Common.kt                        图标按钮 / chip / pill / 分区标题 / 分隔线 / 用量条
+  data/                              ApiConfig / Mcp / Memory / ModelCatalog / RoleCard / Skill /
+                                      Session / GitChanges / FileBrowser 等真实数据层
+  state/WorkspaceViewModel.kt         StateFlow<WorkspaceUiState> + EngineEvents 实现
+  ui/Animations.kt                    ZhiMotion 动画时长/缓动常量
+  ui/ZhiIcons.kt / ZhiVectorIcons.kt  图标统一出口
+  ui/Common.kt                        ★ Miuix 组件的唯一转发层（ZhiIconButton / ZhiChip /
+                                      ZhiTextField / ZhiAnchoredActionMenu / ZhiDialogWidth …）
   ui/TopBar.kt                        顶栏
   ui/Sidebar.kt                       侧栏与会话行
   ui/AppScaffold.kt                   Scaffold + 宽窄屏布局 + 弹窗挂载点
@@ -90,7 +104,8 @@ app/src/main/java/com/iqge/iqcode/compose/
   ui/composer/Composer.kt             输入器
   ui/composer/SlashPalette.kt         斜杠命令面板
   ui/panes/{ChangesPane,TerminalPane,FilesPane,PaneHeader}.kt
-  ui/dialogs/Dialogs.kt               授权 / 计划审批 / 通用选择器
+  ui/dialogs/                         各弹窗（外壳见 dialogs/DialogShell.kt）
+  ui/settings/                        设置页与设置行
 ```
 
 ## Miuix 组件映射
@@ -99,9 +114,9 @@ app/src/main/java/com/iqge/iqcode/compose/
 | --- | --- |
 | 应用容器 | `Scaffold`（Overlay 系列弹窗必须在其内容里才能找到 `popupHost`） |
 | 主题 | `MiuixTheme(colors = lightColorScheme()/darkColorScheme())` |
-| 工作区 Tab | `IqButtonGroupBar`（自写分段按键组，Miuix `TabRow` 的选中胶囊会溢出盖住内容） |
+| 工作区 Tab | `ZhiSegmentedTabs` → Miuix `TabRowWithContour`（带轮廓的分段控件） |
 | 文件路径 | `BreadcrumbBar`（0.9.4 新增，点击任一层级直接跳转） |
-| 图标 | `MiuixIcons.Regular.*`（经 `ui/IqIcons.kt` 统一出口，无自绘/字形图标） |
+| 图标 | `MiuixIcons.Regular.*`（经 `ui/ZhiIcons.kt` 统一出口，无自绘/字形图标） |
 | 消息与工具卡片 | `Card`（含 `pressFeedbackType = Sink` 与原生的按压/涟漪反馈） |
 | 输入框 | `TextField` |
 | 按钮 | `Button` / `TextButton` |
@@ -143,7 +158,7 @@ Miuix 0.9.4 提供 **33 个 basic + 4 个 overlay** 组件。下面逐项标注�
 | `VerticalScrollBar` + `rememberScrollBarAdapter` | 已用 | 对话流、终端缓冲、文件列表 |
 | `TooltipBox` | 已用 | 顶栏三个图标按钮的说明气泡 |
 | `SnackbarHost` | **已移除** | 浮层遮挡底部输入器，按需求删除 |
-| `TabRow` | **不用** | 选中胶囊向外绘制会盖住相邻内容，改用自写 `IqButtonGroupBar` |
+| `TabRow` | **不用** | 选中胶囊向外绘制会盖住相邻内容，改用 `ZhiSegmentedTabs`（Miuix `TabRowWithContour`） |
 | `TopAppBar` | **不用** | 大标题布局与原版 48dp 紧凑栏差异大，改用自写单行 `Row` |
 | `OverlayBottomSheet` | **不用** | 需求改为左侧滑入抽屉，自写 `IqSideDrawer` |
 | `OverlayListPopup` | **不用** | 其 `PopupPositionProvider.calculatePosition` 需要真实锚点矩形，是**锚定下拉/右键菜单** API，拿来当居中模态选择器属于误用 |
@@ -189,51 +204,58 @@ Miuix 0.9.4 提供 **33 个 basic + 4 个 overlay** 组件。下面逐项标注�
 
 ## 动画
 
-统一收在 `ui/Animations.kt` 的 `IqMotion` 里，不要在各处硬编码时长：
+统一收在 `ui/Animations.kt` 的 `ZhiMotion` 里，不要在各处硬编码时长：
 
 | 常量 | 值 | 用途 |
 | --- | --- | --- |
-| `IqMotion.FAST` | 160ms | 遮罩淡入淡出、按钮展开收拢 |
-| `IqMotion.EXPAND` | 240ms | `animateContentSize` 卡片展开 |
-| `IqMotion.MEDIUM` | 280ms | 抽屉/面板位移、颜色过渡、进度条 |
-| `IqMotion.linear` | 1200ms | 顶栏无限扫动进度条 |
+| `ZhiMotion.FAST` | 160ms | 遮罩淡入淡出、按钮展开收拢 |
+| `ZhiMotion.EXPAND` | 240ms | `animateContentSize` 卡片展开 |
+| `ZhiMotion.MEDIUM` | 280ms | 抽屉/面板位移、颜色过渡、进度条 |
+| `ZhiMotion.linear` | 1200ms | 顶栏无限扫动进度条 |
 
 按类别分布：
 
 - **按压反馈**：交给 Miuix `Card` / `Surface(onClick)` 自带的 `pressFeedbackType`，
-  不再叠加自写缩放（否则会形成"双重按压"）。`Modifier.iqPressScale` 已删除。
-- **颜色过渡**：chip / 分段按键组 / 侧栏行用 `animateColorAsState(tween(IqMotion.MEDIUM))`。
-- **伸缩**：消息卡、工具组、思考面板、diff 文件卡用 `animateContentSize(tween(IqMotion.EXPAND))`。
+  不再叠加自写缩放（否则会形成"双重按压"）。按压反馈由 Miuix 自带，不再自写缩放。
+- **颜色过渡**：chip / 分段按键组 / 侧栏行用 `animateColorAsState(tween(ZhiMotion.MEDIUM))`。
+- **伸缩**：消息卡、工具组、思考面板、diff 文件卡用 `animateContentSize(tween(ZhiMotion.EXPAND))`。
 - **进场退场**：斜杠面板、附件条、停止按钮用 `AnimatedVisibility`；
   工作区面板切换用 `AnimatedContent`（位移 + 淡入淡出）；窄屏侧栏用 `slideInHorizontally` + 遮罩 `fadeIn`。
 - **列表增删**：对话流每项包 `Modifier.animateItem()`，新消息与工作状态条都带插入动画。
 
-## 接入真实引擎
+## 架构要点
 
-UI 不直接依赖 Mock。把这一处换掉即可：
+### 引擎已经接上了
+
+`WorkspaceViewModel` 实现 `EngineEvents`，真实引擎 `ZhiCodeEngine` 在**第一次发消息时**
+懒创建。流式回复、工具调用、权限询问、子代理都走它，不再是模拟数据。
 
 ```kotlin
-// state/WorkspaceViewModel.kt
 class WorkspaceViewModel(
-    private val repo: WorkspaceRepository = MockWorkspaceRepository(),  // ← 换成真实实现
-) : ViewModel()
+    application: Application,
+    private val repo: WorkspaceRepository = MockWorkspaceRepository(),
+) : AndroidViewModel(application), EngineEvents
 ```
 
-需要实现 `WorkspaceRepository` 的成员：
+⚠️ `WorkspaceRepository` / `MockWorkspaceRepository` **现在只剩终端占位横幅一项用途**，
+名字容易误导。对话流、工具执行、会话文件都已经不经它了 —— 看到这个名字别以为主流程还是 Mock。
 
-- `sessions()` / `transcript(sessionId)` —— 接 `SessionStore`
-- `changes()` —— 接 `git diff`
-- `rootFiles()` / `childrenOf()` / `readFile()` —— 接真实文件系统或 `IqDocumentsProvider`
-- `terminalBanner()` —— 接 `TermuxTerminalPane` 的输出流（需要改成可增量追加）
-- `assistantReply()` / `toolSequence()` —— 换成 `IQCodeEngine` 的流式回调
+### 权限与终端
 
-另外几处 UI 相关的替换点：
-
-- **流式回复**：目前 `runMockTurn()` 用 `delay` 拼接分片；真实引擎应把 `onTextDelta` 之类回调
-  转发成对 `WorkspaceUiState.transcript` 的增量更新。
 - **授权弹窗**：`requestPermission()` 用 `CompletableDeferred` 挂起等待用户点击，
-  真实实现应把 `PermissionGate.PermissionRequest` 映射到 `PermissionRequest`。
-- **终端面板**：`TerminalPane` 目前接收静态 `List<TerminalLine>`，接真实 PTY 时改为可滚动的增量缓冲。
+  真实实现把引擎侧的权限请求映射成 `PermissionRequest`。
+- **终端面板**：`TerminalPane` 接收 PTY 的增量输出；`TerminalSession` 管理真实会话。
+
+### 长按菜单与输入框的两条约定
+
+这两个都是踩过坑之后收口的，改动前请先读对应源码里的注释：
+
+- 输入框一律走 `ZhiTextField`（`compose/ui/Common.kt`）—— 它负责两件不加就出错的事：
+  显式文字色（否则会被弹窗里 `Card` 的 `contentColor` 吃掉、输入的字与底色分不清）、
+  以及外部改值时把光标放到末尾（否则光标恒在 0，输入 `123` 会变成 `231`）。
+- 长按动作菜单走 `ZhiAnchoredActionMenu`：Miuix 下拉菜单 + 一个**只观察不消费**的
+  指针修饰符（`zhiObservePointer`）拿到手指位置，于是菜单从手指处长出来，
+  同时卡片自己的点击/长按与无障碍语义都保留。
 
 ## 沙箱调试提示
 
@@ -241,9 +263,9 @@ Compose 在 `dump_ui` 里只会呈现一个 `AndroidComposeView`（无法定位�
 因此验证界面**必须靠截图**：
 
 ```bash
-iqsandbox install com.iqge.iqcode.compose   # 或 Sandbox action=install
-iqsandbox launch  com.iqge.iqcode.compose
-iqsandbox screenshot com.iqge.iqcode.compose
+iqsandbox install com.zhizhu.code   # 或 Sandbox action=install
+iqsandbox launch  com.zhizhu.code
+iqsandbox screenshot com.zhizhu.code
 ```
 
 `Sandbox action=tap` 的 `x/y` 是 **window 像素**（直接派发 `MotionEvent` 给 decor view），
@@ -259,14 +281,65 @@ iqsandbox screenshot com.iqge.iqcode.compose
 ```
 ./gradlew :app:assembleDebug
 grep -rcE '\.background\(|RoundedCornerShape\(' --include=*.kt \
-  app/src/main/java/com/iqge/iqcode/compose | awk -F: '{s+=$2} END {print s}'
+  app/src/main/java/com/zhizhu/zhicode/compose | awk -F: '{s+=$2} END {print s}'
 ```
 
 - 手写绘制站点 **78 → 9**，剩余的是传给 Miuix `Surface(shape = …)` 的 Shape 参数，
   以及 diff 逐行的**语义着色**（`+` 绿 / `−` 红，不是装饰容器）。
-- 新增接入的 Miuix 组件：`Card`、`Surface(onClick)`、`IconButton`、`HorizontalDivider`、
-  `VerticalDivider`、`SmallTitle`、`LinearProgressIndicator`、`Badge`、`Switch`、
-  `Checkbox`、`BasicComponent`、`WindowDialog`、`InputField`、`VerticalScrollBar`、`TooltipBox`。
+- 接入的 Miuix 组件（这一行按当前代码里的实际 import 列，不是历史清单）：
+  `Card`、`Surface(onClick)`、`IconButton`、`Button`/`TextButton`、`SmallTitle`、
+  `HorizontalDivider`、`VerticalDivider`、`LinearProgressIndicator`、`Badge`、`Switch`、
+  `BasicComponent`、`TabRowWithContour`、`OverlayDialog`、`OverlayDropdownPopup`、
+  `DropdownEntry`/`DropdownItem`、`BreadcrumbBar`、`VerticalScrollBar`、`TooltipBox`、
+  `TextField`、`Scaffold`。
 
-`Modifier.iqPressScale` / `IqPressable` 已**删除**（零调用点）：Miuix `Card` / `Surface(onClick)`
+**几处刻意不用**（改动前先看清理由，各自在源码注释里）：
+
+- `WindowDialog` —— 它另开一个 Android 窗口，拿不到 `Scaffold` 的 `popupHost`，
+  内部的 `Overlay*` 会失效，也参与不了主窗口的背景模糊。全部改用 `OverlayDialog`。
+- `Checkbox` —— 固定 26dp 且是圆形，从外部改不小（`requiredSize` 在调用方 modifier 之后）。
+  下拉/选择器里的选中态改用与 Miuix 一致的 `Check` 图标 + `DropdownDefaults.CheckIconSize`。
+- `TabRow` —— 选中胶囊向外绘制会盖住相邻内容，改用 `TabRowWithContour`。
+
+自写的按压缩放（曾经的 `iqPressScale` / `IqPressable`）已**删除**（零调用点）：Miuix `Card` / `Surface(onClick)`
 自带按压反馈，再叠自写缩放会双重触发。
+
+## 质量守卫
+
+除常规单测外，`test-source-no-build.sh` 里有一组**只读源码的结构测试**（不需要 Android SDK，
+`java` 直接跑单文件即可），专门拦「改坏了不会编译失败、只会表现为界面或行为不对」的那类问题：
+
+| 守卫 | 拦什么 |
+| --- | --- |
+| `TypographyScaleTest` | 裸 `fontSize = N.sp`、第二份字阶、主题未接上字阶 |
+| `TextFieldConventionTest` | 绕过 `ZhiTextField` 直接用裸输入框（会丢文字色 / 光标位置） |
+| `AnchoredMenuStructureTest` | 长按菜单接线断裂；观察器**消费事件**（会顶掉点击与无障碍语义） |
+| `LayoutConsistencyTest` | 弹窗宽度/边距写字面量、气泡用强制比例宽度、触发方式写成点击 |
+
+```
+bash test-source-no-build.sh
+```
+
+## 许可
+
+- **本工程自身代码：MIT**，见 [`LICENSE`](LICENSE)。
+- 分发物里含第三方组件（Apache-2.0 组件、Termux 二进制等），逐项清单见
+  [`NOTICE`](NOTICE)，许可原文见 [`THIRD-PARTY-LICENSES/`](THIRD-PARTY-LICENSES)，
+  **判断依据与复核方式**见 [`docs/licensing.md`](docs/licensing.md)。
+
+> 关于「哪些代码是自己写的」：`docs/licensing.md` 里用**净相同行**做了可核对的说明
+> （逐行相同多少行、其中骨架与协议串扣掉多少），并写明了这个数的算法与可能被做手脚的位置。
+> 作者的目标是把它降到 0，**当前尚未达到**。
+
+## 上游与致谢
+
+- [Miuix](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）—— 全部界面组件与主题
+- [BlackBox](https://github.com/ALEX5402/NewBlackbox)（Apache-2.0）—— 虚拟化沙箱引擎
+- [Termux](https://github.com/termux)（各组件许可见 NOTICE）—— 内置 Linux 环境
+- [Dobby](https://github.com/jmpews/Dobby)（Apache-2.0）—— 内联 hook
+
+## 贡献与安全
+
+- 提交代码前请读 [`CONTRIBUTING.md`](CONTRIBUTING.md)（特别是「守卫测试」与「不要顺手重构」两条）。
+- **这是一个会执行任意代码的应用**（自带 shell、可在虚拟沙箱里运行 APK）。
+  安全模型与漏洞报告方式见 [`SECURITY.md`](SECURITY.md)。

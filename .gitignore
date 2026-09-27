@@ -15,3 +15,6 @@ local.properties
 
 # 工具的编译产物（源码 VerifyBootstrap.java 在版本库里）
 tools/termux-bootstrap-fork/*.class
+
+# Kotlin 会话目录（IDE / 编译器插件生成）
+.kotlin/
