@@ -1482,11 +1482,92 @@ node app/tests/js/frida-payload-embedding-check.mjs .
 
 ---
 
+## 开源前的许可复核（2026-09-27）
+
+本节记录**为开源而做的那次复核**：核了什么、怎么核的、结论是什么，
+以及**哪些部分我核不出来**。
+
+复核方式是可复现的命令（`curl` GitHub 的 public API），不是凭印象。复核时间是
+**2026-09-27**；GitHub 上的仓库状态会变，过一段时间请按同样的命令重跑。
+
+### 1. 我们 vendored 的那一份：`ALEX5402/NewBlackbox` → Apache-2.0（已确证）
+
+    curl -s https://api.github.com/repos/ALEX5402/NewBlackbox/license
+    # → "spdx_id": "Apache-2.0"   （"key": "apache-2.0"，HTTP 200）
+
+即 GitHub 自己识别出的 SPDX 标识就是 Apache-2.0。这与仓库里 `Bcore/LICENSE`、
+`black-reflection/LICENSE`、`compiler/LICENSE` 三份 Apache-2.0 原文一致，
+所以**对直接上游的署名与许可要求是满足的**。
+
+> ⚠️ 注意 GitHub 的 license API 是**自动识别**（拿 LICENSE 文本去比对特征），
+> 它能证明「这个文件在、且是 Apache-2.0 的标准文本」，不能替代法律判断。
+
+### 2. 血统更上游的 `FBlackBox/BlackBox`：源码与 LICENSE 已被作者移除（**无法确证**）
+
+这是我这次**核不出来**的部分，如实写在这里。
+
+- 仓库**仍然存在**，HTTP 200：
+
+      curl -s -o /dev/null -w '%{http_code}' https://api.github.com/repos/FBlackBox/BlackBox
+      # → 200
+
+  所以「仓库被删了」这种说法是不准确的 —— 准确的说法是**源码被删了**。
+  它的根目录现在只剩下 `.gitattributes`、`.github`、`.gitignore`、`README.md`。
+
+- 因此它没有许可文件可查：
+
+      curl -s https://api.github.com/repos/FBlackBox/BlackBox/license   # → HTTP 404
+      curl -s https://api.github.com/repos/FBlackBox/BlackBox | grep license   # → "license": null
+
+- README 只剩 293 字节，原文就是作者宣布删除项目：
+
+  > Currently, I think everybody has knows this event, this project affects so many
+  > innocent developers. So I decide to dissolve the telegram group and delete this project.
+
+- 另一个可能是源头的仓库 `niunaijun/BlackBox` 返回 **HTTP 404**（已不存在）。
+  本工程代码里保留的包名 `top.niunaijun.*` 正是来自这个名字。
+
+**结论（严格限定为「我确证不了」）**：本工程 vendored 的是 Apache-2.0 的
+`ALEX5402/NewBlackbox`，这一层的义务我们履行了；但**再往上一层的原始项目
+当时是否 Apache-2.0（或其它许可），今天已经无从查证** —— 文件被作者删了。
+我**不对此下法律结论**，只把它标成一个已知的、无法当场关闭的疑点。
+
+如果有第三方持有该仓库在删除前的快照（例如 Software Heritage、其它 fork），
+那才是能补上这一环的证据来源；本仓库没有这样的材料。
+
+### 3. 保留上游包名 `top.niunaijun.*`：是**故意**的，不是漏改
+
+      git ls-files | grep -c 'top/niunaijun/'                       # → 318 个路径
+      git ls-files -z | xargs -0 grep -l 'top\.niunaijun' | wc -l   # → 551 个文件提到
+
+不能改名的技术原因：Bcore 的原生代码是**按字符串**找 Java 类的，名字一改就崩：
+
+    # Bcore/src/main/cpp/JniHook/JniHook.cpp
+    env->FindClass("top/niunaijun/jnihook/jni/JniHook");
+    env->GetStaticMethodID(clazz, "nativeOffset", "()V");
+
+    # Bcore/src/main/cpp/BoxCore.cpp（VMCORE_CLASS）
+    env->FindClass(VMCORE_CLASS);
+
+好处是顺带也满足了「保留来源标识」—— 谁看代码都能认出这套虚拟化引擎的出处。
+
+### 4. 本节的边界
+
+- 本节只陈述**用命令核出来的事实**与**核不出来的地方**，不构成法律意见。
+- 复核日期 2026-09-27；上述 GitHub 仓库状态之后可能变化。
+- 与本节相关的自动守卫：`LicenseNoticeStructureTest` 守各模块许可文件的存在，
+  但它**证明不了**上面第 2 点那个疑点已被解决 —— 那个疑点目前是**开放的**。
+
+---
+
 ## 发行前还需处理
 
-1. **把版权主体填成真实名称。** `LICENSE` 与 `THIRD-PARTY-LICENSES/MIT.txt` 里
-   目前写的是占位符 `蜘蛛 (ZhiCode) contributors`。
+1. ~~**把版权主体填成真实名称。**~~ **已完成**：`LICENSE` 与
+   `THIRD-PARTY-LICENSES/MIT.txt` 的版权行现在是 `Copyright (c) 2026 zhizhu0002`。
+   `LicenseNoticeStructureTest` 守着它不再是占位写法。
 2. **确认 bootstrap 的源码对接收者可达**（见上文「一处仍需自己确认的事」）。
 3. **`NOTICE` 提到但不覆盖**：通过 Gradle 引入的 Miuix、AndroidX、Compose 构件
    会随 APK 一并分发，其许可原文随构件本身提供。若要做正式发行，
    建议在「关于」页里放一份可滚动查看的完整许可列表。
+4. **上一节第 2 点那个疑点是开放的**：血统更上游的原始项目当时用什么许可，
+   今天查不到（文件被作者删了）。这一条**不会**因为本文件其它部分完备而消失。

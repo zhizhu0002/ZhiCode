@@ -38,7 +38,10 @@ SandboxProcessDebug 等）就是逐文件的对照关系 —— 派生关系本�
 ----------------------------------------------------------------
 
 来源 : https://github.com/ALEX5402/NewBlackbox
-       （BlackBox 血统；原始仓库 FBlackBox/BlackBox 已由作者删除源码）
+       （BlackBox 血统。原始仓库 FBlackBox/BlackBox 的**源码已被作者移除**：
+         仓库本身还在，但只余 README/.gitignore/.github，
+         其 README 写明作者决定删除该项目。详见 docs/licensing.md
+         「开源前的许可复核」一节，其中标注了此处无法确证的部分）
 许可 : Apache License 2.0
 许可原文: THIRD-PARTY-LICENSES/Apache-2.0.txt
           以及各模块目录下的 LICENSE（Bcore/、black-reflection/、compiler/）
@@ -167,5 +170,5 @@ BuildConfig.APPLICATION_ID 派生。保留它是因为类名与调用点遍布�
 蜘蛛自己的代码（Compose 界面层、宿主层重写部分、新增的诊断与安全边界等）
 按同目录 LICENSE 的 MIT 发布。
 
-发行前请把 LICENSE 与 THIRD-PARTY-LICENSES/MIT.txt 中的
-「蜘蛛 (ZhiCode) contributors」替换成你的真实法律主体名称。
+版权行为 Copyright (c) 2026 zhizhu0002（LICENSE 与 THIRD-PARTY-LICENSES/MIT.txt
+两处一致，由 app/tests/LicenseNoticeStructureTest.java 守着不再是占位写法）。
