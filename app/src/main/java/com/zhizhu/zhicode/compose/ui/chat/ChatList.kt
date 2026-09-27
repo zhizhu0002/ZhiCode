@@ -54,6 +54,11 @@ fun ChatList(
     onToggleGroup: (String, Boolean) -> Unit,
     onToggleThinking: (String) -> Unit,
     onMessageActions: (ChatItem) -> Unit,
+    /**
+     * 长按动作菜单的宿主插槽：在**每一项自己的布局里**调用，菜单就会锚在那一项上
+     * 弹出（见 `ZhiAnchoredActionMenu`）。参数是该项的 id，只有被长按那一项会认领。
+     */
+    anchoredMenu: @Composable (String) -> Unit,
     modifier: Modifier = Modifier,
     /**
      * 列表底部预留的高度。悬浮的任务/状态卡会盖住列表下部，
@@ -180,6 +185,10 @@ fun ChatList(
                         ChatKind.ERROR -> ErrorCard(item)
                         ChatKind.INFO -> InfoCard(item)
                     }
+                    // 长按动作菜单（Miuix 下拉菜单）挂在这一项自己的 Box 里，
+                    // 这样它天然锚在**被长按的那一项**上，而不是弹到屏幕正中。
+                    // 参数传该项 id：列表里只有它会认领这份菜单。
+                    anchoredMenu(item.id)
                 }
             }
             // 任务进度与工作状态**不放在滚动区**（对应原版把它们挂在固定的

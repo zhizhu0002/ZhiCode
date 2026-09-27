@@ -2561,6 +2561,8 @@ class WorkspaceViewModel(
                 choicePicker = ChoicePickerState(
                     title = "消息操作",
                     intent = ChoiceIntent.MESSAGE_ACTION,
+                    // 锚到这条消息自己：列表里只有它的 Box 会认领这份菜单
+                    anchorId = item.id,
                     options = options.map { ChoiceOption(it) },
                 )
             )
@@ -2625,6 +2627,8 @@ class WorkspaceViewModel(
                 choicePicker = ChoicePickerState(
                     title = session.title,
                     intent = ChoiceIntent.SESSION_ACTION,
+                    // 锚到这条会话自己：侧栏只有它的 Box 会认领这份菜单
+                    anchorId = session.id,
                     options = options.map { ChoiceOption(it) },
                 )
             )

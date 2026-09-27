@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
@@ -56,6 +57,7 @@ import top.yukonga.miuix.kmp.basic.TextFieldColors
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.basic.VerticalDivider
 import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
+import top.yukonga.miuix.kmp.popup.OverlayDropdownPopup
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
@@ -622,6 +624,68 @@ fun ZhiTextField(
         trailingIcon = trailingIcon,
         interactionSource = interactionSource,
     )
+}
+
+/**
+ * **贴住某一项弹出**的动作菜单（长按菜单）。
+ *
+ * ## 为什么用它，而不是居中对话框
+ *
+ * 长按一条消息 / 一条会话时，"会弹在屏幕正中"与手指所在的位置完全无关，
+ * 而动作又是针对**那一项**的 —— 位置与语义对不上。所以改成 Miuix 的下拉
+ * 菜单组件：把它放进被长按那一项的布局里，它就会锚在那一项上弹出。
+ *
+ * ## 转发到 `OverlayDropdownPopup`
+ *
+ * 上游源码（`miuix-preference/.../popup/OverlayDropdownPopup.kt`）对这个组件的
+ * 说明里明确写了「Entries without selection state **can be used as action menus**」，
+ * 它就是为动作菜单准备的：分组分隔线、按压触感、点击后收起都由它负责。
+ *
+ * ⚠️ **`collapseOnSelection` 必须显式传 true**。
+ * 它的默认值是 `entries.size <= 1`，而本工程恰好只建**一个** entry
+ * （一个 entry 装全部动作），所以默认值这次会等于 true —— 但这是**巧合**：
+ * 万一以后按分组拆成两个 entry，默认值就变成 false，表现是"点完不收起"，
+ * 而那种 bug 不会编译失败。显式写出来，让意图不依赖入口数量。
+ *
+ * `renderInRootScaffold = true`（与 Miuix 默认一致）：弹层渲染在最外层
+ * Scaffold 的弹出宿主里，所以能在整个屏幕范围内定位与绘制，不受局部裁剪影响。
+ *
+ * ## 调用点
+ *
+ * 只应由"被长按的那一项"调用（见 `ChatList` 的每项 Box 与 `Sidebar` 的 `SessionRow`），
+ * 这样锚点天然就是那一项的边界 —— 不需要把任何坐标从手势里传出来，
+ * 也就不会因为滚动、内边距或坐标空间不一致而锚偏。
+ */
+@Composable
+fun ZhiAnchoredActionMenu(
+    labels: List<String>,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (labels.isEmpty()) return
+    // 每次重组重建即可：OverlayDropdownPopup 内部用 rememberUpdatedState(entries)
+    // 持有它，所以不会因为新实例而丢状态；反过来若用 remember 缓存，
+    // onClick 里捕获的 onSelect 就有过期风险（这个回调会随重组变化）。
+    val entries = listOf(
+        DropdownEntry(
+            items = labels.mapIndexed { index, label ->
+                DropdownItem(text = label, onClick = { onSelect(index) })
+            },
+        ),
+    )
+    Box(modifier) {
+        OverlayDropdownPopup(
+            entries = entries,
+            show = true,
+            onDismiss = onDismiss,
+            onDismissFinished = {},
+            maxHeight = null,
+            dropdownColors = DropdownDefaults.dropdownColors(),
+            renderInRootScaffold = true,
+            collapseOnSelection = true,
+        )
+    }
 }
 
 /**

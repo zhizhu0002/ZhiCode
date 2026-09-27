@@ -228,9 +228,13 @@ private fun ZhiCodeScreen(
             // Miuix 的 blur 只能在**同一个窗口**内采样背景（LayerBackdrop 录的是本窗口
             // 的 GraphicsLayer），所以没法在弹窗自己的窗口里做模糊 —— 改成在主窗口里
             // 把整个工作区糊掉，弹窗再画在它上面。视觉效果与 MIUI 的模态背景一致。
+            // 长按动作菜单由**被长按的那一项**自己渲染（贴它弹出），不是居中对话框。
+            // 所以它既不该进 modalOpen（那会给整个工作区再加一层背景模糊，而弹层
+            // 自己已经带窗口变暗），也不该再走 ChoicePickerOverlay。
+            val anchoredActionMenu = state.choicePicker?.isActionMenu == true
             val modalOpen = state.permissionRequest != null ||
                 state.planApproval != null ||
-                state.choicePicker != null ||
+                (state.choicePicker != null && !anchoredActionMenu) ||
                 state.settingsDraft != null ||
                 state.environmentOpen ||
                 state.attachPickerOpen ||
@@ -256,7 +260,9 @@ private fun ZhiCodeScreen(
                 onReviseWithFeedback = viewModel::resolvePlanWithFeedback,
             )
             ChoicePickerOverlay(
-                picker = state.choicePicker,
+                // 锚定菜单已经由被长按的条目自己画了，这里必须让位 ——
+                // 否则长按后会出现「下拉菜单 + 居中对话框」同时可见。
+                picker = if (anchoredActionMenu) null else state.choicePicker,
                 onSubmit = viewModel::onSubmitSelection,
                 onDismiss = viewModel::dismissChoicePicker,
                 onSubmitFreeForm = viewModel::onSubmitFreeForm,
@@ -614,6 +620,8 @@ private fun ChatArea(
             },
             onToggleThinking = viewModel::toggleThinking,
             onMessageActions = viewModel::showMessageActions,
+            // 长按消息的动作菜单：由那一条消息自己渲染（贴它弹出）
+            anchoredMenu = { anchorId -> ZhiAnchoredMenuHost(state, viewModel, anchorId) },
             modifier = glass.capture(Modifier.fillMaxSize()),
             // 底部预留出悬浮层的高度，让被盖住的内容也能滑上来；
             // 顶部预留头部高度，让内容能滚到悬浮头部下面被模糊。
@@ -794,6 +802,33 @@ private fun ComposerHost(
     )
 }
 
+/**
+ * 长按动作菜单的**宿主插槽**：交给被长按的那一项去调用。
+ *
+ * 每一项在**自己的布局里**调用 `anchoredMenu(自己的 id)`，菜单就会锚在那一项上
+ * 弹出（见 [ZhiAnchoredActionMenu]）。这里集中做三件事，避免每个调用点各写一遍：
+ *
+ * 1. 只有 `anchorId` 与传进来的 id 相同的那一项才认领这份菜单 —— 否则列表里
+ *    每一条都会弹一个；
+ * 2. 不是动作菜单（`isActionMenu` 为假）时什么都不画，交回 `ChoicePickerOverlay`；
+ * 3. 点击走**原有的** [WorkspaceViewModel.onChoiceSelected]（按下标分发，详见
+ *    该方法里的 intent 分支）—— 动作语义、目标记忆、错误提示全部复用。
+ */
+@Composable
+private fun ZhiAnchoredMenuHost(
+    state: WorkspaceUiState,
+    viewModel: WorkspaceViewModel,
+    anchorId: String,
+) {
+    val picker = state.choicePicker ?: return
+    if (!picker.isActionMenu || picker.anchorId != anchorId) return
+    ZhiAnchoredActionMenu(
+        labels = picker.options.map { it.label },
+        onSelect = viewModel::onChoiceSelected,
+        onDismiss = viewModel::dismissChoicePicker,
+    )
+}
+
 @Composable
 private fun ZhiSidebarHost(
     state: WorkspaceUiState,
@@ -808,6 +843,8 @@ private fun ZhiSidebarHost(
         onOpenSession = viewModel::openSession,
         onSessionActions = viewModel::showSessionActions,
         onDeleteSession = { viewModel.deleteSession(it.id) },
+        // 长按会话的动作菜单：由侧栏里那一条会话自己渲染（贴它弹出）
+        anchoredMenu = { anchorId -> ZhiAnchoredMenuHost(state, viewModel, anchorId) },
         onSkills = viewModel::openSkills,
         onRoleCard = viewModel::openRoleCards,
         onSandbox = { viewModel.openSandbox() },

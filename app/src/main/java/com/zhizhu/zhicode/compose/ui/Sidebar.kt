@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -58,6 +59,12 @@ fun ZhiSidebar(
     onOpenSession: (SessionSummary) -> Unit,
     onSessionActions: (SessionSummary) -> Unit,
     onDeleteSession: (SessionSummary) -> Unit,
+    /**
+     * 长按动作菜单的宿主插槽：在**每一条会话自己的布局里**调用，菜单就会锚在
+     * 那一条上弹出（见 `ZhiAnchoredActionMenu`）。参数是会话 id，
+     * 只有被长按那一条会认领。
+     */
+    anchoredMenu: @Composable (String) -> Unit,
     onRoleCard: () -> Unit,
     onSkills: () -> Unit,
     onSandbox: () -> Unit,
@@ -108,6 +115,7 @@ fun ZhiSidebar(
                             onOpen = { onOpenSession(session) },
                             onActions = { onSessionActions(session) },
                             onDelete = { onDeleteSession(session) },
+                            anchoredMenu = anchoredMenu,
                         )
                     }
                 }
@@ -238,6 +246,30 @@ private fun SidebarAction(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SessionRow(
+    session: SessionSummary,
+    active: Boolean,
+    onOpen: () -> Unit,
+    onActions: () -> Unit,
+    onDelete: () -> Unit,
+    anchoredMenu: @Composable (String) -> Unit,
+) {
+    // 外面这层 Box 只为托住长按菜单：菜单作为它的子项就会锚在这**一条会话**上
+    // （而不是弹到屏幕正中）。它不参与布局，Card 依旧 fillMaxWidth。
+    Box {
+        SessionRowCard(
+            session = session,
+            active = active,
+            onOpen = onOpen,
+            onActions = onActions,
+            onDelete = onDelete,
+        )
+        anchoredMenu(session.id)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SessionRowCard(
     session: SessionSummary,
     active: Boolean,
     onOpen: () -> Unit,

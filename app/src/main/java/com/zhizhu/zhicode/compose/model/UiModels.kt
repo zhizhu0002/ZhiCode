@@ -138,7 +138,26 @@ data class ChoicePickerState(
     val multiSelect: Boolean = false,
     val submitLabel: String = "提交",
     val cancelLabel: String = "取消",
-)
+    /**
+     * 长按动作菜单要**锚**到哪一项（消息 id / 会话 id）。
+     *
+     * 只有 [ChoiceIntent.MESSAGE_ACTION] 与 [ChoiceIntent.SESSION_ACTION] 会写它，
+     * 其余情形为 null（走居中对话框）。被长按的那一项按 id 认领它，菜单就在
+     * 那一项自己的 Box 里弹出（见 `ui/Common.kt` 的 `ZhiAnchoredActionMenu`）——
+     * 这样不必做任何坐标换算，也就不会因为滚动/内边距而锚偏。
+     */
+    val anchorId: String? = null,
+) {
+    /**
+     * 是否按**贴住长按项的下拉菜单**渲染，而不是居中对话框。
+     *
+     * `anchorId` 也要求非空：万一哪天有调用点忘了传，宁可退回原来的对话框，
+     * 也不能出现「菜单不显示、对话框也没有」的空洞。
+     */
+    val isActionMenu: Boolean
+        get() = anchorId != null &&
+            (intent == ChoiceIntent.MESSAGE_ACTION || intent == ChoiceIntent.SESSION_ACTION)
+}
 
 enum class ChoiceIntent {
     GENERIC,
