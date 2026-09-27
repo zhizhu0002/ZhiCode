@@ -175,6 +175,9 @@ run TerminalPaneContractTest "$PROJECT_ROOT"
 # ---------- 字阶单一来源（防"同一层次的尺寸被逐处手写"再犯） ----------
 # TypographyScaleTest.java
 run TypographyScaleTest "$PROJECT_ROOT"
+# ---------- 输入框唯一入口（防"隐形的文字色/光标"缺陷回来） ----------
+# TextFieldConventionTest.java
+run TextFieldConventionTest "$PROJECT_ROOT"
 
 echo "-----"
 echo "通过 $PASS / 失败 $FAIL"

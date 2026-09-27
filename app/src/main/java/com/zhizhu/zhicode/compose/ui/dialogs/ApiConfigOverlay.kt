@@ -27,6 +27,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -36,7 +37,6 @@ import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
@@ -226,7 +226,7 @@ private fun ApiProfileForm(
             )
         },
     ) {
-        TextField(
+        ZhiTextField(
             value = draft.name,
             onValueChange = { value -> onChange { it.copy(name = value) } },
             label = "名称",
@@ -249,7 +249,7 @@ private fun ApiProfileForm(
             },
         )
 
-        TextField(
+        ZhiTextField(
             value = draft.baseUrl,
             onValueChange = { value -> onChange { it.copy(baseUrl = value) } },
             label = "Base URL",
@@ -265,7 +265,7 @@ private fun ApiProfileForm(
             onCheckedChange = { allowCleartext = it },
         )
 
-        TextField(
+        ZhiTextField(
             value = draft.apiKey,
             onValueChange = { value -> onChange { it.copy(apiKey = value) } },
             label = if (draft.isEditing) "API Key（留空 = 沿用原密钥）" else "API Key",
@@ -274,7 +274,7 @@ private fun ApiProfileForm(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp),
         )
 
-        TextField(
+        ZhiTextField(
             value = draft.model,
             onValueChange = { value -> onChange { it.copy(model = value) } },
             label = "模型名",

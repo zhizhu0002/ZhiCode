@@ -24,12 +24,12 @@ import com.zhizhu.zhicode.compose.model.SkillsState
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -198,7 +198,7 @@ private fun SkillCreateForm(
             )
         },
     ) {
-        TextField(
+        ZhiTextField(
             value = draft.name,
             onValueChange = { value -> onChange { it.copy(name = value) } },
             label = "名称",
@@ -259,7 +259,7 @@ private fun SkillEditor(
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         )
         Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-            TextField(
+            ZhiTextField(
                 value = target.body,
                 onValueChange = onBodyChange,
                 label = "SKILL.md",

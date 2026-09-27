@@ -23,12 +23,12 @@ import com.zhizhu.zhicode.compose.model.McpType
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
@@ -199,7 +199,7 @@ private fun McpServerForm(
         androidx.compose.foundation.layout.Column(
             modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         ) {
-            TextField(
+            ZhiTextField(
                 value = draft.name,
                 onValueChange = { v -> onChange { it.copy(name = v) } },
                 label = "服务器名称",
@@ -220,7 +220,7 @@ private fun McpServerForm(
             )
 
             if (draft.type.needsCommand) {
-                TextField(
+                ZhiTextField(
                     value = draft.command,
                     onValueChange = { v -> onChange { it.copy(command = v) } },
                     label = "启动命令",
@@ -229,7 +229,7 @@ private fun McpServerForm(
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
                 FieldError(draft.commandError)
-                TextField(
+                ZhiTextField(
                     value = draft.argsText,
                     onValueChange = { v -> onChange { it.copy(argsText = v) } },
                     label = "命令参数（每行一个）",
@@ -237,7 +237,7 @@ private fun McpServerForm(
                     singleLine = false,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
-                TextField(
+                ZhiTextField(
                     value = draft.envText,
                     onValueChange = { v -> onChange { it.copy(envText = v) } },
                     label = "环境变量 JSON（可选）",
@@ -247,7 +247,7 @@ private fun McpServerForm(
                 )
                 FieldError(draft.envError)
             } else {
-                TextField(
+                ZhiTextField(
                     value = draft.url,
                     onValueChange = { v -> onChange { it.copy(url = v) } },
                     label = "服务器 URL",
@@ -256,7 +256,7 @@ private fun McpServerForm(
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
                 FieldError(draft.urlError)
-                TextField(
+                ZhiTextField(
                     value = draft.headersText,
                     onValueChange = { v -> onChange { it.copy(headersText = v) } },
                     label = "请求头 JSON（可选）",

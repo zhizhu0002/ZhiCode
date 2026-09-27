@@ -38,6 +38,7 @@ import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -54,7 +55,6 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
@@ -239,7 +239,7 @@ fun PlanApprovalOverlay(
             groupBody = true,
             // 反馈输入框不随计划正文滚动，固定在底板下方
             footer = {
-                TextField(
+                ZhiTextField(
                     value = feedback,
                     onValueChange = { feedback = it },
                     label = "继续规划时填写反馈（可选）",
@@ -332,7 +332,7 @@ fun ChoicePickerOverlay(
             // 自由文本输入框不随选项列表滚动，固定在底板下方
             footer = if (!picker.allowFreeForm) null else {
                 {
-                    TextField(
+                    ZhiTextField(
                         value = freeForm,
                         onValueChange = { freeForm = it },
                         label = picker.freeFormHint,

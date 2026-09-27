@@ -21,13 +21,13 @@ import com.zhizhu.zhicode.compose.model.FileHit
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.zhiFormatSize
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -79,7 +79,7 @@ fun AttachFileOverlay(
             // 搜索框固定在**不滚动**的头部：结果列表很长时，输入框跟着滚上去
             // 就没法边看边改查询了。
             header = {
-                TextField(
+                ZhiTextField(
                     value = query,
                     onValueChange = onQueryChange,
                     label = "搜索文件名或路径片段",

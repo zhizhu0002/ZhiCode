@@ -17,9 +17,9 @@ import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 
 /**
@@ -114,7 +114,7 @@ internal fun TerminalRenameDialog(
         DialogShell(
             title = "Rename session",
             footer = {
-                TextField(
+                ZhiTextField(
                     value = draft,
                     onValueChange = { draft = it },
                     label = "Session name",

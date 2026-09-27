@@ -12,17 +12,28 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -40,6 +51,9 @@ import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.TabRowDefaults
 import top.yukonga.miuix.kmp.basic.TabRowWithContour
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.basic.TextFieldColors
+import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.basic.VerticalDivider
 import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -504,6 +518,111 @@ fun ZhiTextDropdownChip(
     }
 }
 
+
+/**
+ * 文本输入框。转发到 Miuix [TextField] 的 **`TextFieldState`** 重载。
+ *
+ * ## 为什么不能直接用 `TextField(value = 字符串, …)` 那条重载
+ *
+ * 工程原先 22 处输入框全部走 `value: String` 那条旧重载，它在真机上暴露了两个
+ * 缺陷，而且**看起来毫无关联、实则同源**：
+ *
+ * 1. **输入的字看不见**（和占位符一个色）。Miuix 里输入字的颜色是
+ *    `textStyle.color.takeOrElse { LocalContentColor.current }`
+ *    （源码 `TextField.kt` 的 `resolvedTextStyle`）。本工程的字阶只改
+ *    `fontSize`、不动 color，于是它一路回落到 `LocalContentColor` ——
+ *    而 **Miuix `Card` 会用 `colors.contentColor` 覆盖这个局部值**
+ *    （`CardKt` 里 `CompositionLocalProvider(LocalContentColor provides
+ *    colors.contentColor)`）。弹窗内容区（`Dialogs/RoleCardsOverlay` 那层用的
+ *    [com.zhizhu.zhicode.compose.ui.dialogs.DialogShell]），暗色方案里它是
+ *    **`#666666`**；占位符 `onSecondaryContainer` 是 `#7C7C7C` ——
+ *    在 `#242424` 底上两者分不出来。
+ *
+ * 2. **光标停在第一个字母前面，输入顺序错乱**（输入 `123` 显示 `231`）。
+ *    旧重载内部是 `remember {}`（无 key）建一个 `TextFieldValue`，选区取默认值
+ *    `TextRange.Zero`；之后每次外部文本变化只 `copy(text = 新值)`，
+ *    **选区原样保留**（实测 Compose `BasicTextFieldKt` 字节码：建值与
+ *    `copy$default` 两处的 mask 都是 6，selection 都走默认）。于是光标恒在
+ *    索引 0，输入法按「光标在 0」提交，字符就插到了最前面：先 `1`，
+ *    再把 `23` 插到 0，得 `231`。
+ *
+ * 所以改用 `TextFieldState` 重载（Miuix 0.9.4 文档列在首位的现代 API），
+ * 并守两条纪律：**外部改值**用 [setTextAndPlaceCursorAtEnd]（光标落末尾，
+ * 不是 0）；**回传**走 `snapshotFlow`，不把渲染时机与状态时机绑在一起。
+ *
+ * 参数只保留各调用点真正用到的那些，其余交给 Miuix 默认值。
+ */
+@Composable
+fun ZhiTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    label: String = "",
+    useLabelAsPlaceholder: Boolean = true,
+    enabled: Boolean = true,
+    readOnly: Boolean = false,
+    /**
+     * 默认 **false**，与 Miuix 原默认值一致。
+     *
+     * 不能默认 true：本工程有几处输入框（输入器、反馈、自由输入）**不写**
+     * `singleLine` 而是靠 `minLines`/`maxLines` 表达多行，默认 true 会把它们
+     * 变成单行。凡是单行的地方，调用点本来就都显式写了 `singleLine = true`。
+     */
+    singleLine: Boolean = false,
+    minLines: Int = 1,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
+    colors: TextFieldColors = TextFieldDefaults.textFieldColors(),
+    insideMargin: DpSize = TextFieldDefaults.InsideMargin,
+    cornerRadius: Dp = TextFieldDefaults.CornerRadius,
+    /** 传 null 用主题的正文样式（只补一个可见的文字色）。 */
+    textStyle: TextStyle? = null,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    interactionSource: MutableInteractionSource? = null,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    trailingIcon: (@Composable () -> Unit)? = null,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val fieldState = remember { TextFieldState(value) }
+
+    // 外部改值：只在真不一致时写回，并把光标放到末尾。
+    // 少了这一步，点列表填值之后光标会留在旧位置，用户接着输入就插错地方
+    // ——即上面第 2 个缺陷的来源。
+    LaunchedEffect(value) {
+        if (fieldState.text != value) fieldState.setTextAndPlaceCursorAtEnd(value)
+    }
+
+    // 内部改值回传给状态层。snapshotFlow 自身只在值真的变化时发射，
+    // 所以外部写回不会被再次回传而打成循环。
+    // （`TextFieldState.text` 是 `CharSequence`，这里显式转成 `String`。）
+    LaunchedEffect(fieldState) {
+        snapshotFlow { fieldState.text.toString() }.collect { onValueChange(it) }
+    }
+
+    val base = textStyle ?: MiuixTheme.textStyles.main
+    TextField(
+        state = fieldState,
+        modifier = modifier,
+        insideMargin = insideMargin,
+        colors = colors,
+        cornerRadius = cornerRadius,
+        label = label,
+        useLabelAsPlaceholder = useLabelAsPlaceholder,
+        enabled = enabled,
+        readOnly = readOnly,
+        // takeOrElse：调用点若显式指定了颜色就尊重它，否则补一个在深浅两套里
+        // 都看得清的文字色。
+        textStyle = base.copy(color = base.color.takeOrElse { scheme.onSurface }),
+        keyboardOptions = keyboardOptions,
+        lineLimits = if (singleLine) {
+            TextFieldLineLimits.SingleLine
+        } else {
+            TextFieldLineLimits.MultiLine(minHeightInLines = minLines, maxHeightInLines = maxLines)
+        },
+        leadingIcon = leadingIcon,
+        trailingIcon = trailingIcon,
+        interactionSource = interactionSource,
+    )
+}
 
 /**
  * 人类可读的字节数。

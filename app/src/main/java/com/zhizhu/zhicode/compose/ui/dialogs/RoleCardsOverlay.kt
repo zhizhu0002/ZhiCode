@@ -20,6 +20,7 @@ import com.zhizhu.zhicode.compose.model.RoleCardsState
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -29,7 +30,6 @@ import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
@@ -205,7 +205,7 @@ private fun RoleCardEditorForm(
             )
         },
     ) {
-        TextField(
+        ZhiTextField(
             value = editor.name,
             onValueChange = { value -> onChange { it.copy(name = value) } },
             label = "角色名称",
@@ -224,7 +224,7 @@ private fun RoleCardEditorForm(
         }
 
         Column(modifier = Modifier.fillMaxWidth()) {
-            TextField(
+            ZhiTextField(
                 value = editor.content,
                 onValueChange = { value -> onChange { it.copy(content = value) } },
                 label = "角色卡内容",

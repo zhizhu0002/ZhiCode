@@ -52,12 +52,12 @@ import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
 import com.zhizhu.zhicode.compose.ui.ZhiTextDropdownChip
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.FloatingToolbar
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -164,7 +164,7 @@ fun Composer(
                 modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                TextField(
+                ZhiTextField(
                     value = state.composerText,
                     onValueChange = onTextChange,
                     label = "描述任务或向蜘蛛提问",
