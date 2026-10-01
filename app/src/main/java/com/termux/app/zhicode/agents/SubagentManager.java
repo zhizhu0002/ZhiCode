@@ -153,20 +153,15 @@ public final class SubagentManager {
 
     // ------------------------------------------------------------ 对外接口
 
-    /** 发给模型的三个子代理工具。它们不注册在 {@code ToolRegistry} 里，由本类自己实现。 */
+    /**
+     * 发给模型的三个子代理工具。它们不注册在 {@code ToolRegistry} 里，由本类自己实现。
+     *
+     * <p>schema 的构造搬到 {@link SubagentToolSchemas}：那段是纯 JSON 组装，
+     * 放在这里只能靠"发一次真请求"验证，而 schema 写坏不一定每次都被服务端指出来
+     * （曾经就这样漏掉过最外层的 {@code type:object}，见那个类的注释）。
+     */
     public JSONArray apiSchemas() {
-        JSONArray schemas = new JSONArray();
-        schemas.put(toolSchema("Agent",
-                "Launch a specialized ZhiCode subagent in an independent context."
-                        + " Subagents cannot spawn other subagents.",
-                agentInputSchema()));
-        schemas.put(toolSchema("TaskOutput",
-                "Read the current or final output of a background subagent task.",
-                taskOutputSchema()));
-        schemas.put(toolSchema("TaskStop",
-                "Stop a running background subagent task.",
-                taskStopSchema()));
-        return schemas;
+        return SubagentToolSchemas.apiSchemas();
     }
 
     public ToolExecutionResult execute(SessionConfig parent, String parentEffectiveMode, ToolCall call)
@@ -731,109 +726,4 @@ public final class SubagentManager {
     }
 
     // ------------------------------------------------------------ 工具 schema
-
-    private static JSONObject toolSchema(String name, String description, JSONObject input) {
-        return with(new JSONObject(), schema -> schema
-                .put("name", name)
-                .put("description", description)
-                .put("input_schema", input));
-    }
-
-    /**
-     * {@code Agent} 的入参 schema。
-     *
-     * <p>这些描述是模型唯一能看到的说明，因此每一条都要说清「填什么」，
-     * 尤其是 {@code isolation} 与 {@code cwd} 互斥这一条 —— 不写的话模型会把两个都填上。
-     */
-    private static JSONObject agentInputSchema() {
-        return with(new JSONObject(), properties -> properties
-                .put("description", string("A short 3-5 word task description."))
-                .put("prompt", string("The task for the subagent to perform."))
-                .put("subagent_type", string("Specialized agent type, such as Explore, Plan,"
-                        + " general-purpose, verification, or a custom agent name."))
-                .put("model", string("Optional model override: inherit, sonnet, opus, haiku,"
-                        + " or a full model ID."))
-                .put("run_in_background", bool("Run in background and return a task_id immediately."))
-                .put("isolation", enumeration("Optional isolation mode.", "worktree"))
-                .put("cwd", string("Optional absolute working directory; mutually exclusive"
-                        + " with isolation.")),
-                properties -> objectSchema(properties, "description", "prompt"));
-    }
-
-    private static JSONObject taskOutputSchema() {
-        return with(new JSONObject(), properties -> properties
-                .put("task_id", string("Background agent task ID."))
-                .put("block", bool("Wait for completion if still running. Default true."))
-                .put("timeout", integer("Maximum wait in milliseconds (max 600000).")),
-                properties -> objectSchema(properties, "task_id"));
-    }
-
-    private static JSONObject taskStopSchema() {
-        return with(new JSONObject(), properties -> properties
-                .put("task_id", string("Background agent task ID.")),
-                properties -> objectSchema(properties, "task_id"));
-    }
-
-    private static JSONObject objectSchema(JSONObject properties, String... required) {
-        return with(new JSONObject(), schema -> {
-            schema.put("type", "object").put("properties", properties).put("additionalProperties", false);
-            JSONArray requiredList = new JSONArray();
-            for (String name : required) requiredList.put(name);
-            if (requiredList.length() > 0) schema.put("required", requiredList);
-        });
-    }
-
-    private static JSONObject string(String description) {
-        return with(new JSONObject(), schema -> schema.put("type", "string").put("description", description));
-    }
-
-    private static JSONObject bool(String description) {
-        return with(new JSONObject(), schema -> schema.put("type", "boolean").put("description", description));
-    }
-
-    private static JSONObject integer(String description) {
-        return with(new JSONObject(), schema -> schema
-                .put("type", "integer")
-                .put("minimum", 0)
-                .put("description", description));
-    }
-
-    private static JSONObject enumeration(String description, String... values) {
-        return with(new JSONObject(), schema -> {
-            JSONArray options = new JSONArray();
-            for (String value : values) options.put(value);
-            schema.put("type", "string").put("enum", options).put("description", description);
-        });
-    }
-
-    /**
-     * 把 {@link JSONException} 收成 {@link IllegalStateException}。
-     *
-     * <p>上面这些 schema 全是固定的字面量结构，写错了只可能是代码错，不是运行期状况。
-     * 让它们各自声明 {@code throws Exception} 会把异常传染到整条调用链
-     * （工具接口、引擎、界面），而那里并没有人有办法处理它。
-     */
-    private interface JsonBuilder {
-        void build(JSONObject target) throws Exception;
-    }
-
-    private static JSONObject with(JSONObject target, JsonBuilder builder) {
-        try {
-            builder.build(target);
-            return target;
-        } catch (Exception impossible) {
-            throw new IllegalStateException(impossible);
-        }
-    }
-
-    /** 两段式：先把 properties 填好，再整形成 schema。 */
-    private static JSONObject with(JSONObject target, JsonBuilder properties, JsonBuilder incomplete) {
-        try {
-            properties.build(target);
-            incomplete.build(target);
-            return target;
-        } catch (Exception impossible) {
-            throw new IllegalStateException(impossible);
-        }
-    }
 }
