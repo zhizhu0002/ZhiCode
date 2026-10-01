@@ -1,6 +1,8 @@
 package com.zhizhu.zhicode.compose.ui.chat
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -19,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -151,6 +154,18 @@ fun ChatList(
             lastSessionId = stamp.session
             if (tailIndex <= 0) return@collect
             if (switched || autoFollow) listState.requestScrollToItem(tailIndex)
+        }
+    }
+
+    // 输入法弹出/收起时把对话吸回底部：键盘顶起视口后列表可视高度骤变，
+    // 原先贴底的内容被顶出屏幕；用户此刻的意图几乎总是"接着输入"，所以这里
+    // 无条件回底（不改 autoFollow，避免键盘收起时把正在看历史的人拽走）。
+    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+    LaunchedEffect(imeBottom) {
+        if (imeBottom > 0) {
+            val s = currentState
+            val leading = if (s.transcript.isEmpty()) 1 else 0
+            listState.requestScrollToItem(leading + s.transcript.size)
         }
     }
 
