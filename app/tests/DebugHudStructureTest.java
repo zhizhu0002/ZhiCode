@@ -52,6 +52,15 @@ public final class DebugHudStructureTest {
     /** 操作反馈条。事故见 §15：`state.message` 曾被写 29 次却没人渲染。 */
     private static final String MESSAGE_BAR = SRC + "ui/MessageBar.kt";
 
+    /** 图片解码与缩略图。事故见 §16：图片发给了模型，界面上什么都不显示。 */
+    private static final String ZHI_IMAGE = SRC + "ui/ZhiImage.kt";
+
+    /** 会话读取：把 JSONL 里的 image 块读回界面模型。 */
+    private static final String SESSION_READER = SRC + "data/SessionReader.kt";
+
+    /** 用户气泡与助手卡片。图片行的接入点在 `UserBubble`。 */
+    private static final String MESSAGE_CARDS = SRC + "ui/chat/MessageCards.kt";
+
     /** 工具实现所在目录：脚本里点名的工具名要在这里能找到出处。 */
     private static final String TOOLS_DIR = "app/src/main/java/com/termux/app/zhicode/tools";
 
@@ -467,6 +476,94 @@ public final class DebugHudStructureTest {
         requireContains(modelsForMessage, "val messageIsError: Boolean",
                 MODELS + " 必须记录 message 的**语义**（是不是错误）："
                         + "从文案里猜（含\"失败\"就当错误）会在正常提示上判错，且改一个字就静默失效");
+
+        // ---- 16. 用户发的图片必须能显示出来 -------------------------------
+        //
+        // 事故：图片确实发给了模型（引擎收到 base64 块），但界面上什么都不显示 ——
+        // ChatItem 只有 body，图片字节存在 ViewModel 的 attachmentPayloads 里，
+        // 而 send() 一进来就 clearAttachments() 把它清空；SessionReader 又把
+        // JSONL 里的 image 块静默跳过。三处各自"看起来没问题"，合起来图就没了。
+        //
+        // 这类"数据在、没人画"的 bug 单测抓不住（字段有值、能编译、逻辑也过），
+        // 所以按每一环各钉一条：模型有字段 → 读得回来 → 真的画了 → 发送时带上。
+        requireContains(modelsForMessage, "val images: List<ChatImage>",
+                MODELS + " 的 ChatItem 必须有 images 字段：图片要成为消息自己的一部分，"
+                        + "而不是存在别处等被 clearAttachments() 清掉");
+
+        String zhiImage = stripComments(read(root, ZHI_IMAGE));
+        requireContains(zhiImage, "fun sampleSizeFor(",
+                ZHI_IMAGE + " 必须提供 sampleSizeFor：4 万像素级的原图直接解码会 OOM");
+        requireContains(zhiImage, "inJustDecodeBounds",
+                "必须先量尺寸再降采样 —— inSampleSize 只有在解码**前**给出才生效");
+        requireContains(zhiImage, "ContentScale.Fit",
+                "缩略图必须等比不裁剪：用户要确认的是\"我发的是不是这张\"，"
+                        + "裁掉一块比留边更让人困惑");
+        require(!zhiImage.contains("coil"),
+                ZHI_IMAGE + " 不得引入 coil 之类的图片库：构建走 --offline，加依赖会直接构建失败");
+
+        String messageCards = stripComments(read(root, MESSAGE_CARDS));
+        requireContains(messageCards, "ZhiImageRow(",
+                MESSAGE_CARDS + " 的 UserBubble 必须真的画图片行 —— 这是整个 bug 的修复点");
+        requireContains(messageCards, "images = item.images",
+                "图片行必须接 item.images（而不是从别处找数据）");
+
+        String sessionReader = stripComments(read(root, SESSION_READER));
+        requireContains(sessionReader, "fun readImages(",
+                SESSION_READER + " 必须能从会话行里读回 image 块");
+        requireContains(sessionReader, "images.isNotEmpty()",
+                "出气泡的判据必须包含 images：只发图不写字的消息没有 text 块，"
+                        + "按 text.isNotBlank() 判断会把整条消息丢掉（用户翻历史会发现图连带消息都没了）");
+
+        String vmForImages = stripComments(read(root, VIEW_MODEL));
+        requireContains(vmForImages, "images = currentImages()",
+                VIEW_MODEL + " 的 send() 必须把图片挂到出站气泡上");
+        requireContains(vmForImages, "fun currentImages()",
+                VIEW_MODEL + " 必须提供 currentImages()");
+        // 顺序：取图片必须在 clearAttachments() **调用**之前，否则拿到的是空列表。
+        //
+        // ⚠️ 必须把范围限定在 send() 函数体内再比位置：`clearAttachments()` 这个子串
+        // 在它自己的**定义**处（`private fun clearAttachments() {`）也出现，
+        // 而那个位置在文件里永远更靠前 —— 不限定范围的话这条断言恒为失败，
+        // 等于一个永远红着的测试（那和没有测试一样糟糕）。
+        int sendAt = vmForImages.indexOf("fun send()");
+        require(sendAt > 0, VIEW_MODEL + " 必须保留 send()");
+        // 切到下一个顶层函数为止，避免把后面别的方法也算进 send() 里。
+        int sendEnd = vmForImages.indexOf("\n    private fun ", sendAt + 1);
+        if (sendEnd < 0) sendEnd = vmForImages.indexOf("\n    fun ", sendAt + 1);
+        if (sendEnd < 0) sendEnd = vmForImages.length();
+        String sendBody = vmForImages.substring(sendAt, sendEnd);
+        int firstClear = sendBody.indexOf("clearAttachments()");
+        int firstImages = sendBody.indexOf("images = currentImages()");
+        require(firstClear > 0 && firstImages > 0 && firstImages < firstClear,
+                "send() 里 currentImages() 必须出现在 clearAttachments() 之前："
+                        + "附件载荷由它清空，顺序反了图片就是空的（这正是原来的 bug）");
+
+        // ---- 17. 发送 / 停止键必须是方角且同尺寸 ---------------------------
+        //
+        // Common.kt 的 ZhiFilledIconButton 文档写着「square 为 true 时改成方角，
+        // 发送键即用这个形态」，但两个调用点从来没传过 square —— 文档与代码
+        // 互相矛盾了很久。另外两个键尺寸不同（34 / 36）会在切换时跳一下。
+        String composerActionKeys = stripComments(read(root, COMPOSER));
+        int squareCount = countOf(composerActionKeys, "square = true");
+        require(squareCount >= 2,
+                COMPOSER + " 的发送键与停止键都必须传 square = true，实际只有 " + squareCount + " 处");
+        require(!composerActionKeys.contains("size = 36.dp") && !composerActionKeys.contains("size = 34.dp"),
+                COMPOSER + " 的两个动作键必须共用 ComposerActionSize，"
+                        + "各写一个数字会重新出现\"切换时按钮跳一下\"");
+        requireContains(composerActionKeys, "private val ComposerActionSize",
+                COMPOSER + " 必须用一个常量统一两个动作键的边长");
+    }
+
+    /** 子串出现次数。 */
+    private static int countOf(String text, String needle) {
+        int count = 0;
+        int from = 0;
+        while (true) {
+            int at = text.indexOf(needle, from);
+            if (at < 0) return count;
+            count++;
+            from = at + needle.length();
+        }
     }
 
     /** tools/ 下每个工具自己声明的名字（`public String name() { return "Read"; }`）。 */

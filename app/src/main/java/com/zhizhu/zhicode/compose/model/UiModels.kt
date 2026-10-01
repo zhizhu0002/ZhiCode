@@ -25,6 +25,30 @@ data class ToolActivity(
     val kind: ToolKind = ToolKind.OTHER,
 )
 
+/**
+ * 一条用户消息里带的图片。
+ *
+ * ## 为什么 base64 直接放在界面模型里
+ *
+ * 会话 JSONL 里的 image 块本来就是 `source.data` = base64（引擎写的，见
+ * `ZhiCodeEngine.buildUserContent`），这里**照原样搬过来**：
+ * - 不存 Uri：`content://` 的读权限只在这个 Activity 生命周期内有效，
+ *   恢复历史会话时那个 Uri 早就读不了了；
+ * - 不存文件路径：得先把字节落盘、再处理清理，多一份生命周期要管。
+ *
+ * base64 比原图大约 33%，一张 1 MB 的截图在内存里是 1.4 MB 的字符串 ——
+ * 对「用户自己发过的那几张图」这个量级是可接受的，换来的是恢复历史时
+ * **一定能画出来**。
+ */
+data class ChatImage(
+    /** base64（不带 `data:` 前缀，与引擎写进 JSONL 的形态一致）。 */
+    val data: String,
+    /** `image/png` 这类 MIME；解码只做兜底提示，不参与格式判断。 */
+    val mimeType: String,
+    /** 文件名，用于解码失败时回退显示与无障碍描述。 */
+    val name: String,
+)
+
 data class ChatItem(
     val id: String,
     val kind: ChatKind,
@@ -39,6 +63,15 @@ data class ChatItem(
     val contextTokens: Int = -1,
     val contextWindow: Int = 0,
     val streaming: Boolean = false,
+    /**
+     * 这条消息带的图片。
+     *
+     * ⚠️ 这个字段是「图片不显示」那个 bug 的修复点之一：以前用户消息**只有** [body]，
+     * 图片字节存在 ViewModel 的 `attachmentPayloads` 里，而 `send()` 一进来就
+     * `clearAttachments()` 把它清空 —— 气泡那边根本没有任何地方能拿到这张图。
+     * 现在图片成为消息**自己**的一部分，发送那一刻就在，恢复历史时还在。
+     */
+    val images: List<ChatImage> = emptyList(),
 )
 
 data class SessionSummary(

@@ -40,6 +40,7 @@ import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.ApiProfile
 import com.zhizhu.zhicode.compose.model.ApiProfileDraft
 import com.zhizhu.zhicode.compose.model.Attachment
+import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
 import com.zhizhu.zhicode.compose.model.ChoiceIntent
@@ -502,10 +503,24 @@ class WorkspaceViewModel(
      * 每次 `copy()` 都拖着它，而且 Compose 判断状态是否变化时要对它做 `equals`——
      * 每帧比较几 MB 是纯粹的浪费。界面只需要名字和大小，真正的字节留在这里，
      * 发送时再取。
+     *
+     * [image] 是 base64（界面显示缩略图用）。**在这里编码一次**而不是每次要用时现编：
+     * 一张 10 MB 的图 base64 是 13 MB 的字符串，编码本身要遍历全部字节 ——
+     * 缩略图与消息气泡、引擎请求三处都要它，各编一次就是三倍开销。
+     * 它也不进 state（同样是不让几 MB 的字符串跟着每次 copy 走），
+     * 由 [currentAttachmentImage] 按 id 取。
      */
-    private class AttachmentPayload(val bytes: ByteArray?, val mimeType: String)
+    private class AttachmentPayload(val bytes: ByteArray?, val mimeType: String, val image: ChatImage?)
 
     private val attachmentPayloads = mutableMapOf<String, AttachmentPayload>()
+
+    /**
+     * 取某个待发附件的图片（给输入器的缩略图用）。
+     *
+     * 返回值里的大字符串与载荷共享**同一个引用**，不会复制字节；
+     * 之所以不做成 `WorkspaceUiState` 的字段，理由见 [AttachmentPayload] 的注释。
+     */
+    fun currentAttachmentImage(id: String): ChatImage? = attachmentPayloads[id]?.image
 
     /**
      * 附加一张图片（来自系统选择器）。
@@ -518,7 +533,16 @@ class WorkspaceViewModel(
             result.fold(
                 onSuccess = { image ->
                     val id = nextId("att")
-                    attachmentPayloads[id] = AttachmentPayload(image.bytes, image.mimeType)
+                    // base64 在这里编一次，缩略图 / 气泡 / 引擎请求三处复用同一份。
+                    attachmentPayloads[id] = AttachmentPayload(
+                        bytes = image.bytes,
+                        mimeType = image.mimeType,
+                        image = ChatImage(
+                            data = android.util.Base64.encodeToString(image.bytes, android.util.Base64.NO_WRAP),
+                            mimeType = image.mimeType,
+                            name = image.name,
+                        ),
+                    )
                     _state.update { s ->
                         s.copy(
                             attachments = s.attachments + Attachment(
@@ -550,8 +574,8 @@ class WorkspaceViewModel(
         val blocks = JSONArray()
         _state.value.attachments.filter { it.isImage }.forEach { attachment ->
             val payload = attachmentPayloads[attachment.id] ?: return@forEach
-            val bytes = payload.bytes ?: return@forEach
-            if (bytes.isEmpty()) return@forEach
+            val encoded = payload.image?.data ?: return@forEach
+            if (encoded.isEmpty()) return@forEach
             runCatching {
                 blocks.put(
                     JSONObject()
@@ -561,7 +585,7 @@ class WorkspaceViewModel(
                             JSONObject()
                                 .put("type", "base64")
                                 .put("media_type", payload.mimeType)
-                                .put("data", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)),
+                                .put("data", encoded),
                         )
                         .put("name", attachment.label),
                 )
@@ -569,6 +593,22 @@ class WorkspaceViewModel(
         }
         return blocks
     }
+
+    /**
+     * 把待发图片编成**界面模型**（挂到用户气泡上）。
+     *
+     * 与 [buildImageBlocks] 读的是同一份 `attachmentPayloads`，但两者不能合并：
+     *
+     * - [buildImageBlocks] 给**引擎**，结构必须是 Anthropic 的 `source.base64`；
+     * - 这里给**界面**，只要 base64 字符串本身。
+     *
+     * 合并成一个函数再各取所需，就得让界面层认识 `JSONObject` 结构；分开反而是
+     * 两个都很小的纯函数。唯一要守住的是**调用时机**：必须在 `clearAttachments()`
+     * **之前**调用，两处调用点都写了这条注释。
+     */
+    private fun currentImages(): List<ChatImage> = _state.value.attachments
+        .filter { it.isImage }
+        .mapNotNull { currentAttachmentImage(it.id) }
 
     /** 清空附件：界面条目与载荷必须一起走，否则载荷留在 map 里没人回收。 */
     private fun clearAttachments() {
@@ -1026,11 +1066,16 @@ class WorkspaceViewModel(
             //  3) 工作状态文案改成「已预输入，等待当前回复完成…」（原版 showWorkingIndicator）；
             //  4) 文案按当时在执行什么分三种（原版的 wasTool / wasModel / 其它）。
             // ⚠️ 追加到**队尾**（不是覆盖）：连发多条都要保留。
+            //
+            // 图片必须在 clearAttachments() **之前**取出来挂到气泡上：附件载荷存在
+            // attachmentPayloads 里、由 clearAttachments() 整个清掉，而气泡一旦进了
+            // 对话流就没法再回头找那张图 —— 这正是「发出去图片不见了」的成因。
             val userItem = ChatItem(
                 id = nextId("u"),
                 kind = ChatKind.USER,
                 title = "你",
                 body = text,
+                images = currentImages(),
             )
             // 顺序很重要：先编好要发的内容块与拼好提示词，再把附件清掉。
             // 反过来的话队列里这条预输入就永远发不出那张图、也丢掉附加的技能了。
@@ -1077,6 +1122,8 @@ class WorkspaceViewModel(
             kind = ChatKind.USER,
             title = "你",
             body = text,
+            // 同上：必须在下面的 clearAttachments() 之前取，否则拿到的是空列表。
+            images = currentImages(),
         )
         // 同上：先编内容块再清附件。
         val imageBlocks = buildImageBlocks()

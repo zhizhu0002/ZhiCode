@@ -18,6 +18,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -28,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.engine.ToolText
+import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ToolActivity
 import com.zhizhu.zhicode.compose.model.ToolKind
@@ -37,6 +42,8 @@ import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.panes.DiffLines
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
+import com.zhizhu.zhicode.compose.ui.ZhiImageRow
+import com.zhizhu.zhicode.compose.ui.ZhiImageViewer
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.Card
@@ -96,6 +103,11 @@ fun EmptyState() {
 @Composable
 fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
+    // 放大查看的当前图。放在**气泡内部**而不是提到 AppScaffold：
+    // 它是一个纯本地 UI 状态（点了哪张图），提升上去只会让上层多一个字段，
+    // 而这个浮层本身是 OverlayDialog，画在主窗口里，不存在被气泡裁掉的问题。
+    var viewing by remember { mutableStateOf<ChatImage?>(null) }
+
     // 需要可用宽度才能把气泡宽度表达成「上限 = 可用宽 × 比例」。
     // BoxWithConstraints 是 Compose 布局原语（skill 决策顺序第 4 条），
     // 比手写 onSizeChanged 更直接，也不会多一次重组。
@@ -128,14 +140,27 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
             // 短按也会看到整块气泡缩放一下、松手却没有反应 —— 像卡了点不动。
             pressFeedbackType = PressFeedbackType.None,
         ) {
-            Text(
-                text = item.body,
-                fontSize = ZhiTextScale.Subheading,
-                fontWeight = FontWeight.Normal,
-            )
+            // 图片画在正文**上方**：一条「图 + 一句话」的消息，图是主体，
+            // 说明文字在下面；反过来会让图看起来像附注。
+            //
+            // 空 body 时不要画那个空 Text：`Text("")` 仍会占一行行高，
+            // 于是"只发图"的气泡下面会多出一条空隙。
+            ZhiImageRow(images = item.images, onOpen = { viewing = it })
+            if (item.body.isNotBlank()) {
+                Text(
+                    text = item.body,
+                    fontSize = ZhiTextScale.Subheading,
+                    fontWeight = FontWeight.Normal,
+                )
+            }
         }
         }
     }
+
+    // 放大查看：浮层挂在气泡之外（OverlayDialog 画在主窗口里）。
+    // 放在 BoxWithConstraints 之后而不是里面，是为了不让它参与气泡的宽度测量 ——
+    // 否则 `maxWidth` 会把浮层也算进去，气泡宽度可能被它影响。
+    ZhiImageViewer(image = viewing, onDismiss = { viewing = null })
 }
 
 /**

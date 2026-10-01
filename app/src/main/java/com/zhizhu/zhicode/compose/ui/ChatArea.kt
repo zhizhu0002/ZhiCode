@@ -250,6 +250,8 @@ private fun ComposerHost(
         onOpenSkills = viewModel::openSkills,
         onOpenFilesTab = { viewModel.selectTab(WorkspaceTab.FILES) },
         onPickImage = { pickImage.launch("image/*") },
+        // 输入器里待发图片的缩略图数据（按附件 id 取，不进 state）
+        onAttachmentImage = viewModel::currentAttachmentImage,
         // 页脚的下拉：选中即生效，不再弹选择器
         onPermissionSelected = viewModel::setPermissionMode,
         onEffortSelected = viewModel::setEffort,

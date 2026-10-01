@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.model.Attachment
+import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.EffortLevel
 import com.zhizhu.zhicode.compose.model.PermissionMode
 import com.zhizhu.zhicode.compose.model.SlashCommand
@@ -43,6 +44,7 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiFilledIconButton
+import com.zhizhu.zhicode.compose.ui.ZhiPendingImageChip
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIconDropdownMenu
@@ -84,6 +86,14 @@ fun Composer(
     onOpenSkills: () -> Unit,
     onOpenFilesTab: () -> Unit,
     onPickImage: () -> Unit,
+    /**
+     * 取某个待发附件的图片（输入器里的缩略图）。
+     *
+     * 走回调而不是把字节放进 `WorkspaceUiState`：几 MB 的 base64 跟着每次 `copy()`
+     * 走、还要参与 Compose 的状态比较，是纯粹的浪费（见 ViewModel 里
+     * `AttachmentPayload` 的注释）。附件列表本身在 state 里，它一变重组就会重新调用。
+     */
+    onAttachmentImage: (String) -> ChatImage?,
     // ---- 页脚三个下拉 ----
     onPermissionSelected: (PermissionMode) -> Unit,
     onEffortSelected: (EffortLevel) -> Unit,
@@ -156,7 +166,15 @@ fun Composer(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     state.attachments.take(4).forEach { attachment ->
-                        AttachmentChip(attachment) { onRemoveAttachment(attachment) }
+                        // 图片走缩略图卡片（图片本身就是"芯片"，X 叠在右上角），
+                        // 文本附件继续用「图标 + 文件名」的窄条 —— 两者形态不同是**有意的**：
+                        // 图片靠画面辨认，文件只能靠名字。
+                        val image = onAttachmentImage(attachment.id)
+                        if (attachment.isImage && image != null) {
+                            ZhiPendingImageChip(image = image, onRemove = { onRemoveAttachment(attachment) })
+                        } else {
+                            AttachmentChip(attachment) { onRemoveAttachment(attachment) }
+                        }
                     }
                 }
             }
@@ -348,21 +366,29 @@ fun Composer(
                         // 前景也必须是 onError，否则浅色下红底白字对比度不足。
                         containerColor = MiuixTheme.colorScheme.error,
                         contentColor = MiuixTheme.colorScheme.onError,
-                        iconSize = 14.dp,
-                        size = 36.dp,
+                        // 与发送键同尺寸同方角：两个键在同一个 ActionBar 位置上互换，
+                        // 一个圆一个方、一个大一个小，切换时会看到形状在跳。
+                        square = true,
+                        iconSize = 12.dp,
+                        size = ComposerActionSize,
                         modifier = Modifier.padding(start = 6.dp),
                     )
                 }
 
-                // 圆形发送键（参考图：上箭头）
+                // 方形发送键（参考图：上箭头）
                 ZhiFilledIconButton(
                     description = "发送消息",
                     glyph = "↑",
-                    glyphSize = 18.sp,
+                    glyphSize = 16.sp,
                     onClick = onSend,
                     containerColor = scheme.primary,
                     enabled = state.composerText.isNotBlank(),
-                    size = 34.dp,
+                    // ⚠️ 这两个参数是**成对**的：Common.kt 的文档写着
+                    // 「`square` 为 true 时改成方角（圆角 10dp），发送键即用这个形态」，
+                    // 但这里一直没传 `square` —— 文档与代码互相矛盾了很久。
+                    // 现在让代码追上文档：方角 + 与停止键同一个尺寸。
+                    square = true,
+                    size = ComposerActionSize,
                 )
 
             } // 底排 Row
@@ -414,3 +440,16 @@ private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
 
 private fun shorten(value: String, max: Int): String =
     if (value.length <= max) value else value.substring(0, max - 1) + "…"
+
+/**
+ * 底排「发送 / 停止」两个动作键的边长。
+ *
+ * 用一个常量而不是各写一个数字：这两个键占据同一个 ActionBar 位置、
+ * 由 `AnimatedVisibility` 互换，尺寸不同就会看到按钮在切换时**跳一下**。
+ * 之前是 34 与 36 两个值，视觉上就是没对齐。
+ *
+ * 30dp 比 48dp 的无障碍最小点击区小，这是**有意的**：它与这一排其它元素
+ * （页脚 chip 26dp、附件芯片 26dp）同一量级，且外面还有输入器的内边距；
+ * 前身 34/36 本来也不满足 48dp，这次只是把它统一并再收小一档。
+ */
+private val ComposerActionSize = 30.dp
