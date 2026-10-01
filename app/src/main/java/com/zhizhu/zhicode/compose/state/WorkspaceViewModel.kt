@@ -1780,7 +1780,8 @@ class WorkspaceViewModel(
         when (command) {
             "/clear", "/new" -> newSession()
             "/terminal" -> selectTab(WorkspaceTab.TERMINAL)
-            "/changes", "/diff" -> selectTab(WorkspaceTab.CHANGES)
+            // 「变更」Tab 已移除：/diff 走普通消息输出 diff 文本
+            "/changes", "/diff" -> {}
             "/files" -> selectTab(WorkspaceTab.FILES)
             "/plan" -> enterPlanMode(arg)
             "/permissions" -> showPermissionPicker()
@@ -2987,7 +2988,7 @@ class WorkspaceViewModel(
         _state.update { it.copy(tab = tab) }
         // 进入「变更」页时才去读 git。切换 Tab 是明确的用户动作，
         // 每次切过去读一次是合理的；若挂在回合结束自动读，大仓库会明显拖慢对话。
-        if (tab == WorkspaceTab.CHANGES) refreshDiff()
+        // 「变更」Tab 已移除
     }
 
     /**

@@ -118,11 +118,6 @@ private fun ZhiCodeScreen(
                         viewModel.onComposerChange("/usage")
                         viewModel.send()
                     },
-                    onCycleTheme = viewModel::cycleThemeMode,
-                    onFloatingBall = {
-                        viewModel.onComposerChange("/canvas")
-                        viewModel.send()
-                    },
                     onSettings = viewModel::openSettings,
                     tabs = WorkspaceTab.entries,
                     onSelectTab = viewModel::selectTab,

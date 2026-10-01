@@ -80,7 +80,6 @@ fun ZhiSidebar(
     onSandbox: () -> Unit,
     onRuntime: () -> Unit,
     onSettings: () -> Unit,
-    onCanvas: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -133,7 +132,6 @@ fun ZhiSidebar(
             SidebarRow(label = "技能", icon = ZhiIcons.skill, onClick = onSkills)
             SidebarRow(label = "自定义角色卡", icon = ZhiIcons.roleCard, onClick = onRoleCard)
             SidebarRow(label = "ZhiCode 沙箱", icon = ZhiIcons.sandbox, onClick = onSandbox)
-            SidebarRow(label = "系统悬浮球", icon = ZhiIcons.floatingBall, onClick = onCanvas)
 
             SidebarRow(
                 label = if (state.runtimeReady) "运行环境就绪" else "准备内置 Termux 环境",

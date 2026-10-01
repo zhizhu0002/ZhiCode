@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
-import com.zhizhu.zhicode.compose.ui.panes.ChangesPane
 import com.zhizhu.zhicode.compose.ui.panes.FilesPane
 import com.zhizhu.zhicode.compose.ui.panes.TerminalPane
 
@@ -58,11 +57,6 @@ internal fun WideWorkspace(
                 onOpenSidebar = viewModel::openSidebar,
                 onContextClick = {
                     viewModel.onComposerChange("/usage")
-                    viewModel.send()
-                },
-                onCycleTheme = viewModel::cycleThemeMode,
-                onFloatingBall = {
-                    viewModel.onComposerChange("/canvas")
                     viewModel.send()
                 },
                 onSettings = viewModel::openSettings,
@@ -180,7 +174,6 @@ internal fun WorkspaceTabs(
 /** 工作区标签 → 图标。顶栏（TopBar.kt）与宽屏按键组共用，所以是 internal。 */
 internal fun iconForTab(tab: WorkspaceTab) = when (tab) {
     WorkspaceTab.CHAT -> ZhiIcons.chat
-    WorkspaceTab.CHANGES -> ZhiIcons.changes
     WorkspaceTab.TERMINAL -> ZhiIcons.terminal
     WorkspaceTab.FILES -> ZhiIcons.files
 }
@@ -214,12 +207,6 @@ private fun PaneHost(
     tabOverride: WorkspaceTab? = null,
 ) {
     when (val tab = tabOverride ?: state.tab) {
-        WorkspaceTab.CHANGES -> ChangesPane(
-            diff = state.diff,
-            isDark = isDark,
-            onRefresh = viewModel::refreshDiff,
-            modifier = modifier,
-        )
         WorkspaceTab.TERMINAL -> TerminalPane(
             lines = state.terminalLines,
             projectName = state.projectName,
@@ -273,7 +260,6 @@ internal fun ZhiSidebarHost(
         // 不再是把 /doctor 当普通消息发出去（那样只会得到一句 Mock 回复）。
         onRuntime = viewModel::openEnvironment,
         onSettings = viewModel::openSettings,
-        onCanvas = { viewModel.onComposerChange("/canvas"); viewModel.send() },
         modifier = modifier,
     )
 }

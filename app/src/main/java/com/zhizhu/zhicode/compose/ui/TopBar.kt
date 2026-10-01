@@ -44,8 +44,6 @@ fun ZhiTopBar(
     glass: Glass,
     onOpenSidebar: () -> Unit,
     onContextClick: () -> Unit,
-    onCycleTheme: () -> Unit,
-    onFloatingBall: () -> Unit,
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
     // 随头部一起悬浮的按键组；为 null 时不渲染（宽屏的按键组在右侧栏各自的位置）。

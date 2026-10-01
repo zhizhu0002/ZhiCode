@@ -52,7 +52,7 @@ data class SessionSummary(
 )
 
 enum class WorkspaceTab(val label: String) {
-    CHAT("对话"), CHANGES("变更"), TERMINAL("终端"), FILES("文件")
+    CHAT("对话"), TERMINAL("终端"), FILES("文件")
 }
 
 enum class PermissionMode(val label: String, val detail: String) {
@@ -394,7 +394,6 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/copy", "复制最近一条智蛛回复"),
     SlashCommand("/plan", "进入计划模式；/plan off 退出"),
     SlashCommand("/config", "打开 ZhiCode 设置"),
-    SlashCommand("/canvas", "打开运行时 UI 画布自定义"),
     SlashCommand("/memory", "打开项目或用户 ZhiCode.md 记忆"),
     SlashCommand("/init", "让智蛛初始化或完善项目 ZhiCode.md"),
     SlashCommand("/tasks", "查看 Android Agent 的任务与会话文件"),
