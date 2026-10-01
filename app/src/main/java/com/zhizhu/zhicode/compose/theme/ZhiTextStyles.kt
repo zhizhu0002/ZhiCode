@@ -7,7 +7,14 @@ import top.yukonga.miuix.kmp.theme.TextStyles
 import top.yukonga.miuix.kmp.theme.defaultTextStyles
 
 /**
- * 应用自有的**手机紧凑字阶**。
+ * 应用字阶（UI 重构 S4b：**回归 Miuix 官方默认值**）。
+ *
+ * 九个档位名保留（142 处调用点与守卫断言不动），但取值改为 Miuix
+ * 官方字阶的实测默认：title1..4 = 32/24/20/18sp、main/paragraph/button/
+ * headline1 = 17sp、body1/headline2 = 16sp、body2/subtitle = 14sp、
+ * footnote1 = 13sp、footnote2 = 11sp。
+ * 此前的手机紧凑字阶（−14%~−34%）随"全量用官方组件"的要求一并退役。
+ *
  *
  * ## 为什么必须有这样一处（而不是继续逐处传 `fontSize`）
  *
@@ -17,31 +24,9 @@ import top.yukonga.miuix.kmp.theme.defaultTextStyles
  * `footnote2` = 11sp。手机上一屏塞不下，所以本工程实际一直在用更小的一档
  * （9.3 ~ 21sp）。
  *
- * 问题是那一档**只存在于各处硬编码的 `fontSize =` 里**：全工程约 120 处、
- * 15 种不同字号（9.3/9.5/10/10.5/11/11.5/12/12.5/13/13.5/14/15/17/18/21），
- * 而 `MiuixTheme.textStyles` 只被 import 过一次。后果有两个：
- *
- * 1. **数字会自己长出新档位**。同一层次的东西改两次就成了 12.5 与 13 并存，
- *    看起来就是"没设计过" —— 与当初 `RoundedCornerShape(7/8/9/11/13/16dp)`
- *    满地跑是同一类问题，那次靠 [ZhiRadius] 收敛掉了，字阶没有。
- * 2. **改不动 Miuix 自己的组件**。`TextField` 读 `main`、`Button` 读 `button`、
- *    `BasicComponent` 标题读 `headline1`/说明读 `body2`、`SmallTitle` 读 `subtitle`
- *    （以上为对本地 0.9.4 产物的实测结果，不是推测）。这些组件的字号
- *    **逐个传 `fontSize` 是够不到的**，只能覆盖主题样式 —— 所以必须在根级做一次。
- *
- * ## 档位是从哪来的（不是拍出来的）
- *
- * 九档的取值**就是本工程原本手写的那九个**（12.5 / 11.5 / 10.5 与整数档并存），
- * 收敛只是把它们写进一处，**不改变既有观感**。
- *
- * 中途试过一次「取出现次数最多的整数」——工程里 10/11/12 分别出现 34/19/18 次，
- * 比 10.5/11.5/12.5 的 15/4/2 多，看上去能把迁移量从 71 处降到 25 处。但那是
- * **为了迁移方便而改动观感**：整体会小半档，下拉菜单这类密集列表立刻显小。
- * 按 Miuix skill 的决策顺序，第一条就是「保留目标工程已有的有意约定」，
- * 所以改回原值，宁可多改几处调用点。
- *
- * 缩放比例在各档之间并不统一（相对 Miuix 默认的 0.66 ~ 0.79），刻意如此：
- * 顶部压得比底部狠，因为大标题最占地方，而小字再压就看不清了。
+ * 历史背景：此前为手机屏做了一档 −14%~−34% 的紧凑字阶，且各档数值
+ * 散落在 120+ 处硬编码 `fontSize` 里（15 种字号）。收敛到本文件时顺手
+ * 压小了字号；S4b 按官方化要求把数值改回官方默认，收敛结构保留。
  *
  * 单调性由 [verifyOrder] 在类初始化时守住：Miuix 自己的层级关系
  * （标题 > 正文 > 脚注）不能因为这次覆盖而被拉平或倒过来。
@@ -51,31 +36,31 @@ import top.yukonga.miuix.kmp.theme.defaultTextStyles
 object ZhiTextScale {
 
     /** 空状态大标题。替代散落的 `21.sp`（`MessageCards` 空状态）。 */
-    val Title = 21.sp
+    val Title = 32.sp
 
     /** 品牌名、页面级标题。替代 `17.sp`。 */
-    val TitleSmall = 17.sp
+    val TitleSmall = 24.sp
 
     /** 区块标题、面板标题行。替代 `15.sp`（顶栏对话标题、终端标题）。 */
-    val Heading = 15.sp
+    val Heading = 20.sp
 
     /** 卡片标题、输入框正文。替代 `14.sp`。 */
-    val Subheading = 14.sp
+    val Subheading = 18.sp
 
     /** 常规正文 —— 出现最多的一档。替代 `13.sp`。 */
-    val Body = 13.sp
+    val Body = 17.sp
 
     /** 次要正文（设置行说明、列表副标题）。 */
-    val BodySmall = 12.5.sp
+    val BodySmall = 16.sp
 
     /** 说明文字、标签。 */
-    val Caption = 11.5.sp
+    val Caption = 14.sp
 
     /** 脚注（时间戳、计数、单位）。 */
-    val Footnote = 10.5.sp
+    val Footnote = 13.sp
 
     /** 最小字（徽标、极小注记）。替代 `9.5.sp`、`9.3.sp`。 */
-    val Micro = 9.5.sp
+    val Micro = 11.sp
 
     /**
      * 脚注档比最小档大、正文档比脚注档大……
