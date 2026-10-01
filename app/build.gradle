@@ -73,8 +73,8 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
     }
 
     // 开启 BuildConfig：包名的**唯一真实来源**就是上面的 applicationId，
@@ -184,6 +184,10 @@ dependencies {
     implementation 'top.yukonga.miuix.kmp:miuix-preference:0.9.4'
     implementation 'top.yukonga.miuix.kmp:miuix-shader:0.9.4'
     implementation 'top.yukonga.miuix.kmp:miuix-squircle:0.9.4'
+    // 官方导航容器：整页之间的推入/弹出动效走它的 NavTransitions.MiuixDefault 预设
+    // （新页全宽从右缘滑入 + 被覆盖页 1/4 视差与亮度衰减），返回方向自动反向。
+    // 之前这些整页是各自 AnimatedVisibility 硬切，层级与动效都得手工维护。
+    implementation 'top.yukonga.miuix.kmp:miuix-nav:0.9.4'
     // 模糊效果：独立 artifact，Android 需 API 33+（RuntimeShader），用 isRuntimeShaderSupported() 门控
     implementation 'top.yukonga.miuix.kmp:miuix-blur-android:0.9.4'
 

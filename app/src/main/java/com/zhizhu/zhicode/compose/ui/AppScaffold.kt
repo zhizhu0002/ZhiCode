@@ -7,8 +7,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.fadeOut
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -53,6 +51,12 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModelFactory
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.nav.core.NavDisplay
+import top.yukonga.miuix.kmp.nav.core.NavController
+import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
+import top.yukonga.miuix.kmp.nav.core.NavKey
+import top.yukonga.miuix.kmp.nav.core.navBackStackOf
+import top.yukonga.miuix.kmp.nav.transition.NavTransitions
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
@@ -122,25 +126,21 @@ private fun ZhiCodeScreen(
     var lastRoleCards by remember { mutableStateOf<RoleCardsState?>(null) }
     var lastMemory by remember { mutableStateOf<MemoryState?>(null) }
 
-    // 页面栈动效的方向：true = 推入（新页从右滑入），false = 弹出（旧页向右滑出）。
-    // 打开设置/子页时置 true；返回键 / onDismiss 关闭前置 false。
-    var pushPage by remember { mutableStateOf(true) }
-    // 任一页面从「关」跳到「开」= 推入（打开动作可能在任何入口发生：
-    // 设置 hub 的导航行、侧栏入口、斜杠命令……统一在这里捕获，不在 VM 里散写）。
-    LaunchedEffect(Unit) {
-        snapshotFlow {
-            listOf(
-                state.settingsOpen,
-                state.apiConfig != null,
-                state.mcpConfig != null,
-                state.skills != null,
-                state.roleCards != null,
-                state.memory != null,
-            )
-        }.collect { flags ->
-            if (flags.any { it }) pushPage = true
-        }
-    }
+    // 每页保留「最后一次非空状态」：关闭动作会先把状态置空，而退出动画还要跑
+    // 几百毫秒，没有保留值那段时间页面内容会整个闪没（只剩空背景）。
+    val settingsUi = state.settingsDraft ?: lastSettingsDraft
+    lastSettingsDraft = settingsUi
+    val apiUi = state.apiConfig ?: lastApiConfig
+    lastApiConfig = apiUi
+    val mcpUi = state.mcpConfig ?: lastMcpConfig
+    lastMcpConfig = mcpUi
+    val skillsUi = state.skills ?: lastSkills
+    lastSkills = skillsUi
+    val roleCardsUi = state.roleCards ?: lastRoleCards
+    lastRoleCards = roleCardsUi
+    val memoryUi = state.memory ?: lastMemory
+    lastMemory = memoryUi
+
 
     // 玻璃对象分两层，因为捕获节点不能包含自己：
     //  · glassMain —— 捕获「整个工作区」；用于顶栏 / 侧栏抽屉 / 弹窗。
@@ -158,239 +158,235 @@ private fun ZhiCodeScreen(
     // 根坐标系，弹出位置贴回锚点；手排 z 序与 TopBarInset 手工留白一并删除。
     // 抽屉必须画在 Scaffold **之外**：Miuix Scaffold 的绘制顺序是
     // bodyContent → topBar → popup，放在内容里的抽屉永远被顶栏压住。
-    Box(modifier = Modifier.fillMaxSize()) {
-    Scaffold(
-        topBar = {
-            if (wide) {
-                // 宽屏：侧栏常驻，顶栏只覆盖右侧内容区 —— 由 WorkspaceLayouts
-                // 里的 WideWorkspace 自己排侧栏 + 分隔线 + 顶栏，这里不重复挂。
-            } else {
-                ZhiTopBar(
-                    state = state,
-                    wide = false,
-                    glass = glassMain,
-                    onOpenSidebar = viewModel::openSidebar,
-                    onContextClick = {
-                        viewModel.onComposerChange("/usage")
-                        viewModel.send()
-                    },
-                    onSettings = viewModel::openSettings,
-                    tabs = WorkspaceTab.entries,
-                    onSelectTab = viewModel::selectTab,
-                )
-            }
-        },
-    ) { padding ->
-        // 顶栏 blur 需要内容从它**底下滚过**才有东西可采样：
-        // 去掉 padding.top，让内容 Box 从 y=0 铺满；各面板自己用
-        // TopBarTotalInset 在内容头部留白（见 WorkspaceLayouts）。
-        Box(
-            modifier = Modifier.fillMaxSize().padding(
-                bottom = padding.calculateBottomPadding(),
-            ),
-        ) {
-            // 整块工作区先录进 glassMain 的背景（抽屉/弹窗的模糊来源）
-            Box(modifier = Modifier.fillMaxSize().then(glassMain.capture(Modifier))) {
-                if (wide) {
-                    // 宽屏的顶栏在右侧内容区内部（与常驻侧栏并列），见 WideWorkspace
-                    WideWorkspace(
-                        state = state,
-                        viewModel = viewModel,
-                        isDark = isDark,
-                        glass = glass,
-                        glassMain = glassMain,
-                    )
-                } else {
-                    CompactWorkspace(state = state, viewModel = viewModel, isDark = isDark, glass = glass)
-                }
-            }
+    // ---- 页面栈：工作区（root）+ 设置页们（miuix-nav 的 NavDisplay）----
+    //
+    // 整页之间的推入/弹出交给官方导航容器，动效用它的 MiuixDefault 预设：
+    //   推入：新页全宽从**右缘滑入**，被覆盖页向左视差 1/4 宽 + α 衰减 10%
+    //   弹出：反向（返回时当前页向右滑出）
+    // 这正是需求里「进入从右到左、退出反之」；之前的 AnimatedVisibility 是
+    // 页面各自硬切，方向得手工标记、层级也得手工维护，还会出现「二级页返回
+    // 直接回工作区」的断栈问题。栈由系统返回键驱动（NavDisplay 内部接
+    // PredictiveBackHandler），层级天然正确：二级页 → 设置主页 → 工作区。
+    val nav = remember { NavController(navBackStackOf(AppKey.Workspace)) }
 
-
-            // ---- Overlay 系列 ----
-            // 弹窗挂载与模态模糊背景在 OverlayHost.kt。
-            // 必须仍处于 Scaffold 内容里才能找到 popupHost。
-            ZhiOverlayHost(state = state, viewModel = viewModel, glassMain = glassMain)
+    // 由 ViewModel 状态派生的「期望栈」：VM 仍是打开/关闭的唯一入口，
+    // 这里只把它翻译成栈，增量 reconcile —— pop 触发弹出动画、push 触发推入动画。
+    val desiredStack: List<NavKey> = buildList {
+        add(AppKey.Workspace)
+        if (state.settingsOpen) add(SettingsKey.Hub)
+        when {
+            state.apiConfig != null -> add(SettingsKey.Api)
+            state.mcpConfig != null -> add(SettingsKey.Mcp)
+            state.skills != null -> add(SettingsKey.Skills)
+            state.roleCards != null -> add(SettingsKey.RoleCards)
+            state.memory != null -> add(SettingsKey.Memory)
+        }
+    }
+    LaunchedEffect(desiredStack) {
+        val stack = nav.backStack
+        // 先弹掉多余的（返回），再压入新增的（进入）；同深度换页走 replace。
+        while (stack.size > desiredStack.size) stack.removeAt(stack.lastIndex)
+        for (i in stack.size until desiredStack.size) stack.add(desiredStack[i])
+        if (stack.isNotEmpty() && stack.last() != desiredStack.last()) {
+            stack[stack.lastIndex] = desiredStack.last()
         }
     }
 
-    // ---- 侧边栏抽屉（窄屏，画在 Scaffold 之上）----
-    if (!wide) {
-        ZhiSideDrawer(
-            open = state.sidebarOpen,
-            onClose = viewModel::closeSidebar,
-            width = (configuration.screenWidthDp * 0.82f).dp.coerceAtMost(320.dp),
-            glass = glassMain,
-        ) {
-            ZhiSidebarHost(
-                state = state,
-                viewModel = viewModel,
-                modifier = Modifier.fillMaxHeight(),
+    NavDisplay(
+        backStack = nav.backStack,
+        modifier = Modifier.fillMaxSize(),
+        transition = NavTransitions.MiuixDefault,
+        effects = NavDisplayEffects(
+            enableCornerClip = true,
+            cornerClipRadius = 16.dp,
+        ),
+        onBack = {
+            // 系统返回：按当前栈顶逐级回退，并同步关掉 VM 的对应状态。
+            // 只有 root（工作区）时把返回交还给系统（退出应用）。
+            when {
+                state.apiConfig != null -> viewModel.closeApiConfig()
+                state.mcpConfig != null -> viewModel.closeMcpConfig()
+                state.skills != null -> viewModel.closeSkills()
+                state.roleCards != null -> viewModel.closeRoleCards()
+                state.memory != null -> viewModel.closeMemory()
+                state.settingsOpen -> viewModel.closeSettings()
+            }
+        },
+    ) {
+        entry<AppKey.Workspace> {
+        Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
+                if (wide) {
+                    // 宽屏：侧栏常驻，顶栏只覆盖右侧内容区 —— 由 WorkspaceLayouts
+                    // 里的 WideWorkspace 自己排侧栏 + 分隔线 + 顶栏，这里不重复挂。
+                } else {
+                    ZhiTopBar(
+                        state = state,
+                        wide = false,
+                        glass = glassMain,
+                        onOpenSidebar = viewModel::openSidebar,
+                        onContextClick = {
+                            viewModel.onComposerChange("/usage")
+                            viewModel.send()
+                        },
+                        onSettings = viewModel::openSettings,
+                        tabs = WorkspaceTab.entries,
+                        onSelectTab = viewModel::selectTab,
+                    )
+                }
+            },
+        ) { padding ->
+            // 顶栏 blur 需要内容从它**底下滚过**才有东西可采样：
+            // 去掉 padding.top，让内容 Box 从 y=0 铺满；各面板自己用
+            // TopBarTotalInset 在内容头部留白（见 WorkspaceLayouts）。
+            Box(
+                modifier = Modifier.fillMaxSize().padding(
+                    bottom = padding.calculateBottomPadding(),
+                ),
+            ) {
+                // 整块工作区先录进 glassMain 的背景（抽屉/弹窗的模糊来源）
+                Box(modifier = Modifier.fillMaxSize().then(glassMain.capture(Modifier))) {
+                    if (wide) {
+                        // 宽屏的顶栏在右侧内容区内部（与常驻侧栏并列），见 WideWorkspace
+                        WideWorkspace(
+                            state = state,
+                            viewModel = viewModel,
+                            isDark = isDark,
+                            glass = glass,
+                            glassMain = glassMain,
+                        )
+                    } else {
+                        CompactWorkspace(state = state, viewModel = viewModel, isDark = isDark, glass = glass)
+                    }
+                }
+
+
+                // ---- Overlay 系列 ----
+                // 弹窗挂载与模态模糊背景在 OverlayHost.kt。
+                // 必须仍处于 Scaffold 内容里才能找到 popupHost。
+                ZhiOverlayHost(state = state, viewModel = viewModel, glassMain = glassMain)
+            }
+        }
+
+        // ---- 侧边栏抽屉（窄屏，画在 Scaffold 之上）----
+        if (!wide) {
+            ZhiSideDrawer(
+                open = state.sidebarOpen,
+                onClose = viewModel::closeSidebar,
+                width = (configuration.screenWidthDp * 0.82f).dp.coerceAtMost(320.dp),
+                glass = glassMain,
+            ) {
+                ZhiSidebarHost(
+                    state = state,
+                    viewModel = viewModel,
+                    modifier = Modifier.fillMaxHeight(),
+                )
+            }
+        }
+        }
+        }
+        entry<SettingsKey.Hub> {
+            SettingsDialog(
+                draft = settingsUi,
+                onChange = viewModel::setSettingsDraft,
+                onDismiss = viewModel::closeSettings,
+                onSave = viewModel::saveSettings,
+                onNavigate = viewModel::navigateFromSettings,
+            )
+        }
+        entry<SettingsKey.Api> {
+            ApiConfigOverlay(
+                config = apiUi,
+                onDismiss = viewModel::closeApiConfig,
+                onNew = viewModel::newApiProfile,
+                onEdit = viewModel::editApiProfile,
+                onSelect = viewModel::selectApiProfile,
+                onDelete = viewModel::deleteApiProfile,
+                onDraftChange = viewModel::updateApiProfileDraft,
+                onSave = viewModel::saveApiProfile,
+                onCancelForm = viewModel::cancelApiProfileForm,
+            )
+        }
+        entry<SettingsKey.Mcp> {
+            McpConfigOverlay(
+                config = mcpUi,
+                onDismiss = viewModel::closeMcpConfig,
+                onNew = viewModel::newMcpServer,
+                onEdit = viewModel::editMcpServer,
+                onToggle = viewModel::toggleMcpServer,
+                onDelete = viewModel::deleteMcpServer,
+                onDraftChange = viewModel::updateMcpDraft,
+                onSave = viewModel::saveMcpServer,
+                onCancelForm = viewModel::cancelMcpForm,
+            )
+        }
+        entry<SettingsKey.Skills> {
+            SkillsOverlay(
+                state = skillsUi,
+                onDismiss = viewModel::closeSkills,
+                onNew = viewModel::newSkill,
+                onEdit = viewModel::editSkill,
+                onAttach = viewModel::attachSkill,
+                onDelete = viewModel::deleteSkill,
+                onCreateDraftChange = viewModel::updateSkillCreateDraft,
+                onCreate = viewModel::createSkill,
+                onCancelCreate = viewModel::cancelSkillCreate,
+                onBodyChange = viewModel::updateSkillBody,
+                onSave = viewModel::saveSkill,
+                onCancelEdit = viewModel::cancelSkillEdit,
+            )
+        }
+        entry<SettingsKey.RoleCards> {
+            RoleCardsOverlay(
+                state = roleCardsUi,
+                onDismiss = viewModel::closeRoleCards,
+                onNew = viewModel::newRoleCard,
+                onEdit = viewModel::editRoleCard,
+                onSelect = viewModel::selectRoleCard,
+                onDisable = viewModel::disableRoleCard,
+                onDelete = viewModel::deleteRoleCard,
+                onDraftChange = viewModel::updateRoleCardDraft,
+                onSave = viewModel::saveRoleCard,
+                onCancelEditor = viewModel::cancelRoleCardEditor,
+            )
+        }
+        entry<SettingsKey.Memory> {
+            MemoryOverlay(
+                state = memoryUi,
+                onDismiss = viewModel::closeMemory,
+                onEdit = viewModel::editMemory,
+                onRunInit = { viewModel.closeMemory(); viewModel.runInitFromUi() },
+                onBodyChange = viewModel::updateMemoryBody,
+                onSave = viewModel::saveMemory,
+                onCancelEdit = viewModel::cancelMemoryEdit,
             )
         }
     }
-
-    // ---- 返回键路由 ----
-    // OnBackPressedDispatcher 的优先级是「**后注册的先消费**」：
-    // 先注册 hub（设置主页），再注册各二级页 —— 这样在二级页里按返回时
-    // 二级页的回调先入栈、先被分发，关掉的是二级页而不是整页设置。
-    // 之前顺序写反了（二级页在前），按返回直接把整页设置一把关掉。
-    // 设置主页在**最前**注册（兜底层）；二级页从浅到深注册，
-    // 深层（编辑表单）最后注册，才能比列表态先拿到返回事件。
-    fun back() { pushPage = false }
-    BackHandler(enabled = state.settingsOpen) { back(); viewModel.closeSettings() }
-    BackHandler(enabled = state.apiConfig != null) { back(); viewModel.closeApiConfig() }
-    BackHandler(enabled = state.mcpConfig != null) { back(); viewModel.closeMcpConfig() }
-    BackHandler(enabled = state.skills != null) { back(); viewModel.closeSkills() }
-    BackHandler(enabled = state.roleCards != null) { back(); viewModel.closeRoleCards() }
-    BackHandler(enabled = state.memory != null) { back(); viewModel.closeMemory() }
-    // 二级页内部的深层态（表单/编辑器）比列表态更深，后注册先消费：
-    state.apiConfig?.let { cfg ->
-        BackHandler(enabled = cfg.form != null) { back(); viewModel.cancelApiProfileForm() }
-    }
-    state.mcpConfig?.let { cfg ->
-        BackHandler(enabled = cfg.form != null) { back(); viewModel.cancelMcpForm() }
-    }
-    state.skills?.let { st ->
-        BackHandler(enabled = st.editing != null) { back(); viewModel.cancelSkillEdit() }
-        BackHandler(enabled = st.createForm != null) { back(); viewModel.cancelSkillCreate() }
-    }
-    state.roleCards?.let { st ->
-        BackHandler(enabled = st.editor != null) { back(); viewModel.cancelRoleCardEditor() }
-    }
-    state.memory?.let { st ->
-        BackHandler(enabled = st.editing != null) { back(); viewModel.cancelMemoryEdit() }
-    }
-
-    
-    // ---- 设置整页（K4：像 miuix 示例的 SettingsPage，覆盖全屏）----
-    // 画在 Scaffold/抽屉之后 = 最上层；打开时整页盖住工作区。
-    // 动效 = 页面栈推入/弹出：进入从右滑入，返回向右滑出（用户指定的方向）。
-    // `settingsUi` 保留最后一次非空的 draft：closeSettings 会先把状态置空，
-    // 没有 retained 值的话退出动画的那几百毫秒里页面内容会整个闪没。
-    val settingsUi = state.settingsDraft ?: lastSettingsDraft
-    lastSettingsDraft = settingsUi
-    AnimatedVisibility(
-        visible = state.settingsOpen,
-        enter = if (pushPage) slideInHorizontally(tween(ZhiMotion.MEDIUM)) { it } + fadeIn(tween(ZhiMotion.FAST))
-                else fadeIn(tween(ZhiMotion.MEDIUM)),
-        exit = if (pushPage) fadeOut(tween(ZhiMotion.FAST))
-               else slideOutHorizontally(tween(ZhiMotion.MEDIUM)) { it } + fadeOut(tween(ZhiMotion.FAST)),
-    ) {
-        SettingsDialog(
-            draft = settingsUi,
-            onChange = viewModel::setSettingsDraft,
-            onDismiss = { pushPage = false; viewModel.closeSettings() },
-            onSave = viewModel::saveSettings,
-            onNavigate = viewModel::navigateFromSettings,
-        )
-    }
-
-    // ---- 设置二级页（K6：整页化后必须挂在根层）----
-    // 它们现在是 SettingsSubPage（自带 Scaffold+顶栏）。若留在 ZhiOverlayHost
-    // （主 Scaffold 的 bodyContent 里），会被主顶栏/Tab 压住（Miuix Scaffold
-    // 绘制顺序 bodyContent → topBar）。挂在根层、设置主页之后 = 盖住一切。
-    //
-    // 每个页都保留「最后一次非空状态」：关闭动作会立刻把状态置空，而退出动画
-    // 还要跑 160ms，没有保留值的话那段时间页面内容会整个闪没（只剩空背景）。
-    val apiUi = state.apiConfig ?: lastApiConfig
-    lastApiConfig = apiUi
-    SubPageHost(visible = state.apiConfig != null, push = pushPage) {
-        ApiConfigOverlay(
-            config = apiUi,
-            onDismiss = { pushPage = false; viewModel.closeApiConfig() },
-            onNew = viewModel::newApiProfile,
-            onEdit = viewModel::editApiProfile,
-            onSelect = viewModel::selectApiProfile,
-            onDelete = viewModel::deleteApiProfile,
-            onDraftChange = viewModel::updateApiProfileDraft,
-            onSave = viewModel::saveApiProfile,
-            onCancelForm = { pushPage = false; viewModel.cancelApiProfileForm() },
-        )
-    }
-
-    val mcpUi = state.mcpConfig ?: lastMcpConfig
-    lastMcpConfig = mcpUi
-    SubPageHost(visible = state.mcpConfig != null, push = pushPage) {
-        McpConfigOverlay(
-            config = mcpUi,
-            onDismiss = { pushPage = false; viewModel.closeMcpConfig() },
-            onNew = viewModel::newMcpServer,
-            onEdit = viewModel::editMcpServer,
-            onToggle = viewModel::toggleMcpServer,
-            onDelete = viewModel::deleteMcpServer,
-            onDraftChange = viewModel::updateMcpDraft,
-            onSave = viewModel::saveMcpServer,
-            onCancelForm = { pushPage = false; viewModel.cancelMcpForm() },
-        )
-    }
-
-    val skillsUi = state.skills ?: lastSkills
-    lastSkills = skillsUi
-    SubPageHost(visible = state.skills != null, push = pushPage) {
-        SkillsOverlay(
-            state = skillsUi,
-            onDismiss = { pushPage = false; viewModel.closeSkills() },
-            onNew = viewModel::newSkill,
-            onEdit = viewModel::editSkill,
-            onAttach = viewModel::attachSkill,
-            onDelete = viewModel::deleteSkill,
-            onCreateDraftChange = viewModel::updateSkillCreateDraft,
-            onCreate = viewModel::createSkill,
-            onCancelCreate = { pushPage = false; viewModel.cancelSkillCreate() },
-            onBodyChange = viewModel::updateSkillBody,
-            onSave = viewModel::saveSkill,
-            onCancelEdit = { pushPage = false; viewModel.cancelSkillEdit() },
-        )
-    }
-
-    val roleCardsUi = state.roleCards ?: lastRoleCards
-    lastRoleCards = roleCardsUi
-    SubPageHost(visible = state.roleCards != null, push = pushPage) {
-        RoleCardsOverlay(
-            state = roleCardsUi,
-            onDismiss = { pushPage = false; viewModel.closeRoleCards() },
-            onNew = viewModel::newRoleCard,
-            onEdit = viewModel::editRoleCard,
-            onSelect = viewModel::selectRoleCard,
-            onDisable = viewModel::disableRoleCard,
-            onDelete = viewModel::deleteRoleCard,
-            onDraftChange = viewModel::updateRoleCardDraft,
-            onSave = viewModel::saveRoleCard,
-            onCancelEditor = { pushPage = false; viewModel.cancelRoleCardEditor() },
-        )
-    }
-
-    val memoryUi = state.memory ?: lastMemory
-    lastMemory = memoryUi
-    SubPageHost(visible = state.memory != null, push = pushPage) {
-        MemoryOverlay(
-            state = memoryUi,
-            onDismiss = { pushPage = false; viewModel.closeMemory() },
-            onEdit = viewModel::editMemory,
-            onRunInit = { viewModel.closeMemory(); viewModel.runInitFromUi() },
-            onBodyChange = viewModel::updateMemoryBody,
-            onSave = viewModel::saveMemory,
-            onCancelEdit = { pushPage = false; viewModel.cancelMemoryEdit() },
-        )
-    }
-    }
 }
 
-/** 二级页的动效外壳：visible 由「状态非空」驱动，内容保留最后一次非空值。
- *  动效 = 页面栈推入/弹出（方向由 [push] 决定）：推入从右滑入，弹出向右滑出。 */
-@Composable
-private fun SubPageHost(
-    visible: Boolean,
-    push: Boolean,
-    content: @Composable () -> Unit,
-) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = if (push) slideInHorizontally(tween(ZhiMotion.MEDIUM)) { it } + fadeIn(tween(ZhiMotion.FAST))
-                else fadeIn(tween(ZhiMotion.MEDIUM)),
-        exit = if (push) fadeOut(tween(ZhiMotion.FAST))
-               else slideOutHorizontally(tween(ZhiMotion.MEDIUM)) { it } + fadeOut(tween(ZhiMotion.FAST)),
-    ) {
-        content()
-    }
+
+
+
+// ------------------------------------------------------------------ 页面栈 key
+
+/**
+ * 应用根页。整页栈的 root = 工作区（顶栏/Tab/面板/输入器），
+ * 设置与它的二级页作为栈上更深的一层压在上面。
+ *
+ * 用 [navBackStackOf] 建栈（内存态，不跨进程持久化），所以 key 不需要
+ * `@Serializable` —— 栈的真源仍是 ViewModel 状态，这里只是把它渲染出来。
+ */
+private sealed interface AppKey : NavKey {
+    data object Workspace : AppKey
+}
+
+/** 设置相关页面：hub 与五个二级页。 */
+private sealed interface SettingsKey : NavKey {
+    data object Hub : SettingsKey
+    data object Api : SettingsKey
+    data object Mcp : SettingsKey
+    data object Skills : SettingsKey
+    data object RoleCards : SettingsKey
+    data object Memory : SettingsKey
 }
