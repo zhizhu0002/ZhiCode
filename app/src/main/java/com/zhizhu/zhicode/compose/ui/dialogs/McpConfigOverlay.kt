@@ -4,16 +4,13 @@ import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.model.McpConfigState
 import com.zhizhu.zhicode.compose.model.McpScope
 import com.zhizhu.zhicode.compose.model.McpServer
@@ -21,19 +18,15 @@ import com.zhizhu.zhicode.compose.model.McpServerDraft
 import com.zhizhu.zhicode.compose.model.McpType
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
-import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /**
  * MCP 服务器配置窗口：列表页与编辑表单共用一个弹窗。
@@ -99,39 +92,28 @@ private fun McpServerList(
     onDelete: (McpServer) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+    Column {
         Text(
             text = "配置文件：${config.filePath}",
             color = scheme.onSurfaceVariantSummary,
             fontSize = ZhiTextScale.Micro,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
-        if (config.servers.isEmpty()) {
-            // 空态要把"怎么开始"说清楚，而不是只报一句"0 项"。
-            Text(
-                text = "当前没有配置 MCP 服务器。点「添加」填入服务器名称与启动命令（stdio）" +
-                    "或服务器 URL（HTTP/SSE），保存后 Agent 即可调用该服务器提供的工具。",
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            return@Column
-        }
-
-        // 整页模式下列表不再限高：外层 SettingsSubPage 的 LazyColumn 负责滚动。
-        Column {
-        config.servers.forEach { server ->
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                    cornerRadius = ZhiRadius.card,
-                    insideMargin = PaddingValues(0.dp),
-                    colors = CardDefaults.defaultColors(
-                        color = if (server.enabled) scheme.surfaceContainerHigh else scheme.surfaceContainer,
-                        contentColor = scheme.onBackground,
-                    ),
-                    pressFeedbackType = PressFeedbackType.None,
-                ) {
+        // 与设置主页同形态：一张分组卡里若干行，每行不再各套一张卡。
+        // （整页模式下列表不再限高：外层 SettingsSubPage 的 LazyColumn 负责滚动。）
+        SettingsGroup("服务器") {
+            if (config.servers.isEmpty()) {
+                // 空态要把"怎么开始"说清楚，而不是只报一句"0 项"。
+                Text(
+                    text = "当前没有配置 MCP 服务器。点「添加」填入服务器名称与启动命令（stdio）" +
+                        "或服务器 URL（HTTP/SSE），保存后 Agent 即可调用该服务器提供的工具。",
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Footnote,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+            } else {
+                config.servers.forEach { server ->
                     BasicComponent(
                         title = server.name,
                         titleColor = BasicComponentDefaults.titleColor(
@@ -156,11 +138,11 @@ private fun McpServerList(
                         // 整行点击 = 启用/停用。原版是在行尾放一个独立按钮，
                         // 但 Compose 里两个图标按钮已经占了行尾，整行点击更省事且不易误触。
                         onClick = { onToggle(server) },
-                        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                     )
                 }
+            }
         }
-    }
     }
 }
 
@@ -172,14 +154,16 @@ private fun McpServerForm(
     // 表单滚动由外层 SettingsSubPage 的 LazyColumn 负责，这里不套 verticalScroll
     // （嵌套滚动容器会拿到无限高度约束而崩溃）。
     val scheme = MiuixTheme.colorScheme
-    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+    Column {
+        // 与设置主页同形态：表单按「服务器 / 连接 / 作用范围」三张分组卡排列。
+        SettingsGroup("服务器") {
             ZhiTextField(
                 value = draft.name,
                 onValueChange = { v -> onChange { it.copy(name = v) } },
                 label = "服务器名称",
                 useLabelAsPlaceholder = true,
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             )
             FieldError(draft.nameError)
 
@@ -192,7 +176,9 @@ private fun McpServerForm(
                     McpType.entries.getOrNull(index)?.let { type -> onChange { it.copy(type = type) } }
                 },
             )
+        }
 
+        SettingsGroup(if (draft.type.needsCommand) "启动参数" else "HTTP 连接") {
             if (draft.type.needsCommand) {
                 ZhiTextField(
                     value = draft.command,
@@ -200,7 +186,7 @@ private fun McpServerForm(
                     label = "启动命令",
                     useLabelAsPlaceholder = true,
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                 )
                 FieldError(draft.commandError)
                 ZhiTextField(
@@ -209,7 +195,7 @@ private fun McpServerForm(
                     label = "命令参数（每行一个）",
                     useLabelAsPlaceholder = true,
                     singleLine = false,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                 )
                 ZhiTextField(
                     value = draft.envText,
@@ -217,7 +203,7 @@ private fun McpServerForm(
                     label = "环境变量 JSON（可选）",
                     useLabelAsPlaceholder = true,
                     singleLine = false,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                 )
                 FieldError(draft.envError)
             } else {
@@ -227,7 +213,7 @@ private fun McpServerForm(
                     label = "服务器 URL",
                     useLabelAsPlaceholder = true,
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                 )
                 FieldError(draft.urlError)
                 ZhiTextField(
@@ -236,7 +222,7 @@ private fun McpServerForm(
                     label = "请求头 JSON（可选）",
                     useLabelAsPlaceholder = true,
                     singleLine = false,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                 )
                 FieldError(draft.headersError)
             }
@@ -257,16 +243,17 @@ private fun McpServerForm(
                 checked = draft.enabled,
                 onCheckedChange = { v -> onChange { it.copy(enabled = v) } },
             )
-
-            Text(
-                text = "「名称」用来在 Agent 调用时标识这台服务器，改动名称等于换了一台" +
-                    "（原名称的记录会被覆盖）。",
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
         }
+
+        Text(
+            text = "「名称」用来在 Agent 调用时标识这台服务器，改动名称等于换了一台" +
+                "（原名称的记录会被覆盖）。",
+            color = scheme.onSurfaceVariantSummary,
+            fontSize = ZhiTextScale.Footnote,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        )
     }
+}
 
 /** 只在有错时占位，没错时不画——避免表单里到处是空行。 */
 @Composable
