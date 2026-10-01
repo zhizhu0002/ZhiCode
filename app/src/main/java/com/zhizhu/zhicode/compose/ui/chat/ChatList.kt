@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,11 +38,11 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
 import com.zhizhu.zhicode.compose.ui.rememberFingerTracker
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -225,11 +226,18 @@ fun ChatList(
                         .padding(end = 14.dp)
                         .then(finger.modifier),
                 ) {
-                    // ---- 主体调试模式：就地加料（不改变下面任何卡片的渲染） ----
-                    if (debugMode) {
-                        MessageDebugStrip(item)
-                    }
-                    when (item.kind) {
+                    // ⚠️ 调试条与消息卡必须放进**同一个 Column** 里，不能并列在 Box 下。
+                    //
+                    // 这个 Box 是用来给 anchoredMenu 定位的（菜单要盖在卡片上），
+                    // 而 Box 的子项是**叠放**而不是竖排 —— 直接并列会让调试条被卡片盖住，
+                    // 表现是"调试条的文字与消息正文糊在一起"。所以：竖排交给 Column，
+                    // 叠放只留给那一个菜单。
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // ---- 主体调试模式：就地加料（不改变下面任何卡片的渲染） ----
+                        if (debugMode) {
+                            MessageDebugStrip(item)
+                        }
+                        when (item.kind) {
                         ChatKind.USER -> UserBubble(item) {
                             fingerOffset = finger.offset()
                             onMessageActions(item)
@@ -254,6 +262,7 @@ fun ChatList(
                         ChatKind.ERROR -> ErrorCard(item)
                         ChatKind.INFO -> InfoCard(item)
                     }
+                    } // Column（调试条 + 消息卡）
                     // 菜单挂在这一项自己的 Box 里，并用手指位置作偏移 ——
                     // 于是它从**手指那一点**长出来，而不是贴条目边界。
                     anchoredMenu(item.id, fingerOffset)
@@ -289,8 +298,11 @@ private fun MessageDebugStrip(item: ChatItem) {
     val failed = item.tools.count { it.failed }
     val awaiting = item.tools.count { it.awaitingPermission }
 
-    Column(modifier = Modifier.fillMaxWidth().padding(start = 2.dp, bottom = 2.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier = Modifier.fillMaxWidth().padding(start = 2.dp, bottom = 1.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 text = item.kind.name,
                 fontSize = ZhiTextScale.Micro,
@@ -303,35 +315,41 @@ private fun MessageDebugStrip(item: ChatItem) {
             )
             Text(
                 text = buildString {
-                    append("  body ").append(item.body.length)
-                    append(" · think ").append(item.thinking.length)
+                    append("  ")
+                    append(item.body.length).append('/').append(item.thinking.length)
                     if (item.tools.isNotEmpty()) {
-                        append(" · tools ").append(item.tools.size)
-                        if (running > 0) append(" 运行").append(running)
-                        if (failed > 0) append(" 失败").append(failed)
-                        if (awaiting > 0) append(" 待授权").append(awaiting)
+                        append(" t").append(item.tools.size)
+                        if (running > 0) append(" ▶").append(running)
+                        if (failed > 0) append(" ✗").append(failed)
+                        if (awaiting > 0) append(" ⧗").append(awaiting)
                     }
-                    if (item.streaming) append(" · streaming")
-                    if (item.contextTokens >= 0) append(" · ctx ").append(item.contextTokens)
-                    append(" · ").append(item.id)
+                    if (item.streaming) append(" …")
+                    if (item.contextTokens >= 0) append(" ctx").append(item.contextTokens)
+                    append("  ").append(item.id)
                 },
                 fontSize = ZhiTextScale.Micro,
                 fontFamily = FontFamily.Monospace,
                 color = scheme.onSurfaceVariantSummary,
+                // 元信息是**单行且不换行**的：它不该把消息卡往下推，
+                // 超长时截断即可（要看全的在调试浮层的「对话条目」里）。
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            if (item.body.isNotBlank()) {
-                TextButton(
-                    text = if (showSource) "隐藏源码" else "Markdown 源码",
-                    onClick = { showSource = !showSource },
-                )
-            }
+            // 源码开关走 ZhiSmallPill（24dp 胶囊），不是 Miuix TextButton：
+            // 后者最小高 40dp、字号走主题 button 档，放进这一行会把整条调试带撑得
+            // 比消息卡还显眼，而调试带本该是"贴着卡片的一条注记"。
+            ZhiSmallPill(
+                label = if (showSource) "收起源码" else "源码",
+                highlighted = showSource,
+                onClick = { showSource = !showSource },
+                modifier = Modifier.padding(start = 4.dp),
+            )
         }
         if (showSource) {
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
                 cornerRadius = ZhiRadius.inner,
                 insideMargin = PaddingValues(8.dp),
                 colors = CardDefaults.defaultColors(

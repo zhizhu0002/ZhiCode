@@ -201,11 +201,37 @@ public final class DebugHudStructureTest {
                 CHAT_LIST + " 的 ChatList 必须接受 debugMode（真实对话流就地加料）");
         requireContains(chatList, "MessageDebugStrip(",
                 "主体调试模式必须在真实消息上加调试条（类型/长度/工具计数）");
-        requireContains(chatList, "Markdown 源码",
+        requireContains(chatList, "源码",
                 "主体调试模式必须能摊出原始 Markdown 源码："
                         + "看到渲染不对时，第一件事就是对照源码判断是素材还是渲染器的问题");
         requireContains(chatList, "onSurfaceVariantSummary",
                 "调试条的配色必须走主题令牌（自己写死颜色会在浅色模式下糊掉）");
+
+        // ---- 回归：调试条**不得**与消息卡叠在一起 ---------------------------
+        //
+        // 真机上出现过：调试条与消息正文糊在一起（`ASSISTANT ...` 那行字压在卡片上）。
+        // 真因是 LazyColumn 每一项的那个外层 **Box 是用来给长按菜单定位的**，
+        // 而 Box 的子项是**叠放**不是竖排 —— 把调试条直接并列进去就会被卡片盖住。
+        // 这类错误不会编译失败，只在屏幕上烂掉，所以在这里钉住：
+        // 调试条必须出现在一个 Column 里（与卡片竖排），叠放只留给那一个菜单。
+        int strip = chatList.indexOf("MessageDebugStrip(item)");
+        require(strip > 0, "找不到调试条的调用点");
+        int columnBefore = chatList.lastIndexOf("Column(modifier = Modifier.fillMaxWidth())", strip);
+        require(columnBefore > 0 && strip - columnBefore < 400,
+                "调试条必须包在 Column 里再与消息卡竖排。这个位置的外层是给长按菜单定位的 Box，"
+                        + "Box 子项是叠放：直接并列会让调试条被卡片盖住（真机上表现为文字糊在一起）。"
+                        + "要拆掉这个 Column 的话，请先确认 CardList 每一项的层级改成竖排容器。");
+        int menuAfter = chatList.indexOf("anchoredMenu(item.id, fingerOffset)", strip);
+        require(menuAfter > 0,
+                "长按菜单必须仍挂在最外层 Box 上（它要盖在卡片上，不能进竖排的 Column）");
+
+        // 调试条的开关必须是**小胶囊**，不能是 Miuix TextButton：
+        // 后者最小高 40dp、字号走主题 button 档，会把调试条撑得比消息卡还显眼。
+        requireContains(chatList, "ZhiSmallPill(",
+                "调试条的「源码」开关必须用 ZhiSmallPill（24dp 胶囊）");
+        int pill = chatList.indexOf("ZhiSmallPill(");
+        require(chatList.substring(strip, pill).indexOf("TextButton(") < 0,
+                "调试条里不得出现 Miuix TextButton：它 40dp 的最小高会把这条注记撑成主角");
 
         requireContains(composer, "debugMode: Boolean = false",
                 COMPOSER + " 的 Composer 必须接受 debugMode");

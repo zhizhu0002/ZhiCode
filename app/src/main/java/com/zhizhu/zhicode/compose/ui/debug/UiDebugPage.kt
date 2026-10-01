@@ -218,22 +218,25 @@ fun UiDebugPage(
                     bottom = padding.calculateBottomPadding() + 24.dp,
                 ),
             ) {
+                // 调试开关放最前面：进这一页**通常就是为了开调试**，
+                // 让它落在第一屏比让人翻半天更合理。画廊部分（色板/字阶/组件）
+                // 是"进去以后慢慢看"的东西，排在后面。
+                item(key = "debugOverlay") { DebugOverlaySection(state, viewModel) }
+                item(key = "debugApi") { DebugApiSection(state, viewModel) }
+                item(key = "conversation") { ConversationSection(state.uiDebugResetToken) }
+                item(key = "tasks") { TaskCardSection() }
+                item(key = "media") { MediaSection(state.uiDebugResetToken) }
+                item(key = "markdown") { MarkdownSection() }
+                item(key = "composer") { ComposerSection(state, viewModel, glass) }
+                item(key = "workspace") { WorkspaceSection(state, viewModel) }
+                item(key = "overlays") { OverlayEntrySection(state, viewModel) }
                 item(key = "palette") { PaletteSection() }
                 item(key = "typography") { TypographySection() }
                 item(key = "radiusIcons") { RadiusAndIconSection() }
                 item(key = "basics") { MiuixBasicsSection() }
                 item(key = "preference") { PreferenceSection() }
                 item(key = "appRows") { AppSettingsRowsSection() }
-                item(key = "debugOverlay") { DebugOverlaySection(state, viewModel) }
-                item(key = "debugApi") { DebugApiSection(state, viewModel) }
-                item(key = "markdown") { MarkdownSection() }
-                item(key = "conversation") { ConversationSection(state.uiDebugResetToken) }
-                item(key = "media") { MediaSection(state.uiDebugResetToken) }
-                item(key = "workspace") { WorkspaceSection(state, viewModel) }
-                item(key = "tasks") { TaskCardSection() }
-                item(key = "composer") { ComposerSection(state, viewModel, glass) }
                 item(key = "chrome") { ChromeSection() }
-                item(key = "overlays") { OverlayEntrySection(state, viewModel) }
                 item(key = "state") { StateSnapshotSection(state) }
             }
             VerticalScrollBar(
@@ -634,11 +637,19 @@ private class DebugConversation {
 }
 
 /**
- * 出厂样例：把每种状态都摆一份。
+ * 出厂样例：把对话流**能渲染的每一种东西**都摆一份。
  *
- * 覆盖：用户文本、用户附图片、带思考与上下文脚注的回复、流式回复、工具组
- * （搜索已完成 / 读取已展开 / 编辑**运行中** / 命令**失败** / 命令**等待授权**）、
- * 错误卡、提示卡。
+ * 覆盖清单（改对话流渲染时对着这张表核对，缺一项就可能漏测一条分支）：
+ *
+ * | 类型 | 覆盖的形态 |
+ * |---|---|
+ * | USER | 短句 / 长段（窄屏折行） |
+ * | 图片 | 附件卡（比例切换） |
+ * | ASSISTANT | 普通 / **流式**（带光标与"正在输入"）/ 思考折叠 / **思考已展开** / 长 Markdown（表格+代码块+引用）/ **上下文接近上限**（脚注变色） |
+ * | TOOL_GROUP | 单工具组 / 四态（已完成·运行中·失败带退出码·等待授权）/ 已展开输出 / **已全部完成** / 各 ToolKind（搜索·读取·编辑·命令·其他）/ diff 计数 |
+ * | ERROR | 编译失败（带可操作建议） |
+ * | INFO | 斜杠命令输出 |
+ * | 空状态 | 对话流为空时的整屏空态 |
  */
 private fun initialSamples(): List<DebugItem> = listOf(
     DebugItem.Msg(
@@ -785,6 +796,119 @@ private fun initialSamples(): List<DebugItem> = listOf(
             kind = ChatKind.INFO,
             title = "提示",
             body = "已切换到「项目路径与会话」面板。",
+        ),
+    ),
+
+    // ---- 以下是把"能渲染的都摆一份"补齐的那几类 ----
+
+    // 长段用户文本：窄屏折行 + 气泡最大宽度的实际观感（短句看不出这两件事）。
+    DebugItem.Msg(
+        id = "dbg-user-long",
+        item = ChatItem(
+            id = "dbg-user-long",
+            kind = ChatKind.USER,
+            body = "这一段刻意写得比较长，用来确认用户气泡在窄屏上的折行与最大宽度：" +
+                "它应该换行而不是横向溢出，右边的留白应当与助手卡片一致，" +
+                "而且整段文字不能被截断。",
+        ),
+    ),
+    // 思考**已展开** + 上下文接近上限（脚注会变色）。
+    DebugItem.Msg(
+        id = "dbg-assistant-thinking-open",
+        item = ChatItem(
+            id = "dbg-assistant-thinking-open",
+            kind = ChatKind.ASSISTANT,
+            title = "ZhiCode",
+            body = "结论：把折叠面板的默认状态改成「记忆上一次」，同一会话里不要每次都收起。",
+            thinking = "判断依据是用户连续三次展开同一条的思考面板。\n\n" +
+                "需要考虑的点：\n" +
+                "1. 记忆范围是「这一条」还是「这一类」；\n" +
+                "2. 换会话后要不要重置；\n" +
+                "3. 状态放在 ChatItem 上还是单独一张表。",
+            thinkingExpanded = true,
+            contextTokens = 191_000,
+            contextWindow = 200_000,
+        ),
+    ),
+    // 长 Markdown：表格 + 围栏 + 引用 + 任务项 + 行内样式，一次测完渲染器的块级分支。
+    DebugItem.Msg(
+        id = "dbg-assistant-markdown",
+        item = ChatItem(
+            id = "dbg-assistant-markdown",
+            kind = ChatKind.ASSISTANT,
+            title = "ZhiCode",
+            body = MARKDOWN_SAMPLES.first { it.title.startsWith("⑤") }.source +
+                "\n\n" + MARKDOWN_SAMPLES.first { it.title.startsWith("⑥") }.source,
+            contextTokens = 42_000,
+            contextWindow = 200_000,
+        ),
+    ),
+    // 全部完成的工具组：标题走「已运行 N 个工具」那条分支，且没有运行中的行。
+    DebugItem.Msg(
+        id = "dbg-tools-completed",
+        item = ChatItem(
+            id = "dbg-tools-completed",
+            kind = ChatKind.TOOL_GROUP,
+            groupLabel = "读取 2 个文件 · 其他 1 项",
+            groupCompleted = true,
+            tools = listOf(
+                ToolActivity(
+                    id = "c-read-1",
+                    toolName = "ReadMany",
+                    displayName = "批量读取",
+                    summary = "4 个文件",
+                    completed = true,
+                    elapsedMs = 610,
+                    kind = ToolKind.READ,
+                    expanded = true,
+                    output = "Animations.kt\nAppScaffold.kt\nChatList.kt\nComposer.kt",
+                ),
+                ToolActivity(
+                    id = "c-stat",
+                    toolName = "Stat",
+                    displayName = "查看属性",
+                    summary = "Animations.kt",
+                    completed = true,
+                    elapsedMs = 90,
+                    kind = ToolKind.READ,
+                ),
+                // ToolKind.OTHER：既不是搜索/读取/编辑，也不是命令的那一类
+                // （AndroidIntent / TermuxDoctor / Skill …），用来确认分组文案不会漏掉它们。
+                ToolActivity(
+                    id = "c-other",
+                    toolName = "TermuxDoctor",
+                    displayName = "环境自检",
+                    summary = "内置 Termux",
+                    completed = true,
+                    elapsedMs = 1_450,
+                    kind = ToolKind.OTHER,
+                    output = "prefix: /data/data/com.zhizhu.code/files/usr\n" +
+                        "arch: aarch64\npackages: 337 files ok",
+                ),
+            ),
+        ),
+    ),
+    // 单工具组（组里只有一条）：确认"一个工具"时标题不会写成复数、卡片高度不塌。
+    DebugItem.Msg(
+        id = "dbg-tools-single",
+        item = ChatItem(
+            id = "dbg-tools-single",
+            kind = ChatKind.TOOL_GROUP,
+            groupLabel = "执行 1 条命令",
+            groupCompleted = true,
+            tools = listOf(
+                ToolActivity(
+                    id = "s-bash",
+                    toolName = "Bash",
+                    displayName = "执行",
+                    summary = "./gradlew :app:assembleDebug",
+                    completed = true,
+                    exitCode = 0,
+                    elapsedMs = 62_000,
+                    kind = ToolKind.COMMAND,
+                    output = "BUILD SUCCESSFUL in 1m 2s\n42 actionable tasks: 12 executed",
+                ),
+            ),
         ),
     ),
 )
@@ -2206,8 +2330,14 @@ private fun TaskCardSection() {
             ),
         )
     }
-    DebugSection("Agent 任务卡", "点「推进」可以看到三种状态之间的切换（真实任务里由引擎推）") {
+    val scheme = MiuixTheme.colorScheme
+    DebugSection(
+        title = "Agent 任务卡（悬浮态，与对话页底部那张同一组件）",
+        subtitle = "同一张卡在「混合 / 全完成 / 单条运行中 / 窄屏只显示 2 条」下的样子；点推进看状态切换",
+    ) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+            // ① 混合态（真实任务里最常见）：完成 + 运行中 + 待办
+            TaskCardLabel("① 混合态（默认 maxTasks=3）")
             AgentProgressCard(
                 status = tasks.firstOrNull { it.state == TaskState.RUNNING }?.title?.let { "正在执行：$it" }
                     ?: "所有任务已完成",
@@ -2218,7 +2348,7 @@ private fun TaskCardSection() {
             TextButton(
                 text = "推进任务状态",
                 onClick = {
-                    // DONE → RUNNING → DONE 的循环推进：卡片的进度条与"已完成/总数"会跟着动。
+                    // DONE → RUNNING → PENDING 的循环推进：卡片的进度条与「已完成/总数」会跟着动。
                     tasks = tasks.map { task ->
                         when (task.state) {
                             TaskState.PENDING -> task.copy(state = TaskState.RUNNING)
@@ -2228,8 +2358,74 @@ private fun TaskCardSection() {
                     }
                 },
             )
+
+            // ② 全部完成：进度条满格、没有运行中的行
+            TaskCardLabel("② 全部完成")
+            AgentProgressCard(
+                status = "全部完成",
+                tasks = tasks.map { it.copy(state = TaskState.DONE) },
+                onExpand = {},
+                maxTasks = 3,
+            )
+
+            // ③ 只有一条任务且正在跑：确认单条时卡片高度与标题不塌
+            TaskCardLabel("③ 单条运行中")
+            AgentProgressCard(
+                status = "正在执行：读取工程结构",
+                tasks = listOf(AgentTask(title = "读取工程结构", detail = "扫描 `app/src/main`", state = TaskState.RUNNING)),
+                onExpand = {},
+                maxTasks = 3,
+            )
+
+            // ④ 悬浮形态的真实上限：对话页底部那张卡默认最多显示 2 条，
+            //    更多时靠右侧「已完成 / 总数」表达 —— 过高的卡会盖住对话。
+            TaskCardLabel("④ 窄屏上限（maxTasks=2，任务多于 2 条）")
+            AgentProgressCard(
+                status = "正在执行：替换动效令牌",
+                tasks = tasks,
+                onExpand = {},
+                maxTasks = 2,
+            )
+
+            // ⑤ 长标题 + 长详情：确认标题省略号与详情不把卡片撑破
+            TaskCardLabel("⑤ 超长标题与详情")
+            AgentProgressCard(
+                status = "正在执行",
+                tasks = listOf(
+                    AgentTask(
+                        title = "把设置页里所有仍然自拟的动效曲线替换成 miuix 官方的曲线并重跑守卫",
+                        detail = "这一步会读到 `Animations.kt`、12 个调用点、以及 `test-source-no-build.sh`；" +
+                            "详情是 Markdown，长内容应当在任务清单窗口里完整可读。",
+                        state = TaskState.RUNNING,
+                    ),
+                ),
+                onExpand = {},
+                maxTasks = 3,
+            )
+
+            // ⑥ 任务清单窗口（真实入口）：它会作为浮层压到导航栈上，返回即关。
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "任务卡点一下 = 打开任务清单窗口（真实浮层）",
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Caption,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
+}
+
+/** 任务卡分组的小标签（调试页内部用，不导出）。 */
+@Composable
+private fun TaskCardLabel(text: String) {
+    Text(
+        text = text,
+        color = MiuixTheme.colorScheme.primary,
+        fontSize = ZhiTextScale.Micro,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+    )
 }
 
 // ------------------------------------------------------------------ 输入器

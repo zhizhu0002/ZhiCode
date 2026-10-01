@@ -111,6 +111,8 @@ public final class UiDebugPageStructureTest {
                 "对话流样例必须含一条**流式**回复");
         require(page.contains("thinkingExpanded = false"),
                 "对话流样例必须含**可展开的思考内容**");
+        require(page.contains("thinkingExpanded = true"),
+                "对话流样例必须含**已展开**的思考内容（两种状态都要看到）");
         require(page.contains("awaitingPermission = true"),
                 "对话流样例必须含**等待授权**的工具行");
         require(page.contains("completed = false"),
@@ -121,6 +123,28 @@ public final class UiDebugPageStructureTest {
                 "对话流样例必须含**已展开输出**的工具行");
         require(page.contains("aspectRatio"),
                 "媒体区必须真的按比例布局图片（写死高度就测不出极端比例下的圆角裁切）");
+
+        // 工具分组：五种 ToolKind 都要有样例，否则分组文案漏掉一类没人发现。
+        for (String kind : new String[]{
+                "ToolKind.SEARCH", "ToolKind.READ", "ToolKind.EDIT", "ToolKind.COMMAND", "ToolKind.OTHER",
+        }) {
+            require(page.contains(kind),
+                    "对话流样例必须覆盖 " + kind + "：分组文案是按 kind 拼的，"
+                            + "少一类就可能出现\"搜索 0 个模式\"这种空话");
+        }
+        require(page.contains("groupCompleted = true"),
+                "对话流样例必须含**已全部完成**的工具组（标题走另一条分支）");
+        require(page.contains("contextTokens = 191_000"),
+                "对话流样例必须含**上下文接近上限**的回复：脚注会变色，"
+                        + "不摆一份就永远看不到那个状态");
+
+        // 任务卡：三种状态、单条、超上限、超长标题都要能看到。
+        require(page.contains("TaskCardLabel("),
+                "任务卡区必须分组标注每一张卡在演示什么（六张卡不标注就分不清差别）");
+        require(page.contains("maxTasks = 2"),
+                "任务卡必须演示**窄屏上限**（maxTasks=2）：悬浮卡过高会盖住对话");
+        require(page.contains("超长标题与详情"),
+                "任务卡必须演示超长标题/详情（省略号与卡片高度都在这里才会暴露）");
 
         // ---- 7. 长按复制 + 吐司 ---------------------------------------------
         require(page.contains("ZhiAnchoredActionMenu("),
