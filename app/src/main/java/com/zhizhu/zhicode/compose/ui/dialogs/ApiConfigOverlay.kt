@@ -1,10 +1,8 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -14,11 +12,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.model.ApiConfigState
 import com.zhizhu.zhicode.compose.model.ApiProfile
 import com.zhizhu.zhicode.compose.model.ApiProfileDraft
@@ -26,8 +21,8 @@ import com.zhizhu.zhicode.compose.model.ApiProtocol
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.theme.ZhiColors
-import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -35,12 +30,8 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 
@@ -104,31 +95,25 @@ private fun ApiProfileList(
     onDelete: (String) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
-        if (config.profiles.isEmpty()) {
-            // 空列表是正常的初始状态（应用不再自带任何厂商配置），
-            // 但只显示一行"没有数据"会让人以为坏了。写清下一步做什么。
-            Text(
-                text = "还没有 API 配置。点右上角「新增」填写你自己服务的 Base URL、协议与模型名 —— " +
-                    "应用不预置任何厂商地址，API Key 会存进系统加密存储。",
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            )
-        }
-        // 列表/表单两态共用一个整页栈；「新增」在顶栏，这里只负责行内容。
-        config.profiles.forEach { profile ->
-            val active = profile.id == config.activeId
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                cornerRadius = ZhiRadius.card,
-                insideMargin = PaddingValues(0.dp),
-                colors = CardDefaults.defaultColors(
-                    color = if (active) scheme.surfaceContainerHighest else scheme.surfaceContainerHigh,
-                    contentColor = scheme.onBackground,
-                ),
-                pressFeedbackType = PressFeedbackType.None,
-            ) {
+    Column {
+        SettingsGroup("配置记录") {
+            if (config.profiles.isEmpty()) {
+                // 空列表是正常的初始状态（应用不再自带任何厂商配置），
+                // 但只显示一行"没有数据"会让人以为坏了。写清下一步做什么。
+                // 内边距与 preference 行对齐，避免这行看起来贴边。
+                Text(
+                    text = "还没有 API 配置。点右上角「新增」填写你自己服务的 Base URL、协议与模型名 —— " +
+                        "应用不预置任何厂商地址，API Key 会存进系统加密存储。",
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Footnote,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+            }
+            // 列表/表单两态共用一个整页栈；「新增」在顶栏，这里只负责行内容。
+            // 每行不再各套一张卡：官方 SettingsPage 与 rikkahub 都是「一张分组卡里若干行」，
+            // 散卡会让整页碎成一堆便签；「当前生效」那条仍靠左侧勾 + 主色标题区分。
+            config.profiles.forEach { profile ->
+                val active = profile.id == config.activeId
                 BasicComponent(
                     title = profile.name,
                     titleColor = BasicComponentDefaults.titleColor(
@@ -168,7 +153,7 @@ private fun ApiProfileList(
                         )
                     },
                     onClick = { if (!active) onSelect(profile.id) },
-                    insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                 )
             }
         }
@@ -177,7 +162,7 @@ private fun ApiProfileList(
                 "编辑已有配置时密钥框留空表示沿用原密钥。",
             color = scheme.onSurfaceVariantSummary,
             fontSize = ZhiTextScale.Footnote,
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
 }
@@ -203,72 +188,82 @@ private fun ApiProfileForm(
         }
     }
 
-    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
-        ZhiTextField(
-            value = draft.name,
-            onValueChange = { value -> onChange { it.copy(name = value) } },
-            label = "名称",
-            useLabelAsPlaceholder = true,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-        )
+    Column {
+        // 表单与设置主页同形态：按「基本信息 / 连接 / 凭据 / 模型」分组卡排列，
+        // 不再是一列散着的控件 —— 散控件正是「和整页设置割裂」的来源。
+        SettingsGroup("基本信息") {
+            ZhiTextField(
+                value = draft.name,
+                onValueChange = { value -> onChange { it.copy(name = value) } },
+                label = "名称",
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            )
 
-        // 协议：用 Miuix 的 OverlayDropdownPreference（行尾显示当前值 + 下拉箭头）。
-        // 不用 SuperArrow —— 那个 API 在 Miuix 0.9.4 里已经不存在（`extra` 包已移除）。
-        OverlayDropdownPreference(
-            items = ApiProtocol.entries.map { it.label },
-            selectedIndex = ApiProtocol.entries.indexOf(draft.protocol).coerceAtLeast(0),
-            title = "协议",
-            summary = null,
-            onSelectedIndexChange = { index ->
-                ApiProtocol.entries.getOrNull(index)?.let { protocol ->
-                    onChange { it.copy(protocol = protocol) }
-                }
-            },
-        )
+            // 协议：用 Miuix 的 OverlayDropdownPreference（行尾显示当前值 + 下拉箭头）。
+            // 不用 SuperArrow —— 那个 API 在 Miuix 0.9.4 里已经不存在（`extra` 包已移除）。
+            OverlayDropdownPreference(
+                items = ApiProtocol.entries.map { it.label },
+                selectedIndex = ApiProtocol.entries.indexOf(draft.protocol).coerceAtLeast(0),
+                title = "协议",
+                summary = null,
+                onSelectedIndexChange = { index ->
+                    ApiProtocol.entries.getOrNull(index)?.let { protocol ->
+                        onChange { it.copy(protocol = protocol) }
+                    }
+                },
+            )
+        }
 
-        ZhiTextField(
-            value = draft.baseUrl,
-            onValueChange = { value -> onChange { it.copy(baseUrl = value) } },
-            label = "Base URL",
-            useLabelAsPlaceholder = true,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp),
-        )
+        SettingsGroup("连接") {
+            ZhiTextField(
+                value = draft.baseUrl,
+                onValueChange = { value -> onChange { it.copy(baseUrl = value) } },
+                label = "Base URL",
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            )
 
-        SwitchPreference(
-            title = "允许明文 HTTP",
-            summary = if (allowCleartext) "当前地址走 http（不加密）" else "仅使用 https",
-            checked = allowCleartext,
-            onCheckedChange = { allowCleartext = it },
-        )
+            SwitchPreference(
+                title = "允许明文 HTTP",
+                summary = if (allowCleartext) "当前地址走 http（不加密）" else "仅使用 https",
+                checked = allowCleartext,
+                onCheckedChange = { allowCleartext = it },
+            )
+        }
 
-        ZhiTextField(
-            value = draft.apiKey,
-            onValueChange = { value -> onChange { it.copy(apiKey = value) } },
-            label = if (draft.isEditing) "API Key（留空 = 沿用原密钥）" else "API Key",
-            useLabelAsPlaceholder = true,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp),
-        )
+        SettingsGroup("凭据") {
+            ZhiTextField(
+                value = draft.apiKey,
+                onValueChange = { value -> onChange { it.copy(apiKey = value) } },
+                label = if (draft.isEditing) "API Key（留空 = 沿用原密钥）" else "API Key",
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
 
-        ZhiTextField(
-            value = draft.model,
-            onValueChange = { value -> onChange { it.copy(model = value) } },
-            label = "模型名",
-            useLabelAsPlaceholder = true,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-        )
+        SettingsGroup("模型") {
+            ZhiTextField(
+                value = draft.model,
+                onValueChange = { value -> onChange { it.copy(model = value) } },
+                label = "模型名",
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            )
 
-        SwitchPreference(
-            title = "发送图片（Vision）",
-            // 一句话说明：SwitchPreference 的 summary 走 body2 字阶，长说明在
-            // 行内被压缩裁切（中文字形切一半），长解释放不下就不该塞进 summary。
-            summary = "用于不支持视觉的模型",
-            checked = visionEnabled,
-            onCheckedChange = { visionEnabled = it },
-        )
+            SwitchPreference(
+                title = "发送图片（Vision）",
+                // 一句话说明：SwitchPreference 的 summary 走 body2 字阶，长说明在
+                // 行内被压缩裁切（中文字形切一半），长解释放不下就不该塞进 summary。
+                summary = "用于不支持视觉的模型",
+                checked = visionEnabled,
+                onCheckedChange = { visionEnabled = it },
+            )
+        }
 
         // 表单级校验失败时直接说清是哪一项，而不是只把保存键置灰。
         val error = draft.nameError ?: draft.baseUrlError
@@ -277,7 +272,7 @@ private fun ApiProfileForm(
                 text = error,
                 color = ZhiColors.red(),
                 fontSize = ZhiTextScale.Footnote,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
     }
