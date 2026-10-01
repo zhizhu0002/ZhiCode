@@ -56,6 +56,15 @@ public final class DebugScriptedProvider implements ModelProvider {
     /** 每次回调携带的字符数。 */
     private static final int CHUNK = 6;
 
+    /**
+     * 单段文本最多拆成多少个增量。
+     *
+     * <p>长素材（全工具清单、长 Markdown）逐 6 字符流出要等十几秒，等待反而盖过了观察目的。
+     * 这里给增量数封顶，超出就按更大块流：**增量回调这条路径照样被走到**，
+     * 而长文能在两秒内铺满一屏。
+     */
+    private static final int MAX_DELTAS = 60;
+
     @Override
     public AssistantTurn createMessage(
             SessionConfig config,
@@ -66,8 +75,8 @@ public final class DebugScriptedProvider implements ModelProvider {
     ) throws Exception {
         Scenario scenario = Scenario.pick(userText(messages));
         int step = assistantTurnCount(messages);
-        List<Step> plan = scenario.steps();
-        Step current = step < plan.size() ? plan.get(step) : scenario.closing();
+        List<Step> plan = scenario.steps(tools);
+        Step current = step < plan.size() ? plan.get(step) : scenario.closing(tools);
 
         emit(listener, current);
         return turnOf(current);
@@ -94,9 +103,10 @@ public final class DebugScriptedProvider implements ModelProvider {
 
     private void stream(java.util.function.Consumer<String> sink, String text) throws InterruptedException {
         if (text == null || text.isEmpty()) return;
-        for (int at = 0; at < text.length(); at += CHUNK) {
+        int chunk = Math.max(CHUNK, text.length() / MAX_DELTAS);
+        for (int at = 0; at < text.length(); at += chunk) {
             Thread.sleep(STEP_DELAY_MS);
-            sink.accept(text.substring(at, Math.min(text.length(), at + CHUNK)));
+            sink.accept(text.substring(at, Math.min(text.length(), at + chunk)));
         }
     }
 
@@ -206,7 +216,19 @@ public final class DebugScriptedProvider implements ModelProvider {
     enum Scenario {
 
         /** 默认：搜索 → 读取 → 列目录 → Git 状态 → 汇总（把工具行四种状态都走一遍）。 */
-        FULL_CHAIN("全链路", new String[]{"", "工具", "tool", "全链路", "默认"}),
+        FULL_CHAIN("全链路", new String[]{"", "全链路", "默认"}),
+
+        /**
+         * 关键词 {@code 工具}：把引擎这一次**下发给模型的全部工具**列成清单。
+         *
+         * <p>与其它场景的区别在于它的素材不是写死的 —— 清单直接读 {@code tools} 参数，
+         * 于是"模型到底能调哪些工具"这件事在界面上是可读的（含子代理工具与 MCP 工具）。
+         * 写死一份名单迟早会跟注册表对不上，而"对不上"在界面上看不出来。
+         *
+         * <p>同时把**只读那一批真跑一次**：清单告诉你有什么，工具行告诉你它跑起来长什么样。
+         * 写操作类的只列不调（见 {@link #readOnlyBatch(JSONArray)}）。
+         */
+        ALL_TOOLS("全部工具清单", new String[]{"工具", "tool", "tools"}),
 
         /** 只读一个文件，用来快速验证单行工具卡。 */
         SINGLE_TOOL("单个工具", new String[]{"单个", "single", "read"}),
@@ -259,16 +281,22 @@ public final class DebugScriptedProvider implements ModelProvider {
             return this == FULL_CHAIN;
         }
 
-        List<Step> steps() {
+        List<Step> steps(JSONArray tools) {
             try {
-                return stepsChecked();
+                return stepsChecked(tools);
             } catch (JSONException failure) {
                 throw new IllegalStateException("脚本化传输的场景定义有误（JSON 构造失败）", failure);
             }
         }
 
-        private List<Step> stepsChecked() throws JSONException {
+        private List<Step> stepsChecked(JSONArray tools) throws JSONException {
             switch (this) {
+                case ALL_TOOLS:
+                    return List.of(
+                            new Step("先把只读那一批真跑一次：清单里的名字能不能跑、跑出来长什么样，看工具行最直接。",
+                                    "我先跑一遍只读工具，再把完整清单列给你。",
+                                    readOnlyBatch(tools))
+                    );
                 case SINGLE_TOOL:
                     return List.of(
                             new Step("只读一个文件就够看得出工具卡的排版。", "我先读一下构建脚本。",
@@ -326,22 +354,27 @@ public final class DebugScriptedProvider implements ModelProvider {
                                                     .put("pattern", "ZhiMotion")
                                                     .put("glob", "**/*.kt")),
                                             tool("chain-2", "Glob", new JSONObject()
-                                                    .put("pattern", "**/ui/**/*.kt"))
+                                                    .put("pattern", "**/ui/**/*.kt")),
+                                            tool("chain-3", "LS", new JSONObject()
+                                                    .put("path", "app/src/main/java/com/zhizhu/zhicode/compose/ui"))
                                     )),
                             new Step("把关键文件读出来，确认当前用的是哪几条曲线。", "再读一下动效令牌的定义。",
-                                    List.of(tool("chain-3", "Read", new JSONObject()
+                                    List.of(tool("chain-4", "Read", new JSONObject()
                                             .put("file_path", "app/src/main/java/com/zhizhu/zhicode/compose/ui/Animations.kt")))),
                             new Step("顺手看一眼仓库状态，确认改动范围。", "顺便看一下工作区改动。",
-                                    List.of(tool("chain-4", "GitStatus", new JSONObject()))),
+                                    List.of(tool("chain-5", "GitStatus", new JSONObject()))),
                             finalStep("")
                     );
             }
         }
 
         /** 收尾一步：正文按场景给一段像样的回答（也是 Markdown 渲染器的实测素材）。 */
-        Step closing() {
+        Step closing(JSONArray tools) {
             if (this == MARKDOWN) {
                 return Step.say("", LONG_MARKDOWN);
+            }
+            if (this == ALL_TOOLS) {
+                return Step.say("清单在上面。", toolCatalog(tools));
             }
             return finalStep("");
         }
@@ -352,7 +385,9 @@ public final class DebugScriptedProvider implements ModelProvider {
             text.append("已按脚本走完「").append(label()).append("」场景。\n\n")
                     .append("这一步走到的链路：**流式正文** → 工具调用（由引擎真实执行）→ 工具结果回收 → 收尾。\n\n")
                     .append("想换场景，直接在下一条消息里带上关键词：\n\n")
-                    .append("- `工具`：搜索 / 读取 / 列目录 / Git 状态（默认）\n")
+                    .append("- `工具`：列出**全部工具**（清单读自引擎下发的 tools 数组）"
+                            + "并把只读那一批真跑一遍\n")
+                    .append("- `（不带关键词）`：搜索 / 列目录 / 读取 / Git 状态（默认全链路）\n")
                     .append("- `单个`：只读一个文件\n")
                     .append("- `权限`：触发**权限确认**浮层\n")
                     .append("- `计划`：触发**计划模式 / 审批**\n")
@@ -365,6 +400,107 @@ public final class DebugScriptedProvider implements ModelProvider {
 
     private static ToolCall tool(String id, String name, JSONObject input) {
         return new ToolCall(id, name, input);
+    }
+
+    // ------------------------------------------------------------ 全工具清单
+
+    /** 表格里工具名的宽度上限。 */
+    private static final int NAME_MAX = 24;
+
+    /** 表格里说明的宽度上限。 */
+    private static final int SUMMARY_MAX = 46;
+
+    /**
+     * 只读批次：查询/读取类工具各来一发，覆盖全部五种 {@code ToolKind}（搜索/读取/命令/其它…），
+     * 且**都不改动工程** —— 调试脚本不该因为点一下「确认」就改掉工作区。
+     *
+     * <p>名单是手写的，但**只调用本次真的下发过的那些**：工具白名单会让某些工具根本不在
+     * {@code tools} 里，那时硬调只会换来一行 "Unknown tool"，而那是脚本的错，
+     * 不该在界面上显示成工具的错。
+     */
+    private static List<ToolCall> readOnlyBatch(JSONArray tools) throws JSONException {
+        List<ToolCall> candidates = new ArrayList<>();
+        candidates.add(tool("all-1", "Grep", new JSONObject()
+                .put("pattern", "ZhiMotion").put("glob", "**/*.kt")));
+        candidates.add(tool("all-2", "Glob", new JSONObject().put("pattern", "**/*.kt")));
+        candidates.add(tool("all-3", "Read", new JSONObject().put("file_path", "settings.gradle")));
+        candidates.add(tool("all-4", "ReadMany", new JSONObject()
+                .put("paths", new JSONArray().put("settings.gradle").put("build.gradle"))
+                .put("limit_per_file", 20)));
+        candidates.add(tool("all-5", "LS", new JSONObject().put("path", ".")));
+        candidates.add(tool("all-6", "Tree", new JSONObject().put("path", ".").put("depth", 1)));
+        candidates.add(tool("all-7", "Stat", new JSONObject().put("path", "settings.gradle")));
+        candidates.add(tool("all-8", "GitStatus", new JSONObject()));
+
+        List<ToolCall> calls = new ArrayList<>();
+        for (ToolCall candidate : candidates) {
+            if (isOffered(tools, candidate.name)) calls.add(candidate);
+        }
+        return calls;
+    }
+
+    /** 这一次请求是否真的下发了这个工具。 */
+    private static boolean isOffered(JSONArray tools, String name) {
+        if (tools == null) return false;
+        for (int i = 0; i < tools.length(); i++) {
+            JSONObject schema = tools.optJSONObject(i);
+            if (schema != null && name.equals(schema.optString("name"))) return true;
+        }
+        return false;
+    }
+
+    /**
+     * **全部工具清单**（产物是一张 Markdown 表格）。
+     *
+     * <p>素材一点都不写死：直接读引擎这一次下发的 {@code tools} 数组，
+     * 所以表格里出现的就是模型真能调用的那些（含子代理工具与已连接的 MCP 工具）。
+     * 也正因为它读的是现场数据，"注册表加了工具但界面没跟上"这类问题才看得出来。
+     */
+    private static String toolCatalog(JSONArray tools) {
+        int count = tools == null ? 0 : tools.length();
+        StringBuilder text = new StringBuilder();
+        text.append("## 全部工具清单（").append(count).append(" 个）\n\n");
+        if (count == 0) {
+            return text.append("这一次请求**没有下发任何工具** —— 该检查权限模式或工具白名单，")
+                    .append("而不是怀疑模型不肯调工具。\n")
+                    .toString();
+        }
+        text.append("| 工具 | 说明 |\n")
+                .append("| --- | --- |\n");
+        for (int i = 0; i < count; i++) {
+            JSONObject schema = tools.optJSONObject(i);
+            if (schema == null) continue;
+            text.append("| `").append(cell(schema.optString("name"), NAME_MAX))
+                    .append("` | ").append(cell(firstSentence(schema.optString("description")), SUMMARY_MAX))
+                    .append(" |\n");
+        }
+        text.append("\n清单上面那批只读工具是**真执行**过的（输出、耗时、失败退出码都是真的）；")
+                .append("写操作类的（Write / Edit / Delete / Move / Bash…）只列不调 —— ")
+                .append("调试脚本不该因为误点一次确认就改动工程。\n");
+        return text.toString();
+    }
+
+    /** 说明的第一句：多数工具的说明是「一句话 + 一大段解释」，表格里只需要第一句。 */
+    private static String firstSentence(String description) {
+        String flat = description == null ? "" : description.replaceAll("\\s+", " ").trim();
+        int cut = flat.length();
+        for (String stop : new String[]{". ", "。", "；", "; "}) {
+            int at = flat.indexOf(stop);
+            if (at > 0 && at < cut) cut = at;
+        }
+        return cut < flat.length() ? flat.substring(0, cut) : flat;
+    }
+
+    /**
+     * 单元格化。
+     *
+     * <p>表格要求"一格一行"，而工具说明里既有换行也有竖线，`**` 这类标记也不该漏出去：
+     * 不处理的话，第一条竖线就会被渲染器当成列分隔符，整张表从那一行开始错位。
+     * 所以先压平空白、转义 `|`，再按宽度上限截断。
+     */
+    private static String cell(String raw, int max) {
+        String flat = raw == null ? "" : raw.replaceAll("\\s+", " ").trim().replace("|", "\\|");
+        return flat.length() <= max ? flat : flat.substring(0, Math.max(1, max - 1)) + "…";
     }
 
     /** 长 Markdown 素材：把渲染器支持的块级语法都覆盖一遍。 */

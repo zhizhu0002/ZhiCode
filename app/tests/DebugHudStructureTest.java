@@ -1,5 +1,6 @@
 import java.nio.file.*;
 import java.util.*;
+import java.util.regex.*;
 
 /**
  * 「全局调试浮层」与「Markdown 全语法样例」的守卫。
@@ -41,6 +42,17 @@ public final class DebugHudStructureTest {
     private static final String SCRIPTED_PROVIDER =
             "app/src/main/java/com/termux/app/zhicode/api/DebugScriptedProvider.java";
     private static final String DEBUG_PROFILE = SRC + "data/DebugApiProfile.kt";
+
+    /** 工具实现所在目录：脚本里点名的工具名要在这里能找到出处。 */
+    private static final String TOOLS_DIR = "app/src/main/java/com/termux/app/zhicode/tools";
+
+    /** 工具自己声明的名字。 */
+    private static final Pattern TOOL_NAME =
+            Pattern.compile("public\\s+String\\s+name\\(\\)\\s*\\{\\s*return\\s+\"([^\"]+)\"");
+
+    /** 脚本里的 `tool("id", "Name", …)`。 */
+    private static final Pattern TOOL_CALL =
+            Pattern.compile("tool\\(\"[^\"]*\",\\s*\"([^\"]+)\"");
 
     private static void require(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
@@ -311,5 +323,56 @@ public final class DebugHudStructureTest {
                 "关闭主体调试模式时必须真的切回原配置");
         requireContains(models, "debugPreviousProfileId",
                 MODELS + " 必须记住\"打开调试前生效的那条配置\"，否则关掉时无从还原");
+
+        // ---- 11. 全工具清单：清单读现场数据，且点名的工具必须真的存在 -----------
+        //
+        // 「输入『工具』列出所有工具」这条需求里最容易悄悄做坏的两件事：
+        //   1. 清单写死一份名单 —— 注册表加了工具它不会跟着变，而界面上看不出来；
+        //   2. 工具名写歪（`LS` 写成 `List`、`GitStatus` 写成 `Git`）—— 编译过、运行不报错，
+        //      界面上只多一行 "Unknown tool"，看起来像工具的错，实际是脚本的错。
+        requireContains(scripted, "ALL_TOOLS",
+                SCRIPTED_PROVIDER + " 必须有「列出全部工具」的场景（关键词「工具」）");
+        requireContains(scripted, "toolCatalog(",
+                "全工具清单必须由 toolCatalog( 生成：它要读引擎这一次下发的 tools 数组，"
+                        + "写死一份名单迟早与注册表对不上，而\"对不上\"在界面上看不出来");
+        requireContains(scripted, "readOnlyBatch(",
+                "全工具清单场景还要把只读那批**真跑一遍**：清单说明有什么，工具行说明它跑起来什么样");
+        requireContains(scripted, "isOffered(",
+                "只读批次必须按本次真下发的工具名单过滤：白名单挡掉的工具硬调只会换来一行 "
+                        + "Unknown tool，而那是脚本的错，不该显示成工具的错");
+
+        Set<String> registered = registeredToolNames(root);
+        require(registered.size() > 20,
+                "从 tools/ 里只认出 " + registered.size() + " 个工具名，取值方式大概写错了");
+        Set<String> called = scriptedToolCalls(scripted);
+        require(!called.isEmpty(), "没从脚本里认出任何工具调用，正则与写法大概已经对不上了");
+        for (String name : called) {
+            require(registered.contains(name),
+                    "脚本化传输调用了不存在的工具 `" + name + "`（tools/ 下没有任何工具声明这个名字）："
+                            + "界面上只会显示成一行 Unknown tool");
+        }
+    }
+
+    /** tools/ 下每个工具自己声明的名字（`public String name() { return "Read"; }`）。 */
+    private static Set<String> registeredToolNames(String root) throws Exception {
+        Set<String> names = new HashSet<>();
+        try (DirectoryStream<Path> stream =
+                     Files.newDirectoryStream(Paths.get(root, TOOLS_DIR), "*.java")) {
+            for (Path file : stream) {
+                String text = new String(Files.readAllBytes(file),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                Matcher matcher = TOOL_NAME.matcher(stripComments(text));
+                while (matcher.find()) names.add(matcher.group(1));
+            }
+        }
+        return names;
+    }
+
+    /** 脚本里 `tool("id", "Name", …)` 用到的工具名。 */
+    private static Set<String> scriptedToolCalls(String scripted) {
+        Set<String> names = new LinkedHashSet<>();
+        Matcher matcher = TOOL_CALL.matcher(scripted);
+        while (matcher.find()) names.add(matcher.group(1));
+        return names;
     }
 }

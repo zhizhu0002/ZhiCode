@@ -1526,8 +1526,8 @@ private fun DebugApiSection(state: WorkspaceUiState, viewModel: WorkspaceViewMod
 
 /** 场景关键词 → 会走到哪条链路。与 `DebugScriptedProvider.Scenario` 一一对应。 */
 private val DEBUG_SCENARIOS: List<Pair<String, String>> = listOf(
-    "（空）" to "搜索 → 读取 → Git 状态 → 收尾（默认全链路）",
-    "工具" to "同上，显式点名",
+    "（空）" to "搜索 → 列目录 → 读取 → Git 状态 → 收尾（默认全链路）",
+    "工具" to "列出**全部工具**（清单读自引擎下发的 tools 数组）+ 只读那批真跑一遍",
     "单个" to "只读一个文件（单行工具卡的排版）",
     "权限" to "执行命令 → 触发**权限确认**浮层（ASK 模式下）",
     "计划" to "进入计划模式 → 触发**计划/审批**链路",
