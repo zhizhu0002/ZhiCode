@@ -41,53 +41,27 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
  */
 
 /**
- * 把弹窗撑大。
+ * 弹窗边距（UI 重构 S4：回归官方默认）。
  *
- * Miuix `DialogDefaults` 的边距很保守（实测 `outsideMargin` = 12dp × 12dp、
- * `insideMargin` = 24dp × 24dp），在 360dp 宽的手机上窗口只剩 336dp、
- * 内容区再被吃掉 48dp，实际可用宽度只有 288dp。
- * 这里把两侧边距各收掉一些，窗口与内容区都明显变宽。
- *
- * **横向 6dp 是走过头了**：在 450dpi 手机上只有 17px，弹窗几乎左右顶到屏幕边，
- * 看起来不像弹窗而像整屏页面。18dp 是常规弹窗内缩（Material 系默认 16~24dp），
- * 既留出与屏幕的呼吸感，又比 Miuix 默认宽了 6dp。
- * 纵向保持 12dp：手机竖屏下高度本来就紧张，多留白会把内容区挤没。
+ * 此前有意收窄（横向 18dp / 纵向 12dp、inside 14dp）让手机上弹窗更宽；
+ * 用户要求全量回归官方组件默认，这里改用 Miuix DialogDefaults 的
+ * outsideMargin 12dp / insideMargin 24dp。调用点继续引用这两个名字，
+ * 守卫（LayoutConsistencyTest）的"字面量禁用"断言不变。
  */
-internal val DialogWideOutsideMargin = DpSize(18.dp, 12.dp)
-internal val DialogWideInsideMargin = DpSize(14.dp, 14.dp)
+internal val DialogWideOutsideMargin = DpSize(12.dp, 12.dp)
+internal val DialogWideInsideMargin = DpSize(24.dp, 24.dp)
 
 /**
- * 弹窗宽度档位。**三档，够用就不要再加。**
+ * 弹窗宽度档位（UI 重构 S4：全部回归官方 DialogDefaults.MaxWidth = 420dp）。
  *
- * 收敛之前全工程有四个互不相同、也没有规则的 `maxWidth`：560 / 620 / 640 / 860。
- * 后果是「太窄」与「太宽」并存 —— 模型选择与终端命名两个弹窗明显比其他窄一截，
- * 而设置页又宽出一大截，看起来不像一套东西。
- *
- * ## 为什么不直接用 Miuix 的默认值
- *
- * Miuix `DialogDefaults.MaxWidth` 实测是 **420dp**（连同 `outsideMargin = 12`、
- * `insideMargin = 24`，在 360dp 宽的手机上内容区只剩 288dp）。本工程当初**有意**
- * 覆盖它把弹窗放宽，理由写在 [DialogWideOutsideMargin] 的注释里。
- * 按 Miuix skill 决策顺序的第 1 条「保留目标工程已有的有意约定」，这里**保留加宽**，
- * 只把散落的四个字面量收敛成有名字的三档 —— 与工程既有的 `ZhiRadius`、
- * `ZhiTextScale` 是同一类收敛。
- *
- * [Regular] 是默认档：**拿不准就用它**，这样新加的弹窗不会再多出一个宽度。
+ * 此前三档 560/640/860 是有意加宽；按用户要求回归官方默认后三档统一为
+ * 官方 MaxWidth。保留三档名字是为了不改动 16 处调用点与守卫断言，
+ * 语义上它们不再是"三档宽度"而是同一个官方值。
  */
 internal object ZhiDialogWidth {
-
-    /** 内容很少的小选择器、单行命名。 */
-    val Compact = 560.dp
-
-    /** 表单与列表的默认档（绝大多数弹窗）。 */
-    val Regular = 640.dp
-
-    /**
-     * 内容宽或多列的页面级弹窗（设置页）。
-     *
-     * 手机竖屏下它会被可用宽截断，所以这不是"更宽的弹窗"，而是"宽屏时不显得挤"。
-     */
-    val Wide = 860.dp
+    val Compact = 420.dp
+    val Regular = 420.dp
+    val Wide = 420.dp
 }
 
 /**
@@ -228,10 +202,10 @@ internal fun PrimaryButton(
     enabled: Boolean = true,
 ) {
     val scheme = MiuixTheme.colorScheme
+    // S4：圆角回归官方 ButtonDefaults 默认（16dp），不再覆写。
     Button(
         onClick = onClick,
         enabled = enabled,
-        cornerRadius = ZhiRadius.button,
         colors = ButtonDefaults.buttonColorsPrimary(
             color = scheme.primary,
             contentColor = scheme.onPrimary,
@@ -255,10 +229,10 @@ internal fun PrimaryButton(
  */
 @Composable
 internal fun SecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    // S4：圆角回归官方默认（16dp），不再覆写。
     TextButton(
         text = text,
         onClick = onClick,
-        cornerRadius = ZhiRadius.button,
         modifier = modifier,
     )
 }
