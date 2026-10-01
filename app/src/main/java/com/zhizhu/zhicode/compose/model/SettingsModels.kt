@@ -28,6 +28,19 @@ enum class ApiProtocol(val label: String) {
     OPENAI_RESPONSES("OpenAI Responses"),
     OPENAI_CHAT("OpenAI Chat"),
     ANTHROPIC("Anthropic"),
+
+    /**
+     * 调试用：不发网络请求，按脚本产出回复（含真实的工具调用）。
+     *
+     * 只在 debug 构建里出现在协议下拉与「新增配置」的候选里（见
+     * [com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay]）；发布包即使读到
+     * 这样一条记录，引擎侧也会明确拒绝（见 `ModelProviders.debugScripted`）。
+     */
+    DEBUG_SCRIPTED("调试 · 本地模拟（无网络）"),
+    ;
+
+    /** 是否只在 debug 构建里可选。 */
+    val debugOnly: Boolean get() = this == DEBUG_SCRIPTED
 }
 
 /**

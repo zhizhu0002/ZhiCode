@@ -35,6 +35,13 @@ public final class DebugHudStructureTest {
     private static final String COMPOSER = SRC + "ui/composer/Composer.kt";
     private static final String CHAT_AREA = SRC + "ui/ChatArea.kt";
 
+    /** 调试 API（脚本化传输）涉及的文件：引擎侧与界面侧各两处。 */
+    private static final String PROTOCOL_ENUM = "app/src/main/java/com/termux/app/zhicode/api/ApiProtocol.java";
+    private static final String MODEL_PROVIDERS = "app/src/main/java/com/termux/app/zhicode/api/ModelProviders.java";
+    private static final String SCRIPTED_PROVIDER =
+            "app/src/main/java/com/termux/app/zhicode/api/DebugScriptedProvider.java";
+    private static final String DEBUG_PROFILE = SRC + "data/DebugApiProfile.kt";
+
     private static void require(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
     }
@@ -216,5 +223,67 @@ public final class DebugHudStructureTest {
         require(gate2 > 0, DEBUG_PAGE + " 必须提供主体调试模式的开关");
         require(page.lastIndexOf("BuildConfig.DEBUG", gate2) > 0,
                 "主体调试模式的开关必须在 BuildConfig.DEBUG 之内");
+
+        // ---- 10. **调试 API（脚本化传输）** ---------------------------------
+        //
+        // 这一条守的是"网络边界"：脚本化传输让应用在**不出网**的情况下回话，
+        // 一旦它在发布包里可用，用户会以为自己连上了某个服务。
+        String protocol = read(root, PROTOCOL_ENUM);
+        requireContains(protocol, "DEBUG_SCRIPTED(",
+                PROTOCOL_ENUM + " 必须收录 DEBUG_SCRIPTED —— 它是一条能被正常选中/切换的配置协议");
+        requireContains(protocol, "DebugScriptedProvider.WIRE_NAME",
+                "调试协议的线上名必须引用 DebugScriptedProvider.WIRE_NAME，"
+                        + "不要在两边各写一份字面量（写歪了表现是\"协议没实现\"）");
+
+        String providers = stripComments(read(root, MODEL_PROVIDERS));
+        int dispatch = providers.indexOf("case DEBUG_SCRIPTED");
+        require(dispatch > 0, MODEL_PROVIDERS + " 必须分派 DEBUG_SCRIPTED（枚举 switch 少一个分支编译不过，"
+                + "但把结果接错不会）");
+        int providerGate = providers.indexOf("BuildConfig.DEBUG", dispatch >= 0 ? dispatch : 0);
+        require(providerGate > 0 && providerGate - dispatch < 200,
+                "DEBUG_SCRIPTED 的分派必须紧邻 BuildConfig.DEBUG 检查："
+                        + "发布包里它必须走\"未知协议\"那条失败路径，而不是悄悄可用");
+        requireContains(providers, "UNSUPPORTED",
+                "发布包里的调试协议必须报\"没有实现\"（复用同一条错误文案），"
+                        + "不要发明第二套说法");
+
+        String scripted = stripComments(read(root, SCRIPTED_PROVIDER));
+        requireContains(scripted, "createMessage(",
+                SCRIPTED_PROVIDER + " 必须实现 ModelProvider.createMessage");
+        requireContains(scripted, "onTextDelta", "脚本化传输必须真的走流式增量回调");
+        requireContains(scripted, "onThinkingDelta",
+                "脚本化传输必须产出思考增量：思考面板是对话流里最容易出问题的一块");
+        requireContains(scripted, "onToolInputDelta",
+                "脚本化传输必须产出工具入参增量：引擎侧\"拼入参\"的路径不能只在真模型那里被走到");
+        require(!scripted.contains("new JSONObject() {}") && scripted.contains("assistantTurnCount("),
+                "脚本进度必须从 messages 推导（本类必须无状态）："
+                        + "ModelProvider 的实现不许把\"一次请求\"的状态放进字段");
+        // 脚本里的命令必须是无副作用的读取类命令：调试时点一下"确认"不该改动工程。
+        require(!scripted.contains("\"rm ") && !scripted.contains("rm -rf"),
+                "脚本里的命令行不得包含删除类命令：调试时误授权就会改动工程");
+        require(scripted.contains("Scenario"),
+                "脚本化传输必须有多场景（关键词可选中不同链路），"
+                        + "否则调试\"权限确认/计划审批/任务卡\"这几条链路仍然只能靠真模型凑");
+
+        String debugProfile = stripComments(read(root, DEBUG_PROFILE));
+        requireContains(debugProfile, "fun activate(",
+                DEBUG_PROFILE + " 必须提供 activate()（建并选中调试配置）");
+        requireContains(debugProfile, "fun restore(",
+                DEBUG_PROFILE + " 必须提供 restore()：关掉调试模式要切回原来那条配置，"
+                        + "否则用户下次正常发消息还在走脚本化传输，而界面显示\"调试已关闭\"");
+        requireContains(debugProfile, "BuildConfig.DEBUG",
+                "调试配置的写入必须自己再挡一道 BuildConfig.DEBUG");
+        // ⚠️ 这一条必须用**原始文本**：`debug://scripted` 含 `//`，
+        // 而剥注释的正则会把它当行注释、把该行后面全删掉 —— 用剥过的文本查，永远"缺失"。
+        requireContains(read(root, DEBUG_PROFILE), "\"debug://",
+                "调试配置的地址不得是 http(s)：脚本化传输不出网，"
+                        + "写一个真地址会让人以为它在连某个服务");
+
+        requireContains(viewModel, "DebugApiProfile.activate(",
+                "打开主体调试模式时必须真的切到调试 API 配置");
+        requireContains(viewModel, "DebugApiProfile.restore(",
+                "关闭主体调试模式时必须真的切回原配置");
+        requireContains(models, "debugPreviousProfileId",
+                MODELS + " 必须记住\"打开调试前生效的那条配置\"，否则关掉时无从还原");
     }
 }

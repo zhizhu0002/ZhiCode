@@ -225,6 +225,7 @@ fun UiDebugPage(
                 item(key = "preference") { PreferenceSection() }
                 item(key = "appRows") { AppSettingsRowsSection() }
                 item(key = "debugOverlay") { DebugOverlaySection(state, viewModel) }
+                item(key = "debugApi") { DebugApiSection(state, viewModel) }
                 item(key = "markdown") { MarkdownSection() }
                 item(key = "conversation") { ConversationSection(state.uiDebugResetToken) }
                 item(key = "media") { MediaSection(state.uiDebugResetToken) }
@@ -1285,7 +1286,8 @@ private fun AppSettingsRowsSection() {
 private fun DebugOverlaySection(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
     DebugSection(
         title = "调试模式（把软件主体当调试面板）",
-        subtitle = "打开后**不另开页面**：真实对话流与输入器就地多出调试信息，边用边看真实排版",
+        subtitle = "打开后**不另开页面**：真实对话流与输入器就地多出调试信息，" +
+            "并把 API 切到「调试 · 本地模拟」——发消息不出网也能走完整条对话流",
     ) {
         if (com.zhizhu.zhicode.compose.BuildConfig.DEBUG) {
             SettingsToggle(
@@ -1321,6 +1323,95 @@ private fun DebugOverlaySection(state: WorkspaceUiState, viewModel: WorkspaceVie
         }
     }
 }
+
+/**
+ * 「调试 API」区块：当前生效的配置 + 脚本化传输的用法。
+ *
+ * 内容全是**只读的真实状态**（当前配置名/协议/模型），加上一张场景对照表 ——
+ * 调试时最需要知道的是"我该发什么话才会走到我想看的那条链路"。
+ */
+@Composable
+private fun DebugApiSection(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
+    val scheme = MiuixTheme.colorScheme
+    val isDebugProfile = state.profileName.startsWith("调试 · 本地模拟")
+    DebugSection(
+        title = "调试 API（脚本化传输）",
+        subtitle = "把当前配置切到「调试 · 本地模拟」后，发消息不出网；工具仍由引擎真实执行",
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = if (isDebugProfile) ZhiIcons.done else ZhiIcons.info,
+                    contentDescription = null,
+                    tint = if (isDebugProfile) ZhiColors.green() else scheme.onSurfaceVariantSummary,
+                    modifier = Modifier.size(14.dp),
+                )
+                Text(
+                    text = if (isDebugProfile) "当前生效：调试 · 本地模拟（不出网）" else "当前生效：${state.profileName}",
+                    fontSize = ZhiTextScale.BodySmall,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
+            SettingsFootnote("模型：${state.modelLabel} · 密钥：${if (state.apiKeyConfigured) "已配置" else "未配置"}")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    text = "切到调试 API",
+                    onClick = { viewModel.setDebugAppMode(true) },
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "还原原配置",
+                    onClick = { viewModel.setDebugAppMode(false) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Text(
+                text = "发消息时在正文里带上关键词即可选场景：",
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = ZhiTextScale.Caption,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            DEBUG_SCENARIOS.forEach { (keyword, effect) ->
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+                    Text(
+                        text = keyword,
+                        fontSize = ZhiTextScale.Micro,
+                        fontFamily = FontFamily.Monospace,
+                        color = scheme.primary,
+                        modifier = Modifier.width(56.dp),
+                    )
+                    Text(
+                        text = effect,
+                        fontSize = ZhiTextScale.Micro,
+                        color = scheme.onSurfaceVariantSummary,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            SettingsFootnote(
+                "脚本只产出**模型的意图**，工具执行走真实链路，所以工具行的输出、耗时、" +
+                    "diff、失败退出码都是真的。脚本里的命令行只用无副作用的读取类命令。"
+            )
+        }
+    }
+}
+
+/** 场景关键词 → 会走到哪条链路。与 `DebugScriptedProvider.Scenario` 一一对应。 */
+private val DEBUG_SCENARIOS: List<Pair<String, String>> = listOf(
+    "（空）" to "搜索 → 读取 → Git 状态 → 收尾（默认全链路）",
+    "工具" to "同上，显式点名",
+    "单个" to "只读一个文件（单行工具卡的排版）",
+    "权限" to "执行命令 → 触发**权限确认**浮层（ASK 模式下）",
+    "计划" to "进入计划模式 → 触发**计划/审批**链路",
+    "任务" to "建两条任务 → 触发 **Agent 任务卡**与任务清单",
+    "失败" to "读不存在的文件 + 非零退出码 → 红色失败行",
+    "长文" to "长 Markdown 回复（标题/列表/表格/代码块/引用/折行）",
+)
+
 
 // ------------------------------------------------------------------ Markdown 全语法
 

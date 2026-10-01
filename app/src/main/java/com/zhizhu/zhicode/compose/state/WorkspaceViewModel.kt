@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.zhizhu.zhicode.compose.data.ApiConfigStore
 import com.zhizhu.zhicode.compose.data.AttachmentReader
 import com.zhizhu.zhicode.compose.data.Clipboard
+import com.zhizhu.zhicode.compose.data.DebugApiProfile
 import com.zhizhu.zhicode.compose.data.FileBrowser
 import com.zhizhu.zhicode.compose.data.FileSearch
 import com.zhizhu.zhicode.compose.data.GitChanges
@@ -3277,10 +3278,58 @@ class WorkspaceViewModel(
     /**
      * 开关**主体调试模式**：真实界面就地显示调试信息（不另开页面）。
      *
-     * 比浮层更进一步 —— 浮层是"盖在上面的一块"，本项是"把真实控件本身加料"：
-     * 消息带类型/长度与 Markdown 源码开关、工具行默认展开、输入器下方实时预览。
+     * 同时把当前 API 配置切到「调试 · 本地模拟」**并记住原来那条**：
+     * 这条配置的协议是脚本化传输（不发网络、按脚本产回复、工具照常真实执行），
+     * 于是"发一句话就能走完整条对话流"——包括流式正文、思考、工具行、
+     * 权限确认、计划审批、任务卡。关掉时切回原来那条。
+     *
+     * 之所以要真的切配置而不是在引擎里加开关：引擎读的就是"当前生效的那条配置"，
+     * 走真实链路才能保证调试出来的行为与真正用起来一致（见 [DebugApiProfile]）。
      */
-    fun setDebugAppMode(enabled: Boolean) = _state.update { it.copy(debugAppMode = enabled) }
+    fun setDebugAppMode(enabled: Boolean) {
+        // 双保险：开关本身在 debug 独有页面里，但这里再挡一道 ——
+        // 发布包绝不该因为某处误接线而切到脚本化传输。
+        if (!com.zhizhu.zhicode.compose.BuildConfig.DEBUG) return
+        if (!enabled) {
+            val previous = _state.value.debugPreviousProfileId
+            _state.update { it.copy(debugAppMode = false, debugPreviousProfileId = "") }
+            val restored = if (previous.isBlank()) {
+                Result.failure(IllegalStateException("没有记录到原来的配置"))
+            } else {
+                DebugApiProfile.restore(getApplication(), previous)
+            }
+            syncActiveProfile()
+            _state.update {
+                it.copy(
+                    message = if (restored.isSuccess) "已退出调试模式，API 配置还原为「${it.profileName}」"
+                    else "已退出调试模式，但没能切回原配置（${restored.exceptionOrNull()?.message ?: "未知原因"}）；" +
+                        "请在「API 配置记录」里手动选一条",
+                )
+            }
+            return
+        }
+        // 先记下当前生效的那条，再切走 —— 顺序反了会记成调试配置自己。
+        val previous = runCatching { ApiConfigStore.active(getApplication())?.profileId }.getOrNull().orEmpty()
+        val activated = DebugApiProfile.activate(getApplication())
+        _state.update {
+            it.copy(
+                debugAppMode = true,
+                debugPreviousProfileId = if (activated.isSuccess) previous else "",
+            )
+        }
+        syncActiveProfile()
+        _state.update {
+            it.copy(
+                message = if (activated.isSuccess) {
+                    "调试模式已开启：当前 API 切到「${DebugApiProfile.NAME}」，发消息不会出网，" +
+                        "工具仍按真实链路执行"
+                } else {
+                    "调试模式已开启，但没能写入调试 API 配置（${activated.exceptionOrNull()?.message ?: "未知原因"}）；" +
+                        "请到「API 配置记录」手动新增一条，协议选「调试 · 本地模拟（无网络）」"
+                },
+            )
+        }
+    }
 
     /** 弹窗内任意一项改动都走这里，保证 draft 只有一份写入路径。 */
     fun updateSettingsDraft(transform: (SettingsDraft) -> SettingsDraft) = _state.update {

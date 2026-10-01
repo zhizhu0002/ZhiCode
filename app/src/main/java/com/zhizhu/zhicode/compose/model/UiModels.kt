@@ -399,6 +399,14 @@ data class WorkspaceUiState(
      * 同样不持久化（调试设施，重启回默认）。
      */
     val debugAppMode: Boolean = false,
+    /**
+     * 打开主体调试模式**之前**生效的那条 API 配置 id。
+     *
+     * 打开时会切到「调试 · 本地模拟」这条配置；关掉时要切回来，否则用户
+     * 下次正常发消息会继续走脚本化传输（而界面只显示"调试模式已关闭"），
+     * 那是最难查的一类不一致。空串表示"没有可还原的配置"。
+     */
+    val debugPreviousProfileId: String = "",
     /** 非空即设置弹窗打开；所有编辑先落在这里，「保存」才写回上面的字段。 */
     val settingsDraft: SettingsDraft? = null,
 ) {

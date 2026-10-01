@@ -116,6 +116,10 @@ internal object ApiConfigStore {
     private fun String.toUiProtocol(): ApiProtocol = when (lowercase()) {
         "anthropic" -> ApiProtocol.ANTHROPIC
         "openai-chat", "openai-compatible" -> ApiProtocol.OPENAI_CHAT
+        // 调试配置在发布包里也要能**显示**出来（它可能已经被写进设置）。
+        // 认不出来会被回落成 OPENAI_RESPONSES，用户会看到一条"看着正常、
+        // 却怎么都调不通"的配置 —— 那不是更糟，而是更难查。
+        "debug-scripted" -> ApiProtocol.DEBUG_SCRIPTED
         else -> ApiProtocol.OPENAI_RESPONSES
     }
 
@@ -123,5 +127,6 @@ internal object ApiConfigStore {
         ApiProtocol.OPENAI_RESPONSES -> "openai-responses"
         ApiProtocol.OPENAI_CHAT -> "openai-chat"
         ApiProtocol.ANTHROPIC -> "anthropic"
+        ApiProtocol.DEBUG_SCRIPTED -> "debug-scripted"
     }
 }

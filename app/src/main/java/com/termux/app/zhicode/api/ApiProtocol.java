@@ -24,7 +24,17 @@ enum ApiProtocol {
 
     ANTHROPIC("anthropic"),
     OPENAI_CHAT("openai-chat"),
-    OPENAI_RESPONSES("openai-responses");
+    OPENAI_RESPONSES("openai-responses"),
+
+    /**
+     * **调试用**：不发网络请求，按脚本产出回复（见 {@link DebugScriptedProvider}）。
+     *
+     * <p>它是一个正常收录的协议值，所以能被写进一条普通的 API 配置记录里、
+     * 也能被正常选中与切换；**但只有 debug 构建允许它真的跑起来** ——
+     * {@link ModelProviders} 在 release 里对这个值照旧报「没有实现」，
+     * 于是发布包即使读到了这样一条配置也只会明确失败，而不是偷偷走一条假路径。
+     */
+    DEBUG_SCRIPTED(DebugScriptedProvider.WIRE_NAME);
 
     /** 与 {@link #OPENAI_RESPONSES} 同义的历史写法。 */
     static final String ALIAS_CODEX_RESPONSES = "codex-responses";

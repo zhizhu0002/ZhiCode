@@ -39,6 +39,28 @@ public final class ModelProviders {
             case ANTHROPIC -> new AnthropicMessagesProvider();
             case OPENAI_CHAT -> new OpenAIChatCompletionsProvider();
             case OPENAI_RESPONSES -> new OpenAIResponsesProvider();
+            case DEBUG_SCRIPTED -> debugScripted();
         };
+    }
+
+    /**
+     * 脚本化传输的**唯一放行点**。
+     *
+     * <p>它是一条"不发网络、按脚本回话"的路径，只对调试有意义，所以：
+     *
+     * <ul>
+     *   <li>只有 {@code BuildConfig.DEBUG} 为真才返回实例；发布包里走与
+     *       「未知协议」同一条失败路径（抛 {@link IllegalArgumentException}），
+     *       于是用户看到的是明确的"这个协议没有实现"，而不是界面像坏了一样没反应。</li>
+     *   <li>判定放在这里而不是 provider 内部：这样"哪些构建能用它"只有一处，
+     *       不会出现"某条调用路径绕过了检查"。</li>
+     * </ul>
+     */
+    private static ModelProvider debugScripted() {
+        if (!com.zhizhu.zhicode.compose.BuildConfig.DEBUG) {
+            throw new IllegalArgumentException(UNSUPPORTED + DebugScriptedProvider.WIRE_NAME
+                    + "（脚本化传输只在 debug 构建可用）");
+        }
+        return new DebugScriptedProvider();
     }
 }

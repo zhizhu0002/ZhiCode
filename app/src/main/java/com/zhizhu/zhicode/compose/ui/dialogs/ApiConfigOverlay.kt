@@ -203,13 +203,21 @@ private fun ApiProfileForm(
 
             // 协议：用 Miuix 的 OverlayDropdownPreference（行尾显示当前值 + 下拉箭头）。
             // 不用 SuperArrow —— 那个 API 在 Miuix 0.9.4 里已经不存在（`extra` 包已移除）。
+            //
+            // 「调试 · 本地模拟」只在 debug 构建里出现在候选里：它是一条不发网络、
+            // 按脚本回话的路径，对用户没有意义，出现在发布包里只会让人以为能这么用。
+            val protocols = remember {
+                ApiProtocol.entries.filter {
+                    !it.debugOnly || com.zhizhu.zhicode.compose.BuildConfig.DEBUG
+                }
+            }
             OverlayDropdownPreference(
-                items = ApiProtocol.entries.map { it.label },
-                selectedIndex = ApiProtocol.entries.indexOf(draft.protocol).coerceAtLeast(0),
+                items = protocols.map { it.label },
+                selectedIndex = protocols.indexOf(draft.protocol).coerceAtLeast(0),
                 title = "协议",
                 summary = null,
                 onSelectedIndexChange = { index ->
-                    ApiProtocol.entries.getOrNull(index)?.let { protocol ->
+                    protocols.getOrNull(index)?.let { protocol ->
                         onChange { it.copy(protocol = protocol) }
                     }
                 },
