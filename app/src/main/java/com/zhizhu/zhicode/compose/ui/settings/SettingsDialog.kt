@@ -1,17 +1,19 @@
+@file:OptIn(top.yukonga.miuix.kmp.interfaces.ExperimentalScrollBarApi::class)
+
 package com.zhizhu.zhicode.compose.ui.settings
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,16 +39,17 @@ import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
-import com.zhizhu.zhicode.compose.ui.ZhiIconButton
-import com.zhizhu.zhicode.compose.ui.ZhiIcons
-import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
-import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
-import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
-import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.VerticalScrollBar
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Back
+import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -82,22 +85,30 @@ fun SettingsDialog(
     onSave: () -> Unit,
     onNavigate: (String) -> Unit,
 ) {
-    // 整页设置（像 miuix 示例的 SettingsPage）：Scaffold + 顶栏 + 分组卡滚动列表。
-    // 不再用 OverlayDialog —— 设置项多，弹窗里滚动层级深，整页更接近系统设置的心智。
+    // 整页设置，骨架全部用 Miuix 原生组件，照官方 example 的 SettingsPage 模式：
+    // Scaffold + SmallTopAppBar(MiuixScrollBehavior) + LazyColumn(overScroll+nestedScroll)。
+    // 返回键 = MiuixIcons.Back + 原生 IconButton；保存走顶栏 TextButton。
     if (draft == null) return
 
     val scheme = MiuixTheme.colorScheme
+    val listState = rememberLazyListState()
+    val topAppBarScrollBehavior = MiuixScrollBehavior()
+
     Scaffold(
         topBar = {
             SmallTopAppBar(
                 title = "设置",
+                scrollBehavior = topAppBarScrollBehavior,
                 color = scheme.surface,
                 navigationIcon = {
-                    ZhiIconButton(
-                        icon = ZhiIcons.upLevel,
-                        description = "返回",
-                        onClick = onDismiss,
-                    )
+                    // 官方 BackNavigationIcon 同款：原生 IconButton + MiuixIcons.Back
+                    top.yukonga.miuix.kmp.basic.IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = MiuixIcons.Back,
+                            contentDescription = "返回",
+                            tint = scheme.onBackground,
+                        )
+                    }
                 },
                 actions = {
                     TextButton(text = "保存", onClick = onSave)
@@ -105,28 +116,29 @@ fun SettingsDialog(
             )
         },
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState()),
-        ) {
-            Spacer(modifier = Modifier.height(8.dp))
-            AllSettingsPages(draft, onChange, onNavigate)
-            // 底部保存区：整页模式下按钮常驻列表尾，比悬浮按钮省一层玻璃
-            Row(
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                state = listState,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 16.dp),
-                horizontalArrangement = Arrangement.End,
+                    .fillMaxHeight()
+                    .overScrollVertical()
+                    .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
+                contentPadding = PaddingValues(
+                    top = padding.calculateTopPadding(),
+                    bottom = padding.calculateBottomPadding() + 16.dp,
+                ),
             ) {
-                TextButton(text = "取消", onClick = onDismiss)
-                PrimaryButton(
-                    text = "保存",
-                    onClick = onSave,
-                    modifier = Modifier.padding(start = 8.dp),
-                )
+                item(key = "settingsBody") {
+                    AllSettingsPages(draft, onChange, onNavigate)
+                }
             }
+            // Miuix 原生滚动条
+            VerticalScrollBar(
+                adapter = rememberScrollBarAdapter(listState),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight(),
+            )
         }
     }
 }
