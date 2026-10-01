@@ -39,6 +39,7 @@ import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -51,9 +52,10 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
-import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -96,8 +98,11 @@ fun SettingsDialog(
 
     Scaffold(
         topBar = {
-            SmallTopAppBar(
+            // rikkahub 用 LargeFlexibleTopAppBar（大标题 + 滚动折叠）；
+            // Miuix 对应组件 = TopAppBar（自带 largeTitle 折叠行为）。
+            TopAppBar(
                 title = "设置",
+                largeTitle = "设置",
                 scrollBehavior = topAppBarScrollBehavior,
                 color = scheme.surface,
                 navigationIcon = {
@@ -174,8 +179,10 @@ private fun AllSettingsPages(
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
 ) {
-    // 使用频率排序：模型最先（最常改），外观其次，其余按功能聚类
-    SettingsGroup("模型") { ModelPermissionPage(draft, onChange, onNavigate) }
+    // rikkahub 式 hub：主页主要是「导航行（图标+标题+副标题+箭头）」，
+    // 少数高频即时项（主题模式）内联；细节全部下放到二级页与原分组。
+    // 顺序按使用频率：模型最先，扩展收尾。
+    SettingsGroup("模型与对话") { ModelPermissionPage(draft, onChange, onNavigate) }
     SettingsGroup("外观") { AppearancePage(draft, onChange) }
     SettingsGroup("上下文与项目") { ContextProjectPage(draft, onChange) }
     SettingsGroup("联网") { NetworkPage(draft, onChange) }
@@ -204,10 +211,13 @@ private fun ModelPermissionPage(
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
 ) {
-    SettingsEntry(
+    // rikkahub hub 的「当前值行」：图标 + 标题 + 当前值当副标题 + 行尾箭头，
+    // 细节进二级页。原先这里用 SettingsEntry 且写了一句「密钥不会回填」的长说明，
+    // 该说明在二级页里已有，这里按 hub 惯例收成一行当前值。
+    SettingsIconEntry(
         title = "API 配置记录",
-        valueText = "${draft.profileName} · ${draft.modelLabel}",
-        summary = "密钥不会在设置页回填，点模型按钮可自动获取",
+        summary = "${draft.profileName} · ${draft.modelLabel}",
+        icon = ZhiIcons.projectPath,
         onClick = { onNavigate("apiProfiles") },
     )
 
@@ -393,15 +403,61 @@ private fun ProjectPathField(draft: SettingsDraft, onChange: (SettingsDraft) -> 
  */
 @Composable
 private fun ExtensionsPage(onNavigate: (String) -> Unit) {
-    SettingsEntry(
+    // rikkahub 式入口行：图标 + 标题 + 副标题；Miuix 用 ArrowPreference 的 startAction。
+    // 注意：这里不放「API 配置记录」——那条带当前生效值的入口留在上面的
+    // 「模型与对话」组里，同一目标只保留一条路径（hub 的规矩）。
+    SettingsIconEntry(
         title = "Model Context Protocol（MCP）",
-        valueText = "MCP 服务器配置",
+        summary = "MCP 服务器配置",
+        icon = ZhiIcons.sandbox,
         onClick = { onNavigate("mcp") },
     )
-    SettingsEntry(
+    SettingsIconEntry(
+        title = "Skill 管理器",
+        summary = "项目级与用户级技能模板",
+        icon = ZhiIcons.skill,
+        onClick = { onNavigate("skills") },
+    )
+    SettingsIconEntry(
+        title = "自定义角色卡",
+        summary = "可切换的多份人设指令",
+        icon = ZhiIcons.roleCard,
+        onClick = { onNavigate("roleCards") },
+    )
+    SettingsIconEntry(
+        title = "记忆文件 · ZhiCode.md",
+        summary = "项目级与用户级说明文件",
+        icon = ZhiIcons.edit,
+        onClick = { onNavigate("memory") },
+    )
+    SettingsIconEntry(
         title = "关于 ZhiCode",
-        valueText = "智蛛代码 · Miuix UI",
+        summary = "智蛛代码 · Miuix UI",
+        icon = ZhiIcons.info,
         onClick = {},
+    )
+}
+
+/** rikkahub 式导航行：图标 + 标题 + 副标题 + 箭头（Miuix ArrowPreference）。 */
+@Composable
+private fun SettingsIconEntry(
+    title: String,
+    summary: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    ArrowPreference(
+        title = title,
+        summary = summary,
+        startAction = {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = scheme.onBackground,
+            )
+        },
+        onClick = onClick,
     )
 }
 

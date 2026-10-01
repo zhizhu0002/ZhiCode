@@ -3235,10 +3235,14 @@ class WorkspaceViewModel(
      * 留着只会让后来的人以为这里有功能。
      */
     fun navigateFromSettings(target: String) {
-        _state.update { it.copy(settingsDraft = null) }
+        // rikkahub 式导航：hub 保留在下层，子页盖上来；返回回 hub 时 draft 原样。
+        // 「保存」只在 hub 顶栏点（draft 语义不变）。
         when (target) {
             "apiProfiles" -> openApiConfig()
             "mcp" -> openMcpConfig()
+            "skills" -> openSkills()
+            "roleCards" -> openRoleCards()
+            "memory" -> openMemory()
             else -> Unit
         }
     }
