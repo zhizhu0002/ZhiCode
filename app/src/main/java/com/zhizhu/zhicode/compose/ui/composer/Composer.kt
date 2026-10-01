@@ -120,12 +120,9 @@ fun Composer(
         // 输入框 + 发送键**并排**：输入箱在左（weight 1f），方角发送键在右。
         // 两者都走 Miuix：箱子用 FloatingToolbar（圆角 + 阴影由组件库负责），
         // 按键用转发到 IconButton 的 ZhiFilledIconButton(square = true)。
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.Bottom,
-        ) {
         FloatingToolbar(
-            modifier = Modifier.weight(1f)
+            modifier = Modifier
+                .fillMaxWidth()
                 .then(glass.blur(Modifier, RoundedCornerShape(ZhiRadius.floating), radius = 24f)),
             color = glass.surfaceColor(scheme.surfaceContainer),
             cornerRadius = ZhiRadius.floating,
@@ -157,76 +154,9 @@ fun Composer(
                 }
             }
 
-            // 输入框 + 暂停键 + 发送键**同一行**：
-            // 输入框本身不画容器（透明），方角外框由外层 FloatingToolbar 负责，
-            // 这样不会出现"盒中盒"；行高下限与按钮同高（32dp），多行时按钮贴底。
+// 选项行：+ 菜单与三枚下拉，先于输入行（选项属于“发起前”的设置）
             Row(
-                modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                ZhiTextField(
-                    value = state.composerText,
-                    onValueChange = onTextChange,
-                    label = "描述任务或向智蛛提问",
-                    useLabelAsPlaceholder = true,
-                    // 透明容器 + 透明描边：只留外层方角框
-                    colors = TextFieldDefaults.textFieldColors(
-                        backgroundColor = Color.Transparent,
-                        labelColor = scheme.onSurfaceVariantSummary,
-                        borderColor = Color.Transparent,
-                    ),
-                    // 收紧 Miuix TextField 的内部留白，让输入区更矮
-                    insideMargin = DpSize(6.dp, 1.dp),
-                    // 常规字重的正文样式：Miuix 主题默认文字样式偏粗，会显得比原版重
-                    textStyle = MiuixTheme.textStyles.main.copy(
-                        fontSize = ZhiTextScale.Subheading,
-                        fontWeight = FontWeight.Normal,
-                    ),
-                    // 比原版的 minLines = 2 更矮，只占一行起，随内容长高
-                    minLines = 1,
-                    maxLines = 5,
-                    modifier = Modifier.weight(1f).heightIn(min = 36.dp),
-                )
-
-                // 停止键在任务运行时滑入，位置就在发送键左边
-                AnimatedVisibility(
-                    visible = state.composerBusy,
-                    enter = fadeIn(tween(ZhiMotion.FAST)) + expandHorizontally(tween(ZhiMotion.EXPAND)) +
-                        scaleIn(initialScale = 0.7f, animationSpec = tween(ZhiMotion.EXPAND)),
-                    exit = fadeOut(tween(ZhiMotion.FAST)) + shrinkHorizontally(tween(ZhiMotion.FAST)) +
-                        scaleOut(targetScale = 0.7f, animationSpec = tween(ZhiMotion.FAST)),
-                ) {
-                    ZhiFilledIconButton(
-                        icon = ZhiIcons.stop,
-                        description = "立即停止当前任务",
-                        onClick = onStop,
-                        // 走主题的 error 语义色而不是写死的红：浅色模式会自动换成暗红，
-                        // 前景也必须是 onError，否则浅色下红底白字对比度不足。
-                        containerColor = MiuixTheme.colorScheme.error,
-                        contentColor = MiuixTheme.colorScheme.onError,
-                        iconSize = 14.dp,
-                        size = 36.dp,
-                        square = true,
-                        modifier = Modifier.padding(start = 6.dp),
-                    )
-                }
-
-                // 方角发送键；图标库没有纯右箭头，用文字字形 `→`（原版发送键也是文字字形）
-                ZhiFilledIconButton(
-                    description = "发送消息",
-                    glyph = "→",
-                    glyphSize = 17.sp,
-                    onClick = onSend,
-                    containerColor = scheme.primary,
-                    enabled = state.composerText.isNotBlank(),
-                    size = 36.dp,
-                    square = true,
-                    modifier = Modifier.padding(start = 6.dp),
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth().height(34.dp),
+                modifier = Modifier.fillMaxWidth().height(36.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // `+` 不再直接弹相册：改成 Miuix 的动作菜单（OverlayIconDropdownMenu）。
@@ -317,10 +247,92 @@ fun Composer(
                     onClick = onModelChip,
                     modifier = Modifier.weight(1f),
                 )
-            } // 面板内页脚 Row（+ 与三个下拉/按钮）
+            } // 选项行 Row
+
+            // 附件条随附件增减平滑展开/收起
+            AnimatedVisibility(
+                visible = state.attachments.isNotEmpty(),
+                enter = expandVertically(tween(ZhiMotion.EXPAND)) + fadeIn(tween(ZhiMotion.FAST)),
+                exit = shrinkVertically(tween(ZhiMotion.FAST)) + fadeOut(tween(ZhiMotion.FAST)),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    state.attachments.take(4).forEach { attachment ->
+                        AttachmentChip(attachment) { onRemoveAttachment(attachment) }
+                    }
+                }
+            }
+
+            // 输入框 + 暂停键 + 发送键**同一行**：
+            // 输入框本身不画容器（透明），方角外框由外层 FloatingToolbar 负责，
+            // 这样不会出现"盒中盒"；行高下限与按钮同高（32dp），多行时按钮贴底。
+            Row(
+                modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                ZhiTextField(
+                    value = state.composerText,
+                    onValueChange = onTextChange,
+                    label = "描述任务或向智蛛提问",
+                    useLabelAsPlaceholder = true,
+                    // 透明容器 + 透明描边：只留外层方角框
+                    colors = TextFieldDefaults.textFieldColors(
+                        backgroundColor = Color.Transparent,
+                        labelColor = scheme.onSurfaceVariantSummary,
+                        borderColor = Color.Transparent,
+                    ),
+                    // 收紧 Miuix TextField 的内部留白，让输入区更矮
+                    insideMargin = DpSize(6.dp, 1.dp),
+                    // 常规字重的正文样式：Miuix 主题默认文字样式偏粗，会显得比原版重
+                    textStyle = MiuixTheme.textStyles.main.copy(
+                        fontSize = ZhiTextScale.Subheading,
+                        fontWeight = FontWeight.Normal,
+                    ),
+                    // 比原版的 minLines = 2 更矮，只占一行起，随内容长高
+                    minLines = 1,
+                    maxLines = 5,
+                    modifier = Modifier.weight(1f).heightIn(min = 36.dp),
+                )
+
+                // 停止键在任务运行时滑入，位置就在发送键左边
+                AnimatedVisibility(
+                    visible = state.composerBusy,
+                    enter = fadeIn(tween(ZhiMotion.FAST)) + expandHorizontally(tween(ZhiMotion.EXPAND)) +
+                        scaleIn(initialScale = 0.7f, animationSpec = tween(ZhiMotion.EXPAND)),
+                    exit = fadeOut(tween(ZhiMotion.FAST)) + shrinkHorizontally(tween(ZhiMotion.FAST)) +
+                        scaleOut(targetScale = 0.7f, animationSpec = tween(ZhiMotion.FAST)),
+                ) {
+                    ZhiFilledIconButton(
+                        icon = ZhiIcons.stop,
+                        description = "立即停止当前任务",
+                        onClick = onStop,
+                        // 走主题的 error 语义色而不是写死的红：浅色模式会自动换成暗红，
+                        // 前景也必须是 onError，否则浅色下红底白字对比度不足。
+                        containerColor = MiuixTheme.colorScheme.error,
+                        contentColor = MiuixTheme.colorScheme.onError,
+                        iconSize = 14.dp,
+                        size = 36.dp,
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
+
+                // 圆形发送键；图标库没有纯右箭头，用文字字形 `→`（原版发送键也是文字字形）
+                ZhiFilledIconButton(
+                    description = "发送消息",
+                    glyph = "→",
+                    glyphSize = 18.sp,
+                    onClick = onSend,
+                    containerColor = scheme.primary,
+                    enabled = state.composerText.isNotBlank(),
+                    size = 36.dp,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
+
             } // 悬浮面板内容 Column
-        } // FloatingToolbar
-        } // 输入框 + 停止/发送键 Row
+        } // FloatingToolbar 外层
     }
 }
 
