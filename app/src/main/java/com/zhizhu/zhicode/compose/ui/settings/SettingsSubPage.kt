@@ -15,8 +15,8 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -47,7 +47,10 @@ internal fun SettingsSubPage(
 
     Scaffold(
         topBar = {
-            SmallTopAppBar(
+            // 与设置主页同款顶栏：Miuix TopAppBar 自带 largeTitle（大标题随滚动折叠），
+            // 对应 rikkahub 二级页的 LargeFlexibleTopAppBar —— 主页与二级页的
+            // 标题层级一致，返回时不会出现「标题突然变小」的断层。
+            TopAppBar(
                 title = title,
                 scrollBehavior = topAppBarScrollBehavior,
                 color = scheme.surface,
