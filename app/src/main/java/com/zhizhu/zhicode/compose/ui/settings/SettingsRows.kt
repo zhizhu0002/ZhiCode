@@ -48,11 +48,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /** 分组标题。转发到 Miuix [SmallTitle]，强调色文字。 */
 @Composable
 internal fun SettingsGroupHeader(text: String, modifier: Modifier = Modifier) {
-    SmallTitle(
-        text = text,
-        modifier = modifier,
-        textColor = MiuixTheme.colorScheme.primary,
-    )
+    // 官方 SettingsPage 的组标题用 SmallTitle 默认色（onBackgroundVariant），
+    // 强调色整页刷满反而让"危险项"的 warn 色失去辨识度。
+    SmallTitle(text = text, modifier = modifier)
 }
 
 /**

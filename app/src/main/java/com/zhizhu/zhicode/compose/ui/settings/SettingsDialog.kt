@@ -140,18 +140,17 @@ private fun AllSettingsPages(
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
 ) {
+    // 使用频率排序：模型最先（最常改），外观其次，其余按功能聚类
+    SettingsGroup("模型") { ModelPermissionPage(draft, onChange, onNavigate) }
     SettingsGroup("外观") { AppearancePage(draft, onChange) }
-    SettingsGroup("模型与权限") { ModelPermissionPage(draft, onChange, onNavigate) }
-    SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) }
-    SettingsGroup("联网") { NetworkPage(draft, onChange) }
     SettingsGroup("上下文与项目") { ContextProjectPage(draft, onChange) }
-    SettingsGroup("扩展功能") { ExtensionsPage(onNavigate) }
+    SettingsGroup("联网") { NetworkPage(draft, onChange) }
+    SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) }
+    SettingsGroup("扩展") { ExtensionsPage(onNavigate) }
 }
 
 @Composable
 private fun AppearancePage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
-    val scheme = MiuixTheme.colorScheme
-
     SettingsChoice(
         title = "主题模式",
         options = ThemeMode.entries.map(::themeLabel),
@@ -236,28 +235,33 @@ private fun NetworkPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit)
         onCheckedChange = { onChange(draft.copy(webSearchEnabled = it)) },
     )
 
-    SettingsChoice(
-        title = "搜索后端",
-        options = WebSearchProvider.entries.map { it.label },
-        selectedIndex = WebSearchProvider.entries.indexOf(draft.webSearchProvider),
-        onSelect = { onChange(draft.copy(webSearchProvider = WebSearchProvider.entries[it])) },
-        summary = draft.webSearchProvider.detail,
-    )
+    // 关闭联网搜索时后续配置全部折叠（官方 SettingsPage 的 AnimatedVisibility 模式）
+    androidx.compose.animation.AnimatedVisibility(visible = draft.webSearchEnabled) {
+        Column {
+            SettingsChoice(
+                title = "搜索后端",
+                options = WebSearchProvider.entries.map { it.label },
+                selectedIndex = WebSearchProvider.entries.indexOf(draft.webSearchProvider),
+                onSelect = { onChange(draft.copy(webSearchProvider = WebSearchProvider.entries[it])) },
+                summary = draft.webSearchProvider.detail,
+            )
 
-    // 纯数字项走 Miuix 滚轮选择器
-    SettingsNumber(
-        title = "默认搜索结果数（1-10）",
-        value = draft.webSearchMaxResults,
-        options = (WEB_RESULTS_MIN..WEB_RESULTS_MAX).toList(),
-        onValueChange = { onChange(draft.copy(webSearchMaxResults = it)) },
-    )
+            // 纯数字项走 Miuix 滚轮选择器
+            SettingsNumber(
+                title = "默认搜索结果数（1-10）",
+                value = draft.webSearchMaxResults,
+                options = (WEB_RESULTS_MIN..WEB_RESULTS_MAX).toList(),
+                onValueChange = { onChange(draft.copy(webSearchMaxResults = it)) },
+            )
 
-    SettingsNumber(
-        title = "联网超时（秒）",
-        value = draft.webSearchTimeoutSec,
-        options = (WEB_TIMEOUT_MIN_SEC..WEB_TIMEOUT_MAX_SEC step 5).toList(),
-        onValueChange = { onChange(draft.copy(webSearchTimeoutSec = it)) },
-    )
+            SettingsNumber(
+                title = "联网超时（秒）",
+                value = draft.webSearchTimeoutSec,
+                options = (WEB_TIMEOUT_MIN_SEC..WEB_TIMEOUT_MAX_SEC step 5).toList(),
+                onValueChange = { onChange(draft.copy(webSearchTimeoutSec = it)) },
+            )
+        }
+    }
 }
 
 /** 上下文窗口的候选：预设值 + 当前值（当前值可能来自自定义输入）。 */
@@ -282,18 +286,14 @@ private fun ContextProjectPage(draft: SettingsDraft, onChange: (SettingsDraft) -
         onCheckedChange = { onChange(draft.copy(autoCompact = it)) },
     )
 
-    val percentOptions = if (draft.autoCompact) {
-        (COMPACT_PERCENT_MIN..COMPACT_PERCENT_MAX step 5).toList()
-    } else {
-        emptyList()
+    androidx.compose.animation.AnimatedVisibility(visible = draft.autoCompact) {
+        SettingsNumber(
+            title = "自动压缩上限（50-100%，安全缓冲优先）",
+            value = draft.autoCompactPercent,
+            options = (COMPACT_PERCENT_MIN..COMPACT_PERCENT_MAX step 5).toList(),
+            onValueChange = { onChange(draft.copy(autoCompactPercent = it)) },
+        )
     }
-    SettingsNumber(
-        title = "自动压缩上限（50-100%，安全缓冲优先）",
-        value = draft.autoCompactPercent,
-        options = percentOptions,
-        onValueChange = { onChange(draft.copy(autoCompactPercent = it)) },
-        summary = if (draft.autoCompact) null else "已关闭自动压缩，此项不生效。",
-    )
 
     ProjectPathField(draft, onChange)
     CustomSystemPromptField(draft, onChange)
@@ -363,6 +363,11 @@ private fun ExtensionsPage(onNavigate: (String) -> Unit) {
         title = "Model Context Protocol（MCP）",
         valueText = "MCP 服务器配置",
         onClick = { onNavigate("mcp") },
+    )
+    SettingsEntry(
+        title = "关于 ZhiCode",
+        valueText = "智蛛代码 · Miuix UI",
+        onClick = {},
     )
 }
 
