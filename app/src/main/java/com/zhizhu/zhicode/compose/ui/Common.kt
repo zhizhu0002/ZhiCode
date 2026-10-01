@@ -3,7 +3,6 @@ import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -218,7 +217,7 @@ fun ZhiChip(
     }
     val background by animateColorAsState(
         targetValue = targetBackground,
-        animationSpec = tween(ZhiMotion.FAST),
+        animationSpec = ZhiMotion.colorSpec,
         label = "chipBackground",
     )
     val foreground = when {
@@ -254,7 +253,7 @@ fun ZhiSmallPill(
     val scheme = MiuixTheme.colorScheme
     val foreground by animateColorAsState(
         targetValue = if (highlighted) scheme.primary else scheme.onSurfaceVariantSummary,
-        animationSpec = tween(ZhiMotion.FAST),
+        animationSpec = ZhiMotion.colorSpec,
         label = "pillForeground",
     )
     ZhiPillSurface(

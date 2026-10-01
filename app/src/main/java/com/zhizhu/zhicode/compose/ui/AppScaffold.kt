@@ -1,14 +1,5 @@
 package com.zhizhu.zhicode.compose.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.fadeOut
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.isSystemInDarkTheme
 import com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.McpConfigOverlay
@@ -34,6 +25,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
@@ -56,6 +49,8 @@ import top.yukonga.miuix.kmp.nav.core.NavController
 import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
 import top.yukonga.miuix.kmp.nav.core.NavKey
 import top.yukonga.miuix.kmp.nav.core.navBackStackOf
+import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
+import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
 import top.yukonga.miuix.kmp.nav.transition.NavTransitions
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
@@ -192,14 +187,36 @@ private fun ZhiCodeScreen(
         }
     }
 
+    // ---- 正交效果层（圆角裁剪 + 调暗）与手势返回方向 ----
+    //
+    // 照官方 example（`AppContent.kt`）的写法：
+    //  · 圆角跟随**设备屏幕圆角** —— `rememberNavSystemCornerRadius()`，平台报 0
+    //    （方角屏 / 非 Android）时就不裁。此前写死 16dp：在圆角更大的机器上会
+    //    多切一块，在方屏上又白裁一圈，都不像系统。
+    //  · `dimAmount` 保持官方滑动式转场的 0.5（卡片式才用 0.2/0.8）。
+    //  · `backdropColor` 用**应用背板色**：被覆盖页向左视差 1/4 宽后露出的那一条
+    //    读起来应当是"页面之外"，所以取与窗口底色同一层的颜色，而不是面板纯黑/纯白。
+    val navCornerRadius = rememberNavSystemCornerRadius()
+    val navBackdrop = ZhiColors.backdrop()
+    val navEffects = remember(navCornerRadius, navBackdrop) {
+        NavDisplayEffects(
+            cornerClipRadius = navCornerRadius,
+            dimAmount = 0.5f,
+            backdropColor = navBackdrop,
+        )
+    }
+    // 滑动关闭是 **opt-in**（Miuix 默认全关）。方向是**物理方向**、不随布局方向镜像，
+    // 所以按当前布局方向在 LTR / RTL 之间选 —— 与官方 example 同一段逻辑。
+    val swipeBack = when (LocalLayoutDirection.current) {
+        LayoutDirection.Rtl -> NavSwipeDirection.RightToLeft
+        else -> NavSwipeDirection.LeftToRight
+    }
+
     NavDisplay(
         backStack = nav.backStack,
         modifier = Modifier.fillMaxSize(),
         transition = NavTransitions.MiuixDefault,
-        effects = NavDisplayEffects(
-            enableCornerClip = true,
-            cornerClipRadius = 16.dp,
-        ),
+        effects = navEffects,
         onBack = {
             // 系统返回：按当前栈顶逐级回退，并同步关掉 VM 的对应状态。
             // 只有 root（工作区）时把返回交还给系统（退出应用）。
@@ -286,7 +303,9 @@ private fun ZhiCodeScreen(
         }
         }
         }
-        entry<SettingsKey.Hub> {
+        // 设置页与它的二级页开启边缘滑动返回（Miuix 的 opt-in）；root 工作区不开 ——
+        // 它下面没有可回退的页，而内部已经有侧栏抽屉与面板切换在横向上处理手势。
+        entry<SettingsKey.Hub>(swipeDismiss = swipeBack) {
             SettingsDialog(
                 draft = settingsUi,
                 onChange = viewModel::setSettingsDraft,
@@ -295,7 +314,7 @@ private fun ZhiCodeScreen(
                 onNavigate = viewModel::navigateFromSettings,
             )
         }
-        entry<SettingsKey.Api> {
+        entry<SettingsKey.Api>(swipeDismiss = swipeBack) {
             ApiConfigOverlay(
                 config = apiUi,
                 onDismiss = viewModel::closeApiConfig,
@@ -308,7 +327,7 @@ private fun ZhiCodeScreen(
                 onCancelForm = viewModel::cancelApiProfileForm,
             )
         }
-        entry<SettingsKey.Mcp> {
+        entry<SettingsKey.Mcp>(swipeDismiss = swipeBack) {
             McpConfigOverlay(
                 config = mcpUi,
                 onDismiss = viewModel::closeMcpConfig,
@@ -321,7 +340,7 @@ private fun ZhiCodeScreen(
                 onCancelForm = viewModel::cancelMcpForm,
             )
         }
-        entry<SettingsKey.Skills> {
+        entry<SettingsKey.Skills>(swipeDismiss = swipeBack) {
             SkillsOverlay(
                 state = skillsUi,
                 onDismiss = viewModel::closeSkills,
@@ -337,7 +356,7 @@ private fun ZhiCodeScreen(
                 onCancelEdit = viewModel::cancelSkillEdit,
             )
         }
-        entry<SettingsKey.RoleCards> {
+        entry<SettingsKey.RoleCards>(swipeDismiss = swipeBack) {
             RoleCardsOverlay(
                 state = roleCardsUi,
                 onDismiss = viewModel::closeRoleCards,
@@ -351,7 +370,7 @@ private fun ZhiCodeScreen(
                 onCancelEditor = viewModel::cancelRoleCardEditor,
             )
         }
-        entry<SettingsKey.Memory> {
+        entry<SettingsKey.Memory>(swipeDismiss = swipeBack) {
             MemoryOverlay(
                 state = memoryUi,
                 onDismiss = viewModel::closeMemory,

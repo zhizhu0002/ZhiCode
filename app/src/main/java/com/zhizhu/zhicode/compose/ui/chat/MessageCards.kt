@@ -4,8 +4,6 @@ import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
@@ -187,7 +185,7 @@ fun AssistantCard(
             modifier = Modifier
                 .weight(1f)
                 .animateContentSize(
-                    animationSpec = tween(ZhiMotion.EXPAND, easing = FastOutSlowInEasing),
+                    animationSpec = ZhiMotion.sizeSpec,
                 ),
         ) {
             if (item.thinking.isNotEmpty() || item.processSteps.isNotEmpty()) {
@@ -275,7 +273,7 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
             // 展开/折叠走动画，高度平滑变化
             Column(
                 modifier = Modifier.animateContentSize(
-                    animationSpec = tween(ZhiMotion.EXPAND, easing = FastOutSlowInEasing),
+                    animationSpec = ZhiMotion.sizeSpec,
                 ),
             ) {
                 if (item.processSteps.isNotEmpty()) {
@@ -329,7 +327,7 @@ fun ToolGroupCard(
             .fillMaxWidth()
             .padding(vertical = 4.dp)
             .animateContentSize(
-                animationSpec = tween(ZhiMotion.EXPAND, easing = FastOutSlowInEasing),
+                animationSpec = ZhiMotion.sizeSpec,
             ),
         cornerRadius = ZhiRadius.card,
         insideMargin = GroupMargin,
@@ -387,7 +385,7 @@ fun ToolGroupCard(
         if (anyExpanded) {
             Column(
                 modifier = Modifier.animateContentSize(
-                    animationSpec = tween(ZhiMotion.EXPAND, easing = FastOutSlowInEasing),
+                    animationSpec = ZhiMotion.sizeSpec,
                 ),
             ) {
                 item.tools.forEach { tool ->
@@ -437,7 +435,7 @@ private fun ToolRow(
             .fillMaxWidth()
             .padding(start = 20.dp, top = 1.dp, end = 2.dp, bottom = 4.dp)
             .animateContentSize(
-                animationSpec = tween(ZhiMotion.EXPAND, easing = FastOutSlowInEasing),
+                animationSpec = ZhiMotion.sizeSpec,
             ),
     ) {
         Row(

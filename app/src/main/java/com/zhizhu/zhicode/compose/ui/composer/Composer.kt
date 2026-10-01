@@ -3,9 +3,6 @@ package com.zhizhu.zhicode.compose.ui.composer
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.EaseOutCubic
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -106,13 +103,13 @@ fun Composer(
         AnimatedVisibility(
             visible = state.slashQuery != null && state.slashMatches.isNotEmpty(),
             enter = expandVertically(
-                animationSpec = tween(ZhiMotion.EXPAND, easing = EaseOutCubic),
+                animationSpec = ZhiMotion.sizeSpec,
                 expandFrom = Alignment.Bottom,
-            ) + fadeIn(tween(ZhiMotion.FAST)),
+            ) + fadeIn(ZhiMotion.fadeInSpec),
             exit = shrinkVertically(
-                animationSpec = tween(ZhiMotion.FAST),
+                animationSpec = ZhiMotion.sizeSpec,
                 shrinkTowards = Alignment.Bottom,
-            ) + fadeOut(tween(ZhiMotion.FAST)),
+            ) + fadeOut(ZhiMotion.fadeOutSpec),
         ) {
             SlashPalette(matches = state.slashMatches, onPick = onPickSlash)
         }
@@ -134,15 +131,15 @@ fun Composer(
                 modifier = Modifier
                     .fillMaxWidth()
                     .animateContentSize(
-                        animationSpec = tween(ZhiMotion.EXPAND, easing = FastOutSlowInEasing),
+                        animationSpec = ZhiMotion.sizeSpec,
                     )
                     .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 5.dp),
             ) {
             // 附件条随附件增减平滑展开/收起
             AnimatedVisibility(
                 visible = state.attachments.isNotEmpty(),
-                enter = expandVertically(tween(ZhiMotion.EXPAND)) + fadeIn(tween(ZhiMotion.FAST)),
-                exit = shrinkVertically(tween(ZhiMotion.FAST)) + fadeOut(tween(ZhiMotion.FAST)),
+                enter = expandVertically(ZhiMotion.sizeSpec) + fadeIn(ZhiMotion.fadeInSpec),
+                exit = shrinkVertically(ZhiMotion.sizeSpec) + fadeOut(ZhiMotion.fadeOutSpec),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
@@ -290,10 +287,10 @@ fun Composer(
                 AnimatedVisibility(
 
                     visible = state.composerBusy,
-                    enter = fadeIn(tween(ZhiMotion.FAST)) + expandHorizontally(tween(ZhiMotion.EXPAND)) +
-                        scaleIn(initialScale = 0.7f, animationSpec = tween(ZhiMotion.EXPAND)),
-                    exit = fadeOut(tween(ZhiMotion.FAST)) + shrinkHorizontally(tween(ZhiMotion.FAST)) +
-                        scaleOut(targetScale = 0.7f, animationSpec = tween(ZhiMotion.FAST)),
+                    enter = fadeIn(ZhiMotion.fadeInSpec) + expandHorizontally(ZhiMotion.sizeSpec) +
+                        scaleIn(initialScale = 0.7f, animationSpec = ZhiMotion.scaleEnterSpec),
+                    exit = fadeOut(ZhiMotion.fadeOutSpec) + shrinkHorizontally(ZhiMotion.sizeSpec) +
+                        scaleOut(targetScale = 0.7f, animationSpec = ZhiMotion.scaleExitSpec),
                 ) {
                     ZhiFilledIconButton(
                         icon = ZhiIcons.stop,

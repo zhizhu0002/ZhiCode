@@ -1,9 +1,6 @@
 package com.zhizhu.zhicode.compose.ui
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.EaseOutCubic
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -47,8 +44,8 @@ internal fun ZhiSideDrawer(
         // 传 indication = null 保持"只有压暗、不出现涟漪"的原有效果。
         AnimatedVisibility(
             visible = open,
-            enter = fadeIn(tween(ZhiMotion.FAST)),
-            exit = fadeOut(tween(ZhiMotion.FAST)),
+            enter = fadeIn(ZhiMotion.fadeInSpec),
+            exit = fadeOut(ZhiMotion.fadeOutSpec),
         ) {
             Surface(
                 onClick = onClose,
@@ -65,11 +62,11 @@ internal fun ZhiSideDrawer(
         AnimatedVisibility(
             visible = open,
             enter = slideInHorizontally(
-                animationSpec = tween(ZhiMotion.MEDIUM, easing = EaseOutCubic),
-            ) { -it } + fadeIn(tween(ZhiMotion.FAST)),
+                animationSpec = ZhiMotion.enterSpec,
+            ) { -it } + fadeIn(ZhiMotion.fadeInSpec),
             exit = slideOutHorizontally(
-                animationSpec = tween(ZhiMotion.EXPAND, easing = FastOutSlowInEasing),
-            ) { -it } + fadeOut(tween(ZhiMotion.FAST)),
+                animationSpec = ZhiMotion.exitSpec,
+            ) { -it } + fadeOut(ZhiMotion.fadeOutSpec),
             modifier = Modifier.align(Alignment.CenterStart),
         ) {
             Surface(

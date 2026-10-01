@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.res.Configuration
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -308,8 +307,8 @@ internal fun BoxScope.TerminalDrawer(
     val palette = chrome()
     AnimatedVisibility(
         visible = open,
-        enter = fadeIn(tween(ZhiMotion.FAST)),
-        exit = fadeOut(tween(ZhiMotion.FAST)),
+        enter = fadeIn(ZhiMotion.fadeInSpec),
+        exit = fadeOut(ZhiMotion.fadeOutSpec),
     ) {
         Box(
             modifier = Modifier
@@ -320,8 +319,8 @@ internal fun BoxScope.TerminalDrawer(
     }
     AnimatedVisibility(
         visible = open,
-        enter = slideInHorizontally(tween(ZhiMotion.MEDIUM)) { -it },
-        exit = slideOutHorizontally(tween(ZhiMotion.MEDIUM)) { -it },
+        enter = slideInHorizontally(ZhiMotion.enterSpec) { -it },
+        exit = slideOutHorizontally(ZhiMotion.exitSpec) { -it },
         modifier = Modifier.align(Alignment.CenterStart).width(TerminalDrawerWidth).fillMaxHeight(),
     ) {
         Surface(color = palette.drawer, modifier = Modifier.fillMaxSize()) {

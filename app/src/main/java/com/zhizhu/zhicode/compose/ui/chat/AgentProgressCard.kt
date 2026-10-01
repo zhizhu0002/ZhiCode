@@ -1,9 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.chat
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -138,7 +136,7 @@ private fun CardBody(
         // 进度条平滑推进
         val animatedFraction by animateFloatAsState(
             targetValue = progress,
-            animationSpec = tween(ZhiMotion.MEDIUM, easing = FastOutSlowInEasing),
+            animationSpec = ZhiMotion.progressSpec,
             label = "agentProgress",
         )
         ZhiUsageBar(fraction = animatedFraction, modifier = Modifier.padding(top = 6.dp))

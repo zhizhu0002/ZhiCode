@@ -3,8 +3,6 @@ package com.zhizhu.zhicode.compose.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.EaseOutCubic
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -99,10 +97,10 @@ internal fun ChatArea(
         ) {
             AnimatedVisibility(
                 visible = floating,
-                enter = slideInVertically(tween(ZhiMotion.MEDIUM, easing = EaseOutCubic)) { it / 2 } +
-                    fadeIn(tween(ZhiMotion.MEDIUM)),
-                exit = slideOutVertically(tween(ZhiMotion.FAST)) { it / 2 } +
-                    fadeOut(tween(ZhiMotion.FAST)),
+                enter = slideInVertically(ZhiMotion.enterSpec) { it / 2 } +
+                    fadeIn(ZhiMotion.fadeInSpec),
+                exit = slideOutVertically(ZhiMotion.exitSpec) { it / 2 } +
+                    fadeOut(ZhiMotion.fadeOutSpec),
             ) {
                 FloatingAgentStatus(
                     status = state.workingStatus.orEmpty(),

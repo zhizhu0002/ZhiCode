@@ -2,8 +2,6 @@ package com.zhizhu.zhicode.compose.ui.panes
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -147,7 +145,7 @@ private fun DiffFileCard(
             .fillMaxWidth()
             .padding(bottom = 8.dp)
             .animateContentSize(
-                animationSpec = tween(ZhiMotion.EXPAND, easing = FastOutSlowInEasing),
+                animationSpec = ZhiMotion.sizeSpec,
             ),
         cornerRadius = ZhiRadius.card,
         insideMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
