@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
+
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -33,6 +33,8 @@ import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -140,16 +142,16 @@ fun ZhiSandboxScreen(
     onConfirmAction: (SandboxDialog.ConfirmAction) -> Unit,
     onConfirmFridaInstall: (SandboxDialog.FridaInstall) -> Unit,
 ) {
-    Surface(modifier = Modifier.fillMaxSize(), color = MiuixTheme.colorScheme.background) {
-        Column(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
-            TopBar(onBack = onBack, onDiagnostics = onDiagnostics)
-            ZhiHorizontalDivider()
-
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
-                contentPadding = PaddingValues(top = 10.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+    Scaffold(
+        topBar = {
+            SandboxTopBar(onBack = onBack, onDiagnostics = onDiagnostics)
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
+            contentPadding = PaddingValues(top = 10.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
                 item { StatusLine(state.status, state.statusTone) }
 
                 // 两个开关放同一张卡片，与设置页的「分组卡片」观感一致。
@@ -224,7 +226,6 @@ fun ZhiSandboxScreen(
                         )
                     }
                 }
-            }
         }
     }
 
@@ -244,33 +245,28 @@ fun ZhiSandboxScreen(
  * 而 ArrowUp 与左箭头是同一个字形旋转关系，转一下比再塞一个自绘 path 更省。
  */
 @Composable
-private fun TopBar(onBack: () -> Unit, onDiagnostics: () -> Unit) {
+private fun SandboxTopBar(onBack: () -> Unit, onDiagnostics: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
-    Row(
-        modifier = Modifier.fillMaxWidth().height(48.dp).padding(start = 4.dp, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ZhiIconButton(
-            icon = ZhiIcons.upLevel,
-            description = "返回",
-            onClick = onBack,
-            iconSize = 18.dp,
-            compact = 36.dp,
-            modifier = Modifier.rotate(-90f),
-        )
-        Text(
-            text = "ZhiCode 沙箱",
-            color = scheme.onBackground,
-            fontSize = ZhiTextScale.TitleSmall,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f).padding(start = 6.dp),
-        )
-        TextButton(
-            text = "诊断",
-            onClick = onDiagnostics,
-            cornerRadius = ZhiRadius.button,
-        )
-    }
+    SmallTopAppBar(
+        title = "ZhiCode 沙箱",
+        color = scheme.surface,
+        navigationIcon = {
+            ZhiIconButton(
+                icon = ZhiIcons.upLevel,
+                description = "返回",
+                onClick = onBack,
+                iconSize = 18.dp,
+                modifier = Modifier.rotate(-90f),
+            )
+        },
+        actions = {
+            TextButton(
+                text = "诊断",
+                onClick = onDiagnostics,
+                cornerRadius = ZhiRadius.button,
+            )
+        },
+    )
 }
 
 /** 状态行：后端状态、重试进度、错误原因都落在这里。 */
