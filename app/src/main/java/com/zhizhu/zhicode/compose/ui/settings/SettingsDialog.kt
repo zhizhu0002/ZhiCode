@@ -3,18 +3,15 @@
 package com.zhizhu.zhicode.compose.ui.settings
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,8 +35,6 @@ import com.zhizhu.zhicode.compose.model.WEB_TIMEOUT_MIN_SEC
 import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
-import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
@@ -163,31 +158,31 @@ private fun AllSettingsPages(
     // rikkahub 式 hub：主页主要是「导航行（图标+标题+副标题+箭头）」，
     // 少数高频即时项（主题模式）内联；细节全部下放到二级页与原分组。
     // 顺序按使用频率：模型最先，扩展收尾。
-    SettingsGroup("模型与对话") { ModelPermissionPage(draft, onChange, onNavigate) }
-    SettingsGroup("外观") { AppearancePage(draft, onChange) }
+    // rikkahub 的分组顺序：通用最先（主题/联网这类看一眼就走的），模型服务其次，
+    // 扩展收尾。组名也从功能视角改成 rikkahub 的叫法。
+    SettingsGroup("通用") { GeneralPage(draft, onChange) }
+    SettingsGroup("模型与服务") { ModelServicePage(draft, onChange, onNavigate) }
     SettingsGroup("上下文与项目") { ContextProjectPage(draft, onChange) }
-    SettingsGroup("联网") { NetworkPage(draft, onChange) }
     SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) }
     SettingsGroup("扩展") { ExtensionsPage(onNavigate) }
 }
 
+/** 通用组：主题模式 + 联网搜索（rikkahub 的 generalSettings / search 合并）。 */
 @Composable
-private fun AppearancePage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
+private fun GeneralPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
     SettingsChoice(
         title = "主题模式",
         options = ThemeMode.entries.map(::themeLabel),
         selectedIndex = ThemeMode.entries.indexOf(draft.themeMode),
         onSelect = { onChange(draft.copy(themeMode = ThemeMode.entries[it])) },
-        // summary 按官方 demo 惯例保持一句话：BasicComponent 的布局给行尾
-        // 取值/箭头最多 60% 行宽，长说明折行后必与右侧取值挤压。
-        summary = "右上角 ☼/☾ 可快速切换",
+        // 不写「右上角 ☼/☾ 可快速切换」——顶栏早就没有这个快捷键了，
+        // 指向不存在入口的说明比没有说明更糟。
     )
-
-
+    NetworkPage(draft, onChange)
 }
 
 @Composable
-private fun ModelPermissionPage(
+private fun ModelServicePage(
     draft: SettingsDraft,
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
@@ -405,17 +400,13 @@ private fun ExtensionsPage(onNavigate: (String) -> Unit) {
         icon = ZhiIcons.roleCard,
         onClick = { onNavigate("roleCards") },
     )
+    // 「关于」行已删：onClick 是空的，点了没反应——rikkahub 的 About 页有
+    // 版本/开源许可/检查更新等真实内容，我们暂时没有可放的，空壳不如没有。
     SettingsIconEntry(
         title = "记忆文件 · ZhiCode.md",
         summary = "项目级与用户级说明文件",
         icon = ZhiIcons.edit,
         onClick = { onNavigate("memory") },
-    )
-    SettingsIconEntry(
-        title = "关于 ZhiCode",
-        summary = "智蛛代码 · Miuix UI",
-        icon = ZhiIcons.info,
-        onClick = {},
     )
 }
 
