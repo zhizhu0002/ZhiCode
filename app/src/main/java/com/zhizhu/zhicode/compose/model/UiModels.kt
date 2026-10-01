@@ -346,7 +346,24 @@ data class WorkspaceUiState(
     val attachQuery: String = "",
     /** 附加面板当前的搜索结果（已由 ViewModel 在 IO 线程算好）。 */
     val attachHits: List<FileHit> = emptyList(),
+    /**
+     * 最后一次操作反馈（「已切换 API 配置」「保存失败：…」）。
+     *
+     * ⚠️ 它**必须被渲染出来**，见 `ui/MessageBar.kt`。这里记一段历史：
+     * 它曾经由 Miuix Snackbar 消费，后来因为"浮层挡住底部输入器"被整个移除，
+     * 于是 29 处 `copy(message = …)` 全都在往一个没人看的地方写 ——
+     * 用户点了「保存」失败，界面上什么都不会发生。现在改为在悬浮输入器**上方**内联显示，
+     * 既有反馈又不遮输入器。
+     */
     val message: String? = null,
+    /**
+     * [message] 是不是一条**错误**（决定用红底还是中性的 Miuix 强调色）。
+     *
+     * <p>为什么不从文案里猜（比如含"失败"就当错误）：那种启发式一定会在
+     * 「已重试失败的那条命令」这类正常提示上判错，而且文案改一个字就静默失效。
+     * 判断必须由**知道语义的那一处**给出。
+     */
+    val messageIsError: Boolean = false,
     val busySessionIds: Set<String> = emptySet(),
     /** 设置页新增的持久化项（见 [AppSettings]）。 */
     val settings: AppSettings = AppSettings(),

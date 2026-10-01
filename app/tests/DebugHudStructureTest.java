@@ -49,6 +49,9 @@ public final class DebugHudStructureTest {
     /** 悬浮任务卡：条数与"画不画任务行"这两个决定都在这里。 */
     private static final String AGENT_PROGRESS_CARD = SRC + "ui/chat/AgentProgressCard.kt";
 
+    /** 操作反馈条。事故见 §15：`state.message` 曾被写 29 次却没人渲染。 */
+    private static final String MESSAGE_BAR = SRC + "ui/MessageBar.kt";
+
     /** 工具实现所在目录：脚本里点名的工具名要在这里能找到出处。 */
     private static final String TOOLS_DIR = "app/src/main/java/com/termux/app/zhicode/tools";
 
@@ -429,6 +432,41 @@ public final class DebugHudStructureTest {
         requireContains(progressCard.substring(windowHelper, windowHelper + 600), "if (max <= 0) return emptyList()",
                 "max <= 0 必须返回**空列表**（而不是\"全部\"）："
                         + "调用点弄错时至少会让\"还有 N 条\"的提示兜住，不会静默吞内容");
+
+        // ---- 15. 操作反馈必须真的被渲染出来 -------------------------------
+        //
+        // 事故：Snackbar 因为"浮层挡输入器"被删掉，`state.message` 却留着 ——
+        // 29 处 `copy(message = …)`（保存失败、附件读不了、没有可复制的内容…）
+        // 从此写进一个**没人渲染**的字段，用户点保存失败时界面毫无反应。
+        // 这是最难自查的一类 bug：字段有值、代码能编译、单测也过，只有人眼能发现。
+        // 所以这里钉住三件事：写方有语义标志、读方存在、读方被真的调用。
+        String messageBar = stripComments(read(root, MESSAGE_BAR));
+        requireContains(messageBar, "fun MessageBar(",
+                MESSAGE_BAR + " 必须提供 MessageBar 组合函数");
+        requireContains(messageBar, "scheme.errorContainer",
+                "错误提示必须走主题的 errorContainer，不能在代码里写死红色");
+        requireContains(messageBar, "delay(",
+                "提示条必须自己超时消失：否则一次失败会永久占着输入器上方那条空间");
+
+        String chatAreaMsg = stripComments(read(root, CHAT_AREA));
+        requireContains(chatAreaMsg, "MessageBar(",
+                CHAT_AREA + " 必须真的调用 MessageBar —— 光有组件不算修复，"
+                        + "这次事故正是\"有字段没人渲染\"，必须钉在调用点上");
+        requireContains(chatAreaMsg, "message = state.message",
+                "调用点必须接 state.message（而不是另起一个字段）");
+        requireContains(chatAreaMsg, "onDismiss = { viewModel.clearMessage() }",
+                "提示条要能被点掉/自动关掉，必须接上 clearMessage");
+
+        String vmForMessage = stripComments(read(root, VIEW_MODEL));
+        requireContains(vmForMessage, "fun clearMessage(",
+                VIEW_MODEL + " 必须提供 clearMessage");
+        requireContains(vmForMessage, "current.message != text",
+                "clearMessage 必须先比对文案再清：否则一次无关点击会把刚弹出的新提示也抹掉");
+
+        String modelsForMessage = stripComments(read(root, MODELS));
+        requireContains(modelsForMessage, "val messageIsError: Boolean",
+                MODELS + " 必须记录 message 的**语义**（是不是错误）："
+                        + "从文案里猜（含\"失败\"就当错误）会在正常提示上判错，且改一个字就静默失效");
     }
 
     /** tools/ 下每个工具自己声明的名字（`public String name() { return "Read"; }`）。 */

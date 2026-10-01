@@ -533,7 +533,7 @@ class WorkspaceViewModel(
                     }
                 },
                 onFailure = { error ->
-                    _state.update { it.copy(message = "图片读取失败：${error.message ?: "未知原因"}") }
+                    _state.update { it.copy(message = "图片读取失败：${error.message ?: "未知原因"}", messageIsError = true) }
                 },
             )
         }
@@ -659,7 +659,7 @@ class WorkspaceViewModel(
                 }
             },
             onFailure = { error ->
-                _state.update { it.copy(message = "创建失败：${error.message ?: "未知原因"}") }
+                _state.update { it.copy(message = "创建失败：${error.message ?: "未知原因"}", messageIsError = true) }
             },
         )
     }
@@ -667,7 +667,7 @@ class WorkspaceViewModel(
     fun editSkill(entry: SkillEntry) {
         val s = _state.value
         val body = SkillStore.read(s.projectPath, entry.scope, entry.name).getOrElse { error ->
-            _state.update { it.copy(message = "打开失败：${error.message ?: "未知原因"}") }
+            _state.update { it.copy(message = "打开失败：${error.message ?: "未知原因"}", messageIsError = true) }
             return
         }
         _state.update {
@@ -723,7 +723,7 @@ class WorkspaceViewModel(
      */
     fun attachSkill(entry: SkillEntry) {
         val body = SkillStore.read(_state.value.projectPath, entry.scope, entry.name).getOrElse { error ->
-            _state.update { it.copy(message = "附加失败：${error.message ?: "未知原因"}") }
+            _state.update { it.copy(message = "附加失败：${error.message ?: "未知原因"}", messageIsError = true) }
             return
         }
         val id = nextId("skill")
@@ -813,7 +813,7 @@ class WorkspaceViewModel(
                 runCatching { engine.configure(engineOverrides()) }
             },
             onFailure = { error ->
-                _state.update { it.copy(message = "保存失败：${error.message ?: "未知原因"}") }
+                _state.update { it.copy(message = "保存失败：${error.message ?: "未知原因"}", messageIsError = true) }
             },
         )
     }
@@ -823,7 +823,7 @@ class WorkspaceViewModel(
         val context = getApplication<android.app.Application>()
         val result = RoleCardStore.save(context, RoleCardStore.list(context), card.id)
         if (result.isFailure) {
-            _state.update { it.copy(message = "启用失败：${result.exceptionOrNull()?.message ?: "未知原因"}") }
+            _state.update { it.copy(message = "启用失败：${result.exceptionOrNull()?.message ?: "未知原因"}", messageIsError = true) }
             return
         }
         roleCardOverride = card.content
@@ -835,7 +835,7 @@ class WorkspaceViewModel(
         val context = getApplication<android.app.Application>()
         val result = RoleCardStore.save(context, RoleCardStore.list(context), "")
         if (result.isFailure) {
-            _state.update { it.copy(message = "停用失败：${result.exceptionOrNull()?.message ?: "未知原因"}") }
+            _state.update { it.copy(message = "停用失败：${result.exceptionOrNull()?.message ?: "未知原因"}", messageIsError = true) }
             return
         }
         // 覆盖值置成空串（而不是 null）：null 表示"不覆盖"，那会退回配置里的旧值，
@@ -850,7 +850,7 @@ class WorkspaceViewModel(
         val wasActive = _state.value.roleCards?.activeId == card.id
         val result = RoleCardStore.delete(context, card.id)
         if (result.isFailure) {
-            _state.update { it.copy(message = "删除失败：${result.exceptionOrNull()?.message ?: "未知原因"}") }
+            _state.update { it.copy(message = "删除失败：${result.exceptionOrNull()?.message ?: "未知原因"}", messageIsError = true) }
             return
         }
         if (wasActive) {
@@ -936,7 +936,7 @@ class WorkspaceViewModel(
     fun editMemory(file: MemoryFile) {
         val path = _state.value.projectPath
         val body = MemoryStore.read(path, file.scope).getOrElse { error ->
-            _state.update { it.copy(message = "打开失败：${error.message ?: "未知原因"}") }
+            _state.update { it.copy(message = "打开失败：${error.message ?: "未知原因"}", messageIsError = true) }
             return
         }
         _state.update {
@@ -1837,7 +1837,7 @@ class WorkspaceViewModel(
                 } else {
                     val tokens = parseTokenCount(arg)
                     if (tokens == null) {
-                        _state.update { it.copy(message = "请输入 128k、200k、1m、1.5m 这类格式") }
+                        _state.update { it.copy(message = "请输入 128k、200k、1m、1.5m 这类格式", messageIsError = true) }
                     } else {
                         _state.update { it.copy(contextWindow = tokens, message = "上下文窗口已设置为 ${formatTokens(tokens)}") }
                     }
@@ -1917,7 +1917,7 @@ class WorkspaceViewModel(
             it.kind == ChatKind.USER && it.body.isNotBlank()
         }
         if (lastUser == null) {
-            _state.update { it.copy(message = "没有可重试的问题") }
+            _state.update { it.copy(message = "没有可重试的问题", messageIsError = true) }
             return
         }
         _state.update { it.copy(composerText = lastUser.body) }
@@ -2196,7 +2196,7 @@ class WorkspaceViewModel(
             val result = ApiConfigStore.save(getApplication(), form)
             if (result.isFailure) {
                 val error = result.exceptionOrNull()
-                _state.update { it.copy(message = "保存失败：" + (error?.message ?: "未知原因")) }
+                _state.update { it.copy(message = "保存失败：" + (error?.message ?: "未知原因"), messageIsError = true) }
                 return@launch
             }
             val state = ApiConfigStore.read(getApplication())
@@ -2472,7 +2472,7 @@ class WorkspaceViewModel(
             val size = withContext(Dispatchers.IO) { runCatching { File(path).length() }.getOrDefault(0L) }
             val body = withContext(Dispatchers.IO) { FileBrowser.readTextForAttachment(path) }
             if (body == null) {
-                _state.update { it.copy(message = "附加失败：$name 不是文本文件或读不了") }
+                _state.update { it.copy(message = "附加失败：$name 不是文本文件或读不了", messageIsError = true) }
                 return@launch
             }
             val id = nextId("file")
@@ -2629,7 +2629,7 @@ class WorkspaceViewModel(
             it.kind == ChatKind.ASSISTANT && it.body.isNotBlank()
         }
         if (latest == null) {
-            _state.update { it.copy(message = "还没有可复制的回复") }
+            _state.update { it.copy(message = "还没有可复制的回复", messageIsError = true) }
             return
         }
         copyText(latest.body, "智蛛回复")
@@ -2768,7 +2768,7 @@ class WorkspaceViewModel(
                     "复制" -> copyMessage(target)
                     "再次发送" -> {
                         // 复用用户消息的原文重发；工具组这类没有正文的目标不支持。
-                        if (target.body.isBlank()) _state.update { it.copy(message = "这条消息没有可重发的内容") }
+                        if (target.body.isBlank()) _state.update { it.copy(message = "这条消息没有可重发的内容", messageIsError = true) }
                         else {
                             _state.update { it.copy(composerText = target.body) }
                             send()
@@ -2912,7 +2912,7 @@ class WorkspaceViewModel(
     fun openSession(session: SessionSummary) {
         val file = File(session.id)
         if (!file.isFile) {
-            _state.update { it.copy(message = "会话文件不存在：${session.id}") }
+            _state.update { it.copy(message = "会话文件不存在：${session.id}", messageIsError = true) }
             refreshSessions()
             return
         }
@@ -3460,9 +3460,23 @@ class WorkspaceViewModel(
 
     // ---------- 操作反馈 ----------
     //
-    // 原先这里由 Snackbar 消费 message，但浮层会遮挡底部输入器，已移除。
-    // state.message 继续记录最后一次操作结果（「已切换 API 配置」「模型：xxx」等），
-    // 留作将来接内联提示的缓冲；不接也不会渲染出任何东西。
+    // 这段注释曾经写着"原先由 Snackbar 消费 message，但浮层会遮挡底部输入器，已移除"，
+    // 于是 29 处 `copy(message = …)` 全都在往一个没人渲染的地方写：保存失败时界面
+    // **一点反应都没有**。现在由 `ui/MessageBar.kt` 在悬浮输入器**上方**内联显示 ——
+    // 既不遮输入器，也不再是死代码。
+
+    /**
+     * 手动关掉当前提示（点提示条本身，或自动超时）。
+     *
+     * <p>要判空再更新，而不是无条件 `copy(message = null)`：否则一次无关的点击会把
+     * 刚刚弹出的**新**提示也抹掉（点旧位置、提示刚换成新的那种竞态）。
+     */
+    fun clearMessage(text: String? = null) {
+        _state.update { current ->
+            if (text != null && current.message != text) current
+            else current.copy(message = null, messageIsError = false)
+        }
+    }
 
     companion object {
         fun clockLabel(): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())

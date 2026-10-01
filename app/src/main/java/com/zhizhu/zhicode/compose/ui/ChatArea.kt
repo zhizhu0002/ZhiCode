@@ -145,6 +145,19 @@ internal fun ChatArea(
                 )
             }
 
+            // 操作反馈条：夹在任务卡与输入器之间。
+            //
+            // 为什么放这一层而不是 SnackbarHost：Snackbar 是覆盖在内容之上的浮层，
+            // 会压住底部输入器（这正是它当初被删掉的原因）；而放在这个 Column 里
+            // 它参与布局，长高只会把输入器往上顶，永远不遮挡。
+            MessageBar(
+                message = state.message,
+                isError = state.messageIsError,
+                onDismiss = { viewModel.clearMessage() },
+                wide = wide,
+                glass = glass,
+            )
+
             // 悬浮输入器
             ComposerHost(state = state, viewModel = viewModel, wide = wide, glass = glass)
         }
