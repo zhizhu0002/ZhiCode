@@ -4,8 +4,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.fadeOut
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.isSystemInDarkTheme
 import com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay
@@ -203,16 +204,36 @@ private fun ZhiCodeScreen(
         }
     }
 
-    // ---- 返回键路由（最优先的页面在最上面）----
-    // 预测性返回手势来到 Compose 层时，谁在最上层谁消费：二级页 → 设置主页 → 沙箱/环境页。
-    // 之前没有任何 BackHandler，手势直接落到 Activity，整页设置被一把关掉——
-    // 用户感觉是「从二级页返回却退到了主页」，实际是退到了应用之外/主界面。
+    // ---- 返回键路由 ----
+    // OnBackPressedDispatcher 的优先级是「**后注册的先消费**」：
+    // 先注册 hub（设置主页），再注册各二级页 —— 这样在二级页里按返回时
+    // 二级页的回调先入栈、先被分发，关掉的是二级页而不是整页设置。
+    // 之前顺序写反了（二级页在前），按返回直接把整页设置一把关掉。
+    // 设置主页在**最前**注册（兜底层）；二级页从浅到深注册，
+    // 深层（编辑表单）最后注册，才能比列表态先拿到返回事件。
+    BackHandler(enabled = state.settingsOpen) { viewModel.closeSettings() }
     BackHandler(enabled = state.apiConfig != null) { viewModel.closeApiConfig() }
     BackHandler(enabled = state.mcpConfig != null) { viewModel.closeMcpConfig() }
     BackHandler(enabled = state.skills != null) { viewModel.closeSkills() }
     BackHandler(enabled = state.roleCards != null) { viewModel.closeRoleCards() }
     BackHandler(enabled = state.memory != null) { viewModel.closeMemory() }
-    BackHandler(enabled = state.settingsOpen) { viewModel.closeSettings() }
+    // 二级页内部的深层态（表单/编辑器）比列表态更深，后注册先消费：
+    state.apiConfig?.let { cfg ->
+        BackHandler(enabled = cfg.form != null) { viewModel.cancelApiProfileForm() }
+    }
+    state.mcpConfig?.let { cfg ->
+        BackHandler(enabled = cfg.form != null) { viewModel.cancelMcpForm() }
+    }
+    state.skills?.let { st ->
+        BackHandler(enabled = st.editing != null) { viewModel.cancelSkillEdit() }
+        BackHandler(enabled = st.createForm != null) { viewModel.cancelSkillCreate() }
+    }
+    state.roleCards?.let { st ->
+        BackHandler(enabled = st.editor != null) { viewModel.cancelRoleCardEditor() }
+    }
+    state.memory?.let { st ->
+        BackHandler(enabled = st.editing != null) { viewModel.cancelMemoryEdit() }
+    }
 
     
     // ---- 设置整页（K4：像 miuix 示例的 SettingsPage，覆盖全屏）----
@@ -224,8 +245,8 @@ private fun ZhiCodeScreen(
     lastSettingsDraft = settingsUi
     AnimatedVisibility(
         visible = state.settingsOpen,
-        enter = fadeIn(tween(ZhiMotion.MEDIUM)) + slideInVertically(tween(ZhiMotion.MEDIUM)) { it / 12 },
-        exit = fadeOut(tween(ZhiMotion.FAST)) + slideOutVertically(tween(ZhiMotion.FAST)) { it / 12 },
+        enter = fadeIn(tween(ZhiMotion.MEDIUM)) + scaleIn(initialScale = 0.94f, animationSpec = tween(ZhiMotion.MEDIUM)),
+        exit = fadeOut(tween(ZhiMotion.FAST)) + scaleOut(targetScale = 0.96f, animationSpec = tween(ZhiMotion.FAST)),
     ) {
         SettingsDialog(
             draft = settingsUi,
@@ -335,8 +356,8 @@ private fun SubPageHost(
 ) {
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(tween(ZhiMotion.MEDIUM)) + slideInVertically(tween(ZhiMotion.MEDIUM)) { it / 14 },
-        exit = fadeOut(tween(ZhiMotion.FAST)) + slideOutVertically(tween(ZhiMotion.FAST)) { it / 14 },
+        enter = fadeIn(tween(ZhiMotion.MEDIUM)) + scaleIn(initialScale = 0.96f, animationSpec = tween(ZhiMotion.MEDIUM)),
+        exit = fadeOut(tween(ZhiMotion.FAST)),
     ) {
         content()
     }
