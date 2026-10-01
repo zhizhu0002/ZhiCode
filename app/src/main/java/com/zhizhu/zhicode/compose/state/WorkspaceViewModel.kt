@@ -1987,7 +1987,9 @@ class WorkspaceViewModel(
                 append("模型：").append(s.modelLabel).append('\n')
                 append("API 配置：").append(s.profileName)
                 append(if (s.apiKeyConfigured) "（已配置密钥）" else "（未配置密钥）").append('\n')
-                append("项目：").append(s.projectPath).append('\n')
+                // 只显示项目名：完整路径在沙箱里是 /data/user/0/<宿主>/blackbox/...
+                // 内部虚拟化路径，又长又吓人且用户无法据此操作（与 GitChanges 空态同理）。
+                append("项目：").append(s.projectPath.trimEnd('/').substringAfterLast('/')).append('\n')
                 append("上下文：").append(formatTokens(s.contextTokens))
                 append(" / ").append(formatTokens(s.contextWindow))
                 append(if (measured) "（API 实测用量）" else "（本地估算，尚未产生 API 用量）").append('\n')
