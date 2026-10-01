@@ -62,7 +62,6 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
 fun ZhiSidebar(
     state: WorkspaceUiState,
     onNewSession: () -> Unit,
-    onProjectHistory: () -> Unit,
     onProjectPath: () -> Unit,
     onOpenSession: (SessionSummary) -> Unit,
     onSessionActions: (SessionSummary) -> Unit,
@@ -91,8 +90,10 @@ fun ZhiSidebar(
                 emphasized = true,
                 onClick = onNewSession,
             )
-            SidebarRow(label = "当前项目上下文", icon = ZhiIcons.projectHistory, onClick = onProjectHistory)
-            SidebarRow(label = "手动添加 / 切换项目路径", icon = ZhiIcons.projectPath, onClick = onProjectPath)
+            // rikkahub 式语义化入口：直接开页面/动作，不走命令行通道。
+            // 「当前项目上下文」（旧 = 发 /resume）删了：项目历史列表就在下面，
+            // 同一目标两条路径会让用户困惑该点哪个；恢复会话直接点历史里的会话。
+            SidebarRow(label = "项目路径与会话", icon = ZhiIcons.projectPath, onClick = onProjectPath)
 
             ZhiSectionLabel(
                 text = "项目历史 · ${state.projectName}",
@@ -126,7 +127,7 @@ fun ZhiSidebar(
             }
 
             ZhiSectionLabel(
-                text = "工作区",
+                text = "扩展",
                 modifier = Modifier.padding(start = 8.dp, top = 10.dp, bottom = 2.dp),
             )
             SidebarRow(label = "技能", icon = ZhiIcons.skill, onClick = onSkills)
