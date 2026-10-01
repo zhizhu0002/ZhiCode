@@ -5,7 +5,9 @@ public final class SandboxControllerStartupRaceTest {
     Path r=Path.of(a.length==0?".":a[0]);
     String engine=Files.readString(r.resolve("app/src/main/java/com/zhizhu/zhicode/sandbox/ZhiSandbox.java"));
     String provider=Files.readString(r.resolve("app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxRpcService.java"));
-    String ui=Files.readString(r.resolve("app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxBoard.java"));
+    // 界面已从手写 View 改成 Compose（SandboxBoard.java → SandboxBoard.kt），
+    // 断言的语义没变（启动重试必须在），只是读取的文件后缀跟着改。
+    String ui=Files.readString(r.resolve("app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxBoard.kt"));
     String core=Files.readString(r.resolve("Bcore/src/main/java/top/niunaijun/blackbox/BlackBoxCore.java"));
     req(engine.contains("CountDownLatch READY_LATCH") && engine.contains("awaitReady(long timeoutMs)"),"controller readiness gate missing");
     req(engine.contains("ensureCreateScheduled()") && engine.contains("new Handler(Looper.getMainLooper())"),"main-loop engine creation scheduling missing");

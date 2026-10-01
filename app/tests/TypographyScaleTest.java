@@ -38,6 +38,37 @@ public final class TypographyScaleTest {
             "app/src/main/java/com/zhizhu/zhicode/compose";
 
     /**
+     * 另一处会自己搭主题栈的目录：沙箱管理界面。
+     *
+     * <p>它以前**不在**扫描范围内，于是本守卫对它是盲的 —— 而它恰恰就是“第二个主题栈”
+     * 真实出现过的地方：那个 Activity 根本没进 Miuix 主题树（没声明 `android:theme`，
+     * 继承了框架的 `Theme.Material`），于是开关是 Material v1 的青色、弹窗是平台样式。
+     * 盲点已经补上，现在这份名单必须**逐个写清理由**。
+     */
+    private static final String SANDBOX_ROOT =
+            "app/src/main/java/com/zhizhu/zhicode/sandbox";
+
+    private static final String APP_SCAFFOLD =
+            "app/src/main/java/com/zhizhu/zhicode/compose/ui/AppScaffold.kt";
+
+    /**
+     * 允许出现 `textStyles = …` 的文件 → 理由。
+     *
+     * <p>不是“放宽断言”：名单是闭合的，**多出一个就是红**，且新增的每一个都必须在这里
+     * 写下它为什么需要自己那一份字阶。当前两个都是 Activity 级的根主题（每个 Activity
+     * 都要自己套一次），没有任何一个界面级文件在其中。
+     */
+    private static final Map<String, String> THEME_ROOT_ALLOWED = new LinkedHashMap<>();
+
+    static {
+        THEME_ROOT_ALLOWED.put(APP_SCAFFOLD, "主界面根主题");
+        THEME_ROOT_ALLOWED.put(
+                SANDBOX_ROOT + "/SandboxBoard.kt",
+                "沙箱管理界面是独立启动的 Activity（引擎在 :zhisandbox，界面必须留在主进程），"
+                        + "拿不到 MainActivity 的 Compose 树，只能自己再套一次同一套主题栈");
+    }
+
+    /**
      * 允许保留裸 `fontSize = N.sp` 的文件 → 理由。
      *
      * <p>当前为空：115 处已全部迁到字阶档位。留这张表是为了让下一个例外
@@ -55,12 +86,29 @@ public final class TypographyScaleTest {
     }
 
     private static List<String> kotlinSources(String root) throws Exception {
-        try (Stream<Path> walk = Files.walk(Paths.get(root, UI_ROOT))) {
-            return walk.filter(p -> p.toString().endsWith(".kt"))
-                    .map(p -> Paths.get(root).relativize(p).toString())
-                    .sorted()
-                    .collect(Collectors.toList());
+        List<String> files = new ArrayList<>();
+        for (String dir : new String[]{UI_ROOT, SANDBOX_ROOT}) {
+            try (Stream<Path> walk = Files.walk(Paths.get(root, dir))) {
+                walk.filter(p -> p.toString().endsWith(".kt"))
+                        .map(p -> Paths.get(root).relativize(p).toString())
+                        .sorted()
+                        .forEach(files::add);
+            }
         }
+        Collections.sort(files);
+        return files;
+    }
+
+    /**
+     * 去掉注释再匹配。
+     *
+     * <p>不这么做的话，一句「本屏幕自己**不**套 textStyles」的说明文字就会把
+     * “单一来源”守卫误判成红 —— 而注释里提一下某个 API 名字完全正常。
+     * 同样地，别人也可能靠改措辞把真的第二份字阶藏过去，那条路由
+     * {@link #THEME_ROOT_ALLOWED} 的闭合名单堵住（它同时看真实调用点）。
+     */
+    private static String stripComments(String text) {
+        return text.replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("(?m)//[^\\n]*", " ");
     }
 
     /** `fontSize = 12.sp` 与 `fontSize: TextUnit = 12.sp` 都算裸字号。 */
@@ -104,14 +152,33 @@ public final class TypographyScaleTest {
 
         List<String> textStylesSites = new ArrayList<>();
         for (String file : kotlinSources(root)) {
-            String text = read(root, file);
+            String text = stripComments(read(root, file));
             Matcher m = Pattern.compile("textStyles\\s*=").matcher(text);
             if (m.find() && !file.equals(SCALE_FILE)) textStylesSites.add(file);
         }
-        require(textStylesSites.size() == 1,
-                "textStyles 只应在根主题出现一处（现在是 " + textStylesSites.size() + " 处: "
-                        + textStylesSites + "）。第二份紧凑字阶就是这么长出来的 —— "
-                        + "它不会编译失败，只会让两个界面的字号不一致。");
+        // 名单闭合：多一处就是红（而不是“只要数量对就放行”）。
+        // 并且每一处都必须真的接的是 zhiTextStyles()，不允许就地手写一份新的样式表。
+        List<String> unexpected = new ArrayList<>();
+        for (String file : textStylesSites) {
+            if (!THEME_ROOT_ALLOWED.containsKey(file)) unexpected.add(file);
+        }
+        require(unexpected.isEmpty(),
+                "这些文件自己接了 textStyles，但不在 THEME_ROOT_ALLOWED 名单里：" + unexpected
+                        + "\n  第二份紧凑字阶就是这么长出来的 —— 它不会编译失败，"
+                        + "只会让两个界面的字号不一致。"
+                        + "\n  若确实需要（例如又一个独立 Activity），请加进名单并写明理由。");
+        List<String> missing = new ArrayList<>();
+        for (String file : THEME_ROOT_ALLOWED.keySet()) {
+            if (!textStylesSites.contains(file)) missing.add(file);
+        }
+        require(missing.isEmpty(),
+                "名单里的这些文件不再接 textStyles 了：" + missing
+                        + "\n  要么把它们接回去，要么从名单里删掉 —— 否则名单会变成一份谎话。");
+        for (String file : textStylesSites) {
+            require(read(root, file).contains("zhiTextStyles()"),
+                    file + " 接了 textStyles 但用的不是 zhiTextStyles()："
+                            + "就地手写一份样式表等于把字阶又拆成了两份");
+        }
 
         // ---- 3. 用到档位的文件必须显式 import --------------------------------
         for (String file : kotlinSources(root)) {
@@ -123,7 +190,7 @@ public final class TypographyScaleTest {
         }
 
         // ---- 4. 根主题必须真的把字阶接上 -------------------------------------
-        String app = read(root, "app/src/main/java/com/zhizhu/zhicode/compose/ui/AppScaffold.kt");
+        String app = read(root, APP_SCAFFOLD);
         require(app.contains("zhiTextStyles()"),
                 "根 MiuixTheme 必须传 textStyles = zhiTextStyles()："
                         + "删掉它没有任何编译错误，界面会静默退回 Miuix 的平板尺度字阶");

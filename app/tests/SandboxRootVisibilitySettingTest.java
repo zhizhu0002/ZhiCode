@@ -22,7 +22,12 @@ public final class SandboxRootVisibilitySettingTest {
         String store = read(root, "app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxPrefs.java");
         String engine = read(root, "app/src/main/java/com/zhizhu/zhicode/sandbox/ZhiSandbox.java");
         String provider = read(root, "app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxRpcService.java");
-        String dashboard = read(root, "app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxBoard.java");
+        // 界面已从手写 View 改成 Compose + Miuix，所以这里读**两个**文件：
+        //   · SandboxBoard.kt      —— 状态与后端调用（开关值、在飞互斥位、回滚）
+        //   · ZhiSandboxScreen.kt  —— 绘制（文案、Miuix 组件）
+        // 断言的语义一条没松：这个开关必须存在、必须说清"会重启 Guest"、必须带回滚。
+        String dashboard = read(root, "app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxBoard.kt")
+                + read(root, "app/src/main/java/com/zhizhu/zhicode/compose/ui/sandbox/ZhiSandboxScreen.kt");
         String testScript = read(root, "test-source-no-build.sh");
 
         require(store.contains("AtomicFile") && store.contains("sandbox/settings.json"),
@@ -56,7 +61,12 @@ public final class SandboxRootVisibilitySettingTest {
         require(provider.contains("case \"set_hide_root\"")
                         && provider.contains("put(\"hide_root\", ZhiSandbox.isRootHidden())"),
                 "the private sandbox RPC must expose the effective setting");
-        require(dashboard.contains("new Switch(this)") && dashboard.contains("隐藏 Root"),
+        // 这里原来钉的是 `new Switch(this)` —— 那是**平台 View 的书写形态**，不是不变式。
+        // 改成 Compose 之后组件换成了 Miuix 的 `SwitchPreference`（这本来就是这次改动的目的：
+        // 平台 Switch 在 Material v1 主题下是青色、且被塞进 64dp 盒子压变形）。
+        // 于是断言换成「这个开关用的是 Miuix 的开关组件、且文案还在」，
+        // 其余三条（文案、在飞压住、失败回滚）一字不改。
+        require(has(dashboard, "SwitchPreference(") && dashboard.contains("隐藏 Root"),
                 "the sandbox dashboard must expose a Root hiding switch");
         // 用 squash 比较：断言的是「回滚语义」（切走时禁用并压住交互，失败时恢复），
         // 不该被 setRootSwitch(previous, false) 这类逗号后的空格写法左右。

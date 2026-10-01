@@ -5,7 +5,7 @@ public final class SandboxHooklessControllerStructureTest {
     Path root=Path.of(a[0]);
     String core=Files.readString(root.resolve("Bcore/src/main/java/top/niunaijun/blackbox/BlackBoxCore.java"));
     String manifest=Files.readString(root.resolve("app/src/main/AndroidManifest.xml"));
-    String ui=Files.readString(root.resolve("app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxBoard.java"));
+    String ui=Files.readString(root.resolve("app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxBoard.kt"));
     require(core.contains("attach:controller-hookless"),"controller hookless attach marker missing");
     require(core.contains("if (!dedicatedSandboxMain)"),"controller must skip native essential hooks");
     require(core.contains("if (isMainProcess())")&&core.contains("create:controller-ready"),"hookless controller create branch missing");
