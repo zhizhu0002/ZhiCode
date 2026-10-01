@@ -30,17 +30,18 @@ import com.zhizhu.zhicode.compose.ui.panes.TerminalPane
 
 /** （以下内容从 `AppScaffold.kt` 原地拆出，注释逐字未改。） */
 
-/** 宽屏：侧栏常驻 + 对话主栏 + 工作区副栏。 */
+/** 宽屏：侧栏常驻 + 对话主栏 + 工作区副栏。宽屏顶栏在右侧内容区顶部（S1 重构）。 */
 @Composable
 internal fun WideWorkspace(
     state: WorkspaceUiState,
     viewModel: WorkspaceViewModel,
     isDark: Boolean,
     glass: Glass,
+    glassMain: Glass,
 ) {
     Row(modifier = Modifier.fillMaxSize()) {
-        // 侧栏保持**满高**：悬浮顶栏在宽屏下只覆盖右侧内容区（见 ZhiCodeScreen 里
-        // 给顶栏加的 start 偏移），所以侧栏不需要给它让位，第一项也不会被遮住。
+        // 侧栏保持**满高**：宽屏顶栏现在位于右侧内容区内部（Column 顶部），
+        // 不再悬浮盖住侧栏，所以侧栏不需要让位。
         ZhiSidebarHost(
             state = state,
             viewModel = viewModel,
@@ -48,14 +49,33 @@ internal fun WideWorkspace(
         )
         ZhiVerticalDivider()
         Column(modifier = Modifier.weight(56f)) {
+            // 宽屏顶栏（含玻璃模糊）：排在内容 Column 顶部，占布局高度而非悬浮。
+            // 触发器从此处于 Scaffold 根坐标系，「+」菜单等 Overlay 弹层锚点正确。
+            ZhiTopBar(
+                state = state,
+                wide = true,
+                glass = glassMain,
+                onOpenSidebar = viewModel::openSidebar,
+                onContextClick = {
+                    viewModel.onComposerChange("/usage")
+                    viewModel.send()
+                },
+                onCycleTheme = viewModel::cycleThemeMode,
+                onFloatingBall = {
+                    viewModel.onComposerChange("/canvas")
+                    viewModel.send()
+                },
+                onSettings = viewModel::openSettings,
+                tabs = null,
+            )
             // 输入器现在由 ChatArea 以悬浮层形式托管
             ChatArea(state = state, viewModel = viewModel, wide = true, modifier = Modifier.weight(1f), glass = glass)
         }
         ZhiVerticalDivider()
         Column(modifier = Modifier.weight(44f)) {
             val secondary = WorkspaceTab.entries.filter { it != WorkspaceTab.CHAT }
-            // 这一栏的按键组不滚动，所以仍要躲开覆盖它的头部
-            Column(modifier = Modifier.padding(top = TopBarInset)) {
+            // 顶栏不再悬浮覆盖副栏，按键组不再需要躲开头部
+            Column {
                 WorkspaceTabs(
                     tabs = secondary,
                     selected = state.tab,
@@ -67,7 +87,7 @@ internal fun WideWorkspace(
     }
 }
 
-/** 宽屏侧栏宽度。顶栏的起始偏移也用它，两处必须是同一个值。 */
+/** 宽屏侧栏宽度。 */
 internal val SidebarWidth = 258.dp
 
 /** Miuix 纵向分隔线的宽度；顶栏偏移要把它算进去。 */
@@ -108,16 +128,15 @@ internal fun CompactWorkspace(
                     glass = glass,
                 )
             } else {
-                // 变更 / 终端 / 文件三个面板是普通 Column，不会滚动，
-                // 所以必须顶开悬浮头部（含归顺进来的 Tab 行）的高度，
-                // 否则它们的第一行会被压住。
+                // 变更 / 终端 / 文件三个面板：顶栏已在 Scaffold topBar 槽位占布局
+                // 高度（S1 重构），不再悬浮覆盖，面板不需要手工让位。
                 PaneHost(
                     state = state,
                     viewModel = viewModel,
                     isDark = isDark,
                     glass = glass,
                     tabOverride = tab,
-                    modifier = Modifier.fillMaxSize().padding(top = TopBarInsetWithTabs),
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }

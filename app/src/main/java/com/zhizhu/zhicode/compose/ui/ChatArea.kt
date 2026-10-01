@@ -83,9 +83,10 @@ internal fun ChatArea(
             },
             modifier = glass.capture(Modifier.fillMaxSize()),
             // 底部预留出悬浮层的高度，让被盖住的内容也能滑上来；
-            // 顶部预留头部高度，让内容能滚到悬浮头部下面被模糊。
+            // 顶部留白：S1 重构后顶栏在 topBar 槽位已由 Scaffold padding 处理，
+            // 对话列表不再需要让出头部高度，可从 Scaffold padding 顶部起排。
             bottomInset = if (floating) ComposerInset + TaskCardInset else ComposerInset,
-            topInset = if (wide) TopBarInset else TopBarInsetWithTabs,
+            topInset = 0.dp,
         )
 
         // 底部悬浮层：任务卡在上、输入器在下，两者都不占布局高度，
