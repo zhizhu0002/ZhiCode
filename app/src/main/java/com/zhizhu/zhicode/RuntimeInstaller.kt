@@ -3,6 +3,7 @@ package com.zhizhu.zhicode
 import android.content.Context
 import android.os.Build
 import android.system.Os
+import java.nio.file.Files
 import com.termux.app.zhicode.termux.TermuxShellExecutor
 import com.termux.shared.termux.TermuxConstants
 import java.io.ByteArrayOutputStream
@@ -403,6 +404,19 @@ class RuntimeInstaller(private val context: Context) {
                         target.parentFile?.mkdirs()
                         FileOutputStream(target).use { it.write(out) }
                         target.setExecutable(isExecutableContent(out), false)
+                        /*
+                         * 读权限必须显式补上：FileOutputStream 建出的文件带进程 umask
+                         * （本工程是 0077），落在 600。同一 uid 的 bash 读它没问题，
+                         * 但在虚拟化环境（blackbox/IQ 沙箱）里 profile 会被宿主层
+                         * 以读方式拉起，600 直接变成启动横幅里的
+                         * 「bash: .../usr/etc/profile: Permission denied」。
+                         * 与上面按内容推断可执行位同理：bootstrap 内容是固定的，
+                         * 非 ELF/#! 一律 644，ELF 与脚本 755。
+                         */
+                        Os.chmod(
+                            target.absolutePath,
+                            if (isExecutableContent(out)) 0b111101101 else 0b110100100,
+                        )
                     }
                 }
                 zin.closeEntry()
@@ -432,6 +446,20 @@ class RuntimeInstaller(private val context: Context) {
             linkPath.parentFile?.mkdirs()
             kotlin.runCatching { linkPath.delete() }
             Os.symlink(linkTarget, linkPath.absolutePath)
+        }
+
+        /*
+         * 目录权限归一：mkdirs() 建出的目录同样吃 0077 的 umask（实测 etc/ 等全是
+         * drwx------）。普通场景同一 uid 能穿过去；但虚拟化环境（blackbox/IQ 沙箱）
+         * 里路径解析可能由宿主层代持，700 目录会让 profile 与脚本的读取在中途被挡。
+         * bootstrap 的目录层级是固定产物，全部归一到 755（rwxr-xr-x），与 Termux 官方
+         * 安装结果一致。只处理目录，文件权限已在解包循环里逐个 chmod 过。
+         */
+        Files.walk(staging.toPath()).use { paths ->
+            for (path in paths) {
+                val f = path.toFile()
+                if (f.isDirectory) Os.chmod(f.absolutePath, 0b111101101)
+            }
         }
     }
 
