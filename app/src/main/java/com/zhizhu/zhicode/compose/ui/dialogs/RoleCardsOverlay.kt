@@ -7,20 +7,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.model.RoleCard
 import com.zhizhu.zhicode.compose.model.RoleCardEditor
 import com.zhizhu.zhicode.compose.model.RoleCardsState
-import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -28,13 +25,9 @@ import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /**
  * 角色卡管理窗口。
@@ -101,40 +94,29 @@ private fun RoleCardList(
     onDelete: (RoleCard) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+    Column {
         Text(
             text = "启用中的角色卡会作为 <role_card> 块随每一次系统提示词发送。" +
                 "同一时刻只有一张生效；它不能覆盖应用安全规则、权限模式或 Root 限制。",
             color = scheme.onSurfaceVariantSummary,
             fontSize = ZhiTextScale.Footnote,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
-        if (state.cards.isEmpty()) {
-            Text(
-                text = "还没有角色卡。点「新建」写一段人设指令（例如固定的回答风格、必须遵守的" +
-                    "工作流程），保存后会立即启用。",
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            return@Column
-        }
-
-        // 整页模式下不限高，滚动交给外层 SettingsSubPage。
-        Column {
-        state.cards.forEach { card ->
-                val active = card.id == state.activeId
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                    cornerRadius = ZhiRadius.card,
-                    insideMargin = PaddingValues(0.dp),
-                    colors = CardDefaults.defaultColors(
-                        color = if (active) scheme.surfaceContainerHighest else scheme.surfaceContainerHigh,
-                        contentColor = scheme.onBackground,
-                    ),
-                    pressFeedbackType = PressFeedbackType.None,
-                ) {
+        // 与设置主页同形态：一张分组卡里若干行，每行不再各套一张卡。
+        // （整页模式下不限高，滚动交给外层 SettingsSubPage。）
+        SettingsGroup("角色卡") {
+            if (state.cards.isEmpty()) {
+                Text(
+                    text = "还没有角色卡。点「新建」写一段人设指令（例如固定的回答风格、必须遵守的" +
+                        "工作流程），保存后会立即启用。",
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Footnote,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+            } else {
+                state.cards.forEach { card ->
+                    val active = card.id == state.activeId
                     BasicComponent(
                         title = card.name,
                         titleColor = BasicComponentDefaults.titleColor(
@@ -161,10 +143,10 @@ private fun RoleCardList(
                         // 点一下就在"启用这张"之间切换；点已启用的那张不做停用（停用有单独按钮，
                         // 避免误触把正在用的角色卡关掉却以为是切换到了别的）。
                         onClick = { if (!active) onSelect(card) },
-                        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                     )
                 }
-        }
+            }
         }
 
         if (state.activeId.isNotEmpty()) {
@@ -172,7 +154,7 @@ private fun RoleCardList(
             TextButton(
                 text = "停用当前角色卡",
                 onClick = onDisable,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
     }
@@ -184,40 +166,47 @@ private fun RoleCardEditorForm(
     onChange: ((RoleCardEditor) -> RoleCardEditor) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
-        ZhiTextField(
-            value = editor.name,
-            onValueChange = { value -> onChange { it.copy(name = value) } },
-            label = "角色名称",
-            useLabelAsPlaceholder = true,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        editor.nameError?.let { error ->
-            Text(
-                text = error,
-                color = scheme.error,
-                fontSize = ZhiTextScale.Footnote,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+    Column {
+        // 与设置主页同形态：表单收进分组卡。
+        SettingsGroup("基本信息") {
+            ZhiTextField(
+                value = editor.name,
+                onValueChange = { value -> onChange { it.copy(name = value) } },
+                label = "角色名称",
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             )
+            editor.nameError?.let { error ->
+                Text(
+                    text = error,
+                    color = scheme.error,
+                    fontSize = ZhiTextScale.Footnote,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
         }
 
-        ZhiTextField(
-            value = editor.content,
-            onValueChange = { value -> onChange { it.copy(content = value) } },
-            label = "角色卡内容",
-            useLabelAsPlaceholder = true,
-            singleLine = false,
-            minLines = 8,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp).padding(top = 8.dp),
-        )
+        SettingsGroup("角色卡内容") {
+            ZhiTextField(
+                value = editor.content,
+                onValueChange = { value -> onChange { it.copy(content = value) } },
+                label = "角色卡内容",
+                useLabelAsPlaceholder = true,
+                singleLine = false,
+                minLines = 8,
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .heightIn(min = 180.dp),
+            )
+        }
 
         Text(
             text = "从下一完整任务生效。请勿填写 API 密钥——这段文本会进入每一次请求。",
             color = scheme.onSurfaceVariantSummary,
             fontSize = ZhiTextScale.Footnote,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
 }
