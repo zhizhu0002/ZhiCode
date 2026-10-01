@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui
 
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,9 @@ import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.blur.BlurDefaults
+import top.yukonga.miuix.kmp.blur.BlendColorEntry
+import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TooltipBox
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -50,17 +54,31 @@ fun ZhiTopBar(
 ) {
     val scheme = MiuixTheme.colorScheme
 
-    // 真模糊：blur 修饰符必须挂在捕获层（glassMain.capture）的**上层**绘制才能采样到背景。
-    // 顶栏在 Scaffold topBar 槽位，绘制顺序晚于内容层，直接对自身 modifier 做 blur 即可。
-    val blurredModifier = modifier.then(
-        glass.blur(Modifier, RoundedCornerShape(0.dp), radius = ZhiGlass.FloatingBlur),
-    )
+    // 官方 BlurredBar 模式（miuix example/utils/PageUtils.kt:127）：
+    // textureBlur 挂在**包裹 Box** 上并混入一层 surface(0.8) 做磨砂底色，
+    // TopAppBar 自身底色取透明 —— 之前把 surface(0.72) 直接叠在 blur 修饰符上，
+    // 半透明底色把模糊结果盖死，肉眼等于没有 blur。
+    val blurActive = glass.supported
+    Box(
+        modifier = modifier.then(
+            if (blurActive) {
+                Modifier.textureBlur(
+                    backdrop = glass.backdrop!!,
+                    shape = RectangleShape,
+                    blurRadius = ZhiGlass.FloatingBlur,
+                    colors = BlurDefaults.blurColors(
+                        blendColors = listOf(BlendColorEntry(color = scheme.surface.copy(alpha = 0.8f))),
+                    ),
+                )
+            } else {
+                Modifier
+            },
+        ),
+    ) {
     SmallTopAppBar(
-        modifier = blurredModifier,
+        modifier = Modifier,
         title = "ZhiCode",
-        // 玻璃半透明底：SmallTopAppBar 内部 background(color)，
-        // blur 结果透出半透明容器 = 磨砂顶栏。
-        color = glass.surfaceColor(scheme.surface),
+        color = if (blurActive) Color.Transparent else scheme.surface,
         defaultWindowInsetsPadding = false,
         navigationIcon = {
             if (!wide) {
@@ -140,4 +158,5 @@ fun ZhiTopBar(
             }
         },
     )
+    }
 }
