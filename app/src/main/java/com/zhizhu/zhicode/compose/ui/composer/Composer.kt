@@ -138,23 +138,7 @@ fun Composer(
                     )
                     .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 5.dp),
             ) {
-            // 附件条随附件增减平滑展开/收起
-            AnimatedVisibility(
-                visible = state.attachments.isNotEmpty(),
-                enter = expandVertically(tween(ZhiMotion.EXPAND)) + fadeIn(tween(ZhiMotion.FAST)),
-                exit = shrinkVertically(tween(ZhiMotion.FAST)) + fadeOut(tween(ZhiMotion.FAST)),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    state.attachments.take(4).forEach { attachment ->
-                        AttachmentChip(attachment) { onRemoveAttachment(attachment) }
-                    }
-                }
-            }
-
-// 选项行：+ 菜单与三枚下拉，先于输入行（选项属于“发起前”的设置）
+            // 选项行：+ 菜单与三枚下拉，位于输入行上方
             Row(
                 modifier = Modifier.fillMaxWidth().height(36.dp),
                 verticalAlignment = Alignment.CenterVertically,
