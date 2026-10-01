@@ -7,13 +7,11 @@ import top.yukonga.miuix.kmp.theme.TextStyles
 import top.yukonga.miuix.kmp.theme.defaultTextStyles
 
 /**
- * 应用字阶（UI 重构 S4b：**回归 Miuix 官方默认值**）。
+ * 应用字阶（UI 重设计 R1：**手机紧凑中间值**）。
  *
- * 九个档位名保留（142 处调用点与守卫断言不动），但取值改为 Miuix
- * 官方字阶的实测默认：title1..4 = 32/24/20/18sp、main/paragraph/button/
- * headline1 = 17sp、body1/headline2 = 16sp、body2/subtitle = 14sp、
- * footnote1 = 13sp、footnote2 = 11sp。
- * 此前的手机紧凑字阶（−14%~−34%）随"全量用官方组件"的要求一并退役。
+ * 档位名保留（142 处调用点与守卫断言不动）。取值为手机紧凑中间值：
+ * 比 Miuix 官方平板尺度（17sp 正文）小约一档，比最早的过度压缩
+ * （13sp 正文）大一档 —— 手机一屏信息量与可读性的平衡点。
  *
  *
  * ## 为什么必须有这样一处（而不是继续逐处传 `fontSize`）
@@ -36,31 +34,31 @@ import top.yukonga.miuix.kmp.theme.defaultTextStyles
 object ZhiTextScale {
 
     /** 空状态大标题。替代散落的 `21.sp`（`MessageCards` 空状态）。 */
-    val Title = 32.sp
+    val Title = 24.sp
 
     /** 品牌名、页面级标题。替代 `17.sp`。 */
-    val TitleSmall = 24.sp
+    val TitleSmall = 19.sp
 
     /** 区块标题、面板标题行。替代 `15.sp`（顶栏对话标题、终端标题）。 */
-    val Heading = 20.sp
+    val Heading = 16.sp
 
     /** 卡片标题、输入框正文。替代 `14.sp`。 */
-    val Subheading = 18.sp
+    val Subheading = 15.sp
 
     /** 常规正文 —— 出现最多的一档。替代 `13.sp`。 */
-    val Body = 17.sp
+    val Body = 14.sp
 
     /** 次要正文（设置行说明、列表副标题）。 */
-    val BodySmall = 16.sp
+    val BodySmall = 13.sp
 
     /** 说明文字、标签。 */
-    val Caption = 14.sp
+    val Caption = 12.sp
 
     /** 脚注（时间戳、计数、单位）。 */
-    val Footnote = 13.sp
+    val Footnote = 11.sp
 
     /** 最小字（徽标、极小注记）。替代 `9.5.sp`、`9.3.sp`。 */
-    val Micro = 11.sp
+    val Micro = 10.sp
 
     /**
      * 脚注档比最小档大、正文档比脚注档大……

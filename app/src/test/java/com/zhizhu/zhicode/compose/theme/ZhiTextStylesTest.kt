@@ -18,17 +18,17 @@ class ZhiTextStylesTest {
 
     /** 期望的接线表。顺序即层级，所以「单调」不用另写一条用例。
      *
-     * S4b 重构：取值回归 Miuix 官方默认字阶
-     * （title1..4 = 32/24/20/18，main/paragraph/button/headline1 = 17，
-     *  body1/headline2 = 16，body2/subtitle = 14，footnote1/2 = 13/11）。
+     * R1 重设计：手机紧凑中间值
+     * （title1..4 = 24/19/16/15，main/paragraph/button/headline1 = 14，
+     *  body1/headline2 = 13，body2/subtitle = 12，footnote1/2 = 11/10）。
      * token → 档位的接线断言不变。
      */
     private val expected = listOf(
-        "title1" to 32f, "title2" to 24f, "title3" to 20f, "title4" to 18f,
-        "main" to 17f, "paragraph" to 17f, "button" to 17f, "headline1" to 17f,
-        "body1" to 16f, "headline2" to 16f,
-        "body2" to 14f, "subtitle" to 14f,
-        "footnote1" to 13f, "footnote2" to 11f,
+        "title1" to 24f, "title2" to 19f, "title3" to 16f, "title4" to 15f,
+        "main" to 14f, "paragraph" to 14f, "button" to 14f, "headline1" to 14f,
+        "body1" to 13f, "headline2" to 13f,
+        "body2" to 12f, "subtitle" to 12f,
+        "footnote1" to 11f, "footnote2" to 10f,
     )
 
     private fun size(name: String): Float = when (name) {
