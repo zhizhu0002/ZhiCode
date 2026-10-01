@@ -3240,6 +3240,17 @@ class WorkspaceViewModel(
 
     fun closeSettings() = _state.update { it.copy(settingsDraft = null, settingsOpen = false) }
 
+    /**
+     * 打开「UI 调试」整页（**仅 debug 构建**）。
+     *
+     * 刻意不动 [openSettings] 的 draft：从设置页进来时它已经垫在栈底，
+     * 返回时 draft 原样还在，所以调试完回到设置页不会丢未保存的改动。
+     */
+    fun openUiDebug() = _state.update { it.copy(uiDebugOpen = true) }
+
+    /** 关闭 UI 调试页。若它是由设置页打开的，设置主页会随之露出来（栈自动回退一层）。 */
+    fun closeUiDebug() = _state.update { it.copy(uiDebugOpen = false) }
+
     /** 弹窗内任意一项改动都走这里，保证 draft 只有一份写入路径。 */
     fun updateSettingsDraft(transform: (SettingsDraft) -> SettingsDraft) = _state.update {
         val draft = it.settingsDraft ?: return@update it
@@ -3272,6 +3283,7 @@ class WorkspaceViewModel(
             "skills" -> openSkills()
             "roleCards" -> openRoleCards()
             "memory" -> openMemory()
+            "uiDebug" -> openUiDebug()
             else -> Unit
         }
     }

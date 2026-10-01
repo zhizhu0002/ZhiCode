@@ -407,6 +407,17 @@ private fun ExtensionsPage(onNavigate: (String) -> Unit) {
         icon = ZhiIcons.edit,
         onClick = { onNavigate("memory") },
     )
+
+    // 仅 debug 构建：把工程真正在用的组件按类别铺开（含对话流/任务卡/输入器），
+    // 用来复现"看起来不对"这类问题 —— 详见 ui/debug/UiDebugPage.kt。
+    if (com.zhizhu.zhicode.compose.BuildConfig.DEBUG) {
+        SettingsIconEntry(
+            title = "UI 调试",
+            summary = "铺开全部组件与状态（仅 debug 构建）",
+            icon = ZhiIcons.floatingBall,
+            onClick = { onNavigate("uiDebug") },
+        )
+    }
 }
 
 /** rikkahub 式导航行：图标 + 标题 + 副标题 + 箭头（Miuix ArrowPreference）。 */

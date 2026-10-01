@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import com.zhizhu.zhicode.compose.ui.debug.UiDebugPage
 import com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.McpConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.MemoryOverlay
@@ -168,13 +169,20 @@ private fun ZhiCodeScreen(
     // 这里只把它翻译成栈，增量 reconcile —— pop 触发弹出动画、push 触发推入动画。
     val desiredStack: List<NavKey> = buildList {
         add(AppKey.Workspace)
-        if (state.settingsOpen) add(SettingsKey.Hub)
-        when {
-            state.apiConfig != null -> add(SettingsKey.Api)
-            state.mcpConfig != null -> add(SettingsKey.Mcp)
-            state.skills != null -> add(SettingsKey.Skills)
-            state.roleCards != null -> add(SettingsKey.RoleCards)
-            state.memory != null -> add(SettingsKey.Memory)
+        if (state.uiDebugOpen) {
+            // UI 调试是**整页**而不是设置二级页：它显示的是全部组件与状态，
+            // 与设置 draft 无关。放在 settingsOpen 之前判断，于是从设置页进来时
+            // 栈是 [工作区, UI 调试]（设置主页留在 settingsOpen 里，返回即回到它）。
+            add(AppKey.UiDebug)
+        } else {
+            if (state.settingsOpen) add(SettingsKey.Hub)
+            when {
+                state.apiConfig != null -> add(SettingsKey.Api)
+                state.mcpConfig != null -> add(SettingsKey.Mcp)
+                state.skills != null -> add(SettingsKey.Skills)
+                state.roleCards != null -> add(SettingsKey.RoleCards)
+                state.memory != null -> add(SettingsKey.Memory)
+            }
         }
     }
     LaunchedEffect(desiredStack) {
@@ -221,6 +229,7 @@ private fun ZhiCodeScreen(
             // 系统返回：按当前栈顶逐级回退，并同步关掉 VM 的对应状态。
             // 只有 root（工作区）时把返回交还给系统（退出应用）。
             when {
+                state.uiDebugOpen -> viewModel.closeUiDebug()
                 state.apiConfig != null -> viewModel.closeApiConfig()
                 state.mcpConfig != null -> viewModel.closeMcpConfig()
                 state.skills != null -> viewModel.closeSkills()
@@ -381,6 +390,16 @@ private fun ZhiCodeScreen(
                 onCancelEdit = viewModel::cancelMemoryEdit,
             )
         }
+        // UI 调试整页（仅 debug 构建有入口）。它拿的是**真实 state 与 ViewModel**：
+        // 页面里的输入器、各浮层入口都是真能用的，不是静态贴图。
+        entry<AppKey.UiDebug>(swipeDismiss = swipeBack) {
+            UiDebugPage(
+                state = state,
+                viewModel = viewModel,
+                glass = glass,
+                onBack = viewModel::closeUiDebug,
+            )
+        }
     }
 }
 
@@ -398,6 +417,9 @@ private fun ZhiCodeScreen(
  */
 private sealed interface AppKey : NavKey {
     data object Workspace : AppKey
+
+    /** UI 调试整页（debug 构建的设置页里有入口）。 */
+    data object UiDebug : AppKey
 }
 
 /** 设置相关页面：hub 与五个二级页。 */

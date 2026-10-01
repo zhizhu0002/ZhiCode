@@ -190,6 +190,12 @@ run R8ConfigTest "$PROJECT_ROOT"
 # 而表单里又套了一层 —— 编译通过、只有测量时才抛 Infinity maximum height constraints。
 # DialogScrollNestingTest.java
 run DialogScrollNestingTest "$PROJECT_ROOT"
+# ---------- UI 调试页的入口门控与"真的铺开组件" ----------
+# 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
+# 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。
+# 侧栏那两项（技能 / 自定义角色卡）的收敛也一并守在这里。
+# UiDebugPageStructureTest.java
+run UiDebugPageStructureTest "$PROJECT_ROOT"
 
 echo "-----"
 echo "通过 $PASS / 失败 $FAIL"

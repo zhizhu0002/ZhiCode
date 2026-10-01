@@ -357,6 +357,13 @@ data class WorkspaceUiState(
     val roleCards: com.zhizhu.zhicode.compose.model.RoleCardsState? = null,
     val memory: com.zhizhu.zhicode.compose.model.MemoryState? = null,
     val modelPicker: com.zhizhu.zhicode.compose.model.ModelPickerState? = null,
+    /**
+     * 非空即「UI 调试」整页打开（**仅 debug 构建**有入口，见设置页的「扩展」组）。
+     *
+     * 与 [settingsOpen] 平级而不是菜单式叠加：它是压在导航栈上的一层整页，
+     * 从设置页进来时 [settingsOpen] 仍为真，于是返回会回到设置主页。
+     */
+    val uiDebugOpen: Boolean = false,
     /** 非空即设置弹窗打开；所有编辑先落在这里，「保存」才写回上面的字段。 */
     val settingsDraft: SettingsDraft? = null,
 ) {
