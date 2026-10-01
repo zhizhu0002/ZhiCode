@@ -119,12 +119,14 @@ private fun themeLabel(mode: ThemeMode): String = when (mode) {
 }
 
 /**
- * 分组卡：一组设置行包进一张圆角 Card（Miuix 官方设置 demo 的排布方式）。
- * insideMargin = 0 让 Preference 行自己控制内边距。
+ * 分组 = SmallTitle 标题 + 圆角 Card，间距照官方 SettingsPage：
+ * 标题与卡片各自水平 12dp，卡片之间 12dp 垂直间隔。
  */
 @Composable
-private fun SettingsCard(content: @Composable () -> Unit) {
+private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
+    SettingsGroupHeader(title, modifier = Modifier.padding(horizontal = 12.dp))
     top.yukonga.miuix.kmp.basic.Card(
+        modifier = Modifier.padding(horizontal = 12.dp),
         cornerRadius = ZhiRadius.card,
         insideMargin = PaddingValues(0.dp),
     ) {
@@ -138,24 +140,18 @@ private fun AllSettingsPages(
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
 ) {
-    SettingsCard { AppearancePage(draft, onChange) }
-
-    SettingsCard { ModelPermissionPage(draft, onChange, onNavigate) }
-
-    SettingsCard { AgentSecurityPage(draft, onChange) }
-
-    SettingsCard { NetworkPage(draft, onChange) }
-
-    SettingsCard { ContextProjectPage(draft, onChange) }
-
-    SettingsCard { ExtensionsPage(onNavigate) }
+    SettingsGroup("外观") { AppearancePage(draft, onChange) }
+    SettingsGroup("模型与权限") { ModelPermissionPage(draft, onChange, onNavigate) }
+    SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) }
+    SettingsGroup("联网") { NetworkPage(draft, onChange) }
+    SettingsGroup("上下文与项目") { ContextProjectPage(draft, onChange) }
+    SettingsGroup("扩展功能") { ExtensionsPage(onNavigate) }
 }
 
 @Composable
 private fun AppearancePage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
     val scheme = MiuixTheme.colorScheme
 
-    SettingsGroupHeader("外观")
     SettingsChoice(
         title = "主题模式",
         options = ThemeMode.entries.map(::themeLabel),
@@ -175,7 +171,6 @@ private fun ModelPermissionPage(
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
 ) {
-    SettingsGroupHeader("模型与权限")
     SettingsEntry(
         title = "API 配置记录",
         valueText = "${draft.profileName} · ${draft.modelLabel}",
@@ -209,7 +204,6 @@ private fun ModelPermissionPage(
 
 @Composable
 private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
-    SettingsGroupHeader("Agent 与安全")
     SettingsToggle(
         title = "Agent 沙箱全权调试",
         checked = draft.sandboxAgentFullAccess,
@@ -236,7 +230,6 @@ private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) ->
 
 @Composable
 private fun NetworkPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
-    SettingsGroupHeader("联网")
     SettingsToggle(
         title = "联网搜索",
         checked = draft.webSearchEnabled,
@@ -275,7 +268,6 @@ private fun contextWindowOptions(current: Int): List<Int> =
 private fun ContextProjectPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
     val windowOptions = contextWindowOptions(draft.contextWindow)
 
-    SettingsGroupHeader("上下文与项目")
     SettingsChoice(
         title = "上下文窗口",
         options = windowOptions.map(::formatTokenCountShort),
@@ -367,7 +359,6 @@ private fun ProjectPathField(draft: SettingsDraft, onChange: (SettingsDraft) -> 
  */
 @Composable
 private fun ExtensionsPage(onNavigate: (String) -> Unit) {
-    SettingsGroupHeader("扩展功能")
     SettingsEntry(
         title = "Model Context Protocol（MCP）",
         valueText = "MCP 服务器配置",
