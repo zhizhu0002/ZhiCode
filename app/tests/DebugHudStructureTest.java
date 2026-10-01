@@ -75,6 +75,12 @@ public final class DebugHudStructureTest {
     /** 浮层宿主：所有面板的接线点。 */
     private static final String OVERLAY_HOST = SRC + "ui/OverlayHost.kt";
 
+    /** 宽窄屏的工作区布局（含底部导航栏与宽屏右栏）。 */
+    private static final String WORKSPACE_LAYOUTS = SRC + "ui/WorkspaceLayouts.kt";
+
+    /** 顶栏。Tab 行已从它移到底部，见 §20。 */
+    private static final String TOP_BAR = SRC + "ui/TopBar.kt";
+
     /** 工具实现所在目录：脚本里点名的工具名要在这里能找到出处。 */
     private static final String TOOLS_DIR = "app/src/main/java/com/termux/app/zhicode/tools";
 
@@ -621,12 +627,19 @@ public final class DebugHudStructureTest {
                 "面板必须用 visibleModels 过滤后的列表，而不是原始 models");
         requireContains(pickerFile, "onSearchChange",
                 "搜索框必须接**独立的** onSearchChange，不能复用 onQueryChange");
-        // 选中高亮必须铺在**圆角容器**上（Surface），而不是 BasicComponent 的哪个颜色
-        // 参数：后者画出来是直角色块，与卡片圆角对不上，多行堆叠时四角会露方边。
+        // 选中高亮必须铺在**带形状的 Miuix 容器**上（Card），而不是 BasicComponent 的哪个
+        // 颜色参数：后者画出来是直角色块，与圆角对不上，多行堆叠时四角会露方边。
+        //
+        // 这里断言的是**不变量**（容器 + 圆角 + 主题色令牌），不是某个具体实现：
+        // 最早用裸 Surface，后来为了「保持 Miuix 原生」换成 Miuix Card —— 两者都满足
+        // "带形状的容器"，所以守卫不该绑死其中任何一个，否则每次改善实现都要改测试。
         requireContains(pickerFile, "if (selected) scheme.primaryContainer",
-                MODEL_PICKER + " 的选中高亮必须走 primaryContainer 铺在带形状的容器上");
-        requireContains(pickerFile, "Surface(",
-                MODEL_PICKER + " 的模型行必须自己套一层 Surface 才能做出圆角高亮");
+                MODEL_PICKER + " 的选中高亮必须走 primaryContainer（主题令牌）");
+        require(pickerFile.contains("Card(") || pickerFile.contains("Surface("),
+                MODEL_PICKER + " 的模型行必须套一层带形状的 Miuix 容器（Card / Surface）"
+                        + "才能做出圆角高亮，不能靠 BasicComponent 的颜色参数");
+        requireContains(pickerFile, "cornerRadius = ZhiRadius.inner",
+                MODEL_PICKER + " 的容器圆角必须走 ZhiRadius 令牌，不写死数值");
 
         String overlayHost = stripComments(read(root, OVERLAY_HOST));
         requireContains(overlayHost, "onSearchChange = viewModel::setModelSearch",
@@ -642,7 +655,47 @@ public final class DebugHudStructureTest {
         // 只读 id/display_name/name），全工程也没有 favorites 概念。
         // 参考图里有这两块，但凭空造出来会让模型收到它并不支持的请求。
         require(!modelsForPicker.contains("favorite"),
-                MODELS + " 没有收藏的数据来源，不得凭空加一个 favorite 字段");
+                SETTINGS_MODELS + " 没有收藏的数据来源，不得凭空加一个 favorite 字段");
+
+        // ---- 20. 工作区切换：窄屏走 Miuix 原生 NavigationBar，放在底部 ---------
+        //
+        // 用户要求「tab 栏放下边」，并补充「保持 miuix 原生」。Miuix **自带** `NavigationBar`
+        // （官方定位就是"固定在应用底部的导航"，支持 2~5 项、自带窗口 inset 处理），
+        // 所以正解是 `Scaffold(bottomBar = { NavigationBar { … } })`，
+        // 而不是把顶部那条 `TabRowWithContour`（内容分类用的横向标签条）原样搬到下面。
+        String scaffoldForTabs = stripComments(read(root, APP_SCAFFOLD));
+        requireContains(scaffoldForTabs, "bottomBar = {",
+                APP_SCAFFOLD + " 必须用 Scaffold 的 bottomBar 槽位承载底部导航 —— "
+                        + "Scaffold 会把它算进 content 的 padding，底部悬浮的输入器才会自动落在它上面");
+        requireContains(scaffoldForTabs, "WorkspaceNavigationBar(",
+                "底部导航必须是 WorkspaceNavigationBar（内部走 Miuix NavigationBar）");
+        require(!scaffoldForTabs.contains("tabs = WorkspaceTab.entries"),
+                APP_SCAFFOLD + " 不得再把 Tab 行塞进顶栏：它已经移到底部，"
+                        + "两处同时存在就会出现两条切换栏");
+
+        String layouts = stripComments(read(root, WORKSPACE_LAYOUTS));
+        requireContains(layouts, "NavigationBar(",
+                WORKSPACE_LAYOUTS + " 必须用 Miuix 原生 NavigationBar");
+        requireContains(layouts, "NavigationBarDisplayMode.",
+                "必须显式选显示模式：默认值随版本可能变，写出来才不会悄悄换形态");
+        require(!layouts.contains("TopBarInsetWithTabs"),
+                "TopBarInsetWithTabs 必须已删除：Tab 行不在顶栏了，"
+                        + "任何还按它留白的地方都会在顶部多出 45+12dp 的空白");
+
+        String topBar = stripComments(read(root, TOP_BAR));
+        require(!topBar.contains("tabs: List<WorkspaceTab>"),
+                TOP_BAR + " 的 ZhiTopBar 不得再收 tabs 参数：两个调用点都已传 null，"
+                        + "留着就是一段永不执行的分支（已连同 WorkspaceTabs 调用一起删除）");
+
+        // 单提供方下这三样是死控件 —— 参考图里它们成立是因为 rikkahub 支持多提供方。
+        require(!pickerFile.contains("stickyHeader"),
+                MODEL_PICKER + " 不得加吸顶分组头：面板永远只有一组，吸顶没有东西可选");
+        // ⚠️ 这一条必须查**原文**而不是 `stripComments` 的结果：README 式的理由说明就写在
+        // 注释里，而 stripComments 会把注释删掉 —— 查 strip 后的文本会让断言恒为失败
+        // （一个永远红着的测试和没有测试一样糟）。
+        require(read(root, MODEL_PICKER).contains("画一个点了没用的控件比不画更糟"),
+                MODEL_PICKER + " 必须保留\"不画死控件\"的理由说明："
+                        + "否则以后有人照参考图补上折叠箭头，就多一个点了没反应的控件");
     }
 
     /** 子串出现次数。 */

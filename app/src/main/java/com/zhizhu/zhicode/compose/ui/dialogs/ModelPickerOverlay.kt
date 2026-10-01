@@ -2,7 +2,6 @@ package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,7 +28,8 @@ import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.basic.Search
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
-import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
@@ -141,7 +140,14 @@ private fun ModelSearchField(
 }
 
 /**
- * 分组标题：提供方名 + 条目数 + 首字母头像。
+ * 分组标题：提供方名 + 条目数。
+ *
+ * ## 为什么没有首字母头像
+ *
+ * 这里曾经放过一个 `primaryContainer` 的首字母方块。删掉的理由：参考图那一行左边
+ * 是**折叠箭头**，没有头像；而我们的面板永远只有一组，箭头是死控件（见下），
+ * 于是留下的是一个既不对应参考图、信息量也为零的方块 —— 提供方名字就在它右边，
+ * 同一个名字的首字母重复一遍没有任何作用。
  *
  * ## 为什么没有折叠箭头
  *
@@ -149,11 +155,6 @@ private fun ModelSearchField(
  * （profile）就对应一个提供方与一份目录，`ModelPickerState` 里也只有单个
  * `profileName`。一组还要折叠的话，点下去就是把整个列表收起来，没有意义。
  * 所以这里不画那个箭头：画一个点了没用的控件比不画更糟。
- *
- * ## 头像为什么是首字母
- *
- * 工程里没有任何品牌图标数据，也不该为此内置一批厂商 logo（那等于替各家做标识，
- * 还会过期）。首字母方块是**如实**表达"这是哪个提供方"，而不是假装有品牌图。
  */
 @Composable
 private fun ModelGroupHeader(profileName: String, count: Int) {
@@ -162,30 +163,15 @@ private fun ModelGroupHeader(profileName: String, count: Int) {
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 首字母头像
-        Surface(
-            shape = RoundedCornerShape(ZhiRadius.inner),
-            color = scheme.primaryContainer,
-            modifier = Modifier.size(28.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    // 空名字时给一个中性的占位，而不是画出空格子
-                    text = profileName.trim().take(1).ifEmpty { "模" },
-                    color = scheme.onPrimaryContainer,
-                    fontSize = ZhiTextScale.BodySmall,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
-        }
         Text(
             text = profileName,
-            color = scheme.onBackground,
+            // 与参考图一致：分组标题用主色。这是主题令牌（深浅色各自成立），不是写死的颜色。
+            color = scheme.primary,
             fontSize = ZhiTextScale.BodySmall,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 8.dp).weight(1f),
+            modifier = Modifier.weight(1f),
         )
         Text(
             text = "$count 个模型",
@@ -229,11 +215,11 @@ private fun ModelPickerBody(
             // 外层不再套 Card：参考图里每个模型是**独立的一张卡**，行与行之间有缝。
             // 共用一个 Card 再靠分割线分开，视觉上是一整块面板，与参考图不是一回事。
             //
-            // `heightIn(max = 260.dp)` 是硬性要求，不能删：LazyColumn 在竖直方向没有
+            // `heightIn(max = 420.dp)` 是硬性要求，不能删：LazyColumn 在竖直方向没有
             // 高度上限时会拿到 Infinity 高度约束，Compose 直接抛异常崩掉
             // （见 DialogScrollNestingTest）。
             LazyColumn(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).heightIn(max = 260.dp),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).heightIn(max = 420.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 items(visible, key = { it.id }) { model ->
@@ -311,16 +297,21 @@ private fun ModelRow(
 ) {
     val scheme = MiuixTheme.colorScheme
     val duplicated = option.displayName == option.id
-    // 每行是**自己一张圆角卡片**（参考图就是这样：模型之间有一条缝），
+    // 每行是**自己一张 Miuix Card**（参考图就是这样：模型之间有一条缝），
     // 而不是共用一个外层 Card 再靠分割线分开。
     //
-    // 高亮也铺在这一层：`BasicComponent` 没有颜色参数（只有 modifier），
-    // 而把底色写进 modifier 会画出一个**直角**色块，在多行堆叠下四角会露出
-    // 方形边，与卡片的圆角对不上。Surface 自带形状裁剪，一步到位。
-    Surface(
-        shape = RoundedCornerShape(ZhiRadius.inner),
-        color = if (selected) scheme.primaryContainer else scheme.surfaceContainerHigh,
+    // 用 Miuix `Card` 而不是裸 `Surface`：Card 是这套设计系统里的行容器（自带形状裁剪
+    // 与按压反馈），而且**它支持容器色** —— `BasicComponent` 没有颜色参数（只有 modifier），
+    // 把底色写进 modifier 会画出一个**直角**色块、与卡片圆角对不上。
+    // 这样既拿到了参考图那种"整块高亮"的观感，又没离开 Miuix 的组件。
+    Card(
         modifier = Modifier.fillMaxWidth(),
+        cornerRadius = ZhiRadius.inner,
+        insideMargin = PaddingValues(0.dp),
+        colors = CardDefaults.defaultColors(
+            color = if (selected) scheme.primaryContainer else scheme.surfaceContainerHigh,
+            contentColor = if (selected) scheme.onPrimaryContainer else scheme.onSurface,
+        ),
     ) {
         BasicComponent(
             title = option.displayName,

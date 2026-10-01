@@ -24,6 +24,9 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.panes.FilesPane
 import com.zhizhu.zhicode.compose.ui.panes.TerminalPane
+import top.yukonga.miuix.kmp.basic.NavigationBar
+import top.yukonga.miuix.kmp.basic.NavigationBarDisplayMode
+import top.yukonga.miuix.kmp.basic.NavigationBarItem
 
 /** （以下内容从 `AppScaffold.kt` 原地拆出，注释逐字未改。） */
 
@@ -58,7 +61,6 @@ internal fun WideWorkspace(
                     viewModel.send()
                 },
                 onSettings = viewModel::openSettings,
-                tabs = null,
             )
             // 输入器现在由 ChatArea 以悬浮层形式托管
             ChatArea(state = state, viewModel = viewModel, wide = true, modifier = Modifier.weight(1f), glass = glass)
@@ -68,13 +70,23 @@ internal fun WideWorkspace(
             val secondary = WorkspaceTab.entries.filter { it != WorkspaceTab.CHAT }
             // 顶栏不再悬浮覆盖副栏，按键组不再需要躲开头部
             Column {
+                // ⚠️ Tab 行在**下边**（与窄屏的底部导航栏一致）。
+                // 宽屏这里仍用标签条而不是 `NavigationBar`：`NavigationBar` 是"贴屏幕底部"
+                // 的组件，放进中栏既不是屏幕底部、又会被 Scaffold 的 bottomBar 横跨整屏
+                // 压到满高的常驻侧栏下面。所以保持标签条，只把它挪到底部。
+                PaneHost(
+                    state = state,
+                    viewModel = viewModel,
+                    isDark = isDark,
+                    glass = glass,
+                    modifier = Modifier.weight(1f),
+                )
                 WorkspaceTabs(
                     tabs = secondary,
                     selected = state.tab,
                     onSelect = viewModel::selectTab,
                 )
             }
-            PaneHost(state = state, viewModel = viewModel, isDark = isDark, glass = glass, modifier = Modifier.weight(1f))
         }
     }
 }
@@ -142,11 +154,56 @@ internal fun CompactWorkspace(
 internal val WorkspaceTabRowHeight = 45.dp
 
 /**
+ * 窄屏底部的工作区导航栏。
+ *
+ * ## 为什么是 Miuix `NavigationBar` 而不是把顶部那条 Tab 行搬下来
+ *
+ * 这两个组件在 Miuix 里是**分开设计的**：`TabRow` / `TabRowWithContour` 是"内容分类"用的
+ * 横向标签条（通常放内容上方），`NavigationBar` 才是"固定在屏幕底部"的导航
+ * （官方文档原话：used to create navigation menus fixed at the bottom of applications，
+ * 支持 2~5 项、自带窗口 inset 处理）。把分类标签条硬挪到底部，位置对了但语义与
+ * 默认尺寸都不是为底部准备的，那才是"不原生"。
+ *
+ * ## 为什么用默认配色
+ *
+ * 0.9.4 的 `NavigationBarDefaults` **没有** `navigationBarItemColors()`（更新版本的文档里有，
+ * 这个版本还没有）。所以这里不传颜色，直接用官方默认 —— 也正好符合"保持 Miuix 原生"。
+ *
+ * [NavigationBarDisplayMode.IconAndText]：底栏有图标才能一眼认出（对话/终端/文件三个图标
+ * 在 `iconForTab` 里已有）。官方还支持 `IconOnly` 与 `IconWithSelectedLabel`，
+ * 想换成那两种只改这一个参数。
+ */
+@Composable
+internal fun WorkspaceNavigationBar(
+    selected: WorkspaceTab,
+    onSelect: (WorkspaceTab) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    NavigationBar(
+        modifier = modifier,
+        mode = NavigationBarDisplayMode.IconAndText,
+    ) {
+        WorkspaceTab.entries.forEach { tab ->
+            NavigationBarItem(
+                selected = tab == selected,
+                onClick = { onSelect(tab) },
+                icon = iconForTab(tab),
+                label = tab.label,
+            )
+        }
+    }
+}
+
+/**
  * 工作区 Tab 行。转发到 [ZhiSegmentedTabs]（Miuix `TabRowWithContour`，即带轮廓变体）。
  *
  * `matchWidth = true`：4 项等分填满整行（S3 重构：等分上限改为官方
  * `TabRowDefaults.TabRowWithContourMaxWidth` 的三倍即 252dp——4 项等分在
  * 450dpi 手机上约 100dp/项，252dp 足够表达"等分"语义又远小于原来的 1000dp）。
+ *
+ * ⚠️ 现在只给**宽屏**的右栏用（窄屏改用底部 [WorkspaceNavigationBar]）。不要顺手删掉
+ * 它以为没人用 —— 宽屏是"侧栏常驻 + 双栏"范式，底栏该由整个屏幕共用一个，
+ * 而那会横跨到常驻侧栏下面，所以宽屏保持用这条标签条。
  */
 @Composable
 internal fun WorkspaceTabs(
@@ -179,21 +236,20 @@ internal fun iconForTab(tab: WorkspaceTab) = when (tab) {
 /** 顶栏标题行高度（窄屏用 48dp，见 `ZhiTopBar` 里的 height）。 */
 internal val TopBarTitleRowHeight = 48.dp
 
-/** 归顺到顶栏的 Tab 行上下留白（`ZhiTopBar` 里 `padding(vertical = 6.dp)` 的两倍）。 */
-internal val TopBarTabRowPadding = 12.dp
-
 /**
- * 悬浮头部的占位高度：宽屏只有标题行，窄屏还要加上归顺进来的 Tab 行。
+ * 顶栏的占位高度。
  *
  * 这三个数字必须和 `ZhiTopBar` 里的实际尺寸严格对齐，否则面板的首行
  * （尤其是标题栏右侧的动作图标）会被悬浮头部压掉一半。
  */
-// SmallTopAppBar 官方 CollapsedHeight = 52dp；窄屏 Tab 行在 bottomContent 槽位。
+// SmallTopAppBar 官方 CollapsedHeight = 52dp。
 // S1 之后顶栏占布局高度、内容不再重叠 —— 但顶栏 blur 需要内容从底下滚过，
-// 所以 Scaffold 内容层不再吃 padding.top，各面板用这两个常量自己留出可见区起点。
+// 所以 Scaffold 内容层不再吃 padding.top，各面板用这个常量自己留出可见区起点。
+//
+// ⚠️ 原先还有第二个常量 `TopBarInsetWithTabs = 52 + 45 + 12dp`（窄屏把 Tab 行归顺进顶栏时）。
+// Tab 行挪到底部之后它没有正确取值了，已删除 —— **不要**为了让某处多留一点空白而把它加回来，
+// 那会让所有面板顶部多出 57dp。
 internal val TopBarInset = 52.dp
-internal val TopBarInsetWithTabs =
-    52.dp + WorkspaceTabRowHeight + TopBarTabRowPadding
 
 @Composable
 private fun PaneHost(

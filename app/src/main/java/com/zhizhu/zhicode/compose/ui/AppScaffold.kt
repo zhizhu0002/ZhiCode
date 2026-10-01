@@ -258,8 +258,26 @@ private fun ZhiCodeScreen(
                             viewModel.send()
                         },
                         onSettings = viewModel::openSettings,
-                        tabs = WorkspaceTab.entries,
-                        onSelectTab = viewModel::selectTab,
+                    )
+                }
+            },
+            bottomBar = {
+                // 窄屏的工作区切换放**底部**，用 Miuix 原生 `NavigationBar`
+                // （官方定位就是"固定在应用底部的导航"，自带窗口 inset 处理）。
+                //
+                // 走 Scaffold 的 bottomBar 槽位而不是自己塞进内容 Column，有两个好处：
+                //  1. Scaffold 自己把这个高度算进 content 的 padding —— 本页已经有
+                //     `padding.calculateBottomPadding()`，所以底部悬浮的输入器会自动
+                //     落在导航栏**上面**，不需要任何手工 inset 计算；
+                //  2. inset 只被消费一次（`NavigationBar` 自己也处理 inset，由 Scaffold
+                //     统一协调），不会出现"导航栏 + 系统条"叠成两条的情况。
+                //
+                // 宽屏不挂：那会横跨整个屏幕宽度、压到满高的常驻侧栏下面。
+                // 宽屏的切换在右栏底部，见 WideWorkspace。
+                if (!wide) {
+                    WorkspaceNavigationBar(
+                        selected = state.tab,
+                        onSelect = viewModel::selectTab,
                     )
                 }
             },
@@ -306,8 +324,10 @@ private fun ZhiCodeScreen(
                         state = state,
                         viewModel = viewModel,
                         glass = glassMain,
-                        // 让出顶栏（含 Tab 行）的高度，否则药丸会被模糊顶栏压住。
-                        topInset = TopBarInsetWithTabs,
+                        // 让出顶栏的高度，否则药丸会被模糊顶栏压住。
+                        // ⚠️ 用 `TopBarInset`（只管标题行）：Tab 行已挪到底部，
+                        // 顶部不再有那 45+12dp，否则药丸下会多出一块空白。
+                        topInset = TopBarInset,
                     )
                 }
             }

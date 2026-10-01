@@ -5,8 +5,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -17,7 +17,6 @@ import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiGlass
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.model.ThemeMode
-import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
@@ -46,9 +45,6 @@ fun ZhiTopBar(
     onContextClick: () -> Unit,
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
-    // 随头部一起悬浮的按键组；为 null 时不渲染（宽屏的按键组在右侧栏各自的位置）。
-    tabs: List<WorkspaceTab>? = null,
-    onSelectTab: (WorkspaceTab) -> Unit = {},
 ) {
     val scheme = MiuixTheme.colorScheme
 
@@ -139,20 +135,16 @@ fun ZhiTopBar(
             }
         },
         bottomContent = {
-            // 服务中时是 Miuix 不确定进度条；空闲且无 Tab 时退化成极淡分隔线
+            // 服务中时是 Miuix 不确定进度条；空闲时退化成极淡分隔线。
+            //
+            // 这里原先还有一条「工作区 Tab 归顺到头部」的分支（`tabs != null` 时渲染
+            // `WorkspaceTabs`）。Tab 已挪到底部（窄屏走 Miuix `NavigationBar`，
+            // 见 `AppScaffold` 的 bottomBar），那段分支再也不会执行 —— 已删除，
+            // 而不是留着当"备选"，否则下次有人看到会以为还能从这里开出来。
             if (state.composerBusy) {
                 ZhiIndeterminateBar()
-            } else if (tabs == null) {
+            } else {
                 ZhiHorizontalDivider(color = scheme.dividerLine)
-            }
-            // 工作区 Tab 归顺到头部：与标题同一块玻璃（官方 bottomContent 槽位）
-            if (tabs != null) {
-                WorkspaceTabs(
-                    tabs = tabs,
-                    selected = state.tab,
-                    onSelect = onSelectTab,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = TopBarTabRowPadding / 2),
-                )
             }
         },
     )
