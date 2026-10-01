@@ -1,5 +1,12 @@
 package com.zhizhu.zhicode.compose.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.isSystemInDarkTheme
 import com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.McpConfigOverlay
@@ -15,6 +22,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
 import android.app.Application
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
@@ -25,6 +35,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.LocalZhiDark
 import com.zhizhu.zhicode.compose.theme.zhiTextStyles
+import com.zhizhu.zhicode.compose.model.ApiConfigState
+import com.zhizhu.zhicode.compose.model.McpConfigState
+import com.zhizhu.zhicode.compose.model.SkillsState
+import com.zhizhu.zhicode.compose.model.RoleCardsState
+import com.zhizhu.zhicode.compose.model.MemoryState
+import com.zhizhu.zhicode.compose.model.SettingsDraft
 import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
@@ -91,6 +107,14 @@ private fun ZhiCodeScreen(
 ) {
     val configuration = LocalConfiguration.current
     val wide = configuration.screenWidthDp >= 600
+
+    // 各整页在退出动画期间的「最后内容」缓存（见下方 settingsUi / apiUi 的说明）。
+    var lastSettingsDraft by remember { mutableStateOf<SettingsDraft?>(null) }
+    var lastApiConfig by remember { mutableStateOf<ApiConfigState?>(null) }
+    var lastMcpConfig by remember { mutableStateOf<McpConfigState?>(null) }
+    var lastSkills by remember { mutableStateOf<SkillsState?>(null) }
+    var lastRoleCards by remember { mutableStateOf<RoleCardsState?>(null) }
+    var lastMemory by remember { mutableStateOf<MemoryState?>(null) }
 
     // 玻璃对象分两层，因为捕获节点不能包含自己：
     //  · glassMain —— 捕获「整个工作区」；用于顶栏 / 侧栏抽屉 / 弹窗。
@@ -179,11 +203,32 @@ private fun ZhiCodeScreen(
         }
     }
 
+    // ---- 返回键路由（最优先的页面在最上面）----
+    // 预测性返回手势来到 Compose 层时，谁在最上层谁消费：二级页 → 设置主页 → 沙箱/环境页。
+    // 之前没有任何 BackHandler，手势直接落到 Activity，整页设置被一把关掉——
+    // 用户感觉是「从二级页返回却退到了主页」，实际是退到了应用之外/主界面。
+    BackHandler(enabled = state.apiConfig != null) { viewModel.closeApiConfig() }
+    BackHandler(enabled = state.mcpConfig != null) { viewModel.closeMcpConfig() }
+    BackHandler(enabled = state.skills != null) { viewModel.closeSkills() }
+    BackHandler(enabled = state.roleCards != null) { viewModel.closeRoleCards() }
+    BackHandler(enabled = state.memory != null) { viewModel.closeMemory() }
+    BackHandler(enabled = state.settingsOpen) { viewModel.closeSettings() }
+
+    
     // ---- 设置整页（K4：像 miuix 示例的 SettingsPage，覆盖全屏）----
     // 画在 Scaffold/抽屉之后 = 最上层；打开时整页盖住工作区。
-    if (state.settingsOpen) {
+    // 动效对齐侧栏抽屉（ZhiMotion）：淡入 + 底部轻微上移，关闭时反向。
+    // `settingsUi` 保留最后一次非空的 draft：closeSettings 会先把状态置空，
+    // 没有 retained 值的话退出动画的那几百毫秒里页面内容会整个闪没。
+    val settingsUi = state.settingsDraft ?: lastSettingsDraft
+    lastSettingsDraft = settingsUi
+    AnimatedVisibility(
+        visible = state.settingsOpen,
+        enter = fadeIn(tween(ZhiMotion.MEDIUM)) + slideInVertically(tween(ZhiMotion.MEDIUM)) { it / 12 },
+        exit = fadeOut(tween(ZhiMotion.FAST)) + slideOutVertically(tween(ZhiMotion.FAST)) { it / 12 },
+    ) {
         SettingsDialog(
-            draft = state.settingsDraft,
+            draft = settingsUi,
             onChange = viewModel::setSettingsDraft,
             onDismiss = viewModel::closeSettings,
             onSave = viewModel::saveSettings,
@@ -195,62 +240,104 @@ private fun ZhiCodeScreen(
     // 它们现在是 SettingsSubPage（自带 Scaffold+顶栏）。若留在 ZhiOverlayHost
     // （主 Scaffold 的 bodyContent 里），会被主顶栏/Tab 压住（Miuix Scaffold
     // 绘制顺序 bodyContent → topBar）。挂在根层、设置主页之后 = 盖住一切。
-    ApiConfigOverlay(
-        config = state.apiConfig,
-        onDismiss = viewModel::closeApiConfig,
-        onNew = viewModel::newApiProfile,
-        onEdit = viewModel::editApiProfile,
-        onSelect = viewModel::selectApiProfile,
-        onDelete = viewModel::deleteApiProfile,
-        onDraftChange = viewModel::updateApiProfileDraft,
-        onSave = viewModel::saveApiProfile,
-        onCancelForm = viewModel::cancelApiProfileForm,
-    )
-    McpConfigOverlay(
-        config = state.mcpConfig,
-        onDismiss = viewModel::closeMcpConfig,
-        onNew = viewModel::newMcpServer,
-        onEdit = viewModel::editMcpServer,
-        onToggle = viewModel::toggleMcpServer,
-        onDelete = viewModel::deleteMcpServer,
-        onDraftChange = viewModel::updateMcpDraft,
-        onSave = viewModel::saveMcpServer,
-        onCancelForm = viewModel::cancelMcpForm,
-    )
-    SkillsOverlay(
-        state = state.skills,
-        onDismiss = viewModel::closeSkills,
-        onNew = viewModel::newSkill,
-        onEdit = viewModel::editSkill,
-        onAttach = viewModel::attachSkill,
-        onDelete = viewModel::deleteSkill,
-        onCreateDraftChange = viewModel::updateSkillCreateDraft,
-        onCreate = viewModel::createSkill,
-        onCancelCreate = viewModel::cancelSkillCreate,
-        onBodyChange = viewModel::updateSkillBody,
-        onSave = viewModel::saveSkill,
-        onCancelEdit = viewModel::cancelSkillEdit,
-    )
-    RoleCardsOverlay(
-        state = state.roleCards,
-        onDismiss = viewModel::closeRoleCards,
-        onNew = viewModel::newRoleCard,
-        onEdit = viewModel::editRoleCard,
-        onSelect = viewModel::selectRoleCard,
-        onDisable = viewModel::disableRoleCard,
-        onDelete = viewModel::deleteRoleCard,
-        onDraftChange = viewModel::updateRoleCardDraft,
-        onSave = viewModel::saveRoleCard,
-        onCancelEditor = viewModel::cancelRoleCardEditor,
-    )
-    MemoryOverlay(
-        state = state.memory,
-        onDismiss = viewModel::closeMemory,
-        onEdit = viewModel::editMemory,
-        onRunInit = { viewModel.closeMemory(); viewModel.runInitFromUi() },
-        onBodyChange = viewModel::updateMemoryBody,
-        onSave = viewModel::saveMemory,
-        onCancelEdit = viewModel::cancelMemoryEdit,
-    )
+    //
+    // 每个页都保留「最后一次非空状态」：关闭动作会立刻把状态置空，而退出动画
+    // 还要跑 160ms，没有保留值的话那段时间页面内容会整个闪没（只剩空背景）。
+    val apiUi = state.apiConfig ?: lastApiConfig
+    lastApiConfig = apiUi
+    SubPageHost(visible = state.apiConfig != null) {
+        ApiConfigOverlay(
+            config = apiUi,
+            onDismiss = viewModel::closeApiConfig,
+            onNew = viewModel::newApiProfile,
+            onEdit = viewModel::editApiProfile,
+            onSelect = viewModel::selectApiProfile,
+            onDelete = viewModel::deleteApiProfile,
+            onDraftChange = viewModel::updateApiProfileDraft,
+            onSave = viewModel::saveApiProfile,
+            onCancelForm = viewModel::cancelApiProfileForm,
+        )
+    }
+
+    val mcpUi = state.mcpConfig ?: lastMcpConfig
+    lastMcpConfig = mcpUi
+    SubPageHost(visible = state.mcpConfig != null) {
+        McpConfigOverlay(
+            config = mcpUi,
+            onDismiss = viewModel::closeMcpConfig,
+            onNew = viewModel::newMcpServer,
+            onEdit = viewModel::editMcpServer,
+            onToggle = viewModel::toggleMcpServer,
+            onDelete = viewModel::deleteMcpServer,
+            onDraftChange = viewModel::updateMcpDraft,
+            onSave = viewModel::saveMcpServer,
+            onCancelForm = viewModel::cancelMcpForm,
+        )
+    }
+
+    val skillsUi = state.skills ?: lastSkills
+    lastSkills = skillsUi
+    SubPageHost(visible = state.skills != null) {
+        SkillsOverlay(
+            state = skillsUi,
+            onDismiss = viewModel::closeSkills,
+            onNew = viewModel::newSkill,
+            onEdit = viewModel::editSkill,
+            onAttach = viewModel::attachSkill,
+            onDelete = viewModel::deleteSkill,
+            onCreateDraftChange = viewModel::updateSkillCreateDraft,
+            onCreate = viewModel::createSkill,
+            onCancelCreate = viewModel::cancelSkillCreate,
+            onBodyChange = viewModel::updateSkillBody,
+            onSave = viewModel::saveSkill,
+            onCancelEdit = viewModel::cancelSkillEdit,
+        )
+    }
+
+    val roleCardsUi = state.roleCards ?: lastRoleCards
+    lastRoleCards = roleCardsUi
+    SubPageHost(visible = state.roleCards != null) {
+        RoleCardsOverlay(
+            state = roleCardsUi,
+            onDismiss = viewModel::closeRoleCards,
+            onNew = viewModel::newRoleCard,
+            onEdit = viewModel::editRoleCard,
+            onSelect = viewModel::selectRoleCard,
+            onDisable = viewModel::disableRoleCard,
+            onDelete = viewModel::deleteRoleCard,
+            onDraftChange = viewModel::updateRoleCardDraft,
+            onSave = viewModel::saveRoleCard,
+            onCancelEditor = viewModel::cancelRoleCardEditor,
+        )
+    }
+
+    val memoryUi = state.memory ?: lastMemory
+    lastMemory = memoryUi
+    SubPageHost(visible = state.memory != null) {
+        MemoryOverlay(
+            state = memoryUi,
+            onDismiss = viewModel::closeMemory,
+            onEdit = viewModel::editMemory,
+            onRunInit = { viewModel.closeMemory(); viewModel.runInitFromUi() },
+            onBodyChange = viewModel::updateMemoryBody,
+            onSave = viewModel::saveMemory,
+            onCancelEdit = viewModel::cancelMemoryEdit,
+        )
+    }
+    }
+}
+
+/** 二级页的动效外壳：visible 由「状态非空」驱动，内容保留最后一次非空值。 */
+@Composable
+private fun SubPageHost(
+    visible: Boolean,
+    content: @Composable () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(ZhiMotion.MEDIUM)) + slideInVertically(tween(ZhiMotion.MEDIUM)) { it / 14 },
+        exit = fadeOut(tween(ZhiMotion.FAST)) + slideOutVertically(tween(ZhiMotion.FAST)) { it / 14 },
+    ) {
+        content()
     }
 }
