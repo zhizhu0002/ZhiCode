@@ -12,9 +12,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -86,15 +89,33 @@ internal fun sampleSizeFor(sourceWidth: Int, sourceHeight: Int, targetWidth: Int
     return sample
 }
 
-/** base64 → 该分辨率下的位图。失败返回 null（调用方回退显示文件名）。 */
-private fun decode(base64: String, reqWidth: Int, reqHeight: Int): ImageBitmap? {
-    val bytes = runCatching { Base64.decode(base64, Base64.DEFAULT) }.getOrNull() ?: return null
-    if (bytes.isEmpty()) return null
+/**
+ * 一次解码的产物：位图 + **原图尺寸**。
+ *
+ * <p>为什么要连原图尺寸一起带出来：缩略图要"同高不等宽"（见 [ZhiImageThumb]），
+ * 而宽度必须由**原图长宽比**算出来 —— 只看解码后的位图是做不到的，因为
+ * 降采样后的位图在还没解出来时不存在，而且它自己的尺寸是"降到多少就是多少"。
+ * 长宽比只有 `inJustDecodeBounds` 那一遍能拿到。
+ *
+ * <p>尺寸在**头解析成功**时就有值，即使随后真正解码失败（例如内存不够）也拿得到 ——
+ * 所以占位框从一开始就能按正确比例留好，不会等图出来再"跳"一下宽度。
+ */
+private class Decoded(val bitmap: ImageBitmap?, val sourceWidth: Int, val sourceHeight: Int) {
+    /** 长宽比；尺寸未知时为 null。 */
+    val aspect: Float?
+        get() = if (sourceWidth > 0 && sourceHeight > 0) sourceWidth.toFloat() / sourceHeight else null
+}
+
+/** base64 → 该分辨率下的位图 + 原图尺寸。整体失败时尺寸为 0。 */
+private fun decode(base64: String, reqWidth: Int, reqHeight: Int): Decoded {
+    val bytes = runCatching { Base64.decode(base64, Base64.DEFAULT) }.getOrNull()
+        ?: return Decoded(null, 0, 0)
+    if (bytes.isEmpty()) return Decoded(null, 0, 0)
 
     // 第一遍：只量尺寸，不分配像素。
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return Decoded(null, 0, 0)
 
     val options = BitmapFactory.Options().apply {
         inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight, reqWidth, reqHeight)
@@ -102,7 +123,8 @@ private fun decode(base64: String, reqWidth: Int, reqHeight: Int): ImageBitmap? 
         inPreferredConfig = Bitmap.Config.RGB_565
     }
     val bitmap = runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) }.getOrNull()
-    return bitmap?.asImageBitmap()
+    // 即使位图没解出来，尺寸也照带 —— 占位框能按正确比例留好。
+    return Decoded(bitmap?.asImageBitmap(), bounds.outWidth, bounds.outHeight)
 }
 
 /**
@@ -111,8 +133,14 @@ private fun decode(base64: String, reqWidth: Int, reqHeight: Int): ImageBitmap? 
  * 用**字节数**做上限而不是条数：一张缩略图可能 20 KB，也可能 2 MB，
  * 按条数限制在两种极端的图上都会做出错误决定。
  */
-private val imageCache = object : LruCache<String, ImageBitmap>(8 * 1024 * 1024) {
-    override fun sizeOf(key: String, value: ImageBitmap): Int = value.height * value.width * 4
+private val imageCache = object : LruCache<String, Decoded>(8 * 1024 * 1024) {
+    override fun sizeOf(key: String, value: Decoded): Int {
+        // 没有位图的条目（解码失败 / 只量到尺寸）没有真实内存占用，
+        // 但不能记 0：LruCache 靠 size 决定淘汰，全 0 就永远不淘汰，
+        // 这种条目会无限积累。给一个名义值让它仍然能被挤出去。
+        val bitmap = value.bitmap ?: return 1024
+        return bitmap.height * bitmap.width * 4
+    }
 }
 
 /** 缓存键：内容本身（base64 很长，取哈希）+ 目标尺寸。 */
@@ -134,8 +162,20 @@ internal fun rememberDecodedImage(image: ChatImage, reqWidth: Int, reqHeight: In
  *
  * 之所以要把"失败"与"还在解"分开：两者都表现为没有位图，但**该显示的东西不同**
  * —— 还在解时留一块占位，失败时显示文件名。只看 `ImageBitmap?` 是分不出来的。
+ *
+ * [sourceWidth] / [sourceHeight] 是**原图**尺寸（不是解码结果），
+ * 供缩略图按长宽比定宽用；还量不到时为 0。
  */
-internal class DecodeState(val bitmap: ImageBitmap?, val failed: Boolean)
+internal class DecodeState(
+    val bitmap: ImageBitmap?,
+    val failed: Boolean,
+    val sourceWidth: Int = 0,
+    val sourceHeight: Int = 0,
+) {
+    /** 原图长宽比；尺寸未知时为 null。 */
+    val aspect: Float?
+        get() = if (sourceWidth > 0 && sourceHeight > 0) sourceWidth.toFloat() / sourceHeight else null
+}
 
 @Composable
 internal fun rememberDecodeState(image: ChatImage, reqWidth: Int, reqHeight: Int): DecodeState {
@@ -143,13 +183,14 @@ internal fun rememberDecodeState(image: ChatImage, reqWidth: Int, reqHeight: Int
     // 缓存命中时同步返回，不闪一下占位。
     val cached = remember(key) { imageCache.get(key) }
     val state by produceState(
-        initialValue = if (cached != null) DecodeState(cached, false) else DecodeState(null, false),
+        initialValue = if (cached != null) DecodeState(cached.bitmap, false, cached.sourceWidth, cached.sourceHeight)
+        else DecodeState(null, false),
         key1 = key,
     ) {
         if (cached != null) return@produceState
         val decoded = withContext(Dispatchers.Default) { decode(image.data, reqWidth, reqHeight) }
-        if (decoded != null) imageCache.put(key, decoded)
-        value = DecodeState(decoded, decoded == null)
+        imageCache.put(key, decoded)
+        value = DecodeState(decoded.bitmap, decoded.bitmap == null, decoded.sourceWidth, decoded.sourceHeight)
     }
     return state
 }
@@ -157,19 +198,59 @@ internal fun rememberDecodeState(image: ChatImage, reqWidth: Int, reqHeight: Int
 // ------------------------------------------------------------------ 组件
 
 /**
- * 缩略图。
+ * 由统一高度和原图长宽比算出这一张的宽度。
  *
- * **等比缩放、不裁剪**（`ContentScale.Fit`）：用户发的是截图或照片，
- * 裁掉一块比留一点边更让人困惑 —— 他要确认的是"我发的是不是这张"。
- * 因此外层固定一个框，图在里面按原比例缩到刚好放得下。
+ * 抽成纯函数有两个理由：
  *
- * @param maxWidth / @param maxHeight 缩略图框的**上限**（不是固定尺寸）
+ * 1. **`coerceIn` 在 min > max 时会抛 IllegalArgumentException**。调用点有两个
+ *    （气泡行、待发方框），待发那个把上下限都钉在 56dp，气泡那个是 72..260 ——
+ *    一旦有人改错顺序就是"打开对话直接崩"。这里先把上下限排好，把崩溃面消掉。
+ * 2. 夹取是这段代码里唯一能算错的部分（算错的表现是全景图占满整屏、或长截图细成
+ *    一条线），而这两种都只能靠肉眼发现，正适合用单测钉死。
+ *
+ * @param aspect 原图 宽/高；未知（null 或非正）时返回一个正方形占位宽度
+ * @return 已夹进 `[min(minWidth,maxWidth), max(minWidth,maxWidth)]` 的宽度
+ */
+internal fun thumbWidthFor(height: Float, aspect: Float?, minWidth: Float, maxWidth: Float): Float {
+    if (aspect == null || aspect <= 0f || !aspect.isFinite()) return height
+    val low = minOf(minWidth, maxWidth)
+    val high = maxOf(minWidth, maxWidth)
+    return (height * aspect).coerceIn(low, high)
+}
+
+/**
+ * 缩略图：**同高、宽度随长宽比**。
+ *
+ * ## 为什么要固定高度
+ *
+ * 早先这里是「框一个上限，图按自己的比例缩进去」，结果一排缩略图宽度高度全不一样，
+ * 看着参差不齐 —— 用户的原话是"不能同高吗，写的好丑"。照片墙的常规做法就是
+ * **统一高度、宽度按比例**，一行读起来才像一条带子。
+ *
+ * 宽度由 `原图长宽比 × 高度` 算出（见 [thumbWidthFor]），再夹进
+ * [minWidth]..[maxWidth]：极宽的图（全景）会被夹住，否则一张图就占满整屏；
+ * 极窄的图（长截图）也要夹住，否则会细成一条线看不出内容。
+ *
+ * ## 被夹住时用 Crop
+ *
+ * 比例算出的宽度**没被夹**时，框的长宽比与原图完全一致，`Crop` 与 `Fit` 结果相同
+ * （都不裁）。被夹住时才真的裁 —— 此时宁可裁掉一点也要保证**视觉高度一致**：
+ * 一排放下来高度参差正是要修的问题。极端长宽比（全景/长截图）裁中间，
+ * 也仍然认得出是哪张图。
+ *
+ * > 这里与"缩略图一律不裁剪"的早期决定**相反**，是有意的：那条决定服务于
+ * > "确认这张图是不是我发的那张"，而用户明确要求同一行同高 —— 同高与不裁剪
+ * > 在极端长宽比下不可兼得，取同高。
+ *
+ * @param height 统一的缩略图高度（同一行里所有图共用）
+ * @param maxWidth / @param minWidth 宽度夹取范围
  */
 @Composable
 internal fun ZhiImageThumb(
     image: ChatImage,
+    height: Dp,
     maxWidth: Dp,
-    maxHeight: Dp,
+    minWidth: Dp = ThumbMinWidth,
     onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -177,11 +258,17 @@ internal fun ZhiImageThumb(
     // 传 dp 而不是 px：解码器要的是像素，但这里拿不到 density 以外的信息，
     // 而多留一倍余量（×2）比引入 LocalDensity 更简单也更保守 —— 高密度屏上
     // 少降一档，图更清楚，内存仍在有界范围内。
-    val state = rememberDecodeState(image, (maxWidth.value * 2).toInt(), (maxHeight.value * 2).toInt())
+    val state = rememberDecodeState(image, (maxWidth.value * 2).toInt(), (height.value * 2).toInt())
+
+    // 宽度按原图长宽比算；尺寸还没量到时先占一个方框。
+    // 占位宽度必须**稳定**：先方框、量到比例后再变宽，会让整行在两三帧内抖一下，
+    // 所以只在拿到比例时才改宽度，且在下一帧就定下来。
+    val width = thumbWidthFor(height.value, state.aspect, minWidth.value, maxWidth.value).dp
 
     Box(
         modifier = modifier
-            .widthIn(max = maxWidth)
+            .width(width)
+            .height(height)
             .clip(RoundedCornerShape(ZhiRadius.inner))
             .background(scheme.surfaceContainerHigh)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
@@ -192,8 +279,8 @@ internal fun ZhiImageThumb(
             Image(
                 bitmap = bitmap,
                 contentDescription = image.name,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.widthIn(max = maxWidth),
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
             )
         } else {
             // 解码中与失败都先占位：失败时多一行文件名，用户至少知道这里本来是什么。
@@ -250,8 +337,11 @@ internal fun ZhiPendingImageChip(
     Box(modifier = Modifier.size(PendingImageSize)) {
         ZhiImageThumb(
             image = image,
+            height = PendingImageSize,
             maxWidth = PendingImageSize,
-            maxHeight = PendingImageSize,
+            // 上下限都钉在同一个值上 = **固定正方形**。待发区里不需要"按比例不等宽"，
+            // 反而必须等宽：删除键压在右上角，宽度一变 X 的位置就会跟着飘。
+            minWidth = PendingImageSize,
             onClick = onClick,
         )
         // 删除键：走工程统一的 ZhiFilledIconButton（square = false 时 Miuix 用
@@ -346,8 +436,8 @@ internal fun ZhiImageRow(images: List<ChatImage>, onOpen: (ChatImage) -> Unit, m
         images.forEach { image ->
             ZhiImageThumb(
                 image = image,
-                maxWidth = BubbleImageWidth,
-                maxHeight = BubbleImageHeight,
+                height = BubbleImageHeight,
+                maxWidth = BubbleImageMaxWidth,
                 onClick = { onOpen(image) },
             )
         }
@@ -355,10 +445,25 @@ internal fun ZhiImageRow(images: List<ChatImage>, onOpen: (ChatImage) -> Unit, m
 }
 
 /**
- * 气泡里单张图的上限。
+ * 气泡里缩略图的**统一高度**。
  *
- * 200dp 宽对多数手机（360–420dp 可用宽）都放得下两张；
- * 高度卡在 140dp 是为了**长截图**：不卡的话一张竖屏长图会把整条对话顶出屏幕。
+ * 140dp 是为了**长截图**：再高的话一张竖屏长图就把整条对话顶出屏幕。
+ * 同一行里所有图共用这个高度，宽度按各自长宽比算 —— 这才是一条整齐的图片带。
  */
-private val BubbleImageWidth = 200.dp
 private val BubbleImageHeight = 140.dp
+
+/**
+ * 单张缩略图的宽度上限。
+ *
+ * 全景图按比例算出来可能有四五百 dp，一张就占满整屏、后面的图全被推到屏幕外，
+ * 横向滑动就失去意义了。夹到 260dp 之后一行至少能看到一张半。
+ */
+private val BubbleImageMaxWidth = 260.dp
+
+/**
+ * 单张缩略图的宽度下限。
+ *
+ * 长截图（例如 1:4）按比例算出来只有 35dp 宽，细成一条线看不出内容。
+ * 夹到 72dp 至少能认出是哪张，配合 `Crop` 也仍然同高。
+ */
+private val ThumbMinWidth = 72.dp

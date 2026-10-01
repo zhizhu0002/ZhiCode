@@ -46,6 +46,7 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiFilledIconButton
+import com.zhizhu.zhicode.compose.ui.floatingHorizontalInset
 import com.zhizhu.zhicode.compose.ui.ZhiPendingImageChip
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
@@ -114,8 +115,10 @@ fun Composer(
         modifier = modifier
             .fillMaxWidth()
             .padding(
-                start = if (wide) 24.dp else 12.dp,
-                end = if (wide) 24.dp else 12.dp,
+                // 与任务卡、反馈条共用同一个内缩值（见 Common.kt）。
+                // 这三块是同一列，左边缘必须落在同一条线上。
+                start = floatingHorizontalInset(wide),
+                end = floatingHorizontalInset(wide),
                 top = 4.dp,
                 bottom = 10.dp,
             ),

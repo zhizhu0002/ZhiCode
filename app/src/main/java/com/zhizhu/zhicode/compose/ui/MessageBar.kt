@@ -102,7 +102,8 @@ fun MessageBar(
             else glass.surfaceColor(scheme.surfaceContainer),
             cornerRadius = ZhiRadius.floating,
             outSidePadding = PaddingValues(
-                horizontal = if (wide) 24.dp else 12.dp,
+                // 与任务卡、输入器共用同一个内缩值（见 Common.kt）。
+                horizontal = floatingHorizontalInset(wide),
                 vertical = 6.dp,
             ),
             shadowElevation = 6.dp,

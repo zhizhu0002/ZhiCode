@@ -495,9 +495,17 @@ public final class DebugHudStructureTest {
                 ZHI_IMAGE + " 必须提供 sampleSizeFor：4 万像素级的原图直接解码会 OOM");
         requireContains(zhiImage, "inJustDecodeBounds",
                 "必须先量尺寸再降采样 —— inSampleSize 只有在解码**前**给出才生效");
-        requireContains(zhiImage, "ContentScale.Fit",
-                "缩略图必须等比不裁剪：用户要确认的是\"我发的是不是这张\"，"
-                        + "裁掉一块比留边更让人困惑");
+        requireContains(zhiImage, "ContentScale.Crop",
+                "缩略图必须用 Crop 而不是 Fit：同一行要**同高**，"
+                        + "而 Fit 会让每张图按自己的比例停在不同高度上（用户原话"
+                        + "\"不能同高吗，写的好丑\"）。宽度已由原图长宽比算出并夹进范围，"
+                        + "所以只有极端长宽比才会真的裁到");
+        requireContains(zhiImage, "fun thumbWidthFor(",
+                ZHI_IMAGE + " 的宽度夹取必须抽成纯函数，并带单测："
+                        + "coerceIn 在 min > max 时抛 IllegalArgumentException，"
+                        + "而这个函数有两个调用点、上下限各不相同");
+        requireContains(zhiImage, "val low = minOf(minWidth, maxWidth)",
+                "thumbWidthFor 必须自己把上下限摆正：调用点传反了就是\"打开对话直接崩\"");
         require(!zhiImage.contains("coil"),
                 ZHI_IMAGE + " 不得引入 coil 之类的图片库：构建走 --offline，加依赖会直接构建失败");
 

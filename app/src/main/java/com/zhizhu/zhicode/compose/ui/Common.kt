@@ -84,6 +84,23 @@ private val ChipHeight = 26.dp
 private val PillHeight = 24.dp
 
 /**
+ * 底部悬浮层（任务卡 / 反馈条 / 输入器）的横向外边距。
+ *
+ * ## 为什么要收成一个函数
+ *
+ * 这三块是**竖着叠在一起的同一列**，左右必须严格对齐 —— 差 1dp 都会在那条中缝上
+ * 看得出来。原先这个表达式在三个文件里各写了一遍（原文
+ * `if (wide) 24.dp else 12.dp`）。三份拷贝意味着"改一处忘两处"迟早发生，
+ * 而一旦发生，表现是"两块宽度对不齐"这种**只有肉眼能发现**的问题：
+ * 编译通过、单测全绿、跑起来也不崩。
+ *
+ * 收成一个函数之后，宽度一致就是**结构性**保证，而不是靠三处记得同步。
+ *
+ * [wide] 是横屏/大屏档，比手机竖屏多留一段边距。
+ */
+internal fun floatingHorizontalInset(wide: Boolean): Dp = if (wide) 24.dp else 12.dp
+
+/**
  * 顶栏/侧栏/工具行使用的图标按钮。转发到 Miuix [IconButton]（自带涟漪与按压反馈）。
  *
  * [compact] 非空时把按钮压成该边长的方形。**必须**在窄行里显式传：
@@ -170,13 +187,15 @@ fun ZhiFilledIconButton(
         modifier = modifier.size(size),
         enabled = enabled,
         backgroundColor = containerColor,
-        // ⚠️ 方角用的是 `ZhiRadius.square`（4dp），**不是** `ZhiRadius.inner`（10dp）。
+        // ⚠️ 方角用的是 `ZhiRadius.actionKey`（8dp），**不是** `ZhiRadius.square`（4dp），
+        // 也不是 `ZhiRadius.inner`（10dp）。两个都试过：
+        // 4dp 在 30dp 的键上是个硬邦邦的方块（"太方了"），
+        // 10dp 又已经偏胶囊、两个键并排像"一块被劈成两半"。
         //
-        // 这里原来是 10dp，在 40dp 的按钮上还算方；但发送/停止键现在是 30dp，
-        // 10/30 ≈ 0.33 的圆角比已经接近胶囊，两个键并排看像"一块被劈成两半"，
-        // 而用户要的恰恰是**方**键。方角的观感取决于「圆角/边长」这个比例，
-        // 所以按钮变小后圆角必须跟着降档，不能沿用同一个绝对值。
-        cornerRadius = if (square) ZhiRadius.square else size / 2,
+        // 根因是**方角的观感取决于「圆角/边长」比例**，而不是圆角的绝对值：
+        // 同一个 10dp 放在 40dp 的按钮上只有 0.25、还算方，放到 30dp 上就是 0.33。
+        // 所以按钮变小必须跟着换档，不能沿用同一个绝对值。详见 ZhiRadius.actionKey。
+        cornerRadius = if (square) ZhiRadius.actionKey else size / 2,
         minHeight = size,
         minWidth = size,
     ) {

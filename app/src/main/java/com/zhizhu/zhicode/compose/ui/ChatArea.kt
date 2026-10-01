@@ -207,7 +207,8 @@ private fun FloatingAgentStatus(
         color = glass.surfaceColor(scheme.surfaceContainer),
         cornerRadius = ZhiRadius.floating,
         outSidePadding = PaddingValues(
-            horizontal = if (wide) 24.dp else 12.dp,
+            // 与输入器、反馈条共用同一个内缩值：三块是同一列，左右必须对齐。
+            horizontal = floatingHorizontalInset(wide),
             vertical = 8.dp,
         ),
         shadowElevation = 10.dp,
