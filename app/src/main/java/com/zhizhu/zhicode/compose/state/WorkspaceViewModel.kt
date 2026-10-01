@@ -3251,6 +3251,14 @@ class WorkspaceViewModel(
     /** 关闭 UI 调试页。若它是由设置页打开的，设置主页会随之露出来（栈自动回退一层）。 */
     fun closeUiDebug() = _state.update { it.copy(uiDebugOpen = false) }
 
+    /**
+     * 重置 UI 调试页的样例数据。
+     *
+     * 只递增令牌：页面用 `remember(token)` 重建自己那份样例（含秒表状态）。
+     * 样例数据是纯调试物，不进持久化状态，也不该让 ViewModel 认识它的结构。
+     */
+    fun requestUiDebugReset() = _state.update { it.copy(uiDebugResetToken = it.uiDebugResetToken + 1) }
+
     /** 弹窗内任意一项改动都走这里，保证 draft 只有一份写入路径。 */
     fun updateSettingsDraft(transform: (SettingsDraft) -> SettingsDraft) = _state.update {
         val draft = it.settingsDraft ?: return@update it

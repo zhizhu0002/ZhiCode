@@ -2,6 +2,8 @@
 
 package com.zhizhu.zhicode.compose.ui.debug
 
+import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +11,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,29 +23,42 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import com.zhizhu.zhicode.compose.data.Clipboard
 import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
+import com.zhizhu.zhicode.compose.model.EffortLevel
+import com.zhizhu.zhicode.compose.model.PermissionMode
 import com.zhizhu.zhicode.compose.model.TaskState
 import com.zhizhu.zhicode.compose.model.ToolActivity
 import com.zhizhu.zhicode.compose.model.ToolKind
+import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.Glass
+import com.zhizhu.zhicode.compose.ui.ZhiAnchoredActionMenu
 import com.zhizhu.zhicode.compose.ui.ZhiChip
 import com.zhizhu.zhicode.compose.ui.ZhiFilledIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
@@ -65,6 +81,7 @@ import com.zhizhu.zhicode.compose.ui.chat.InfoCard
 import com.zhizhu.zhicode.compose.ui.chat.ToolGroupCard
 import com.zhizhu.zhicode.compose.ui.chat.UserBubble
 import com.zhizhu.zhicode.compose.ui.composer.Composer
+import com.zhizhu.zhicode.compose.ui.rememberFingerTracker
 import com.zhizhu.zhicode.compose.ui.settings.SettingsChoice
 import com.zhizhu.zhicode.compose.ui.settings.SettingsEntry
 import com.zhizhu.zhicode.compose.ui.settings.SettingsFootnote
@@ -73,13 +90,15 @@ import com.zhizhu.zhicode.compose.ui.settings.SettingsNumber
 import com.zhizhu.zhicode.compose.ui.settings.SettingsReadOnly
 import com.zhizhu.zhicode.compose.ui.settings.SettingsTextField
 import com.zhizhu.zhicode.compose.ui.settings.SettingsToggle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Checkbox
-import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
+import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.FloatingToolbar
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -96,6 +115,8 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.CheckboxPreference
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
@@ -103,8 +124,6 @@ import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
 import top.yukonga.miuix.kmp.preference.RadioButtonPreference
 import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
@@ -114,7 +133,7 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
  * ## 它解决什么问题
  *
  * 界面问题里最难定位的一类是「看起来不对」，而验证它需要**同时**看到同一个组件在各种
- * 状态下的样子：一条工具卡在"进行中 / 成功 / 失败 / 等待授权"四态下高度差别很大，一次
+ * 状态下的样子：一条工具卡在"运行中 / 成功 / 失败 / 等待授权"四态下高度差别很大，一次
  * 真的任务只会出现其中一态；同理还有流式回复、思考折叠、上下文脚注、错误卡、空状态。
  * 靠真跑一遍任务去凑齐这些状态既慢又不可复现。
  *
@@ -122,13 +141,28 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
  * 摆一份：颜色/字阶/圆角/图标 → Miuix 基础组件 → 设置行（preference 全套）→ 对话流
  * 卡片 → 任务卡 → 输入器 → 面板与 chips → 各浮层入口 → 当前 state 快照。
  *
+ * ## 它是**可互动的**（不是静态画廊）
+ *
+ * - 「对话流」是一份**可变的样例数据**：思考可展开、工具行可展开看输出、工具组可整体
+ *   折叠；按钮能追加用户消息、追加一段"流式 → 完成"的回复、起一个**正在运行**的工具
+ *   （秒表会真的走）并让它成功或失败。
+ * - 每一条消息、每一张图片都**长按弹出动作菜单**（用的是生产组件
+ *   `ZhiAnchoredActionMenu`，从手指位置长出来），选「复制」即写入剪贴板并弹
+ *   **吐司**提示；图片项复制的是**图片信息**（文件名 / 尺寸 / 体积 / 类型）。
+ * - 底部有「交互日志」：每次点击/长按/复制都留一行，于是"我点了它到底有没有响应"
+ *   不用靠猜。
+ * - 输入器与「浮层入口」接的是**真实 ViewModel**：输入、斜杠面板、页脚下拉、发送、
+ *   打开 API 配置/MCP/技能/角色卡/记忆/模型选择/环境自检/附加文件都是真路径。
+ * - 颜色/字阶/圆角/状态快照读的是**当前主题与当前 state**，切深浅色会跟着变。
+ *
  * ## 纪律
  *
  * - 这里**不新造样式**：视觉一律取自 `Zhi*` 令牌与 Miuix 组件本身，颜色/字号/圆角
  *   必须走 `MiuixTheme.colorScheme` / `ZhiTextScale` / `ZhiRadius` —— 这一页的意义
- *   就是"看到的即真实组件"，一旦自己写死数值，它就开始骗人了。
+ *   就是"看到的即真实组件"，一旦自己写死数值，它就开始骗人了（由
+ *   `UiDebugPageStructureTest` 守着）。
  * - 输入框走 `ZhiTextField`（工程唯一转发点，见 `TextFieldConventionTest`）。
- * - 对话流与任务卡直接调用**生产组件**（`ChatList` 里的那几个），不是仿制版。
+ * - 对话流与任务卡直接调用**生产组件**，不是仿制版。
  * - 未收纳官方组件（NavigationBar / NavigationRail / BreadcrumbBar / SearchBar /
  *   ColorPicker / PullToRefresh / Snackbar / Tooltip / NumberPicker 等）：本工程没有
  *   用到它们，摆出来只会增加维护面而没有调试价值。
@@ -165,6 +199,10 @@ fun UiDebugPage(
                         )
                     }
                 },
+                actions = {
+                    // 每进一次都从干净样例开始：上一次调试留下的"半运行工具"不该带到下一次。
+                    TextButton(text = "重置", onClick = { viewModel.requestUiDebugReset() })
+                },
             )
         },
     ) { padding ->
@@ -186,11 +224,13 @@ fun UiDebugPage(
                 item(key = "basics") { MiuixBasicsSection() }
                 item(key = "preference") { PreferenceSection() }
                 item(key = "appRows") { AppSettingsRowsSection() }
-                item(key = "conversation") { ConversationSection() }
+                item(key = "conversation") { ConversationSection(state.uiDebugResetToken) }
+                item(key = "media") { MediaSection(state.uiDebugResetToken) }
+                item(key = "workspace") { WorkspaceSection(state, viewModel) }
                 item(key = "tasks") { TaskCardSection() }
                 item(key = "composer") { ComposerSection(state, viewModel, glass) }
                 item(key = "chrome") { ChromeSection() }
-                item(key = "overlays") { OverlayEntrySection(viewModel) }
+                item(key = "overlays") { OverlayEntrySection(state, viewModel) }
                 item(key = "state") { StateSnapshotSection(state) }
             }
             VerticalScrollBar(
@@ -223,6 +263,528 @@ private fun DebugSection(title: String, subtitle: String? = null, content: @Comp
         }
     }
 }
+
+// ------------------------------------------------------------------ 剪贴板 + 吐司
+
+/**
+ * 复制到剪贴板并弹**吐司**。
+ *
+ * 为什么不复用 `WorkspaceViewModel.copyText`：那条路径在 Android 13+ 上**刻意不弹**
+ * 自己的提示（系统已经在复制时弹了"已复制"，再弹一次是重复打扰，见 `data/Clipboard.kt`）。
+ * 但调试页的用途恰恰是"给我一个看得见的反馈"——点了有没有生效必须当场看见，
+ * 所以这里显式弹吐司，并如实区分成功与失败（空内容/剪贴板不可用时不能谎报成功）。
+ */
+private fun copyWithToast(context: android.content.Context, label: String, text: String, toast: String) {
+    val ok = Clipboard.copy(context, label, text)
+    val message = if (ok) toast else "复制失败：内容为空或剪贴板不可用"
+    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+}
+
+/** 一条消息的可见文本：与生产路径（`WorkspaceViewModel.copyMessage`）取同一份内容。 */
+private fun copyTextOf(item: ChatItem): String = when (item.kind) {
+    ChatKind.ASSISTANT, ChatKind.ERROR -> item.body.ifBlank { item.thinking }
+    ChatKind.TOOL_GROUP -> item.tools.joinToString("\n") { tool ->
+        listOfNotNull(
+            tool.displayName.takeIf { it.isNotBlank() },
+            tool.summary.takeIf { it.isNotBlank() },
+        ).joinToString(" · ")
+    }
+    else -> item.body
+}
+
+/** 工具组的完整输出（含各工具的运行详情），供"复制全部输出"用。 */
+private fun toolsTextOf(item: ChatItem): String = item.tools.joinToString("\n\n") { tool ->
+    buildString {
+        append(tool.displayName)
+        if (tool.summary.isNotBlank()) append("  ").append(tool.summary)
+        append('\n')
+        append(
+            when {
+                tool.awaitingPermission -> "等待授权"
+                !tool.completed -> "运行中"
+                tool.failed -> "失败${tool.exitCode?.let { "（退出码 $it）" } ?: ""}"
+                else -> "完成"
+            },
+        )
+        if (tool.additions > 0 || tool.deletions > 0) {
+            append("  +${tool.additions} −${tool.deletions}")
+        }
+        if (tool.output.isNotBlank()) append('\n').append(tool.output)
+    }
+}
+
+// ------------------------------------------------------------------ 样例对话数据
+
+/** 样例对话流里的一项：真实消息，或一张图片（图片是消息里最常见的"非文本内容"）。 */
+private sealed interface DebugItem {
+    val id: String
+
+    /** 用生产组件渲染的一条消息。 */
+    data class Msg(override val id: String, val item: ChatItem) : DebugItem
+
+    /** 一张附件图片：渲染成"图片 + 说明"，长按可复制**图片信息**。 */
+    data class Image(
+        override val id: String,
+        val name: String,
+        val dimensions: String,
+        val size: String,
+        val mime: String,
+        val caption: String,
+        val expanded: Boolean = false,
+    ) : DebugItem {
+        /** 长按「复制图片信息」写入的内容。 */
+        fun info(): String = "$name · $dimensions · $size · $mime"
+    }
+}
+
+/**
+ * 可变的样例会话 + 交互日志。
+ *
+ * 用 `mutableStateListOf` 而不是 `List`：这一页的价值一半在"点了有反应"，
+ * 而不可变列表每次改动都要重建整份数据结构，反而更容易写错。
+ */
+private class DebugConversation {
+    val items = mutableStateListOf<DebugItem>()
+    val log = mutableStateListOf<String>()
+    private var seq = 0
+
+    init {
+        reset()
+    }
+
+    /** 重置为出厂样例（按钮与顶栏都用它）。 */
+    fun reset() {
+        seq = 0
+        items.clear()
+        items.addAll(initialSamples())
+        log.clear()
+        note("样例对话已重置（${items.size} 项）")
+    }
+
+    /** 记一行交互日志，最多留 10 行。 */
+    fun note(text: String) {
+        log.add(0, text)
+        while (log.size > 10) log.removeAt(log.lastIndex)
+    }
+
+    fun nextId(prefix: String): String = "$prefix-${++seq}"
+
+    // ---- 按 id 改一条消息 ----
+
+    private fun updateMsg(id: String, transform: (ChatItem) -> ChatItem) {
+        val index = items.indexOfFirst { it.id == id }
+        if (index < 0) return
+        val current = items[index]
+        if (current is DebugItem.Msg) items[index] = current.copy(item = transform(current.item))
+    }
+
+    private fun updateImage(id: String, transform: (DebugItem.Image) -> DebugItem.Image) {
+        val index = items.indexOfFirst { it.id == id }
+        if (index < 0) return
+        val current = items[index]
+        if (current is DebugItem.Image) items[index] = transform(current)
+    }
+
+    // ---- 交互：折叠/展开 ----
+
+    fun toggleThinking(id: String) {
+        updateMsg(id) { it.copy(thinkingExpanded = !it.thinkingExpanded) }
+        note("切换思考内容 · $id")
+    }
+
+    fun toggleTool(msgId: String, toolId: String) {
+        // 与生产分支一致：只有"已完成且有输出"的工具才有可展开的内容。
+        updateMsg(msgId) { item ->
+            item.copy(
+                tools = item.tools.map { tool ->
+                    if (tool.id == toolId && tool.completed && tool.output.isNotBlank()) {
+                        tool.copy(expanded = !tool.expanded)
+                    } else {
+                        tool
+                    }
+                },
+            )
+        }
+        note("展开/折叠工具输出 · $toolId")
+    }
+
+    fun toggleGroup(msgId: String, expanded: Boolean) {
+        updateMsg(msgId) { item ->
+            item.copy(
+                groupCompleted = expanded,
+                tools = item.tools.map { tool ->
+                    if (tool.completed && tool.output.isNotBlank()) tool.copy(expanded = expanded) else tool
+                },
+            )
+        }
+        note(if (expanded) "展开全部工具输出" else "折叠全部工具输出")
+    }
+
+    fun toggleImage(id: String) {
+        updateImage(id) { it.copy(expanded = !it.expanded) }
+        note("切换图片大小 · $id")
+    }
+
+    // ---- 交互：追加与推进 ----
+
+    fun appendUser(text: String) {
+        val id = nextId("dbg-user")
+        items.add(
+            DebugItem.Msg(
+                id = id,
+                item = ChatItem(id = id, kind = ChatKind.USER, body = text),
+            ),
+        )
+        note("追加用户消息 · ${text.take(12)}…")
+    }
+
+    /** 追加一段**流式**回复，返回它的 id（调用方稍后把它置为完成）。 */
+    fun appendStreamingAssistant(): String {
+        val id = nextId("dbg-assistant")
+        items.add(
+            DebugItem.Msg(
+                id = id,
+                item = ChatItem(
+                    id = id,
+                    kind = ChatKind.ASSISTANT,
+                    body = "正在读取 `app/src/main/java/com/zhizhu/zhicode/compose/ui/Animations.kt`",
+                    streaming = true,
+                ),
+            ),
+        )
+        note("追加流式回复 · $id")
+        return id
+    }
+
+    /** 流式结束：正文补全、去掉 streaming 标记。 */
+    fun finishStreaming(id: String) {
+        updateMsg(id) {
+            it.copy(
+                streaming = false,
+                body = it.body + "\n\n已按官方曲线改完；`bash test-source-no-build.sh` 全部通过。",
+                contextTokens = 21_600,
+                contextWindow = 200_000,
+            )
+        }
+        note("流式回复完成 · $id")
+    }
+
+    /**
+     * 起一个**正在运行**的工具：追加到最后一个工具组上（没有就新建一个）。
+     * 运行中的行会让秒表真的走起来（见 [tickRunning]）。
+     */
+    fun startTool(displayName: String, summary: String, kind: ToolKind) {
+        val tool = ToolActivity(
+            id = nextId("tool"),
+            toolName = displayName,
+            displayName = displayName,
+            summary = summary,
+            completed = false,
+            kind = kind,
+        )
+        val groupId = lastGroupId()
+        if (groupId == null) {
+            val id = nextId("dbg-tools")
+            items.add(
+                DebugItem.Msg(
+                    id = id,
+                    item = ChatItem(
+                        id = id,
+                        kind = ChatKind.TOOL_GROUP,
+                        groupLabel = "执行 1 项",
+                        tools = listOf(tool),
+                    ),
+                ),
+            )
+        } else {
+            updateMsg(groupId) { item ->
+                item.copy(
+                    tools = item.tools + tool,
+                    groupCompleted = false,
+                    groupLabel = "执行 ${item.tools.size + 1} 项",
+                )
+            }
+        }
+        note("起工具 · $displayName $summary")
+    }
+
+    /**
+     * 逐条改写消息项（图片项原样保留）。
+     *
+     * 刻意不用 `MutableList.replaceAll`：它是 `java.util.List` 的默认方法，在
+     * `SnapshotStateList` 上虽然能跑，但回调里无法"跳过不写"（每次都会写回，
+     * 于是没有变化也会触发重组），而且语义上容易与 `removeAll` 那类混淆。
+     * 只留这一条按索引写回的路径，返回真正改动的条数。
+     *
+     * [transform] 返回 `null` 表示这一条无需改动。
+     */
+    private inline fun updateMsgs(transform: (ChatItem) -> ChatItem?): Int {
+        var changed = 0
+        for (index in items.indices) {
+            val entry = items[index]
+            if (entry is DebugItem.Msg) {
+                val updated = transform(entry.item) ?: continue
+                items[index] = entry.copy(item = updated)
+                changed++
+            }
+        }
+        return changed
+    }
+
+    /** 让当前**所有**运行中的工具成功完成，并补上输出。 */
+    fun completeRunning() {
+        val touched = mutableListOf<String>()
+        updateMsgs { item ->
+            var any = false
+            val tools = item.tools.map { tool ->
+                if (tool.completed || tool.awaitingPermission) {
+                    tool
+                } else {
+                    any = true
+                    touched.add(tool.displayName)
+                    tool.copy(
+                        completed = true,
+                        output = "(调试样例) ${tool.summary.ifBlank { tool.displayName }} 执行成功",
+                    )
+                }
+            }
+            if (any) item.copy(tools = tools, groupCompleted = true) else null
+        }
+        if (touched.isEmpty()) note("没有运行中的工具可完成") else note("完成工具 · ${touched.joinToString("/")}")
+    }
+
+    /** 让当前所有运行中的工具**失败**（带退出码与错误输出）。 */
+    fun failRunning() {
+        val touched = mutableListOf<String>()
+        updateMsgs { item ->
+            var any = false
+            val tools = item.tools.map { tool ->
+                if (tool.completed || tool.awaitingPermission) {
+                    tool
+                } else {
+                    any = true
+                    touched.add(tool.displayName)
+                    tool.copy(
+                        completed = true,
+                        failed = true,
+                        exitCode = 1,
+                        output = "FAIL UiDebugPageStructureTest\n  AssertionError: 组件未铺开",
+                    )
+                }
+            }
+            if (any) item.copy(tools = tools, groupCompleted = true) else null
+        }
+        if (touched.isEmpty()) note("没有运行中的工具可失败") else note("工具失败 · ${touched.joinToString("/")}")
+    }
+
+    /** 等待授权 → 授权通过（演示"等待授权"这一态怎么消失）。 */
+    fun approveAwaiting() {
+        val changed = updateMsgs { item ->
+            var any = false
+            val tools = item.tools.map { tool ->
+                if (tool.awaitingPermission) {
+                    any = true
+                    tool.copy(awaitingPermission = false, completed = true, output = "(调试样例) 已授权并执行完成")
+                } else {
+                    tool
+                }
+            }
+            if (any) item.copy(tools = tools) else null
+        }
+        note(if (changed > 0) "等待授权的工具已放行" else "没有等待授权的工具")
+    }
+
+    /** 是否有工具正在运行（用来决定秒表要不要跑）。 */
+    fun hasRunning(): Boolean = items.any { entry ->
+        entry is DebugItem.Msg && entry.item.tools.any { !it.completed && !it.awaitingPermission }
+    }
+
+    /**
+     * 推进运行中工具的秒表。
+     *
+     * 生产代码里 `elapsedMs` 由引擎推；这里由调试页自己每 [TICK_MILLIS] 加一点，
+     * 于是"运行中 · 0.3s"这行字会真的在走 —— 静止的假数据看不出
+     * 「运行中」和「卡住了」的区别。
+     *
+     * @return 是否还有运行中的工具（false 时调用方应停下循环）。
+     */
+    fun tickRunning(): Boolean = updateMsgs { item ->
+        var any = false
+        val tools = item.tools.map { tool ->
+            if (tool.completed || tool.awaitingPermission) {
+                tool
+            } else {
+                any = true
+                tool.copy(elapsedMs = tool.elapsedMs + TICK_MILLIS)
+            }
+        }
+        if (any) item.copy(tools = tools) else null
+    } > 0
+
+    private fun lastGroupId(): String? =
+        items.lastOrNull { it is DebugItem.Msg && it.item.kind == ChatKind.TOOL_GROUP }?.id
+
+    companion object {
+        /** 秒表步长：与生产里引擎推 `elapsedMs` 的频率同一个量级。 */
+        const val TICK_MILLIS = 150L
+    }
+}
+
+/**
+ * 出厂样例：把每种状态都摆一份。
+ *
+ * 覆盖：用户文本、用户附图片、带思考与上下文脚注的回复、流式回复、工具组
+ * （搜索已完成 / 读取已展开 / 编辑**运行中** / 命令**失败** / 命令**等待授权**）、
+ * 错误卡、提示卡。
+ */
+private fun initialSamples(): List<DebugItem> = listOf(
+    DebugItem.Msg(
+        id = "dbg-user-0",
+        item = ChatItem(
+            id = "dbg-user-0",
+            kind = ChatKind.USER,
+            body = "把设置页的动画都改成 miuix 官方的曲线，顺便看一下长文本气泡在窄屏上的折行。",
+        ),
+    ),
+    DebugItem.Image(
+        id = "dbg-image-0",
+        name = "IMG_20261001_221500.jpg",
+        dimensions = "1080×2400",
+        size = "2.4 MB",
+        mime = "image/jpeg",
+        caption = "顺便看下这张截图里输入器页脚三个 pill 的间距",
+    ),
+    DebugItem.Msg(
+        id = "dbg-assistant-0",
+        item = ChatItem(
+            id = "dbg-assistant-0",
+            kind = ChatKind.ASSISTANT,
+            title = "ZhiCode",
+            body = """
+                已经按官方曲线改完了。要点：
+
+                - 淡入 `tween(300, SinOutEasing)`，淡出 `tween(150, SinOutEasing)`
+                - 位移退出 `tween(200, DecelerateEasing(1.5f))`
+                - 数字/进度用 `folmeSpring(1.0, 0.3)`
+
+                ```kotlin
+                val fadeOutSpec = tween(150, easing = SinOutEasing)
+                ```
+            """.trimIndent(),
+            thinking = "先确认哪些调用点还在用自拟的 280ms/EaseOutCubic，再逐处替换；" +
+                "换完必须重跑守卫，否则可能悄悄放宽了断言。",
+            thinkingExpanded = false,
+            processSteps = listOf("读取 Animations.kt", "替换 12 处调用点", "编译校验"),
+            contextTokens = 18_400,
+            contextWindow = 200_000,
+        ),
+    ),
+    DebugItem.Msg(
+        id = "dbg-assistant-stream",
+        item = ChatItem(
+            id = "dbg-assistant-stream",
+            kind = ChatKind.ASSISTANT,
+            body = "正在读取 `app/src/main/java/com/zhizhu/zhicode/compose/ui/AppScaffold.kt`",
+            streaming = true,
+        ),
+    ),
+    DebugItem.Msg(
+        id = "dbg-tools-0",
+        item = ChatItem(
+            id = "dbg-tools-0",
+            kind = ChatKind.TOOL_GROUP,
+            groupLabel = "搜索 1 个模式 · 读取 2 个文件 · 编辑 2 个文件 · 执行 2 条命令",
+            groupCompleted = false,
+            tools = listOf(
+                ToolActivity(
+                    id = "t-search",
+                    toolName = "grep",
+                    displayName = "搜索",
+                    summary = "ZhiMotion\\.",
+                    completed = true,
+                    elapsedMs = 410,
+                    kind = ToolKind.SEARCH,
+                    output = "app/.../ui/Composer.kt:12\napp/.../ui/AppScaffold.kt:170\napp/.../ui/Sidebar.kt:233",
+                ),
+                ToolActivity(
+                    id = "t-read",
+                    toolName = "read",
+                    displayName = "读取",
+                    summary = "Animations.kt",
+                    completed = true,
+                    elapsedMs = 320,
+                    kind = ToolKind.READ,
+                    // 已展开：展示"展开后的全量输出"这一态
+                    expanded = true,
+                    output = "1  object ZhiMotion {\n2      val fadeInSpec = tween(300, easing = SinOutEasing)\n" +
+                        "3      val fadeOutSpec = tween(150, easing = SinOutEasing)\n4  }",
+                ),
+                ToolActivity(
+                    id = "t-edit",
+                    toolName = "edit",
+                    displayName = "编辑",
+                    summary = "AppScaffold.kt",
+                    completed = true,
+                    elapsedMs = 860,
+                    additions = 12,
+                    deletions = 3,
+                    kind = ToolKind.EDIT,
+                    output = "app/.../ui/AppScaffold.kt: 12 行新增，3 行删除",
+                ),
+                ToolActivity(
+                    id = "t-edit-running",
+                    toolName = "edit",
+                    displayName = "编辑",
+                    summary = "SettingsDialog.kt",
+                    // 运行中：行尾没有 chevron，底部一行「运行中 · 1.2s」会随秒表走
+                    completed = false,
+                    elapsedMs = 1200,
+                    kind = ToolKind.EDIT,
+                ),
+                ToolActivity(
+                    id = "t-bash-failed",
+                    toolName = "bash",
+                    displayName = "执行",
+                    summary = "bash test-source-no-build.sh",
+                    completed = true,
+                    failed = true,
+                    exitCode = 1,
+                    elapsedMs = 4_200,
+                    kind = ToolKind.COMMAND,
+                    output = "FAIL UiDebugPageStructureTest\n  AssertionError: UI 调试页必须调用生产组件 EmptyState(",
+                ),
+                ToolActivity(
+                    id = "t-bash-awaiting",
+                    toolName = "bash",
+                    displayName = "执行",
+                    summary = "pkg install -y openjdk-21",
+                    // 等待授权：底部一行用强调色写「等待授权…」，没有 chevron
+                    completed = false,
+                    awaitingPermission = true,
+                    kind = ToolKind.COMMAND,
+                ),
+            ),
+        ),
+    ),
+    DebugItem.Msg(
+        id = "dbg-error-0",
+        item = ChatItem(
+            id = "dbg-error-0",
+            kind = ChatKind.ERROR,
+            title = "编译失败",
+            body = "`Unresolved reference 'ZhiIcons'`（SettingsDialog.kt:406）—— 需要补 import。",
+        ),
+    ),
+    DebugItem.Msg(
+        id = "dbg-info-0",
+        item = ChatItem(
+            id = "dbg-info-0",
+            kind = ChatKind.INFO,
+            title = "提示",
+            body = "已切换到「项目路径与会话」面板。",
+        ),
+    ),
+)
 
 // ------------------------------------------------------------------ 设计令牌
 
@@ -441,41 +1003,59 @@ private fun RadiusAndIconSection() {
 
 // ------------------------------------------------------------------ 官方基础组件
 
-/** Miuix 基础组件全家桶（本工程用到的那一档）。 */
+/** Miuix 基础组件全家桶（本工程用到的那一档）。全部可点/可拖。 */
 @Composable
 private fun MiuixBasicsSection() {
     val scheme = MiuixTheme.colorScheme
+    val context = LocalContext.current
     var switchA by remember { mutableStateOf(true) }
     var switchB by remember { mutableStateOf(false) }
     var checkA by remember { mutableStateOf(true) }
     var checkB by remember { mutableStateOf(false) }
     var radio by remember { mutableStateOf(0) }
     var slider by remember { mutableStateOf(0.4f) }
+    var lastTap by remember { mutableStateOf("（还没点过）") }
 
-    DebugSection("Miuix 组件 · 基础", "按钮 / 卡片 / 选择控件 / 进度 —— 全部官方默认尺寸") {
+    DebugSection("Miuix 组件 · 基础", "按钮 / 卡片 / 选择控件 / 进度 —— 全部官方默认尺寸，点了都有反应") {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Button(onClick = {}, content = { Text("主按钮") })
-                Button(onClick = {}, enabled = false, content = { Text("禁用") })
-                TextButton(text = "文字按钮", onClick = {})
+                Button(
+                    onClick = { lastTap = "Button · 主按钮" },
+                    content = { Text("主按钮") },
+                )
+                Button(
+                    onClick = {},
+                    enabled = false,
+                    content = { Text("禁用") },
+                )
+                TextButton(text = "文字按钮", onClick = { lastTap = "TextButton" })
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                ZhiIconButton(icon = ZhiIcons.close, description = "默认圆钮", onClick = {})
-                ZhiIconButton(icon = ZhiIcons.edit, description = "紧凑方钮", onClick = {}, compact = 28.dp)
+                ZhiIconButton(
+                    icon = ZhiIcons.close,
+                    description = "默认圆钮",
+                    onClick = { lastTap = "ZhiIconButton · 默认" },
+                )
+                ZhiIconButton(
+                    icon = ZhiIcons.edit,
+                    description = "紧凑方钮",
+                    onClick = { lastTap = "ZhiIconButton · compact 28dp" },
+                    compact = 28.dp,
+                )
                 ZhiFilledIconButton(
                     icon = ZhiIcons.send,
                     description = "实心方角",
-                    onClick = {},
+                    onClick = { lastTap = "ZhiFilledIconButton · 方角" },
                     containerColor = scheme.primary,
                     square = true,
                 )
                 ZhiFilledIconButton(
                     icon = ZhiIcons.stop,
                     description = "实心圆",
-                    onClick = {},
+                    onClick = { lastTap = "ZhiFilledIconButton · 圆" },
                     containerColor = scheme.error,
                     contentColor = scheme.onBackground,
                 )
@@ -483,6 +1063,7 @@ private fun MiuixBasicsSection() {
             }
             Card(
                 modifier = Modifier.fillMaxWidth(),
+                onClick = { lastTap = "Card" },
                 cornerRadius = ZhiRadius.card,
                 insideMargin = PaddingValues(12.dp),
                 colors = CardDefaults.defaultColors(
@@ -490,7 +1071,7 @@ private fun MiuixBasicsSection() {
                     contentColor = scheme.onSurface,
                 ),
             ) {
-                Text(text = "Card（ZhiRadius.card）", fontSize = ZhiTextScale.Body)
+                Text(text = "Card（ZhiRadius.card）· 可点", fontSize = ZhiTextScale.Body)
                 HorizontalPairDivider()
                 Text(
                     text = "Card 的按压反馈与 squircle 圆角由 Miuix 负责。",
@@ -537,8 +1118,18 @@ private fun MiuixBasicsSection() {
                 ) {
                     Text(text = "FloatingToolbar", fontSize = ZhiTextScale.BodySmall)
                     Spacer(modifier = Modifier.weight(1f))
-                    ZhiChip(label = "chip")
+                    ZhiChip(
+                        label = "点我复制 chip 文本",
+                        onClick = { copyWithToast(context, "chip", "chip", "已复制") },
+                    )
                 }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "最近一次点击：$lastTap",
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Caption,
+                )
             }
         }
     }
@@ -633,7 +1224,7 @@ private fun PreferenceSection() {
             title = "行内输入（ZhiTextField）",
             value = inlineText,
             onValueChange = { inlineText = it },
-            summary = "Miuix 的 bottomAction 槽位",
+            summary = "Miuix 的 bottomAction 槽位；光标落在末尾，不是开头",
         )
         SmallTitle(text = "非 preference 的纯展示行", modifier = Modifier.padding(start = 12.dp, top = 10.dp))
         SettingsReadOnly(title = "只读行 · 色值", valueText = "#34C759", swatch = ZhiColors.green())
@@ -680,153 +1271,507 @@ private fun AppSettingsRowsSection() {
     }
 }
 
-// ------------------------------------------------------------------ 对话流
+// ------------------------------------------------------------------ 对话流（可互动）
 
-/** 对话流的**生产组件** + 覆盖每种状态的样例数据。 */
+/**
+ * 对话流：**生产组件 + 可变的样例数据**。
+ *
+ * 与真实对话页的差别只有数据来源 —— 组件的调用方式、回调语义、折叠规则都照抄
+ * `ui/chat/ChatList.kt`，所以在这里看到的排版就是真实排版。
+ *
+ * 长按任意一条（或图片）弹出的动作菜单用的是生产组件 [ZhiAnchoredActionMenu]，
+ * 与真实对话页同一个锚定机制（从手指位置长出来）。
+ */
 @Composable
-private fun ConversationSection() {
+private fun ConversationSection(resetToken: Int) {
+    val feed = remember(resetToken) { DebugConversation() }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // 哪一条的菜单正开着（同时只开一个）。
+    var menuFor by remember { mutableStateOf<String?>(null) }
+
+    // 运行中工具的秒表：有运行中的工具就每 TICK_MILLIS 推一次，没有就整段不进循环。
+    val hasRunning = feed.hasRunning()
+    LaunchedEffect(hasRunning) {
+        while (hasRunning) {
+            delay(DebugConversation.TICK_MILLIS)
+            feed.tickRunning()
+        }
+    }
+
     DebugSection(
-        title = "对话流（生产组件 + 样例数据）",
-        subtitle = "直接调用 ChatList 里的组件；长按动作菜单、思考折叠、上下文脚注都可点",
+        title = "对话流（生产组件 + 可互动样例）",
+        subtitle = "思考可展开、工具行可展开看输出、工具组可整体折叠；长按任意一条或图片复制（吐司提示）",
     ) {
+        // ---- 控制条：所有按钮都会真的改变下面这份样例数据，并记一行交互日志 ----
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "样例数据控制",
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = ZhiTextScale.Caption,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    text = "追加用户消息",
+                    onClick = { feed.appendUser("（调试）再帮我确认一下这个间距。") },
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "追加流式回复",
+                    onClick = {
+                        val id = feed.appendStreamingAssistant()
+                        // 1.6 秒后自动收尾：于是"流式 → 完成"这条路径也能被看到，
+                        // 而不必靠人去点第二次。
+                        scope.launch {
+                            delay(1_600)
+                            feed.finishStreaming(id)
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    text = "起一个工具（运行中）",
+                    onClick = { feed.startTool("读取", "WorkspaceViewModel.kt", ToolKind.READ) },
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "起一条命令",
+                    onClick = { feed.startTool("执行", "./gradlew :app:assembleDebug", ToolKind.COMMAND) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    text = "让运行中的成功",
+                    onClick = { feed.completeRunning() },
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "让运行中的失败",
+                    onClick = { feed.failRunning() },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    text = "放行等待授权",
+                    onClick = { feed.approveAwaiting() },
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "重置样例对话",
+                    onClick = { menuFor = null; feed.reset() },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        ZhiHorizontalDivider(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp))
+
+        // ---- 样例流本体 ----
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-            ConversationSamples()
+            feed.items.forEach { entry ->
+                // 手指位置追踪挂在这一项的 Box 上：于是菜单从手指那一点长出来，
+                // 与真实对话页（ChatList）完全一致。
+                val finger = rememberFingerTracker()
+                var fingerOffset by remember { mutableStateOf<DpOffset?>(null) }
+                Box(modifier = Modifier.then(finger.modifier)) {
+                    when (entry) {
+                        is DebugItem.Msg -> {
+                            val item = entry.item
+                            when (item.kind) {
+                                ChatKind.USER -> UserBubble(item) {
+                                    fingerOffset = finger.offset()
+                                    menuFor = item.id
+                                    feed.note("长按 · 用户消息")
+                                }
+                                ChatKind.ASSISTANT -> AssistantCard(
+                                    item = item,
+                                    onToggleThinking = { feed.toggleThinking(item.id) },
+                                    onLongPress = {
+                                        fingerOffset = finger.offset()
+                                        menuFor = item.id
+                                        feed.note("长按 · 助手回复")
+                                    },
+                                )
+                                ChatKind.TOOL_GROUP -> ToolGroupCard(
+                                    item = item,
+                                    onToggleTool = { toolId -> feed.toggleTool(item.id, toolId) },
+                                    onToggleGroup = { expanded -> feed.toggleGroup(item.id, expanded) },
+                                    onActions = {
+                                        fingerOffset = null
+                                        menuFor = item.id
+                                        feed.note("点开工具组菜单")
+                                    },
+                                )
+                                ChatKind.ERROR -> ErrorCard(item)
+                                ChatKind.INFO -> InfoCard(item)
+                            }
+                        }
+                        is DebugItem.Image -> DebugImageBubble(
+                            image = entry,
+                            onToggleSize = { feed.toggleImage(entry.id) },
+                            onLongPress = {
+                                fingerOffset = finger.offset()
+                                menuFor = entry.id
+                                feed.note("长按 · 图片")
+                            },
+                        )
+                    }
+                    if (menuFor == entry.id) {
+                        ItemActionMenu(
+                            entry = entry,
+                            fingerOffset = fingerOffset,
+                            onDismiss = { menuFor = null },
+                            onAction = { label ->
+                                menuFor = null
+                                handleItemAction(context, entry, label, feed)
+                            },
+                        )
+                    }
+                }
+            }
+            Text(
+                text = "空状态（对话流无内容时）",
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = ZhiTextScale.Caption,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+            // 空状态是整屏居中的组件，这里给它一个受限高度，免得在画廊里吃掉大半屏。
+            Box(modifier = Modifier.fillMaxWidth().height(200.dp)) {
+                EmptyState()
+            }
+        }
+
+        ZhiHorizontalDivider(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp))
+        InteractionLog(feed.log) { feed.log.clear() }
+    }
+}
+
+/**
+ * 某一条的长按菜单。
+ *
+ * 选项按消息类型给：文本消息能复制内容/思考，工具组能复制摘要与全量输出，
+ * 图片能复制图片信息 —— 「复制」在每一类上都必须有实际内容可复制，
+ * 否则用户点了会以为复制坏了。
+ */
+@Composable
+private fun ItemActionMenu(
+    entry: DebugItem,
+    fingerOffset: DpOffset?,
+    onDismiss: () -> Unit,
+    onAction: (String) -> Unit,
+) {
+    val labels = when (entry) {
+        is DebugItem.Image -> listOf("复制图片信息", "复制文件名", "复制图片说明")
+        is DebugItem.Msg -> when (entry.item.kind) {
+            ChatKind.ASSISTANT -> listOf("复制回复", "复制思考内容", "复制全文（含思考）")
+            ChatKind.TOOL_GROUP -> listOf("复制工具摘要", "复制全部输出")
+            ChatKind.USER -> listOf("复制内容", "再次发送（日志）")
+            else -> listOf("复制内容")
+        }
+    }
+    ZhiAnchoredActionMenu(
+        labels = labels,
+        onSelect = { index -> onAction(labels[index]) },
+        onDismiss = onDismiss,
+        fingerOffset = fingerOffset,
+    )
+}
+
+/** 执行菜单动作：复制 + 吐司 + 记日志。 */
+private fun handleItemAction(
+    context: android.content.Context,
+    entry: DebugItem,
+    label: String,
+    feed: DebugConversation,
+) {
+    when (entry) {
+        is DebugItem.Image -> when (label) {
+            "复制图片信息" ->
+                copyWithToast(context, "图片信息", entry.info(), "已复制图片信息")
+            "复制文件名" ->
+                copyWithToast(context, "图片文件名", entry.name, "已复制文件名")
+            else ->
+                copyWithToast(context, "图片说明", entry.caption, "已复制图片说明")
+        }
+        is DebugItem.Msg -> when (label) {
+            "复制回复" -> copyWithToast(context, "智蛛回复", entry.item.body, "已复制")
+            "复制思考内容" -> copyWithToast(context, "思考内容", entry.item.thinking, "已复制")
+            "复制全文（含思考）" -> copyWithToast(
+                context,
+                "智蛛回复（含思考）",
+                listOf(entry.item.thinking, entry.item.body).filter { it.isNotBlank() }.joinToString("\n\n"),
+                "已复制全文",
+            )
+            "复制工具摘要" -> copyWithToast(context, "工具摘要", copyTextOf(entry.item), "已复制")
+            "复制全部输出" -> copyWithToast(context, "工具输出", toolsTextOf(entry.item), "已复制全部输出")
+            "再次发送（日志）" -> feed.note("（调试）再次发送：${entry.item.body.take(12)}…")
+            else -> copyWithToast(context, "消息", copyTextOf(entry.item), "已复制")
+        }
+    }
+    feed.note("$label · ${entry.id}")
+}
+
+/**
+ * 图片气泡。
+ *
+ * 真实实现里图片附件由输入器带入（`AttachmentReader` 读字节），这里用**纯主题色**画一块
+ * 占位图 —— 调试页不引入图片资源（那会让它依赖具体素材），但尺寸/圆角/说明文字的排布
+ * 与真实附件卡一致。长按复制的是**图片信息**（文件名 / 尺寸 / 体积 / 类型）。
+ */
+@Composable
+private fun DebugImageBubble(
+    image: DebugItem.Image,
+    onToggleSize: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    Card(
+        onClick = onToggleSize,
+        onLongPress = onLongPress,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        cornerRadius = ZhiRadius.card,
+        insideMargin = PaddingValues(8.dp),
+        colors = CardDefaults.defaultColors(
+            color = ZhiColors.cardSurface(),
+            contentColor = scheme.onSurface,
+        ),
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // 点一下切换比例：验证不同宽高比下的圆角/裁切是否正常
+                    .aspectRatio(if (image.expanded) 1f else 4f / 3f)
+                    .clip(RoundedCornerShape(ZhiRadius.inner))
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                scheme.primary.copy(alpha = 0.35f),
+                                scheme.surfaceContainerHighest,
+                            ),
+                        ),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = ZhiIcons.floatingBall,
+                        contentDescription = null,
+                        tint = scheme.onSurface,
+                        modifier = Modifier.size(28.dp),
+                    )
+                    Text(
+                        text = "示例图片 · 点按切换比例",
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = ZhiTextScale.Micro,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
+            Text(
+                text = image.name,
+                fontSize = ZhiTextScale.Caption,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Text(
+                text = "${image.dimensions} · ${image.size} · ${image.mime}",
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = ZhiTextScale.Micro,
+            )
+            Text(
+                text = image.caption,
+                fontSize = ZhiTextScale.BodySmall,
+                modifier = Modifier.padding(top = 3.dp),
+            )
+            Text(
+                text = "长按可复制图片信息",
+                color = scheme.primary,
+                fontSize = ZhiTextScale.Micro,
+                modifier = Modifier.padding(top = 3.dp),
+            )
         }
     }
 }
 
+/** 交互日志：每次点击/长按/复制留一行，并显示当前样例数据规模。 */
 @Composable
-private fun ColumnScope.ConversationSamples() {
-    var thinkingExpanded by remember { mutableStateOf(false) }
+private fun InteractionLog(log: List<String>, onClear: () -> Unit) {
+    val scheme = MiuixTheme.colorScheme
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "交互日志（最近 ${log.size} 条）",
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = ZhiTextScale.Caption,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            TextButton(text = "清空", onClick = onClear)
+        }
+        if (log.isEmpty()) {
+            Text(
+                text = "还没有交互。点上面的按钮或长按任意一条消息试试。",
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = ZhiTextScale.Caption,
+            )
+        } else {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = ZhiRadius.inner,
+                insideMargin = PaddingValues(10.dp),
+                colors = CardDefaults.defaultColors(
+                    color = ZhiColors.cardInnerSurface(),
+                    contentColor = scheme.onSurfaceVariantSummary,
+                ),
+            ) {
+                Column {
+                    log.forEach { line ->
+                        Text(
+                            text = "· $line",
+                            fontSize = ZhiTextScale.Footnote,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
-    UserBubble(
-        item = ChatItem(
-            id = "dbg-user-1",
-            kind = ChatKind.USER,
-            body = "把设置页的动画都改成 miuix 官方的曲线，顺便看一下长文本气泡在窄屏上的折行。",
-        ),
-        onLongPress = {},
-    )
-    AssistantCard(
-        item = ChatItem(
-            id = "dbg-assistant-1",
-            kind = ChatKind.ASSISTANT,
-            title = "ZhiCode",
-            body = """
-                已经按官方曲线改完了。要点：
+// ------------------------------------------------------------------ 媒体
 
-                - 淡入 `tween(300, SinOutEasing)`，淡出 `tween(150, SinOutEasing)`
-                - 位移退出 `tween(200, DecelerateEasing(1.5f))`
-                - 数字/进度用 `folmeSpring(1.0, 0.3)`
-
-                ```kotlin
-                val fadeOutSpec = tween(150, easing = SinOutEasing)
-                ```
-            """.trimIndent(),
-            thinking = "先确认哪些调用点还在用自拟的 280ms/EaseOutCubic，再逐处替换。",
-            thinkingExpanded = thinkingExpanded,
-            processSteps = listOf("读取 Animations.kt", "替换调用点", "编译校验"),
-            contextTokens = 18_400,
-            contextWindow = 200_000,
-        ),
-        onToggleThinking = { thinkingExpanded = !thinkingExpanded },
-        onLongPress = {},
-    )
-    // 流式中的状态（尾字带光标 + 「正在输入」提示）
-    AssistantCard(
-        item = ChatItem(
-            id = "dbg-assistant-2",
-            kind = ChatKind.ASSISTANT,
-            body = "正在读取 `app/src/main/java/com/zhizhu/zhicode/compose/ui/Animations.kt`",
-            streaming = true,
-        ),
-        onToggleThinking = {},
-        onLongPress = {},
-    )
-    ToolGroupCard(
-        item = ChatItem(
-            id = "dbg-tools",
-            kind = ChatKind.TOOL_GROUP,
-            groupLabel = "搜索 2 个模式 · 读取 3 个文件 · 执行 1 条命令",
-            groupCompleted = false,
-            tools = listOf(
-                ToolActivity(
-                    id = "t1",
-                    toolName = "grep",
-                    displayName = "搜索",
-                    summary = "ZhiMotion\\.",
-                    completed = true,
-                    kind = ToolKind.SEARCH,
-                ),
-                ToolActivity(
-                    id = "t2",
-                    toolName = "read",
-                    displayName = "读取",
-                    summary = "Animations.kt",
-                    completed = true,
-                    kind = ToolKind.READ,
-                    elapsedMs = 320,
-                ),
-                ToolActivity(
-                    id = "t3",
-                    toolName = "edit",
-                    displayName = "编辑",
-                    summary = "AppScaffold.kt",
-                    completed = false,
-                    kind = ToolKind.EDIT,
-                    additions = 12,
-                    deletions = 3,
-                ),
-                ToolActivity(
-                    id = "t4",
-                    toolName = "bash",
-                    displayName = "执行",
-                    summary = "bash test-source-no-build.sh",
-                    completed = true,
-                    failed = true,
-                    exitCode = 1,
-                    kind = ToolKind.COMMAND,
-                    output = "FAIL LayoutConsistencyTest",
-                ),
-                ToolActivity(
-                    id = "t5",
-                    toolName = "bash",
-                    displayName = "执行",
-                    summary = "pkg install -y openjdk-21",
-                    awaitingPermission = true,
-                    kind = ToolKind.COMMAND,
-                ),
+/**
+ * 媒体区：图片在**独立分区**里再摆一份，方便直接对比不同比例。
+ *
+ * 对话流里那张图片是"消息里的图片"（与气泡同宽）；这里额外给一张**大图**与一张
+ * **错误/占位**态，用来验证 `aspectRatio` 与圆角裁切在极端比例下是否还正常。
+ */
+@Composable
+private fun MediaSection(resetToken: Int) {
+    val context = LocalContext.current
+    var menuFor by remember(resetToken) { mutableStateOf<String?>(null) }
+    val images = remember(resetToken) {
+        listOf(
+            DebugItem.Image(
+                id = "media-wide",
+                name = "screenshot_settings_hub.png",
+                dimensions = "1080×2400",
+                size = "1.1 MB",
+                mime = "image/png",
+                caption = "设置主页：分组卡与行间距",
             ),
-        ),
-        onToggleTool = {},
-        onToggleGroup = {},
-        onActions = {},
-    )
-    ErrorCard(
-        item = ChatItem(
-            id = "dbg-error",
-            kind = ChatKind.ERROR,
-            title = "编译失败",
-            body = "`Unresolved reference 'ZhiIcons'`（SettingsDialog.kt:406）—— 需要补 import。",
-        ),
-    )
-    InfoCard(
-        item = ChatItem(
-            id = "dbg-info",
-            kind = ChatKind.INFO,
-            title = "提示",
-            body = "已切换到「项目路径与会话」面板。",
-        ),
-    )
-    Text(
-        text = "空状态（对话流无内容时）",
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        fontSize = ZhiTextScale.Caption,
-        modifier = Modifier.padding(top = 8.dp),
-    )
-    // 空状态是整屏居中的组件，这里给它一个受限高度，免得在画廊里吃掉大半屏。
-    Box(modifier = Modifier.fillMaxWidth().height(200.dp)) {
-        EmptyState()
+            DebugItem.Image(
+                id = "media-square",
+                name = "icon_1024.png",
+                dimensions = "1024×1024",
+                size = "486 KB",
+                mime = "image/png",
+                caption = "方形图：验证圆角裁切",
+                expanded = true,
+            ),
+        )
+    }
+
+    DebugSection(
+        title = "媒体 · 图片（长按复制图片信息）",
+        subtitle = "结构与消息里的图片一致；长按弹出动作菜单，复制后弹吐司",
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+            images.forEach { image ->
+                val finger = rememberFingerTracker()
+                var fingerOffset by remember { mutableStateOf<DpOffset?>(null) }
+                Box(modifier = Modifier.then(finger.modifier)) {
+                    DebugImageBubble(
+                        image = image,
+                        onToggleSize = {},
+                        onLongPress = {
+                            fingerOffset = finger.offset()
+                            menuFor = image.id
+                        },
+                    )
+                    if (menuFor == image.id) {
+                        ZhiAnchoredActionMenu(
+                            labels = listOf("复制图片信息", "复制文件名"),
+                            onSelect = { index ->
+                                menuFor = null
+                                if (index == 0) {
+                                    copyWithToast(context, "图片信息", image.info(), "已复制图片信息")
+                                } else {
+                                    copyWithToast(context, "图片文件名", image.name, "已复制文件名")
+                                }
+                            },
+                            onDismiss = { menuFor = null },
+                            fingerOffset = fingerOffset,
+                        )
+                    }
+                }
+            }
+            SettingsFootnote(
+                "真实路径：输入器「＋ → 图片」读入字节后由 AttachmentReader 生成附件，" +
+                    "这里不引入图片素材，避免调试页依赖具体文件。",
+            )
+        }
+    }
+}
+
+// ------------------------------------------------------------------ 工作区（真实状态）
+
+/** 直接操作真实工作区状态：切面板 / 开侧栏 / 开设置 / 切权限与推理。 */
+@Composable
+private fun WorkspaceSection(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
+    DebugSection(
+        title = "工作区状态（真实生效）",
+        subtitle = "这些按钮改的是真实 ViewModel 状态，切完返回即可看到工作区已经跟着变了",
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    text = "切到对话",
+                    onClick = { viewModel.selectTab(WorkspaceTab.CHAT) },
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "切到终端",
+                    onClick = { viewModel.selectTab(WorkspaceTab.TERMINAL) },
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "切到文件",
+                    onClick = { viewModel.selectTab(WorkspaceTab.FILES) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    text = "打开侧栏",
+                    onClick = viewModel::openSidebar,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "权限 → 每次询问",
+                    onClick = { viewModel.setPermissionMode(PermissionMode.ASK) },
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    text = "推理 → 自动",
+                    onClick = { viewModel.setEffort(EffortLevel.AUTO) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            SettingsFootnote(
+                "当前面板：${state.tab.label} · 侧栏${if (state.sidebarOpen) "已打开" else "关闭"} · " +
+                    "权限 ${state.permissionMode.label} · 推理 ${state.effort.label}",
+            )
+        }
     }
 }
 
@@ -834,18 +1779,36 @@ private fun ColumnScope.ConversationSamples() {
 
 @Composable
 private fun TaskCardSection() {
-    val tasks = listOf(
-        AgentTask(title = "读取工程结构", detail = "- 扫描 `app/src/main`\n- 统计模块", state = TaskState.DONE),
-        AgentTask(title = "替换动效令牌", detail = "把 12 个文件收口到 Animations.kt", state = TaskState.RUNNING),
-        AgentTask(title = "编译并跑守卫", state = TaskState.PENDING),
-    )
-    DebugSection("Agent 任务卡", "悬浮态是对话页底部那张卡（embedded 形态由 FloatingAgentStatus 提供）") {
+    var tasks by remember {
+        mutableStateOf(
+            listOf(
+                AgentTask(title = "读取工程结构", detail = "- 扫描 `app/src/main`\n- 统计模块", state = TaskState.DONE),
+                AgentTask(title = "替换动效令牌", detail = "把 12 个文件收口到 Animations.kt", state = TaskState.RUNNING),
+                AgentTask(title = "编译并跑守卫", state = TaskState.PENDING),
+            ),
+        )
+    }
+    DebugSection("Agent 任务卡", "点「推进」可以看到三种状态之间的切换（真实任务里由引擎推）") {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
             AgentProgressCard(
-                status = "正在替换动效令牌…",
+                status = tasks.firstOrNull { it.state == TaskState.RUNNING }?.title?.let { "正在执行：$it" }
+                    ?: "所有任务已完成",
                 tasks = tasks,
                 onExpand = {},
                 maxTasks = 3,
+            )
+            TextButton(
+                text = "推进任务状态",
+                onClick = {
+                    // DONE → RUNNING → DONE 的循环推进：卡片的进度条与"已完成/总数"会跟着动。
+                    tasks = tasks.map { task ->
+                        when (task.state) {
+                            TaskState.PENDING -> task.copy(state = TaskState.RUNNING)
+                            TaskState.RUNNING -> task.copy(state = TaskState.DONE)
+                            TaskState.DONE -> task.copy(state = TaskState.PENDING)
+                        }
+                    }
+                },
             )
         }
     }
@@ -886,10 +1849,11 @@ private fun ComposerSection(state: WorkspaceUiState, viewModel: WorkspaceViewMod
 @Composable
 private fun ChromeSection() {
     val scheme = MiuixTheme.colorScheme
+    val context = LocalContext.current
     var tab by remember { mutableStateOf(0) }
-    var dropdown by remember { mutableStateOf(false) }
+    var lastTap by remember { mutableStateOf("（还没点过）") }
 
-    DebugSection("面板 · chips · 分段控件", "顶栏与输入器页脚用到的这些小组件") {
+    DebugSection("面板 · chips · 分段控件", "顶栏与输入器页脚用到的这些小组件；点了都会记在下面") {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -898,30 +1862,44 @@ private fun ChromeSection() {
             ZhiSegmentedTabs(
                 tabs = listOf("对话", "终端", "文件"),
                 selectedIndex = tab,
-                onSelect = { tab = it },
+                onSelect = { tab = it; lastTap = "分段控件 → 第 ${it + 1} 项" },
                 matchWidth = true,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                ZhiChip(label = "默认 chip")
-                ZhiChip(label = "选中 chip", active = true)
-                ZhiChip(label = "带色 chip", containerColor = ZhiColors.amber(), contentColor = scheme.onBackground)
+                ZhiChip(label = "默认 chip", onClick = { lastTap = "chip · 默认" })
+                ZhiChip(label = "选中 chip", active = true, onClick = { lastTap = "chip · 选中" })
+                ZhiChip(
+                    label = "带色 chip",
+                    containerColor = ZhiColors.amber(),
+                    contentColor = scheme.onBackground,
+                    onClick = { lastTap = "chip · 带色" },
+                )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 ZhiSmallPill(label = "普通 pill")
-                ZhiSmallPill(label = "高亮 pill", highlighted = true, onClick = {})
+                ZhiSmallPill(label = "高亮 pill", highlighted = true, onClick = { lastTap = "pill · 高亮" })
                 ZhiTextDropdownChip(
                     label = "权限：每次询问",
                     items = listOf(
-                        ZhiMenuItem(text = "每次询问", selected = true, onClick = {}),
-                        ZhiMenuItem(text = "自动编辑", onClick = {}),
+                        ZhiMenuItem(text = "每次询问", selected = true, onClick = { lastTap = "下拉 chip · 每次询问" }),
+                        ZhiMenuItem(text = "自动编辑", onClick = { lastTap = "下拉 chip · 自动编辑" }),
                     ),
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ZhiIconDropdownMenu(
                     items = listOf(
-                        ZhiMenuItem(text = "附加项目文件", summary = "搜索并引用文件", icon = ZhiIcons.file, onClick = {}),
-                        ZhiMenuItem(text = "打开技能", icon = ZhiIcons.skill, onClick = {}),
+                        ZhiMenuItem(
+                            text = "附加项目文件",
+                            summary = "搜索并引用文件",
+                            icon = ZhiIcons.file,
+                            onClick = { lastTap = "＋菜单 · 附加项目文件" },
+                        ),
+                        ZhiMenuItem(
+                            text = "打开技能",
+                            icon = ZhiIcons.skill,
+                            onClick = { lastTap = "＋菜单 · 打开技能" },
+                        ),
                     ),
                     content = {
                         Icon(
@@ -933,10 +1911,14 @@ private fun ChromeSection() {
                     },
                 )
                 Spacer(modifier = Modifier.width(10.dp))
-                ZhiIconButton(icon = ZhiIcons.more, description = "独立图标按钮", onClick = { dropdown = !dropdown })
+                ZhiIconButton(
+                    icon = ZhiIcons.refresh,
+                    description = "把 chip 文案复制到剪贴板",
+                    onClick = { copyWithToast(context, "chip", "chip", "已复制") },
+                )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (dropdown) "（下拉菜单已在上面展开）" else "点＋看下拉菜单",
+                    text = "最近一次交互：$lastTap",
                     color = scheme.onSurfaceVariantSummary,
                     fontSize = ZhiTextScale.Caption,
                 )
@@ -959,11 +1941,12 @@ private fun ChromeSection() {
     }
 }
 
+
 // ------------------------------------------------------------------ 浮层入口
 
 /** 各浮层的**真实入口**：点了就会按正常路径把那一层压到导航栈上。 */
 @Composable
-private fun OverlayEntrySection(viewModel: WorkspaceViewModel) {
+private fun OverlayEntrySection(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
     val entries = listOf<Pair<String, () -> Unit>>(
         "API 配置记录" to viewModel::openApiConfig,
         "MCP 服务器" to viewModel::openMcpConfig,
@@ -975,6 +1958,18 @@ private fun OverlayEntrySection(viewModel: WorkspaceViewModel) {
         "附加项目文件" to viewModel::openAttachPicker,
         "任务清单" to viewModel::openTaskList,
     )
+    // 当前哪一层开着：这些状态本来就在 state 里，直接读出来就能知道"刚才那点有没有生效"。
+    val openNow = buildList {
+        if (state.apiConfig != null) add("API 配置")
+        if (state.mcpConfig != null) add("MCP")
+        if (state.skills != null) add("技能")
+        if (state.roleCards != null) add("角色卡")
+        if (state.memory != null) add("记忆文件")
+        if (state.modelPicker != null) add("模型选择")
+        if (state.environmentOpen) add("环境自检")
+        if (state.attachPickerOpen) add("附加文件")
+        if (state.taskListOpen) add("任务清单")
+    }
     DebugSection(
         title = "浮层入口",
         subtitle = "这些都是真实入口（走 ViewModel → NavDisplay 页面栈），返回键逐级回退",
@@ -991,6 +1986,11 @@ private fun OverlayEntrySection(viewModel: WorkspaceViewModel) {
                     if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
                 }
             }
+            Text(
+                text = if (openNow.isEmpty()) "当前没有浮层打开" else "当前打开：${openNow.joinToString(" / ")}",
+                color = MiuixTheme.colorScheme.primary,
+                fontSize = ZhiTextScale.Caption,
+            )
             SettingsFootnote(
                 "权限确认 / 计划审批 / 选择器这三类浮层由真实任务流触发，没有可构造的入口，" +
                     "所以不在这里假造一份——假数据会让人误判真实观感。",
@@ -1004,6 +2004,7 @@ private fun OverlayEntrySection(viewModel: WorkspaceViewModel) {
 /** 当前 state 的关键字段一览：调试时不必再去对照代码猜"界面为什么是这样"。 */
 @Composable
 private fun StateSnapshotSection(state: WorkspaceUiState) {
+    val context = LocalContext.current
     val rows = listOf(
         "项目" to "${state.projectName} · ${state.projectPath}",
         "当前面板" to state.tab.label,
@@ -1044,6 +2045,18 @@ private fun StateSnapshotSection(state: WorkspaceUiState) {
                     )
                 }
             }
+            TextButton(
+                text = "复制整份快照",
+                onClick = {
+                    copyWithToast(
+                        context,
+                        "ZhiCode 状态快照",
+                        rows.joinToString("\n") { (name, value) -> "$name：$value" },
+                        "已复制状态快照",
+                    )
+                },
+                modifier = Modifier.padding(horizontal = 12.dp),
+            )
         }
     }
 }

@@ -4,7 +4,7 @@ import java.util.*;
 /**
  * 「UI 调试页」与侧栏入口的守卫。
  *
- * <p>它守的是四件「改坏了不会编译失败」的事：
+ * <p>它守的是五件「改坏了不会编译失败」的事：
  *
  * <ol>
  *   <li><b>调试页只能从 debug 构建进得去</b>。它是一个纯调试面板（字母/色板/样例对话，
@@ -14,6 +14,8 @@ import java.util.*;
  *       而它已经测不出任何东西了。</li>
  *   <li><b>它不能自己写死视觉</b>。一旦页里出现裸字号或硬编码颜色，它就与真实的
  *       设置页/对话页脱钩，开始骗人 —— 那比没有这一页更糟。</li>
+ *   <li><b>它必须可互动、且对话流覆盖各状态</b>。点按钮要能改样例数据（含"正在运行"
+ *       的工具），长按要能复制（含复制图片信息）并弹吐司；否则它退回静态画廊。</li>
  *   <li><b>侧栏不得再长出「技能 / 自定义角色卡」</b>。这两项已按"配置类入口只留设置页
  *       一条路径"收敛掉；重新加回来是两行代码的事，而且不会有任何编译或运行期症状。</li>
  * </ol>
@@ -90,7 +92,57 @@ public final class UiDebugPageStructureTest {
         require(!page.contains("import androidx.compose.foundation.animation"),
                 "UI 调试页不得自己写动效（不要引入 foundation.animation）");
 
-        // ---- 5. 页面栈接线：注册了 entry，且返回优先关它 ----------------------
+        // ---- 5. 必须**可互动** ----------------------------------------------
+        // 这一页的价值一半在"点了有反应"。下面每一条都是"删掉不会编译失败、
+        // 只会退化成静态贴图"的东西。
+        require(page.contains("mutableStateListOf"),
+                "UI 调试页的样例数据必须是**可变**状态，否则按钮点了界面不会变");
+        for (String control : new String[]{
+                "追加用户消息", "起一个工具", "让运行中的成功", "让运行中的失败",
+                "放行等待授权", "重置样例对话", "推进任务状态", "切到终端", "打开侧栏",
+        }) {
+            require(page.contains(control),
+                    "UI 调试页必须保留可互动控件「" + control
+                            + "」—— 静态画廊看不出状态切换对不对");
+        }
+
+        // ---- 6. 对话流必须覆盖各状态（含**运行中**的工具） --------------------
+        require(page.contains("streaming = true"),
+                "对话流样例必须含一条**流式**回复");
+        require(page.contains("thinkingExpanded = false"),
+                "对话流样例必须含**可展开的思考内容**");
+        require(page.contains("awaitingPermission = true"),
+                "对话流样例必须含**等待授权**的工具行");
+        require(page.contains("completed = false"),
+                "对话流样例必须含**运行中**的工具行（这是最容易漏的一态）");
+        require(page.contains("exitCode = 1"),
+                "对话流样例必须含**失败**的工具行（带退出码）");
+        require(page.contains("expanded = true"),
+                "对话流样例必须含**已展开输出**的工具行");
+        require(page.contains("aspectRatio"),
+                "媒体区必须真的按比例布局图片（写死高度就测不出极端比例下的圆角裁切）");
+
+        // ---- 7. 长按复制 + 吐司 ---------------------------------------------
+        require(page.contains("ZhiAnchoredActionMenu("),
+                "长按菜单必须用生产组件 ZhiAnchoredActionMenu（自己写一个居中对话框会与真实"
+                        + "对话页的锚定行为不一致，也就测不出问题）");
+        require(page.contains("rememberFingerTracker()"),
+                "长按菜单必须从**手指位置**长出来（用生产组件 rememberFingerTracker）");
+        require(page.contains("Clipboard.copy("),
+                "复制必须走工程统一的 Clipboard（它处理了空内容不得清空剪贴板这个坑）");
+        require(page.contains("Toast.makeText("),
+                "复制后必须弹**吐司**提示：调试时最要紧的就是\"我点了它到底有没有生效\"。"
+                        + "注意不要改成生产路径那种静默复制 —— 安卓 13+ 系统虽然也会弹，"
+                        + "但这里需要的是当场可见的反馈。");
+        require(page.contains("复制图片信息"),
+                "图片必须能复制**图片信息**（文件名/尺寸/体积/类型）");
+        require(page.contains("fun info()"),
+                "图片信息必须由数据本身给出（DebugItem.Image.info()），"
+                        + "否则改名/改字段后文案会与实际不一致");
+        require(page.contains("InteractionLog("),
+                "必须有交互日志：没有它就只能靠猜\"刚才那一按到底有没有响应\"");
+
+        // ---- 8. 页面栈接线：注册了 entry，且返回优先关它 ----------------------
         String scaffold = stripComments(read(root, APP_SCAFFOLD));
         require(scaffold.contains("entry<AppKey.UiDebug>"),
                 APP_SCAFFOLD + " 必须把 UI 调试页注册进 NavDisplay 的页面栈");
@@ -105,7 +157,7 @@ public final class UiDebugPageStructureTest {
                 "onBack 的分支顺序必须与页面栈深度一致：UI 调试页在设置子页之上，"
                         + "所以它必须先被判断 —— 顺序反了会一次返回直接跳掉两层。");
 
-        // ---- 6. 侧栏不得再长出技能 / 自定义角色卡 -----------------------------
+        // ---- 9. 侧栏不得再长出技能 / 自定义角色卡 -----------------------------
         String sidebar = stripComments(read(root, SIDEBAR));
         for (String gone : new String[]{"onSkills", "onRoleCard", "技能", "自定义角色卡"}) {
             require(!sidebar.contains(gone),

@@ -364,6 +364,13 @@ data class WorkspaceUiState(
      * 从设置页进来时 [settingsOpen] 仍为真，于是返回会回到设置主页。
      */
     val uiDebugOpen: Boolean = false,
+    /**
+     * 「UI 调试」样例数据的重置令牌。
+     *
+     * 顶栏「重置」只改这个数字，页面用 `remember(token)` 重建样例数据 ——
+     * 比把整份样例状态提到 ViewModel 里干净得多（调试数据不该进生产状态）。
+     */
+    val uiDebugResetToken: Int = 0,
     /** 非空即设置弹窗打开；所有编辑先落在这里，「保存」才写回上面的字段。 */
     val settingsDraft: SettingsDraft? = null,
 ) {
