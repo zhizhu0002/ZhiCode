@@ -330,14 +330,13 @@ fun ZhiSectionLabel(text: String, modifier: Modifier = Modifier) {
 }
 
 /**
- * `matchWidth` 时用的宽度上限。
+ * `matchWidth` 时用的宽度上限（S3 重构：从 1000dp 收敛到 252dp）。
  *
- * 取一个远大于任何手机宽度的值，好让「等分」结果不被 Miuix 默认的
- * `TabRowWithContourMaxWidth`（84dp）截断 —— 宽度算法是
- * `(可用宽 − (n−1)×间距) / n` 再 `coerceIn(minWidth, maxWidth)`，
- * 上限越小越会迫使整行溢出、进入横向滚动。
+ * Miuix 宽度算法是 `(可用宽 − (n−1)×间距) / n` 再 `coerceIn(minWidth, maxWidth)`。
+ * 4 项等分在 450dpi 手机上约 100dp/项，252dp 足够表达"等分"语义
+ * 又不会像 1000dp 那样完全架空官方 84dp 上限的设计意图。
  */
-private val TabsMatchWidthLimit = 1000.dp
+private val TabsMatchWidthLimit = 252.dp
 
 /**
  * 分段按钮组。转发到 Miuix **[TabRowWithContour]** —— `TabRow` 的带轮廓变体。

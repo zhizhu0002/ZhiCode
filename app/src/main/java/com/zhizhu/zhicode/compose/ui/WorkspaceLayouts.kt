@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
@@ -143,19 +142,15 @@ internal fun CompactWorkspace(
     }
 }
 
-/** 工作区 Tab 行的总高度。必须 ≥ `TabRowWithContour` 的默认高（45dp），否则轮廓会被裁。 */
+/** 工作区 Tab 行高度 = 官方 `TabRowDefaults.TabRowWithContourHeight`（45dp）。 */
 internal val WorkspaceTabRowHeight = 45.dp
 
 /**
  * 工作区 Tab 行。转发到 [ZhiSegmentedTabs]（Miuix `TabRowWithContour`，即带轮廓变体）。
  *
- * `matchWidth = true`：4 项等分填满整行，不再受默认 84dp 上限影响。
- *
- * 这里以前是手写的 `ZhiButtonGroup`（等分按键 + 自绘选中胶囊），理由是"TabRow 的轮廓
- * 会向外绘制并盖住相邻内容"。实测确实会溢出，但正确做法不是退回手写，而是
- * **给足高度并裁切外层**：胶囊有地方画，溢出的部分也被裁掉，不会压到下面面板的首行。
- *
- * 代价：Miuix `TabRow` 只接受文本标签，原先每项左侧的图标不再显示。
+ * `matchWidth = true`：4 项等分填满整行（S3 重构：等分上限改为官方
+ * `TabRowDefaults.TabRowWithContourMaxWidth` 的三倍即 252dp——4 项等分在
+ * 450dpi 手机上约 100dp/项，252dp 足够表达"等分"语义又远小于原来的 1000dp）。
  */
 @Composable
 internal fun WorkspaceTabs(
@@ -165,7 +160,7 @@ internal fun WorkspaceTabs(
     modifier: Modifier = Modifier,
 ) {
     Box(
-        modifier = modifier.fillMaxWidth().height(WorkspaceTabRowHeight).clipToBounds(),
+        modifier = modifier.fillMaxWidth().height(WorkspaceTabRowHeight),
         contentAlignment = Alignment.Center,
     ) {
         ZhiSegmentedTabs(
