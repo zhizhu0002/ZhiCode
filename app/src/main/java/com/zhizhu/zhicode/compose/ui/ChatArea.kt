@@ -15,6 +15,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.DpOffset
@@ -63,6 +69,24 @@ internal fun ChatArea(
     // ⚠️ 不要顺手把 6dp 留白搬到下面的 Box 上：那个留白原本只为了让线不贴边，
     // 线没了留白就没意义了（`ChatFramePadding` 已一并删掉）。
     Box(modifier = modifier.fillMaxSize()) {
+        // 底部悬浮层（任务卡 + 输入器）的真实高度，用来给对话列表留白。
+        //
+        // ⚠️ 以前这里是**两个写死的常量**（输入器 92dp + 任务卡 140dp）。写死的代价是
+        // 它永远不会跟着内容变：输入器多长一行、挂了附件条、开了调试模式的 Markdown
+        // 实时预览、或者任务卡里任务变多 —— 悬浮层就变高，而预留的留白不变，
+        // 于是"滑到最底部还有内容被遮住"。
+        //
+        // 现在改成**实测**：悬浮那一列自己 onSizeChanged 报高度，对话列表按它留白。
+        // 这不是循环依赖 —— 悬浮列在 Box 里独立于列表（列表 fillMaxSize），
+        // 它的高度不受 bottomInset 影响，所以量一次就稳定。
+        //
+        // 初始值给一个够用的下限（首帧还没量到），避免第一帧底部贴太紧。
+        var floatingHeightPx by remember { mutableStateOf(0) }
+        val density = LocalDensity.current
+        val bottomInset = with(density) {
+            (floatingHeightPx.toDp() + FloatingBottomGap).coerceAtLeast(MinFloatingInset)
+        }
+
         ChatList(
             state = state,
             onToggleTool = viewModel::toggleToolExpanded,
@@ -80,14 +104,17 @@ internal fun ChatArea(
                 ZhiAnchoredMenuHost(state, viewModel, anchorId, fingerOffset)
             },
             modifier = glass.capture(Modifier.fillMaxSize()),
-            // 底部预留出悬浮层的高度，让被盖住的内容也能滑上来；
+            // 底部留白 = 实测的悬浮层高度 + 一点余量：让被盖住的内容也能滑上来。
             // 顶部留白：S1 重构后顶栏在 topBar 槽位已由 Scaffold padding 处理，
             // 对话列表不再需要让出头部高度，可从 Scaffold padding 顶部起排。
-            bottomInset = if (floating) ComposerInset + TaskCardInset else ComposerInset,
+            bottomInset = bottomInset,
             // 首条消息落在顶栏（含 Tab 行）下缘；列表全高，滚动时消息从顶栏 blur 下穿过
             topInset = TopBarInsetWithTabs,
-            // 主体调试模式：在真实消息上就地显示类型/长度/工具计数 + Markdown 源码开关
+            // 主体调试模式：在真实消息上就地显示类型/长度/工具计数 + Markdown 源码开关；
+            // 并把每条消息的细节默认全展开、任务清单内联进对话流（见 ChatList 的同名参数）
             debugMode = state.debugAppMode,
+            // 内联任务清单的数据：调试模式才传，非调试时是空列表（不渲染）。
+            debugTasks = if (state.debugAppMode) state.tasks else emptyList(),
         )
 
         // 底部悬浮层：任务卡在上、输入器在下，两者都不占布局高度，
@@ -95,7 +122,12 @@ internal fun ChatArea(
         // 对应原版把 AgentProgressView + composerHost 放进位于 chatScroll
         // 之外的 chatBottomHost（MainActivity.java:1325-1331）。
         Column(
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                // 实测自己的高度回报给上面的 bottomInset。
+                // `onSizeChanged` 只在尺寸真的变了时回调，所以正常的打字/滚动不产生额外开销。
+                .onSizeChanged { floatingHeightPx = it.height },
         ) {
             AnimatedVisibility(
                 visible = floating,
@@ -119,11 +151,21 @@ internal fun ChatArea(
     }
 }
 
-/** 悬浮输入器占位高度（含底部外边距），供对话列表留白使用。 */
-private val ComposerInset = 92.dp
+/**
+ * 悬浮层之上再留的余量。
+ *
+ * 不只是为了好看：输入器自带投影与圆角，内容贴着它上缘会显得被"压"住；
+ * 留 8dp 之后最底部那条消息与输入器之间有一条干净的缝。
+ */
+private val FloatingBottomGap = 8.dp
 
-/** 悬浮任务卡占位高度（含外边距），仅在任务运行时参与留白计算。 */
-private val TaskCardInset = 140.dp
+/**
+ * 实测值到手之前的兜底下限。
+ *
+ * 首帧 `onSizeChanged` 还没回调，若此时按 0 留白，用户会看到内容"先贴底、再弹上来"。
+ * 取一个偏小的值（不是旧的 92dp）：宁可第一帧略紧，也不要一开始就凭空多出一大块空白。
+ */
+private val MinFloatingInset = 72.dp
 
 /**
  * 悬浮的任务与状态卡。

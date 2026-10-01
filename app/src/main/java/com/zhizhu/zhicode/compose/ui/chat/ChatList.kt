@@ -32,16 +32,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
+import com.zhizhu.zhicode.compose.model.TaskState
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
+import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
 import com.zhizhu.zhicode.compose.ui.rememberFingerTracker
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
@@ -94,12 +100,28 @@ fun ChatList(
      * **主体调试模式**：在真实消息上就地加调试信息（不另开页面）。
      *
      * 打开后每条消息上方多一行 `类型 · id · 正文/思考长度 · 工具数`，并给一个
-     * 「Markdown 源码」开关把原始文本摊出来；工具组默认全展开。
+     * 「源码」开关把原始文本摊出来；**并且把细节默认全展开**：
      *
-     * 之所以做在**真实列表**里而不是调试页：排版问题（折行、行高、卡片间距、
-     * 长文本溢出）只有在真实滚动容器、真实宽度、真实数据下才看得出来。
+     * - 思考面板按展开渲染（不改 state，只改这一次渲染的输入）；
+     * - 工具组里的每条工具都摊开全量输出；
+     * - 处理步骤（`processSteps`）也显示出来；
+     * - 对话流末尾**内联**一份完整任务清单（不是悬浮卡那片截断视图）。
+     *
+     * 目的只有一个：**没有藏起来的东西**。排版问题（折行、行高、卡片间距、长文本溢出）
+     * 只在内容全都铺开、且处于真实滚动容器与真实宽度下才看得出来。
+     *
+     * 之所以做在**真实列表**里而不是另开一页：另开一页用的是样例数据，
+     * 长文本长度、工具输出体量、附件数量都与真实不符，测不出真实排版。
      */
     debugMode: Boolean = false,
+    /**
+     * 与 [debugMode] 配套：对话流末尾内联的任务清单。
+     *
+     * 悬浮任务卡只显示前 `maxTasks` 条（多了会盖住对话），完整清单原本只在
+     * 「任务清单」窗口里。调试模式把它**摊进对话流本身**，于是"任务与消息的对应关系"
+     * 一眼可见，也不必再开一个窗口。
+     */
+    debugTasks: List<AgentTask> = emptyList(),
 ) {
     val listState = rememberLazyListState()
     val currentState by rememberUpdatedState(state)
@@ -237,13 +259,20 @@ fun ChatList(
                         if (debugMode) {
                             MessageDebugStrip(item)
                         }
-                        when (item.kind) {
-                        ChatKind.USER -> UserBubble(item) {
+                        // 调试模式把细节**默认全展开**：思考面板、工具输出、处理步骤。
+                        //
+                        // 做法是"只改这一次渲染的输入"（item.copy(...)），不动 state ——
+                        // 于是折叠按钮仍然能点（点了会写到 state，而调试模式的强制展开会把它
+                        // 覆盖回展开 —— 这是刻意的：调试模式就是"全都摊开"的视图，
+                        // 想看折叠后的样子就把它关掉）。
+                        val shown = if (debugMode) item.fullyExpanded() else item
+                        when (shown.kind) {
+                        ChatKind.USER -> UserBubble(shown) {
                             fingerOffset = finger.offset()
                             onMessageActions(item)
                         }
                         ChatKind.ASSISTANT -> AssistantCard(
-                            item = item,
+                            item = shown,
                             onToggleThinking = { onToggleThinking(item.id) },
                             onLongPress = {
                                 fingerOffset = finger.offset()
@@ -251,7 +280,9 @@ fun ChatList(
                             },
                         )
                         ChatKind.TOOL_GROUP -> ToolGroupCard(
-                            item = item,
+                            item = shown,
+                            // 传**原始** id：折叠动作要写到 state 上，用 shown 的 id 会指向同一条
+                            // （id 不变），但语义上更清楚的是"动的是哪一条消息"。
                             onToggleTool = onToggleTool,
                             onToggleGroup = { expanded -> onToggleGroup(item.id, expanded) },
                             onActions = {
@@ -259,14 +290,22 @@ fun ChatList(
                                 onMessageActions(item)
                             },
                         )
-                        ChatKind.ERROR -> ErrorCard(item)
-                        ChatKind.INFO -> InfoCard(item)
+                        ChatKind.ERROR -> ErrorCard(shown)
+                        ChatKind.INFO -> InfoCard(shown)
                     }
                     } // Column（调试条 + 消息卡）
                     // 菜单挂在这一项自己的 Box 里，并用手指位置作偏移 ——
                     // 于是它从**手指那一点**长出来，而不是贴条目边界。
                     anchoredMenu(item.id, fingerOffset)
                 }
+            }
+            // ---- 主体调试模式：把**完整任务清单**内联进对话流 ----
+            //
+            // 悬浮任务卡只显示前 maxTasks 条（多了会盖住对话），完整清单原本只在
+            // 「任务清单」窗口里。调试模式把它摊在对话流末尾，于是"任务与消息的对应
+            // 关系"一眼可见，也不必再开一个窗口。
+            if (debugMode && debugTasks.isNotEmpty()) {
+                item(key = "debug-tasks") { InlineTaskList(debugTasks) }
             }
             // 任务进度与工作状态**不放在滚动区**（对应原版把它们挂在固定的
             // chatBottomHost 上），改由 AppScaffold 固定在输入器上方。
@@ -285,9 +324,9 @@ fun ChatList(
  *
  * 内容刻意全是"一眼能对上号"的元信息：类型、id、正文/思考字数、工具数与各状态计数、
  * 上下文脚注。它的用途是回答"这条为什么长这样"——比如卡片高度异常时，先看
- * `body 1200` / `think 3400` 就能立刻分清是正文太长还是思考面板展开着。
+ * `1200/3400`（正文/思考）就能立刻分清是正文太长还是思考面板展开着。
  *
- * 「Markdown 源码」是一个**开关**而不是常显：源码往往比渲染结果长好几倍，
+ * 「源码」是一个**开关**而不是常显：源码往往比渲染结果长好几倍，
  * 常显会把真实排版挤走 —— 而这一模式的价值恰恰是看真实排版。
  */
 @Composable
@@ -362,6 +401,105 @@ private fun MessageDebugStrip(item: ChatItem) {
                     fontSize = ZhiTextScale.Footnote,
                     fontFamily = FontFamily.Monospace,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 调试模式下的"全展开"视图。
+ *
+ * **只改这一次渲染的输入，不动 state**：思考面板按展开渲染、工具组里每条工具都摊开输出。
+ * 这样调试视图与用户自己折叠/展开的状态互不干扰 —— 关掉调试模式，看到的就是用户原本的状态。
+ *
+ * 之所以不直接把 state 改掉（例如"打开调试时把所有 thinking 置为展开"）：
+ * 那会在关掉调试模式后留下一个被改过的界面，而用户并没有点过任何折叠按钮。
+ */
+private fun ChatItem.fullyExpanded(): ChatItem = when (kind) {
+    ChatKind.ASSISTANT -> copy(thinkingExpanded = true, streaming = streaming)
+    ChatKind.TOOL_GROUP -> copy(
+        groupCompleted = true,
+        // 只有"已完成且有输出"的工具才有可展开的内容 —— 与卡片自身的判断保持一致，
+        // 否则运行中/等待授权的行会被强行展开，露出一片空白。
+        tools = tools.map { tool ->
+            if (tool.completed && tool.output.isNotBlank()) tool.copy(expanded = true) else tool
+        },
+    )
+    else -> this
+}
+
+/**
+ * 内联的**完整**任务清单（调试模式专用）。
+ *
+ * 与悬浮任务卡的区别：不过滤条数、不打折信息 —— 每条任务都显示状态、标题与详情。
+ * 它是"没有藏起来的东西"这条要求里最直接的一块：任务清单原本只存在于另一个窗口里。
+ */
+@Composable
+private fun InlineTaskList(tasks: List<AgentTask>) {
+    val scheme = MiuixTheme.colorScheme
+    val done = tasks.count { it.state == TaskState.DONE }
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(end = 14.dp, top = 6.dp, bottom = 4.dp),
+    ) {
+        Text(
+            text = "TASK_LIST  $done/${tasks.size}  （调试模式 · 完整清单）",
+            fontSize = ZhiTextScale.Micro,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = scheme.primary,
+        )
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(top = 3.dp),
+            cornerRadius = ZhiRadius.card,
+            insideMargin = PaddingValues(10.dp),
+            colors = CardDefaults.defaultColors(
+                color = ZhiColors.cardSurface(),
+                contentColor = scheme.onSurface,
+            ),
+        ) {
+            Column {
+                tasks.forEachIndexed { index, task ->
+                    if (index > 0) {
+                        ZhiHorizontalDivider(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp))
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = when (task.state) {
+                                TaskState.DONE -> ZhiIcons.done
+                                TaskState.RUNNING -> ZhiIcons.pending
+                                TaskState.PENDING -> ZhiIcons.awaiting
+                            },
+                            contentDescription = task.state.name,
+                            tint = when (task.state) {
+                                TaskState.DONE -> ZhiColors.green()
+                                TaskState.RUNNING -> scheme.primary
+                                TaskState.PENDING -> scheme.onSurfaceVariantSummary
+                            },
+                            modifier = Modifier.size(13.dp),
+                        )
+                        Text(
+                            text = task.title,
+                            fontSize = ZhiTextScale.BodySmall,
+                            fontWeight = if (task.state == TaskState.RUNNING) FontWeight.Medium else FontWeight.Normal,
+                            modifier = Modifier.padding(start = 7.dp).weight(1f),
+                        )
+                        Text(
+                            text = task.state.name,
+                            fontSize = ZhiTextScale.Micro,
+                            fontFamily = FontFamily.Monospace,
+                            color = scheme.onSurfaceVariantSummary,
+                        )
+                    }
+                    // 详情是 Markdown（真实任务清单窗口里也是这么渲染的），
+                    // 所以这里用同一个渲染器，长内容/表格/代码块都能照原样看到。
+                    if (task.detail.isNotBlank()) {
+                        ZhiMarkdown(
+                            source = task.detail,
+                            bodyFontSize = ZhiTextScale.Caption,
+                            modifier = Modifier.padding(start = 20.dp, top = 3.dp),
+                        )
+                    }
+                }
             }
         }
     }

@@ -28,6 +28,8 @@ public final class UiDebugPageStructureTest {
     private static final String SETTINGS_DIALOG = SRC + "ui/settings/SettingsDialog.kt";
     private static final String APP_SCAFFOLD = SRC + "ui/AppScaffold.kt";
     private static final String SIDEBAR = SRC + "ui/Sidebar.kt";
+    private static final String CHAT_AREA = SRC + "ui/ChatArea.kt";
+    private static final String CHAT_LIST = SRC + "ui/chat/ChatList.kt";
 
     private static void require(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
@@ -42,6 +44,11 @@ public final class UiDebugPageStructureTest {
     private static String stripComments(String text) {
         String noBlock = text.replaceAll("(?s)/\\*.*?\\*/", " ");
         return noBlock.replaceAll("(?m)//[^\\n]*", " ");
+    }
+
+    /** 断言 [haystack] 含 [needle]，失败时给出 [message]。 */
+    private static void requireText(String haystack, String needle, String message) {
+        require(haystack.contains(needle), message);
     }
 
     public static void main(String[] args) throws Exception {
@@ -145,6 +152,43 @@ public final class UiDebugPageStructureTest {
                 "任务卡必须演示**窄屏上限**（maxTasks=2）：悬浮卡过高会盖住对话");
         require(page.contains("超长标题与详情"),
                 "任务卡必须演示超长标题/详情（省略号与卡片高度都在这里才会暴露）");
+
+        // ---- 6b. 对话面板：底部留白必须**实测**，不得写死 ----
+        //
+        // 真机上出现过：滑到最底部仍有内容被输入器盖住。真因是留白是两个写死的常量
+        // （输入器 92dp + 任务卡 140dp），而悬浮层的高度会变 —— 输入器多长一行、
+        // 挂上附件条、开了调试模式的 Markdown 实时预览、任务卡里任务变多，
+        // 写死的值都不会跟着变。这件事不会编译失败，只在屏幕上表现为"被挡住"。
+        String chatArea = stripComments(read(root, CHAT_AREA));
+        requireText(chatArea, "onSizeChanged",
+                CHAT_AREA + " 必须**实测**底部悬浮层高度（onSizeChanged）来算对话列表的底部留白。"
+                        + "写死常量会随内容变化而失准：输入器长高、挂附件、开调试预览、任务变多 —— "
+                        + "表现就是\"滑到底还有内容被遮住\"。");
+        requireText(chatArea, "bottomInset = bottomInset",
+                "实测出来的高度必须真的接到 ChatList 的 bottomInset 上（算了不用等于没算）");
+        String[] deadInsets = {"ComposerInset", "TaskCardInset"};
+        for (String dead : deadInsets) {
+            require(!chatArea.contains(dead),
+                    CHAT_AREA + " 不得再出现写死的 " + dead
+                            + "：那两个常量正是\"不随内容自适应\"的来源。要调余量请改 "
+                            + "FloatingBottomGap / MinFloatingInset 并说明理由。");
+        }
+
+        // ---- 6c. 对话面板（调试模式）必须把细节全摊开 + 内联任务清单 ----
+        String chatList = stripComments(read(root, CHAT_LIST));
+        requireText(chatList, "debugTasks",
+                "ChatList 必须接受 debugTasks：完整任务清单要在调试模式下内联进对话流"
+                        + "（悬浮卡只显示前 2 条，剩下的原本只在另一个窗口里）");
+        requireText(chatList, "fullyExpanded(",
+                "调试模式必须把思考/工具输出**默认全展开**：排版问题只在内容全铺开时才看得出来");
+        requireText(chatList, "thinkingExpanded = true",
+                "全展开必须覆盖思考面板");
+        requireText(chatList, "expanded = true",
+                "全展开必须覆盖工具输出");
+        requireText(chatList, "InlineTaskList(",
+                "必须有内联的完整任务清单（不过滤条数、不打折信息）");
+        requireText(chatArea, "debugTasks = if (state.debugAppMode) state.tasks else emptyList()",
+                "内联任务清单只在调试模式下传数据：非调试时必须是空列表（不渲染）");
 
         // ---- 7. 长按复制 + 吐司 ---------------------------------------------
         require(page.contains("ZhiAnchoredActionMenu("),
