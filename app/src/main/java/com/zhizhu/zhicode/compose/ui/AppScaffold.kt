@@ -100,6 +100,9 @@ private fun ZhiCodeScreen(
     // （调用层的 positionInWindow）与根 MiuixPopupHost 的窗口原点不一致，
     // 菜单整体飞到锚点上方。迁入槽位后触发器与 PopupHost 同处 Scaffold
     // 根坐标系，弹出位置贴回锚点；手排 z 序与 TopBarInset 手工留白一并删除。
+    // 抽屉必须画在 Scaffold **之外**：Miuix Scaffold 的绘制顺序是
+    // bodyContent → topBar → popup，放在内容里的抽屉永远被顶栏压住。
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
             if (wide) {
@@ -144,28 +147,28 @@ private fun ZhiCodeScreen(
                 }
             }
 
-            // ---- 侧边栏抽屉（窄屏）----
-            // 官方 Overlay 系列之外保留手写抽屉（S4 再评估迁移 OverlayBottomSheet）。
-            // 排在内容之后 = 画在内容之上；遮罩连顶栏一起压暗。
-            if (!wide) {
-                ZhiSideDrawer(
-                    open = state.sidebarOpen,
-                    onClose = viewModel::closeSidebar,
-                    width = (configuration.screenWidthDp * 0.82f).dp.coerceAtMost(320.dp),
-                    glass = glassMain,
-                ) {
-                    ZhiSidebarHost(
-                        state = state,
-                        viewModel = viewModel,
-                        modifier = Modifier.fillMaxHeight(),
-                    )
-                }
-            }
 
             // ---- Overlay 系列 ----
             // 弹窗挂载与模态模糊背景在 OverlayHost.kt。
             // 必须仍处于 Scaffold 内容里才能找到 popupHost。
             ZhiOverlayHost(state = state, viewModel = viewModel, glassMain = glassMain)
         }
+    }
+
+    // ---- 侧边栏抽屉（窄屏，画在 Scaffold 之上）----
+    if (!wide) {
+        ZhiSideDrawer(
+            open = state.sidebarOpen,
+            onClose = viewModel::closeSidebar,
+            width = (configuration.screenWidthDp * 0.82f).dp.coerceAtMost(320.dp),
+            glass = glassMain,
+        ) {
+            ZhiSidebarHost(
+                state = state,
+                viewModel = viewModel,
+                modifier = Modifier.fillMaxHeight(),
+            )
+        }
+    }
     }
 }
