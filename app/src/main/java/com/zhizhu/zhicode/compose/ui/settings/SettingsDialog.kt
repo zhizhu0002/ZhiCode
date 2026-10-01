@@ -173,9 +173,10 @@ private fun AppearancePage(draft: SettingsDraft, onChange: (SettingsDraft) -> Un
 
     // 这几行展示**本工程实际生效**的层级色，而不是主题里的原始 token：
     // 背板/面板/卡片三层的取值由 ZhiColors 按深浅切换，直接读主题会显示成另一套值。
-    SettingsReadOnly("背板色", hexOf(ZhiColors.backdrop()))
-    SettingsReadOnly("面板色", hexOf(ZhiColors.panelSurface()))
-    SettingsReadOnly("卡片色", hexOf(ZhiColors.cardSurface()))
+    // 每行都带色块（V1：此前只有文字色/强调色有色块，其余只有 hex，视觉不一致）。
+    SettingsReadOnly("背板色", hexOf(ZhiColors.backdrop()), ZhiColors.backdrop())
+    SettingsReadOnly("面板色", hexOf(ZhiColors.panelSurface()), ZhiColors.panelSurface())
+    SettingsReadOnly("卡片色", hexOf(ZhiColors.cardSurface()), ZhiColors.cardSurface())
     SettingsReadOnly("文字色", hexOf(scheme.onBackground), scheme.onBackground)
     SettingsReadOnly("强调色", hexOf(scheme.primary), scheme.primary)
     SettingsReadOnly("错误色", hexOf(scheme.error), scheme.error)

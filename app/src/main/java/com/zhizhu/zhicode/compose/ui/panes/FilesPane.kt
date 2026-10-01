@@ -208,7 +208,11 @@ private fun breadcrumbItems(filePath: String): List<BreadcrumbItem> {
     return items
 }
 
-/** 文件行：上下各 20dp 内边距 ≈ 60dp 行高，触摸目标也够大。 */
+/**
+ * 文件行：此前 vertical = 20dp 导致行高约 60dp，一屏放不下几个文件（V2）。
+ * 收到 11dp ≈ 40dp 行高，仍在 Material 触摸目标下限（48dp）附近，密度观感
+ * 与 Miuix 设置列表行一致。
+ */
 @Composable
 private fun FileRow(entry: FileEntry, onOpen: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
@@ -216,7 +220,7 @@ private fun FileRow(entry: FileEntry, onOpen: () -> Unit) {
         onClick = onOpen,
         modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
         cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 20.dp),
+        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 11.dp),
         colors = CardDefaults.defaultColors(
             color = ZhiColors.cardSurface(),
             contentColor = scheme.onSurface,

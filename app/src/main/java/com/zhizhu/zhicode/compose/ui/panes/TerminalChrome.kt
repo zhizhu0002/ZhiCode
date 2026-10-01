@@ -36,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -240,6 +242,14 @@ internal fun TerminalExtraKeys(
             .fillMaxWidth()
             .height(if (landscape) 68.dp else 82.dp)
             .background(palette.bar)
+            // V3：bar 与终端内容区同为纯黑贴在一起边界感弱，加一条顶部
+            // 分隔线（与 drawer 同用的 divider 色）划清两块区域。
+            .drawBehind {
+                drawRect(
+                    color = palette.divider,
+                    size = Size(size.width, 1.dp.toPx()),
+                )
+            }
             .padding(horizontal = 3.dp, vertical = 2.dp),
     ) {
         state.extraKeys.forEach { keys ->

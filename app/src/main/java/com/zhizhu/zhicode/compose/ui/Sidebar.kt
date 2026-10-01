@@ -96,12 +96,17 @@ fun ZhiSidebar(
 
             SidebarSection(
                 title = "项目历史 · ${state.projectName}",
-                // 这一块要吃掉剩余高度，这样一屏能看到尽可能多的会话
-                modifier = Modifier.weight(1f, fill = true),
-                fillHeight = true,
+                // 会话多时吃掉剩余高度让一屏看到更多；空/少时 weight(fill=false)
+                // 只给上限不强制撑满，不再出现巨型空卡（上限仍由 weight 约束，
+                // 会话多时 LazyColumn 照样占满并内部滚动）。
+                modifier = Modifier.weight(1f, fill = state.sessions.isNotEmpty()),
+                fillHeight = state.sessions.isNotEmpty(),
             ) {
                 // 会话区占满剩余高度（搜索框已按要求移除）。
-                LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = true)) {
+                LazyColumn(
+                    modifier = if (state.sessions.isEmpty()) Modifier.fillMaxWidth()
+                    else Modifier.fillMaxWidth().weight(1f, fill = true),
+                ) {
                     if (state.sessions.isEmpty()) {
                         item {
                             Text(
