@@ -17,7 +17,8 @@ import java.util.stream.*;
  *       将来按分组拆成两个 entry，默认值就变 false，表现是「点了不收」，不报错）；</li>
  *   <li>{@code ChatList} 与 {@code Sidebar} 在**每一项目的布局里**调用插槽
  *       （这是菜单能锚在那一项上的唯一原因）；</li>
- *   <li>{@code AppScaffold} 按 {@code isActionMenu} 把居中对话框与背景模糊让位
+ *   <li>{@code AppScaffold}（ui 拆分后为 {@code OverlayHost.kt}，挂载点仍在
+ *       AppScaffold）按 {@code isActionMenu} 把居中对话框与背景模糊让位
  *       （不让位就会两者同时可见）。</li>
  * </ol>
  */
@@ -28,6 +29,8 @@ public final class AnchoredMenuStructureTest {
     private static final String MODEL = SRC + "model/UiModels.kt";
     private static final String VIEW_MODEL = SRC + "state/WorkspaceViewModel.kt";
     private static final String APP_SCAFFOLD = SRC + "ui/AppScaffold.kt";
+    private static final String OVERLAY_HOST = SRC + "ui/OverlayHost.kt";
+    private static final String CHAT_AREA = SRC + "ui/ChatArea.kt";
     private static final String CHAT_LIST = SRC + "ui/chat/ChatList.kt";
     private static final String SIDEBAR = SRC + "ui/Sidebar.kt";
 
@@ -80,7 +83,7 @@ public final class AnchoredMenuStructureTest {
         require(model.contains("val anchorId"),
                 MODEL + " 的 ChoicePickerState 必须有 anchorId（长按菜单靠它认领条目）");
         require(model.contains("val isActionMenu"),
-                MODEL + " 必须有 isActionMenu 判定（AppScaffold 靠它让位）");
+                MODEL + " 必须有 isActionMenu 判定（弹窗挂载宿主靠它让位）");
         require(model.contains("anchorId != null"),
                 "isActionMenu 必须把 anchorId 也算进去：只看 intent 的话，"
                         + "「intent 是动作菜单但没锚点」会让菜单与对话框**都不画**");
@@ -162,21 +165,44 @@ public final class AnchoredMenuStructureTest {
         require(chatList.contains("anchoredMenu(item.id, fingerOffset)"),
                 CHAT_LIST + " 必须在消息条目里用 anchoredMenu(item.id, fingerOffset) 调用");
 
-        // ---- 5. AppScaffold 必须按 isActionMenu 让位 ------------------------
+        // ---- 5. 「让位」逻辑必须按 isActionMenu 存在，且接线不断 ------------
+        // 让位块原先内联在 AppScaffold；ui 结构重构（AppScaffold 拆分）后整块
+        // 搬进 OverlayHost.kt，AppScaffold 只留一行 ZhiOverlayHost 挂载。
+        // 守卫随之更新文件引用，但语义断言逐字保留：
+        //  ① 让位块必须恰好落在 AppScaffold / OverlayHost 之一（双份会双重模糊，
+        //     缺失会让位失效）；
+        //  ② 两处字面让位写法必须原样存在；
+        //  ③ 若让位块不在 AppScaffold，挂载点 ZhiOverlayHost 必须还在；
+        //  ④ 跨「挂载宿主 + 菜单认领（ChatArea 的 ZhiAnchoredMenuHost）」计数
+        //     isActionMenu >= 2，防止哪一半被单独删掉。
         String scaffold = stripComments(read(root, APP_SCAFFOLD));
+        String overlayHost = stripComments(read(root, OVERLAY_HOST));
+        boolean inScaffold = scaffold.contains("val anchoredActionMenu");
+        boolean inOverlay = overlayHost.contains("val anchoredActionMenu");
+        require(inScaffold ^ inOverlay,
+                "「让位」块（val anchoredActionMenu/modalOpen）必须恰好出现在 "
+                        + APP_SCAFFOLD + " 或 " + OVERLAY_HOST + " 之一："
+                        + "两处都写会双重模糊，都不写会让位失效");
+        String holder = inScaffold ? scaffold : overlayHost;
+        String holderPath = inScaffold ? APP_SCAFFOLD : OVERLAY_HOST;
+        require(holder.contains("if (anchoredActionMenu) null else state.choicePicker"),
+                holderPath + " 必须把 anchored 菜单从 ChoicePickerOverlay 里排除，"
+                        + "否则长按后「下拉菜单 + 居中对话框」同时可见");
+        require(holder.contains("state.choicePicker != null && !anchoredActionMenu"),
+                holderPath + " 必须把 anchored 菜单从 modalOpen 里排除，"
+                        + "否则会给工作区多加一层与弹层自身重复的背景模糊");
+        if (!inScaffold) {
+            require(scaffold.contains("ZhiOverlayHost("),
+                    APP_SCAFFOLD + " 不再内联让位块时必须挂载 " + OVERLAY_HOST
+                            + "（ZhiOverlayHost），否则弹窗整体消失");
+        }
         int siteCount = 0;
-        Matcher m = Pattern.compile("isActionMenu").matcher(scaffold);
+        Matcher m = Pattern.compile("isActionMenu").matcher(
+                overlayHost + stripComments(read(root, CHAT_AREA)));
         while (m.find()) siteCount++;
         require(siteCount >= 2,
-                APP_SCAFFOLD + " 至少要有两处 isActionMenu：一处把居中对话框让位"
-                        + "（ChoicePickerOverlay 的 picker 传 null），一处把背景模糊让位"
-                        + "（modalOpen）。当前只有 " + siteCount + " 处。");
-        require(scaffold.contains("if (anchoredActionMenu) null else state.choicePicker"),
-                APP_SCAFFOLD + " 必须把 anchored 菜单从 ChoicePickerOverlay 里排除，"
-                        + "否则长按后「下拉菜单 + 居中对话框」同时可见");
-        require(scaffold.contains("state.choicePicker != null && !anchoredActionMenu"),
-                APP_SCAFFOLD + " 必须把 anchored 菜单从 modalOpen 里排除，"
-                        + "否则会给工作区多加一层与弹层自身重复的背景模糊");
+                "让位宿主（OverlayHost）与菜单认领（ChatArea 的 ZhiAnchoredMenuHost）"
+                        + "合计至少要有两处 isActionMenu。当前只有 " + siteCount + " 处。");
 
         // ---- 6. 本测试自身必须被 canonical suite 执行 ------------------------
         String script = read(root, "test-source-no-build.sh");
