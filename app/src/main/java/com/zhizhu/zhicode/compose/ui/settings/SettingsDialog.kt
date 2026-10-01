@@ -1,5 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.settings
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -25,6 +27,7 @@ import com.zhizhu.zhicode.compose.model.WEB_TIMEOUT_MIN_SEC
 import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
@@ -32,6 +35,7 @@ import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -114,18 +118,37 @@ private fun themeLabel(mode: ThemeMode): String = when (mode) {
     ThemeMode.DARK -> "夜间模式"
 }
 
+/**
+ * 分组卡：一组设置行包进一张圆角 Card（Miuix 官方设置 demo 的排布方式）。
+ * insideMargin = 0 让 Preference 行自己控制内边距。
+ */
+@Composable
+private fun SettingsCard(content: @Composable () -> Unit) {
+    top.yukonga.miuix.kmp.basic.Card(
+        cornerRadius = ZhiRadius.card,
+        insideMargin = PaddingValues(0.dp),
+    ) {
+        Column { content() }
+    }
+}
+
 @Composable
 private fun AllSettingsPages(
     draft: SettingsDraft,
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
 ) {
-    AppearancePage(draft, onChange)
-    ModelPermissionPage(draft, onChange, onNavigate)
-    AgentSecurityPage(draft, onChange)
-    NetworkPage(draft, onChange)
-    ContextProjectPage(draft, onChange)
-    ExtensionsPage(onNavigate)
+    SettingsCard { AppearancePage(draft, onChange) }
+
+    SettingsCard { ModelPermissionPage(draft, onChange, onNavigate) }
+
+    SettingsCard { AgentSecurityPage(draft, onChange) }
+
+    SettingsCard { NetworkPage(draft, onChange) }
+
+    SettingsCard { ContextProjectPage(draft, onChange) }
+
+    SettingsCard { ExtensionsPage(onNavigate) }
 }
 
 @Composable
@@ -143,22 +166,7 @@ private fun AppearancePage(draft: SettingsDraft, onChange: (SettingsDraft) -> Un
         summary = "右上角 ☼/☾ 可快速切换",
     )
 
-    // 这几行展示**本工程实际生效**的层级色，而不是主题里的原始 token：
-    // 背板/面板/卡片三层的取值由 ZhiColors 按深浅切换，直接读主题会显示成另一套值。
-    // 每行都带色块（V1：此前只有文字色/强调色有色块，其余只有 hex，视觉不一致）。
-    SettingsReadOnly("背板色", hexOf(ZhiColors.backdrop()), ZhiColors.backdrop())
-    SettingsReadOnly("面板色", hexOf(ZhiColors.panelSurface()), ZhiColors.panelSurface())
-    SettingsReadOnly("卡片色", hexOf(ZhiColors.cardSurface()), ZhiColors.cardSurface())
-    SettingsReadOnly("文字色", hexOf(scheme.onBackground), scheme.onBackground)
-    SettingsReadOnly("强调色", hexOf(scheme.primary), scheme.primary)
-    SettingsReadOnly("错误色", hexOf(scheme.error), scheme.error)
 
-    SettingsFootnote(
-        "层级由 theme/ZhiTheme.kt 的 ZhiColors 统一给出：背板深色 #242424 / 浅色 #EDEDED，" +
-            "侧栏与面板为纯黑/纯白，卡片再偏一档。" +
-            "其余颜色来自 Miuix 主题与系统动态取色。",
-        modifier = Modifier.padding(top = 6.dp),
-    )
 }
 
 @Composable
