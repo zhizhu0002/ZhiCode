@@ -86,6 +86,8 @@ internal fun ChatArea(
             bottomInset = if (floating) ComposerInset + TaskCardInset else ComposerInset,
             // 首条消息落在顶栏（含 Tab 行）下缘；列表全高，滚动时消息从顶栏 blur 下穿过
             topInset = TopBarInsetWithTabs,
+            // 主体调试模式：在真实消息上就地显示类型/长度/工具计数 + Markdown 源码开关
+            debugMode = state.debugAppMode,
         )
 
         // 底部悬浮层：任务卡在上、输入器在下，两者都不占布局高度，
@@ -198,6 +200,8 @@ private fun ComposerHost(
         onEffortSelected = viewModel::setEffort,
         onModelChip = viewModel::showModelPicker,
         onPickSlash = viewModel::pickSlashCommand,
+        // 主体调试模式：输入行下方实时渲染当前输入的 Markdown（与对话流同一渲染器）
+        debugMode = state.debugAppMode,
     )
 }
 

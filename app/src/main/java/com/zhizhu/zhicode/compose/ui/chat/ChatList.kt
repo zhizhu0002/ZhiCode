@@ -1,7 +1,10 @@
 package com.zhizhu.zhicode.compose.ui.chat
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,15 +25,26 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
+import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.rememberFingerTracker
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 对话内容的指纹。
@@ -75,6 +89,16 @@ fun ChatList(
     bottomInset: Dp = 0.dp,
     /** 顶部预留高度：顶栏改成悬浮层后，内容要能滚到它下面。 */
     topInset: Dp = 0.dp,
+    /**
+     * **主体调试模式**：在真实消息上就地加调试信息（不另开页面）。
+     *
+     * 打开后每条消息上方多一行 `类型 · id · 正文/思考长度 · 工具数`，并给一个
+     * 「Markdown 源码」开关把原始文本摊出来；工具组默认全展开。
+     *
+     * 之所以做在**真实列表**里而不是调试页：排版问题（折行、行高、卡片间距、
+     * 长文本溢出）只有在真实滚动容器、真实宽度、真实数据下才看得出来。
+     */
+    debugMode: Boolean = false,
 ) {
     val listState = rememberLazyListState()
     val currentState by rememberUpdatedState(state)
@@ -201,6 +225,10 @@ fun ChatList(
                         .padding(end = 14.dp)
                         .then(finger.modifier),
                 ) {
+                    // ---- 主体调试模式：就地加料（不改变下面任何卡片的渲染） ----
+                    if (debugMode) {
+                        MessageDebugStrip(item)
+                    }
                     when (item.kind) {
                         ChatKind.USER -> UserBubble(item) {
                             fingerOffset = finger.offset()
@@ -240,5 +268,83 @@ fun ChatList(
             adapter = rememberScrollBarAdapter(listState),
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
         )
+    }
+}
+
+/**
+ * 主体调试模式下每条消息上方的**调试条**。
+ *
+ * 内容刻意全是"一眼能对上号"的元信息：类型、id、正文/思考字数、工具数与各状态计数、
+ * 上下文脚注。它的用途是回答"这条为什么长这样"——比如卡片高度异常时，先看
+ * `body 1200` / `think 3400` 就能立刻分清是正文太长还是思考面板展开着。
+ *
+ * 「Markdown 源码」是一个**开关**而不是常显：源码往往比渲染结果长好几倍，
+ * 常显会把真实排版挤走 —— 而这一模式的价值恰恰是看真实排版。
+ */
+@Composable
+private fun MessageDebugStrip(item: ChatItem) {
+    val scheme = MiuixTheme.colorScheme
+    var showSource by remember(item.id) { mutableStateOf(false) }
+    val running = item.tools.count { !it.completed && !it.awaitingPermission }
+    val failed = item.tools.count { it.failed }
+    val awaiting = item.tools.count { it.awaitingPermission }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(start = 2.dp, bottom = 2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = item.kind.name,
+                fontSize = ZhiTextScale.Micro,
+                fontWeight = FontWeight.Bold,
+                color = when (item.kind) {
+                    ChatKind.ERROR -> ZhiColors.red()
+                    ChatKind.INFO -> ZhiColors.amber()
+                    else -> scheme.primary
+                },
+            )
+            Text(
+                text = buildString {
+                    append("  body ").append(item.body.length)
+                    append(" · think ").append(item.thinking.length)
+                    if (item.tools.isNotEmpty()) {
+                        append(" · tools ").append(item.tools.size)
+                        if (running > 0) append(" 运行").append(running)
+                        if (failed > 0) append(" 失败").append(failed)
+                        if (awaiting > 0) append(" 待授权").append(awaiting)
+                    }
+                    if (item.streaming) append(" · streaming")
+                    if (item.contextTokens >= 0) append(" · ctx ").append(item.contextTokens)
+                    append(" · ").append(item.id)
+                },
+                fontSize = ZhiTextScale.Micro,
+                fontFamily = FontFamily.Monospace,
+                color = scheme.onSurfaceVariantSummary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (item.body.isNotBlank()) {
+                TextButton(
+                    text = if (showSource) "隐藏源码" else "Markdown 源码",
+                    onClick = { showSource = !showSource },
+                )
+            }
+        }
+        if (showSource) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = ZhiRadius.inner,
+                insideMargin = PaddingValues(8.dp),
+                colors = CardDefaults.defaultColors(
+                    color = ZhiColors.cardInnerSurface(),
+                    contentColor = scheme.onSurfaceVariantSummary,
+                ),
+            ) {
+                Text(
+                    text = item.body,
+                    fontSize = ZhiTextScale.Footnote,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
     }
 }

@@ -3274,6 +3274,14 @@ class WorkspaceViewModel(
         it.copy(debugOverlayExpanded = expanded)
     }
 
+    /**
+     * 开关**主体调试模式**：真实界面就地显示调试信息（不另开页面）。
+     *
+     * 比浮层更进一步 —— 浮层是"盖在上面的一块"，本项是"把真实控件本身加料"：
+     * 消息带类型/长度与 Markdown 源码开关、工具行默认展开、输入器下方实时预览。
+     */
+    fun setDebugAppMode(enabled: Boolean) = _state.update { it.copy(debugAppMode = enabled) }
+
     /** 弹窗内任意一项改动都走这里，保证 draft 只有一份写入路径。 */
     fun updateSettingsDraft(transform: (SettingsDraft) -> SettingsDraft) = _state.update {
         val draft = it.settingsDraft ?: return@update it

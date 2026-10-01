@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
@@ -42,9 +43,11 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiFilledIconButton
+import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIconDropdownMenu
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
 import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
@@ -85,6 +88,13 @@ fun Composer(
     onPermissionSelected: (PermissionMode) -> Unit,
     onEffortSelected: (EffortLevel) -> Unit,
     onModelChip: () -> Unit,
+    /**
+     * **主体调试模式**：输入行下方就地渲染当前输入的 Markdown（用对话流的渲染器）。
+     *
+     * 之所以做在真实输入器里：Markdown 观感问题（折行、代码块宽度、表格溢出）
+     * 只在真实的输入器宽度与真实字体下才看得出来。
+     */
+    debugMode: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -182,6 +192,44 @@ fun Composer(
                 )
 
 
+            }
+
+            // ---- 主体调试模式：输入行下方的 Markdown 实时预览 ----
+            // 用生产渲染器 ZhiMarkdown，所以这里看到的排版就是消息里会有的排版。
+            if (debugMode) {
+                ZhiHorizontalDivider(modifier = Modifier.fillMaxWidth())
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "M↓ 实时预览",
+                        color = scheme.primary,
+                        fontSize = ZhiTextScale.Micro,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "  ${state.composerText.length} 字 · ${state.attachments.size} 附件 · " +
+                            (state.slashQuery?.let { "斜杠「$it」" } ?: "无斜杠"),
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = ZhiTextScale.Micro,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+                if (state.composerText.isBlank()) {
+                    Text(
+                        text = "输入框为空；在上面写点 Markdown（# 标题 / - 列表 / **粗体** / `代码` / 表格）即会在此渲染。",
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = ZhiTextScale.Micro,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
+                    )
+                } else {
+                    ZhiMarkdown(
+                        source = state.composerText,
+                        bodyFontSize = ZhiTextScale.Caption,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
+                    )
+                }
             }
 
             // 底排（参考图）：+ 圆钮 | 权限/推理下拉 | 弹性 | 模型 pill | 停止 | 发送

@@ -30,6 +30,10 @@ public final class DebugHudStructureTest {
     private static final String MODELS = SRC + "model/UiModels.kt";
     private static final String VIEW_MODEL = SRC + "state/WorkspaceViewModel.kt";
     private static final String MARKDOWN_PARSE = SRC + "ui/MarkdownParse.kt";
+    /** 主体调试模式落在真实界面上的三个文件。 */
+    private static final String CHAT_LIST = SRC + "ui/chat/ChatList.kt";
+    private static final String COMPOSER = SRC + "ui/composer/Composer.kt";
+    private static final String CHAT_AREA = SRC + "ui/ChatArea.kt";
 
     private static void require(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
@@ -173,5 +177,44 @@ public final class DebugHudStructureTest {
                 "Markdown 样例必须放在**生产的助手气泡**里渲染（与真实回复同一条路径）");
         requireContains(pageRaw, "查看源码",
                 "每组的源码必须可展开查看（长样例默认展开会把页面拉得很长）");
+
+        // ---- 9. **主体调试模式**：把真实界面当调试面板 -----------------------
+        //
+        // 这一项与"另开一页"是不同的调试手段：真实控件上加料，才能看到**真实排版**。
+        // 下面每一条都是"删掉不会编译失败、只会静默退化"的。
+        String chatList = stripComments(read(root, CHAT_LIST));
+        String composer = stripComments(read(root, COMPOSER));
+        String chatArea = stripComments(read(root, CHAT_AREA));
+
+        requireContains(models, "debugAppMode", MODELS + " 必须定义 debugAppMode");
+        requireContains(viewModel, "fun setDebugAppMode(",
+                VIEW_MODEL + " 必须提供 setDebugAppMode()");
+
+        requireContains(chatList, "debugMode: Boolean = false",
+                CHAT_LIST + " 的 ChatList 必须接受 debugMode（真实对话流就地加料）");
+        requireContains(chatList, "MessageDebugStrip(",
+                "主体调试模式必须在真实消息上加调试条（类型/长度/工具计数）");
+        requireContains(chatList, "Markdown 源码",
+                "主体调试模式必须能摊出原始 Markdown 源码："
+                        + "看到渲染不对时，第一件事就是对照源码判断是素材还是渲染器的问题");
+        requireContains(chatList, "onSurfaceVariantSummary",
+                "调试条的配色必须走主题令牌（自己写死颜色会在浅色模式下糊掉）");
+
+        requireContains(composer, "debugMode: Boolean = false",
+                COMPOSER + " 的 Composer 必须接受 debugMode");
+        requireContains(composer, "实时预览",
+                "主体调试模式必须在真实输入器里做 Markdown 实时预览");
+        requireContains(composer, "ZhiMarkdown(",
+                "输入器的实时预览必须用生产渲染器 ZhiMarkdown —— "
+                        + "自己写一个简易渲染会显示与真实消息不一致的观感");
+
+        requireContains(chatArea, "debugMode = state.debugAppMode",
+                CHAT_AREA + " 必须把 state.debugAppMode 接给对话流与输入器："
+                        + "开关拨了但没接线，表现是\"开关没反应\"，而且不报错");
+
+        int gate2 = page.indexOf("setDebugAppMode");
+        require(gate2 > 0, DEBUG_PAGE + " 必须提供主体调试模式的开关");
+        require(page.lastIndexOf("BuildConfig.DEBUG", gate2) > 0,
+                "主体调试模式的开关必须在 BuildConfig.DEBUG 之内");
     }
 }

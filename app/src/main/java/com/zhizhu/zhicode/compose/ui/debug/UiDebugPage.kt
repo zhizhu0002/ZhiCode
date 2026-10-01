@@ -1284,16 +1284,25 @@ private fun AppSettingsRowsSection() {
 @Composable
 private fun DebugOverlaySection(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
     DebugSection(
-        title = "全局调试浮层",
-        subtitle = "打开后工作区右上角出现仪表盘：面板/工具/输入器状态 + 输入的 Markdown 实时预览",
+        title = "调试模式（把软件主体当调试面板）",
+        subtitle = "打开后**不另开页面**：真实对话流与输入器就地多出调试信息，边用边看真实排版",
     ) {
         if (com.zhizhu.zhicode.compose.BuildConfig.DEBUG) {
             SettingsToggle(
-                title = "启用调试浮层",
+                title = "主体调试模式",
+                checked = state.debugAppMode,
+                onCheckedChange = { viewModel.setDebugAppMode(it) },
+                summary = "对话流：每条消息上方显示 类型/id/正文字数/思考字数/工具计数，" +
+                    "并带「Markdown 源码」开关；输入器：输入行下方实时渲染当前输入的 Markdown。" +
+                    "返回工作区（或任意面板）即可看到。",
+                warn = true,
+            )
+            SettingsToggle(
+                title = "启用调试浮层（仪表盘）",
                 checked = state.debugOverlayEnabled,
                 onCheckedChange = { viewModel.setDebugOverlayEnabled(it) },
-                summary = "边用边看：输入框里打的字会立刻用对话流渲染器画一遍；工具调用逐条列出状态。"
-                    + "返回工作区即可看到（浮层只在工作区显示，不挡设置页）。",
+                summary = "工作区右上角浮层：面板/工具/输入器状态汇总 + Markdown 实时预览，" +
+                    "可收起为窄药丸。与上一项可以同时开。",
                 warn = true,
             )
         }
@@ -1302,10 +1311,12 @@ private fun DebugOverlaySection(state: WorkspaceUiState, viewModel: WorkspaceVie
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             SettingsFootnote(
-                "浮层有「展开 / 收起」两态：收起后是贴右缘的窄药丸，只显示 面板 · 消息数 · 输入字数 · 运行中工具数。"
+                "三种调试设施的分工：**主体调试模式** 在真实控件上加料（最贴近真实使用时的样子）；" +
+                    "**调试浮层** 是压在工作区上的仪表盘（汇总状态 + 实时 Markdown 预览）；" +
+                    "**本页** 是静止的组件画廊（含样例数据与各状态）。三者可同时开。"
             )
             SettingsFootnote(
-                "它不持久化：重启应用后回到关闭。避免某次调试忘了关，下次打开以为界面坏了。"
+                "两者都不持久化：重启应用后回到关闭。避免某次调试忘了关，下次打开以为界面坏了。"
             )
         }
     }

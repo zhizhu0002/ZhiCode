@@ -522,6 +522,15 @@ private fun QuickActionsBlock(state: WorkspaceUiState, viewModel: WorkspaceViewM
             CompactAction("调试页") { viewModel.openUiDebug(); lastAction = "打开 UI 调试页" }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // 主体调试模式的开关也放在这里：它在真实界面上生效，所以最顺手的做法是
+            // 边看着界面边开关，而不是先退回调试页。
+            CompactAction(if (state.debugAppMode) "主体调试：开" else "主体调试：关") {
+                viewModel.setDebugAppMode(!state.debugAppMode)
+                lastAction = if (state.debugAppMode) "关闭主体调试模式" else "打开主体调试模式"
+            }
+            CompactAction("收起") { viewModel.setDebugOverlayExpanded(false); lastAction = "收起浮层" }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             CompactAction("复制快照") {
                 val text = state.snapshotText()
                 val ok = Clipboard.copy(context, "ZhiCode 调试快照", text)

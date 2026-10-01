@@ -384,6 +384,21 @@ data class WorkspaceUiState(
     val debugOverlayEnabled: Boolean = false,
     /** 浮层是否展开（false = 贴边窄药丸，只显示几个计数）。 */
     val debugOverlayExpanded: Boolean = false,
+    /**
+     * **主体调试模式**：把应用主体本身变成调试面板（不另开一页）。
+     *
+     * 打开后，真实界面就地多出调试信息 —— 对话流每条消息带上类型/长度/工具计数与
+     * 「Markdown 源码」开关、工具行默认全展开并显示退出码与全量输出、输入器下方
+     * 实时渲染当前输入的 Markdown、面板顶部显示计数条。
+     *
+     * 与另外两个调试设施的分工：
+     * - [uiDebugOpen]：独立的「UI 调试」整页，静止地看组件与状态；
+     * - [debugOverlayEnabled]：工作区右上角的浮层仪表盘，边用边看汇总状态；
+     * - 本项：**不额外占屏幕**，直接在真实控件上加料，所以最贴近"真实使用时长什么样"。
+     *
+     * 同样不持久化（调试设施，重启回默认）。
+     */
+    val debugAppMode: Boolean = false,
     /** 非空即设置弹窗打开；所有编辑先落在这里，「保存」才写回上面的字段。 */
     val settingsDraft: SettingsDraft? = null,
 ) {
