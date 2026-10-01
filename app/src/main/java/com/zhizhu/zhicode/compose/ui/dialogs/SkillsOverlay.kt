@@ -61,8 +61,8 @@ fun SkillsOverlay(
         show = state != null,
         onDismissRequest = onDismiss,
         largeScreen = true,
-        maxWidth = ZhiDialogWidth.Regular,
-        outsideMargin = DialogWideOutsideMargin,
+        maxWidth = ZhiDialogWidth.Wide,
+        outsideMargin = DialogSheetOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
         val current = state ?: return@OverlayDialog

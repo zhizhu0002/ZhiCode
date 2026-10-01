@@ -54,8 +54,8 @@ fun AttachFileOverlay(
         show = open,
         onDismissRequest = onDismiss,
         largeScreen = true,
-        maxWidth = ZhiDialogWidth.Regular,
-        outsideMargin = DialogWideOutsideMargin,
+        maxWidth = ZhiDialogWidth.Wide,
+        outsideMargin = DialogSheetOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
         val scheme = MiuixTheme.colorScheme

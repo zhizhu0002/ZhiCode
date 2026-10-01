@@ -134,8 +134,8 @@ public final class LayoutConsistencyTest {
         int tokenUsers = 0;
         for (String file : kotlinSources(root, SRC)) {
             String text = stripComments(read(root, file));
-            if (text.contains("outsideMargin = DialogWideOutsideMargin")) tokenUsers++;
-            Matcher m = Pattern.compile("outsideMargin\\s*=\\s*DpSize\\s*\\(").matcher(text);
+            if (text.contains("outsideMargin = DialogWideOutsideMargin") || text.contains("outsideMargin = DialogSheetOutsideMargin")) tokenUsers++;
+            Matcher m = Pattern.compile("outsideMargin\\s*=\\s*DpSize\\s*\\(").matcher(text.replace("DialogSheetOutsideMargin = DpSize", "DialogSheetOutsideMargin ="));
             while (m.find()) {
                 marginLiteralOffenders.add(file + ":" + lineOf(text, m.start()));
             }

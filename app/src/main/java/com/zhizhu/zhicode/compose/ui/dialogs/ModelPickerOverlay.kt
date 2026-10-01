@@ -69,8 +69,8 @@ fun ModelPickerOverlay(
         show = picker != null,
         onDismissRequest = onDismiss,
         largeScreen = true,
-        maxWidth = ZhiDialogWidth.Compact,
-        outsideMargin = DialogWideOutsideMargin,
+        maxWidth = ZhiDialogWidth.Regular,
+        outsideMargin = DialogSheetOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
         val current = picker ?: return@OverlayDialog

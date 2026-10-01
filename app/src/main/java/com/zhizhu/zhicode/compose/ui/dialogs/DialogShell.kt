@@ -59,10 +59,17 @@ internal val DialogWideInsideMargin = DpSize(24.dp, 24.dp)
  * 语义上它们不再是"三档宽度"而是同一个官方值。
  */
 internal object ZhiDialogWidth {
-    val Compact = 420.dp
+    /** 短确认/单输入弹窗。 */
+    val Compact = 360.dp
     val Regular = 420.dp
     val Wide = 420.dp
 }
+
+/**
+ * 贴底弹窗（Sheet 档）的外边距：横向贴边、纵向正常 —— 窄屏长列表弹窗
+ * （技能/模型/文件选择）用这档，观感是"从底部升起的抽屉"。
+ */
+internal val DialogSheetOutsideMargin = DpSize(0.dp, 12.dp)
 
 /**
  * 弹窗内容的外壳：左对齐标题 + 固定说明 + 中间内容区 + 底部固定按钮区。
