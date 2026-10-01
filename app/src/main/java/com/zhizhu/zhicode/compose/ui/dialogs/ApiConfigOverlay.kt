@@ -285,7 +285,9 @@ private fun ApiProfileForm(
 
         SwitchPreference(
             title = "发送图片（Vision）",
-            summary = "关闭后不会把图片块发给模型，用于不支持视觉的模型",
+            // 一句话说明：SwitchPreference 的 summary 走 body2 字阶，长说明在
+            // 行内被压缩裁切（中文字形切一半），长解释放不下就不该塞进 summary。
+            summary = "用于不支持视觉的模型",
             checked = visionEnabled,
             onCheckedChange = { visionEnabled = it },
         )

@@ -166,7 +166,9 @@ private fun AppearancePage(draft: SettingsDraft, onChange: (SettingsDraft) -> Un
         options = ThemeMode.entries.map(::themeLabel),
         selectedIndex = ThemeMode.entries.indexOf(draft.themeMode),
         onSelect = { onChange(draft.copy(themeMode = ThemeMode.entries[it])) },
-        summary = "右上角 ☼/☾ 可快速切换；切换时会平滑重建界面。",
+        // summary 按官方 demo 惯例保持一句话：BasicComponent 的布局给行尾
+        // 取值/箭头最多 60% 行宽，长说明折行后必与右侧取值挤压。
+        summary = "右上角 ☼/☾ 可快速切换",
     )
 
     // 这几行展示**本工程实际生效**的层级色，而不是主题里的原始 token：
@@ -196,8 +198,7 @@ private fun ModelPermissionPage(
     SettingsEntry(
         title = "API 配置记录",
         valueText = "${draft.profileName} · ${draft.modelLabel}",
-        summary = "API 地址、协议、默认模型和密钥按配置记录独立保存；密钥不会在设置页回填。" +
-            "点模型按钮可自动获取当前 API 的模型。",
+        summary = "密钥不会在设置页回填，点模型按钮可自动获取",
         onClick = { onNavigate("apiProfiles") },
     )
 
@@ -206,8 +207,7 @@ private fun ModelPermissionPage(
         options = listOf("开启（发送图片给模型）", "关闭（仅保留本地预览）"),
         selectedIndex = if (draft.visionEnabled) 0 else 1,
         onSelect = { onChange(draft.copy(visionEnabled = it == 0)) },
-        summary = "模型不支持 vision 时请选择关闭；当前图片和历史图片都不会发送，" +
-            "但聊天预览与会话记录仍会保留。",
+        summary = "模型不支持 vision 时请关闭",
     )
 
     SettingsChoice(
@@ -233,8 +233,7 @@ private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) ->
         title = "Agent 沙箱全权调试",
         checked = draft.sandboxAgentFullAccess,
         onCheckedChange = { onChange(draft.copy(sandboxAgentFullAccess = it)) },
-        summary = "只绕过 ZhiSandbox/Sandbox Debug 的逐次确认：允许容器内安装、UI 操作、动态内存、" +
-            "Frida Hook/脚本。不会自动放开真机 host、Root、zygote/SystemUI 或其他无关 App。",
+        summary = "允许容器内安装、UI 操作与 Frida；不含真机 host 与 Root",
         warn = true,
     )
 
@@ -242,8 +241,7 @@ private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) ->
         title = "Agent Root 权限",
         checked = draft.rootExecutionEnabled,
         onCheckedChange = { onChange(draft.copy(rootExecutionEnabled = it)) },
-        summary = "高风险功能：需要 Magisk/KernelSU 和 su 授权。开启后主 Agent 与通用子 Agent " +
-            "可请求 Root；普通权限模式仍会逐次确认。",
+        summary = "高风险：需要 Magisk/KernelSU 授权；普通模式仍逐次确认",
         warn = true,
     )
 
@@ -302,7 +300,7 @@ private fun ContextProjectPage(draft: SettingsDraft, onChange: (SettingsDraft) -
         options = windowOptions.map(::formatTokenCountShort),
         selectedIndex = windowOptions.indexOf(draft.contextWindow),
         onSelect = { onChange(draft.copy(contextWindow = windowOptions[it])) },
-        summary = "也可直接输入 128k / 1.5m 这类写法，保存时按你填的数值生效。",
+        summary = "支持 128k / 1.5m 写法",
     )
 
     SettingsToggle(
@@ -346,8 +344,7 @@ private fun CustomSystemPromptField(draft: SettingsDraft, onChange: (SettingsDra
         title = "自定义头部提示词",
         value = draft.customSystemPrompt,
         onValueChange = { onChange(draft.copy(customSystemPrompt = it)) },
-        summary = "作为系统指令随模型请求发送。从下一完整任务生效；不能覆盖应用安全规则、" +
-            "权限模式、工具白名单或 Root 限制。请勿填写 API 密钥。" +
+        summary = "随请求发送，下一任务生效；不能覆盖安全规则，勿填密钥。" +
             if (draft.customSystemPrompt.isBlank()) "" else "当前 ${draft.customSystemPrompt.length} 字。",
         singleLine = false,
         minLines = 5,
@@ -367,7 +364,7 @@ private fun ProjectPathField(draft: SettingsDraft, onChange: (SettingsDraft) -> 
             // 失焦前就同步回 draft，避免用户点「保存」时漏掉最后一次输入
             onChange(draft.copy(projectPath = it.trim()))
         },
-        summary = "项目路径与上下文历史一一绑定；保存新路径后会自动显示该项目可恢复的历史记录。",
+        summary = "与上下文历史一一绑定，保存后可恢复该项目记录",
     )
 }
 

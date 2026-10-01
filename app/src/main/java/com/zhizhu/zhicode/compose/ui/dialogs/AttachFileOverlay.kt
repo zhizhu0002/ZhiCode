@@ -92,8 +92,9 @@ fun AttachFileOverlay(
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
-            // 结果可能几百条，撑满剩余高度并内部滚动，避免把按钮区挤出屏幕
-            fillBody = true,
+            // 结果少时按内容自适应（fill=false 只是设上限，内容多仍会撑满并可滚动），
+            // 不再无论几条都占满全屏高 —— 空态/少量结果时弹窗孤零零的很难看。
+            fillBody = false,
             actions = {},
         ) {
             if (hits.isEmpty()) {
