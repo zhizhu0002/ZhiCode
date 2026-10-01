@@ -79,10 +79,10 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  */
 
 /** 顶栏 chip 的固定高度；胶囊半径由它推出来。 */
-private val ChipHeight = 30.dp
+private val ChipHeight = 26.dp
 
 /** 输入器底部小 pill 的固定高度。 */
-private val PillHeight = 28.dp
+private val PillHeight = 24.dp
 
 /**
  * 顶栏/侧栏/工具行使用的图标按钮。转发到 Miuix [IconButton]（自带涟漪与按压反馈）。
