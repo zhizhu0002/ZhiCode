@@ -1,6 +1,11 @@
 package com.zhizhu.zhicode.compose.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay
+import com.zhizhu.zhicode.compose.ui.dialogs.McpConfigOverlay
+import com.zhizhu.zhicode.compose.ui.dialogs.MemoryOverlay
+import com.zhizhu.zhicode.compose.ui.dialogs.RoleCardsOverlay
+import com.zhizhu.zhicode.compose.ui.dialogs.SkillsOverlay
 import com.zhizhu.zhicode.compose.ui.settings.SettingsDialog
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -185,5 +190,67 @@ private fun ZhiCodeScreen(
             onNavigate = viewModel::navigateFromSettings,
         )
     }
+
+    // ---- 设置二级页（K6：整页化后必须挂在根层）----
+    // 它们现在是 SettingsSubPage（自带 Scaffold+顶栏）。若留在 ZhiOverlayHost
+    // （主 Scaffold 的 bodyContent 里），会被主顶栏/Tab 压住（Miuix Scaffold
+    // 绘制顺序 bodyContent → topBar）。挂在根层、设置主页之后 = 盖住一切。
+    ApiConfigOverlay(
+        config = state.apiConfig,
+        onDismiss = viewModel::closeApiConfig,
+        onNew = viewModel::newApiProfile,
+        onEdit = viewModel::editApiProfile,
+        onSelect = viewModel::selectApiProfile,
+        onDelete = viewModel::deleteApiProfile,
+        onDraftChange = viewModel::updateApiProfileDraft,
+        onSave = viewModel::saveApiProfile,
+        onCancelForm = viewModel::cancelApiProfileForm,
+    )
+    McpConfigOverlay(
+        config = state.mcpConfig,
+        onDismiss = viewModel::closeMcpConfig,
+        onNew = viewModel::newMcpServer,
+        onEdit = viewModel::editMcpServer,
+        onToggle = viewModel::toggleMcpServer,
+        onDelete = viewModel::deleteMcpServer,
+        onDraftChange = viewModel::updateMcpDraft,
+        onSave = viewModel::saveMcpServer,
+        onCancelForm = viewModel::cancelMcpForm,
+    )
+    SkillsOverlay(
+        state = state.skills,
+        onDismiss = viewModel::closeSkills,
+        onNew = viewModel::newSkill,
+        onEdit = viewModel::editSkill,
+        onAttach = viewModel::attachSkill,
+        onDelete = viewModel::deleteSkill,
+        onCreateDraftChange = viewModel::updateSkillCreateDraft,
+        onCreate = viewModel::createSkill,
+        onCancelCreate = viewModel::cancelSkillCreate,
+        onBodyChange = viewModel::updateSkillBody,
+        onSave = viewModel::saveSkill,
+        onCancelEdit = viewModel::cancelSkillEdit,
+    )
+    RoleCardsOverlay(
+        state = state.roleCards,
+        onDismiss = viewModel::closeRoleCards,
+        onNew = viewModel::newRoleCard,
+        onEdit = viewModel::editRoleCard,
+        onSelect = viewModel::selectRoleCard,
+        onDisable = viewModel::disableRoleCard,
+        onDelete = viewModel::deleteRoleCard,
+        onDraftChange = viewModel::updateRoleCardDraft,
+        onSave = viewModel::saveRoleCard,
+        onCancelEditor = viewModel::cancelRoleCardEditor,
+    )
+    MemoryOverlay(
+        state = state.memory,
+        onDismiss = viewModel::closeMemory,
+        onEdit = viewModel::editMemory,
+        onRunInit = { viewModel.closeMemory(); viewModel.runInitFromUi() },
+        onBodyChange = viewModel::updateMemoryBody,
+        onSave = viewModel::saveMemory,
+        onCancelEdit = viewModel::cancelMemoryEdit,
+    )
     }
 }

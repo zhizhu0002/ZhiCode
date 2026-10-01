@@ -7,17 +7,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
-import com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.AttachFileOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.ChoicePickerOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.EnvironmentOverlay
-import com.zhizhu.zhicode.compose.ui.dialogs.McpConfigOverlay
-import com.zhizhu.zhicode.compose.ui.dialogs.MemoryOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.ModelPickerOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.PermissionOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.PlanApprovalOverlay
-import com.zhizhu.zhicode.compose.ui.dialogs.RoleCardsOverlay
-import com.zhizhu.zhicode.compose.ui.dialogs.SkillsOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.TaskListOverlay
 
 /**
@@ -104,62 +99,5 @@ internal fun ZhiOverlayHost(
             viewModel.closeModelPicker()
             viewModel.openApiConfig()
         },
-    )
-    ApiConfigOverlay(
-        config = state.apiConfig,
-        onDismiss = viewModel::closeApiConfig,
-        onNew = viewModel::newApiProfile,
-        onEdit = viewModel::editApiProfile,
-        onSelect = viewModel::selectApiProfile,
-        onDelete = viewModel::deleteApiProfile,
-        onDraftChange = viewModel::updateApiProfileDraft,
-        onSave = viewModel::saveApiProfile,
-        onCancelForm = viewModel::cancelApiProfileForm,
-    )
-    McpConfigOverlay(
-        config = state.mcpConfig,
-        onDismiss = viewModel::closeMcpConfig,
-        onNew = viewModel::newMcpServer,
-        onEdit = viewModel::editMcpServer,
-        onToggle = viewModel::toggleMcpServer,
-        onDelete = viewModel::deleteMcpServer,
-        onDraftChange = viewModel::updateMcpDraft,
-        onSave = viewModel::saveMcpServer,
-        onCancelForm = viewModel::cancelMcpForm,
-    )
-    SkillsOverlay(
-        state = state.skills,
-        onDismiss = viewModel::closeSkills,
-        onNew = viewModel::newSkill,
-        onEdit = viewModel::editSkill,
-        onAttach = viewModel::attachSkill,
-        onDelete = viewModel::deleteSkill,
-        onCreateDraftChange = viewModel::updateSkillCreateDraft,
-        onCreate = viewModel::createSkill,
-        onCancelCreate = viewModel::cancelSkillCreate,
-        onBodyChange = viewModel::updateSkillBody,
-        onSave = viewModel::saveSkill,
-        onCancelEdit = viewModel::cancelSkillEdit,
-    )
-    RoleCardsOverlay(
-        state = state.roleCards,
-        onDismiss = viewModel::closeRoleCards,
-        onNew = viewModel::newRoleCard,
-        onEdit = viewModel::editRoleCard,
-        onSelect = viewModel::selectRoleCard,
-        onDisable = viewModel::disableRoleCard,
-        onDelete = viewModel::deleteRoleCard,
-        onDraftChange = viewModel::updateRoleCardDraft,
-        onSave = viewModel::saveRoleCard,
-        onCancelEditor = viewModel::cancelRoleCardEditor,
-    )
-    MemoryOverlay(
-        state = state.memory,
-        onDismiss = viewModel::closeMemory,
-        onEdit = viewModel::editMemory,
-        onRunInit = { viewModel.closeMemory(); viewModel.runInitFromUi() },
-        onBodyChange = viewModel::updateMemoryBody,
-        onSave = viewModel::saveMemory,
-        onCancelEdit = viewModel::cancelMemoryEdit,
     )
 }
