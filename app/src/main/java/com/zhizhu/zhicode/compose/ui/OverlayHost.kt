@@ -40,20 +40,15 @@ internal fun ZhiOverlayHost(
     glassMain: Glass,
 ) {
     val anchoredActionMenu = state.choicePicker?.isActionMenu == true
+    // 背景模糊层按用户要求移除：OverlayDialog 自带窗口变暗（windowDimming），
+    // 再叠一层整屏 blur 属于重复的视觉噪音。保留 modalOpen 判断是为了
+    // 后续若要按弹窗区分遮蔽策略时有个现成挂点。
     val modalOpen = state.permissionRequest != null ||
         state.planApproval != null ||
         (state.choicePicker != null && !anchoredActionMenu) ||
-        state.settingsDraft != null ||
         state.environmentOpen ||
         state.attachPickerOpen ||
         state.taskListOpen
-    if (modalOpen) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .then(glassMain.blur(Modifier, RectangleShape, radius = 48f)),
-        )
-    }
 
     PermissionOverlay(
         request = state.permissionRequest,

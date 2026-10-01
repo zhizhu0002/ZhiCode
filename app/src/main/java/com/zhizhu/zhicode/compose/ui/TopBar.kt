@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.zhizhu.zhicode.compose.theme.ZhiGlass
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
@@ -48,11 +50,16 @@ fun ZhiTopBar(
 ) {
     val scheme = MiuixTheme.colorScheme
 
+    // 真模糊：blur 修饰符必须挂在捕获层（glassMain.capture）的**上层**绘制才能采样到背景。
+    // 顶栏在 Scaffold topBar 槽位，绘制顺序晚于内容层，直接对自身 modifier 做 blur 即可。
+    val blurredModifier = modifier.then(
+        glass.blur(Modifier, RoundedCornerShape(0.dp), radius = ZhiGlass.FloatingBlur),
+    )
     SmallTopAppBar(
-        modifier = modifier,
+        modifier = blurredModifier,
         title = "ZhiCode",
         // 玻璃半透明底：SmallTopAppBar 内部 background(color)，
-        // 让 blur 结果透过官方容器显示。
+        // blur 结果透出半透明容器 = 磨砂顶栏。
         color = glass.surfaceColor(scheme.surface),
         defaultWindowInsetsPadding = false,
         navigationIcon = {
