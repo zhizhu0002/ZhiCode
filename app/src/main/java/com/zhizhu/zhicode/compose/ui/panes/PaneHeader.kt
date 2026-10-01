@@ -1,5 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
+import com.zhizhu.zhicode.compose.theme.ZhiRow
+import com.zhizhu.zhicode.compose.theme.ZhiSpace
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,7 +47,7 @@ fun PaneHeader(
     val scheme = MiuixTheme.colorScheme
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(32.dp).padding(start = 12.dp, end = 4.dp),
+            modifier = Modifier.fillMaxWidth().height(ZhiRow.height).padding(start = ZhiSpace.m, end = ZhiSpace.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(

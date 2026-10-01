@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.termux.shared.termux.TermuxConstants
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.theme.ZhiSpace
 import com.zhizhu.zhicode.compose.model.FileEntry
 import com.zhizhu.zhicode.compose.model.OpenFile
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -220,7 +221,7 @@ private fun FileRow(entry: FileEntry, onOpen: () -> Unit) {
         onClick = onOpen,
         modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
         cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 9.dp),
+        insideMargin = PaddingValues(horizontal = ZhiSpace.s, vertical = 9.dp),
         colors = CardDefaults.defaultColors(
             color = ZhiColors.cardSurface(),
             contentColor = scheme.onSurface,

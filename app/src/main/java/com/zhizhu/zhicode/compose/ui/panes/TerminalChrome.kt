@@ -58,6 +58,7 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 终端面板的外壳：工具栏、会话抽屉、两行扩展键，以及「环境未就绪 / PTY 起不来」两种占位。
@@ -88,29 +89,18 @@ private class Chrome(
 )
 
 @Composable
-private fun chrome(): Chrome = if (ZhiColors.isDark()) {
-    Chrome(
-        bar = Color(0xFF121212),
-        keyBg = Color(0xFF222222),
-        drawer = Color(0xFF1C1C1C),
-        divider = Color(0xFF3A3A3A),
-        selected = Color(0xFF2C2C2C),
-        text = Color(0xFFEEEEEE),
-        muted = Color(0xFF9E9E9E),
-        accent = Color(0xFFD97757),
-        error = Color(0xFFD6786F),
-    )
-} else {
-    Chrome(
-        bar = Color(0xFFFFFFFF),
-        keyBg = Color(0xFFE7EBF3),
-        drawer = Color(0xFFEEF2F8),
-        divider = Color(0xFFD8DEE8),
-        selected = Color(0xFFE1E6F5),
-        text = Color(0xFF1D2433),
-        muted = Color(0xFF637084),
-        accent = Color(0xFF535BD6),
-        error = Color(0xFFC2414B),
+private fun chrome(): Chrome {
+    val scheme = MiuixTheme.colorScheme
+    return Chrome(
+        bar = scheme.surface,
+        keyBg = ZhiColors.cardSurface(),
+        drawer = ZhiColors.panelSurface(),
+        divider = scheme.dividerLine,
+        selected = ZhiColors.cardInnerSurface(),
+        text = scheme.onSurface,
+        muted = scheme.onSurfaceVariantSummary,
+        accent = scheme.primary,
+        error = ZhiColors.red(),
     )
 }
 
