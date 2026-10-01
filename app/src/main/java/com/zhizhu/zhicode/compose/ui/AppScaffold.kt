@@ -130,7 +130,14 @@ private fun ZhiCodeScreen(
             }
         },
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        // 顶栏 blur 需要内容从它**底下滚过**才有东西可采样：
+        // 去掉 padding.top，让内容 Box 从 y=0 铺满；各面板自己用
+        // TopBarTotalInset 在内容头部留白（见 WorkspaceLayouts）。
+        Box(
+            modifier = Modifier.fillMaxSize().padding(
+                bottom = padding.calculateBottomPadding(),
+            ),
+        ) {
             // 整块工作区先录进 glassMain 的背景（抽屉/弹窗的模糊来源）
             Box(modifier = Modifier.fillMaxSize().then(glassMain.capture(Modifier))) {
                 if (wide) {

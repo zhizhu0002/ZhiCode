@@ -11,6 +11,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -101,6 +102,9 @@ internal fun CompactWorkspace(
     glass: Glass,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
+        // 顶栏 blur 采样需要内容从顶栏底下滚过：面板内容整体上移进顶栏区域，
+        // 再用 padding 把"首行可见位置"推回顶栏下缘（内容滚动时能穿过 blur 区）。
+        Spacer(modifier = Modifier.height(TopBarInsetWithTabs))
         // 面板切换动画：淡入淡出 + 轻微横向位移
         AnimatedContent(
             targetState = state.tab,
@@ -193,9 +197,12 @@ internal val TopBarTabRowPadding = 12.dp
  * 这三个数字必须和 `ZhiTopBar` 里的实际尺寸严格对齐，否则面板的首行
  * （尤其是标题栏右侧的动作图标）会被悬浮头部压掉一半。
  */
-internal val TopBarInset = TopBarTitleRowHeight
+// SmallTopAppBar 官方 CollapsedHeight = 52dp；窄屏 Tab 行在 bottomContent 槽位。
+// S1 之后顶栏占布局高度、内容不再重叠 —— 但顶栏 blur 需要内容从底下滚过，
+// 所以 Scaffold 内容层不再吃 padding.top，各面板用这两个常量自己留出可见区起点。
+internal val TopBarInset = 52.dp
 internal val TopBarInsetWithTabs =
-    TopBarTitleRowHeight + WorkspaceTabRowHeight + TopBarTabRowPadding
+    52.dp + WorkspaceTabRowHeight + TopBarTabRowPadding
 
 @Composable
 private fun PaneHost(
