@@ -193,11 +193,15 @@ private fun DiffFileCard(
     }
 }
 
-/** 逐行着色渲染 unified diff，对应原版 colorDiff()。 */
+/**
+ * 逐行着色渲染 unified diff，对应原版 colorDiff()。
+ *
+ * <p>自带卡片外壳。**外面已经有卡片时用 [DiffLines]** —— 套两层实心卡会出现
+ * 两个不同圆角的底板叠在一起（本工程为同类观感问题改过两次）。
+ */
 @Composable
 fun DiffBlock(diff: String, isDark: Boolean, modifier: Modifier = Modifier) {
     val scheme = MiuixTheme.colorScheme
-    val lines = remember(diff) { diff.split('\n') }
     Card(
         modifier = modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.inner,
@@ -207,30 +211,48 @@ fun DiffBlock(diff: String, isDark: Boolean, modifier: Modifier = Modifier) {
             contentColor = scheme.onSurface,
         ),
     ) {
-        lines.forEach { line ->
-            // 逐行背景是 diff 的语义着色（+绿/−红），不是装饰容器，因此保留 background
-            val (foreground, background) = when {
-                line.startsWith("+++") || line.startsWith("---") ->
-                    scheme.onSurfaceVariantSummary to Color.Transparent
-                line.startsWith("+") -> ZhiColors.green() to ZhiColors.greenContainer()
-                line.startsWith("-") -> ZhiColors.red() to ZhiColors.redContainer()
-                line.startsWith("@@") -> scheme.primary to Color.Transparent
-                line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("new file") ->
-                    scheme.onSurfaceVariantSummary to Color.Transparent
-                else -> scheme.onSurface to Color.Transparent
-            }
-            Text(
-                text = line.ifEmpty { " " },
-                color = foreground,
-                fontSize = ZhiTextScale.Footnote,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                overflow = TextOverflow.Clip,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(background)
-                    .padding(horizontal = 8.dp),
-            )
+        DiffLines(diff)
+    }
+}
+
+/**
+ * 只做**逐行着色**，不画容器。
+ *
+ * <p>抽出来有两个理由，都不是"为了少写几行"：
+ *
+ * 1. **外面已经有一张卡片的调用点要能复用**。工具卡（`chat/MessageCards.kt` 展开的输出区）
+ *    自己就是一张 `cardInnerSurface` 卡片，再套一层 `DiffBlock` 会出现两个不同圆角的
+ *    实心底板叠在一起 —— 本工程同类观感问题已经改过两次。
+ * 2. **着色规则只能有一份**。写在两处，迟早一边补了 `+++`/`---` 的特例而另一边没有，
+ *    同一份 diff 在两处颜色不同，而那种差别没人会当成 bug 报上来。
+ */
+@Composable
+fun DiffLines(diff: String) {
+    val scheme = MiuixTheme.colorScheme
+    val lines = remember(diff) { diff.split('\n') }
+    lines.forEach { line ->
+        // 逐行背景是 diff 的语义着色（+绿/−红），不是装饰容器，因此保留 background
+        val (foreground, background) = when {
+            line.startsWith("+++") || line.startsWith("---") ->
+                scheme.onSurfaceVariantSummary to Color.Transparent
+            line.startsWith("+") -> ZhiColors.green() to ZhiColors.greenContainer()
+            line.startsWith("-") -> ZhiColors.red() to ZhiColors.redContainer()
+            line.startsWith("@@") -> scheme.primary to Color.Transparent
+            line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("new file") ->
+                scheme.onSurfaceVariantSummary to Color.Transparent
+            else -> scheme.onSurface to Color.Transparent
         }
+        Text(
+            text = line.ifEmpty { " " },
+            color = foreground,
+            fontSize = ZhiTextScale.Footnote,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(background)
+                .padding(horizontal = 8.dp),
+        )
     }
 }

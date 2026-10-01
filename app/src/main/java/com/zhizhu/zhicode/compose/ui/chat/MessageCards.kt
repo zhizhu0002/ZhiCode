@@ -27,12 +27,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.engine.ToolText
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ToolActivity
 import com.zhizhu.zhicode.compose.model.ToolKind
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
+import com.zhizhu.zhicode.compose.ui.panes.DiffLines
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
@@ -523,26 +525,47 @@ private fun ToolRow(
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(start = 23.dp, bottom = 2.dp),
             )
-            // 展开：全量输出
+            // 展开：全量输出。
+            //
+            // 写文件类工具（Write / Edit / MultiEdit / Delete）的输出是**统一 diff**，
+            // 逐行着色渲染：+绿 / −红 / @@ 用强调色 / 文件头弱化。与「变更」面板共用
+            // `DiffLines`（`ui/panes/ChangesPane.kt`）—— 着色规则只有那一份，
+            // 否则同一份 diff 在对话里与变更面板里会长得不一样。
+            //
+            // 左右不留给外层 Card：着色条要顶到卡片两边（像 diff 该有的样子），
+            // 所以 insideMargin 只给上下；横向留白由每一行自己出（见 DiffLines）。
             activity.expanded && hasDetails -> Card(
                 modifier = Modifier.padding(start = 23.dp, top = 5.dp),
                 cornerRadius = ZhiRadius.inner,
-                insideMargin = PaddingValues(8.dp),
+                insideMargin = if (activity.isFileDiff()) PaddingValues(vertical = 6.dp) else PaddingValues(8.dp),
                 colors = CardDefaults.defaultColors(
                     color = ZhiColors.cardInnerSurface(),
                     contentColor = scheme.onSurfaceVariantSummary,
                 ),
             ) {
-                Text(
-                    text = activity.output,
-                    fontSize = ZhiTextScale.Footnote,
-                    fontFamily = FontFamily.Monospace,
-                )
+                if (activity.isFileDiff()) {
+                    DiffLines(activity.output)
+                } else {
+                    Text(
+                        text = activity.output,
+                        fontSize = ZhiTextScale.Footnote,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
             }
         }
     }
     } // Surface(onClick)
 }
+
+/**
+ * 这条工具的输出该不该按 diff 渲染。
+ *
+ * <p>判据在 [ToolText.isFileDiff]（纯函数、有单测）：既要工具是写文件的，
+ * **也要**输出真的是 diff —— 写入失败时输出是一行错误文本，
+ * 按工具名着色会把那行错误画成 diff 配色，比不着色更误导。
+ */
+private fun ToolActivity.isFileDiff(): Boolean = ToolText.isFileDiff(toolName, output)
 
 /**
  * 行首状态字形，复刻原版 `addToolCard()` 的 `statusGlyph`：
