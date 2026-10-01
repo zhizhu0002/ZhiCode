@@ -23,6 +23,7 @@ import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -57,35 +58,41 @@ fun SkillsOverlay(
     onSave: () -> Unit,
     onCancelEdit: () -> Unit,
 ) {
-    OverlayDialog(
-        show = state != null,
-        onDismissRequest = onDismiss,
-        largeScreen = true,
-        maxWidth = ZhiDialogWidth.Wide,
-        outsideMargin = DialogSheetOutsideMargin,
-        insideMargin = DialogWideInsideMargin,
-    ) {
-        val current = state ?: return@OverlayDialog
-        when {
-            current.createForm != null -> SkillCreateForm(
-                draft = current.createForm,
-                onChange = onCreateDraftChange,
-                onCreate = onCreate,
-                onCancel = onCancelCreate,
-            )
-            current.editing != null -> SkillEditor(
-                target = current.editing,
+    if (state == null) return
+    when {
+        state.createForm != null -> {
+            val draft = state.createForm
+            SettingsSubPage(
+                title = "新建 Skill",
+                onBack = onCancelCreate,
+                action = "创建" to (if (draft.saveable) onCreate else null),
+            ) {
+                SkillCreateForm(
+                    draft = draft,
+                    onChange = onCreateDraftChange,
+                )
+            }
+        }
+        state.editing != null -> SettingsSubPage(
+            title = "编辑 " + state.editing.name,
+            onBack = onCancelEdit,
+            action = "保存" to onSave,
+        ) {
+            SkillEditor(
+                target = state.editing,
                 onBodyChange = onBodyChange,
-                onSave = onSave,
-                onCancel = onCancelEdit,
             )
-            else -> SkillList(
-                state = current,
-                onNew = onNew,
+        }
+        else -> SettingsSubPage(
+            title = "Skill 管理器",
+            onBack = onDismiss,
+            action = "新建" to onNew,
+        ) {
+            SkillList(
+                state = state,
                 onEdit = onEdit,
                 onAttach = onAttach,
                 onDelete = onDelete,
-                onClose = onDismiss,
             )
         }
     }
@@ -94,21 +101,12 @@ fun SkillsOverlay(
 @Composable
 private fun SkillList(
     state: SkillsState,
-    onNew: () -> Unit,
     onEdit: (SkillEntry) -> Unit,
     onAttach: (SkillEntry) -> Unit,
     onDelete: (SkillEntry) -> Unit,
-    onClose: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    DialogShell(
-        title = "Skill 管理器",
-        groupBody = true,
-        actions = {
-            SecondaryButton(text = "关闭", onClick = onClose)
-            PrimaryButton(text = "新建", onClick = onNew, modifier = Modifier.padding(start = 8.dp))
-        },
-    ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
         Text(
             text = "项目级 .zhicode/skills 与用户级 ~/.zhicode/skills（与引擎 Skill 工具的查找路径一致）",
             color = scheme.onSurfaceVariantSummary,
@@ -125,11 +123,12 @@ private fun SkillList(
                 fontSize = ZhiTextScale.Footnote,
                 modifier = Modifier.fillMaxWidth(),
             )
-            return@DialogShell
+            return@Column
         }
 
-        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp)) {
-            items(state.skills, key = { "${it.scope}-${it.name}" }) { skill ->
+        // 整页模式下不限高，滚动交给外层 SettingsSubPage。
+        Column {
+        state.skills.forEach { skill ->
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
                     cornerRadius = ZhiRadius.card,
@@ -170,32 +169,18 @@ private fun SkillList(
                         insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                     )
                 }
-            }
         }
     }
+}
 }
 
 @Composable
 private fun SkillCreateForm(
     draft: SkillCreateDraft,
     onChange: ((SkillCreateDraft) -> SkillCreateDraft) -> Unit,
-    onCreate: () -> Unit,
-    onCancel: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    DialogShell(
-        title = "新建 Skill",
-        groupBody = true,
-        actions = {
-            SecondaryButton(text = "取消", onClick = onCancel)
-            PrimaryButton(
-                text = "创建并编辑",
-                enabled = draft.saveable,
-                onClick = onCreate,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-        },
-    ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
         ZhiTextField(
             value = draft.name,
             onValueChange = { value -> onChange { it.copy(name = value) } },
@@ -238,36 +223,25 @@ private fun SkillCreateForm(
 private fun SkillEditor(
     target: SkillEditTarget,
     onBodyChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onCancel: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    DialogShell(
-        title = "编辑 ${target.name}",
-        groupBody = true,
-        actions = {
-            SecondaryButton(text = "取消", onClick = onCancel)
-            PrimaryButton(text = "保存", onClick = onSave, modifier = Modifier.padding(start = 8.dp))
-        },
-    ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
         Text(
             text = target.path,
             color = scheme.onSurfaceVariantSummary,
             fontSize = ZhiTextScale.Micro,
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         )
-        // 同上：DialogShell 的 body 已经是竖向滚动容器，这里再套一层会崩溃。
-        Column(modifier = Modifier.fillMaxWidth()) {
-            ZhiTextField(
-                value = target.body,
-                onValueChange = onBodyChange,
-                label = "SKILL.md",
-                useLabelAsPlaceholder = false,
-                singleLine = false,
-                minLines = 10,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp),
-            )
-        }
+        // 滚动由外层 SettingsSubPage 负责，这里不再套滚动容器。
+        ZhiTextField(
+            value = target.body,
+            onValueChange = onBodyChange,
+            label = "SKILL.md",
+            useLabelAsPlaceholder = false,
+            singleLine = false,
+            minLines = 10,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp),
+        )
         Text(
             text = if (target.empty) "内容为空：保存后会生成一个空的 SKILL.md。"
             else "当前 ${target.body.length} 字。",

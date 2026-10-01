@@ -17,6 +17,7 @@ import com.zhizhu.zhicode.compose.model.MemoryState
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -45,29 +46,28 @@ fun MemoryOverlay(
     onSave: () -> Unit,
     onCancelEdit: () -> Unit,
 ) {
-    OverlayDialog(
-        show = state != null,
-        onDismissRequest = onDismiss,
-        largeScreen = true,
-        maxWidth = ZhiDialogWidth.Regular,
-        outsideMargin = DialogWideOutsideMargin,
-        insideMargin = DialogWideInsideMargin,
-    ) {
-        val current = state ?: return@OverlayDialog
-        val editing = current.editing
-        if (editing == null) {
+    if (state == null) return
+    val editing = state.editing
+    if (editing == null) {
+        SettingsSubPage(
+            title = "记忆文件 · ZhiCode.md",
+            onBack = onDismiss,
+            action = "完善" to onRunInit,
+        ) {
             MemoryFileList(
-                state = current,
+                state = state,
                 onEdit = onEdit,
-                onRunInit = onRunInit,
-                onClose = onDismiss,
             )
-        } else {
+        }
+    } else {
+        SettingsSubPage(
+            title = editing.title,
+            onBack = onCancelEdit,
+            action = "保存" to onSave,
+        ) {
             MemoryEditorBody(
                 editing = editing,
                 onBodyChange = onBodyChange,
-                onSave = onSave,
-                onCancel = onCancelEdit,
             )
         }
     }
@@ -77,18 +77,9 @@ fun MemoryOverlay(
 private fun MemoryFileList(
     state: MemoryState,
     onEdit: (MemoryFile) -> Unit,
-    onRunInit: () -> Unit,
-    onClose: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    DialogShell(
-        title = "记忆文件 · ZhiCode.md",
-        groupBody = true,
-        actions = {
-            SecondaryButton(text = "关闭", onClick = onClose)
-            PrimaryButton(text = "让智蛛完善", onClick = onRunInit, modifier = Modifier.padding(start = 8.dp))
-        },
-    ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
         Text(
             text = "项目级与用户级两份说明文件。写入后**不会**自动注入模型——" +
                 "「让智蛛完善」会让 Agent 读取现有说明与构建清单后直接整理 ZhiCode.md；" +
@@ -139,36 +130,25 @@ private fun MemoryFileList(
 private fun MemoryEditorBody(
     editing: MemoryEditor,
     onBodyChange: (String) -> Unit,
-    onSave: () -> Unit,
-    onCancel: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    DialogShell(
-        title = editing.title,
-        groupBody = true,
-        actions = {
-            SecondaryButton(text = "取消", onClick = onCancel)
-            PrimaryButton(text = "保存", onClick = onSave, modifier = Modifier.padding(start = 8.dp))
-        },
-    ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
         Text(
             text = editing.path,
             color = scheme.onSurfaceVariantSummary,
             fontSize = ZhiTextScale.Micro,
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         )
-        // 同上：DialogShell 的 body 已经是竖向滚动容器，这里再套一层会崩溃。
-        Column(modifier = Modifier.fillMaxWidth()) {
-            ZhiTextField(
-                value = editing.body,
-                onValueChange = onBodyChange,
-                label = "ZhiCode.md",
-                useLabelAsPlaceholder = false,
-                singleLine = false,
-                minLines = 12,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 260.dp),
-            )
-        }
+        // 滚动由外层 SettingsSubPage 负责，这里不再套滚动容器。
+        ZhiTextField(
+            value = editing.body,
+            onValueChange = onBodyChange,
+            label = "ZhiCode.md",
+            useLabelAsPlaceholder = false,
+            singleLine = false,
+            minLines = 12,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 260.dp),
+        )
         Text(
             text = if (editing.empty) {
                 "内容为空。建议写清楚：构建/测试命令、目录结构、项目约定。"

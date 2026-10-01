@@ -28,6 +28,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -65,32 +66,31 @@ fun ApiConfigOverlay(
     onSave: () -> Unit,
     onCancelForm: () -> Unit,
 ) {
-    val form = config?.form
-
-    OverlayDialog(
-        show = config != null,
-        onDismissRequest = onDismiss,
-        largeScreen = true,
-        maxWidth = ZhiDialogWidth.Regular,
-        outsideMargin = DialogWideOutsideMargin,
-        insideMargin = DialogWideInsideMargin,
-    ) {
-        val current = config ?: return@OverlayDialog
-        if (form == null) {
+    if (config == null) return
+    val form = config.form
+    // 二级整页（与设置主页同款骨架），列表/表单两态复用一个页面栈
+    if (form == null) {
+        SettingsSubPage(
+            title = "API 配置记录",
+            onBack = onDismiss,
+            action = "新增" to onNew,
+        ) {
             ApiProfileList(
-                config = current,
-                onNew = onNew,
+                config = config,
                 onEdit = onEdit,
                 onSelect = onSelect,
                 onDelete = onDelete,
-                onClose = onDismiss,
             )
-        } else {
+        }
+    } else {
+        SettingsSubPage(
+            title = if (form.isEditing) "编辑 API 配置" else "新增 API 配置",
+            onBack = onCancelForm,
+            action = "保存" to (if (form.saveable) onSave else null),
+        ) {
             ApiProfileForm(
                 draft = form,
                 onChange = onDraftChange,
-                onSave = onSave,
-                onCancel = onCancelForm,
             )
         }
     }
@@ -99,21 +99,12 @@ fun ApiConfigOverlay(
 @Composable
 private fun ApiProfileList(
     config: ApiConfigState,
-    onNew: () -> Unit,
     onEdit: (ApiProfile) -> Unit,
     onSelect: (String) -> Unit,
     onDelete: (String) -> Unit,
-    onClose: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    DialogShell(
-        title = "API 配置记录",
-        groupBody = true,
-        actions = {
-            SecondaryButton(text = "关闭", onClick = onClose)
-            PrimaryButton(text = "新增", onClick = onNew, modifier = Modifier.padding(start = 8.dp))
-        },
-    ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
         if (config.profiles.isEmpty()) {
             // 空列表是正常的初始状态（应用不再自带任何厂商配置），
             // 但只显示一行"没有数据"会让人以为坏了。写清下一步做什么。
@@ -125,6 +116,7 @@ private fun ApiProfileList(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
             )
         }
+        // 列表/表单两态共用一个整页栈；「新增」在顶栏，这里只负责行内容。
         config.profiles.forEach { profile ->
             val active = profile.id == config.activeId
             Card(
@@ -194,8 +186,6 @@ private fun ApiProfileList(
 private fun ApiProfileForm(
     draft: ApiProfileDraft,
     onChange: ((ApiProfileDraft) -> ApiProfileDraft) -> Unit,
-    onSave: () -> Unit,
-    onCancel: () -> Unit,
 ) {
     // 地址是否走明文 HTTP：部分自建网关只有 http。这个开关对应引擎里的
     // usesCleartextTraffic 场景，正常应保持关闭。
@@ -213,19 +203,7 @@ private fun ApiProfileForm(
         }
     }
 
-    DialogShell(
-        title = if (draft.isEditing) "编辑 API 配置" else "新增 API 配置",
-        groupBody = true,
-        actions = {
-            SecondaryButton(text = "取消", onClick = onCancel)
-            PrimaryButton(
-                text = "保存",
-                enabled = draft.saveable,
-                onClick = onSave,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-        },
-    ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
         ZhiTextField(
             value = draft.name,
             onValueChange = { value -> onChange { it.copy(name = value) } },

@@ -21,6 +21,7 @@ import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -30,6 +31,7 @@ import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
@@ -60,32 +62,31 @@ fun RoleCardsOverlay(
     onSave: () -> Unit,
     onCancelEditor: () -> Unit,
 ) {
-    OverlayDialog(
-        show = state != null,
-        onDismissRequest = onDismiss,
-        largeScreen = true,
-        maxWidth = ZhiDialogWidth.Regular,
-        outsideMargin = DialogWideOutsideMargin,
-        insideMargin = DialogWideInsideMargin,
-    ) {
-        val current = state ?: return@OverlayDialog
-        val editor = current.editor
-        if (editor == null) {
+    if (state == null) return
+    val editor = state.editor
+    if (editor == null) {
+        SettingsSubPage(
+            title = "自定义角色卡",
+            onBack = onDismiss,
+            action = "新建" to onNew,
+        ) {
             RoleCardList(
-                state = current,
-                onNew = onNew,
+                state = state,
                 onEdit = onEdit,
                 onSelect = onSelect,
                 onDisable = onDisable,
                 onDelete = onDelete,
-                onClose = onDismiss,
             )
-        } else {
+        }
+    } else {
+        SettingsSubPage(
+            title = if (editor.isEditing) "编辑角色卡" else "新建角色卡",
+            onBack = onCancelEditor,
+            action = "保存" to (if (editor.saveable) onSave else null),
+        ) {
             RoleCardEditorForm(
                 editor = editor,
                 onChange = onDraftChange,
-                onSave = onSave,
-                onCancel = onCancelEditor,
             )
         }
     }
@@ -94,22 +95,13 @@ fun RoleCardsOverlay(
 @Composable
 private fun RoleCardList(
     state: RoleCardsState,
-    onNew: () -> Unit,
     onEdit: (RoleCard) -> Unit,
     onSelect: (RoleCard) -> Unit,
     onDisable: () -> Unit,
     onDelete: (RoleCard) -> Unit,
-    onClose: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    DialogShell(
-        title = "自定义角色卡",
-        groupBody = true,
-        actions = {
-            SecondaryButton(text = "关闭", onClick = onClose)
-            PrimaryButton(text = "新建", onClick = onNew, modifier = Modifier.padding(start = 8.dp))
-        },
-    ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
         Text(
             text = "启用中的角色卡会作为 <role_card> 块随每一次系统提示词发送。" +
                 "同一时刻只有一张生效；它不能覆盖应用安全规则、权限模式或 Root 限制。",
@@ -126,11 +118,12 @@ private fun RoleCardList(
                 fontSize = ZhiTextScale.Footnote,
                 modifier = Modifier.fillMaxWidth(),
             )
-            return@DialogShell
+            return@Column
         }
 
-        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
-            items(state.cards, key = { it.id }) { card ->
+        // 整页模式下不限高，滚动交给外层 SettingsSubPage。
+        Column {
+        state.cards.forEach { card ->
                 val active = card.id == state.activeId
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
@@ -171,11 +164,12 @@ private fun RoleCardList(
                         insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                     )
                 }
-            }
+        }
         }
 
         if (state.activeId.isNotEmpty()) {
-            SecondaryButton(
+            // 整页模式下「停用」放列表尾（原生 TextButton，与顶栏动作同族）
+            TextButton(
                 text = "停用当前角色卡",
                 onClick = onDisable,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -188,23 +182,9 @@ private fun RoleCardList(
 private fun RoleCardEditorForm(
     editor: RoleCardEditor,
     onChange: ((RoleCardEditor) -> RoleCardEditor) -> Unit,
-    onSave: () -> Unit,
-    onCancel: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    DialogShell(
-        title = if (editor.isEditing) "编辑角色卡" else "新建角色卡",
-        groupBody = true,
-        actions = {
-            SecondaryButton(text = "取消", onClick = onCancel)
-            PrimaryButton(
-                text = "保存并启用",
-                enabled = editor.saveable,
-                onClick = onSave,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-        },
-    ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
         ZhiTextField(
             value = editor.name,
             onValueChange = { value -> onChange { it.copy(name = value) } },
@@ -223,17 +203,15 @@ private fun RoleCardEditorForm(
             )
         }
 
-        Column(modifier = Modifier.fillMaxWidth()) {
-            ZhiTextField(
-                value = editor.content,
-                onValueChange = { value -> onChange { it.copy(content = value) } },
-                label = "角色卡内容",
-                useLabelAsPlaceholder = true,
-                singleLine = false,
-                minLines = 8,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp).padding(top = 8.dp),
-            )
-        }
+        ZhiTextField(
+            value = editor.content,
+            onValueChange = { value -> onChange { it.copy(content = value) } },
+            label = "角色卡内容",
+            useLabelAsPlaceholder = true,
+            singleLine = false,
+            minLines = 8,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp).padding(top = 8.dp),
+        )
 
         Text(
             text = "从下一完整任务生效。请勿填写 API 密钥——这段文本会进入每一次请求。",

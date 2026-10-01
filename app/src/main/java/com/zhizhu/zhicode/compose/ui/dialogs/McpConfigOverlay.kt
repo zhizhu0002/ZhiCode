@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -22,6 +23,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -60,31 +62,30 @@ fun McpConfigOverlay(
     onSave: () -> Unit,
     onCancelForm: () -> Unit,
 ) {
-    OverlayDialog(
-        show = config != null,
-        onDismissRequest = onDismiss,
-        largeScreen = true,
-        maxWidth = ZhiDialogWidth.Regular,
-        outsideMargin = DialogWideOutsideMargin,
-        insideMargin = DialogWideInsideMargin,
-    ) {
-        val current = config ?: return@OverlayDialog
-        val form = current.form
-        if (form == null) {
+    if (config == null) return
+    val form = config.form
+    if (form == null) {
+        SettingsSubPage(
+            title = "MCP 服务器",
+            onBack = onDismiss,
+            action = "添加" to onNew,
+        ) {
             McpServerList(
-                config = current,
-                onNew = onNew,
+                config = config,
                 onEdit = onEdit,
                 onToggle = onToggle,
                 onDelete = onDelete,
-                onClose = onDismiss,
             )
-        } else {
+        }
+    } else {
+        SettingsSubPage(
+            title = if (form.isEditing) "编辑 MCP 服务器" else "添加 MCP 服务器",
+            onBack = onCancelForm,
+            action = "保存" to (if (form.saveable) onSave else null),
+        ) {
             McpServerForm(
                 draft = form,
                 onChange = onDraftChange,
-                onSave = onSave,
-                onCancel = onCancelForm,
             )
         }
     }
@@ -93,21 +94,12 @@ fun McpConfigOverlay(
 @Composable
 private fun McpServerList(
     config: McpConfigState,
-    onNew: () -> Unit,
     onEdit: (McpServer) -> Unit,
     onToggle: (McpServer) -> Unit,
     onDelete: (McpServer) -> Unit,
-    onClose: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    DialogShell(
-        title = "MCP 服务器",
-        groupBody = true,
-        actions = {
-            SecondaryButton(text = "关闭", onClick = onClose)
-            PrimaryButton(text = "添加", onClick = onNew, modifier = Modifier.padding(start = 8.dp))
-        },
-    ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
         Text(
             text = "配置文件：${config.filePath}",
             color = scheme.onSurfaceVariantSummary,
@@ -124,13 +116,12 @@ private fun McpServerList(
                 fontSize = ZhiTextScale.Footnote,
                 modifier = Modifier.fillMaxWidth(),
             )
-            return@DialogShell
+            return@Column
         }
 
-        // 服务器可以有很多条，用懒列表 + 高度上限，避免把底部按钮顶出屏幕。
-        // 这里不能用 weight()：DialogShell 的 body 是通用容器，不保证处在 ColumnScope 里。
-        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
-            items(config.servers, key = { it.name }) { server ->
+        // 整页模式下列表不再限高：外层 SettingsSubPage 的 LazyColumn 负责滚动。
+        Column {
+        config.servers.forEach { server ->
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
                     cornerRadius = ZhiRadius.card,
@@ -168,8 +159,8 @@ private fun McpServerList(
                         insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                     )
                 }
-            }
         }
+    }
     }
 }
 
@@ -177,28 +168,11 @@ private fun McpServerList(
 private fun McpServerForm(
     draft: McpServerDraft,
     onChange: ((McpServerDraft) -> McpServerDraft) -> Unit,
-    onSave: () -> Unit,
-    onCancel: () -> Unit,
 ) {
+    // 表单滚动由外层 SettingsSubPage 的 LazyColumn 负责，这里不套 verticalScroll
+    // （嵌套滚动容器会拿到无限高度约束而崩溃）。
     val scheme = MiuixTheme.colorScheme
-    DialogShell(
-        title = if (draft.isEditing) "编辑 MCP 服务器" else "添加 MCP 服务器",
-        groupBody = true,
-        actions = {
-            SecondaryButton(text = "取消", onClick = onCancel)
-            PrimaryButton(
-                text = "保存",
-                enabled = draft.saveable,
-                onClick = onSave,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-        },
-    ) {
-        // 这里**不能**再套一层 verticalScroll：DialogShell 已经把 body 放进竖向滚动容器，
-        // 嵌套会让内层拿到无限大高度约束，Compose 直接抛 IllegalStateException
-        // （Vertically scrollable component was measured with an infinity maximum height
-        // constraints），main 线程崩溃、进程被杀。表单变长由外层滚动负责。
-        androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxWidth()) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
             ZhiTextField(
                 value = draft.name,
                 onValueChange = { v -> onChange { it.copy(name = v) } },
@@ -293,7 +267,6 @@ private fun McpServerForm(
             )
         }
     }
-}
 
 /** 只在有错时占位，没错时不画——避免表单里到处是空行。 */
 @Composable

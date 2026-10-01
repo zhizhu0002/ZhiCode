@@ -143,8 +143,10 @@ public final class LayoutConsistencyTest {
         require(marginLiteralOffenders.isEmpty(),
                 "弹窗外边距必须统一走 DialogWideOutsideMargin，不要写字面量 DpSize：\n  "
                         + String.join("\n  ", marginLiteralOffenders));
-        require(tokenUsers >= 10,
-                "应当有大量弹窗使用 DialogWideOutsideMargin（现在只有 " + tokenUsers
+        // 设置及其二级页（API/MCP/技能/角色卡/记忆）已整页化（SettingsSubPage），
+        // 不再走 OverlayDialog，常量的自然用户随之减少 —— 阈值只保证「剩余弹窗没绕过」。
+        require(tokenUsers >= 5,
+                "应当有多个弹窗使用 DialogWideOutsideMargin（现在只有 " + tokenUsers
                         + " 处）——过少说明有人绕过了它");
 
         // ---- 4. 本测试自身必须被 canonical suite 执行 ------------------------
