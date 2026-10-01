@@ -1,8 +1,6 @@
 package com.zhizhu.zhicode.compose.ui
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.EaseOutCubic
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -105,11 +103,11 @@ internal fun CompactWorkspace(
             transitionSpec = {
                 val forward = targetState.ordinal > initialState.ordinal
                 val offset = if (forward) 1 else -1
-                (slideInHorizontally(tween(ZhiMotion.MEDIUM, easing = EaseOutCubic)) {
+                (slideInHorizontally(ZhiMotion.enterSpec) {
                     offset * it / 8
-                } + fadeIn(tween(ZhiMotion.MEDIUM))) togetherWith
-                    (slideOutHorizontally(tween(ZhiMotion.FAST)) { -offset * it / 8 } +
-                        fadeOut(tween(ZhiMotion.FAST)))
+                } + fadeIn(ZhiMotion.fadeInSpec)) togetherWith
+                    (slideOutHorizontally(ZhiMotion.exitSpec) { -offset * it / 8 } +
+                        fadeOut(ZhiMotion.fadeOutSpec))
             },
             modifier = Modifier.weight(1f),
             label = "workspacePane",
@@ -252,8 +250,6 @@ internal fun ZhiSidebarHost(
         anchoredMenu = { anchorId, fingerOffset ->
             ZhiAnchoredMenuHost(state, viewModel, anchorId, fingerOffset)
         },
-        onSkills = viewModel::openSkills,
-        onRoleCard = viewModel::openRoleCards,
         onSandbox = { viewModel.openSandbox() },
         // 「运行环境」行现在是真实探测结果 + 真实的安装/自检窗口，
         // 不再是把 /doctor 当普通消息发出去（那样只会得到一句 Mock 回复）。

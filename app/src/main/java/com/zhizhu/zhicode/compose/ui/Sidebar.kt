@@ -2,8 +2,6 @@ package com.zhizhu.zhicode.compose.ui
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.background
@@ -74,8 +72,6 @@ fun ZhiSidebar(
      * （相对该条），非空时菜单从那一点长出来。
      */
     anchoredMenu: @Composable (String, DpOffset?) -> Unit,
-    onRoleCard: () -> Unit,
-    onSkills: () -> Unit,
     onSandbox: () -> Unit,
     onRuntime: () -> Unit,
     onSettings: () -> Unit,
@@ -126,12 +122,14 @@ fun ZhiSidebar(
                 }
             }
 
+            // 「技能」「自定义角色卡」原本在这里，已删：它们是**设置里的配置对象**，
+            // 侧栏是"去哪一屏"的导航，把两处配置项摆在导航栏里会让同一目标出现两条
+            // 路径（侧栏一条、设置页「扩展」组一条），且侧栏会被越堆越长。
+            // 配置类入口统一收到设置页（见 SettingsDialog 的 ExtensionsPage）。
             ZhiSectionLabel(
-                text = "扩展",
+                text = "更多",
                 modifier = Modifier.padding(start = 8.dp, top = 10.dp, bottom = 2.dp),
             )
-            SidebarRow(label = "技能", icon = ZhiIcons.skill, onClick = onSkills)
-            SidebarRow(label = "自定义角色卡", icon = ZhiIcons.roleCard, onClick = onRoleCard)
             SidebarRow(label = "ZhiCode 沙箱", icon = ZhiIcons.sandbox, onClick = onSandbox)
 
             SidebarRow(
@@ -232,7 +230,7 @@ private fun SessionRowInner(
     // 选中态背景淡入，切换会话时不会硬跳
     val background by animateColorAsState(
         targetValue = if (active) ZhiColors.cardInnerSurface() else Color.Transparent,
-        animationSpec = tween(ZhiMotion.MEDIUM, easing = FastOutSlowInEasing),
+        animationSpec = ZhiMotion.colorSpec,
         label = "sessionRowBackground",
     )
     Card(
