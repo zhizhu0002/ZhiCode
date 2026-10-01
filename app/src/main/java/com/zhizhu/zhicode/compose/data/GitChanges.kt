@@ -26,7 +26,8 @@ internal object GitChanges {
 
     fun read(context: Context, projectPath: String): DiffState {
         if (projectPath.isBlank() || !File(projectPath).isDirectory()) {
-            return DiffState(note = "项目目录不存在：$projectPath")
+            val projectName = projectPath.trimEnd('/').substringAfterLast('/')
+            return DiffState(note = "项目目录不存在：$projectName")
         }
         val shell = TermuxShellExecutor(context)
         // git 不可用（内置 Termux 环境还没初始化）时给出可操作的提示，而不是空列表。
@@ -37,7 +38,10 @@ internal object GitChanges {
         val topLevel = runCatching { git(shell, projectPath, "rev-parse --show-toplevel") }.getOrNull()
             ?: return DiffState(note = "无法执行 git（内置环境可能未就绪）")
         if (topLevel.exitCode != 0) {
-            return DiffState(note = "当前项目不是 git 仓库：$projectPath")
+            // 只显示项目名：完整路径是 /data/user/0/<pkg>/blackbox/... 这样的内部
+            // 虚拟化路径，又长又吓人，用户既不需要也无法据此操作。
+            val projectName = projectPath.trimEnd('/').substringAfterLast('/')
+            return DiffState(note = "当前项目「$projectName」不是 git 仓库")
         }
         val repoRoot = topLevel.stdout.trim().lineSequence().firstOrNull()?.trim().orEmpty()
             .ifEmpty { projectPath }
