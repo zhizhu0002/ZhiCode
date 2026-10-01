@@ -52,8 +52,8 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  *
  * 用 Card 的地方**不要**再叠按压缩放修饰符，否则会和 Miuix 的按压反馈打架。
  */
-private val BubbleMargin = PaddingValues(horizontal = 12.dp, vertical = 9.dp)
-private val MessageMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+private val BubbleMargin = PaddingValues(horizontal = 10.dp, vertical = 5.dp)
+private val MessageMargin = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
 
 /**
  * 用户气泡宽度占可用宽的比例（**上限**，不是固定值）。

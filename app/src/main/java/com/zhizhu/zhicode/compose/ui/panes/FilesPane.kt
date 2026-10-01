@@ -220,7 +220,7 @@ private fun FileRow(entry: FileEntry, onOpen: () -> Unit) {
         onClick = onOpen,
         modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
         cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 11.dp),
+        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 9.dp),
         colors = CardDefaults.defaultColors(
             color = ZhiColors.cardSurface(),
             contentColor = scheme.onSurface,

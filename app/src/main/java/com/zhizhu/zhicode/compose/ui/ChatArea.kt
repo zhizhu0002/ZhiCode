@@ -119,10 +119,10 @@ internal fun ChatArea(
 }
 
 /** 悬浮输入器占位高度（含底部外边距），供对话列表留白使用。 */
-private val ComposerInset = 104.dp
+private val ComposerInset = 92.dp
 
 /** 悬浮任务卡占位高度（含外边距），仅在任务运行时参与留白计算。 */
-private val TaskCardInset = 152.dp
+private val TaskCardInset = 140.dp
 
 /**
  * 悬浮的任务与状态卡。

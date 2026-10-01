@@ -45,7 +45,7 @@ fun PaneHeader(
     val scheme = MiuixTheme.colorScheme
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(36.dp).padding(start = 12.dp, end = 4.dp),
+            modifier = Modifier.fillMaxWidth().height(32.dp).padding(start = 12.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
