@@ -16,7 +16,6 @@ import com.zhizhu.zhicode.compose.model.COMPACT_PERCENT_MIN
 import com.zhizhu.zhicode.compose.model.CONTEXT_WINDOW_PRESETS
 import com.zhizhu.zhicode.compose.model.EffortLevel
 import com.zhizhu.zhicode.compose.model.PermissionMode
-import com.zhizhu.zhicode.compose.model.SettingsCategory
 import com.zhizhu.zhicode.compose.model.SettingsDraft
 import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.model.WEB_RESULTS_MAX
@@ -29,7 +28,6 @@ import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
-import com.zhizhu.zhicode.compose.ui.ZhiSegmentedTabs
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
@@ -90,18 +88,7 @@ fun SettingsDialog(
                     )
                 }
             },
-            header = {
-                CategoryTabs(
-                    selected = draft.category,
-                    onSelect = { onChange(draft.copy(category = it)) },
-                )
-            },
-            groupBody = true,
-            fillBody = true,
             actions = {
-                // 取消＝纯文字。这里以前手挑了三个颜色，其中 `disabledColor = Transparent`
-                // 会让禁用态完全看不见。Miuix 的 DialogShell.SecondaryButton 已经得出
-                // 正确结论：直接用 TextButton 默认配色即可。
                 TextButton(text = "取消", onClick = onDismiss)
                 PrimaryButton(
                     text = "保存",
@@ -110,41 +97,12 @@ fun SettingsDialog(
                 )
             },
         ) {
-            when (draft.category) {
-                SettingsCategory.APPEARANCE -> AppearancePage(draft, onChange)
-                SettingsCategory.MODEL_PERMISSION -> ModelPermissionPage(draft, onChange, onNavigate)
-                SettingsCategory.AGENT_SECURITY -> AgentSecurityPage(draft, onChange)
-                SettingsCategory.NETWORK -> NetworkPage(draft, onChange)
-                SettingsCategory.CONTEXT_PROJECT -> ContextProjectPage(draft, onChange)
-                SettingsCategory.EXTENSIONS -> ExtensionsPage(onNavigate)
-            }
+            // 单页分组：不再用 Tab 分页 —— 六个分类的内容都不长，
+            // 分组标题（SmallTitle）给出的结构已经足够扫读，
+            // 少一层 Tab 交互、少一次"找不到设置在哪一页"的来回。
+            AllSettingsPages(draft, onChange, onNavigate)
         }
     }
-}
-
-// ------------------------------------------------------------------ 分类 Tab
-
-/**
- * 分类 Tab。转发到 [ZhiSegmentedTabs]（Miuix `TabRowWithContour`，即带轮廓变体）。
- *
- * `matchWidth = true`：6 个分类等分整行宽度并**全部可见**。原先用标准 `TabRow` 并指定
- * `minWidth = 72.dp`，6×72 + 间距 ≈ 430dp 远超弹窗宽度，于是整行溢出、后面的分类被推到
- * 屏幕外，只能靠横向滚动才发现。改为等分后每项约 55dp，2 字标签（外观/模型/安全/
- * 联网/上下文/扩展）刚好放得下。
- */
-@Composable
-private fun CategoryTabs(
-    selected: SettingsCategory,
-    onSelect: (SettingsCategory) -> Unit,
-) {
-    ZhiSegmentedTabs(
-        // 用简写标签：长标签（"模型与权限"）在手机宽度下必然被省略号截断。
-        // 全称仍保留在 [SettingsCategory.label] 里。
-        tabs = SettingsCategory.entries.map { it.tabLabel },
-        selectedIndex = SettingsCategory.entries.indexOf(selected).coerceAtLeast(0),
-        onSelect = { index -> SettingsCategory.entries.getOrNull(index)?.let(onSelect) },
-        matchWidth = true,
-    )
 }
 
 // ------------------------------------------------------------------ 各分类页
@@ -154,6 +112,20 @@ private fun themeLabel(mode: ThemeMode): String = when (mode) {
     ThemeMode.SYSTEM -> "跟随系统"
     ThemeMode.LIGHT -> "白天模式"
     ThemeMode.DARK -> "夜间模式"
+}
+
+@Composable
+private fun AllSettingsPages(
+    draft: SettingsDraft,
+    onChange: (SettingsDraft) -> Unit,
+    onNavigate: (String) -> Unit,
+) {
+    AppearancePage(draft, onChange)
+    ModelPermissionPage(draft, onChange, onNavigate)
+    AgentSecurityPage(draft, onChange)
+    NetworkPage(draft, onChange)
+    ContextProjectPage(draft, onChange)
+    ExtensionsPage(onNavigate)
 }
 
 @Composable
