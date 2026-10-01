@@ -138,7 +138,7 @@ fun ZhiIconButton(
 /**
  * 实心图标按钮（发送 / 停止）。
  * 转发到 Miuix [IconButton]，用 `cornerRadius = 半径` 得到正圆；
- * [square] 为 true 时改成**方角**（圆角 10dp），发送键即用这个形态。
+ * [square] 为 true 时改成**方角**，发送键即用这个形态。
  * `enabled` 的禁用态由 Miuix 自己处理，不再手写 alpha。
  *
  * [glyph] 非空时改用**文字字形**而不是矢量图标：Miuix 图标库没有纯右箭头，
@@ -170,7 +170,13 @@ fun ZhiFilledIconButton(
         modifier = modifier.size(size),
         enabled = enabled,
         backgroundColor = containerColor,
-        cornerRadius = if (square) ZhiRadius.inner else size / 2,
+        // ⚠️ 方角用的是 `ZhiRadius.square`（4dp），**不是** `ZhiRadius.inner`（10dp）。
+        //
+        // 这里原来是 10dp，在 40dp 的按钮上还算方；但发送/停止键现在是 30dp，
+        // 10/30 ≈ 0.33 的圆角比已经接近胶囊，两个键并排看像"一块被劈成两半"，
+        // 而用户要的恰恰是**方**键。方角的观感取决于「圆角/边长」这个比例，
+        // 所以按钮变小后圆角必须跟着降档，不能沿用同一个绝对值。
+        cornerRadius = if (square) ZhiRadius.square else size / 2,
         minHeight = size,
         minWidth = size,
     ) {

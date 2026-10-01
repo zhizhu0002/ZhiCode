@@ -11,6 +11,8 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -161,11 +163,19 @@ fun Composer(
                 enter = expandVertically(ZhiMotion.sizeSpec) + fadeIn(ZhiMotion.fadeInSpec),
                 exit = shrinkVertically(ZhiMotion.sizeSpec) + fadeOut(ZhiMotion.fadeOutSpec),
             ) {
+                // 横向可滚动，而不是 `take(4)`：
+                //
+                // 多选图片之后 `.take(4)` 变成了一个真 bug —— 第 5 张起会**照样发给模型**，
+                // 却在输入器上既看不见也删不掉。用户看到的是"我选了 6 张，怎么只有 4 张"，
+                // 而模型收到的却是 6 张。横向滚动让每一张都可达、可删。
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp)
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    state.attachments.take(4).forEach { attachment ->
+                    state.attachments.forEach { attachment ->
                         // 图片走缩略图卡片（图片本身就是"芯片"，X 叠在右上角），
                         // 文本附件继续用「图标 + 文件名」的窄条 —— 两者形态不同是**有意的**：
                         // 图片靠画面辨认，文件只能靠名字。
@@ -313,6 +323,16 @@ fun Composer(
                 //
                 // 三者共用 OverlayIconDropdownMenu：它的 content 可以是任意可组合内容，
                 // 所以 `+` 放图标、这两个放"文字 + 箭头"，弹出菜单是同一套原生样式。
+                // ⚠️ 这三个**不能**都用 `weight(1f)`（曾经就是）。
+                //
+                // 均分意味着"每个 chip 固定拿 1/3，不管它需不需要"：「每次询问」只要
+                // ~55dp，却和另外两个各占 1/3；忙时停止键再抢走 ~36dp，于是
+                // 「推理：自动」被切成人「推理: …」、模型名被切成「deepse」——
+                // 都是**词中被切**，看上去像坏了。
+                //
+                // 现在的分工：这两个标签长度固定，按**自然宽度**排（不参与分配）；
+                // 只有模型那一条吃剩余空间。它本来就是唯一可缩短的（`shorten()`），
+                // 被压缩时也会规规矩矩地打省略号，而不是把词砍一半。
                 ZhiTextDropdownChip(
                     label = state.permissionMode.label,
                     items = PermissionMode.entries.map { mode ->
@@ -323,7 +343,6 @@ fun Composer(
                             onClick = { onPermissionSelected(mode) },
                         )
                     },
-                    modifier = Modifier.weight(1f),
                 )
                 ZhiTextDropdownChip(
                     label = "推理：${state.effort.label}",
@@ -334,7 +353,6 @@ fun Composer(
                             onClick = { onEffortSelected(level) },
                         )
                     },
-                    modifier = Modifier.weight(1f),
                 )
                 // 模型这一项**不是**下拉：它要异步拉目录、还要写回配置记录，
                 // 表达不了"固定几项"，仍走原有的 ModelPickerOverlay。
@@ -371,7 +389,9 @@ fun Composer(
                         square = true,
                         iconSize = 12.dp,
                         size = ComposerActionSize,
-                        modifier = Modifier.padding(start = 6.dp),
+                        // 8dp 而不是原来的 6dp：两个键颜色一红一蓝，挨太近会被读成
+                        // "一块被劈成两半的控件"，拉开一点才像两个独立按键。
+                        modifier = Modifier.padding(start = 8.dp),
                     )
                 }
 

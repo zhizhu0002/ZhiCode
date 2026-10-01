@@ -229,13 +229,16 @@ private fun ComposerHost(
     wide: Boolean,
     glass: Glass,
 ) {
-    // 用 GetContent 而不是 OpenDocument：这里的授权只为"立刻读一次字节"服务，
+    // 用 GetMultipleContents 而不是 GetContent：相册里一次挑多张是常态
+    // （对比截图、多页文档），只能选一张的话用户得反复进出选择器。
+    //
+    // 它仍然不是 OpenDocument：这里的授权只为"立刻读一次字节"服务，
     // 内容读完就进内存了，不需要跨进程重启保留的持久授权。
     // （原版用 ACTION_OPEN_DOCUMENT + takePersistableUriPermission，是因为它把 Uri
     //  留在附件列表里直到用户点发送，中间可能经历一次重组甚至进程重启。）
     val pickImage = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
-    ) { uri -> if (uri != null) viewModel.attachImage(uri) }
+        contract = ActivityResultContracts.GetMultipleContents(),
+    ) { uris -> viewModel.attachImages(uris) }
 
     Composer(
         state = state,

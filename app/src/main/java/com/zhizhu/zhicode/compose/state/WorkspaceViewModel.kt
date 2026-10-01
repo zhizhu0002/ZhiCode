@@ -527,11 +527,38 @@ class WorkspaceViewModel(
      *
      * 读盘与大小校验都在 IO 线程：10 MB 的图片读进来是实打实的耗时。
      */
-    fun attachImage(uri: android.net.Uri) {
+    fun attachImage(uri: android.net.Uri) = attachImages(listOf(uri))
+
+    /**
+     * 一次附加多张图片（多选）。
+     *
+     * ## 为什么是"全部读完再更新一次状态"而不是每张各更新一次
+     *
+     * 五张图各发一次 `_state.update` 会让附件条闪四下、每次都重新测量布局
+     * （`animateContentSize` 会为每一次变化播一段动画）。攒起来一次性落地，
+     * 用户看到的是"五张一起出现"。
+     *
+     * ## 为什么一张失败不放弃其它张
+     *
+     * 选五张图时有了一张超大/损坏的，把其余四张一起丢掉是最糟的结果 ——
+     * 用户还得重新去相册挑一遍。所以逐张读、逐张记失败原因，
+     * **成功的照样进附件条**，失败的在提示里报出来。
+     *
+     * ## 部分失败为什么只吃一条提示
+     *
+     * 复用 `message` 那条通道（同一时刻只显示一条），用「N 张失败」汇总而不是
+     * 每张各弹一条：连弹五条提示会把真正成功的那几张也淹没掉。
+     */
+    fun attachImages(uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { AttachmentReader.readImage(getApplication(), uri) }
-            result.fold(
-                onSuccess = { image ->
+            val loaded = withContext(Dispatchers.IO) {
+                uris.map { uri -> AttachmentReader.readImage(getApplication(), uri) }
+            }
+            val failures = loaded.filter { it.isFailure }
+            val added = loaded.mapNotNull { it.getOrNull() }
+            if (added.isNotEmpty()) {
+                val newAttachments = added.map { image ->
                     val id = nextId("att")
                     // base64 在这里编一次，缩略图 / 气泡 / 引擎请求三处复用同一份。
                     attachmentPayloads[id] = AttachmentPayload(
@@ -543,23 +570,38 @@ class WorkspaceViewModel(
                             name = image.name,
                         ),
                     )
-                    _state.update { s ->
-                        s.copy(
-                            attachments = s.attachments + Attachment(
-                                id = id,
-                                label = image.name,
-                                // 「PNG · 2.4 MB」两个信息都来自真实读数，不是写死的文案。
-                                detail = "${image.formatLabel} · ${image.sizeLabel}",
-                                isImage = true,
-                            ),
-                            message = "已添加图片：${image.name}",
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _state.update { it.copy(message = "图片读取失败：${error.message ?: "未知原因"}", messageIsError = true) }
-                },
-            )
+                    Attachment(
+                        id = id,
+                        label = image.name,
+                        // 「PNG · 2.4 MB」两个信息都来自真实读数，不是写死的文案。
+                        detail = "${image.formatLabel} · ${image.sizeLabel}",
+                        isImage = true,
+                    )
+                }
+                _state.update { s ->
+                    s.copy(
+                        attachments = s.attachments + newAttachments,
+                        message = when {
+                            failures.isEmpty() && added.size == 1 -> "已添加图片：${added[0].name}"
+                            failures.isEmpty() -> "已添加 ${added.size} 张图片"
+                            // 有失败时提示必须偏错误色：否则"已添加 4 张"配一个中性色，
+                            // 用户根本不会注意到自己选的第 5 张没进来。
+                            else -> "已添加 ${added.size} 张，${failures.size} 张失败：" +
+                                (failures[0].exceptionOrNull()?.message ?: "未知原因")
+                        },
+                        messageIsError = failures.isNotEmpty(),
+                    )
+                }
+            } else {
+                val reason = failures[0].exceptionOrNull()?.message ?: "未知原因"
+                _state.update {
+                    it.copy(
+                        message = if (failures.size == 1) "图片读取失败：$reason"
+                        else "${failures.size} 张图片都读取失败：$reason",
+                        messageIsError = true,
+                    )
+                }
+            }
         }
     }
 

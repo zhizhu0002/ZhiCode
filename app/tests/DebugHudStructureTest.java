@@ -552,6 +552,29 @@ public final class DebugHudStructureTest {
                         + "各写一个数字会重新出现\"切换时按钮跳一下\"");
         requireContains(composerActionKeys, "private val ComposerActionSize",
                 COMPOSER + " 必须用一个常量统一两个动作键的边长");
+
+        // ---- 18. 图片行必须能横向滑完，且三个 chip 不许均分 -----------------
+        //
+        // 两件事都是"能编译、能跑、但用起来不对"的类型，单测抓不到：
+        //
+        // (a) 图片行曾经是 `take(4)` + 「+K」角标 —— 第 5 张起只能看到"还有 N 张"，
+        //     想确认自己发了哪几张得退出应用去翻相册。用户发的常是一串对比截图。
+        // (b) 底部三个 chip 曾经都是 `weight(1f)` —— 「每次询问」只要 ~55dp 却和各
+        //     占 1/3，忙时停止键再抢 ~36dp，「推理：自动」就被切成「推理: …」、
+        //     模型名被切成「deepse」，都是**词中被切**，看着像坏了。
+        requireContains(zhiImage, "horizontalScroll(",
+                ZHI_IMAGE + " 的图片行必须横向可滑动：截断成「+K」会让屏幕外的图看不到，"
+                        + "而用户要确认的正是自己到底发了哪几张");
+        require(!zhiImage.contains("take(maxVisible)") && !zhiImage.contains("maxVisible"),
+                ZHI_IMAGE + " 不得再用「最多 N 张 + K」的截断：横向滑动已经能看全，"
+                        + "留着截断只会让人以为只发出了前几张");
+
+        String composerChips = stripComments(read(root, COMPOSER));
+        require(countOf(composerChips, "modifier = Modifier.weight(1f),") <= 1,
+                "底排最多只能有一处 `weight(1f)`（模型那条）。"
+                        + "多于一处就回到了\"三个 chip 均分宽度\"：长度固定的"
+                        + "「每次询问」「推理：自动」会被切成「推理: …」这类半截词，"
+                        + "而它们本来就只需要自己的自然宽度");
     }
 
     /** 子串出现次数。 */

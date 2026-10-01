@@ -7,6 +7,7 @@ import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,7 +27,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -318,53 +319,40 @@ private val ZhiViewerMaxWidth = 320.dp
 // ------------------------------------------------------------------ 气泡里的图片行
 
 /**
- * 气泡里的一行图片缩略图。
+ * 气泡里的一行图片缩略图：**横向可滑动**。
  *
- * 超过 [maxVisible] 张时最后一张叠一个「+K」，而不是横向滚动：
- * 气泡是 `LazyColumn` 的一项，里面再套一个横向滚动会把滑动手势抢走 ——
- * 用户想滚对话，结果在滚图片。
+ * ## 为什么是可滑动而不是"最多 N 张 + K"
+ *
+ * 这里原先写的是 `take(4)` 加一个「+K」角标。它的问题不是不好看，而是**看不全**：
+ * 第 5 张起只能看到"还有 3 张"，想确认自己到底发了哪几张就得退出应用去看相册。
+ * 用户发的往往就是一串对比截图，恰恰需要左右翻着比对。
+ *
+ * ## 横向滚动会不会抢走"滚对话"的手势
+ *
+ * 不会，这是两个轴：Compose 的 `horizontalScroll` 只消费横向拖拽，竖向拖拽会穿透到
+ * 外层的 `LazyColumn`。所以当初"怕和对话滚动打架"那个顾虑是不成立的 ——
+ * 唯一要守的是别在**同一轴**上再套一层滚动。
  */
 @Composable
 internal fun ZhiImageRow(images: List<ChatImage>, onOpen: (ChatImage) -> Unit, modifier: Modifier = Modifier) {
     if (images.isEmpty()) return
-    val visible = images.take(maxVisible)
     Row(
-        modifier = modifier.fillMaxWidth().padding(top = 6.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp)
+            .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        visible.forEach { image ->
-            Box {
-                ZhiImageThumb(
-                    image = image,
-                    maxWidth = BubbleImageWidth,
-                    maxHeight = BubbleImageHeight,
-                    onClick = { onOpen(image) },
-                )
-                // 只在**最后一张**上标剩余数量，且确实有被藏起来的图。
-                val hidden = images.size - maxVisible
-                if (hidden > 0 && image === visible.last()) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(4.dp)
-                            .clip(RoundedCornerShape(ZhiRadius.inner))
-                            .background(Color.Black.copy(alpha = 0.55f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    ) {
-                        Text(
-                            text = "+$hidden",
-                            fontSize = ZhiTextScale.Caption,
-                            color = Color.White,
-                        )
-                    }
-                }
-            }
+        images.forEach { image ->
+            ZhiImageThumb(
+                image = image,
+                maxWidth = BubbleImageWidth,
+                maxHeight = BubbleImageHeight,
+                onClick = { onOpen(image) },
+            )
         }
     }
 }
-
-/** 气泡里一行最多画几张；更多的用「+K」表示。 */
-private const val maxVisible = 4
 
 /**
  * 气泡里单张图的上限。
