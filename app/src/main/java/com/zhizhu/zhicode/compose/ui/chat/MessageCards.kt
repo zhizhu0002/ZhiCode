@@ -2,9 +2,12 @@ package com.zhizhu.zhicode.compose.ui.chat
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -114,11 +117,11 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
             // 之前是 `fillMaxWidth(0.86f)` —— 那是**强制** 86%，于是像「1」这样的
             // 短消息也会撑成一条几乎整行宽的蓝条。见根部的 BoxWithConstraints。
             modifier = Modifier.widthIn(max = maxBubbleWidth),
-            cornerRadius = ZhiRadius.card,
-            insideMargin = BubbleMargin,
+            cornerRadius = 18.dp,
+            insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             colors = CardDefaults.defaultColors(
-                color = scheme.primaryContainer,
-                contentColor = scheme.onPrimaryContainer,
+                color = scheme.primary,
+                contentColor = scheme.onPrimary,
             ),
             // ⚠️ 必须是 None，理由与 AssistantCard 完全相同：
             // 这张卡只有**长按**才有动作，而 Sink 是「按下即缩放」，
@@ -162,22 +165,27 @@ fun AssistantCard(
     // 一片。消息操作仍然可用 —— 整块卡片本身就是入口（onLongPress）。
     Card(
         onLongPress = onLongPress,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 2.dp),
         cornerRadius = ZhiRadius.card,
-        insideMargin = BubbleMargin,
+        insideMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+        // 透明底：不再是"一块卡片"，只剩长按入口 + 左侧竖线的身份标记
         colors = CardDefaults.defaultColors(
-            color = ZhiColors.cardSurface(),
+            color = Color.Transparent,
             contentColor = scheme.onSurface,
         ),
-        // ⚠️ 必须是 None，别改成 Sink。
-        // 这张卡只有**长按**才有动作（打开消息操作菜单），短按什么都不发生。
-        // 而 Sink 的反馈是"按下即缩放"，于是短按也会看到整块卡片缩放一下、
-        // 松手却没有反应 —— 看起来像卡了点不动，也把阅读中的正文整块顶得晃动。
         pressFeedbackType = PressFeedbackType.None,
     ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .padding(top = 4.dp)
+                .width(2.dp)
+                .height(34.dp)
+                .background(scheme.primary, RoundedCornerShape(1.dp)),
+        )
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .weight(1f)
                 .animateContentSize(
                     animationSpec = tween(ZhiMotion.EXPAND, easing = FastOutSlowInEasing),
                 ),
@@ -203,6 +211,7 @@ fun AssistantCard(
                     window = item.contextWindow,
                 )
             }
+        }
         }
     }
 }
@@ -634,16 +643,23 @@ private fun DiffCount(label: String, color: Color) {
 @Composable
 fun ErrorCard(item: ChatItem) {
     val scheme = MiuixTheme.colorScheme
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        cornerRadius = ZhiRadius.card,
-        insideMargin = MessageMargin,
-        colors = CardDefaults.defaultColors(
-            color = scheme.errorContainer,
-            contentColor = scheme.onErrorContainer,
-        ),
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 2.dp),
     ) {
-        Text(text = item.title, fontSize = ZhiTextScale.BodySmall, fontWeight = FontWeight.Bold)
+        Box(
+            modifier = Modifier
+                .padding(top = 4.dp)
+                .width(3.dp)
+                .height(34.dp)
+                .background(ZhiColors.red(), RoundedCornerShape(1.dp)),
+        )
+        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
+            Text(
+                text = item.title,
+                color = ZhiColors.red(),
+                fontSize = ZhiTextScale.BodySmall,
+                fontWeight = FontWeight.Bold,
+            )
         // 错误正文也走 Markdown：`ToolText.friendlyError` 会输出带 `代码` 与列表的
         // 可操作建议，与回复正文保持一致。
         ZhiMarkdown(
@@ -651,6 +667,7 @@ fun ErrorCard(item: ChatItem) {
             bodyFontSize = 13.sp,
             modifier = Modifier.padding(top = 4.dp),
         )
+        }
     }
 }
 
@@ -658,17 +675,24 @@ fun ErrorCard(item: ChatItem) {
 @Composable
 fun InfoCard(item: ChatItem) {
     val scheme = MiuixTheme.colorScheme
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        cornerRadius = ZhiRadius.card,
-        insideMargin = BubbleMargin,
-        colors = CardDefaults.defaultColors(
-            color = scheme.secondaryContainer,
-            contentColor = scheme.onSecondaryContainer,
-        ),
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 2.dp),
     ) {
+        Box(
+            modifier = Modifier
+                .padding(top = 3.dp)
+                .width(3.dp)
+                .height(28.dp)
+                .background(ZhiColors.amber(), RoundedCornerShape(1.dp)),
+        )
+        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
         if (item.title.isNotEmpty()) {
-            Text(text = item.title, fontSize = ZhiTextScale.Caption, fontWeight = FontWeight.Bold)
+            Text(
+                text = item.title,
+                color = ZhiColors.amber(),
+                fontSize = ZhiTextScale.Caption,
+                fontWeight = FontWeight.Bold,
+            )
         }
         // 提示正文也走 Markdown。这些内容里大量使用 `反引号` 标记命令与参数，
         // 原先那个"整段变等宽"的启发式太粗（一句里只要有反引号，全段都成等宽），
@@ -678,6 +702,7 @@ fun InfoCard(item: ChatItem) {
             bodyFontSize = 12.sp,
             modifier = Modifier.padding(top = 3.dp),
         )
+        }
     }
 }
 
