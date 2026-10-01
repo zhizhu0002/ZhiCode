@@ -460,18 +460,29 @@ public final class DebugScriptedProvider implements ModelProvider {
      *
      * <p>字段名跟着引擎那份 schema 走（{@code questions[]} 里每项
      * {@code question} / {@code header} / {@code multiSelect} / {@code options[]}）。
-     * 选项刻意给成"有长说明的"和"没说明的"两种：选择窗口里说明是可空的，
-     * 少了它行高会变 —— 这正是要看的东西之一。
+     *
+     * <p>选项刻意做成**长短不齐、条数偏多**的一批，因为这几件事都要在同一屏里看到：
+     * 选项多到超出一屏时列表能不能滚（而不是把底部的输入框与按钮顶出去）、
+     * 长标题会不会折行、说明为空的选项行高对不对。
      */
     private static ToolCall question(String id) throws JSONException {
-        JSONObject multi = new JSONObject()
-                .put("label", "只读命令")
-                .put("description", "跑 pwd / ls 这类无副作用命令");
         JSONArray options = new JSONArray()
                 .put(new JSONObject().put("label", "搜索").put("description", "Grep / Glob / WebSearch"))
                 .put(new JSONObject().put("label", "读取").put("description", "Read / ReadMany / Tree"))
-                .put(multi)
-                .put(new JSONObject().put("label", "没有说明的选项"));
+                .put(new JSONObject().put("label", "只读命令")
+                        .put("description", "跑 pwd / ls 这类无副作用命令"))
+                .put(new JSONObject().put("label", "没有说明的选项"))
+                .put(new JSONObject().put("label", "WebSearch 再来一轮")
+                        .put("description", "换一个关键词再搜，看结果卡会不会溢出"))
+                .put(new JSONObject().put("label", "Bash 只读命令")
+                        .put("description", "pwd / ls / termux 环境信息这类无副作用命令"))
+                .put(new JSONObject().put("label", "Agent 子代理")
+                        .put("description", "派一个 Explore 子代理去 projects/ 下找工程根"))
+                .put(new JSONObject().put("label", "一个标题长到必须折行的选项，用来确认行高与换行都没问题")
+                        .put("description", "标题折行时勾选框是否仍然对齐第一行、行间距是否还均匀"))
+                .put(new JSONObject().put("label", "任务清单")
+                        .put("description", "用 TaskCreate / TaskList 建几条并列出"))
+                .put(new JSONObject().put("label", "其他（我在下面自己写）"));
         JSONObject ask = new JSONObject()
                 .put("question", "选一下接下来要测的项（可多选）")
                 .put("header", "测试项")

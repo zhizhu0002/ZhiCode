@@ -236,7 +236,9 @@ public final class DebugScriptedProviderTest {
 
         JSONArray options = question.optJSONArray("options");
         assertNotNull(options);
-        assertTrue("选项至少两条，否则看不出「多选」这件事", options.length() >= 2);
+        assertTrue("选项要够多（>= 6）：选择窗口超出一屏时能不能滚、"
+                        + "底部的输入框与按钮会不会被顶出去，只有条目够多才看得出来",
+                options.length() >= 6);
         for (int i = 0; i < options.length(); i++) {
             JSONObject option = options.optJSONObject(i);
             assertNotNull(option);
@@ -245,6 +247,16 @@ public final class DebugScriptedProviderTest {
         }
         assertTrue("要留一条**没有说明**的选项：说明可空，少了它行高会变 —— 那正是要看的东西之一",
                 hasOptionWithoutDescription(options));
+        assertTrue("要留一条**长到必须折行**的标题：标题折行时勾选框是否仍与第一行对齐，只能这么看",
+                hasLongLabel(options));
+    }
+
+    private static boolean hasLongLabel(JSONArray options) {
+        for (int i = 0; i < options.length(); i++) {
+            JSONObject option = options.optJSONObject(i);
+            if (option != null && option.optString("label").length() >= 20) return true;
+        }
+        return false;
     }
 
     private static boolean hasOptionWithoutDescription(JSONArray options) {

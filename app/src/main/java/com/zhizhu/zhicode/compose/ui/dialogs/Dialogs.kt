@@ -18,7 +18,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -40,10 +39,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
-import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -79,9 +75,9 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
  * ## 手写降到最低
  *
  * - 列表行 → Miuix [BasicComponent]（`title` / `summary` / `startAction` / `endActions`）
- * - 选中指示 → 多选用 Miuix [Checkbox]（未选中也画空框，"可以多选"这件事才看得见）；
- *   单选用 Miuix [Icon] + `MiuixIcons.Basic.Check`（与库自己的下拉列表一致）。
- *   不用 `RadioButton`：它在未选中时不画任何东西，单选行会连"这里能点"都看不出来。
+ * - 选中指示 → Miuix [Checkbox]，单选与多选**共用**。不用 Miuix `RadioButton`：
+ *   它在未选中时不画任何东西（只画那个勾），单选行会连"这里能点"都看不出来。
+ *   单选/多选的差别在**行为**（点另一行是否清掉原来那行），不在控件长相。
  * - 主按钮 → Miuix [Button] + [ButtonDefaults.buttonColorsPrimary]
  * - 次要按钮 → Miuix [Button] + `buttonColors`（与主按钮同形状、只有配色不同）
  * - 开关 → Miuix [Switch]
@@ -393,42 +389,30 @@ fun ChoicePickerOverlay(
                         summaryColor = BasicComponentDefaults.summaryColor(
                             color = scheme.onSurfaceVariantSummary,
                         ),
-                        // 左侧选择控件分两种，按"能不能反悔"选：
+                        // 行首选择控件统一用 Miuix [Checkbox]，**单选与多选都一样**。
                         //
-                        // - **多选**（引擎 `AskUserQuestion` 的 multiSelect）→ Miuix [Checkbox]。
-                        //   多选必须先让人看出"这里可以打勾、而且能勾好几个"，
-                        //   而 Checkbox 是 Miuix 里**唯一在未选中时也画东西**的选择控件
-                        //   （字节码里 `CheckboxColors` 有 checked/unchecked 两套前景与底色，
-                        //   未选中画的是空框）。之前两种情形共用"选中才出现的 Check 图标"，
-                        //   未选中就是一片空白 —— 多选窗口看起来像一列普通文字，根本看不出能选。
+                        // 为什么不能按"单选用 RadioButton、多选用 Checkbox"来分：
+                        // Miuix 0.9.4 的 `RadioButton` 只画那个勾（字节码里唯一的绘制路径
+                        // 是 `drawTrimmedCheck`，未选中时 alpha 动画到 0），
+                        // 也就是说**未选中时整行不画任何东西** —— 一列选项看起来就是普通文字，
+                        // 用户看不出"这里能点"。而 `Checkbox` 有 checked/unchecked 两套
+                        // 前景与底色（见 `CheckboxColors`），未选中态是画得出来的。
+                        // 所以单选行也要它，否则同一个窗口里"能选/不能选"长得不一样。
                         //
-                        // - **单选** → 选中才出现的 Miuix Check 图标，与库自己的下拉列表一致
-                        //   （`DropdownImpl` 用的就是 `MiuixIcons.Basic.Check` 配
-                        //   `DropdownDefaults.CheckIconSize`）。单选不做空框：那会看着像复选框，
-                        //   让人以为能勾多个。
+                        // 单选与多选的**行为**差异仍然保留：单选点另一行会换掉原来那一行
+                        // （见下面的 toggle），多选可以同时勾多个。控件只是"看得见的入口"。
                         //
-                        // 关于 Checkbox 的尺寸：0.9.4 里它**固定 26dp 且是圆的**
-                        // （字节码 `requiredSize(26.dp)`，在调用方 modifier 之后，外面压不动）。
-                        // 多选行因此比单选行略高，这是跟库对齐的代价，不再自己画一个方框去绕开。
+                        // 关于尺寸：0.9.4 的 Checkbox 固定 26dp 且是圆的（字节码
+                        // `requiredSize(26.dp)`，在调用方 modifier 之后，外面压不动），
+                        // 行因此比自己画一个小方框要高一点 —— 这是跟库对齐的代价，认了。
                         //
-                        // 多选时 Checkbox 自己也接了 toggle：点框和点整行是同一个动作，
-                        // 不会出现"点框没反应"（Compose 的点击会被消费，不会同时触发两遍）。
-                        startAction = if (multi) {
-                            {
-                                Checkbox(
-                                    state = if (checked) ToggleableState.On else ToggleableState.Off,
-                                    onClick = toggle,
-                                )
-                            }
-                        } else {
-                            {
-                                Icon(
-                                    imageVector = MiuixIcons.Basic.Check,
-                                    contentDescription = null,
-                                    tint = if (checked) scheme.primary else Color.Transparent,
-                                    modifier = Modifier.size(DropdownDefaults.CheckIconSize),
-                                )
-                            }
+                        // Checkbox 自己也接同一个 toggle：点框与点整行是同一个动作，
+                        // 不会出现"点框没反应"（Compose 的点击会被消费，不会触发两遍）。
+                        startAction = {
+                            Checkbox(
+                                state = if (checked) ToggleableState.On else ToggleableState.Off,
+                                onClick = toggle,
+                            )
                         },
                         onClick = toggle,
                         insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),

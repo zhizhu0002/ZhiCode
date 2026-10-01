@@ -40,9 +40,17 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  * 取最多 [max] 条「当前相关」的任务：
  * 跳过已完成的，从第一条未完成（通常是运行中）开始；若全部完成则回退到最后 [max] 条。
  * 条数受限后卡片高度可控，配合"悬浮卡 + 列表底部留白"避免遮挡对话。
+ *
+ * ⚠️ [max] **必须为正**。这里出过一次事故：有人用 `0` 表示"全部"，
+ * 而当时的调用点又按"空"去渲染（`if (!compact)`），两边理解相反，
+ * 结果悬浮任务卡既不画任务行、也算不出"还有 N 条"（因为 `size - size == 0`），
+ * 界面上只剩「任务进度 3 / 7」和一根进度条 —— 用户看到的就是"任务怎么没显现出来"。
+ * 现在 `max <= 0` 明确返回**空列表**：宁可让"还有 N 条 · 点按查看全部"兜住，
+ * 也不要静默地把内容吞掉。
  */
 internal fun List<AgentTask>.currentWindow(max: Int): List<AgentTask> {
-    if (max <= 0 || size <= max) return this
+    if (max <= 0) return emptyList()
+    if (size <= max) return this
     val firstUnfinished = indexOfFirst { it.state != TaskState.DONE }
     if (firstUnfinished < 0) return takeLast(max)
     return drop(firstUnfinished).take(max)
@@ -115,7 +123,9 @@ private fun CardBody(
 ) {
     val scheme = MiuixTheme.colorScheme
     val done = tasks.count { it.state == TaskState.DONE }
-    val visibleTasks = remember(tasks, maxTasks) { tasks.currentWindow(if (compact) 0 else maxTasks) }
+    // 悬浮形态同样要露任务行（只是条数少、每条一行）：它不是"只有总数"的进度条，
+    // 而是"我现在做到哪一条了"。所以 compact 只改**条数**与**每条的详略**，不改"画不画"。
+    val visibleTasks = remember(tasks, maxTasks) { tasks.currentWindow(maxTasks) }
     val progress = if (tasks.isEmpty()) 0f else done.toFloat() / tasks.size
 
         // 单行进度条铺在标题行下面（悬浮形态下卡片高度可控）
@@ -141,9 +151,10 @@ private fun CardBody(
         )
         ZhiUsageBar(fraction = animatedFraction, modifier = Modifier.padding(top = 6.dp))
 
-        if (!compact) visibleTasks.forEach { task ->
+        visibleTasks.forEach { task ->
             Row(
-                modifier = Modifier.padding(top = 8.dp),
+                // 悬浮形态下行距收紧一档：同样露 2 条，紧凑形态少占约 8dp 的高度。
+                modifier = Modifier.padding(top = if (compact) 6.dp else 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TaskStatusIndicator(state = task.state)
@@ -154,14 +165,18 @@ private fun CardBody(
                         fontSize = ZhiTextScale.BodySmall,
                         fontWeight = if (task.state == TaskState.RUNNING) FontWeight.Medium else FontWeight.Normal,
                     )
-                    // 卡片里只显示详情首行，完整 Markdown 在详情窗口里看
-                    val firstLine = task.detail.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
-                    if (firstLine.isNotBlank()) {
-                        Text(
-                            text = firstLine,
-                            color = scheme.onSurfaceVariantSummary,
-                            fontSize = ZhiTextScale.Footnote,
-                        )
+                    // 悬浮形态不给详情：它是"贴一条注记"，不是详情面板（全量在任务清单窗口里）。
+                    // 但**每条任务自己也要能看出状态**，所以状态指示器照画（上面那行）。
+                    if (!compact) {
+                        // 卡片里只显示详情首行，完整 Markdown 在详情窗口里看
+                        val firstLine = task.detail.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty()
+                        if (firstLine.isNotBlank()) {
+                            Text(
+                                text = firstLine,
+                                color = scheme.onSurfaceVariantSummary,
+                                fontSize = ZhiTextScale.Footnote,
+                            )
+                        }
                     }
                 }
             }

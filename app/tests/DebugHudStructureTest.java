@@ -46,6 +46,9 @@ public final class DebugHudStructureTest {
     /** 模态窗口：选择窗口的行首控件在这里决定。 */
     private static final String DIALOGS = SRC + "ui/dialogs/Dialogs.kt";
 
+    /** 悬浮任务卡：条数与"画不画任务行"这两个决定都在这里。 */
+    private static final String AGENT_PROGRESS_CARD = SRC + "ui/chat/AgentProgressCard.kt";
+
     /** 工具实现所在目录：脚本里点名的工具名要在这里能找到出处。 */
     private static final String TOOLS_DIR = "app/src/main/java/com/termux/app/zhicode/tools";
 
@@ -373,28 +376,31 @@ public final class DebugHudStructureTest {
                 "旧的\"取第一条用户消息\"那个辅助方法必须删掉 —— 留着它，"
                         + "下一个改这里的人很容易又接回去");
 
-        // ---- 13. 选择窗口的行首控件：多选必须画得出"未选中" -----------------
+        // ---- 13. 选择窗口的行首控件：未选中也要看得见 -----------------------
         //
-        // 多选窗口原来两种情形共用"选中才出现的 Check 图标"，未选中时 tint 透明 ——
-        // 一列选项看起来就是普通文字，没人看得出能勾、也没人知道能勾好几个。
-        // 能画出未选中态的 Miuix 控件只有 Checkbox，所以这条必须钉住分支本身。
+        // 选项行原来只在**选中**时画一个 Miuix Check 图标（未选中 tint 透明）——
+        // 一列选项看起来就是普通文字，看不出能点、也看不出能多选。
+        // 能画出未选中态的 Miuix 选择控件只有 Checkbox，所以单选多选都用它。
         String dialogs = stripComments(read(root, DIALOGS));
-        int branch = dialogs.indexOf("startAction = if (multi)");
-        require(branch > 0,
-                DIALOGS + " 的选择窗口必须按 multi 分开选行首控件："
-                        + "多选与单选共用一种标记时，未选中那一态就没法各自画对");
-        int checkbox = dialogs.indexOf("Checkbox(", branch);
-        require(checkbox > 0 && checkbox - branch < 500,
-                "多选行首必须是 Miuix Checkbox：它是 Miuix 里唯一在**未选中**时也画东西的"
-                        + "选择控件（未选中画空框），多选这件事才看得见");
+        int picker = dialogs.indexOf("fun ChoicePickerOverlay(");
+        require(picker > 0, DIALOGS + " 必须保留 ChoicePickerOverlay");
+        int startAction = dialogs.indexOf("startAction = {", picker);
+        require(startAction > 0, "选择窗口必须有行首控件（startAction）");
+        int checkbox = dialogs.indexOf("Checkbox(", startAction);
+        require(checkbox > 0 && checkbox - startAction < 600,
+                "选择窗口的行首必须是 Miuix Checkbox（单选多选都一样）："
+                        + "Miuix RadioButton 只画那个勾，未选中时整行不画任何东西，"
+                        + "单选行会连\"这里能点\"都看不出来");
+        require(dialogs.indexOf("startAction = if (", picker) < 0,
+                "行首控件不得再按条件分成两个分支：一旦分开，某一支很容易又退化回\"看不见\"");
         requireContains(dialogs, "ToggleableState",
                 "Checkbox 的选中态必须走 ToggleableState（On/Off），不要用别的近似控件代替");
-        int checkIcon = dialogs.indexOf("MiuixIcons.Basic.Check", branch);
-        require(checkIcon > checkbox,
-                "单选分支必须留在 Checkbox 之后：单选不做空框（那会看着像复选框），"
-                        + "仍用 Miuix 下拉列表那套\"选中才出现 Check 图标\"");
+        // 单选与多选的差别留在**行为**上：单选点另一行要换掉原来那行。
+        requireContains(dialogs, "if (multi) {",
+                "单选/多选的差别必须在 toggle 行为里保留（单选点另一行换掉原选项），"
+                        + "控件统一不等于行为统一");
 
-        // 选择窗口原先只有真模型肯调 AskUserQuestion 才出现，"多选行长什么样"只能碰运气复现。
+        // 选择窗口原先只有真模型肯调 AskUserQuestion 才出现，"选项行长什么样"只能碰运气复现。
         // 脚本化传输直接把这条链路变成一句话就能触发（引擎自己实现该工具，不注册在注册表里）。
         requireContains(scripted, "QUESTION",
                 SCRIPTED_PROVIDER + " 必须有触发选择窗口的场景");
@@ -403,6 +409,26 @@ public final class DebugHudStructureTest {
                         + "（不注册在 ToolRegistry 里），所以脚本只能按名字给调用");
         requireContains(scripted, "\"multiSelect\", true",
                 "选择窗口场景必须是**多选**：单选不画勾选框，用它测等于没测");
+
+        // ---- 14. 悬浮任务卡必须真的露出任务行 -------------------------------
+        //
+        // 事故：`currentWindow(if (compact) 0 else maxTasks)` 配 `if (!compact)` 渲染 ——
+        // 一个把 0 当"全部"、另一个把 0 当"不画"，两边理解相反，
+        // 结果悬浮卡只剩「任务进度 3 / 7」和一根进度条，用户看到的就是"任务怎么没显现出来"。
+        // 这两处必须同时钉住：条数参数是**真实条数**，且任务行不按 compact 决定画不画。
+        String progressCard = stripComments(read(root, AGENT_PROGRESS_CARD));
+        require(!progressCard.contains("if (compact) 0 else"),
+                AGENT_PROGRESS_CARD + " 不得再出现 `if (compact) 0 else maxTasks`："
+                        + "0 条任务与\"不画任务行\"是两回事，混在一起会让悬浮卡静默地什么都不显示");
+        require(!progressCard.contains("if (!compact) visibleTasks"),
+                "任务行不得包在 `if (!compact)` 里：悬浮形态也要露出当前窗口的几条任务");
+        requireContains(progressCard, "currentWindow(maxTasks)",
+                "条数参数必须原样透传给 currentWindow：悬浮与详情只差**条数**，不差\"画不画\"");
+        int windowHelper = progressCard.indexOf("fun List<AgentTask>.currentWindow(");
+        require(windowHelper > 0, AGENT_PROGRESS_CARD + " 必须保留 currentWindow 助手");
+        requireContains(progressCard.substring(windowHelper, windowHelper + 600), "if (max <= 0) return emptyList()",
+                "max <= 0 必须返回**空列表**（而不是\"全部\"）："
+                        + "调用点弄错时至少会让\"还有 N 条\"的提示兜住，不会静默吞内容");
     }
 
     /** tools/ 下每个工具自己声明的名字（`public String name() { return "Read"; }`）。 */
