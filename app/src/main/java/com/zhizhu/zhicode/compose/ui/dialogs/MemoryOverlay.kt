@@ -10,22 +10,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.model.MemoryEditor
 import com.zhizhu.zhicode.compose.model.MemoryFile
 import com.zhizhu.zhicode.compose.model.MemoryState
-import com.zhizhu.zhicode.compose.theme.ZhiRadius
-import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /**
  * 记忆文件（`ZhiCode.md`）窗口：文件列表与编辑器共用一个弹窗。
@@ -79,27 +73,19 @@ private fun MemoryFileList(
     onEdit: (MemoryFile) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+    Column {
         Text(
             text = "项目级与用户级两份说明文件。写入后**不会**自动注入模型——" +
                 "「让智蛛完善」会让 Agent 读取现有说明与构建清单后直接整理 ZhiCode.md；" +
                 "平时的任务里 Agent 也可以自己用 Read 打开它。",
             color = scheme.onSurfaceVariantSummary,
             fontSize = ZhiTextScale.Footnote,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
-        state.files.forEach { file ->
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                cornerRadius = ZhiRadius.card,
-                insideMargin = PaddingValues(0.dp),
-                colors = CardDefaults.defaultColors(
-                    color = if (file.exists) scheme.surfaceContainerHigh else scheme.surfaceContainer,
-                    contentColor = scheme.onBackground,
-                ),
-                pressFeedbackType = PressFeedbackType.None,
-            ) {
+        // 与设置主页同形态：一张分组卡里若干行，每行不再各套一张卡。
+        SettingsGroup("说明文件") {
+            state.files.forEach { file ->
                 BasicComponent(
                     title = file.scope.label,
                     titleColor = BasicComponentDefaults.titleColor(
@@ -119,7 +105,7 @@ private fun MemoryFileList(
                         )
                     },
                     onClick = { onEdit(file) },
-                    insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                 )
             }
         }
@@ -132,23 +118,28 @@ private fun MemoryEditorBody(
     onBodyChange: (String) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+    Column {
         Text(
             text = editing.path,
             color = scheme.onSurfaceVariantSummary,
             fontSize = ZhiTextScale.Micro,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
+        // 与设置主页同形态：编辑区放进分组卡（分组卡 insideMargin=0，行自带边距）。
         // 滚动由外层 SettingsSubPage 负责，这里不再套滚动容器。
-        ZhiTextField(
-            value = editing.body,
-            onValueChange = onBodyChange,
-            label = "ZhiCode.md",
-            useLabelAsPlaceholder = false,
-            singleLine = false,
-            minLines = 12,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 260.dp),
-        )
+        SettingsGroup("内容") {
+            ZhiTextField(
+                value = editing.body,
+                onValueChange = onBodyChange,
+                label = "ZhiCode.md",
+                useLabelAsPlaceholder = false,
+                singleLine = false,
+                minLines = 12,
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .heightIn(min = 260.dp),
+            )
+        }
         Text(
             text = if (editing.empty) {
                 "内容为空。建议写清楚：构建/测试命令、目录结构、项目约定。"
@@ -157,7 +148,7 @@ private fun MemoryEditorBody(
             },
             color = if (editing.empty) scheme.error else scheme.onSurfaceVariantSummary,
             fontSize = ZhiTextScale.Footnote,
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
 }
