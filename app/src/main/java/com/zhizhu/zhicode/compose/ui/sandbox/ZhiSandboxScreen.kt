@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.theme.ZhiSpace
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
@@ -304,7 +305,7 @@ private fun ErrorDetail(detail: String) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             cornerRadius = ZhiRadius.card,
-            insideMargin = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+            insideMargin = PaddingValues(horizontal = 14.dp, vertical = ZhiSpace.m),
             colors = CardDefaults.defaultColors(
                 color = scheme.surfaceContainer,
                 contentColor = scheme.error,
@@ -327,7 +328,7 @@ private fun EmptyState() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.card,
-        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 22.dp),
+        insideMargin = PaddingValues(horizontal = ZhiSpace.l, vertical = 22.dp),
         colors = CardDefaults.defaultColors(
             color = scheme.surfaceContainer,
             contentColor = scheme.onSurfaceVariantSummary,

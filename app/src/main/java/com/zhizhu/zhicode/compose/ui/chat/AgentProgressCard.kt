@@ -103,18 +103,24 @@ fun AgentProgressCard(
             pressFeedbackType = PressFeedbackType.Sink,
             holdDownState = true,
         ) {
-            CardBody(status = status, tasks = tasks, maxTasks = maxTasks)
+            CardBody(status = status, tasks = tasks, maxTasks = maxTasks, compact = true)
         }
     }
 }
 
 @Composable
-private fun CardBody(status: String, tasks: List<AgentTask>, maxTasks: Int) {
+private fun CardBody(
+    status: String,
+    tasks: List<AgentTask>,
+    maxTasks: Int,
+    compact: Boolean = false,
+) {
     val scheme = MiuixTheme.colorScheme
     val done = tasks.count { it.state == TaskState.DONE }
-    val visibleTasks = remember(tasks, maxTasks) { tasks.currentWindow(maxTasks) }
+    val visibleTasks = remember(tasks, maxTasks) { tasks.currentWindow(if (compact) 0 else maxTasks) }
     val progress = if (tasks.isEmpty()) 0f else done.toFloat() / tasks.size
 
+        // 单行进度条铺在标题行下面（悬浮形态下卡片高度可控）
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = "任务进度",
@@ -137,7 +143,7 @@ private fun CardBody(status: String, tasks: List<AgentTask>, maxTasks: Int) {
         )
         ZhiUsageBar(fraction = animatedFraction, modifier = Modifier.padding(top = 6.dp))
 
-        visibleTasks.forEach { task ->
+        if (!compact) visibleTasks.forEach { task ->
             Row(
                 modifier = Modifier.padding(top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
