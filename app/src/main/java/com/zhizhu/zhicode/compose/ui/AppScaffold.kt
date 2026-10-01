@@ -2,6 +2,7 @@ package com.zhizhu.zhicode.compose.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import com.zhizhu.zhicode.compose.ui.debug.UiDebugPage
+import com.zhizhu.zhicode.compose.ui.debug.ZhiDebugHud
 import com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.McpConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.MemoryOverlay
@@ -292,6 +293,23 @@ private fun ZhiCodeScreen(
                 // 弹窗挂载与模态模糊背景在 OverlayHost.kt。
                 // 必须仍处于 Scaffold 内容里才能找到 popupHost。
                 ZhiOverlayHost(state = state, viewModel = viewModel, glassMain = glassMain)
+
+                // ---- 全局调试浮层（debug 构建的 UI 调试页里打开）----
+                // 画在最后 = 压在所有东西之上，但只在自己那块矩形里响应手势，
+                // 其余事件原样透传给下面的工作区。
+                //
+                // `BuildConfig.DEBUG` 是硬门控：唯一能把它打开的地方是 debug 独有
+                // 的「UI 调试」页，这里再挡一道 —— 万一将来有人把开关挪到别处，
+                // 也不会有发布包里冒出调试浮层这种事。
+                if (com.zhizhu.zhicode.compose.BuildConfig.DEBUG && state.debugOverlayEnabled) {
+                    ZhiDebugHud(
+                        state = state,
+                        viewModel = viewModel,
+                        glass = glassMain,
+                        // 让出顶栏（含 Tab 行）的高度，否则药丸会被模糊顶栏压住。
+                        topInset = TopBarInsetWithTabs,
+                    )
+                }
             }
         }
 

@@ -224,6 +224,8 @@ fun UiDebugPage(
                 item(key = "basics") { MiuixBasicsSection() }
                 item(key = "preference") { PreferenceSection() }
                 item(key = "appRows") { AppSettingsRowsSection() }
+                item(key = "debugOverlay") { DebugOverlaySection(state, viewModel) }
+                item(key = "markdown") { MarkdownSection() }
                 item(key = "conversation") { ConversationSection(state.uiDebugResetToken) }
                 item(key = "media") { MediaSection(state.uiDebugResetToken) }
                 item(key = "workspace") { WorkspaceSection(state, viewModel) }
@@ -1270,6 +1272,320 @@ private fun AppSettingsRowsSection() {
         SettingsEntry(title = "SettingsEntry", valueText = "入口", onClick = {})
     }
 }
+
+// ------------------------------------------------------------------ 全局调试浮层开关
+
+/**
+ * 全局调试浮层的开关与说明。
+ *
+ * 这一项与其他分区不同：它改的是**整个应用**的样子（打开后工作区右上角会多出仪表盘），
+ * 所以放在最前面，并且把"打开后会发生什么"写清楚。
+ */
+@Composable
+private fun DebugOverlaySection(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
+    DebugSection(
+        title = "全局调试浮层",
+        subtitle = "打开后工作区右上角出现仪表盘：面板/工具/输入器状态 + 输入的 Markdown 实时预览",
+    ) {
+        if (com.zhizhu.zhicode.compose.BuildConfig.DEBUG) {
+            SettingsToggle(
+                title = "启用调试浮层",
+                checked = state.debugOverlayEnabled,
+                onCheckedChange = { viewModel.setDebugOverlayEnabled(it) },
+                summary = "边用边看：输入框里打的字会立刻用对话流渲染器画一遍；工具调用逐条列出状态。"
+                    + "返回工作区即可看到（浮层只在工作区显示，不挡设置页）。",
+                warn = true,
+            )
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            SettingsFootnote(
+                "浮层有「展开 / 收起」两态：收起后是贴右缘的窄药丸，只显示 面板 · 消息数 · 输入字数 · 运行中工具数。"
+            )
+            SettingsFootnote(
+                "它不持久化：重启应用后回到关闭。避免某次调试忘了关，下次打开以为界面坏了。"
+            )
+        }
+    }
+}
+
+// ------------------------------------------------------------------ Markdown 全语法
+
+/**
+ * 对话流的 Markdown **全语法**样例。
+ *
+ * 每一组都是「说明 + 源码 + 渲染结果」三样并排给出：源码用等宽卡、渲染结果用
+ * **生产的助手气泡** [AssistantCard]。这样一屏就能回答两个问题：
+ * "这段语法渲染成什么样" 与 "它为什么渲染成这样"（源码就在上面）。
+ *
+ * 语法清单来自 `MarkdownParse.kt` 的文件头（块级 10 项、行内 12 项），这里逐项落地；
+ * 最后一组专门放**病态/边界输入**（未闭合围栏与强调、超深列表、引用里放代码块、
+ * 缺分隔行的表格…），因为这一类最容易在改动解析器时悄悄退化。
+ */
+@Composable
+private fun MarkdownSection() {
+    DebugSection(
+        title = "对话流 · Markdown 全语法",
+        subtitle = "每组给出 源码 → 渲染 对照；渲染走的是生产组件 AssistantCard（与真实回复同一套）",
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+            MARKDOWN_SAMPLES.forEach { sample ->
+                MarkdownSampleBlock(sample)
+            }
+            SettingsFootnote(
+                "有意不支持的（遇到时按普通文本原样显示，不会丢字符）：内联 HTML、脚注、" +
+                    "定义列表、引用式链接 [x][1]。",
+            )
+        }
+    }
+}
+
+/** 一组 Markdown 样例：说明 + 源码 + 渲染。 */
+private data class MarkdownSample(val title: String, val note: String, val source: String)
+
+@Composable
+private fun MarkdownSampleBlock(sample: MarkdownSample) {
+    val scheme = MiuixTheme.colorScheme
+    var showSource by remember { mutableStateOf(true) }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
+        Text(
+            text = sample.title,
+            fontSize = ZhiTextScale.BodySmall,
+            fontWeight = FontWeight.Medium,
+        )
+        Text(
+            text = sample.note,
+            color = scheme.onSurfaceVariantSummary,
+            fontSize = ZhiTextScale.Micro,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                text = if (showSource) "隐藏源码" else "查看源码（${sample.source.length} 字）",
+                onClick = { showSource = !showSource },
+            )
+        }
+        if (showSource) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = ZhiRadius.inner,
+                insideMargin = PaddingValues(10.dp),
+                colors = CardDefaults.defaultColors(
+                    color = ZhiColors.cardInnerSurface(),
+                    contentColor = scheme.onSurfaceVariantSummary,
+                ),
+            ) {
+                Text(
+                    text = sample.source,
+                    fontSize = ZhiTextScale.Footnote,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
+        // 渲染结果放在生产气泡里：与真实回复完全同一条渲染路径。
+        AssistantCard(
+            item = ChatItem(
+                id = "md-${sample.title}",
+                kind = ChatKind.ASSISTANT,
+                title = "ZhiCode",
+                body = sample.source,
+            ),
+            onToggleThinking = {},
+            onLongPress = {},
+        )
+    }
+}
+
+/**
+ * 样例正文。
+ *
+ * ⚠️ 这些是**内容里含 Markdown 的 Kotlin 原始字符串**，所以：
+ * 反引号可以直接写（原始字符串的定界符是三个引号，不是反引号），
+ * 而 `$` 必须避开 —— 需要字面量美元符时写 `${'$'}`。
+ */
+private val MARKDOWN_SAMPLES: List<MarkdownSample> = listOf(
+    MarkdownSample(
+        title = "① 块级 · 标题 / Setext / 分隔线",
+        note = "ATX 1-6 级、Setext 两种写法、三种分隔线标记",
+        source = """
+            # 一级标题
+            ## 二级标题
+            ### 三级标题
+            #### 四级标题
+            ##### 五级标题
+            ###### 六级标题
+
+            Setext 一级标题
+            ===============
+
+            Setext 二级标题
+            ---------------
+
+            普通段落跟在后面，用来说明标题与正文的间距。
+
+            ---
+
+            ***
+
+            ___
+        """.trimIndent(),
+    ),
+    MarkdownSample(
+        title = "② 块级 · 代码块",
+        note = "反引号围栏与波浪线围栏；info string 记为语言，无语言时为空",
+        source = """
+            带语言的围栏：
+
+            ```kotlin
+            object ZhiMotion {
+                val fadeOutSpec = tween(150, easing = SinOutEasing)
+            }
+            ```
+
+            波浪线围栏（同样支持）：
+
+            ~~~
+            no-language fence
+              indented line
+            ~~~
+
+            行内的 `val x = 1` 与围栏不是一回事。
+        """.trimIndent(),
+    ),
+    MarkdownSample(
+        title = "③ 块级 · 列表（无序 / 有序 / 嵌套 / 任务项）",
+        note = "三种无序标记、两种有序编号、按缩进嵌套（上限 5 层）、任务项带勾选框",
+        source = """
+            - 无序项，减号
+            - 第二项
+              - 嵌套一层
+                - 嵌套两层
+            - 第三项
+
+            * 星号标记
+            + 加号标记
+
+            1. 有序第一项
+            2. 有序第二项
+            3. 有序第三项
+
+            1) 括号编号第一项
+            2) 括号编号第二项
+
+            - [ ] 未完成的待办
+            - [x] 已完成的待办
+            - [x] 带 `行内代码` 的已完成项
+        """.trimIndent(),
+    ),
+    MarkdownSample(
+        title = "④ 块级 · 引用（可嵌套、块中可有块）",
+        note = "引用内部递归解析：引用里能再放列表、代码块、标题",
+        source = """
+            > 第一层引用。
+            > > 第二层引用，里面还能继续。
+            > 回到第一层。
+
+            > 引用里放列表：
+            > - 第一项
+            > - 第二项
+            >
+            > 以及代码块：
+            > ```kotlin
+            > val inside = true
+            > ```
+        """.trimIndent(),
+    ),
+    MarkdownSample(
+        title = "⑤ 块级 · 表格",
+        note = "对齐分隔行决定是不是表格；行长度不齐时按最长行补齐",
+        source = """
+            | 列一 | 列二 | 列三 |
+            | --- | --- | --- |
+            | a | b | c |
+            | 长内容比较多的一格 |  | 缺一格 |
+            | 只有一列 |
+
+            下面这个缺分隔行，**不是**表格（应原样显示成普通文本）：
+
+            | a | b |
+            | c | d |
+        """.trimIndent(),
+    ),
+    MarkdownSample(
+        title = "⑥ 行内 · 强调与代码",
+        note = "粗体 / 斜体 / 粗斜体 / 删除线（各有两种写法）、行内代码、反斜杠转义",
+        source = """
+            粗体 **B**、下划线粗体 __B__、斜体 *I*、下划线斜体 _I_、
+            粗斜体 ***BI***、删除线 ~~GONE~~。
+
+            行内代码 `TextFieldState` 与 `List<String>`。
+
+            转义：\*这不该是斜体\*、\`这不该是代码\`、\_这不该是斜体\_。
+        """.trimIndent(),
+    ),
+    MarkdownSample(
+        title = "⑦ 行内 · 链接与图片",
+        note = "标准链接、自动链接 <…>、裸 URL 自动识别、图片按链接渲染（带替代文字）",
+        source = """
+            标准链接：[ZhiCode 仓库](https://example.com/zhicode)。
+
+            自动链接：<https://example.com/auto>。
+
+            裸地址：https://example.com/bare?x=1 与 https://example.com/bare2 。
+
+            图片：![替代文字](https://example.com/image.png)。
+
+            行内代码里的链接不解析：`[a](b)`。
+        """.trimIndent(),
+    ),
+    MarkdownSample(
+        title = "⑧ 行内 · 嵌套组合",
+        note = "样式之间可嵌套；代码与链接内部不再解析其它标记（这是刻意的）",
+        source = """
+            **粗体里有 `代码`**，*斜体里有 [链接](https://example.com)*，
+            ~~删除线里有 **粗体**~~，***粗斜体里有 `code`***。
+
+            代码里不解析：`**not bold**`、链接文字里不解析：**[链接](https://example.com)**。
+
+            长行折行检查：这是一段刻意写得很长的句子，用来确认在窄屏上自动折行、不出现横向溢出，也不会把行高算错。
+        """.trimIndent(),
+    ),
+    MarkdownSample(
+        title = "⑨ 边界 · 未闭合与病态输入",
+        note = "未闭合的围栏与强调、超深缩进列表、深引用 —— 都不能崩，也不能吞字符",
+        source = """
+            未闭合的围栏（应显示到末尾为止）：
+
+            ```kotlin
+            val unclosed = 1
+
+            未闭合的强调：**没有收尾 与 *只有一半。
+
+            深缩进列表（超过 5 层后收敛，不再无限加深）：
+
+            - 第 1 层
+                - 第 2 层
+                    - 第 3 层
+                        - 第 4 层
+                            - 第 5 层
+                                - 第 6 层（应被收敛）
+                                    - 第 7 层
+
+            > 深引用：
+            > > > > > 很深的引用层级
+
+            * 星号既可能是列表也可能是斜体：*这一行是斜体* 而下一行是列表
+            * 这一行是列表
+        """.trimIndent(),
+    ),
+    MarkdownSample(
+        title = "⑩ 边界 · 空与纯空白",
+        note = "空串、只有空格与换行 —— 渲染层对这三种输入都必须安全（不崩、不留空壳）",
+        source = "\n   \n\n",
+    ),
+)
 
 // ------------------------------------------------------------------ 对话流（可互动）
 

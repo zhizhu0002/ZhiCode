@@ -3259,6 +3259,21 @@ class WorkspaceViewModel(
      */
     fun requestUiDebugReset() = _state.update { it.copy(uiDebugResetToken = it.uiDebugResetToken + 1) }
 
+    /**
+     * 开关**全局调试浮层**。
+     *
+     * 打开时默认**展开**（用户按下开关就是要看东西，先给他面板），
+     * 关闭时把展开态一起复位，下次打开仍是展开 —— 免得留下"上次收起"的隐式记忆。
+     */
+    fun setDebugOverlayEnabled(enabled: Boolean) = _state.update {
+        it.copy(debugOverlayEnabled = enabled, debugOverlayExpanded = enabled)
+    }
+
+    /** 展开 / 收起调试浮层（收起态是贴边的窄药丸）。 */
+    fun setDebugOverlayExpanded(expanded: Boolean) = _state.update {
+        it.copy(debugOverlayExpanded = expanded)
+    }
+
     /** 弹窗内任意一项改动都走这里，保证 draft 只有一份写入路径。 */
     fun updateSettingsDraft(transform: (SettingsDraft) -> SettingsDraft) = _state.update {
         val draft = it.settingsDraft ?: return@update it

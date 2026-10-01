@@ -371,6 +371,19 @@ data class WorkspaceUiState(
      * 比把整份样例状态提到 ViewModel 里干净得多（调试数据不该进生产状态）。
      */
     val uiDebugResetToken: Int = 0,
+    /**
+     * **全局调试浮层**是否启用（debug 构建的「UI 调试」页里开关）。
+     *
+     * 打开后工作区右上角会出现仪表盘（[com.zhizhu.zhicode.compose.ui.debug.ZhiDebugHud]），
+     * 实时显示面板/工具/输入器状态与**输入的 Markdown 实时预览**。
+     * 与 [uiDebugOpen] 相互独立：整页是"静止地看组件"，浮层是"边用边看状态"。
+     *
+     * 刻意**不持久化**：它是调试设施，重启后回到关闭是符合预期的
+     * （否则某次调试忘了关，下次打开会以为界面坏了）。
+     */
+    val debugOverlayEnabled: Boolean = false,
+    /** 浮层是否展开（false = 贴边窄药丸，只显示几个计数）。 */
+    val debugOverlayExpanded: Boolean = false,
     /** 非空即设置弹窗打开；所有编辑先落在这里，「保存」才写回上面的字段。 */
     val settingsDraft: SettingsDraft? = null,
 ) {

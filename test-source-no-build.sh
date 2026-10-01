@@ -196,6 +196,11 @@ run DialogScrollNestingTest "$PROJECT_ROOT"
 # 侧栏那两项（技能 / 自定义角色卡）的收敛也一并守在这里。
 # UiDebugPageStructureTest.java
 run UiDebugPageStructureTest "$PROJECT_ROOT"
+# ---------- 全局调试浮层 + Markdown 全语法样例 ----------
+# 浮层的 BuildConfig.DEBUG 门控、必须读实时状态、Markdown 预览必须用生产渲染器、
+# 以及"样例必须覆盖解析器支持的每一类语法" —— 这些全是删掉不会编译失败的东西。
+# DebugHudStructureTest.java
+run DebugHudStructureTest "$PROJECT_ROOT"
 
 echo "-----"
 echo "通过 $PASS / 失败 $FAIL"
