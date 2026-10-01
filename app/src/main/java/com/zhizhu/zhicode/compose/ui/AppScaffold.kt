@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import com.zhizhu.zhicode.compose.ui.settings.SettingsDialog
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -171,6 +172,18 @@ private fun ZhiCodeScreen(
                 modifier = Modifier.fillMaxHeight(),
             )
         }
+    }
+
+    // ---- 设置整页（K4：像 miuix 示例的 SettingsPage，覆盖全屏）----
+    // 画在 Scaffold/抽屉之后 = 最上层；打开时整页盖住工作区。
+    if (state.settingsOpen) {
+        SettingsDialog(
+            draft = state.settingsDraft,
+            onChange = viewModel::setSettingsDraft,
+            onDismiss = viewModel::closeSettings,
+            onSave = viewModel::saveSettings,
+            onNavigate = viewModel::navigateFromSettings,
+        )
     }
     }
 }

@@ -1,8 +1,17 @@
 package com.zhizhu.zhicode.compose.ui.settings
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +37,7 @@ import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
@@ -36,6 +46,8 @@ import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -70,41 +82,51 @@ fun SettingsDialog(
     onSave: () -> Unit,
     onNavigate: (String) -> Unit,
 ) {
-    top.yukonga.miuix.kmp.overlay.OverlayDialog(
-        show = draft != null,
-        onDismissRequest = onDismiss,
-        largeScreen = true,
-        maxWidth = ZhiDialogWidth.Wide,
-        outsideMargin = DialogWideOutsideMargin,
-        insideMargin = DialogWideInsideMargin,
-    ) {
-        if (draft == null) return@OverlayDialog
+    // 整页设置（像 miuix 示例的 SettingsPage）：Scaffold + 顶栏 + 分组卡滚动列表。
+    // 不再用 OverlayDialog —— 设置项多，弹窗里滚动层级深，整页更接近系统设置的心智。
+    if (draft == null) return
 
-        DialogShell(
-            title = "ZhiCode 设置",
-            titleAction = {
-                IconButton(onClick = { onDismiss() }) {
-                    Icon(
-                        imageVector = ZhiIcons.close,
-                        contentDescription = "关闭设置",
-                        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier.size(18.dp),
+    val scheme = MiuixTheme.colorScheme
+    Scaffold(
+        topBar = {
+            SmallTopAppBar(
+                title = "设置",
+                color = scheme.surface,
+                navigationIcon = {
+                    ZhiIconButton(
+                        icon = ZhiIcons.upLevel,
+                        description = "返回",
+                        onClick = onDismiss,
                     )
-                }
-            },
-            actions = {
+                },
+                actions = {
+                    TextButton(text = "保存", onClick = onSave)
+                },
+            )
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            Spacer(modifier = Modifier.height(8.dp))
+            AllSettingsPages(draft, onChange, onNavigate)
+            // 底部保存区：整页模式下按钮常驻列表尾，比悬浮按钮省一层玻璃
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
                 TextButton(text = "取消", onClick = onDismiss)
                 PrimaryButton(
                     text = "保存",
                     onClick = onSave,
                     modifier = Modifier.padding(start = 8.dp),
                 )
-            },
-        ) {
-            // 单页分组：不再用 Tab 分页 —— 六个分类的内容都不长，
-            // 分组标题（SmallTitle）给出的结构已经足够扫读，
-            // 少一层 Tab 交互、少一次"找不到设置在哪一页"的来回。
-            AllSettingsPages(draft, onChange, onNavigate)
+            }
         }
     }
 }

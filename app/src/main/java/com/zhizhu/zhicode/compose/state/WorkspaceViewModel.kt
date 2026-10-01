@@ -2131,7 +2131,7 @@ class WorkspaceViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val state = ApiConfigStore.read(getApplication())
             _state.update {
-                it.copy(apiConfig = state, settingsDraft = null)
+                it.copy(apiConfig = state, settingsDraft = null, settingsOpen = false)
             }
             syncActiveProfile()
             syncRoleCardFromStore()
@@ -2225,7 +2225,7 @@ class WorkspaceViewModel(
      * 没有网络也没有密钥解密，放 IO 线程反而让状态更新顺序更难推理。
      */
     fun openMcpConfig() {
-        _state.update { it.copy(mcpConfig = McpStore.read(), settingsDraft = null) }
+        _state.update { it.copy(mcpConfig = McpStore.read(), settingsDraft = null, settingsOpen = false) }
     }
 
     fun closeMcpConfig() = _state.update { it.copy(mcpConfig = null) }
@@ -3203,10 +3203,13 @@ class WorkspaceViewModel(
      * 之后的编辑全部落在 draft 上，「取消」丢弃 draft 即可，不需要回滚任何东西。
      */
     fun openSettings() = _state.update {
-        it.copy(settingsDraft = SettingsDraft.from(it))
+        it.copy(
+            settingsOpen = true,
+            settingsDraft = SettingsDraft.from(it),
+        )
     }
 
-    fun closeSettings() = _state.update { it.copy(settingsDraft = null) }
+    fun closeSettings() = _state.update { it.copy(settingsDraft = null, settingsOpen = false) }
 
     /** 弹窗内任意一项改动都走这里，保证 draft 只有一份写入路径。 */
     fun updateSettingsDraft(transform: (SettingsDraft) -> SettingsDraft) = _state.update {

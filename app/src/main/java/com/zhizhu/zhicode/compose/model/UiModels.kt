@@ -314,6 +314,8 @@ data class WorkspaceUiState(
     /** 环境自检报告全文（可复制）。 */
     val environmentReport: String = "",
     val sidebarOpen: Boolean = false,
+    /** 设置整页是否打开（像 miuix 示例的 SettingsPage：Scaffold+顶栏，非弹窗）。 */
+    val settingsOpen: Boolean = false,
     val slashQuery: String? = null,
     val slashMatches: List<SlashCommand> = emptyList(),
     val permissionRequest: PermissionRequest? = null,

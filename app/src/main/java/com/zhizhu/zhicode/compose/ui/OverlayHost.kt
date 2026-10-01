@@ -19,7 +19,6 @@ import com.zhizhu.zhicode.compose.ui.dialogs.PlanApprovalOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.RoleCardsOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.SkillsOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.TaskListOverlay
-import com.zhizhu.zhicode.compose.ui.settings.SettingsDialog
 
 /**
  * 弹窗挂载宿主：从 `ZhiCodeScreen` 原地拆出，内容逐字未改。
@@ -77,13 +76,6 @@ internal fun ZhiOverlayHost(
         onQueryChange = viewModel::updateAttachQuery,
         onPick = { hit -> viewModel.attachProjectFile(hit.path, hit.relative) },
         onDismiss = viewModel::closeAttachPicker,
-    )
-    SettingsDialog(
-        draft = state.settingsDraft,
-        onChange = viewModel::setSettingsDraft,
-        onDismiss = viewModel::closeSettings,
-        onSave = viewModel::saveSettings,
-        onNavigate = viewModel::navigateFromSettings,
     )
     TaskListOverlay(
         tasks = state.tasks,
