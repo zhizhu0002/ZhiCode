@@ -19,7 +19,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.COMPACT_PERCENT_MAX
 import com.zhizhu.zhicode.compose.model.COMPACT_PERCENT_MIN
@@ -435,5 +434,3 @@ private fun SettingsIconEntry(
 
 // ------------------------------------------------------------------ 工具
 
-/** `Color` → `#RRGGBB`。 */
-private fun hexOf(color: Color): String = String.format("#%06X", color.toArgb() and 0xFFFFFF)
