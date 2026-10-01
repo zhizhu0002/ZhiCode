@@ -102,9 +102,9 @@ internal fun CompactWorkspace(
     glass: Glass,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // 顶栏 blur 采样需要内容从顶栏底下滚过：面板内容整体上移进顶栏区域，
-        // 再用 padding 把"首行可见位置"推回顶栏下缘（内容滚动时能穿过 blur 区）。
-        Spacer(modifier = Modifier.height(TopBarInsetWithTabs))
+        // 面板容器**不**留顶栏高度：blur 顶栏要内容从它底下滚过才有东西可采样。
+        // 各面板自己处理首行可见位置 —— 对话列表用 topInset（contentPadding，
+        // 滚动时消息穿过 blur 区），其余面板直接 padding 顶开（无需滚过顶栏）。
         // 面板切换动画：淡入淡出 + 轻微横向位移
         AnimatedContent(
             targetState = state.tab,

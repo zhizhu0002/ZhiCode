@@ -86,7 +86,8 @@ internal fun ChatArea(
             // 顶部留白：S1 重构后顶栏在 topBar 槽位已由 Scaffold padding 处理，
             // 对话列表不再需要让出头部高度，可从 Scaffold padding 顶部起排。
             bottomInset = if (floating) ComposerInset + TaskCardInset else ComposerInset,
-            topInset = 0.dp,
+            // 首条消息落在顶栏（含 Tab 行）下缘；列表全高，滚动时消息从顶栏 blur 下穿过
+            topInset = TopBarInsetWithTabs,
         )
 
         // 底部悬浮层：任务卡在上、输入器在下，两者都不占布局高度，
