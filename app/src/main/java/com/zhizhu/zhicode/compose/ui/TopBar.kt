@@ -108,6 +108,7 @@ fun ZhiTopBar(
             // 图标按钮都包 Miuix TooltipBox，长按出说明气泡
             TooltipBox(text = "切换主题，当前：${state.themeMode.label}") {
                 ZhiIconButton(
+                    compact = 34.dp,
                     icon = ZhiIcons.theme,
                     description = "切换主题，当前：${state.themeMode.label}",
                     onClick = onCycleTheme,
@@ -116,6 +117,7 @@ fun ZhiTopBar(
             }
             TooltipBox(text = "系统悬浮球") {
                 ZhiIconButton(
+                    compact = 34.dp,
                     icon = ZhiIcons.floatingBall,
                     description = "系统悬浮球",
                     onClick = onFloatingBall,
@@ -123,6 +125,7 @@ fun ZhiTopBar(
             }
             TooltipBox(text = "打开设置") {
                 ZhiIconButton(
+                    compact = 34.dp,
                     icon = ZhiIcons.settings,
                     description = "打开设置",
                     onClick = onSettings,
