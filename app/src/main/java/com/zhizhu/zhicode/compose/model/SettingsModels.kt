@@ -357,7 +357,42 @@ data class ModelPickerState(
     val loading: Boolean = true,
     val status: String = "正在从当前 API 获取模型…",
     val models: List<ModelOption> = emptyList(),
-)
+    /**
+     * 搜索框里的过滤串。
+     *
+     * <p>**与 [query] 是两件事**，不能合并：
+     * - [query] 是"要用的模型名"，点「使用模型」时就是把它写回配置；
+     * - [search] 只影响**看得见哪些行**。
+     *
+     * <p>合并的后果是具体的：在搜索框里敲 `deep` 只想筛出 deepseek 那几条，
+     * 但 [query] 同时变成了 `deep` —— 这时点「使用模型」就会把一个**不存在的模型名**
+     * 写进配置（服务端随后 400）。分开之后搜索再随便敲也不会误改配置。
+     */
+    val search: String = "",
+) {
+    /**
+     * 按 [search] 过滤后的可见行。
+     *
+     * <p>做成**派生属性**而不是在组合函数里现算：筛选规则有边界情况（前后空白、
+     * 大小写、id 与显示名两侧都能匹配），而这里恰好是能脱离 Compose 单测的地方。
+     *
+     * <p>匹配规则刻意选**大小写不敏感的子串**，不做模糊/子序列匹配：
+     * 这个列表里的字符串是用户发请求要用的模型标识符，**结果可预测**比"猜得准"重要。
+     * 模糊匹配会让明明存在的模型因为字符顺序不同而搜不到，用户只会以为目录里没有它。
+     *
+     * <p>[search] 为空白时返回**全部**（不是空）：刚打开面板时搜索框是空的，
+     * 这时必须看到完整目录。
+     */
+    val visibleModels: List<ModelOption>
+        get() {
+            val needle = search.trim()
+            if (needle.isEmpty()) return models
+            return models.filter {
+                it.id.contains(needle, ignoreCase = true) ||
+                    it.displayName.contains(needle, ignoreCase = true)
+            }
+        }
+}
 
 /**
  * 首次进入时的 API 配置列表：**空**。

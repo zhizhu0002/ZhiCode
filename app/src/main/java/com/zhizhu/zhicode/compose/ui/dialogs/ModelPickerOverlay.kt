@@ -2,6 +2,7 @@ package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,33 +12,29 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.model.ModelOption
 import com.zhizhu.zhicode.compose.model.ModelPickerState
-import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
-import com.zhizhu.zhicode.compose.ui.ZhiIcons
-import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Check
+import top.yukonga.miuix.kmp.icon.basic.Search
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /**
  * 模型选择面板。
@@ -84,6 +81,7 @@ fun ModelPickerOverlay(
     picker: ModelPickerState?,
     onDismiss: () -> Unit,
     onQueryChange: (String) -> Unit,
+    onSearchChange: (String) -> Unit,
     onUse: (String) -> Unit,
     onOpenApiConfig: () -> Unit,
 ) {
@@ -98,8 +96,101 @@ fun ModelPickerOverlay(
         ModelPickerBody(
             picker = current,
             onQueryChange = onQueryChange,
+            onSearchChange = onSearchChange,
             onUse = onUse,
             onOpenApiConfig = onOpenApiConfig,
+        )
+    }
+}
+
+/**
+ * 搜索框。
+ *
+ * 只在**目录已经拿到、且不止一条**时才出现：只有两三个模型时它占的位置比它省下的
+ * 翻找更多，而目录拉失败时它更是一个筛不出任何东西的死控件（那种情况走下面的
+ * 手动输入框）。上限 250 条（引擎侧 `MAX_MODELS`）才是它真正有用的场景。
+ */
+@Composable
+private fun ModelSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    ZhiTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = "输入模型名称搜索",
+        useLabelAsPlaceholder = true,
+        singleLine = true,
+        // 圆角给足，与参考图里那种"胶囊搜索框"一致；Miuix 默认圆角偏小。
+        cornerRadius = ZhiRadius.card,
+        colors = TextFieldDefaults.textFieldColors(
+            backgroundColor = scheme.surfaceContainerHigh,
+            labelColor = scheme.onSurfaceVariantSummary,
+        ),
+        leadingIcon = {
+            Icon(
+                imageVector = MiuixIcons.Basic.Search,
+                contentDescription = null,
+                tint = scheme.onSurfaceVariantSummary,
+                modifier = Modifier.size(20.dp),
+            )
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * 分组标题：提供方名 + 条目数 + 首字母头像。
+ *
+ * ## 为什么没有折叠箭头
+ *
+ * 参考图里这一行左边有个 `⌄`。但这个面板**永远只有一组** —— 一个 API 配置
+ * （profile）就对应一个提供方与一份目录，`ModelPickerState` 里也只有单个
+ * `profileName`。一组还要折叠的话，点下去就是把整个列表收起来，没有意义。
+ * 所以这里不画那个箭头：画一个点了没用的控件比不画更糟。
+ *
+ * ## 头像为什么是首字母
+ *
+ * 工程里没有任何品牌图标数据，也不该为此内置一批厂商 logo（那等于替各家做标识，
+ * 还会过期）。首字母方块是**如实**表达"这是哪个提供方"，而不是假装有品牌图。
+ */
+@Composable
+private fun ModelGroupHeader(profileName: String, count: Int) {
+    val scheme = MiuixTheme.colorScheme
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 首字母头像
+        Surface(
+            shape = RoundedCornerShape(ZhiRadius.inner),
+            color = scheme.primaryContainer,
+            modifier = Modifier.size(28.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    // 空名字时给一个中性的占位，而不是画出空格子
+                    text = profileName.trim().take(1).ifEmpty { "模" },
+                    color = scheme.onPrimaryContainer,
+                    fontSize = ZhiTextScale.BodySmall,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+        Text(
+            text = profileName,
+            color = scheme.onBackground,
+            fontSize = ZhiTextScale.BodySmall,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 8.dp).weight(1f),
+        )
+        Text(
+            text = "$count 个模型",
+            color = scheme.onSurfaceVariantSummary,
+            fontSize = ZhiTextScale.Footnote,
         )
     }
 }
@@ -108,6 +199,7 @@ fun ModelPickerOverlay(
 private fun ModelPickerBody(
     picker: ModelPickerState,
     onQueryChange: (String) -> Unit,
+    onSearchChange: (String) -> Unit,
     onUse: (String) -> Unit,
     onOpenApiConfig: () -> Unit,
 ) {
@@ -125,23 +217,41 @@ private fun ModelPickerBody(
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         )
 
+        if (picker.models.size > 1) {
+            ModelSearchField(value = picker.search, onValueChange = onSearchChange)
+        }
+
+        // 过滤规则见 `ModelPickerState.visibleModels`（派生属性，可脱离 Compose 单测）。
+        val visible = picker.visibleModels
+
         if (picker.models.isNotEmpty()) {
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                cornerRadius = ZhiRadius.card,
-                insideMargin = PaddingValues(0.dp),
-                colors = CardDefaults.defaultColors(
-                    color = scheme.surfaceContainerHigh,
-                    contentColor = scheme.onBackground,
-                ),
-                pressFeedbackType = PressFeedbackType.None,
+            ModelGroupHeader(profileName = picker.profileName, count = visible.size)
+            // 外层不再套 Card：参考图里每个模型是**独立的一张卡**，行与行之间有缝。
+            // 共用一个 Card 再靠分割线分开，视觉上是一整块面板，与参考图不是一回事。
+            //
+            // `heightIn(max = 260.dp)` 是硬性要求，不能删：LazyColumn 在竖直方向没有
+            // 高度上限时会拿到 Infinity 高度约束，Compose 直接抛异常崩掉
+            // （见 DialogScrollNestingTest）。
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).heightIn(max = 260.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                LazyColumn(modifier = Modifier.heightIn(max = 260.dp)) {
-                    items(picker.models, key = { it.id }) { model ->
-                        ModelRow(
-                            option = model,
-                            selected = model.id == picker.currentModel,
-                            onPick = { onQueryChange(model.id) },
+                items(visible, key = { it.id }) { model ->
+                    ModelRow(
+                        option = model,
+                        selected = model.id == picker.currentModel,
+                        onPick = { onQueryChange(model.id) },
+                    )
+                }
+                if (visible.isEmpty()) {
+                    // 搜不到时给一句话，而不是留一片空白 —— 空白与"还在加载"、
+                    // "目录是空的"三种情况看起来一模一样。
+                    item {
+                        Text(
+                            text = "没有匹配「${picker.search}」的模型",
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = ZhiTextScale.Footnote,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
                         )
                     }
                 }
@@ -184,7 +294,11 @@ private fun ModelPickerBody(
 }
 
 /**
- * 目录里的一行。
+ * 目录里的一行（卡片式，与参考图一致）。
+ *
+ * 选中态用 `primaryContainer` 铺满整行，而不是只在左侧画一个勾：
+ * 参考图里当前模型那一条是**整块高亮**的，一眼就能从二三十行里认出来；
+ * 一个小勾在长列表里很容易被扫过去。
  *
  * `displayName` 与 `id` 相同时只显示一次，否则每行会重复两遍同一个名字
  * （服务端常常不给 display_name，那种情况下它会被回落成 id）。
@@ -197,28 +311,42 @@ private fun ModelRow(
 ) {
     val scheme = MiuixTheme.colorScheme
     val duplicated = option.displayName == option.id
-    BasicComponent(
-        title = option.displayName,
-        titleColor = BasicComponentDefaults.titleColor(
-            color = if (selected) scheme.primary else scheme.onBackground,
-        ),
-        summary = if (duplicated) null else option.id,
-        summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
-        startAction = {
-            // 选中标记跟 Miuix 下拉列表一致：Check 图标 + 它自己的尺寸常量。
-            // 不用 Checkbox（固定 26dp 且是圆的，配 11~13sp 行文字偏大），
-            // 理由详见 Dialogs.kt 里的同一处注释。
-            if (selected) {
-                Icon(
-                    imageVector = MiuixIcons.Basic.Check,
-                    contentDescription = null,
-                    tint = scheme.primary,
-                    modifier = Modifier.size(DropdownDefaults.CheckIconSize),
-                )
-            }
-        },
-        onClick = onPick,
-        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+    // 每行是**自己一张圆角卡片**（参考图就是这样：模型之间有一条缝），
+    // 而不是共用一个外层 Card 再靠分割线分开。
+    //
+    // 高亮也铺在这一层：`BasicComponent` 没有颜色参数（只有 modifier），
+    // 而把底色写进 modifier 会画出一个**直角**色块，在多行堆叠下四角会露出
+    // 方形边，与卡片的圆角对不上。Surface 自带形状裁剪，一步到位。
+    Surface(
+        shape = RoundedCornerShape(ZhiRadius.inner),
+        color = if (selected) scheme.primaryContainer else scheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth(),
-    )
+    ) {
+        BasicComponent(
+            title = option.displayName,
+            titleColor = BasicComponentDefaults.titleColor(
+                color = if (selected) scheme.onPrimaryContainer else scheme.onBackground,
+            ),
+            summary = if (duplicated) null else option.id,
+            summaryColor = BasicComponentDefaults.summaryColor(
+                color = if (selected) scheme.onPrimaryContainer else scheme.onSurfaceVariantSummary,
+            ),
+            startAction = {
+                // 选中标记跟 Miuix 下拉列表一致：Check 图标 + 它自己的尺寸常量。
+                // 不用 Checkbox（固定 26dp 且是圆的，配 11~13sp 行文字偏大），
+                // 理由详见 Dialogs.kt 里的同一处注释。
+                if (selected) {
+                    Icon(
+                        imageVector = MiuixIcons.Basic.Check,
+                        contentDescription = null,
+                        tint = scheme.onPrimaryContainer,
+                        modifier = Modifier.size(DropdownDefaults.CheckIconSize),
+                    )
+                }
+            },
+            onClick = onPick,
+            insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }

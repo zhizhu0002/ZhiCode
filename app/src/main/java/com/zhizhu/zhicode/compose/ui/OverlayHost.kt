@@ -94,6 +94,8 @@ internal fun ZhiOverlayHost(
         picker = state.modelPicker,
         onDismiss = viewModel::closeModelPicker,
         onQueryChange = viewModel::setModelQuery,
+        // 搜索只筛列表，与"要用的模型名"是两回事（见 ModelPickerState.search）
+        onSearchChange = viewModel::setModelSearch,
         onUse = viewModel::applySelectedModel,
         onOpenApiConfig = {
             viewModel.closeModelPicker()

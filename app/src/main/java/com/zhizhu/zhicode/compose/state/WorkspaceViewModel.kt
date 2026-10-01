@@ -2615,6 +2615,16 @@ class WorkspaceViewModel(
         _state.update { s -> s.copy(modelPicker = s.modelPicker?.copy(query = text)) }
     }
 
+    /**
+     * 搜索框：只过滤**看得见哪些行**，不动 [setModelQuery] 里那个"要用的模型名"。
+     *
+     * 两者分开的理由见 `ModelPickerState.search` 的注释 —— 合并的话，
+     * 搜索时敲的半个词会被当成模型名，点「使用模型」就把它写进了配置。
+     */
+    fun setModelSearch(text: String) {
+        _state.update { s -> s.copy(modelPicker = s.modelPicker?.copy(search = text)) }
+    }
+
     private fun fetchModelCatalog() {
         modelCatalogJob?.cancel()
         modelCatalogJob = viewModelScope.launch {

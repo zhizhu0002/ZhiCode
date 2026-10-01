@@ -61,6 +61,20 @@ public final class DebugHudStructureTest {
     /** 用户气泡与助手卡片。图片行的接入点在 `UserBubble`。 */
     private static final String MESSAGE_CARDS = SRC + "ui/chat/MessageCards.kt";
 
+    /** 模型选择面板。事故见 §19：搜索串误当成"要用的模型名"。 */
+    private static final String MODEL_PICKER = SRC + "ui/dialogs/ModelPickerOverlay.kt";
+
+    /**
+     * 设置相关的界面模型。
+     *
+     * ⚠️ 与 [MODELS]（`model/UiModels.kt`）是**两个文件**：`ModelPickerState` 住在
+     * 这里，`ChatItem` 住在那边。写混了会得到"字段不存在"这种看起来像代码坏了的报错。
+     */
+    private static final String SETTINGS_MODELS = SRC + "model/SettingsModels.kt";
+
+    /** 浮层宿主：所有面板的接线点。 */
+    private static final String OVERLAY_HOST = SRC + "ui/OverlayHost.kt";
+
     /** 工具实现所在目录：脚本里点名的工具名要在这里能找到出处。 */
     private static final String TOOLS_DIR = "app/src/main/java/com/termux/app/zhicode/tools";
 
@@ -583,6 +597,52 @@ public final class DebugHudStructureTest {
                         + "多于一处就回到了\"三个 chip 均分宽度\"：长度固定的"
                         + "「每次询问」「推理：自动」会被切成「推理: …」这类半截词，"
                         + "而它们本来就只需要自己的自然宽度");
+
+        // ---- 19. 模型选择面板：搜索与选择必须是两个字段 --------------------
+        //
+        // 参考 rikkahub 的模型面板加了搜索框。最容易犯的错是**直接复用 `query`**：
+        // 那样在搜索框里敲 `deep` 只想筛行，但 `query` 同时变成了 `deep` ——
+        // 此时点「使用模型」就把它写进配置，服务端随后 400。
+        // 这个 bug 编译能过、单测不覆盖时也全绿，只在使用时才炸。
+        String modelsForPicker = stripComments(read(root, SETTINGS_MODELS));
+        requireContains(modelsForPicker, "val search: String",
+                SETTINGS_MODELS + " 的 ModelPickerState 必须有独立的 search 字段");
+        requireContains(modelsForPicker, "val visibleModels: List<ModelOption>",
+                "过滤要做成派生属性 visibleModels，才能脱离 Compose 单测");
+        requireContains(modelsForPicker, "if (needle.isEmpty()) return models",
+                "空搜索必须返回**全部**：返回空列表会让面板一打开就显示「没有匹配」");
+
+        String pickerFile = stripComments(read(root, MODEL_PICKER));
+        requireContains(pickerFile, "OverlayBottomSheet(",
+                MODEL_PICKER + " 必须用底部 Sheet 容器");
+        requireContains(pickerFile, "ZhiTextField(",
+                MODEL_PICKER + " 的搜索框必须走工程统一的 ZhiTextField");
+        requireContains(pickerFile, "picker.visibleModels",
+                "面板必须用 visibleModels 过滤后的列表，而不是原始 models");
+        requireContains(pickerFile, "onSearchChange",
+                "搜索框必须接**独立的** onSearchChange，不能复用 onQueryChange");
+        // 选中高亮必须铺在**圆角容器**上（Surface），而不是 BasicComponent 的哪个颜色
+        // 参数：后者画出来是直角色块，与卡片圆角对不上，多行堆叠时四角会露方边。
+        requireContains(pickerFile, "if (selected) scheme.primaryContainer",
+                MODEL_PICKER + " 的选中高亮必须走 primaryContainer 铺在带形状的容器上");
+        requireContains(pickerFile, "Surface(",
+                MODEL_PICKER + " 的模型行必须自己套一层 Surface 才能做出圆角高亮");
+
+        String overlayHost = stripComments(read(root, OVERLAY_HOST));
+        requireContains(overlayHost, "onSearchChange = viewModel::setModelSearch",
+                OVERLAY_HOST + " 必须把搜索接到 setModelSearch（而不是 setModelQuery）");
+
+        String vmForSearch = stripComments(read(root, VIEW_MODEL));
+        requireContains(vmForSearch, "fun setModelSearch(",
+                VIEW_MODEL + " 必须提供 setModelSearch");
+        requireContains(vmForSearch, "copy(search = text)",
+                "setModelSearch 必须只改 search：改到 query 上就是上面那个 400 的 bug");
+
+        // 能力标签与收藏心形：上游目录只给 id + displayName（ModelCatalogClient
+        // 只读 id/display_name/name），全工程也没有 favorites 概念。
+        // 参考图里有这两块，但凭空造出来会让模型收到它并不支持的请求。
+        require(!modelsForPicker.contains("favorite"),
+                MODELS + " 没有收藏的数据来源，不得凭空加一个 favorite 字段");
     }
 
     /** 子串出现次数。 */
