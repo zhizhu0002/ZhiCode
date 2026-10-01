@@ -1,7 +1,9 @@
 package com.zhizhu.zhicode.compose.ui.settings
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -13,6 +15,7 @@ import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Surface
@@ -44,6 +47,26 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 这些组件内部都走 `BasicComponent`，所以标题/说明/按压态/圆角由 Miuix 统一负责。
  * 本文件只做一件事：把「蜘蛛 的语义」翻译成它们的参数。
  */
+
+/**
+ * 分组 = [SettingsGroupHeader] 标题 + 圆角 [Card]，间距照官方 `SettingsPage`：
+ * 标题与卡片各自水平 12dp，卡片之间靠标题的高度自然留白。
+ *
+ * 一张卡里放多行 preference（行间**不画分隔线**）是 Miuix 官方 example 的写法，
+ * 也是 rikkahub 的 CardGroup 观感 —— 每行各套一张卡会让整页碎成一堆便签。
+ * 主页与五个二级页共用这一个分组原语。
+ */
+@Composable
+internal fun SettingsGroup(title: String, content: @Composable () -> Unit) {
+    SettingsGroupHeader(title, modifier = Modifier.padding(horizontal = 12.dp))
+    Card(
+        modifier = Modifier.padding(horizontal = 12.dp),
+        cornerRadius = ZhiRadius.card,
+        insideMargin = PaddingValues(0.dp),
+    ) {
+        Column { content() }
+    }
+}
 
 /** 分组标题。转发到 Miuix [SmallTitle]，强调色文字。 */
 @Composable

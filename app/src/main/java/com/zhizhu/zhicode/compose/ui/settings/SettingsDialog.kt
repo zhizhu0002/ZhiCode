@@ -37,12 +37,9 @@ import com.zhizhu.zhicode.compose.model.WEB_TIMEOUT_MAX_SEC
 import com.zhizhu.zhicode.compose.model.WEB_TIMEOUT_MIN_SEC
 import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.model.formatTokenCountShort
-import com.zhizhu.zhicode.compose.theme.ZhiColors
-import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
@@ -155,22 +152,6 @@ private fun themeLabel(mode: ThemeMode): String = when (mode) {
     ThemeMode.SYSTEM -> "跟随系统"
     ThemeMode.LIGHT -> "白天模式"
     ThemeMode.DARK -> "夜间模式"
-}
-
-/**
- * 分组 = SmallTitle 标题 + 圆角 Card，间距照官方 SettingsPage：
- * 标题与卡片各自水平 12dp，卡片之间 12dp 垂直间隔。
- */
-@Composable
-private fun SettingsGroup(title: String, content: @Composable () -> Unit) {
-    SettingsGroupHeader(title, modifier = Modifier.padding(horizontal = 12.dp))
-    top.yukonga.miuix.kmp.basic.Card(
-        modifier = Modifier.padding(horizontal = 12.dp),
-        cornerRadius = ZhiRadius.card,
-        insideMargin = PaddingValues(0.dp),
-    ) {
-        Column { content() }
-    }
 }
 
 @Composable
