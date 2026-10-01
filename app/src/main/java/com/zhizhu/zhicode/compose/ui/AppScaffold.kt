@@ -4,6 +4,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.fadeOut
@@ -22,8 +25,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 import android.app.Application
@@ -116,6 +121,26 @@ private fun ZhiCodeScreen(
     var lastSkills by remember { mutableStateOf<SkillsState?>(null) }
     var lastRoleCards by remember { mutableStateOf<RoleCardsState?>(null) }
     var lastMemory by remember { mutableStateOf<MemoryState?>(null) }
+
+    // 页面栈动效的方向：true = 推入（新页从右滑入），false = 弹出（旧页向右滑出）。
+    // 打开设置/子页时置 true；返回键 / onDismiss 关闭前置 false。
+    var pushPage by remember { mutableStateOf(true) }
+    // 任一页面从「关」跳到「开」= 推入（打开动作可能在任何入口发生：
+    // 设置 hub 的导航行、侧栏入口、斜杠命令……统一在这里捕获，不在 VM 里散写）。
+    LaunchedEffect(Unit) {
+        snapshotFlow {
+            listOf(
+                state.settingsOpen,
+                state.apiConfig != null,
+                state.mcpConfig != null,
+                state.skills != null,
+                state.roleCards != null,
+                state.memory != null,
+            )
+        }.collect { flags ->
+            if (flags.any { it }) pushPage = true
+        }
+    }
 
     // 玻璃对象分两层，因为捕获节点不能包含自己：
     //  · glassMain —— 捕获「整个工作区」；用于顶栏 / 侧栏抽屉 / 弹窗。
@@ -211,47 +236,50 @@ private fun ZhiCodeScreen(
     // 之前顺序写反了（二级页在前），按返回直接把整页设置一把关掉。
     // 设置主页在**最前**注册（兜底层）；二级页从浅到深注册，
     // 深层（编辑表单）最后注册，才能比列表态先拿到返回事件。
-    BackHandler(enabled = state.settingsOpen) { viewModel.closeSettings() }
-    BackHandler(enabled = state.apiConfig != null) { viewModel.closeApiConfig() }
-    BackHandler(enabled = state.mcpConfig != null) { viewModel.closeMcpConfig() }
-    BackHandler(enabled = state.skills != null) { viewModel.closeSkills() }
-    BackHandler(enabled = state.roleCards != null) { viewModel.closeRoleCards() }
-    BackHandler(enabled = state.memory != null) { viewModel.closeMemory() }
+    fun back() { pushPage = false }
+    BackHandler(enabled = state.settingsOpen) { back(); viewModel.closeSettings() }
+    BackHandler(enabled = state.apiConfig != null) { back(); viewModel.closeApiConfig() }
+    BackHandler(enabled = state.mcpConfig != null) { back(); viewModel.closeMcpConfig() }
+    BackHandler(enabled = state.skills != null) { back(); viewModel.closeSkills() }
+    BackHandler(enabled = state.roleCards != null) { back(); viewModel.closeRoleCards() }
+    BackHandler(enabled = state.memory != null) { back(); viewModel.closeMemory() }
     // 二级页内部的深层态（表单/编辑器）比列表态更深，后注册先消费：
     state.apiConfig?.let { cfg ->
-        BackHandler(enabled = cfg.form != null) { viewModel.cancelApiProfileForm() }
+        BackHandler(enabled = cfg.form != null) { back(); viewModel.cancelApiProfileForm() }
     }
     state.mcpConfig?.let { cfg ->
-        BackHandler(enabled = cfg.form != null) { viewModel.cancelMcpForm() }
+        BackHandler(enabled = cfg.form != null) { back(); viewModel.cancelMcpForm() }
     }
     state.skills?.let { st ->
-        BackHandler(enabled = st.editing != null) { viewModel.cancelSkillEdit() }
-        BackHandler(enabled = st.createForm != null) { viewModel.cancelSkillCreate() }
+        BackHandler(enabled = st.editing != null) { back(); viewModel.cancelSkillEdit() }
+        BackHandler(enabled = st.createForm != null) { back(); viewModel.cancelSkillCreate() }
     }
     state.roleCards?.let { st ->
-        BackHandler(enabled = st.editor != null) { viewModel.cancelRoleCardEditor() }
+        BackHandler(enabled = st.editor != null) { back(); viewModel.cancelRoleCardEditor() }
     }
     state.memory?.let { st ->
-        BackHandler(enabled = st.editing != null) { viewModel.cancelMemoryEdit() }
+        BackHandler(enabled = st.editing != null) { back(); viewModel.cancelMemoryEdit() }
     }
 
     
     // ---- 设置整页（K4：像 miuix 示例的 SettingsPage，覆盖全屏）----
     // 画在 Scaffold/抽屉之后 = 最上层；打开时整页盖住工作区。
-    // 动效对齐侧栏抽屉（ZhiMotion）：淡入 + 底部轻微上移，关闭时反向。
+    // 动效 = 页面栈推入/弹出：进入从右滑入，返回向右滑出（用户指定的方向）。
     // `settingsUi` 保留最后一次非空的 draft：closeSettings 会先把状态置空，
     // 没有 retained 值的话退出动画的那几百毫秒里页面内容会整个闪没。
     val settingsUi = state.settingsDraft ?: lastSettingsDraft
     lastSettingsDraft = settingsUi
     AnimatedVisibility(
         visible = state.settingsOpen,
-        enter = fadeIn(tween(ZhiMotion.MEDIUM)) + scaleIn(initialScale = 0.94f, animationSpec = tween(ZhiMotion.MEDIUM)),
-        exit = fadeOut(tween(ZhiMotion.FAST)) + scaleOut(targetScale = 0.96f, animationSpec = tween(ZhiMotion.FAST)),
+        enter = if (pushPage) slideInHorizontally(tween(ZhiMotion.MEDIUM)) { it } + fadeIn(tween(ZhiMotion.FAST))
+                else fadeIn(tween(ZhiMotion.MEDIUM)),
+        exit = if (pushPage) fadeOut(tween(ZhiMotion.FAST))
+               else slideOutHorizontally(tween(ZhiMotion.MEDIUM)) { it } + fadeOut(tween(ZhiMotion.FAST)),
     ) {
         SettingsDialog(
             draft = settingsUi,
             onChange = viewModel::setSettingsDraft,
-            onDismiss = viewModel::closeSettings,
+            onDismiss = { pushPage = false; viewModel.closeSettings() },
             onSave = viewModel::saveSettings,
             onNavigate = viewModel::navigateFromSettings,
         )
@@ -266,61 +294,61 @@ private fun ZhiCodeScreen(
     // 还要跑 160ms，没有保留值的话那段时间页面内容会整个闪没（只剩空背景）。
     val apiUi = state.apiConfig ?: lastApiConfig
     lastApiConfig = apiUi
-    SubPageHost(visible = state.apiConfig != null) {
+    SubPageHost(visible = state.apiConfig != null, push = pushPage) {
         ApiConfigOverlay(
             config = apiUi,
-            onDismiss = viewModel::closeApiConfig,
+            onDismiss = { pushPage = false; viewModel.closeApiConfig() },
             onNew = viewModel::newApiProfile,
             onEdit = viewModel::editApiProfile,
             onSelect = viewModel::selectApiProfile,
             onDelete = viewModel::deleteApiProfile,
             onDraftChange = viewModel::updateApiProfileDraft,
             onSave = viewModel::saveApiProfile,
-            onCancelForm = viewModel::cancelApiProfileForm,
+            onCancelForm = { pushPage = false; viewModel.cancelApiProfileForm() },
         )
     }
 
     val mcpUi = state.mcpConfig ?: lastMcpConfig
     lastMcpConfig = mcpUi
-    SubPageHost(visible = state.mcpConfig != null) {
+    SubPageHost(visible = state.mcpConfig != null, push = pushPage) {
         McpConfigOverlay(
             config = mcpUi,
-            onDismiss = viewModel::closeMcpConfig,
+            onDismiss = { pushPage = false; viewModel.closeMcpConfig() },
             onNew = viewModel::newMcpServer,
             onEdit = viewModel::editMcpServer,
             onToggle = viewModel::toggleMcpServer,
             onDelete = viewModel::deleteMcpServer,
             onDraftChange = viewModel::updateMcpDraft,
             onSave = viewModel::saveMcpServer,
-            onCancelForm = viewModel::cancelMcpForm,
+            onCancelForm = { pushPage = false; viewModel.cancelMcpForm() },
         )
     }
 
     val skillsUi = state.skills ?: lastSkills
     lastSkills = skillsUi
-    SubPageHost(visible = state.skills != null) {
+    SubPageHost(visible = state.skills != null, push = pushPage) {
         SkillsOverlay(
             state = skillsUi,
-            onDismiss = viewModel::closeSkills,
+            onDismiss = { pushPage = false; viewModel.closeSkills() },
             onNew = viewModel::newSkill,
             onEdit = viewModel::editSkill,
             onAttach = viewModel::attachSkill,
             onDelete = viewModel::deleteSkill,
             onCreateDraftChange = viewModel::updateSkillCreateDraft,
             onCreate = viewModel::createSkill,
-            onCancelCreate = viewModel::cancelSkillCreate,
+            onCancelCreate = { pushPage = false; viewModel.cancelSkillCreate() },
             onBodyChange = viewModel::updateSkillBody,
             onSave = viewModel::saveSkill,
-            onCancelEdit = viewModel::cancelSkillEdit,
+            onCancelEdit = { pushPage = false; viewModel.cancelSkillEdit() },
         )
     }
 
     val roleCardsUi = state.roleCards ?: lastRoleCards
     lastRoleCards = roleCardsUi
-    SubPageHost(visible = state.roleCards != null) {
+    SubPageHost(visible = state.roleCards != null, push = pushPage) {
         RoleCardsOverlay(
             state = roleCardsUi,
-            onDismiss = viewModel::closeRoleCards,
+            onDismiss = { pushPage = false; viewModel.closeRoleCards() },
             onNew = viewModel::newRoleCard,
             onEdit = viewModel::editRoleCard,
             onSelect = viewModel::selectRoleCard,
@@ -328,36 +356,40 @@ private fun ZhiCodeScreen(
             onDelete = viewModel::deleteRoleCard,
             onDraftChange = viewModel::updateRoleCardDraft,
             onSave = viewModel::saveRoleCard,
-            onCancelEditor = viewModel::cancelRoleCardEditor,
+            onCancelEditor = { pushPage = false; viewModel.cancelRoleCardEditor() },
         )
     }
 
     val memoryUi = state.memory ?: lastMemory
     lastMemory = memoryUi
-    SubPageHost(visible = state.memory != null) {
+    SubPageHost(visible = state.memory != null, push = pushPage) {
         MemoryOverlay(
             state = memoryUi,
-            onDismiss = viewModel::closeMemory,
+            onDismiss = { pushPage = false; viewModel.closeMemory() },
             onEdit = viewModel::editMemory,
             onRunInit = { viewModel.closeMemory(); viewModel.runInitFromUi() },
             onBodyChange = viewModel::updateMemoryBody,
             onSave = viewModel::saveMemory,
-            onCancelEdit = viewModel::cancelMemoryEdit,
+            onCancelEdit = { pushPage = false; viewModel.cancelMemoryEdit() },
         )
     }
     }
 }
 
-/** 二级页的动效外壳：visible 由「状态非空」驱动，内容保留最后一次非空值。 */
+/** 二级页的动效外壳：visible 由「状态非空」驱动，内容保留最后一次非空值。
+ *  动效 = 页面栈推入/弹出（方向由 [push] 决定）：推入从右滑入，弹出向右滑出。 */
 @Composable
 private fun SubPageHost(
     visible: Boolean,
+    push: Boolean,
     content: @Composable () -> Unit,
 ) {
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(tween(ZhiMotion.MEDIUM)) + scaleIn(initialScale = 0.96f, animationSpec = tween(ZhiMotion.MEDIUM)),
-        exit = fadeOut(tween(ZhiMotion.FAST)),
+        enter = if (push) slideInHorizontally(tween(ZhiMotion.MEDIUM)) { it } + fadeIn(tween(ZhiMotion.FAST))
+                else fadeIn(tween(ZhiMotion.MEDIUM)),
+        exit = if (push) fadeOut(tween(ZhiMotion.FAST))
+               else slideOutHorizontally(tween(ZhiMotion.MEDIUM)) { it } + fadeOut(tween(ZhiMotion.FAST)),
     ) {
         content()
     }

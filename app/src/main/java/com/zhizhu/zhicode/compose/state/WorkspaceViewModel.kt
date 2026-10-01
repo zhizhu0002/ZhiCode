@@ -604,7 +604,15 @@ class WorkspaceViewModel(
     // ---------- Skill ----------
 
     fun openSkills() {
-        _state.update { it.copy(skills = SkillsState(skills = SkillStore.list(it.projectPath))) }
+        _state.update {
+            // 子页永远坐在设置主页之上（rikkahub 的页面栈）：从侧栏入口进来时
+            // 也把 hub 带起来，否则返回时子页关掉就直接回工作区，层断了。
+            it.copy(
+                skills = SkillsState(skills = SkillStore.list(it.projectPath)),
+                settingsOpen = true,
+                settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+            )
+        }
     }
 
     fun closeSkills() = _state.update { it.copy(skills = null) }
@@ -746,12 +754,14 @@ class WorkspaceViewModel(
     fun openRoleCards() {
         val context = getApplication<android.app.Application>()
         _state.update {
+            // 同 openSkills：侧栏入口也要把设置主页垫在底下，保证返回层级完整。
             it.copy(
                 roleCards = RoleCardsState(
                     cards = RoleCardStore.list(context),
                     activeId = RoleCardStore.activeId(context),
                 ),
-                settingsDraft = null,
+                settingsOpen = true,
+                settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
             )
         }
     }
@@ -878,7 +888,14 @@ class WorkspaceViewModel(
     // ---------- 记忆文件（ZhiCode.md） ----------
 
     fun openMemory() {
-        _state.update { it.copy(memory = MemoryState(files = MemoryStore.list(it.projectPath))) }
+        // 同 openSkills：侧栏入口也把设置主页垫在底下。
+        _state.update {
+            it.copy(
+                memory = MemoryState(files = MemoryStore.list(it.projectPath)),
+                settingsOpen = true,
+                settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+            )
+        }
     }
 
     fun closeMemory() = _state.update { it.copy(memory = null) }
@@ -2131,7 +2148,12 @@ class WorkspaceViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val state = ApiConfigStore.read(getApplication())
             _state.update {
-                it.copy(apiConfig = state, settingsDraft = null, settingsOpen = false)
+                // 设置主页垫在子页之下（页面栈），返回才有回退目标。
+                it.copy(
+                    apiConfig = state,
+                    settingsOpen = true,
+                    settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+                )
             }
             syncActiveProfile()
             syncRoleCardFromStore()
@@ -2225,7 +2247,14 @@ class WorkspaceViewModel(
      * 没有网络也没有密钥解密，放 IO 线程反而让状态更新顺序更难推理。
      */
     fun openMcpConfig() {
-        _state.update { it.copy(mcpConfig = McpStore.read(), settingsDraft = null, settingsOpen = false) }
+        _state.update {
+            // 同 openApiConfig：hub 垫底，返回回设置主页。
+            it.copy(
+                mcpConfig = McpStore.read(),
+                settingsOpen = true,
+                settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+            )
+        }
     }
 
     fun closeMcpConfig() = _state.update { it.copy(mcpConfig = null) }
