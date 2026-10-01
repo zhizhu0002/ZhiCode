@@ -139,6 +139,71 @@ public final class DebugScriptedProviderTest {
         assertEquals(DebugScriptedProvider.Scenario.MARKDOWN, DebugScriptedProvider.Scenario.pick("来段长文"));
     }
 
+    /**
+     * **会话中途换场景**：这是"输入『工具』什么都没发生"的那条真因。
+     *
+     * <p>上下文里已经有好几轮对话时，关键词必须取自**最后一条提问**；
+     * 取第一条的话，只有整段会话的第一句话能选场景 —— 之后发什么都不会变，
+     * 用户看到的就是"打了『工具』但链接没动"。
+     */
+    @Test
+    public void scenarioComesFromTheLatestPrompt() throws Exception {
+        JSONArray messages = new JSONArray()
+                .put(new JSONObject().put("role", "user").put("content", "随便聊两句"))
+                .put(new JSONObject().put("role", "assistant").put("content", "好的"))
+                .put(new JSONObject().put("role", "user").put("content", "列一下工具"));
+
+        AssistantTurn turn = new DebugScriptedProvider()
+                .createMessage(null, "system", messages, tools(schema("Grep", "grep")), null);
+
+        assertFalse("换场景后必须从本轮的**第 0 步**重新开始，而不是接着上一轮往下跑："
+                        + "否则新场景的第一步永远不会被执行（表现是「没有工具跑起来」）",
+                turn.toolCalls.isEmpty());
+        assertEquals("只读批次里的工具才是本轮第 0 步该产出的东西",
+                "Grep", turn.toolCalls.get(0).name);
+    }
+
+    /**
+     * **工具结果不是新提问**。
+     *
+     * <p>工具结果以 {@code role=user} 追加（协议要求），如果把这种消息当成新提问，
+     * 脚本每一步都会退回第 0 步 —— 引擎的工具循环就永远出不来（死循环）。
+     * 这条断言守的正是那个循环的出口。
+     */
+    @Test
+    public void toolResultsDoNotResetTheStep() throws Exception {
+        JSONArray messages = new JSONArray()
+                .put(new JSONObject().put("role", "user").put("content", "工具"))
+                .put(new JSONObject().put("role", "assistant").put("content", "（第 0 步：只读批次）"))
+                .put(new JSONObject().put("role", "user").put("content", new JSONArray()
+                        .put(new JSONObject().put("type", "tool_result")
+                                .put("tool_use_id", "all-1").put("content", "匹配到 3 处"))));
+
+        AssistantTurn turn = new DebugScriptedProvider()
+                .createMessage(null, "system", messages, tools(schema("Grep", "grep")), null);
+
+        assertTrue("工具结果之后应当走到收尾这一步（第 0 步已经用掉了）", turn.toolCalls.isEmpty());
+        assertEquals("收尾必须是最终回复，否则引擎会继续循环下去", "end_turn", turn.stopReason);
+        assertTrue("收尾正文就是全工具清单", textOf(turn).contains("全部工具清单"));
+    }
+
+    /** 一轮之内工具循环会多次请求：步数必须逐次往前走。 */
+    @Test
+    public void stepAdvancesInsideToolLoop() throws Exception {
+        JSONArray messages = new JSONArray()
+                .put(new JSONObject().put("role", "user").put("content", "随便说点什么"))
+                .put(new JSONObject().put("role", "assistant").put("content", "（第 0 步）"))
+                .put(new JSONObject().put("role", "user").put("content", new JSONArray()
+                        .put(new JSONObject().put("type", "tool_result")
+                                .put("tool_use_id", "chain-1").put("content", "ok"))));
+
+        AssistantTurn second = new DebugScriptedProvider()
+                .createMessage(null, "system", messages, tools(schema("Read", "read")), null);
+
+        assertFalse("第 1 步（默认全链路是读取）必须有工具调用", second.toolCalls.isEmpty());
+        assertEquals("Read", second.toolCalls.get(0).name);
+    }
+
     // ------------------------------------------------------------------ 工具
 
     private static JSONObject schema(String name, String description) throws Exception {

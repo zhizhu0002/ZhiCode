@@ -35,7 +35,15 @@ import java.util.Locale;
  * <h3>无状态</h3>
  *
  * {@link ModelProvider} 要求实现不得把"一次请求"的状态放进字段（两次请求会互相踩）。
- * 所以脚本进度**只从 messages 推导**：第几轮 = 上下文里已经有几条助手消息。
+ * 所以脚本进度**只从 messages 推导**，而且是**按轮**推导的：
+ *
+ * <ul>
+ *   <li>场景 = 从**最后一条人类提问**（排除搬运工具结果的 user 消息）里取关键词；
+ *       于是"在下一条消息里带上关键词"这句话才是真的 —— 会话说久了也能换场景。</li>
+ *   <li>第几步 = 那条提问**之后**已有几条助手回复。工具循环中间那几次请求，
+ *       提问没有变、助手回复多了一条，所以步数正好往前走一格。</li>
+ * </ul>
+ *
  * 同一个上下文永远得到同一个下一轮，这也是重试语义正确的必要条件。
  *
  * <h3>安全边界</h3>
@@ -73,8 +81,9 @@ public final class DebugScriptedProvider implements ModelProvider {
             JSONArray tools,
             StreamListener listener
     ) throws Exception {
-        Scenario scenario = Scenario.pick(userText(messages));
-        int step = assistantTurnCount(messages);
+        int promptAt = lastPromptIndex(messages);
+        Scenario scenario = Scenario.pick(promptAt < 0 ? "" : textOf(messages.optJSONObject(promptAt).opt("content")));
+        int step = assistantTurnCount(messages, promptAt);
         List<Step> plan = scenario.steps(tools);
         Step current = step < plan.size() ? plan.get(step) : scenario.closing(tools);
 
@@ -151,23 +160,44 @@ public final class DebugScriptedProvider implements ModelProvider {
 
     // ------------------------------------------------------------------ 上下文解析
 
-    /** 上下文里第一条用户消息的正文。 */
-    private static String userText(JSONArray messages) {
-        if (messages == null) return "";
-        for (int i = 0; i < messages.length(); i++) {
+    /**
+     * 上下文里**最后一条人类提问**的下标；没有就返回 {@code -1}。
+     *
+     * <p>为什么必须"最后一条"而不是第一条：关键词是**发消息时**写的，
+     * 而上下文是整段会话。取第一条的话，只有会话的**第一句话**能选场景 ——
+     * 之后无论再发什么（包括写着一堆关键词的那段收尾说明本身），场景都不会变。
+     * 表现出来就是"我明明打了『工具』，什么都没发生"。
+     *
+     * <p>为什么还要排除带 {@code tool_result} 的用户消息：工具结果也是以
+     * {@code role=user} 追加的（协议要求），把它当成新提问会让脚本**每一步都退回第 0 步**，
+     * 于是引擎的工具循环永远出不来。判断依据只有"这条消息里有没有 tool_result 块"。
+     */
+    private static int lastPromptIndex(JSONArray messages) {
+        if (messages == null) return -1;
+        for (int i = messages.length() - 1; i >= 0; i--) {
             JSONObject message = messages.optJSONObject(i);
             if (message == null || !"user".equals(message.optString("role"))) continue;
-            String text = textOf(message.opt("content"));
-            if (!text.isEmpty()) return text;
+            if (!carriesToolResult(message.opt("content"))) return i;
         }
-        return "";
+        return -1;
     }
 
-    /** 已经发生过几轮助手回复 —— 也就是脚本走到第几步。 */
-    private static int assistantTurnCount(JSONArray messages) {
+    /** 这条用户消息是不是"工具结果的搬运工"。 */
+    private static boolean carriesToolResult(Object content) {
+        if (!(content instanceof JSONArray)) return false;
+        JSONArray blocks = (JSONArray) content;
+        for (int i = 0; i < blocks.length(); i++) {
+            JSONObject block = blocks.optJSONObject(i);
+            if (block != null && "tool_result".equals(block.optString("type"))) return true;
+        }
+        return false;
+    }
+
+    /** 从 {@code from}（不含）往后数助手回复 —— 也就是**本轮**脚本走到第几步。 */
+    private static int assistantTurnCount(JSONArray messages, int from) {
         if (messages == null) return 0;
         int count = 0;
-        for (int i = 0; i < messages.length(); i++) {
+        for (int i = Math.max(0, from + 1); i < messages.length(); i++) {
             JSONObject message = messages.optJSONObject(i);
             if (message != null && "assistant".equals(message.optString("role"))) count++;
         }

@@ -351,6 +351,24 @@ public final class DebugHudStructureTest {
                     "脚本化传输调用了不存在的工具 `" + name + "`（tools/ 下没有任何工具声明这个名字）："
                             + "界面上只会显示成一行 Unknown tool");
         }
+
+        // ---- 12. 场景与步数必须**按轮**推导 ---------------------------------
+        //
+        // 「输入『工具』什么都没发生」这条真因就在这儿：关键词原本取自上下文的**第一条**
+        // 用户消息，于是只有整段会话的第一句话能选场景。这类错编译通过、运行不报错，
+        // 只在"会话已经聊了几轮之后再打关键词"时才显形 —— 必须由守卫钉住。
+        requireContains(scripted, "lastPromptIndex(",
+                "场景关键词必须取自**最后一条人类提问**（lastPromptIndex）："
+                        + "取第一条的话，会话说久了再打关键词什么都不会发生");
+        requireContains(scripted, "carriesToolResult(",
+                "必须排除搬运工具结果的 user 消息：工具结果也以 role=user 追加，"
+                        + "把它当新提问会让脚本每一步都退回第 0 步（引擎的工具循环出不来）");
+        requireContains(scripted, "assistantTurnCount(messages, promptAt)",
+                "步数必须相对**本轮提问**来数（助手回复也按轮数，不是整段会话的总数）："
+                        + "按总数数的话，聊得久了新场景直接跳到收尾，第一步永远不执行");
+        require(!scripted.contains("userText("),
+                "旧的\"取第一条用户消息\"那个辅助方法必须删掉 —— 留着它，"
+                        + "下一个改这里的人很容易又接回去");
     }
 
     /** tools/ 下每个工具自己声明的名字（`public String name() { return "Read"; }`）。 */
