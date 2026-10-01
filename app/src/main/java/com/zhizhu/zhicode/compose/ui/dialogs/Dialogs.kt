@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -51,6 +52,7 @@ import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Switch
@@ -77,8 +79,9 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
  * ## 手写降到最低
  *
  * - 列表行 → Miuix [BasicComponent]（`title` / `summary` / `startAction` / `endActions`）
- * - 选中指示 → Miuix [Icon] + `MiuixIcons.Basic.Check`（与库自己的下拉列表一致）。
- *   不用 [Checkbox]：它固定 26dp 且是圆的，配 11~13sp 的行文字明显偏大。
+ * - 选中指示 → 多选用 Miuix [Checkbox]（未选中也画空框，"可以多选"这件事才看得见）；
+ *   单选用 Miuix [Icon] + `MiuixIcons.Basic.Check`（与库自己的下拉列表一致）。
+ *   不用 `RadioButton`：它在未选中时不画任何东西，单选行会连"这里能点"都看不出来。
  * - 主按钮 → Miuix [Button] + [ButtonDefaults.buttonColorsPrimary]
  * - 次要按钮 → Miuix [Button] + `buttonColors`（与主按钮同形状、只有配色不同）
  * - 开关 → Miuix [Switch]
@@ -390,26 +393,42 @@ fun ChoicePickerOverlay(
                         summaryColor = BasicComponentDefaults.summaryColor(
                             color = scheme.onSurfaceVariantSummary,
                         ),
-                        // 左侧选择控件。Miuix `RadioButton` 未选中时不画任何东西，
-                        // 选择标记用 Miuix 自己的 Check 图标，和 Miuix 的做法对齐 ——
-                        // 它的下拉列表（`DropdownImpl`）用的就是 `MiuixIcons.Basic.Check`
-                        // 配 `DropdownDefaults.CheckIconSize`，不是 Checkbox。
+                        // 左侧选择控件分两种，按"能不能反悔"选：
                         //
-                        // 为什么不用 Checkbox：stable 0.9.4 里它**固定 26dp 而且是圆的**
-                        // （源码 `requiredSize(26.dp)` + `clip(CircleShape)`；`requiredSize`
-                        // 在调用方 modifier 之后，所以外面也压不动）。26dp 配 11~13sp
-                        // 的行文字会明显偏大。
+                        // - **多选**（引擎 `AskUserQuestion` 的 multiSelect）→ Miuix [Checkbox]。
+                        //   多选必须先让人看出"这里可以打勾、而且能勾好几个"，
+                        //   而 Checkbox 是 Miuix 里**唯一在未选中时也画东西**的选择控件
+                        //   （字节码里 `CheckboxColors` 有 checked/unchecked 两套前景与底色，
+                        //   未选中画的是空框）。之前两种情形共用"选中才出现的 Check 图标"，
+                        //   未选中就是一片空白 —— 多选窗口看起来像一列普通文字，根本看不出能选。
                         //
-                        // 整行的点击由 BasicComponent 的 onClick 负责，这个图标只是状态
-                        // 指示、不承载交互语义；未选中时用透明 tint 占住同一位置，
-                        // 免得行高随选中状态跳动。
-                        startAction = {
-                            Icon(
-                                imageVector = MiuixIcons.Basic.Check,
-                                contentDescription = null,
-                                tint = if (checked) scheme.primary else Color.Transparent,
-                                modifier = Modifier.size(DropdownDefaults.CheckIconSize),
-                            )
+                        // - **单选** → 选中才出现的 Miuix Check 图标，与库自己的下拉列表一致
+                        //   （`DropdownImpl` 用的就是 `MiuixIcons.Basic.Check` 配
+                        //   `DropdownDefaults.CheckIconSize`）。单选不做空框：那会看着像复选框，
+                        //   让人以为能勾多个。
+                        //
+                        // 关于 Checkbox 的尺寸：0.9.4 里它**固定 26dp 且是圆的**
+                        // （字节码 `requiredSize(26.dp)`，在调用方 modifier 之后，外面压不动）。
+                        // 多选行因此比单选行略高，这是跟库对齐的代价，不再自己画一个方框去绕开。
+                        //
+                        // 多选时 Checkbox 自己也接了 toggle：点框和点整行是同一个动作，
+                        // 不会出现"点框没反应"（Compose 的点击会被消费，不会同时触发两遍）。
+                        startAction = if (multi) {
+                            {
+                                Checkbox(
+                                    state = if (checked) ToggleableState.On else ToggleableState.Off,
+                                    onClick = toggle,
+                                )
+                            }
+                        } else {
+                            {
+                                Icon(
+                                    imageVector = MiuixIcons.Basic.Check,
+                                    contentDescription = null,
+                                    tint = if (checked) scheme.primary else Color.Transparent,
+                                    modifier = Modifier.size(DropdownDefaults.CheckIconSize),
+                                )
+                            }
                         },
                         onClick = toggle,
                         insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),

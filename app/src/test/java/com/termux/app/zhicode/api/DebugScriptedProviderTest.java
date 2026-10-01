@@ -204,6 +204,57 @@ public final class DebugScriptedProviderTest {
         assertEquals("Read", second.toolCalls.get(0).name);
     }
 
+    // ------------------------------------------------------------------ 选择窗口
+
+    /**
+     * 「提问」场景必须产出一次**多选**的 {@code AskUserQuestion}。
+     *
+     * <p>这个窗口原先只有真模型肯调该工具时才出现，于是"多选行的勾选框对不对"
+     * 只能碰运气复现。脚本给出同名 tool_use 就能走完整链路
+     * （窗口 → 用户作答 → 工具结果 → 收尾）—— 前提是字段名与引擎那份 schema 对得上，
+     * 写歪了不会报错，只会静默少一个窗口。
+     */
+    @Test
+    public void questionScenarioAsksAMultiSelectQuestion() throws Exception {
+        AssistantTurn first = firstTurn(tools(schema("Read", "read")), "提问");
+
+        assertEquals("「提问」场景第 0 步必须产出一次工具调用", 1, first.toolCalls.size());
+        ToolCall call = first.toolCalls.get(0);
+        assertEquals("必须叫 AskUserQuestion（引擎按名字分派，名字写歪只会得到 Unknown tool）",
+                "AskUserQuestion", call.name);
+        assertEquals("有工具调用 → 停止原因必须是 tool_use", "tool_use", first.stopReason);
+
+        JSONArray questions = call.input.optJSONArray("questions");
+        assertNotNull("入参必须是 questions[]（引擎 schema 的必填字段）", questions);
+        JSONObject question = questions.optJSONObject(0);
+        assertNotNull(question);
+        assertTrue("必须是多选：单选不画勾选框，用它测等于没测",
+                question.optBoolean("multiSelect", false));
+        assertTrue("要有提问正文（窗口顶部的加粗提问）",
+                !question.optString("question").isEmpty());
+        assertTrue("要有窗口标题（header）", !question.optString("header").isEmpty());
+
+        JSONArray options = question.optJSONArray("options");
+        assertNotNull(options);
+        assertTrue("选项至少两条，否则看不出「多选」这件事", options.length() >= 2);
+        for (int i = 0; i < options.length(); i++) {
+            JSONObject option = options.optJSONObject(i);
+            assertNotNull(option);
+            assertFalse("每个选项必须有 label（引擎 schema 的必填字段）",
+                    option.optString("label").isEmpty());
+        }
+        assertTrue("要留一条**没有说明**的选项：说明可空，少了它行高会变 —— 那正是要看的东西之一",
+                hasOptionWithoutDescription(options));
+    }
+
+    private static boolean hasOptionWithoutDescription(JSONArray options) {
+        for (int i = 0; i < options.length(); i++) {
+            JSONObject option = options.optJSONObject(i);
+            if (option != null && option.optString("description").isEmpty()) return true;
+        }
+        return false;
+    }
+
     // ------------------------------------------------------------------ 工具
 
     private static JSONObject schema(String name, String description) throws Exception {
@@ -229,8 +280,13 @@ public final class DebugScriptedProviderTest {
 
     /** 脚本第 0 步（还没发生过助手回复）。 */
     private static AssistantTurn firstTurn(JSONArray tools) throws Exception {
+        return firstTurn(tools, "工具");
+    }
+
+    /** 指定第一句话的脚本第 0 步。 */
+    private static AssistantTurn firstTurn(JSONArray tools, String prompt) throws Exception {
         DebugScriptedProvider provider = new DebugScriptedProvider();
-        return provider.createMessage(null, "system", userOnly("工具"), tools, null);
+        return provider.createMessage(null, "system", userOnly(prompt), tools, null);
     }
 
     /** 收尾那一步（上下文里已经有一次助手回复）。 */

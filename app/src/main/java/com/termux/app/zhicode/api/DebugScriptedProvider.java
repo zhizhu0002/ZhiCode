@@ -276,7 +276,20 @@ public final class DebugScriptedProvider implements ModelProvider {
         FAILURE("失败", new String[]{"失败", "错误", "fail", "error"}),
 
         /** 长文与 Markdown：验证折行、代码块、表格、列表、引用。 */
-        MARKDOWN("长文 Markdown", new String[]{"长文", "markdown", "md", "文档"});
+        MARKDOWN("长文 Markdown", new String[]{"长文", "markdown", "md", "文档"}),
+
+        /**
+         * 关键词 {@code 提问}：触发引擎的 {@code AskUserQuestion}，弹出**选择窗口**。
+         *
+         * <p>这个窗口原本只有真模型肯调 {@code AskUserQuestion} 时才出现，
+         * 于是"多选行的勾选框长什么样"这类问题只能靠碰运气复现。这里直接用脚本触发一次
+         * —— 注意它**不是**注册表里的工具：引擎自己实现它（见
+         * {@code ZhiCodeEngine.executeTool} 的 {@code AskUserQuestion} 分支），
+         * 所以脚本给一个同名 tool_use 就能走完整条链路（窗口 → 用户作答 → 工具结果 → 收尾）。
+         *
+         * <p>刻意用 {@code multiSelect = true}：单选与多选两种排版里，只有多选才画勾选框。
+         */
+        QUESTION("提问窗口", new String[]{"提问", "选择", "question", "多选"});
 
         private final String label;
         private final String[] keywords;
@@ -321,6 +334,13 @@ public final class DebugScriptedProvider implements ModelProvider {
 
         private List<Step> stepsChecked(JSONArray tools) throws JSONException {
             switch (this) {
+                case QUESTION:
+                    return List.of(
+                            new Step("先问清楚要测哪几项 —— 多选窗口是本场景唯一目的。",
+                                    "有几个点想先跟你确认（可多选）。",
+                                    List.of(question("ask-1"))),
+                            finalStep("选择窗口走完了。")
+                    );
                 case ALL_TOOLS:
                     return List.of(
                             new Step("先把只读那一批真跑一次：清单里的名字能不能跑、跑出来长什么样，看工具行最直接。",
@@ -423,13 +443,41 @@ public final class DebugScriptedProvider implements ModelProvider {
                     .append("- `计划`：触发**计划模式 / 审批**\n")
                     .append("- `任务`：触发 **Agent 任务卡**与任务清单\n")
                     .append("- `失败`：触发失败工具行（含退出码与错误输出）\n")
-                    .append("- `长文`：触发长 Markdown（标题/列表/表格/代码块/引用）\n");
+                    .append("- `长文`：触发长 Markdown（标题/列表/表格/代码块/引用）\n")
+                    .append("- `提问`：触发**选择窗口**（多选，行前有勾选框）\n");
             return Step.say("脚本已收尾。", text.toString());
         }
     }
 
     private static ToolCall tool(String id, String name, JSONObject input) {
         return new ToolCall(id, name, input);
+    }
+
+    // ------------------------------------------------------------ 选择窗口
+
+    /**
+     * 构造一次 {@code AskUserQuestion} 调用（多选）。
+     *
+     * <p>字段名跟着引擎那份 schema 走（{@code questions[]} 里每项
+     * {@code question} / {@code header} / {@code multiSelect} / {@code options[]}）。
+     * 选项刻意给成"有长说明的"和"没说明的"两种：选择窗口里说明是可空的，
+     * 少了它行高会变 —— 这正是要看的东西之一。
+     */
+    private static ToolCall question(String id) throws JSONException {
+        JSONObject multi = new JSONObject()
+                .put("label", "只读命令")
+                .put("description", "跑 pwd / ls 这类无副作用命令");
+        JSONArray options = new JSONArray()
+                .put(new JSONObject().put("label", "搜索").put("description", "Grep / Glob / WebSearch"))
+                .put(new JSONObject().put("label", "读取").put("description", "Read / ReadMany / Tree"))
+                .put(multi)
+                .put(new JSONObject().put("label", "没有说明的选项"));
+        JSONObject ask = new JSONObject()
+                .put("question", "选一下接下来要测的项（可多选）")
+                .put("header", "测试项")
+                .put("multiSelect", true)
+                .put("options", options);
+        return tool(id, "AskUserQuestion", new JSONObject().put("questions", new JSONArray().put(ask)));
     }
 
     // ------------------------------------------------------------ 全工具清单

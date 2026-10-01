@@ -43,6 +43,9 @@ public final class DebugHudStructureTest {
             "app/src/main/java/com/termux/app/zhicode/api/DebugScriptedProvider.java";
     private static final String DEBUG_PROFILE = SRC + "data/DebugApiProfile.kt";
 
+    /** 模态窗口：选择窗口的行首控件在这里决定。 */
+    private static final String DIALOGS = SRC + "ui/dialogs/Dialogs.kt";
+
     /** 工具实现所在目录：脚本里点名的工具名要在这里能找到出处。 */
     private static final String TOOLS_DIR = "app/src/main/java/com/termux/app/zhicode/tools";
 
@@ -369,6 +372,37 @@ public final class DebugHudStructureTest {
         require(!scripted.contains("userText("),
                 "旧的\"取第一条用户消息\"那个辅助方法必须删掉 —— 留着它，"
                         + "下一个改这里的人很容易又接回去");
+
+        // ---- 13. 选择窗口的行首控件：多选必须画得出"未选中" -----------------
+        //
+        // 多选窗口原来两种情形共用"选中才出现的 Check 图标"，未选中时 tint 透明 ——
+        // 一列选项看起来就是普通文字，没人看得出能勾、也没人知道能勾好几个。
+        // 能画出未选中态的 Miuix 控件只有 Checkbox，所以这条必须钉住分支本身。
+        String dialogs = stripComments(read(root, DIALOGS));
+        int branch = dialogs.indexOf("startAction = if (multi)");
+        require(branch > 0,
+                DIALOGS + " 的选择窗口必须按 multi 分开选行首控件："
+                        + "多选与单选共用一种标记时，未选中那一态就没法各自画对");
+        int checkbox = dialogs.indexOf("Checkbox(", branch);
+        require(checkbox > 0 && checkbox - branch < 500,
+                "多选行首必须是 Miuix Checkbox：它是 Miuix 里唯一在**未选中**时也画东西的"
+                        + "选择控件（未选中画空框），多选这件事才看得见");
+        requireContains(dialogs, "ToggleableState",
+                "Checkbox 的选中态必须走 ToggleableState（On/Off），不要用别的近似控件代替");
+        int checkIcon = dialogs.indexOf("MiuixIcons.Basic.Check", branch);
+        require(checkIcon > checkbox,
+                "单选分支必须留在 Checkbox 之后：单选不做空框（那会看着像复选框），"
+                        + "仍用 Miuix 下拉列表那套\"选中才出现 Check 图标\"");
+
+        // 选择窗口原先只有真模型肯调 AskUserQuestion 才出现，"多选行长什么样"只能碰运气复现。
+        // 脚本化传输直接把这条链路变成一句话就能触发（引擎自己实现该工具，不注册在注册表里）。
+        requireContains(scripted, "QUESTION",
+                SCRIPTED_PROVIDER + " 必须有触发选择窗口的场景");
+        requireContains(scripted, "\"AskUserQuestion\"",
+                "触发选择窗口靠的是**同名 tool_use**：该工具由引擎自己实现"
+                        + "（不注册在 ToolRegistry 里），所以脚本只能按名字给调用");
+        requireContains(scripted, "\"multiSelect\", true",
+                "选择窗口场景必须是**多选**：单选不画勾选框，用它测等于没测");
     }
 
     /** tools/ 下每个工具自己声明的名字（`public String name() { return "Read"; }`）。 */

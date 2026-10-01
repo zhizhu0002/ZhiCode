@@ -1534,6 +1534,7 @@ private val DEBUG_SCENARIOS: List<Pair<String, String>> = listOf(
     "任务" to "建两条任务 → 触发 **Agent 任务卡**与任务清单",
     "失败" to "读不存在的文件 + 非零退出码 → 红色失败行",
     "长文" to "长 Markdown 回复（标题/列表/表格/代码块/引用/折行）",
+    "提问" to "触发**选择窗口**（多选 · 每行行首有勾选框）",
 )
 
 
