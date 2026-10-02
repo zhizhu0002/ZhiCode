@@ -2,7 +2,6 @@ package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,27 +11,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.ModelOption
 import com.zhizhu.zhicode.compose.model.ModelPickerState
-import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.ui.ZhiSectionLabel
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.basic.Search
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextFieldDefaults
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.basic.Search
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -60,21 +55,41 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * `DialogShell` —— 那个外壳自带标题行与 `weight(1f)`，套进来会出现两行标题，
  * 而且它的 weight 依赖一个有界高度，sheet 的高度由内容决定，语义也对不上。
  * 底部两个按钮仍留在内容里：sheet 的 `endAction` 是画在**标题行**上的
- * （见 Miuix 的 `TitleAndActionsRow`），与参考图的"按钮在底部"不是一回事。
+ * （见 Miuix 的 `TitleAndActionsRow`），与用户习惯的"按钮在底部"不是一回事。
  *
- * ## 为什么列表是懒的
+ * ## 结构全部照 Miuix 自己的示例，不自己拼
  *
- * 目录最多 250 项（引擎侧 `MAX_MODELS` 上限）。虽然不算多，但把这些行全部即时组合
- * 进面板不如用 [LazyColumn]；同时给一个 [heightIn] 上限，否则长列表会把面板顶出屏幕，
- * 底部的「使用模型」按钮就点不到了。
- * （这条 `heightIn` 还是 `DialogScrollNestingTest` 的硬性要求：没有它，
- * 无限高的 LazyColumn 会拿到 Infinity 高度约束并直接崩。）
+ * 这个面板前后改过四版，踩的坑有个共同点：**都是在"自己拼结构 + 自己挑颜色"**。
+ * 每一处都有 Miuix 官方示例或组件可以直接照，照了就不会错：
  *
- * ## 列表为空不等于失败
+ * | 问题 | 之前的错法 | 官方做法 |
+ * | --- | --- | --- |
+ * | 卡片与背板同色、卡片看不见 | 什么都不传，信"默认值总是搭好的" | 官方**显式**传 `secondaryContainer` |
+ * | 选中行文字反而更暗 | 把 `onSecondaryContainer`(`#7C7C7C` 中灰) 当前景色 | 前景色用 `onSurfaceContainer`(近白) |
+ * | 搜索框填充看不见 | 覆写成 `surfaceContainerHigh` | 用默认的 `secondaryContainer` |
+ * | 高亮"选中项" | 自己拼卡片 + 手绘色块 | 官方 Card 示例的蓝卡：`primaryVariant` |
  *
- * [ModelPickerState.status] 已经区分了「加载中 / 获取到 N 个 / 未返回 / 具体错误」，
- * 所以这里只负责把它显示出来；出现空列表时旁边的输入框就是兜底路径，
- * 这不是"错误态"而是"另一种用法"。
+ * 原因是 Miuix 的**默认值分属两套、并不保证互相搭**：`OverlayBottomSheet` 的背板取
+ * `background`，而 `CardDefaults` 的卡片色取 `surfaceContainer` —— **深色下两者都是
+ * `#242424`**。所以"全用默认值"在 sheet 里恰好会让卡片消失。这不是它设计得差，
+ * 而是它的默认值面向"页面里直接放卡片"，不是"卡片放在 sheet 里"。
+ *
+ * ## 选中态为什么是蓝色卡片
+ *
+ * 直接照 Miuix 自己的 Card 示例（就是那个"ShowIndication: true"的蓝卡）：
+ * `CardDefaults.defaultColors(color = primaryVariant)` + 文字 `onPrimaryVariant`。
+ * 深色下分别是 `#0073DD` 和 `#99C7F1` —— 蓝底浅蓝字。
+ *
+ * ## 为什么不用 `RadioButtonPreference`
+ *
+ * 它是 Miuix 里"从列表单选一个"的原生组件，一度用过。换掉的原因很具体：
+ * 它的选中表达是**单选圈 + 主色文字**，而这里要的是**整块蓝卡**；两者叠在一起时，
+ * 单选圈用的是 `primary`（`#277AF7`），画在 `primaryVariant`（`#0073DD`）的蓝底上
+ * **几乎看不见**，得把 `radioButtonColors` 和四组 `titleColor`/`summaryColor` 全部
+ * 重写一遍 —— 那就又回到"自己拼"的老路上了。
+ *
+ * 无障碍语义没有丢：[BasicComponent] 本身有 `role` 参数，传 `Role.RadioButton`
+ * 就还是"单选组里的一个选项"，读屏软件读得出来；只是不画那个圈。
  */
 @Composable
 fun ModelPickerOverlay(
@@ -89,8 +104,9 @@ fun ModelPickerOverlay(
         show = picker != null,
         onDismissRequest = onDismiss,
         title = "选择模型 · ${picker?.profileName.orEmpty()}",
-        // 其余参数（圆角、底色、拖拽把手颜色、内外边距、最大宽度）一律用 Miuix 默认值：
-        // 它们本来就是从主题里取的，手挑一套只会在动态取色或深浅切换时失配。
+        // 其余参数（圆角、底色、拖拽把手颜色、内外边距、最大宽度）一律用 Miuix 默认值。
+        // ⚠️ `backgroundColor` 尤其不要动：默认的 `background` 就是官方示例里的背板色，
+        // 卡片之所以要显式传 `secondaryContainer`，正是为了跟它**拉开**一档。
     ) {
         val current = picker ?: return@OverlayBottomSheet
         ModelPickerBody(
@@ -104,11 +120,43 @@ fun ModelPickerOverlay(
 }
 
 /**
+ * Sheet 里小标题的内边距。
+ *
+ * Miuix `SmallTitleDefaults.InsideMargin` 是 `PaddingValues(28.dp, 8.dp)`，而 sheet 自身
+ * 已经有 24dp 横向内边距 —— 两者相加 52dp，标题会缩进得比卡片深一大截。官方
+ * `BottomSheetSection` 示例在 sheet 里覆写成 16dp，这里跟随它。
+ */
+private val PickerSectionInsideMargin = PaddingValues(16.dp, 8.dp)
+
+/** 组与组之间的间距，与官方示例一致（12dp）。 */
+private val PickerGroupSpacing = 12.dp
+
+/**
+ * 列表里相邻两张卡片之间的间距。
+ *
+ * 官方示例里**互不相关**的卡片之间是 12dp；这里是同一份列表内的相邻项，取 8dp ——
+ * 比 12dp 紧凑、又不至于像更小那样让卡片边界糊在一起。
+ */
+private val ModelRowSpacing = 8.dp
+
+/**
+ * 模型列表的高度上限。
+ *
+ * 不能删：目录最多 250 项（引擎侧 `MAX_MODELS`），不封顶的话长列表会把面板顶出屏幕，
+ * 底部的「使用模型」按钮就点不到了。这也是 `DialogScrollNestingTest` 的硬性要求 ——
+ * 没有它，无限高的 [LazyColumn] 会拿到 Infinity 高度约束并直接崩。
+ */
+private val ModelListMaxHeight = 420.dp
+
+/**
  * 搜索框。
  *
  * 只在**目录已经拿到、且不止一条**时才出现：只有两三个模型时它占的位置比它省下的
  * 翻找更多，而目录拉失败时它更是一个筛不出任何东西的死控件（那种情况走下面的
  * 手动输入框）。上限 250 条（引擎侧 `MAX_MODELS`）才是它真正有用的场景。
+ *
+ * 颜色与圆角**都用 Miuix 默认**：默认底色 `secondaryContainer`（`#434343`）本来就比
+ * sheet 背板亮一档、看得见填充，之前覆写成 `surfaceContainerHigh` 反而把它抹成了背板色。
  */
 @Composable
 private fun ModelSearchField(
@@ -122,12 +170,6 @@ private fun ModelSearchField(
         label = "输入模型名称搜索",
         useLabelAsPlaceholder = true,
         singleLine = true,
-        // 圆角给足，与参考图里那种"胶囊搜索框"一致；Miuix 默认圆角偏小。
-        cornerRadius = ZhiRadius.card,
-        colors = TextFieldDefaults.textFieldColors(
-            backgroundColor = scheme.surfaceContainerHigh,
-            labelColor = scheme.onSurfaceVariantSummary,
-        ),
         leadingIcon = {
             Icon(
                 imageVector = MiuixIcons.Basic.Search,
@@ -136,49 +178,116 @@ private fun ModelSearchField(
                 modifier = Modifier.size(20.dp),
             )
         },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(bottom = PickerGroupSpacing),
     )
 }
 
 /**
- * 分组标题：提供方名 + 条目数。
+ * 目录里的一行：**每个模型一张 Miuix Card**，选中那张是蓝卡。
  *
- * ## 为什么没有首字母头像
+ * 卡片颜色对照（深色方案的实际值），这也是整块面板的层级关系：
  *
- * 这里曾经放过一个 `primaryContainer` 的首字母方块。删掉的理由：参考图那一行左边
- * 是**折叠箭头**，没有头像；而我们的面板永远只有一组，箭头是死控件（见下），
- * 于是留下的是一个既不对应参考图、信息量也为零的方块 —— 提供方名字就在它右边，
- * 同一个名字的首字母重复一遍没有任何作用。
+ * | | 卡片底 | 标题 | 副标题 |
+ * | --- | --- | --- | --- |
+ * | sheet 背板 | `#242424` | — | — |
+ * | 未选中行 | `secondaryContainer` `#434343` | `onBackground` | `onSurfaceVariantSummary` |
+ * | **选中行** | `primaryVariant` `#0073DD` | `onPrimaryVariant` `#99C7F1` | 同左 |
  *
- * ## 为什么没有折叠箭头
+ * 三行文字色都必须**显式**传：`BasicComponentDefaults.titleColor()` 的默认值是
+ * `onBackground`、`summaryColor()` 的默认值是 `onSurfaceVariantSummary` ——
+ * 都不跟随卡片的 `contentColor`（这条和 Material3 的直觉相反），所以不传的话
+ * 蓝卡上会出现深色字，几乎读不出来。官方 Card 示例同样两个文字色都显式写了
+ * `onPrimaryVariant`。
  *
- * 参考图里这一行左边有个 `⌄`。但这个面板**永远只有一组** —— 一个 API 配置
- * （profile）就对应一个提供方与一份目录，`ModelPickerState` 里也只有单个
- * `profileName`。一组还要折叠的话，点下去就是把整个列表收起来，没有意义。
- * 所以这里不画那个箭头：画一个点了没用的控件比不画更糟。
+ * `role = Role.RadioButton`：这是同一个单选组里的一个选项，语义上要报给读屏软件。
+ * 只是不画单选圈 —— 整张蓝卡就是选中标记（理由见文件顶部）。
  */
 @Composable
-private fun ModelGroupHeader(profileName: String, count: Int) {
+private fun ModelRow(
+    option: ModelOption,
+    selected: Boolean,
+    onPick: () -> Unit,
+) {
     val scheme = MiuixTheme.colorScheme
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    // `displayName` 与 `id` 相同时只显示一次，否则每行会重复两遍同一个名字
+    // （服务端常常不给 display_name，那种情况下它会被回落成 id）。
+    val duplicated = option.displayName == option.id
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        // 官方 Card 示例用的就是这两个令牌；`color` 必须显式传而不是靠默认值 ——
+        // `CardDefaults` 默认的 `surfaceContainer` 与 sheet 背板 `background` 同值
+        // （都是 `#242424`），不传的话未选中的卡片在背板上完全看不出来。
+        colors = CardDefaults.defaultColors(
+            color = if (selected) scheme.primaryVariant else scheme.secondaryContainer,
+        ),
     ) {
-        Text(
-            text = profileName,
-            // 与参考图一致：分组标题用主色。这是主题令牌（深浅色各自成立），不是写死的颜色。
-            color = scheme.primary,
-            fontSize = ZhiTextScale.BodySmall,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+        BasicComponent(
+            title = option.displayName,
+            titleColor = BasicComponentDefaults.titleColor(
+                color = if (selected) scheme.onPrimaryVariant else scheme.onBackground,
+            ),
+            summary = if (duplicated) null else option.id,
+            summaryColor = BasicComponentDefaults.summaryColor(
+                color = if (selected) scheme.onPrimaryVariant else scheme.onSurfaceVariantSummary,
+            ),
+            role = Role.RadioButton,
+            onClick = onPick,
+            modifier = Modifier.fillMaxWidth(),
+            // insideMargin 不传：走 `BasicComponentDefaults.InsideMargin`（16dp），
+            // 与官方示例给卡片写的 `PaddingValues(16.dp)` 是同一个值。
         )
-        Text(
-            text = "$count 个模型",
-            color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
-        )
+    }
+}
+
+/**
+ * 模型列表：每个模型一张独立卡片（不是一张大卡装多行）。
+ *
+ * 这里刻意**不用**上面那条"一张 Card 装多行"的官方分组写法：那种写法是给
+ * **设置项分组**用的（组内各行只是并列，没有"哪一行被选中"的概念）。而这里每行
+ * 都有选中态，选中态要表达成一整张变色卡片 —— 装在同一张卡里的话，蓝底只能在
+ * 大卡内部画一块，四角与卡片圆角对不上（这正是更早一版用裸色块时的毛病）。
+ */
+@Composable
+private fun ModelList(
+    visible: List<ModelOption>,
+    currentModel: String,
+    search: String,
+    onPick: (String) -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = PickerGroupSpacing)
+            .heightIn(max = ModelListMaxHeight),
+        verticalArrangement = Arrangement.spacedBy(ModelRowSpacing),
+    ) {
+        items(visible, key = { it.id }) { model ->
+            ModelRow(
+                option = model,
+                selected = model.id == currentModel,
+                onPick = { onPick(model.id) },
+            )
+        }
+        if (visible.isEmpty()) {
+            // 搜不到时给一句话，而不是留一片空白 —— 空白与"还在加载"、
+            // "目录是空的"三种情况看起来一模一样。
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.defaultColors(color = scheme.secondaryContainer),
+                ) {
+                    Text(
+                        text = "没有匹配「$search」的模型",
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = ZhiTextScale.Footnote,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(BasicComponentDefaults.InsideMargin),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -193,15 +302,16 @@ private fun ModelPickerBody(
     val scheme = MiuixTheme.colorScheme
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
+        // 状态行走 Miuix 的分组小标题（`SmallTitle`）。它本来就是干这个的，
+        // 之前用裸 `Text` + 自己挑颜色，正是不必要的自绘。
+        ZhiSectionLabel(
             text = picker.status,
-            color = if (picker.models.isEmpty() && !picker.loading) {
+            textColor = if (picker.models.isEmpty() && !picker.loading) {
                 scheme.onSurfaceVariantSummary
             } else {
                 scheme.primary
             },
-            fontSize = ZhiTextScale.Footnote,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            insideMargin = PickerSectionInsideMargin,
         )
 
         if (picker.models.size > 1) {
@@ -212,37 +322,33 @@ private fun ModelPickerBody(
         val visible = picker.visibleModels
 
         if (picker.models.isNotEmpty()) {
-            ModelGroupHeader(profileName = picker.profileName, count = visible.size)
-            // 外层不再套 Card：参考图里每个模型是**独立的一张卡**，行与行之间有缝。
-            // 共用一个 Card 再靠分割线分开，视觉上是一整块面板，与参考图不是一回事。
+            // 分组标题在卡片**外面**（官方示例就是这样），文案里带上筛完的条数，
+            // 这样搜索时能立刻看到"还剩几个"。
             //
-            // `heightIn(max = 420.dp)` 是硬性要求，不能删：LazyColumn 在竖直方向没有
-            // 高度上限时会拿到 Infinity 高度约束，Compose 直接抛异常崩掉
-            // （见 DialogScrollNestingTest）。
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).heightIn(max = 420.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                items(visible, key = { it.id }) { model ->
-                    ModelRow(
-                        option = model,
-                        selected = model.id == picker.currentModel,
-                        onPick = { onQueryChange(model.id) },
-                    )
-                }
-                if (visible.isEmpty()) {
-                    // 搜不到时给一句话，而不是留一片空白 —— 空白与"还在加载"、
-                    // "目录是空的"三种情况看起来一模一样。
-                    item {
-                        Text(
-                            text = "没有匹配「${picker.search}」的模型",
-                            color = scheme.onSurfaceVariantSummary,
-                            fontSize = ZhiTextScale.Footnote,
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        )
-                    }
-                }
-            }
+            // ## 为什么这里没有折叠箭头、没有吸顶分组头、没有底部提供方跳转条
+            //
+            // rikkahub 的面板这三样都有。它们成立的前提是它支持**多个提供方**：
+            // 分组头要能折叠是为了收起不看的那些提供方，跳转条是为了快速跳到某一个，
+            // 吸顶是为了在长列表里始终知道自己在哪个提供方下面。
+            //
+            // 而这个面板**永远只有一组** —— 一个 API 配置（profile）就对应一个提供方
+            // 与一份目录，`ModelPickerState` 里也只有单个 `profileName`。所以：
+            // 折叠 = 把整个列表收起来（等于关掉面板），跳转条没有任何目标可跳，
+            // 吸顶也没有第二种分组需要区分。**画一个点了没用的控件比不画更糟** ——
+            // 用户会去点它，然后以为应用坏了。
+            //
+            // 哪天真的支持多提供方了，这三样才谈得上加；那时应当先改 ModelPickerState
+            // 的数据模型（单个 profileName → 一组），而不是先画控件。
+            ZhiSectionLabel(
+                text = "${picker.profileName} · ${visible.size} 个模型",
+                insideMargin = PickerSectionInsideMargin,
+            )
+            ModelList(
+                visible = visible,
+                currentModel = picker.currentModel,
+                search = picker.search,
+                onPick = onQueryChange,
+            )
         }
 
         ZhiTextField(
@@ -251,7 +357,7 @@ private fun ModelPickerBody(
             label = "模型名",
             useLabelAsPlaceholder = true,
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
         )
 
         Text(
@@ -275,122 +381,6 @@ private fun ModelPickerBody(
                 enabled = picker.query.isNotBlank(),
                 onClick = { onUse(picker.query) },
                 modifier = Modifier.padding(start = 8.dp),
-            )
-        }
-    }
-}
-
-/**
- * 目录里的一行：**布局照搬 rikkahub，组件仍是 Miuix 原生**。
- *
- * ## 几何直接借鉴 rikkahub 的 `ModelItem`
- *
- * 它也是 Compose（`androidx.compose.foundation` + `material3`），而 Miuix 建在同一套
- * Compose 原语上，所以**布局数字可以照搬**、只需要把颜色令牌换掉：
- *
- * | 项 | rikkahub | 这里 |
- * | --- | --- | --- |
- * | 行内边距 | 16dp 横 / 12dp 纵 | 同 |
- * | 头像与文字间距 | 12dp | 同（由 `startAction` 侧提供） |
- * | 头像 | `Surface` 内 32dp 内容 + 4dp 内边距（共 40dp） | 同 |
- * | 选中底色 | `primaryContainer` | `secondaryContainer`（见下） |
- *
- * ## 组件为什么仍用 `BasicComponent` 而不是照抄它的 `Row`
- *
- * rikkahub 那一段是自己拼 `Row` + `Column`，因为它还要塞能力标签的 `FlowRow`
- * （我们没有那类数据）。`BasicComponent` 是 Miuix 原生的"一行：前置槽 + 标题 +
- * 副标题 + 尾部槽"，**本来就带 `startAction`** —— 头像放进去刚好对上 rikkahub 的
- * "头像在左、文字在右"结构，同时保留 Miuix 的按压反馈与行高规则。
- * 照抄 `Row` 反而会丢掉这些，那才是"失了 Miuix 的原生框架"。
- *
- * ## 选中色为什么是 `secondaryContainer` 而不是 `primaryContainer`
- *
- * rikkahub 用的确实是 `primaryContainer`，但那是 Material3 的**动态取色**结果，
- * 在它的暗色截图里是低调的暗红/暗蓝。Miuix 的 `primaryContainer` 在暗色下是**高饱和蓝**，
- * 直接套用会得到"整行亮蓝、白字、很扎眼"——实测反馈就是"太亮"。
- * 所以换 `secondaryContainer`（同族的次级容器色，暗色下明显更收敛），
- * 前景相应换成 `onSecondaryContainer`。**要更醒目就把这两个令牌换回 primary 那对**，
- * 只改这两行。
- *
- * ## 为什么没有对勾
- *
- * rikkahub 的选中只靠整块底色表达，没有对勾。这里按它来；如果哪天觉得"
- * 一屏几十行里光靠底色不够醒目"，`endActions` 槽就是放对勾的位置。
- */
-@Composable
-private fun ModelRow(
-    option: ModelOption,
-    selected: Boolean,
-    onPick: () -> Unit,
-) {
-    val scheme = MiuixTheme.colorScheme
-    val duplicated = option.displayName == option.id
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(0.dp),
-        // ⚠️ 未选中用 `surfaceContainerHigh` 而不是 rikkahub 的 `surface`：
-        // Miuix 里 `surface` 与面板底色同色，卡片会"消失"、行与行之间没有界线。
-        colors = CardDefaults.defaultColors(
-            color = if (selected) scheme.secondaryContainer else scheme.surfaceContainerHigh,
-            contentColor = if (selected) scheme.onSecondaryContainer else scheme.onSurface,
-        ),
-    ) {
-        BasicComponent(
-            title = option.displayName,
-            titleColor = BasicComponentDefaults.titleColor(
-                color = if (selected) scheme.onSecondaryContainer else scheme.onBackground,
-            ),
-            summary = if (duplicated) null else option.id,
-            summaryColor = BasicComponentDefaults.summaryColor(
-                color = if (selected) scheme.onSecondaryContainer else scheme.onSurfaceVariantSummary,
-            ),
-            startAction = { ModelAvatar(option.id) },
-            onClick = onPick,
-            // 与 rikkahub 一致的 16 / 12dp。之前是 Miuix 默认（12 / 10dp），
-            // 行显得挤；改这个是因为参考图的行明显更"透气"。
-            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
-}
-
-/**
- * 模型头像：首字方块。
- *
- * ## 几何与回落路径都照搬 rikkahub
- *
- * 它的 `AutoAIIcon` 先按名字查 `assets/icons/<name>.svg`，**查不到就回落到
- * `TextAvatar`** —— 一个 `secondaryContainer` 底、首字大写、自动缩字号的方块
- * （`UIAvatar.kt`）。我们没有任何品牌资产、也不该为此内置一批厂商 logo
- * （等于替各家做标识，还会过期），所以直接走它的**回落路径**：
- * 尺寸同样是「32dp 内容 + 4dp 内边距」，底色同样取自容器的次级色。
- *
- * ## 为什么圆角走 `ZhiRadius.inner`
- *
- * rikkahub 用的是 `MaterialTheme.shapes.small`，Miuix 没有对应的 shapes 别名，
- * 而我们自己的圆角令牌里 `inner`（10dp）就是这个层级 —— 换令牌、不换观感。
- */
-@Composable
-private fun ModelAvatar(modelId: String) {
-    val scheme = MiuixTheme.colorScheme
-    Surface(
-        shape = RoundedCornerShape(ZhiRadius.inner),
-        color = scheme.secondaryContainer,
-    ) {
-        Box(
-            modifier = Modifier.padding(4.dp).size(32.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                // 首字大写，与 rikkahub 的 `text.take(1).uppercase()` 一致。
-                // 空 id 理论上不会到这里（ModelCatalogClient 会丢弃空 id），
-                // 但真遇到也不要画一个空白方块。
-                text = modelId.trim().take(1).uppercase().ifEmpty { "?" },
-                color = scheme.onSecondaryContainer,
-                fontSize = ZhiTextScale.BodySmall,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
             )
         }
     }

@@ -14,10 +14,27 @@
 #   两者互补：改 api/ 这类纯逻辑时两个都要跑。判断标准很简单 ——
 #   如果一处改动「写错了也不会编译失败」，那它需要的是 JVM 单测，而不是文本断言。
 #
-# 用法: ./test-source-no-build.sh [工程根]
+# 用法: ./test-source-no-build.sh [工程根] [--only 测试名]
+#
+#   --only 只跑一条测试。给 teeth.sh 用（它要对同一条测试反复改-跑-还原多次，
+#          跑全量的话每验证一条守卫就要等半分钟），也方便手动定位单条失败。
 set -uo pipefail
 
-PROJECT_ROOT="${1:-$(cd "$(dirname "$0")" && pwd)}"
+ONLY=""
+PROJECT_ROOT=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --only)   ONLY="${2:-}"; shift 2 ;;
+        --only=*) ONLY="${1#--only=}"; shift ;;
+        *)
+            if [ -n "$PROJECT_ROOT" ]; then
+                echo "多余的参数：$1" >&2
+                exit 2
+            fi
+            PROJECT_ROOT="$1"; shift ;;
+    esac
+done
+[ -n "$PROJECT_ROOT" ] || PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 TESTS_DIR="$PROJECT_ROOT/app/tests"
 
 if [ ! -d "$TESTS_DIR" ]; then
@@ -27,13 +44,60 @@ fi
 
 PASS=0
 FAIL=0
+SKIP=0
 FAILED_NAMES=""
+
+# ---------- 把测试**编译一次**，之后每个用 `java -cp` 直接跑 ----------
+#
+# 之前是 `java app/tests/X.java`（JDK 单文件源码模式），每个测试都要**现场编译**一遍：
+# 实测 1.1s/个，31 个就是半分钟。而真正的断言只跑几十毫秒 —— 慢的全是启动。
+#
+# 改成先一次性 javac 成 jar，之后每个 `java -cp jar X` 只要 0.15s（实测），
+# 整套从约 32s 降到 5s 上下。改过测试源码后多花一次编译（8s 左右，几乎不随文件数增长）。
+#
+# 失效判断用「文件名 + 大小 + 修改时间」指纹，不用内容哈希：内容哈希要把所有测试源码
+# 读一遍，而这套测试**本来就是逐个读源码文本的**，再哈希一遍是重复劳动。
+BUILD_DIR="$PROJECT_ROOT/.test-build"
+TESTS_JAR="$BUILD_DIR/tests.jar"
+STAMP_FILE="$BUILD_DIR/sources.stamp"
+COMPILED="no"
+
+prepare_tests() {
+    local stamp
+    stamp=$(find "$TESTS_DIR" -maxdepth 1 -name '*.java' -printf '%f %s %T@\n' 2>/dev/null | LC_ALL=C sort)
+    if [ -f "$TESTS_JAR" ] && [ -f "$STAMP_FILE" ] && [ "$stamp" = "$(cat "$STAMP_FILE")" ]; then
+        return 0
+    fi
+    local sources
+    sources=$(find "$TESTS_DIR" -maxdepth 1 -name '*.java' | LC_ALL=C sort)
+    if [ -z "$sources" ]; then
+        echo "app/tests 下没有 .java 测试" >&2
+        exit 2
+    fi
+    rm -rf "$BUILD_DIR/classes" "$TESTS_JAR"
+    mkdir -p "$BUILD_DIR/classes"
+    # shellcheck disable=SC2086
+    if ! javac -nowarn -d "$BUILD_DIR/classes" $sources 2>"$BUILD_DIR/javac.log"; then
+        # ⚠️ 编译不过就**一个测试都不跑**，绝不能拿上一次留下的旧 class 继续跑：
+        # 那样改坏了一个测试文件反而会得到「全绿」，正是这套东西最该避免的失败模式。
+        echo "测试源码编译失败 —— 不跑任何测试：" >&2
+        sed 's/^/  /' "$BUILD_DIR/javac.log" | head -30 >&2
+        exit 2
+    fi
+    jar cf "$TESTS_JAR" -C "$BUILD_DIR/classes" .
+    printf '%s' "$stamp" > "$STAMP_FILE"
+    COMPILED="yes"
+}
 
 run() {
     local name="$1"
     local root="$2"
+    if [ -n "$ONLY" ] && [ "$name" != "$ONLY" ]; then
+        SKIP=$((SKIP + 1))
+        return 0
+    fi
     local output
-    if output=$(java "$TESTS_DIR/$name.java" "$root" 2>&1); then
+    if output=$(java -cp "$TESTS_JAR" "$name" "$root" 2>&1); then
         echo "PASS  $name"
         PASS=$((PASS + 1))
     else
@@ -53,6 +117,10 @@ run() {
 run_node() {
     local name="$1"
     local root="$2"
+    if [ -n "$ONLY" ] && [ "$name" != "$ONLY" ]; then
+        SKIP=$((SKIP + 1))
+        return 0
+    fi
     local file="$TESTS_DIR/js/$name.mjs"
     if ! command -v node >/dev/null 2>&1; then
         echo "FAIL  $name（缺 node：这些行为断言只能用 JS 引擎跑）"
@@ -79,6 +147,7 @@ run_node() {
 }
 
 # ---------- 宿主层架构（本次重写建立的不变式） ----------
+prepare_tests
 # SandboxHostArchitectureTest.java
 run SandboxHostArchitectureTest "$PROJECT_ROOT"
 # ---------- 进程角色与隔离 ----------
@@ -203,7 +272,12 @@ run UiDebugPageStructureTest "$PROJECT_ROOT"
 run DebugHudStructureTest "$PROJECT_ROOT"
 
 echo "-----"
-echo "通过 $PASS / 失败 $FAIL"
+if [ -n "$ONLY" ]; then
+    echo "通过 $PASS / 失败 $FAIL（--only $ONLY，跳过 $SKIP 条）"
+else
+    echo "通过 $PASS / 失败 $FAIL"
+fi
+[ "$COMPILED" = "yes" ] && echo "（本次先编译了测试：慢的就是这一次，之后复用 .test-build/tests.jar）"
 if [ "$FAIL" -ne 0 ]; then
     echo "失败项:$FAILED_NAMES"
     exit 1

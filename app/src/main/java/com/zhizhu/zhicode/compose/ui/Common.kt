@@ -343,14 +343,32 @@ private fun ZhiPillSurface(
     }
 }
 
-/** 分组小标题（"项目历史 · xxx"、"工作区"）。转发到 Miuix [SmallTitle]。 */
+/**
+ * 分组小标题（"项目历史 · xxx"、"工作区"）。转发到 Miuix [SmallTitle]。
+ *
+ * [textColor] / [insideMargin] 两个可选参数是为**底部 Sheet 里的分区**加的：
+ * - 标题有时要随状态换色（例如模型面板的"已获取 2 个模型"在失败时要变灰）；
+ * - Miuix `SmallTitle` 默认内边距是 `PaddingValues(28.dp, 8.dp)`，而 sheet 自身
+ *   已经有 24dp 横向内边距，两者相加会让标题比卡片缩进 52dp。Miuix 官方
+ *   `BottomSheetSection` 示例在 sheet 里显式覆写成 `PaddingValues(16.dp, 8.dp)`，
+ *   这里跟随它 —— 标题比卡片左边缘多缩进 16dp，是官方的层级观感。
+ *
+ * 两个参数都有默认值，现有调用点不受影响。
+ */
 @Composable
-fun ZhiSectionLabel(text: String, modifier: Modifier = Modifier) {
-    SmallTitle(
-        text = text,
-        modifier = modifier,
-        textColor = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-    )
+fun ZhiSectionLabel(
+    text: String,
+    modifier: Modifier = Modifier,
+    textColor: Color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+    insideMargin: PaddingValues? = null,
+) {
+    // insideMargin 传 null 时不传该参数，走 Miuix 自己的默认值 —— 不用 "0dp 表示默认"
+    // 这种哨兵值，否则哪天想把某个位置的内边距显式清零就没法表达。
+    if (insideMargin == null) {
+        SmallTitle(text = text, modifier = modifier, textColor = textColor)
+    } else {
+        SmallTitle(text = text, modifier = modifier, textColor = textColor, insideMargin = insideMargin)
+    }
 }
 
 /**

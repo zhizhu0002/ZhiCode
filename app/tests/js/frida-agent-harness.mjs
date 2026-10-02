@@ -791,11 +791,17 @@ async function testScanner() {
     // frida_eval 的 timeout_ms 只能打断「会让出事件循环」的脚本
     // （`await`、`Promise`、分块扫描这些），同步死循环没有止损手段 ——
     // 除了杀掉 guest 进程。这里按真实的、可达成的那一半断言，并把这个限制留在注释里。
+    //
+    // ⚠️ 这里的 sleep 只要**比 deadline 长**就够了，**不要**写成 60000 这种数：
+    // 它多验证不了任何东西（deadline 是 1000ms，2000ms 已经超过），但那个 timer 会
+    // 一直挂在事件循环上、把 node 进程拖到它烧完才退出 —— 实测这一行让整套测试
+    // 从 2s 变成 62s，成了整个套件的耗时大头（其余 32 条加起来才 10s）。
+    // 断言的是"harness 提前返回"，不是"等得够久"，所以缩短它不损失任何覆盖。
     {
         const env = makeEnv(moduleSpec());
         const {tick} = boot(JAVA_FILE, env);
         const reply = await send(env, tick, 'eval',
-            {script: 'await new Promise(r=>setTimeout(r, 60000)); return 1;', timeout_ms: 1000},
+            {script: 'await new Promise(r=>setTimeout(r, 2000)); return 1;', timeout_ms: 1000},
             {maxMs: 30000});
         eq(reply.ok, false, 'eval 里 await 住超过 deadline 时必须返回错误，而不是永远挂着');
         ok(String(reply.error).includes('deadline'),

@@ -627,31 +627,59 @@ public final class DebugHudStructureTest {
                 "面板必须用 visibleModels 过滤后的列表，而不是原始 models");
         requireContains(pickerFile, "onSearchChange",
                 "搜索框必须接**独立的** onSearchChange，不能复用 onQueryChange");
-        // 选中高亮必须铺在**带形状的 Miuix 容器**上（Card），而不是 BasicComponent 的哪个
-        // 颜色参数：后者画出来是直角色块，与圆角对不上，多行堆叠时四角会露方边。
+        // ★ 卡片底色必须**显式**覆盖，且未选中用 secondaryContainer、选中用 primaryVariant。
         //
-        // 这里断言的是**不变量**（容器 + 圆角 + 容器色取自主题令牌），不是某个具体令牌：
-        // 最早用裸 Surface + primaryContainer，后来为了「保持 Miuix 原生」换成 Miuix Card，
-        // 又因为 Miuix 的 primaryContainer 在暗色下是高饱和蓝（实测"太亮"）换成
-        // secondaryContainer —— 三次都满足"主题令牌 + 带形状容器"，守卫不该绑死其中一次。
-        requireContains(pickerFile, "if (selected) scheme.secondaryContainer",
-                MODEL_PICKER + " 的选中高亮必须取自主题令牌（当前用 secondaryContainer，"
-                        + "因为 Miuix 暗色下 primaryContainer 是高饱和蓝、太扎眼）");
+        // 这两条守的都是真实踩过的坑，不是风格偏好：
+        // 1. Miuix 深色下 `CardDefaults` 默认色是 `surfaceContainer`，而
+        //    `OverlayBottomSheet` 的默认背板色是 `background` —— **两者都是 #242424**。
+        //    所以"照默认值写"的 Card 放进 sheet 里完全看不见（用户原话就是
+        //    "背板和 card 背景一致"）。
+        // 2. 选中态用蓝卡，令牌就是 Miuix 官方 Card 示例里那个 `primaryVariant`
+        //    （深色 #0073DD）。用户指着示例里那张蓝卡说用它做高亮。
+        requireContains(pickerFile, "if (selected) scheme.primaryVariant",
+                MODEL_PICKER + " 的选中态必须是 primaryVariant 蓝卡（Miuix 官方 Card 示例的令牌）");
+        requireContains(pickerFile, "else scheme.secondaryContainer",
+                MODEL_PICKER + " 的未选中卡片必须显式用 secondaryContainer："
+                        + "CardDefaults 默认的 surfaceContainer 与 sheet 背板 background 同值(#242424)，"
+                        + "不覆盖的话未选中的卡片在背板上看不出来");
         require(pickerFile.contains("Card("),
-                MODEL_PICKER + " 的模型行必须套一层 Miuix Card（带形状的容器）才能做出圆角高亮");
-        requireContains(pickerFile, "cornerRadius = ZhiRadius.inner",
-                MODEL_PICKER + " 的容器圆角必须走 ZhiRadius 令牌，不写死数值");
+                MODEL_PICKER + " 的模型行必须套 Miuix Card（带形状的容器），才能整块圆角变色");
 
-        // 行内几何借鉴 rikkahub（它也是 Compose，布局数字可照搬）：16dp 横 / 12dp 纵。
-        // 这条防的是"以后有人把它改回 Miuix 默认的 12/10 又把行改挤了"。
-        requireContains(pickerFile, "PaddingValues(horizontal = 16.dp, vertical = 12.dp)",
-                MODEL_PICKER + " 的模型行内边距必须保持 16 / 12dp（照搬 rikkahub 的行几何）");
-        requireContains(pickerFile, "startAction = { ModelAvatar(",
-                MODEL_PICKER + " 的模型行必须用 startAction 放头像 —— "
-                        + "rikkahub 那一行就是「左头像 + 右文字」，而 startAction 正是 Miuix 的前置槽，"
-                        + "这样布局照搬参考图、组件仍是 Miuix 原生");
-        requireContains(pickerFile, "private fun ModelAvatar(",
-                MODEL_PICKER + " 必须提供 ModelAvatar（首字方块，走 rikkahub AutoAIIcon 的回落路径）");
+        // ★ 文字色必须显式跟随卡片：`BasicComponentDefaults.titleColor()` 的默认值是
+        // `onBackground`、`summaryColor()` 是 `onSurfaceVariantSummary`，**都不跟随卡片的
+        // contentColor**（与 Material3 直觉相反）。不显式传的话蓝卡上会出现深色字。
+        requireContains(pickerFile, "titleColor = BasicComponentDefaults.titleColor(",
+                MODEL_PICKER + " 的标题色必须显式传：BasicComponent 的默认文字色不跟随卡片 contentColor，"
+                        + "蓝卡上会变成深色字");
+        requireContains(pickerFile, "if (selected) scheme.onPrimaryVariant",
+                MODEL_PICKER + " 的选中行文字色必须是 onPrimaryVariant：蓝卡上要用浅蓝字");
+
+        // ★ 无障碍语义不能因为去掉单选圈而丢。
+        requireContains(pickerFile, "role = Role.RadioButton",
+                MODEL_PICKER + " 必须保留 Role.RadioButton——这是同一个单选组的语义，"
+                        + "不画单选圈不等于可以不告诉读屏软件");
+        // 中灰陷阱：onSecondaryContainer 在深色下是 #7C7C7C，曾把它当选中前景色，
+        // 导致"选中"看起来比未选中更暗。
+        require(!pickerFile.contains("onSecondaryContainer"),
+                MODEL_PICKER + " 不得把 onSecondaryContainer 当前景色："
+                        + "它在深色下是 #7C7C7C 中灰，会让\"选中\"看起来比未选中更暗");
+        require(!pickerFile.contains("startAction = {"),
+                MODEL_PICKER + " 不得再放首字母头像：它既是手绘组件，"
+                        + "又在同一配置下对所有模型取到同一个字母（deepseek-flash / deepseek-v4-pro 都是 D）");
+
+        // ★ 结构照 Miuix 官方示例：小标题在卡片**外面**（走 SmallTitle），不用分隔线分组。
+        requireContains(pickerFile, "ZhiSectionLabel(",
+                MODEL_PICKER + " 的分组标题必须走 ZhiSectionLabel（= Miuix SmallTitle），"
+                        + "而不是自己拼一行 Text");
+        require(!pickerFile.contains("HorizontalDivider"),
+                MODEL_PICKER + " 不得用分隔线分组：Miuix 官方示例靠卡片底色 + 间距分组，不画线");
+
+        // 输入框的填充必须看得见 —— 同一个坑的另一半：
+        // `TextFieldDefaults` 默认底色是 secondaryContainer(#434343)，覆写成
+        // surfaceContainerHigh 就又是 #242424，填充直接融进背板。
+        require(!pickerFile.contains("backgroundColor = scheme.surfaceContainerHigh"),
+                MODEL_PICKER + " 不得把输入框底色覆写成 surfaceContainerHigh："
+                        + "它是 #242424，与 sheet 背板同值、填充会消失；默认的 secondaryContainer 才对");
 
         String overlayHost = stripComments(read(root, OVERLAY_HOST));
         requireContains(overlayHost, "onSearchChange = viewModel::setModelSearch",
