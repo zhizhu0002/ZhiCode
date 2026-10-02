@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -29,6 +30,52 @@ import top.yukonga.miuix.kmp.basic.TooltipBox
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
+ * 顶栏**真正读到的**那六个字段。
+ *
+ * <h2>为什么要单独抽一个类型，而不是直接传 `WorkspaceUiState`</h2>
+ *
+ * 顶栏只用到 `composerBusy` / `modelLabel` / `contextTokens` / `contextWindow` /
+ * `deviceStatus` / `tab` 这六项，而 `WorkspaceUiState` 有五十多个字段 ——
+ * 其中包含**整条对话流**（`transcript`）与全部工具输出。
+ *
+ * 流式回复期间 `_state` 每 32ms 换一次新实例（`ZhiEngineController.DELTA_MERGE_MS`），
+ * 于是顶栏每次都要重来一遍：
+ *
+ * 1. 参数变了 → 顶栏整体重组（虽然它一个像素都不会变）；
+ * 2. 判等本身也要钱 —— `List.equals` 是**逐个元素**比的，比到那条正在流式的消息
+ *    才会因正文字符串不同而停下，也就是说前面每一条消息的所有字段都被逐个走过。
+ *
+ * 换成这六个值之后，两个代价同时消失：参数没变就是没变。
+ *
+ * <h2>为什么这个类型是 @Immutable</h2>
+ *
+ * 全部字段都是 `val` 且都是 String / Int / Boolean / enum ——
+ * 没有 List、没有可变对象，所以这个承诺是**可核对的**（不是靠"看起来没问题"）。
+ * 编译器据此把顶栏的跳过判断简化成逐字段比较，而不是退化成整体 "unstable"。
+ */
+@Immutable
+data class TopBarState(
+    val composerBusy: Boolean,
+    val modelLabel: String,
+    val contextTokens: Int,
+    val contextWindow: Int,
+    val deviceStatus: String,
+    val tab: WorkspaceTab,
+) {
+    companion object {
+        /** 从整份 UiState 里取出顶栏要用的那几项。 */
+        fun from(state: WorkspaceUiState) = TopBarState(
+            composerBusy = state.composerBusy,
+            modelLabel = state.modelLabel,
+            contextTokens = state.contextTokens,
+            contextWindow = state.contextWindow,
+            deviceStatus = state.deviceStatus,
+            tab = state.tab,
+        )
+    }
+}
+
+/**
  * 顶栏（UI 重构 S2）：容器迁到官方 [SmallTopAppBar]。
  *
  * 结构与 Miuix example 的 BlurredBar + AdaptiveTopAppBar 一致：
@@ -39,7 +86,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  */
 @Composable
 fun ZhiTopBar(
-    state: WorkspaceUiState,
+    state: TopBarState,
     wide: Boolean,
     glass: Glass,
     onOpenSidebar: () -> Unit,

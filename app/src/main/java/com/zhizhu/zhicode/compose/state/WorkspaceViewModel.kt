@@ -792,30 +792,40 @@ class WorkspaceViewModel(
         val detail = skills.detail ?: return
         val name = draft.fileName.trim()
         if (!draft.saveable) return
-        if (SkillStore.fileExists(s.projectPath, detail.entry.scope, detail.entry.name, name)) {
-            _state.update { it.copy(message = "文件 $name 已存在", messageIsError = true) }
-            return
-        }
-        val result = SkillStore.writeFile(
-            s.projectPath, detail.entry.scope, detail.entry.name, name, draft.content,
-        )
-        _state.update { state ->
-            if (result.isFailure) {
-                state.copy(
-                    message = "新建失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
-                    messageIsError = true,
-                    skills = skills.copy(fileDraft = null),
-                )
-            } else {
-                state.copy(
-                    message = "已创建 $name",
-                    skills = skills.copy(
-                        fileDraft = null,
-                        detail = detail.copy(
-                            tree = SkillStore.listTree(state.projectPath, detail.entry.scope, detail.entry.name),
+        // ⚠️ 落盘与重列目录都**不在主线程**上做（与 `initSessionState` 同一约定）。
+        //
+        // 用户点「创建」时这一下要写一整份草稿正文，写完还要重新 walk 一遍技能目录；
+        // 技能文件是手写的参考文档，几百 KB 很常见 —— 在 Android 8 那类慢闪存设备上
+        // 这就是一次肉眼可见的卡顿（点击反馈被冻住）。
+        //
+        // 存在性检查与写入必须在**同一个** IO 块里连着做：拆成两块就多出一个
+        // 「检查过了但还没写」的窗口，双击能建出两份。
+        viewModelScope.launch(Dispatchers.IO) {
+            if (SkillStore.fileExists(s.projectPath, detail.entry.scope, detail.entry.name, name)) {
+                _state.update { it.copy(message = "文件 $name 已存在", messageIsError = true) }
+                return@launch
+            }
+            val result = SkillStore.writeFile(
+                s.projectPath, detail.entry.scope, detail.entry.name, name, draft.content,
+            )
+            _state.update { state ->
+                if (result.isFailure) {
+                    state.copy(
+                        message = "新建失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+                        messageIsError = true,
+                        skills = skills.copy(fileDraft = null),
+                    )
+                } else {
+                    state.copy(
+                        message = "已创建 $name",
+                        skills = skills.copy(
+                            fileDraft = null,
+                            detail = detail.copy(
+                                tree = SkillStore.listTree(state.projectPath, detail.entry.scope, detail.entry.name),
+                            ),
                         ),
-                    ),
-                )
+                    )
+                }
             }
         }
     }
@@ -830,17 +840,21 @@ class WorkspaceViewModel(
     fun deleteSkillFile(relativePath: String) {
         val s = _state.value
         val detail = s.skills?.detail ?: return
-        val result = SkillStore.deleteFile(s.projectPath, detail.entry.scope, detail.entry.name, relativePath)
-        _state.update { state ->
-            state.copy(
-                skills = state.skills?.copy(
-                    detail = detail.copy(
-                        tree = SkillStore.listTree(state.projectPath, detail.entry.scope, detail.entry.name),
+        // 删除本身是元数据操作，但它后面**紧接着**要重列整棵文件树（walk 目录 + 逐文件取大小），
+        // 那一步才是真花钱的地方 —— 所以两块一起放到 IO 线程，别只挪一半。
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = SkillStore.deleteFile(s.projectPath, detail.entry.scope, detail.entry.name, relativePath)
+            _state.update { state ->
+                state.copy(
+                    skills = state.skills?.copy(
+                        detail = detail.copy(
+                            tree = SkillStore.listTree(state.projectPath, detail.entry.scope, detail.entry.name),
+                        ),
                     ),
-                ),
-                message = if (result.isSuccess) "已删除 $relativePath"
-                else "删除失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
-            )
+                    message = if (result.isSuccess) "已删除 $relativePath"
+                    else "删除失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+                )
+            }
         }
     }
 
@@ -1132,28 +1146,32 @@ class WorkspaceViewModel(
      */
     fun editSkill(entry: SkillEntry, relativePath: String = "SKILL.md") {
         val s = _state.value
-        val body = SkillStore.readFile(s.projectPath, entry.scope, entry.name, relativePath).getOrElse { error ->
-            _state.update { it.copy(message = "打开失败：${error.message ?: "未知原因"}", messageIsError = true) }
-            return
-        }
-        _state.update {
-            it.copy(
-                skills = it.skills?.copy(
-                    createForm = null,
-                    urlDraft = null,
-                    detail = it.skills.detail ?: SkillDetail(
-                        entry = entry,
-                        tree = SkillStore.listTree(s.projectPath, entry.scope, entry.name),
+        // 打开编辑器要**先把整个文件读进内存**（正文直接进 `SkillEditTarget.body`），
+        // 这几百 KB 的读 + 文件名一致性校验都不该压在点击那一帧上。
+        viewModelScope.launch(Dispatchers.IO) {
+            val body = SkillStore.readFile(s.projectPath, entry.scope, entry.name, relativePath).getOrElse { error ->
+                _state.update { it.copy(message = "打开失败：${error.message ?: "未知原因"}", messageIsError = true) }
+                return@launch
+            }
+            _state.update {
+                it.copy(
+                    skills = it.skills?.copy(
+                        createForm = null,
+                        urlDraft = null,
+                        detail = it.skills.detail ?: SkillDetail(
+                            entry = entry,
+                            tree = SkillStore.listTree(s.projectPath, entry.scope, entry.name),
+                        ),
+                        editing = SkillEditTarget(
+                            name = entry.name,
+                            scope = entry.scope,
+                            relativePath = relativePath,
+                            body = body,
+                            nameError = nameErrorFor(relativePath, entry.name, body),
+                        ),
                     ),
-                    editing = SkillEditTarget(
-                        name = entry.name,
-                        scope = entry.scope,
-                        relativePath = relativePath,
-                        body = body,
-                        nameError = nameErrorFor(relativePath, entry.name, body),
-                    ),
-                ),
-            )
+                )
+            }
         }
     }
 
@@ -1194,22 +1212,25 @@ class WorkspaceViewModel(
         val s = _state.value
         val editing = s.skills?.editing ?: return
         if (!editing.saveable) return
-        val result = SkillStore.writeFile(
-            s.projectPath, editing.scope, editing.name, editing.relativePath, editing.body,
-        )
-        _state.update { state ->
-            val detail = state.skills?.detail
-            state.copy(
-                skills = state.skills?.copy(
-                    editing = if (result.isSuccess) null else editing,
-                    detail = detail?.copy(
-                        tree = SkillStore.listTree(state.projectPath, detail.entry.scope, detail.entry.name),
-                    ),
-                ),
-                message = if (result.isSuccess) "${editing.relativePath} 已保存"
-                else "保存失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
-                messageIsError = result.isFailure,
+        // 与 saveSkillFile 同理：写的是一整份正文 + 写完重列文件树。
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = SkillStore.writeFile(
+                s.projectPath, editing.scope, editing.name, editing.relativePath, editing.body,
             )
+            _state.update { state ->
+                val detail = state.skills?.detail
+                state.copy(
+                    skills = state.skills?.copy(
+                        editing = if (result.isSuccess) null else editing,
+                        detail = detail?.copy(
+                            tree = SkillStore.listTree(state.projectPath, detail.entry.scope, detail.entry.name),
+                        ),
+                    ),
+                    message = if (result.isSuccess) "${editing.relativePath} 已保存"
+                    else "保存失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+                    messageIsError = result.isFailure,
+                )
+            }
         }
     }
 

@@ -304,8 +304,16 @@ private fun TerminalPlaceholder(
     val scheme = MiuixTheme.colorScheme
     val listState = rememberLazyListState()
 
+    // ⚠️ 用 `requestScrollToItem`（非挂起，只登记目标下标、在下次测量里生效），
+    // **不要**换回 `animateScrollToItem`。
+    //
+    // 它俩的差别在"内容连续增长"这个场景下是决定性的：`animateScrollToItem` 是挂起的，
+    // 而它的 key 是 `lines.size` —— 终端每来一行就变一次，于是 effect 被不停地取消并重启，
+    // 滚动常常在真正滚到底之前就被取消掉，只能等某个空档才追上，看起来就是"滚一下停一下"。
+    // 日志输出时本来也不该有动画（每一步都起动画会互相打断）。
+    // 完整推导见 `ui/chat/ChatList.kt` 里那段同源注释（对话流踩过同一个坑）。
     LaunchedEffect(lines.size) {
-        if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
+        if (lines.isNotEmpty()) listState.requestScrollToItem(lines.size - 1)
     }
 
     Surface(modifier = modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {

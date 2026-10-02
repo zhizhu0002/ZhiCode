@@ -50,7 +50,7 @@ internal fun WideWorkspace(
             // 宽屏顶栏（含玻璃模糊）：排在内容 Column 顶部，占布局高度而非悬浮。
             // 触发器从此处于 Scaffold 根坐标系，「+」菜单等 Overlay 弹层锚点正确。
             ZhiTopBar(
-                state = state,
+                state = TopBarState.from(state),
                 wide = true,
                 glass = glassMain,
                 onOpenSidebar = viewModel::openSidebar,
@@ -272,7 +272,7 @@ internal fun ZhiSidebarHost(
     modifier: Modifier = Modifier,
 ) {
     ZhiSidebar(
-        state = state,
+        state = SidebarState.from(state),
         onNewSession = viewModel::newSession,
         onOpenSession = viewModel::openSession,
         onSessionActions = viewModel::showSessionActions,

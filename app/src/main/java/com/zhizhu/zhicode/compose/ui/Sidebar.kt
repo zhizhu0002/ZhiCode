@@ -46,6 +46,36 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /**
+ * 侧栏**真正读到的**四项。
+ *
+ * <p>理由与 [TopBarState] 完全相同：侧栏只用 `projectName` / `sessions` /
+ * `activeSessionId` / `runtimeReady`，而整份 `WorkspaceUiState` 里带着
+ * 对话流与全部工具输出 —— 流式期间每 32ms 换一次实例，侧栏就要为一次
+ * 无关的正文增量重组一遍（它一个字都不会变），判等还要逐个走会话列表。
+ *
+ * <p>⚠️ **不能用 `@Immutable` 标这个类**：`sessions` 是 `List`，而 Kotlin 的
+ * `List` 只是个只读视图，背后完全可能是可变的 `ArrayList`。标成不可变等于向
+ * 编译器保证一件我核实不了的事，一旦哪里原地 add 一下，界面就会静默停更。
+ * 它保持 unstable，跳过判断由 Compose 用 `equals()` 做 —— 会话列表通常很短
+ * （几十条以内），这个代价是可接受的，而"传整份 UiState"的代价不是。
+ */
+data class SidebarState(
+    val projectName: String,
+    val sessions: List<SessionSummary>,
+    val activeSessionId: String,
+    val runtimeReady: Boolean,
+) {
+    companion object {
+        fun from(state: WorkspaceUiState) = SidebarState(
+            projectName = state.projectName,
+            sessions = state.sessions,
+            activeSessionId = state.activeSessionId,
+            runtimeReady = state.runtimeReady,
+        )
+    }
+}
+
+/**
  * 侧栏（UI 重设计 R2）。
  *
  * 结构改为 HyperOS 设置页同构：**分节标题（SmallTitle）+ 直接行列表**，
@@ -58,7 +88,7 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  */
 @Composable
 fun ZhiSidebar(
-    state: WorkspaceUiState,
+    state: SidebarState,
     onNewSession: () -> Unit,
     onOpenSession: (SessionSummary) -> Unit,
     onSessionActions: (SessionSummary) -> Unit,

@@ -289,6 +289,13 @@ run MarkdownStreamingTest "$PROJECT_ROOT"
 # 截断规则的行为由 LimitLinesTest（JVM 单测）守，两者互补。
 # ToolOutputBoundTest.java
 run ToolOutputBoundTest "$PROJECT_ROOT"
+# ---------- 主线程 IO 与热路径组件收到的参数（A3） ----------
+# 两类都不会报错的问题：技能文件读写跑在主线程上（几百 KB + 慢闪存 = 一次卡顿，
+# 够不到 ANR 门槛所以只会被当成"有点卡"）；顶栏/侧栏收整份 WorkspaceUiState，
+# 于是流式期间每 32ms 换一次实例时它们都要为无关的正文增量判等 + 重组。
+# 断言的是**顺序**（IO 块必须在落盘之前），不是"文件里出现过 Dispatchers.IO"。
+# MainThreadIoBoundTest.java
+run MainThreadIoBoundTest "$PROJECT_ROOT"
 run R8ConfigTest "$PROJECT_ROOT"
 # ---------- 弹窗内滚动嵌套（防「点开某个弹窗直接闪退」重犯） ----------
 # 用户报告过「添加 MCP 服务器崩溃」，真因是 DialogShell 的 body 已带 verticalScroll，

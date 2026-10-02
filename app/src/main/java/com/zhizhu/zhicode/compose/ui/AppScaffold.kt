@@ -249,7 +249,7 @@ private fun ZhiCodeScreen(
                     // 里的 WideWorkspace 自己排侧栏 + 分隔线 + 顶栏，这里不重复挂。
                 } else {
                     ZhiTopBar(
-                        state = state,
+                        state = TopBarState.from(state),
                         wide = false,
                         glass = glassMain,
                         onOpenSidebar = viewModel::openSidebar,
