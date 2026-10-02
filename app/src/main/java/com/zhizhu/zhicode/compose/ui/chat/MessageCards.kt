@@ -50,6 +50,7 @@ import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.panes.DiffLines
+import com.zhizhu.zhicode.compose.ui.panes.OutputLines
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiImageRow
@@ -520,6 +521,31 @@ private fun ToolRow(
     val hasDetails = activity.output.isNotBlank()
     val showChevron = activity.completed && hasDetails
 
+    /*
+     * 这两个都是 O(输出长度) 的扫描（展开输出上限 40 000 字符，见
+     * `WorkspaceViewModel.LIVE_OUTPUT_LIMIT`），而这一行每次重组都要用它们 ——
+     * 状态切换、滚动复用、展开/收起都会触发。所以先算一次并缓存。
+     *
+     * ⚠️ key **不能**用 `activity` 整体：它带 `elapsedMs`，运行中每秒都在变，
+     * 那样等于每秒白算一次。key 只取真正参与计算的那几个字段。
+     *
+     * 输出字符串没变时 `remember` 的相等判断走的是同一实例的 `String.equals`
+     * 快路径（O(1)）；真变了才付一次 memcmp —— 都比重新 split 一遍便宜。
+     */
+    val isFileDiff = remember(activity.toolName, activity.output) {
+        activity.isFileDiff()
+    }
+    val collapsedSummary = remember(
+        activity.kind,
+        activity.output,
+        activity.additions,
+        activity.deletions,
+        activity.failed,
+        activity.exitCode,
+    ) {
+        compactToolSummary(activity)
+    }
+
     // 整行点击：Miuix Surface(onClick)（color = Transparent 不填色，仅取按压反馈）
     Surface(
         onClick = onToggle,
@@ -627,7 +653,7 @@ private fun ToolRow(
                     modifier = Modifier.padding(start = 23.dp, top = 2.dp),
                 )
                 ToolStatusRegion.COLLAPSED -> Text(
-                    text = "  ⎿  " + compactToolSummary(activity),
+                    text = "  ⎿  " + collapsedSummary,
                     color = if (activity.failed) ZhiColors.red() else scheme.onSurfaceVariantSummary,
                     fontSize = ZhiTextScale.Footnote,
                     fontFamily = FontFamily.Monospace,
@@ -645,20 +671,20 @@ private fun ToolRow(
                 ToolStatusRegion.EXPANDED -> Card(
                     modifier = Modifier.padding(start = 23.dp, top = 5.dp),
                     cornerRadius = ZhiRadius.inner,
-                    insideMargin = if (activity.isFileDiff()) PaddingValues(vertical = 6.dp) else PaddingValues(8.dp),
+                    insideMargin = if (isFileDiff) PaddingValues(vertical = 6.dp) else PaddingValues(8.dp),
                     colors = CardDefaults.defaultColors(
                         color = ZhiColors.cardInnerSurface(),
                         contentColor = scheme.onSurfaceVariantSummary,
                     ),
                 ) {
-                    if (activity.isFileDiff()) {
+                    if (isFileDiff) {
                         DiffLines(activity.output)
                     } else {
-                        Text(
-                            text = activity.output,
-                            fontSize = ZhiTextScale.Footnote,
-                            fontFamily = FontFamily.Monospace,
-                        )
+                        // OutputLines 与 DiffLines 共用同一套「最多渲染 300 行 + 点按显示全部」
+                        // 的上限（见 ChangesPane.kt 的 MaxRenderedLines）：展开的输出最多
+                        // 40 000 字符，整段当一个 Text 放在单个 LazyColumn item 里，
+                        // 那个 item 会比视口还高，懒加载复用彻底失效。
+                        OutputLines(activity.output)
                     }
                 }
                 ToolStatusRegion.QUIET -> Unit
@@ -747,14 +773,32 @@ private fun compactToolSummary(activity: ToolActivity): String {
     val changed = activity.additions + activity.deletions
     if (changed > 0) return "$changed 行已修改 · 点按展开"
 
-    val clean = activity.output.trim()
-    if (clean.isEmpty()) return "已完成"
-    val lineCount = clean.split('\n').size
+    // ⚠️ 这里曾经是 `val clean = activity.output.trim()` 再 `clean.split('\n').size`。
+    //
+    // 两步都在**每次重组**时按输出全长的代价做一次：trim 会复制整份文本（上限
+    // 40 000 字符），split 会再建出所有行的数组 —— 而结果只有三个数：
+    // 去掉首尾空白后的边界、行数、以及"单行且不超 96 字符"时的那段文本。
+    // 改成按下标算：`trim()` 的边界是一个双向扫描，行数数的是区间里的换行符，
+    // 那段文本只在真要显示时才 substring（一行，很短）。
+    //
+    // 语义与原来逐字一致，包括：区间内部的空行**计入**行数
+    // （`"a\n\nb".trim().split('\n').size == 3`）。
+    val text = activity.output
+    var lo = 0
+    var hi = text.length
+    while (lo < hi && text[lo].isWhitespace()) lo++
+    while (hi > lo && text[hi - 1].isWhitespace()) hi--
+    if (lo >= hi) return "已完成"
+
+    var lineCount = 1
+    for (i in lo until hi) {
+        if (text[i] == '\n') lineCount++
+    }
 
     if (activity.kind == ToolKind.COMMAND) {
         val failedExit = activity.failed || (activity.exitCode != null && activity.exitCode != 0)
         if (failedExit) {
-            val why = firstUsefulErrorLine(clean)
+            val why = firstUsefulErrorLine(text)
             val code = activity.exitCode ?: 1
             return buildString {
                 append("退出码 ").append(code)
@@ -765,13 +809,33 @@ private fun compactToolSummary(activity: ToolActivity): String {
         return "$lineCount 行 · 点按展开"
     }
 
-    if (lineCount == 1 && clean.length <= 96) return clean
+    if (lineCount == 1 && hi - lo <= 96) return text.substring(lo, hi)
     return "$lineCount 行 · 点按展开"
 }
 
-/** 取第一条有用的错误行，对应原版 `firstUsefulErrorLine()`。 */
-private fun firstUsefulErrorLine(text: String): String =
-    text.split('\n').firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+/**
+ * 取第一条有用的错误行，对应原版 `firstUsefulErrorLine()`。
+ *
+ * 同样不 `split`、不建中间数组：按下标逐行扫，遇到第一条非空白行就把它
+ * **按 `trim()` 的边界**取出来（也就是去掉这行自己的首尾空白）。
+ * 每行的空白判据用 `Char.isWhitespace()`，与 Kotlin 的 `String.trim()` 一致。
+ */
+private fun firstUsefulErrorLine(text: String): String {
+    var start = 0
+    val n = text.length
+    while (start <= n) {
+        var end = text.indexOf('\n', start)
+        if (end < 0) end = n
+        var lo = start
+        var hi = end
+        while (lo < hi && text[lo].isWhitespace()) lo++
+        while (hi > lo && text[hi - 1].isWhitespace()) hi--
+        if (lo < hi) return text.substring(lo, hi)
+        if (end >= n) break
+        start = end + 1
+    }
+    return ""
+}
 
 /** 行内 diff 计数：原版是**纯文字着色**（9.5sp 等宽），没有底色胶囊。 */
 @Composable

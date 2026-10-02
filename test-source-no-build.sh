@@ -281,6 +281,14 @@ run LayoutConsistencyTest "$PROJECT_ROOT"
 # MarkdownStreamSplitTest（JVM 单测）守，两者互补。
 # MarkdownStreamingTest.java
 run MarkdownStreamingTest "$PROJECT_ROOT"
+# ---------- 超长工具输出（行数上限 · 不再对输出做 O(n) 字符串手术） ----------
+# 工具卡展开的输出最长 40 000 字符，而 DiffLines 是**每一行一个 Text**，
+# 那些节点又全在同一个 LazyColumn item 里 —— 上千行就是"那个 item 比视口还高"，
+# 懒加载的复用彻底失效。另一条是 compactToolSummary / isFileDiff 每次重组都
+# 对整份输出 trim + split（结果只有三个数）。两条都不会报错，只会让老设备发烫。
+# 截断规则的行为由 LimitLinesTest（JVM 单测）守，两者互补。
+# ToolOutputBoundTest.java
+run ToolOutputBoundTest "$PROJECT_ROOT"
 run R8ConfigTest "$PROJECT_ROOT"
 # ---------- 弹窗内滚动嵌套（防「点开某个弹窗直接闪退」重犯） ----------
 # 用户报告过「添加 MCP 服务器崩溃」，真因是 DialogShell 的 body 已带 verticalScroll，

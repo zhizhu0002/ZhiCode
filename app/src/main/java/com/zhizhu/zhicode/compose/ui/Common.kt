@@ -558,32 +558,47 @@ fun ZhiIconDropdownMenu(
     content: @Composable () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    val entry = DropdownEntry(
-        items = items.map { item ->
-            // 先取出成局部 val：`item.icon` 是可空字段，直接进 lambda 无法智能转换。
-            val icon = item.icon
-            val iconSlot: (@Composable (Modifier) -> Unit)? =
-                if (icon == null) {
-                    null
-                } else {
-                    { m: Modifier ->
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = scheme.primary,
-                            modifier = m,
-                        )
+    /*
+     * ⚠️ 这个 entry 必须 `remember`。
+     *
+     * 输入器页脚有三个 chip 走本函数（`+`、权限、推理、模型），而输入器随
+     * `state.composerText` **每敲一个字**重组一次。原来这里没有任何缓存，
+     * 于是每个字符都要重建一整份 `DropdownEntry` + 每个条目一个 `DropdownItem`
+     * 对象 + 每个条目一个 icon 的可组合 lambda。
+     *
+     * key 取 `items` 与 `scheme.primary`：前者变了（选中项、文案、回调）必须重建；
+     * 后者是 iconSlot 里真正读到的主题色，主题切换时要跟着换，否则图标留在旧配色上。
+     * 两个 key 都是值/身份比较，不会因为「重建了一份内容相同的 list」而失效 ——
+     * 这正是 Compose 的 lambda 记忆化能配合上的地方。
+     */
+    val entry = remember(items, scheme.primary) {
+        DropdownEntry(
+            items = items.map { item ->
+                // 先取出成局部 val：`item.icon` 是可空字段，直接进 lambda 无法智能转换。
+                val icon = item.icon
+                val iconSlot: (@Composable (Modifier) -> Unit)? =
+                    if (icon == null) {
+                        null
+                    } else {
+                        { m: Modifier ->
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = scheme.primary,
+                                modifier = m,
+                            )
+                        }
                     }
-                }
-            DropdownItem(
-                text = item.text,
-                summary = item.summary,
-                selected = item.selected,
-                onClick = item.onClick,
-                icon = iconSlot,
-            )
-        },
-    )
+                DropdownItem(
+                    text = item.text,
+                    summary = item.summary,
+                    selected = item.selected,
+                    onClick = item.onClick,
+                    icon = iconSlot,
+                )
+            },
+        )
+    }
     OverlayIconDropdownMenu(
         entry = entry,
         modifier = modifier,

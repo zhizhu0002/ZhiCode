@@ -84,16 +84,46 @@ internal object ToolText {
         val writesFile = tool == "write" || tool == "edit" || tool == "multiedit" || tool == "delete"
         if (!writesFile) return false
         if (output.isEmpty()) return false
+
+        // ⚠️ 这里**不能用 `output.split('\n')`**（曾经就是那么写的）。
+        //
+        // 展开的工具输出上限是 40 000 字符（`WorkspaceViewModel.LIVE_OUTPUT_LIMIT`），
+        // 一条 2000 行的输出就会先建出 2000 个 String，**然后**才开始找 `@@` ——
+        // 哪怕第一行就是 hunk 头也白建。而这个函数在工具行每次重组时都会被调用
+        // （滚动、状态变化、展开/收起都算），于是几百 KB 的垃圾按次计费。
+        //
+        // 改成按下标逐行扫描并**提前 return**：命中 hunk 头就结束，
+        // 最坏情况也与原来一样是 O(n)，但不产生任何中间对象。
         var sawMinus = false
         var sawPlus = false
-        for (line in output.split('\n')) {
+        var start = 0
+        val n = output.length
+        while (start <= n) {
+            var end = output.indexOf('\n', start)
+            if (end < 0) end = n
             when {
-                line.startsWith("@@") -> return true
-                line.startsWith("--- ") -> sawMinus = true
-                line.startsWith("+++ ") -> sawPlus = true
+                startsWithAt(output, start, end, "@@") -> return true
+                startsWithAt(output, start, end, "--- ") -> sawMinus = true
+                startsWithAt(output, start, end, "+++ ") -> sawPlus = true
             }
+            if (end >= n) break
+            start = end + 1
         }
         return sawMinus && sawPlus
+    }
+
+    /**
+     * 区间 `[start, end)` 是否以 [prefix] 开头。
+     *
+     * 等价于 `output.substring(start, end).startsWith(prefix)`，但不建 String ——
+     * 调用点在每次重组的热路径上（见 [isFileDiff] 的说明）。
+     */
+    private fun startsWithAt(text: String, start: Int, end: Int, prefix: String): Boolean {
+        if (end - start < prefix.length) return false
+        for (k in prefix.indices) {
+            if (text[start + k] != prefix[k]) return false
+        }
+        return true
     }
 
     /** 工具行右侧的摘要（等宽小字）。与 [activityHint] 是**两套**模板，别合并。 */

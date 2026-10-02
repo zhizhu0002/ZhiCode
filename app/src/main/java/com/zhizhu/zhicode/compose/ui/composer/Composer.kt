@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -284,32 +285,48 @@ fun Composer(
                 // 面板本身没有宽度参数可调（`OverlayIconDropdownMenu` 的
                 // `minWidth` 是给触发按钮的），所以**缩短文案是唯一不偏离库默认的收窄办法**。
                 ZhiIconDropdownMenu(
-                    items = listOf(
-                        ZhiMenuItem(
-                            text = "附加项目文件",
-                            summary = "搜索并附加",
-                            icon = ZhiIcons.file,
-                            onClick = onAttachFile,
-                        ),
-                        ZhiMenuItem(
-                            text = "Skill 管理器",
-                            summary = "查看与编辑",
-                            icon = ZhiIcons.skill,
-                            onClick = onOpenSkills,
-                        ),
-                        ZhiMenuItem(
-                            text = "打开文件工作区",
-                            summary = "浏览与查看",
-                            icon = ZhiIcons.files,
-                            onClick = onOpenFilesTab,
-                        ),
-                        ZhiMenuItem(
-                            text = "上传照片",
-                            summary = "作为视觉输入",
-                            icon = ZhiIcons.floatingBall,
-                            onClick = onPickImage,
-                        ),
-                    ),
+                    /*
+                     * ⚠️ 这份 `listOf` 必须 `remember`。
+                     *
+                     * `ZhiIconDropdownMenu` 内部按 `remember(items, ...)` 缓存整份
+                     * `DropdownEntry`（含每个条目的 icon 可组合 lambda）。而 `listOf(...)`
+                     * 写在参数位置上，**每次重组都是一个新的 List 实例** —— 身份不等，
+                     * 那份缓存就永远命中不了，等于没做。输入器随 `state.composerText`
+                     * 每敲一个字重组一次，账单按字符数付。
+                     *
+                     * key 取四个回调：菜单的文案/图标是常量，唯一会变的就是动作本身。
+                     * 它们在 `ChatArea` 里是方法引用与不捕获变量的 lambda，
+                     * Compose 的 lambda 记忆化让它们跨重组保持同一实例，
+                     * 所以这个 `remember` 是真的会命中。
+                     */
+                    items = remember(onAttachFile, onOpenSkills, onOpenFilesTab, onPickImage) {
+                        listOf(
+                            ZhiMenuItem(
+                                text = "附加项目文件",
+                                summary = "搜索并附加",
+                                icon = ZhiIcons.file,
+                                onClick = onAttachFile,
+                            ),
+                            ZhiMenuItem(
+                                text = "Skill 管理器",
+                                summary = "查看与编辑",
+                                icon = ZhiIcons.skill,
+                                onClick = onOpenSkills,
+                            ),
+                            ZhiMenuItem(
+                                text = "打开文件工作区",
+                                summary = "浏览与查看",
+                                icon = ZhiIcons.files,
+                                onClick = onOpenFilesTab,
+                            ),
+                            ZhiMenuItem(
+                                text = "上传照片",
+                                summary = "作为视觉输入",
+                                icon = ZhiIcons.floatingBall,
+                                onClick = onPickImage,
+                            ),
+                        )
+                    },
                 ) {
                     Icon(
                         imageVector = ZhiIcons.attach,
@@ -338,23 +355,31 @@ fun Composer(
                 // 被压缩时也会规规矩矩地打省略号，而不是把词砍一半。
                 ZhiTextDropdownChip(
                     label = state.permissionMode.label,
-                    items = PermissionMode.entries.map { mode ->
-                        ZhiMenuItem(
-                            text = mode.label,
-                            summary = mode.detail,
-                            selected = mode == state.permissionMode,
-                            onClick = { onPermissionSelected(mode) },
-                        )
+                    // 与 `+` 菜单同一个理由（见上）：这两个 chip 的 items 也要 `remember`，
+                    // 否则 `ZhiIconDropdownMenu` 里那份 `remember(items, ...)` 永远命不中。
+                    // key 取「当前选中项」与回调 —— 前者决定哪个条目打勾（外观），
+                    // 后者是条目真正要调用的东西。
+                    items = remember(state.permissionMode, onPermissionSelected) {
+                        PermissionMode.entries.map { mode ->
+                            ZhiMenuItem(
+                                text = mode.label,
+                                summary = mode.detail,
+                                selected = mode == state.permissionMode,
+                                onClick = { onPermissionSelected(mode) },
+                            )
+                        }
                     },
                 )
                 ZhiTextDropdownChip(
                     label = "推理：${state.effort.label}",
-                    items = EffortLevel.entries.map { level ->
-                        ZhiMenuItem(
-                            text = level.label,
-                            selected = level == state.effort,
-                            onClick = { onEffortSelected(level) },
-                        )
+                    items = remember(state.effort, onEffortSelected) {
+                        EffortLevel.entries.map { level ->
+                            ZhiMenuItem(
+                                text = level.label,
+                                selected = level == state.effort,
+                                onClick = { onEffortSelected(level) },
+                            )
+                        }
                     },
                 )
                 // 模型这一项**不是**下拉：它要异步拉目录、还要写回配置记录，
