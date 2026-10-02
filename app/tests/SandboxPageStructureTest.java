@@ -380,7 +380,16 @@ public final class SandboxPageStructureTest {
         String chatCards = stripComments(
             read(root, "app/src/main/java/com/zhizhu/zhicode/compose/ui/chat/MessageCards.kt"));
         String errorCard = section(chatCards, "fun ErrorCard(", "fun InfoCard(");
-        String infoCard = section(chatCards, "fun InfoCard(", "private fun formatElapsed(");
+        // 段落终点取"InfoCard 之后的第一个顶层声明"，取不到就吃到文件末尾。
+        //
+        // 这里原来锚的是 `private fun formatElapsed(`，而那个函数已经删掉了
+        // （耗时格式统一走 `ToolText.formatElapsed`），锚点随之失效 ——
+        // 而且 `InfoCard` 现在就是文件最后一个函数，写死"下一个函数名"这种锚法
+        // 只要动一下文件尾部就会误报。所以改成"下一个顶层声明或文件末尾"。
+        int infoAt = chatCards.indexOf("fun InfoCard(");
+        require(infoAt >= 0, "找不到 InfoCard：外观统一那条断言失去落点");
+        int nextDecl = chatCards.indexOf("\nprivate fun ", infoAt);
+        String infoCard = nextDecl < 0 ? chatCards.substring(infoAt) : chatCards.substring(infoAt, nextDecl);
         require(errorCard.contains("ZhiNoticeBar(") && errorCard.contains("ZhiNoticeTone.ERROR"),
             "对话流的 ErrorCard 必须走共用通知条（ERROR 档）");
         require(infoCard.contains("ZhiNoticeBar(") && infoCard.contains("ZhiNoticeTone.WARN"),

@@ -175,6 +175,11 @@ object ToolActions {
      *
      * 工具已结束时**不在这里处理** —— 调用方不该对已结束的工具调用它，
      * 否则计时会一直涨；这里只在两个值都为 0 时返回 0。
+     *
+     * ⚠️ `startedAtMs` 与 `nowMs` 必须来自**同一个时钟**，且应当是单调时钟
+     * （`SystemClock.elapsedRealtime()`）。用墙上时钟（`currentTimeMillis`）的话，
+     * 系统对时或用户改时间会让"现在 - 起点"跳一大步甚至变负 ——
+     * 而这里的 `max` 也救不了它：引擎值比它小时，显示的就直接是那个错的差值。
      */
     fun displayElapsedMs(elapsedFromEngine: Long, startedAtMs: Long, nowMs: Long): Long {
         val engine = if (elapsedFromEngine > 0) elapsedFromEngine else 0L

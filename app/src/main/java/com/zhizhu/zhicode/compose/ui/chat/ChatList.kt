@@ -152,7 +152,23 @@ fun ChatList(
      * ⚠️ `isScrollInProgress` 在这里只反映用户拖动 / 惯性滚动：我们用的是
      * `requestScrollToItem`，它不走挂起滚动、也不占滚动互斥锁，不会把它置真。
      */
-    val autoFollow by rememberAutoFollow(listState)
+    val autoFollow by rememberAutoFollow(listState, forceFollowToken = state.scrollToBottomToken)
+
+    /*
+     * 发消息 → 立刻滚到底（并恢复跟随）。
+     *
+     * 与下面的吸底 effect 分开，因为触发条件完全不同：吸底是"内容变了且用户在跟随"，
+     * 而这条是"用户按了发送" —— 此刻即使他正在翻历史也要把他带回来。原版
+     * `scrollChat()` 也是无条件 `chatAutoFollow = true` + 滚到底。
+     *
+     * 令牌为 0（首次组合）时不动作：只观察**变化**。
+     */
+    LaunchedEffect(state.scrollToBottomToken) {
+        if (state.scrollToBottomToken == 0L) return@LaunchedEffect
+        val s = currentState
+        val leading = if (s.transcript.isEmpty()) 1 else 0
+        listState.requestScrollToItem(leading + s.transcript.size)
+    }
 
     /*
      * 上一次已处理的会话 id。

@@ -31,6 +31,7 @@ public final class ToolOutputBoundTest {
     private static final String CHANGES = "app/src/main/java/com/zhizhu/zhicode/compose/ui/panes/ChangesPane.kt";
     private static final String CARDS = "app/src/main/java/com/zhizhu/zhicode/compose/ui/chat/MessageCards.kt";
     private static final String TOOL_TEXT = "app/src/main/java/com/zhizhu/zhicode/compose/engine/ToolText.kt";
+    private static final String LIVE_OUTPUT = "app/src/main/java/com/zhizhu/zhicode/compose/model/LiveOutput.kt";
     private static final String COMPOSER = "app/src/main/java/com/zhizhu/zhicode/compose/ui/composer/Composer.kt";
     private static final String COMMON = "app/src/main/java/com/zhizhu/zhicode/compose/ui/Common.kt";
 
@@ -169,10 +170,27 @@ public final class ToolOutputBoundTest {
                 "compactToolSummary 里又出现了 trim()：它会**复制整份输出**"
                         + "（上限 40 000 字符），而这里只需要去空白后的两个下标");
 
+        // 「哪一行才是有用的错误信息」现在在纯逻辑层（见 ToolInteractionTest 里
+        // ErrorSummary 的那几条断言 + ErrorSummaryTest），所以这里只钉一点：
+        // 界面不许自己再扫一遍。
         String errorLine = functionBody(cards, "private fun firstUsefulErrorLine(");
-        require(!errorLine.isEmpty(), CARDS + " 里找不到 firstUsefulErrorLine");
-        require(!errorLine.contains(".split("),
-                "firstUsefulErrorLine 里又出现了 split（理由同 compactToolSummary）");
+        require(errorLine.isEmpty(),
+                CARDS + " 里不许再留着 firstUsefulErrorLine 的自有实现："
+                        + "判据已挪到 ErrorSummary（纯逻辑、有单测）");
+        require(squash(cards).contains("ErrorSummary.firstUsefulLine("),
+                CARDS + " 的错误摘要必须转发到 ErrorSummary.firstUsefulLine");
+
+        // ---- 2b. 运行中的实时输出也必须有上限 ------------------------------
+        //
+        // 运行标签那几行是**每次都重算**的（工具行随重组刷新），所以裁剪同样
+        // 必须是"按下标取尾部"而不是先把整段切碎。判据在纯逻辑层，有单测。
+        String liveOutput = stripComments(read(root, LIVE_OUTPUT));
+        require(liveOutput.contains("fun preview(") && liveOutput.contains("fun tail("),
+                LIVE_OUTPUT + " 必须提供 tail / preview："
+                        + "运行中的行内输出按「尾部 N 字符」与「尾部 N 行」两种口径取");
+        require(liveOutput.contains("DEFAULT_KEEP"),
+                LIVE_OUTPUT + " 必须给缓冲一个上限（对应原版的 keep = 40000）："
+                        + "一条 apt install 能刷出几十万字符");
 
         // ---- 3. isFileDiff 不许 split --------------------------------------
         String toolText = stripComments(read(root, TOOL_TEXT));

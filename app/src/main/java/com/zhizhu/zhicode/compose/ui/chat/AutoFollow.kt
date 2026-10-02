@@ -78,11 +78,26 @@ internal object AutoFollowPolicy {
  * <h3>为什么要立刻暂停</h3>
  * 用户按住往上拖的时候，如果跟随还是 true，流式内容会持续把他拽回底部 ——
  * 手感是"手指和自动滚动在抢"。所以拖动一开始就暂停，松手再按位置决定。
+ *
+ * <h3>[forceFollowToken]：发消息时无条件恢复跟随</h3>
+ * "暂停跟随"这件事住在上面那个 `mutableStateOf` 里，界面外部**没有**任何入口能
+ * 把它打开。于是用户上翻历史后直接发一条消息时，气泡与新回复会全部落在屏幕外。
+ * 参考实现（IQ Code `scrollChat()`）在发消息时无条件 `chatAutoFollow = true`；
+ * 这里用「令牌变了就把它设回 true」达到同一件事，令牌由 ViewModel 在 send 时递增。
+ * 默认 0 且只在 > 0 时生效，于是首帧那次启动不会误触发。
  */
 @Composable
-internal fun rememberAutoFollow(listState: LazyListState, hysteresis: Dp = 8.dp): State<Boolean> {
+internal fun rememberAutoFollow(
+    listState: LazyListState,
+    forceFollowToken: Long = 0L,
+    hysteresis: Dp = 8.dp,
+): State<Boolean> {
     val autoFollow = remember(listState) { mutableStateOf(true) }
     val hysteresisPx = with(LocalDensity.current) { hysteresis.roundToPx() }
+
+    LaunchedEffect(forceFollowToken) {
+        if (forceFollowToken > 0L) autoFollow.value = true
+    }
 
     LaunchedEffect(listState, hysteresisPx) {
         var dragging = false

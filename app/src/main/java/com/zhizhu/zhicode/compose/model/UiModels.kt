@@ -36,6 +36,26 @@ data class ToolActivity(
      * 取引擎存下来的值即可，不需要也不应该重新计时。
      */
     val startedAtMs: Long = 0L,
+    /**
+     * 运行中累积的标准输出 / 错误输出**字符数**。
+     *
+     * 只给运行中的标签用（`实时 00:12 · 标准输出 12.3 KB · 错误输出 0 B · 进程运行中`）。
+     * 为什么要分开两份：只看 [output] 的总长说不出"错误输出有多少"，
+     * 而恰恰是错误输出的体量在决定用户要不要去点开看。
+     *
+     * 工具结束后这两个值不再更新（结束时 [output] 换成了最终结果，与原版一致）。
+     */
+    val stdoutChars: Int = 0,
+    val stderrChars: Int = 0,
+    /**
+     * 命令类工具的**原始命令行**（未截断、保留换行）。
+     *
+     * 折叠态显示的是 [summary] —— 那是 `ToolText.truncateCommand` + `shorten(190)` 的产物，
+     * 主要为了"标题行不撑破"。但**展开态必须看得到完整命令**：一条 `&&` 串起来的
+     * 多行脚本被截成前两行 + `…` 之后，用户根本无法核对它到底跑了什么
+     * （参考实现同样是 `item.expanded ? command : truncateCommand(command)`）。
+     */
+    val command: String = "",
 )
 
 /**
@@ -552,6 +572,23 @@ data class WorkspaceUiState(
     val debugPreviousProfileId: String = "",
     /** 非空即设置弹窗打开；所有编辑先落在这里，「保存」才写回上面的字段。 */
     val settingsDraft: SettingsDraft? = null,
+    /**
+     * "把对话流滚到底"的信号：**每次用户发出消息**就 +1。
+     *
+     * ## 为什么需要它
+     *
+     * 对话流是自动吸底的，但用户一往上翻历史就**暂停跟随**（见 `AutoFollowPolicy`），
+     * 而且暂停状态住在 `ChatList` 自己的 `remember` 里 —— 界面外部没有任何入口能把它
+     * 恢复成"跟随"。于是出现这么一种情形：用户往上翻看历史，直接在输入框里发一条，
+     * 气泡与新回复全都落在屏幕**外**，界面上看不出"发出去了"。
+     *
+     * 参考实现（IQ Code `scrollChat()`）的做法就是发消息时**无条件**恢复跟随并滚到底：
+     * 用户此刻的意图已经由"按下发送"表达得很清楚了。
+     *
+     * 用递增的计数而不是布尔：连发两条也要各触发一次；用布尔的话第二次没有"变化"，
+     * 效果不会重放。
+     */
+    val scrollToBottomToken: Long = 0L,
 ) {
     val activeSession: SessionSummary?
         get() = sessions.firstOrNull { it.id == activeSessionId }

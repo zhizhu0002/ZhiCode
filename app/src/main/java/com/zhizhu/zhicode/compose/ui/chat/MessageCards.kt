@@ -44,12 +44,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.os.SystemClock
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.engine.ToolText
 import com.zhizhu.zhicode.compose.model.ToolActions
 import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.ChatItem
+import com.zhizhu.zhicode.compose.model.ErrorSummary
 import com.zhizhu.zhicode.compose.model.ToolActivity
+import com.zhizhu.zhicode.compose.model.LiveOutput
 import com.zhizhu.zhicode.compose.model.ToolKind
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
@@ -594,6 +597,10 @@ private fun ToolRow(
     val isFileDiff = remember(activity.toolName, activity.output) {
         activity.isFileDiff()
     }
+    // 命令行的折叠/展开两副面孔：展开时看**原始**命令，折叠时才用被截短的摘要。
+    // 恢复出来的历史工具没有 `command`（旧记录里没存），那时退回摘要 —— 有总比空着好。
+    val commandLine = if (activity.expanded && activity.command.isNotBlank()) activity.command
+    else activity.summary
     val collapsedSummary = remember(
         activity.kind,
         activity.output,
@@ -727,14 +734,20 @@ private fun ToolRow(
             }
         }
 
-        // Bash 命令：等宽、缩进，与图片里「命令在名称下方」一致
-        if (isCommand && activity.summary.isNotEmpty()) {
+        // Bash 命令：等宽、缩进，与图片里「命令在名称下方」一致。
+        //
+        // ⚠️ 展开态必须显示**完整**命令（`activity.command`），折叠态才用 `summary`
+        // （那是 `truncateCommand` + `shorten(190)` 的结果，只保证标题行不撑破）。
+        // 参考实现同样是 `item.expanded ? command : truncateCommand(command)` ——
+        // 一条 `&&` 串起来的多行脚本被截成前两行之后，用户没法核对它到底跑了什么。
+        if (isCommand && commandLine.isNotEmpty()) {
             Text(
-                text = "  " + activity.summary,
-                color = scheme.onSurfaceVariantSummary,
+                text = "  " + commandLine,
+                color = if (activity.expanded) scheme.onSurface else scheme.onSurfaceVariantSummary,
                 fontSize = ZhiTextScale.Footnote,
                 fontFamily = FontFamily.Monospace,
-                maxLines = 2,
+                // 展开时**不限制行数**：完整命令是用户主动要求看的，再截就等于没展开。
+                maxLines = if (activity.expanded) Int.MAX_VALUE else 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 23.dp),
             )
@@ -750,13 +763,52 @@ private fun ToolRow(
             label = "tool-status",
         ) { region ->
             when (region) {
-                ToolStatusRegion.RUNNING -> Text(
-                    text = runningToolLabel(activity, nowMs),
-                    color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Micro,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(start = 23.dp, top = 2.dp),
-                )
+                // 运行中：一行标签 + **实时输出**。
+                //
+                // 对齐参考实现（`MainActivity.addToolCard` 的 `else if (!item.completed)` 分支）：
+                // 只显示一个"运行中 · 00:12"是不够的 —— 一条跑两分钟都不吐字的命令与
+                // 一条正在刷日志的命令在界面上长得一模一样，用户没法判断它在干什么。
+                // 所以这里把最新几行实时摊出来（Bash 取尾部 7 行，其他工具取尾部一段字符），
+                // 并在还没有任何输出时明确写一句"等待程序输出…"，而不是留一片空白。
+                ToolStatusRegion.RUNNING -> Column(modifier = Modifier.padding(start = 23.dp, top = 2.dp)) {
+                    Text(
+                        text = runningToolLabel(activity, nowMs),
+                        color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
+                        fontSize = ZhiTextScale.Micro,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    val live = remember(activity.kind, activity.output) { liveOutputPreview(activity) }
+                    if (live.isNotEmpty()) {
+                        Card(
+                            modifier = Modifier.padding(top = 3.dp, bottom = 3.dp),
+                            cornerRadius = ZhiRadius.inner,
+                            insideMargin = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                            colors = CardDefaults.defaultColors(
+                                color = ZhiColors.cardInnerSurface(),
+                                contentColor = scheme.onSurfaceVariantSummary,
+                            ),
+                        ) {
+                            Text(
+                                text = live,
+                                color = scheme.onSurfaceVariantSummary,
+                                fontSize = ZhiTextScale.Micro,
+                                fontFamily = FontFamily.Monospace,
+                                // 实时区**不换行裁剪**，只按行数控制高度（见 liveOutputPreview）：
+                                // 一行很长的编译命令折成三行会把工具行顶得很高，而这几行的
+                                // 用途只是"看见它在动"。
+                                maxLines = 12,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    } else if (isCommand && !activity.awaitingPermission) {
+                        Text(
+                            text = "等待程序输出…",
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = ZhiTextScale.Micro,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
                 ToolStatusRegion.COLLAPSED -> Text(
                     text = "  ⎿  " + collapsedSummary,
                     color = if (activity.failed) ZhiColors.red() else scheme.onSurfaceVariantSummary,
@@ -851,13 +903,45 @@ private fun ToolStatusGlyph(activity: ToolActivity) {
  * `nowMs` 是界面侧时钟（见 [rememberRunningClock]）。耗时取「起点至今」与「引擎推送值」
  * 的较大者 —— 引擎那个值只在有输出时更新，光用它会让长时间不吐字的命令看起来卡死。
  * 取值规则在 [ToolActions.displayElapsedMs]（纯逻辑、有单测）。
+ *
+ * 命令类工具额外报出**输出体量**（`实时 00:12 · 标准输出 12.3 KB · 错误输出 0 B · 进程运行中`）：
+ * 字符数是单调递增的，即使屏幕上那几行没变，这一项也在动 —— 它同时回答了
+ * "到底有没有在产出"和"错误输出是不是在涨"。
  */
 private fun runningToolLabel(activity: ToolActivity, nowMs: Long): String {
+    if (activity.awaitingPermission) return "等待授权…"
     val display = ToolActions.displayElapsedMs(activity.elapsedMs, activity.startedAtMs, nowMs)
+    val clock = if (display > 0) ToolText.formatElapsed(display) else ""
     return when {
-        activity.awaitingPermission -> "等待授权…"
-        display > 0 -> "运行中 · ${formatElapsed(display)}"
-        else -> "运行中…"
+        activity.kind != ToolKind.COMMAND ->
+            if (clock.isEmpty()) "正在执行…" else "正在执行 $clock…"
+        clock.isEmpty() -> "实时 · ${LiveOutput.volume(activity.stdoutChars, activity.stderrChars)} · 进程运行中"
+        else -> "实时 $clock · ${LiveOutput.volume(activity.stdoutChars, activity.stderrChars)} · 进程运行中"
+    }
+}
+
+/**
+ * 运行中要在行内摊出来的实时输出。
+ *
+ * 两种取法对应参考实现的两个函数（`MainActivity.liveOutputPreview` / `liveOutputTail`）：
+ * - **命令类**（Bash / Root）按"最后 7 行、最多 7000 字符"取 —— 命令的输出是**行**结构，
+ *   按行取才看得出跑到哪一步了；
+ * - **其他工具**按"尾部 5000 字符"取 —— 它们多数只吐一段文本（读到的片段、搜索结果），
+ *   没有"行"的概念，硬按行裁会把内容切碎。
+ *
+ * 参考实现在宽屏下按 10 行取。这里固定 7 行：`wide` 要一路从 `ChatArea` 穿过
+ * `ChatList` / `ToolGroupCard` / `ToolRow` 四层，而差别只是横屏多三行 ——
+ * 横向空间的价值在别处，不值得为它铺一条参数通道。
+ *
+ * 裁剪与"省略提示"都在 [LiveOutput]（纯逻辑、有单测）。
+ */
+private fun liveOutputPreview(activity: ToolActivity): String {
+    val text = activity.output
+    if (text.isEmpty()) return ""
+    return if (activity.kind == ToolKind.COMMAND) {
+        LiveOutput.preview(text, maxChars = 7_000, maxLines = 7)
+    } else {
+        LiveOutput.tail(text, maxChars = 5_000)
     }
 }
 
@@ -870,12 +954,14 @@ private fun runningToolLabel(activity: ToolActivity, nowMs: Long): String {
  */
 @Composable
 private fun rememberRunningClock(active: Boolean, periodMs: Long = 500L): Long {
-    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    var now by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(active) {
         if (!active) return@LaunchedEffect
         while (true) {
             delay(periodMs)
-            now = System.currentTimeMillis()
+            // 与 `ToolActivity.startedAtMs` 同一个时钟：混用墙上时钟与单调时钟会让
+            // "现在 - 起点"在改过系统时间之后变成一个无意义的差值。
+            now = SystemClock.elapsedRealtime()
         }
     }
     return now
@@ -933,7 +1019,7 @@ private fun compactToolSummary(activity: ToolActivity): String {
     if (activity.kind == ToolKind.COMMAND) {
         val failedExit = activity.failed || (activity.exitCode != null && activity.exitCode != 0)
         if (failedExit) {
-            val why = firstUsefulErrorLine(text)
+            val why = ErrorSummary.firstUsefulLine(text)
             val code = activity.exitCode ?: 1
             return buildString {
                 append("退出码 ").append(code)
@@ -946,30 +1032,6 @@ private fun compactToolSummary(activity: ToolActivity): String {
 
     if (lineCount == 1 && hi - lo <= 96) return text.substring(lo, hi)
     return "$lineCount 行 · 点按展开"
-}
-
-/**
- * 取第一条有用的错误行，对应原版 `firstUsefulErrorLine()`。
- *
- * 同样不 `split`、不建中间数组：按下标逐行扫，遇到第一条非空白行就把它
- * **按 `trim()` 的边界**取出来（也就是去掉这行自己的首尾空白）。
- * 每行的空白判据用 `Char.isWhitespace()`，与 Kotlin 的 `String.trim()` 一致。
- */
-private fun firstUsefulErrorLine(text: String): String {
-    var start = 0
-    val n = text.length
-    while (start <= n) {
-        var end = text.indexOf('\n', start)
-        if (end < 0) end = n
-        var lo = start
-        var hi = end
-        while (lo < hi && text[lo].isWhitespace()) lo++
-        while (hi > lo && text[hi - 1].isWhitespace()) hi--
-        if (lo < hi) return text.substring(lo, hi)
-        if (end >= n) break
-        start = end + 1
-    }
-    return ""
 }
 
 /** 行内 diff 计数：原版是**纯文字着色**（9.5sp 等宽），没有底色胶囊。 */
@@ -1040,10 +1102,8 @@ fun InfoCard(item: ChatItem) {
 }
 
 
-private fun formatElapsed(millis: Long): String {
-    if (millis <= 0) return "0.0s"
-    val seconds = millis / 1000.0
-    if (seconds < 60) return String.format(java.util.Locale.US, "%.1fs", seconds)
-    val minutes = (seconds / 60).toInt()
-    return "$minutes:${String.format(java.util.Locale.US, "%04.1f", seconds % 60)}"
-}
+// 这里曾经有一个私有的 `formatElapsed`，输出的是 `7.0s` / `1:04.2` —— 现在已经删掉：
+// 参考实现（IQ Code `MainActivity.formatElapsed`）是 `01:04`（分:秒，≥1 小时才带小时位），
+// 而 `ToolText.formatElapsed` 早就是那一份了，只是没人调用它（于是两版截图对不上秒数格式）。
+// 耗时显示统一走 `ToolText.formatElapsed`，不再留第二份实现。
+

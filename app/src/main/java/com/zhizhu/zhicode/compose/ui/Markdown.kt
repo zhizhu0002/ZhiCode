@@ -3,6 +3,7 @@ package com.zhizhu.zhicode.compose.ui
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.data.Clipboard
 
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.drawBehind
@@ -19,10 +20,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -239,6 +246,17 @@ private fun BulletRow(block: MdBlock.Bullet, fontSize: TextUnit, styles: InlineS
 @Composable
 private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
     val scheme = MiuixTheme.colorScheme
+    val context = LocalContext.current
+    // 复制反馈的**本地**状态：点击后把标签换成「已复制」，约 520ms 后复原
+    // （时长对齐参考实现 `MarkdownRenderer` 的 `postDelayed(..., 520)`）。
+    // 不往 ViewModel 里放：这个状态只影响这一个代码块，而且它随滚动回收，
+    // 放进全局 state 反而会出现"滚回来还是已复制"的残留。
+    var copied by remember(block.body) { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (!copied) return@LaunchedEffect
+        delay(CopyFeedbackMs)
+        copied = false
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.inner,
@@ -249,15 +267,32 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
         ),
     ) {
         Column {
-            // 有语言标记时在最上方用小字标出，便于一眼看出是哪种代码
-            if (block.lang.isNotBlank()) {
-                Text(
-                    text = block.lang,
-                    color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Micro,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(bottom = 4.dp),
-                )
+            // 语言标记与「复制」同处一行：语言靠左（便于一眼看出是哪种代码），
+            // 复制按钮靠右（离拇指最近的位置）。
+            //
+            // 代码块是对话流里最常被整段拿走的东西（命令、补丁、配置），而在这之前
+            // 唯一的复制途径是长按整条消息「复制」—— 那会把整篇回答一起复制走。
+            if (block.lang.isNotBlank() || block.body.isNotBlank()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = block.lang,
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = ZhiTextScale.Micro,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ZhiSmallPill(
+                        label = if (copied) "已复制" else "复制",
+                        highlighted = copied,
+                        onClick = {
+                            val ok = Clipboard.copy(context, "ZhiCode 代码块", block.body)
+                            copied = ok
+                        },
+                    )
+                }
             }
             Text(
                 text = block.body,
@@ -269,6 +304,9 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
         }
     }
 }
+
+/** 「已复制」保留多久（参考实现 `MarkdownRenderer` 用的是 520ms）。 */
+private const val CopyFeedbackMs = 520L
 
 /**
  * 表格。

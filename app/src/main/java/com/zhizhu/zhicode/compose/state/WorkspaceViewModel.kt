@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zhizhu.zhicode.compose.data.ApiConfigStore
@@ -45,6 +46,7 @@ import com.zhizhu.zhicode.compose.model.Attachment
 import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
+import com.zhizhu.zhicode.compose.model.ChatNavigation
 import com.zhizhu.zhicode.compose.model.ChoiceIntent
 import com.zhizhu.zhicode.compose.model.ChoiceOption
 import com.zhizhu.zhicode.compose.model.ChoicePickerState
@@ -54,6 +56,7 @@ import com.zhizhu.zhicode.compose.model.FileDeletePrompt
 import com.zhizhu.zhicode.compose.model.FileEntry
 import com.zhizhu.zhicode.compose.model.FileNameForm
 import com.zhizhu.zhicode.compose.model.FileRoot
+import com.zhizhu.zhicode.compose.model.LiveOutput
 import com.zhizhu.zhicode.compose.model.McpScope
 import com.zhizhu.zhicode.compose.model.McpServer
 import com.zhizhu.zhicode.compose.model.McpServerDraft
@@ -161,8 +164,12 @@ class WorkspaceViewModel(
      *
      * `onToolProgress` 的粒度是"每次进程写出一点"，Bash 跑一条 `apt install` 能到几千次。
      * 每次都改 StateFlow 会把界面拖垮，所以按 [PROGRESS_FLUSH_MS] 合并后再落盘。
+     *
+     * 值类型是 [LiveOutput.Buffer] 而不是 `StringBuilder`：除了文本，它还要记住
+     * stdout / stderr 各自的字符数，以及**上一块来自哪个流** —— 后者决定要不要插
+     * `[stdout]` / `[stderr]` 标记行（只在切换时插一次，见 [LiveOutput.append]）。
      */
-    private val progressBuffers = mutableMapOf<String, StringBuilder>()
+    private val progressBuffers = mutableMapOf<String, LiveOutput.Buffer>()
     private val progressLastFlush = mutableMapOf<String, Long>()
 
     /** 正在等待用户回执的权限请求 id。 */
@@ -1678,6 +1685,8 @@ class WorkspaceViewModel(
                     pendingInputs = queue,
                     workingStatus = queuedStatus(queue.size),
                     message = queuedNote,
+                    // 发出去就必须看得见：用户可能正在翻历史，而此刻的意图很明确。
+                    scrollToBottomToken = s.scrollToBottomToken + 1,
                 )
             }
             // 真正的排队交给引擎：它会在「当前工具执行完 / 当前模型回复结束」这个
@@ -1718,6 +1727,8 @@ class WorkspaceViewModel(
                 composerBusy = true,
                 workingStatus = "正在思考…",
                 busySessionIds = it.busySessionIds + it.activeSessionId,
+                // 发送即恢复吸底：用户可能正在翻历史，气泡不能落在屏幕外。
+                scrollToBottomToken = it.scrollToBottomToken + 1,
             )
         }
         startTurn(buildPromptWithTextAttachments(text), imageBlocks)
@@ -2002,7 +2013,13 @@ class WorkspaceViewModel(
             // 记下起点：引擎的 elapsedMs 只在有输出时被推过来，跑很久不吐字的命令
             // 标签会冻在最后一次进度的值上。有了起点，界面侧的定时刷新才能续走
             // （见 ToolActions.displayElapsedMs）。
-            startedAtMs = System.currentTimeMillis(),
+            //
+            // ⚠️ 用 `elapsedRealtime`（单调时钟，含休眠）而**不是** `currentTimeMillis`：
+            // 后者会被系统对时/NTP/用户改时间拨动 —— 那种情况下秒表会突然跳一大步
+            // 甚至变成负数。参考实现用的就是 `SystemClock.elapsedRealtime()`。
+            startedAtMs = SystemClock.elapsedRealtime(),
+            // 原始命令行（未截断）：折叠态用 summary，展开态要看完整的那一份。
+            command = command,
         )
         liveTools[id] = LiveTool(groupId, name, command)
 
@@ -2025,24 +2042,44 @@ class WorkspaceViewModel(
 
     override fun onEngineToolProgress(id: String, chunk: String, stderr: Boolean, elapsedMs: Long) {
         if (liveTools[id] == null) return
-        val buffer = progressBuffers.getOrPut(id) { StringBuilder() }
-        if (stderr) buffer.append("[stderr]\n")
-        buffer.append(chunk)
-        // 单条工具的实时输出上限，超出丢头部（原版 liveOutput 是 40000）。
-        if (buffer.length > LIVE_OUTPUT_LIMIT) buffer.delete(0, buffer.length - LIVE_OUTPUT_LIMIT)
+        // 累积**每一块**（不按 flush 间隔丢块）：缓冲要完整，只有"推给 StateFlow"
+        // 这件事才做合并。
+        //
+        // ⚠️ `LiveOutput.append` 里有两件以前在这里做错的事：
+        //  1. `[stderr]` 标记原来**每个** stderr chunk 都插一次，连续报错的命令会把
+        //     输出刷成一片 `[stderr]`；现在只在 stdout/stderr 切换时插一次。
+        //  2. 换行没有归一化，PTY 的 `\r\n` 会在界面上留下看不见的回车。
+        val buffer = LiveOutput.append(
+            previous = progressBuffers[id] ?: LiveOutput.Buffer(),
+            chunk = chunk,
+            stderr = stderr,
+            keep = LIVE_OUTPUT_LIMIT,
+        )
+        progressBuffers[id] = buffer
 
         val now = System.currentTimeMillis()
         val last = progressLastFlush[id] ?: 0L
         if (now - last < PROGRESS_FLUSH_MS) return
         progressLastFlush[id] = now
-        val text = buffer.toString()
+        val text = buffer.text
         _state.update { s ->
             s.copy(
                 transcript = s.transcript.map { item ->
                     if (item.kind != ChatKind.TOOL_GROUP) item
                     else item.copy(
                         tools = item.tools.map {
-                            if (it.id == id) it.copy(output = text, elapsedMs = maxOf(it.elapsedMs, elapsedMs)) else it
+                            if (it.id == id) {
+                                it.copy(
+                                    output = text,
+                                    // 运行标签要显示"错误输出有多少"，所以两个计数
+                                    // 要跟着文本一起落进 state。
+                                    stdoutChars = buffer.stdoutChars,
+                                    stderrChars = buffer.stderrChars,
+                                    elapsedMs = maxOf(it.elapsedMs, elapsedMs),
+                                )
+                            } else {
+                                it
+                            }
                         },
                     )
                 },
@@ -2617,20 +2654,39 @@ class WorkspaceViewModel(
     }
 
     /**
-     * 「重试上一问」：把最近一条用户消息重新发一次。
+     * 「重试上一问」：把**被点那条消息之前**最近的一条用户消息重新发一次。
      *
      * 注意重发**不会**撤回上一轮的结果，所以它会作为新一轮追加在对话末尾
      * （与原版行为一致：原版也是重发，而不是回滚历史）。
+     *
+     * ## 为什么必须从"被点的那条"往前找
+     *
+     * 以前这里取的是整条对话的**最后一条**用户消息。于是用户翻到很早以前的一轮回复、
+     * 对它点「重试上一问」时，重发的却是**最新**那个问题 —— 点 A 发了 B，
+     * 而界面上看不出任何异常。参考实现同样是 `for (i = index - 1; i >= 0; i--)`，
+     * 从被点的那条往前找。
+     *
+     * @param from 被点的那条消息。为空时退回"最后一条用户消息"（正常不会发生）。
      */
-    private fun retryLastUserPrompt() {
-        val lastUser = _state.value.transcript.lastOrNull {
-            it.kind == ChatKind.USER && it.body.isNotBlank()
-        }
-        if (lastUser == null) {
-            _state.update { it.copy(message = "没有可重试的问题", messageIsError = true) }
+    private fun retryLastUserPrompt(from: ChatItem?) {
+        // 定位逻辑在纯逻辑层（`ChatNavigation.previousUserPrompt`，有单测）：
+        // 这里只负责把对话流翻译成它需要的最小输入。
+        val transcript = _state.value.transcript
+        val previous = ChatNavigation.previousUserPrompt(
+            entries = transcript.map { item ->
+                ChatNavigation.Entry(
+                    id = item.id,
+                    isUser = item.kind == ChatKind.USER,
+                    body = item.body,
+                )
+            },
+            anchorId = from?.id,
+        )
+        if (previous == null) {
+            _state.update { it.copy(message = "这条消息之前没有可重试的问题", messageIsError = true) }
             return
         }
-        _state.update { it.copy(composerText = lastUser.body) }
+        _state.update { it.copy(composerText = previous) }
         send()
     }
 
@@ -3942,7 +3998,7 @@ class WorkspaceViewModel(
                         }
                     }
                     "编辑后发送" -> _state.update { it.copy(composerText = target.body, message = "已放回输入框，可编辑后发送") }
-                    "重试上一问" -> retryLastUserPrompt()
+                    "重试上一问" -> retryLastUserPrompt(target)
                     else -> _state.update { it.copy(message = "不支持的操作：${option.label}") }
                 }
             }

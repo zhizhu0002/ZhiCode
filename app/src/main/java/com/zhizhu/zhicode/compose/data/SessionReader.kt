@@ -129,6 +129,10 @@ internal object SessionReader {
                                     additions = added,
                                     deletions = deleted,
                                     kind = kindOf(name),
+                                    // 会话记录里存着原始入参，命令类工具的命令行就在里面。
+                                    // 不读出来的话，恢复历史后展开一条 Bash 只能看到
+                                    // `truncateCommand` 截过的摘要（前两行 + `…`）。
+                                    command = input?.optString("command", "") ?: "",
                                 )
                                 if (toolId.isNotEmpty()) toolGroupIndex[toolId] = groupIndex
                                 val group = items[groupIndex]
@@ -205,11 +209,40 @@ internal object SessionReader {
             }
         }
         // 整组工具都已完成的，标上完成态（用于分组标题的「已运行 N 个工具」与折叠行为）。
+        //
+        // ⚠️ 同时给**没有结果的**工具收口：会话记录里可能留着只有调用、没有结果的事件
+        // （进程被杀、写入中断、旧版本记录格式）。它们恢复出来会是 `completed = false`，
+        // 而界面把"未完成"一律画成转圈 + 「运行中…」—— 于是一条几天前的记录里会
+        // **永远**有一个转圈的工具行，看着像卡住了。
+        //
+        // 参考实现（IQ Code `MainActivity`）同样在恢复时把它们标成失败，并补一句
+        // 「会话记录未包含该工具的结果。」。照做：这里不是"猜一个结果"，
+        // 而是如实说明"记录里没有"。
         return items.map { item ->
-            if (item.kind != ChatKind.TOOL_GROUP) item
-            else item.copy(groupCompleted = item.tools.isNotEmpty() && item.tools.all { it.completed })
+            if (item.kind != ChatKind.TOOL_GROUP) {
+                item
+            } else {
+                val closed = item.tools.map { tool ->
+                    if (tool.completed) {
+                        tool
+                    } else {
+                        tool.copy(
+                            completed = true,
+                            failed = true,
+                            output = tool.output.ifBlank { UNFINISHED_TOOL_NOTE },
+                        )
+                    }
+                }
+                item.copy(
+                    tools = closed,
+                    groupCompleted = closed.isNotEmpty() && closed.all { it.completed },
+                )
+            }
         }
     }
+
+    /** 恢复历史时给"记录里没有结果的工具"补的说明（参考实现逐字）。 */
+    private const val UNFINISHED_TOOL_NOTE = "会话记录未包含该工具的结果。"
 
     /** 任务清单：取最后一条 `task_snapshot` 事件（引擎在每次任务变更时都会追加）。 */
     fun tasks(file: File): List<AgentTask> {

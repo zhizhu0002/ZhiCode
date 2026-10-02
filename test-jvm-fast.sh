@@ -51,6 +51,9 @@ MAIN_KT_SOURCES=(
     app/src/main/java/com/termux/app/zhicode/api/zcode/ZcodeHarness.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/ToolKind.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/ToolActions.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/model/LiveOutput.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/model/ErrorSummary.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/model/ChatNavigation.kt
 )
 
 # 需要编译并运行的测试类（相对 app/src/test/java、点号包名）。
@@ -65,6 +68,9 @@ DEFAULT_TESTS=(
     com.termux.app.zhicode.api.ApiPureLogicTest
     com.termux.app.zhicode.tools.WebSearchJsonTest
     com.zhizhu.zhicode.compose.model.ToolActionsTest
+    com.zhizhu.zhicode.compose.model.LiveOutputTest
+    com.zhizhu.zhicode.compose.model.ErrorSummaryTest
+    com.zhizhu.zhicode.compose.model.ChatNavigationTest
 )
 
 # 哪些目标是 Kotlin。
