@@ -98,6 +98,15 @@ class SandboxBoard : ComponentActivity() {
      */
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
 
+    /**
+     * 看门狗超时。
+     *
+     * 8 秒：控制器就在同机同 UID，正常往返是毫秒级 —— 这个值已经远超"慢"，
+     * 只用来兜住"根本不返回"。宁可偶尔把一次很慢的正常操作判成超时（用户重试即可），
+     * 也不能让开关永久点不动。
+     */
+    private val WATCHDOG_TIMEOUT_MS = 8_000L
+
     @Volatile
     private var startupRetry = 0
 
@@ -106,6 +115,28 @@ class SandboxBoard : ComponentActivity() {
 
     private var rootSettingInFlight = false
     private var floatingLogInFlight = false
+
+    /**
+     * 主线程 Handler，只用来给"在飞标志"装一个**看门狗**。
+     *
+     * ⚠️ 为什么必须有它：`SandboxRpc.call` 是**阻塞式** `ContentResolver.call`，**没有超时**。
+     * 控制器进程一忙/一卡，调用就永远不返回，而 `rootSettingInFlight` / `floatingLogInFlight`
+     * 只在成功或失败的回调里被清掉 —— 于是在飞标志永久为 true，那个开关**再也点不动**。
+     * 用户报的现象正是"点一次隐藏 Root 之后就再也点不了"。
+     *
+     * 看门狗的作用是"无论后面发生什么，标志一定会被放开"：超时后复位标志、恢复可交互、
+     * 并如实告诉用户这次没等到结果（**不能**假装设置成功）。
+     */
+    private val watchdog = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * 在飞代数。
+     *
+     * 超时回调会检查"我等的还是不是那一次操作"：若用户在网络慢时又点了一次，
+     * 代数已经变了，旧超时就不能去复位新操作的标志（那会让互斥失效、两次写入打架）。
+     */
+    private var rootSettingGeneration = 0
+    private var floatingLogGeneration = 0
 
     /** 等用户在 Frida 确认框里点「安装并加载」的那一对 (包名, pid)。 */
     private var pendingFridaTarget: Pair<String, Int>? = null
@@ -305,7 +336,15 @@ class SandboxBoard : ComponentActivity() {
         val previous = !hidden
         dismissDialog()
         rootSettingInFlight = true
+        val generation = ++rootSettingGeneration
         setRootSwitch(previous, false)
+        armWatchdog(generation) {
+            if (!rootSettingInFlight || generation != rootSettingGeneration) return@armWatchdog
+            rootSettingInFlight = false
+            // 回到"服务端确认过的那个值"：这次调用没有结果，界面不能停在乐观值上。
+            setRootSwitch(previous, true)
+            toast("Root 隐藏设置超时：控制器没有响应，请稍后重试")
+        }
         worker.execute {
             try {
                 val response = SandboxRpc.call(
@@ -317,6 +356,8 @@ class SandboxBoard : ComponentActivity() {
                 val effective = response.optBoolean("hide_root", hidden)
                 runOnUiThread {
                     if (destroyed) return@runOnUiThread
+                    // 超时已经处理过这一次（代数已变）：不要再覆盖用户之后的操作。
+                    if (generation != rootSettingGeneration) return@runOnUiThread
                     rootSettingInFlight = false
                     setRootSwitch(effective, true)
                     toast("Root 隐藏已" + if (effective) "开启" else "关闭")
@@ -325,12 +366,26 @@ class SandboxBoard : ComponentActivity() {
             } catch (error: Throwable) {
                 runOnUiThread {
                     if (destroyed) return@runOnUiThread
+                    if (generation != rootSettingGeneration) return@runOnUiThread
                     rootSettingInFlight = false
                     setRootSwitch(previous, true)
                     toast("Root 隐藏设置失败: ${error.message}")
                 }
             }
         }
+    }
+
+    /**
+     * 给一次"在飞操作"装超时。
+     *
+     * 超时时间取 8 秒：控制器就在同机同 UID，正常往返是毫秒级；8 秒已经远超"慢"，
+     * 只用来兜住"卡死不返回"。
+     *
+     * 回调在**主线程**执行（`SandboxRpc.call` 的等待发生在 worker 线程，主线程一直是活的），
+     * 所以里面可以安全读写这两个非 volatile 的字段。
+     */
+    private fun armWatchdog(generation: Int, onTimeout: () -> Unit) {
+        watchdog.postDelayed({ if (!destroyed) onTimeout() }, WATCHDOG_TIMEOUT_MS)
     }
 
     /** 写入「隐藏 Root」的实际值与「能否交互」。服务端确认前一律禁止交互。 */
@@ -343,8 +398,17 @@ class SandboxBoard : ComponentActivity() {
     private fun applyFloatingLog(enabled: Boolean) {
         if (destroyed || floatingLogInFlight) return
         floatingLogInFlight = true
+        val generation = ++floatingLogGeneration
         // 乐观更新：先按用户意图显示，服务端确认后再以实际值落定
         setFloatingLog(enabled, false)
+        // 与「隐藏 Root」同款看门狗：`SandboxRpc.call` 没有超时，卡住就永远回不来，
+        // 标志会永久为 true、开关再也点不动。见 watchdog 字段的注释。
+        armWatchdog(generation) {
+            if (!floatingLogInFlight || generation != floatingLogGeneration) return@armWatchdog
+            floatingLogInFlight = false
+            setFloatingLog(!enabled, true)
+            toast("日志悬浮窗设置超时：控制器没有响应，请稍后重试")
+        }
         worker.execute {
             try {
                 val response = SandboxRpc.call(
@@ -356,6 +420,7 @@ class SandboxBoard : ComponentActivity() {
                 val effective = response.optBoolean("show_floating_log", enabled)
                 runOnUiThread {
                     if (destroyed) return@runOnUiThread
+                    if (generation != floatingLogGeneration) return@runOnUiThread
                     floatingLogInFlight = false
                     setFloatingLog(effective, true)
                     toast("日志悬浮窗已" + if (effective) "开启" else "关闭")
@@ -364,6 +429,7 @@ class SandboxBoard : ComponentActivity() {
             } catch (error: Throwable) {
                 runOnUiThread {
                     if (destroyed) return@runOnUiThread
+                    if (generation != floatingLogGeneration) return@runOnUiThread
                     floatingLogInFlight = false
                     setFloatingLog(!enabled, true)
                     toast("日志悬浮窗设置失败: ${error.message}")

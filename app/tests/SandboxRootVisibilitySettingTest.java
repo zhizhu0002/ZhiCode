@@ -75,6 +75,41 @@ public final class SandboxRootVisibilitySettingTest {
                         && has(dashboard, "setRootSwitch(previous,true)"),
                 "the switch must confirm restart semantics, disable in flight, and restore on failure");
 
+        // ---- 在飞标志必须有超时兜底（用户报「点一次之后再也点不了」）------------
+        //
+        // 根因：`SandboxRpc.call` 是**阻塞式** `ContentResolver.call`，**没有超时**；
+        // 控制器进程一卡就永远不返回，而 `rootSettingInFlight` / `floatingLogInFlight`
+        // 只在成功或失败的回调里被清掉 —— 标志永久为 true，开关再也点不动。
+        //
+        // 修法是看门狗：超时后复位标志、恢复可交互、并如实告知"没等到结果"。
+        // 这条断言守的就是"这两个开关都有超时兜底"，而不只是"有一个"。
+        require(has(dashboard, "armWatchdog(generation)")
+                        && dashboard.contains("WATCHDOG_TIMEOUT_MS")
+                        && dashboard.contains("watchdog.postDelayed"),
+                "两个在飞标志都必须有看门狗超时兜底：SandboxRpc.call 没有超时，"
+                        + "卡住时标志会永久为 true、开关再也点不动（用户报过的现象）");
+        // 超时回调不得**假装**设置成功：它必须把界面恢复到"服务端确认过的值"，而不是停在乐观值。
+        //
+        // ⚠️ 这里要断的是**超时分支内部**的顺序（先回滚、再报超时），不能只断
+        // "文本里有 setRootSwitch(previous,true) 与 超时" —— 那两样在失败分支里也有，
+        // 把超时分支的回滚删掉测试照样绿（实测如此）。`has` 会压掉空白，
+        // 所以相邻两句可以连着比。
+        require(has(dashboard, "setRootSwitch(previous,true)toast(\"Root隐藏设置超时")
+                        && has(dashboard, "setFloatingLog(!enabled,true)toast(\"日志悬浮窗设置超时"),
+                "超时后必须先回滚到服务端确认的值、再如实提示，不能假装设置成功"
+                        + "（两个开关都要）");
+        // 代数计数：超时回调不能去复位**后来那一次**操作的标志（否则互斥失效、两次写入打架）。
+        //
+        // ⚠️ 两半都要断：**递增**（发起时）与**比较**（超时/完成时）。
+        // 只断比较处的话，把递增删掉测试照样绿 —— 而那时两个操作会共用同一个代数，
+        // 旧超时会误伤新操作。
+        require(has(dashboard, "++rootSettingGeneration")
+                        && has(dashboard, "++floatingLogGeneration")
+                        && has(dashboard, "generation!=rootSettingGeneration")
+                        && has(dashboard, "generation!=floatingLogGeneration"),
+                "代数必须同时有\"发起时递增\"与\"回调时比较\"两半："
+                        + "只比较不递增时两次操作共用同一代数，旧超时会复位新操作的标志，互斥就失效了");
+
         require(testScript.contains("SandboxRootVisibilitySettingTest.java")
                         && testScript.contains("SandboxRootVisibilitySettingTest \"$PROJECT_ROOT\""),
                 "the canonical source suite must run this regression test");
