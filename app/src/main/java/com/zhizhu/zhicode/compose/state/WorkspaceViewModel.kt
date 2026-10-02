@@ -437,6 +437,20 @@ class WorkspaceViewModel(
             // 共享存储的授权状态要**实测**：文件面板切到「共享存储」时，
             // 没授权只会看到"0 项"，而原因（没给「所有文件访问权限」）必须说出来。
             refreshSharedStoragePermission()
+            /*
+             * `~/storage` 的六个链接**在每次启动的路径上**补一次。
+             *
+             * 幂等且只增不删（见 StorageLinks.setup），所以重复调用没有副作用；
+             * 而它是"老环境缺这一块"的唯一补救途径 —— 之前只在手动点「修复」时才跑，
+             * 结果是早先装好的环境永远没有 ~/storage，用户看到的是 `cd ~/storage/shared`
+             * 失败，看不出是"这个版本才加的"。
+             *
+             * 门控在 isInstalled()：环境还没装出来时 HOME 可能都还不存在，
+             * 这时候建链接没有意义（安装流程自己会建）。
+             */
+            if (runCatching { installer.isInstalled() }.getOrDefault(false)) {
+                installer.setupStorageLinks()
+            }
             ensureWorkspace()
             val sessions = SessionReader.list(_state.value.projectPath)
             _state.update { it.copy(sessions = sessions) }

@@ -119,6 +119,32 @@
             android:exported="false"
             android:grantUriPermissions="true" />
 
+        <!--
+          把 HOME 发布给系统文件管理器（DocumentsUI / 系统「文件」/「选择文件」）。
+
+          为什么需要它：HOME 在应用私有目录里（0700 + SELinux），第三方文件管理器
+          一个都进不去，不给 root 没有例外。而把 HOME 搬到共享存储的代价很大 ——
+          那一片挂载是 noexec（/proc/mounts: /dev/fuse /storage/emulated fuse
+          rw,nosuid,nodev,noexec），搬过去之后 ./gradlew 这类脚本就不能直跑了。
+          本 provider 让文件管理器通过 SAF 读我们，HOME 一个字节都不用搬。
+
+          android:permission="android.permission.MANAGE_DOCUMENTS" 是**必须的**，
+          它既是功能要求也是安全边界：这一档是 signature|privileged 权限，
+          只有系统进程持有 —— 于是只有 DocumentsUI 调得到，普通第三方应用调不到。
+          exported="true" 是 SAF 的硬性要求（系统要能发现这个 provider），
+          真正的访问控制由上面那一行权限完成。
+        -->
+        <provider
+            android:name="com.zhizhu.zhicode.ZhiDocumentsProvider"
+            android:authorities="${applicationId}.documents"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+
         <!-- 后台保活（用户显式开启） -->
         <service
             android:name="com.zhizhu.zhicode.background.KeepAliveService"

@@ -385,6 +385,22 @@ run StorageAccessTest "$PROJECT_ROOT"
 # 二进制预览也能进编辑态（保存回去就把文件写坏）。
 # FilePanelWriteTest.java
 run FilePanelWriteTest "$PROJECT_ROOT"
+# ---------- 本地挂载：文件管理器访问 HOME ----------
+# 机制是把 HOME 发布成 DocumentsProvider（SAF），**不搬目录** —— 共享存储整片
+# noexec，搬过去 ./gradlew 就不能直跑了。守六种「编译过、跑得起来、只有文件管理器
+# 里少一项或某一项打不开」的退化，其中最重要的是越界：只比较字符串的话
+# storage/shared 那条链接就能读写到 HOME 之外，而且没人会发现。
+# LocalMountTest.java
+run LocalMountTest "$PROJECT_ROOT"
+# ---------- provider 的失败必须能被看见 ----------
+# SAF 的失败在两端都是静音的：框架把 provider 的异常吞成 null，文件管理器只剩一句
+# 通用文案（真机上就是 Failed to create directory: 1），而真机取 logcat 要 adb/root
+# —— 两样都没有。于是"能看见原因"只能由代码保证，而删掉一句日志不影响任何功能、
+# 不报任何错。这一条钉住：每个入口都过 traced、createDocument 记下调用方参数、
+# 日志自身不许把 provider 弄坏、诊断页必须真调用（不是写死"可用"）、自检自己收尾，
+# 以及启动路径必须补建 ~/storage（这个 bug 真发生过）。
+# ProviderDiagnosticsTest.java
+run ProviderDiagnosticsTest "$PROJECT_ROOT"
 # ---------- UI 调试页的入口门控与"真的铺开组件" ----------
 # 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
 # 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。

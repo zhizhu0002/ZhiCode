@@ -2,10 +2,14 @@ package com.zhizhu.zhicode.compose.runtime
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
+import android.provider.DocumentsContract
 import android.provider.Settings
+import com.termux.app.zhicode.core.DocumentTree
+import com.termux.app.zhicode.core.ProviderLog
 import com.termux.app.zhicode.core.StorageLinks
 import com.termux.shared.termux.TermuxConstants
 import java.io.File
@@ -183,6 +187,177 @@ object EnvDoctor {
         sb.appendLine("外部存储状态 : ${Environment.getExternalStorageState()}")
         sb.appendLine("sdcard 可读  : ${runCatching { File("/sdcard").canRead() }.getOrDefault(false)}")
         sb.appendLine()
+        localMountInfo(context, sb)
+    }
+
+    /**
+     * 「文件管理器能不能看到 HOME」这一节。
+     *
+     * <p>为什么必须单独报：这一整条链路的每一环都可能断，而且**断在哪里从表面看不出来**
+     * —— 文件管理器里只会显示"没有这一项"或者"无法加载"。
+     *
+     * <ol>
+     *   <li>机制本身是「把 HOME 发布成 DocumentsProvider」（SAF），不是搬目录。
+     *       搬目录要付的代价是共享存储整片 `noexec`（见 [StorageLinks] 的说明）；</li>
+     *   <li>provider 必不必须在系统里注册 → 问 `PackageManager` 拿答案，而不是假设；</li>
+     *   <li>HOME 本身要可读写（权限/SELinux 拦下来时这里就会显形）。</li>
+     * </ol>
+     *
+     * <p>报告里**不写**"请去文件管理器里添加"这种固定文案当作成功证据 ——
+     * 那不是我实测到的东西。这里只报事实，怎么用由用户决定。
+     *
+     * <p>第 4 步是**真的调一遍自己**（[providerRoundTrip]）：注册查出来是"是"，
+     * 只说明清单没写错，不代表这条链路能跑通。浏览能过、新建却不能的故障恰恰
+     * 就在这两者之间，所以自检要一路走到"建一个再删掉"。
+     */
+    private fun localMountInfo(context: Context, sb: StringBuilder) {
+        val home = File(TermuxConstants.TERMUX_HOME_DIR_PATH)
+        sb.appendLine("## 本地挂载（文件管理器访问 HOME）")
+        for (line in DocumentTree.describe(home)) sb.appendLine(line)
+
+        val authority = "${context.packageName}.documents"
+        sb.appendLine("provider     : $authority（DocumentsProvider，SAF 发布 HOME，不搬目录）")
+        sb.appendLine("已注册       : ${isDocumentsProviderRegistered(context, authority)}")
+        val readable = home.canRead() && home.isDirectory
+        sb.appendLine("文件管理器可用: ${if (readable) "是" else "否（HOME 读不到）"}")
+        for (line in providerRoundTrip(context, authority)) sb.appendLine(line)
+        for (line in providerLogTail()) sb.appendLine(line)
+        sb.appendLine()
+    }
+
+    /**
+     * 经 `ContentResolver` 走一遍完整链路：打开根 → 列根目录 → **建一个目录** → 删掉它。
+     *
+     * <p>每一步单独一行，因为断在哪一步就是问题所在：注册对了但根打不开是 ID 解析的问题，
+     * 根能打开而列表是空的又是另一回事，能列却不能建则落在写入路径上。
+     *
+     * <p>⚠️ 框架在 `DocumentsProvider.call()` 里**吞掉异常、只回 null** ——
+     * 所以 provider 抛出的原因不会出现在这里。它由 provider 自己记进日志，
+     * 由 [providerLogTail] 紧随其后贴出来，两份合起来才解释得清。
+     *
+     * <p>自检会建一个名字带时间戳的目录，然后**只删它自己建的那一个**：
+     * 自检不允许在用户目录里留下东西。
+     */
+    private fun providerRoundTrip(context: Context, authority: String): List<String> {
+        val out = ArrayList<String>()
+        val resolver = context.contentResolver
+        val root = DocumentsContract.buildDocumentUri(authority, DocumentTree.ROOT_DOCUMENT_ID)
+
+        out += step("自检·打开根") {
+            val cursor = resolver.query(
+                root,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_FLAGS,
+                ),
+                null,
+                null,
+                null,
+            )
+            if (cursor == null) {
+                "null（provider 没回 cursor：没注册，或被 MANAGE_DOCUMENTS 挡住）"
+            } else {
+                try {
+                    if (!cursor.moveToFirst()) {
+                        "空表"
+                    } else {
+                        val flags = cursor.getInt(2)
+                        val canCreate = flags and DocumentsContract.Document.FLAG_DIR_SUPPORTS_CREATE != 0
+                        "ok（名字=${cursor.getString(1)}，flags=$flags，可建子项=$canCreate）"
+                    }
+                } finally {
+                    cursor.close()
+                }
+            }
+        }
+
+        out += step("自检·列根目录") {
+            val children = DocumentsContract.buildChildDocumentsUri(authority, DocumentTree.ROOT_DOCUMENT_ID)
+            val cursor = resolver.query(
+                children,
+                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
+                null,
+                null,
+                null,
+            )
+            if (cursor == null) {
+                "null（列不出来）"
+            } else {
+                try {
+                    if (cursor.count == 0) "0 项（HOME 是空的？）" else "${cursor.count} 项"
+                } finally {
+                    cursor.close()
+                }
+            }
+        }
+
+        val name = "zhicode-selftest-${System.currentTimeMillis()}"
+        var created: Uri? = null
+        out += step("自检·建目录") {
+            created = DocumentsContract.createDocument(
+                resolver,
+                root,
+                DocumentsContract.Document.MIME_TYPE_DIR,
+                name,
+            )
+            if (created == null) {
+                "失败（provider 抛了异常 —— 框架吞成 null，原因见下方日志）"
+            } else {
+                "ok（$name）"
+            }
+        }
+
+        out += step("自检·删掉它") {
+            val uri = created
+            when {
+                uri == null -> "跳过（没建成）"
+                DocumentsContract.deleteDocument(resolver, uri) -> "ok（没留下东西）"
+                else -> "失败 —— 请手动删掉 $name"
+            }
+        }
+        return out
+    }
+
+    /** 跑一步自检并渲染成一行。**绝不抛**：自检自己崩掉，等于把唯一的诊断手段也弄没了。 */
+    private inline fun step(label: String, body: () -> String): String =
+        "$label: " + runCatching(body).getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
+
+    /**
+     * provider 自己记的日志尾巴。
+     *
+     * <p>这是"原因"的来源：框架把 provider 的异常吞成 null，只有我们自己记下的那句
+     * `FAIL FileNotFoundException: 无法创建 xxx` 能说清发生了什么。
+     * 顺带它也记录了文件管理器**实际传进来的参数**（名字是空串还是 null，
+     * mimeType 到底是什么）—— 那是复现问题时最缺的信息。
+     */
+    private fun providerLogTail(): List<String> {
+        val file = File(File(TermuxConstants.TERMUX_HOME_DIR_PATH, "tmp"), ProviderLog.FILE_NAME)
+        if (!file.isFile) return listOf("provider 日志: 还没有（provider 一次都没被调用过）")
+        val text = runCatching { file.readText() }.getOrNull()
+            ?: return listOf("provider 日志: 读不出来（${file.absolutePath}）")
+        val lines = ProviderLog.tail(text)
+        return listOf("provider 日志: ${file.absolutePath}（末尾 ${lines.size} 行）") + lines
+    }
+
+    /**
+     * provider 是否真的被系统登记为 DocumentsProvider。
+     *
+     * <p>真因只能靠 `queryIntentContentProviders` 查：清单里的 `<provider>` 一旦
+     * 被误删、类名写错、或者 `intent-filter` 丢了，**编译与运行都不会报错**，
+     * 只是文件管理器的"添加存储"里少一项。这一条把那个静默失败变成一行可读的事实。
+     */
+    private fun isDocumentsProviderRegistered(context: Context, authority: String): String {
+        val provider = runCatching {
+            context.packageManager.queryIntentContentProviders(
+                android.content.Intent("android.content.action.DOCUMENTS_PROVIDER"),
+                0,
+            ).firstOrNull { it.providerInfo?.authority == authority }?.providerInfo
+        }.getOrNull()
+        return when {
+            provider == null -> "否（清单里的 provider 没生效：检查 name/authorities/intent-filter）"
+            else -> "是（${provider.name}，exported=${provider.exported}）"
+        }
     }
 
     // ---------------------------------------------------------------- 权限
