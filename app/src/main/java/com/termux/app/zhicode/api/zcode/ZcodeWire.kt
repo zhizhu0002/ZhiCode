@@ -377,17 +377,53 @@ object ZcodeWire {
         messages: JSONArray?,
         tools: JSONArray?,
         deviceId: String?,
+        /** 今天的日期（`yyyy-MM-dd`）；由调用方给，便于单测钉住固定值。 */
+        today: String,
     ): JSONObject {
         val body = JSONObject()
-        body.put("model", (model ?: "").trim())
+        val trimmedModel = (model ?: "").trim()
+        body.put("model", trimmedModel)
         body.put("max_tokens", maxTokens)
         body.put("stream", true)
-        body.put("system", buildSystem(systemPrompt))
-        body.put("messages", messages ?: JSONArray())
+        // system 是「harness 前言 3 块 + 本应用提示词」——见 [ZcodeHarness] 的说明：
+        // 只发我们自己的提示词会被网关的风控判成"不是它自己的客户端"（405/3012）。
+        body.put("system", ZcodeHarness.systemBlocks(systemPrompt, trimmedModel))
+        // messages 最前面插一条合成的 user 消息（上下文 + 日期），与官方一致。
+        val outgoing = JSONArray()
+        outgoing.put(contextMessage(today))
+        val incoming = messages ?: JSONArray()
+        for (i in 0 until incoming.length()) {
+            val item = incoming.optJSONObject(i) ?: continue
+            outgoing.put(item)
+        }
+        // 最后一条消息也打缓存标记（官方如此）。
+        ZcodeHarness.markLastMessageEphemeral(outgoing)
+        body.put("messages", outgoing)
         strippedTools(tools)?.let { body.put("tools", it) }
         body.put("metadata", JSONObject().put("user_id", metadataUserId(deviceId)))
         return body
     }
+
+    /**
+     * 那条合成的 user 消息（`<system-reminder>` 里放上下文与日期）。
+     *
+     * 单独成为一个函数是为了能单测它的**形状**（role 必须是 user、content 必须是
+     * 块数组、正文必须带 `</system-reminder>` 收尾）——这三样任一处写错，
+     * 在真机上只表现为又一次 3012，看不出是哪一项。
+     */
+    fun contextMessage(today: String): JSONObject {
+        val text = ZcodeHarness.contextMessageText(today)
+        return JSONObject()
+            .put("role", "user")
+            .put(
+                "content",
+                JSONArray().put(JSONObject().put("type", "text").put("text", text)),
+            )
+    }
+
+    /** 今天的日期戳（`yyyy-MM-dd`）。不用 `java.time`：minSdk 24 需要脱糖。 */
+    fun todayStamp(now: java.util.Date = java.util.Date()): String =
+        java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(now)
 
     /** 系统提示 → 缓存块数组。空提示给空数组（而不是一个空文本块）。 */
     fun buildSystem(systemPrompt: String?): JSONArray {

@@ -94,6 +94,7 @@ class ZcodeProvider : ModelProvider {
                 messages = messages,
                 tools = tools,
                 deviceId = deviceId(),
+                today = ZcodeWire.todayStamp(),
             )
             write(conn, body.toString())
 

@@ -48,6 +48,7 @@ MAIN_KT_SOURCES=(
     app/src/main/java/com/termux/app/zhicode/core/DocumentTree.kt
     app/src/main/java/com/termux/app/zhicode/core/ProviderLog.kt
     app/src/main/java/com/termux/app/zhicode/api/zcode/ZcodeWire.kt
+    app/src/main/java/com/termux/app/zhicode/api/zcode/ZcodeHarness.kt
 )
 
 # 需要编译并运行的测试类（相对 app/src/test/java、点号包名）。

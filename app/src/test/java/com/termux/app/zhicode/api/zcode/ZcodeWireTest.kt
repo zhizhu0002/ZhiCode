@@ -232,13 +232,137 @@ class ZcodeWireTest {
             messages = JSONArray().put(JSONObject().put("role", "user")),
             tools = null,
             deviceId = "",
+            today = "2026-10-03",
         )
         assertEquals("模型名要去掉首尾空格", "glm-4.6", body.getString("model"))
         assertEquals(8192, body.getInt("max_tokens"))
         assertTrue("必须开流式，否则解不出增量", body.getBoolean("stream"))
-        assertEquals(1, body.getJSONArray("messages").length())
+        // 我们那一条 + 前面合成的上下文提醒 = 2 条。少一条就说明提醒没插进去。
+        assertEquals(2, body.getJSONArray("messages").length())
         assertTrue(body.has("metadata"))
         assertFalse("没有工具就不该出现 tools 字段", body.has("tools"))
+
+        // system 必须真的走 harness 前言：走单块老路时请求形状与可用的那份实现不同，
+        // 现象只是又一次 3012 —— 看不出是这里退化了。
+        val system = body.getJSONArray("system")
+        assertEquals("3 块前言 + 我们自己的提示词", 4, system.length())
+        assertTrue(
+            "第一块必须是那句 CLI 前导",
+            system.getJSONObject(0).getString("text").contains("You are ZCode"),
+        )
+        assertTrue(
+            "环境块里要写进这次实际用的模型名",
+            system.getJSONObject(2).getString("text").contains("zai-api/glm-4.6"),
+        )
+    }
+
+    // ------------------------------------------------------------ harness 前言
+
+    @Test
+    fun systemIsTheHarnessPreamblePlusOurOwnPrompt() {
+        // 只发我们自己的提示词会被网关判成"不是它自己的客户端"（405/3012）。
+        // 可用的那份实现发的是 4 块：3 块 harness 前言（各带缓存标记）+ 本应用提示词。
+        val blocks = ZcodeHarness.systemBlocks("本应用的提示词", "GLM-5.3")
+        assertEquals("3 块前言 + 1 块自己的提示词", 4, blocks.length())
+        for (i in 0..2) {
+            assertEquals(
+                "第 ${i + 1} 块必须带 cache_control",
+                "ephemeral",
+                blocks.getJSONObject(i).getJSONObject("cache_control").getString("type"),
+            )
+        }
+        assertFalse(
+            "我们自己的提示词**不**带缓存标记（与可用的那份实现一致）",
+            blocks.getJSONObject(3).has("cache_control"),
+        )
+        assertEquals("本应用的提示词", blocks.getJSONObject(3).getString("text"))
+
+        val first = blocks.getJSONObject(0).getString("text")
+        assertTrue("第一块必须是那句 CLI 前导：$first", first.contains("You are ZCode"))
+        val second = blocks.getJSONObject(1).getString("text")
+        assertTrue("第二块要有身份段：$second", second.contains("interactive ZCode agent"))
+        assertTrue("第二块也要有 Harness 段", second.contains("# Harness"))
+        val third = blocks.getJSONObject(2).getString("text")
+        assertTrue("第三块要有环境块：$third", third.contains("# Environment"))
+        assertTrue("环境块要写进实际模型名", third.contains("zai-api/GLM-5.3"))
+        assertTrue("第三块要有上下文管理段", third.contains("# Context management"))
+    }
+
+    @Test
+    fun anEmptyOwnPromptStillSendsTheThreePreambleBlocks() {
+        // 引擎没给提示词时不能把前言一起省掉 —— 那样又回到"看起来不像它自己的客户端"。
+        assertEquals(3, ZcodeHarness.systemBlocks(null, "GLM-5.3").length())
+        assertEquals(3, ZcodeHarness.systemBlocks("   ", "GLM-5.3").length())
+    }
+
+    @Test
+    fun contextReminderIsPrependedAndTheLastMessageIsCached() {
+        val body = ZcodeWire.buildRequestBody(
+            model = "GLM-5.3",
+            maxTokens = 16,
+            systemPrompt = "s",
+            messages = JSONArray().put(
+                JSONObject()
+                    .put("role", "user")
+                    .put(
+                        "content",
+                        JSONArray().put(JSONObject().put("type", "text").put("text", "你好")),
+                    ),
+            ),
+            tools = null,
+            deviceId = "d",
+            today = "2026-10-03",
+        )
+        val messages = body.getJSONArray("messages")
+        assertEquals(2, messages.length())
+
+        val reminder = messages.getJSONObject(0)
+        assertEquals("合成的提醒必须是 user 消息", "user", reminder.getString("role"))
+        val text = reminder.getJSONArray("content").getJSONObject(0).getString("text")
+        assertTrue("要用 system-reminder 包起来：$text", text.startsWith("<system-reminder>"))
+        assertTrue("必须有收尾标签（漏了会让后续内容被当成提醒）", text.endsWith("</system-reminder>"))
+        assertTrue("日期要真的填进去：$text", text.contains("2026-10-03"))
+        assertFalse("占位符不许原样发出去", text.contains("{date}"))
+
+        // 我们那条用户消息原样保留在后面。
+        assertEquals("你好", messages.getJSONObject(1)
+            .getJSONArray("content").getJSONObject(0).getString("text"))
+        // 最后一条消息带缓存标记（官方如此）。
+        assertTrue(
+            "最后一条消息要带 cache_control",
+            messages.getJSONObject(1).getJSONArray("content")
+                .getJSONObject(0).has("cache_control"),
+        )
+    }
+
+    @Test
+    fun markingTheLastMessageIsIdempotentAndSkipsStringContent() {
+        // 已经是缓存块时不再重复处理；content 是字符串时不改写结构。
+        val already = JSONArray().put(
+            JSONObject().put("role", "user").put(
+                "content",
+                JSONArray().put(
+                    JSONObject().put("type", "text").put("text", "x")
+                        .put("cache_control", JSONObject().put("type", "ephemeral")),
+                ),
+            ),
+        )
+        ZcodeHarness.markLastMessageEphemeral(already)
+        assertEquals(
+            "ephemeral",
+            already.getJSONObject(0).getJSONArray("content").getJSONObject(0)
+                .getJSONObject("cache_control").getString("type"),
+        )
+
+        val plain = JSONArray().put(JSONObject().put("role", "user").put("content", "纯文本"))
+        ZcodeHarness.markLastMessageEphemeral(plain)
+        assertEquals("字符串形态的 content 不该被改写成数组", "纯文本", plain.getJSONObject(0).getString("content"))
+    }
+
+    @Test
+    fun todayStampIsTheFormatTheHarnessUses() {
+        val stamp = ZcodeWire.todayStamp(java.util.Date(0L))
+        assertTrue("必须是 yyyy-MM-dd：$stamp", Regex("""\d{4}-\d{2}-\d{2}""").matches(stamp))
     }
 
     // ------------------------------------------------------------ 响应解析

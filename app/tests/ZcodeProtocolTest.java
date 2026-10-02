@@ -37,6 +37,8 @@ public final class ZcodeProtocolTest {
             "app/src/main/java/com/termux/app/zhicode/api/ZcodeProvider.kt";
     private static final String ZCODE_WIRE =
             "app/src/main/java/com/termux/app/zhicode/api/zcode/ZcodeWire.kt";
+    private static final String ZCODE_HARNESS =
+            "app/src/main/java/com/termux/app/zhicode/api/zcode/ZcodeHarness.kt";
     private static final String SESSION =
             "app/src/main/java/com/termux/app/zhicode/model/SessionConfig.java";
     private static final String PROFILE =
@@ -404,6 +406,49 @@ public final class ZcodeProtocolTest {
         require(provider.contains("truncate(text)"),
                 ZCODE_PROVIDER + " 必须保留原始的 HTTP 失败文案作为兜底："
                         + "只认 3012 一个码，别的错误原样留着，否则会吞掉服务端真正有用的说明");
+
+        // ---- 9e. harness 前言必须发出去（这是 3012 的最后一处结构差异）---------
+        // 请求头逐项对齐官方源码之后**仍然** 405/3012，而同一个账号在另一个应用里正常。
+        // 两边唯一剩下的结构性差异就是请求体：可用的那份实现发 4 个 system 块
+        // （3 块 harness 前言各带 cache_control + 本应用提示词），并在 messages 最前面
+        // 插一条 <system-reminder> 的合成 user 消息、给最后一条消息打缓存标记。
+        String harness = read(root, ZCODE_HARNESS);
+        require(!harness.contains("import android."),
+                ZCODE_HARNESS + " 不许 import android.*：它是纯文本与 JSON 组装，必须留在秒级回路里");
+        String sqHarness = squash(stripComments(harness));
+        // 三块前言的标志性内容各取一句：写丢了哪一块，现象都只是又一次 3012。
+        require(harness.contains("You are ZCode, an interactive coding agent"),
+                ZCODE_HARNESS + " 缺少 CLI 前导块");
+        require(harness.contains("# Harness"),
+                ZCODE_HARNESS + " 缺少身份段里的 # Harness 块");
+        require(harness.contains("# Environment"),
+                ZCODE_HARNESS + " 缺少环境块");
+        require(harness.contains("# Context management"),
+                ZCODE_HARNESS + " 缺少上下文管理段");
+        require(harness.contains("<system-reminder>") && harness.contains("</system-reminder>"),
+                ZCODE_HARNESS + " 必须给出合成提醒消息的开闭标签");
+        require(sqHarness.contains("funmarkLastMessageEphemeral("),
+                ZCODE_HARNESS + " 必须提供 markLastMessageEphemeral（官方给最后一条消息打缓存标记）");
+        // 组装必须真的被用上：system 不许再走单块的老路。
+        require(sqWire.contains("body.put(\"system\",ZcodeHarness.systemBlocks("),
+                ZCODE_WIRE + " 的 system 必须由 ZcodeHarness.systemBlocks 组装："
+                        + "只发本应用自己的提示词会被网关判成「不是它自己的客户端」");
+        require(sqWire.contains("outgoing.put(contextMessage(today))"),
+                ZCODE_WIRE + " 必须在 messages 最前面插入那条合成的上下文提醒："
+                        + "少了它，请求形状与可用的那份实现仍然不同");
+        require(sqWire.contains("ZcodeHarness.markLastMessageEphemeral(outgoing)"),
+                ZCODE_WIRE + " 必须给最后一条消息打缓存标记");
+        // 模板里**应该**留着 {date}（它就是模板）；要钉的是"发出去之前必须替换掉"。
+        require(sqHarness.contains("CONTEXT_DATE_LINE.replace(\"{date}\",date)"),
+                ZCODE_HARNESS + " 的 contextMessageText 必须把 {date} 替换成真实日期："
+                        + "原样发出去等于告诉模型今天叫 {date}");
+        require(sqHarness.contains("funcontextMessageText(date:String)"),
+                ZCODE_HARNESS + " 必须有 contextMessageText(date)");
+        require(provider.contains("ZcodeWire.todayStamp()"),
+                ZCODE_PROVIDER + " 必须把真实日期传进去：写死一个日期会让提醒内容与现实不符");
+        // 秒级回路要带上这两个新文件，否则它们只能在分钟级的 Gradle 单测里被覆盖。
+        require(script.contains("ZcodeHarness.kt"),
+                FAST_SCRIPT + " 必须把 ZcodeHarness.kt 列进 MAIN_KT_SOURCES");
 
         // ---- 10. 「填入 ZCode 默认值」必须两个字段一起填 -------------------
         require(overlay.contains("填入 ZCode 默认值"),
