@@ -69,7 +69,7 @@
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true"
         android:extractNativeLibs="true"
-        android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        android:theme="@android:style/Theme.Material.NoActionBar">
 
         <!--
           与上游实现对齐：把 AndroidX Startup 自动并进来的这两个组件摘掉。

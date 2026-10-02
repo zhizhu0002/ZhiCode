@@ -90,6 +90,8 @@ public final class ApiSettingsStore {
         static final String SANDBOX_FULL_ACCESS = "sandbox_agent_full_access";
         static final String ROOT_EXECUTION = "root_execution_enabled";
         static final String FORCED_KEEP_ALIVE = "forced_keep_alive_enabled";
+        /** 终端是否强制字符模式输入（见 getTerminalCharMode 的说明）。 */
+        static final String TERMINAL_CHAR_MODE = "terminal_char_mode";
         static final String PROJECT_DIRECTORY = "project_directory";
         static final String MAX_TOKENS = "max_tokens";
         static final String CONTEXT_WINDOW = "context_window_tokens";
@@ -592,6 +594,40 @@ public final class ApiSettingsStore {
 
     private static String webSearchSlot(String provider) {
         return "websearch:" + provider.trim().toLowerCase(java.util.Locale.US);
+    }
+
+    /**
+     * 终端是否走「字符模式」输入。
+     *
+     * <p>背景：{@code TerminalView} 有两种输入类型（见 {@code onCreateInputConnection}）：
+     * <ul>
+     *   <li>{@code TYPE_NULL} —— 正常的软件输入法，但少数机型（三星旧键盘等）
+     *       会在切换时残留状态；</li>
+     *   <li>{@code TYPE_TEXT_VARIATION_VISIBLE_PASSWORD} —— 绕开上一条的 workaround，
+     *       代价是**部分输入法把它当成安全/密码键盘**，用户看到的是「调出来的不是
+     *       我常用的输入法」。</li>
+     * </ul>
+     *
+     * <p>两者各有代价，没有普适答案，所以做成开关、默认走普通输入法
+     * （用户反馈的是「有部分设备访问终端时不是软件输入法而是系统的安全输入法」——
+     * 那正是第二个分支的后果）。
+     */
+    public static boolean getTerminalCharMode(Context context) {
+        if (context == null) return false;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        return app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(Key.TERMINAL_CHAR_MODE, false);
+    }
+
+    public static void setTerminalCharMode(Context context, boolean enabled) {
+        if (context == null) return;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(Key.TERMINAL_CHAR_MODE, enabled)
+                .apply();
     }
 
     // ------------------------------------------------------------ 全局字段读写

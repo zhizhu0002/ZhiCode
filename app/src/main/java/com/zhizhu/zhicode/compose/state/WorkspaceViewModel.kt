@@ -458,8 +458,19 @@ class WorkspaceViewModel(
         _state.update {
             it.copy(
                 themeMode = theme,
-                settings = it.settings.copy(webSearchKeys = keys),
-                settingsDraft = it.settingsDraft?.copy(themeMode = theme, webSearchKeys = keys),
+                settings = it.settings.copy(
+                    webSearchKeys = keys,
+                    terminalCharMode = runCatching {
+                        ApiSettingsStore.getTerminalCharMode(getApplication())
+                    }.getOrDefault(false),
+                ),
+                settingsDraft = it.settingsDraft?.copy(
+                    themeMode = theme,
+                    webSearchKeys = keys,
+                    terminalCharMode = runCatching {
+                        ApiSettingsStore.getTerminalCharMode(getApplication())
+                    }.getOrDefault(false),
+                ),
             )
         }
     }
@@ -4265,6 +4276,11 @@ class WorkspaceViewModel(
         // 各自在这里补一次（密钥走加密槽，见 ApiSettingsStore.setWebSearchKey）。
         persistTheme(draft.themeMode)
         persistWebSearchKey(draft)
+        // 终端输入类型也不在 SessionConfig 里（终端是独立 Activity，不读会话配置），
+        // 所以单独落盘。
+        runCatching {
+            ApiSettingsStore.setTerminalCharMode(getApplication(), draft.terminalCharMode)
+        }
     }
 
     /**

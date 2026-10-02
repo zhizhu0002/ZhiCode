@@ -1041,7 +1041,14 @@ public final class TermuxTerminalPane extends FrameLayout
 
     @Override
     public boolean shouldEnforceCharBasedInput() {
-        return true;
+        // 默认 false：走 InputType.TYPE_NULL，也就是**正常的软件输入法**。
+        //
+        // 原先恒 true（TYPE_TEXT_VARIATION_VISIBLE_PASSWORD），而部分输入法会把那个
+        // 类型识别成密码/安全键盘 —— 用户看到的就是「访问终端时调出来的不是我常用的
+        // 输入法，而是系统的安全输入法」。那个 workaround 针对的是少数机型在 TYPE_NULL
+        // 下切换时残留组合状态的老问题（termux-app#686），代价与收益都只落在个别设备上，
+        // 所以做成设置项，由用户按自己机型选（缩进见 ApiSettingsStore.getTerminalCharMode）。
+        return com.termux.app.zhicode.storage.ApiSettingsStore.getTerminalCharMode(getContext());
     }
 
     @Override

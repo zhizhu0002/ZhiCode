@@ -349,6 +349,13 @@ run FieldErrorAlignmentTest "$PROJECT_ROOT"
 # SidebarMetricsTest.java  ComposerMenuTest.java
 run SidebarMetricsTest "$PROJECT_ROOT"
 run ComposerMenuTest "$PROJECT_ROOT"
+# ---------- 状态栏可见 + 终端输入法 ----------
+# 状态栏：真因在**清单**里（Fullscreen 主题把状态栏藏了），Compose 侧一切正常，
+# 所以只有静态钉住清单那一行。
+# 输入法：shouldEnforceCharBasedInput 恒 true 会走 VISIBLE_PASSWORD，
+# 部分输入法据此切到安全/密码键盘 —— 用户报的正是这个。
+# StatusBarAndImeTest.java
+run StatusBarAndImeTest "$PROJECT_ROOT"
 # ---------- UI 调试页的入口门控与"真的铺开组件" ----------
 # 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
 # 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。

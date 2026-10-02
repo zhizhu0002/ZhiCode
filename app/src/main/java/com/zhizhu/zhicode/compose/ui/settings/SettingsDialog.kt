@@ -247,6 +247,15 @@ private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) ->
         onCheckedChange = { onChange(draft.copy(forcedKeepAliveEnabled = it)) },
         summary = "开启前台服务 + WakeLock；Root 时还会强制系统后台策略。",
     )
+
+    // 输入法：两种输入类型各有代价，只能让用户按自己机型选（默认关 = 正常输入法）。
+    SettingsToggle(
+        title = "终端字符模式输入",
+        checked = draft.terminalCharMode,
+        onCheckedChange = { onChange(draft.copy(terminalCharMode = it)) },
+        summary = "若终端里调出的不是你常用的输入法（而是安全/密码键盘），保持关闭；" +
+            "若个别机型在终端里切换输入法后状态残留，再开启。",
+    )
 }
 
 @Composable
