@@ -1,16 +1,13 @@
 package com.zhizhu.zhicode.compose
 
-import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsControllerCompat
-import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModelFactory
+import com.zhizhu.zhicode.compose.theme.ZhiThemeMode
 import com.zhizhu.zhicode.compose.ui.ZhiCodeApp
 import com.termux.app.zhicode.tools.AndroidIntentBridge
 
@@ -68,28 +65,16 @@ class MainActivity : ComponentActivity() {
     /**
      * 状态栏：透明底色 + 图标明暗跟随应用主题。
      *
-     * 「跟随应用主题」而不是「跟随系统」是有意的：本应用允许在设置里独立选浅色/深色
-     * （`ThemeMode`），选浅色而系统是深色时，状态栏图标必须是**深色**的，
-     * 否则白图标压在白背板上完全看不见。所以这里读的是应用自己的主题状态。
+     * 判定与落地都在 [ZhiThemeMode]（那里有为什么「跟随应用主题」而不是「跟随系统」
+     * 的推导，以及为什么不能各 Activity 各写一份）。这里只负责「什么时候调用」。
      */
     private fun applyStatusBarAppearance() {
-        val dark = when (viewModel.state.value.themeMode) {
-            ThemeMode.DARK -> true
-            ThemeMode.LIGHT -> false
-            ThemeMode.SYSTEM ->
-                (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-                    android.content.res.Configuration.UI_MODE_NIGHT_YES
-        }
-        // 背板由 Compose 画（ZhiColors.backdrop()），窗口这一层保持透明，
-        // 状态栏区域才不会有一条与背板不同的色带。
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
-        WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightStatusBars = !dark
-            isAppearanceLightNavigationBars = !dark
-            // 只改图标明暗，**不**隐藏状态栏：用户明确要求「把状态栏显示出来」。
-            // 这一行同时也把上一版本（Fullscreen 主题留下的）隐藏状态复位。
-            show(WindowInsetsControllerCompat.BEHAVIOR_DEFAULT)
-        }
+        ZhiThemeMode.appliedTo(
+            this,
+            ZhiThemeMode.resolve(
+                viewModel.state.value.themeMode,
+                ZhiThemeMode.systemDark(this),
+            ),
+        )
     }
 }

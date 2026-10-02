@@ -21,6 +21,15 @@ public final class StatusBarAndImeTest {
     private static final String MANIFEST = "app/src/main/AndroidManifest.xml";
     private static final String ACTIVITY =
             "app/src/main/java/com/zhizhu/zhicode/compose/MainActivity.kt";
+    /**
+     * 状态栏明暗的**实现**处。
+     *
+     * 它原先写在 MainActivity 里，现在收进 ZhiThemeMode 供两个 Activity 共用 ——
+     * 于是断言也拆成两半：调用点在 MainActivity、实现在这里。
+     * 只留调用点（实现被删）时两边会一起变哑，所以两边都要钉。
+     */
+    private static final String THEME =
+            "app/src/main/java/com/zhizhu/zhicode/compose/theme/ZhiThemeMode.kt";
     private static final String PANE =
             "app/src/main/java/com/zhizhu/zhicode/TermuxTerminalPane.java";
     private static final String STORE =
@@ -29,6 +38,10 @@ public final class StatusBarAndImeTest {
             "app/src/main/java/com/zhizhu/zhicode/compose/ui/settings/SettingsDialog.kt";
     private static final String VM =
             "app/src/main/java/com/zhizhu/zhicode/compose/state/WorkspaceViewModel.kt";
+
+    private static String squash(String text) {
+        return text.replaceAll("\\s+", "");
+    }
 
     private static void require(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
@@ -48,6 +61,7 @@ public final class StatusBarAndImeTest {
         String root = args.length > 0 ? args[0] : ".";
         String manifest = read(root, MANIFEST);
         String activity = stripComments(read(root, ACTIVITY));
+        String themeMode = stripComments(read(root, THEME));
         String pane = stripComments(read(root, PANE));
         String store = stripComments(read(root, STORE));
         String settings = stripComments(read(root, SETTINGS));
@@ -64,11 +78,23 @@ public final class StatusBarAndImeTest {
         require(activity.contains("enableEdgeToEdge()"),
                 ACTIVITY + " 必须开启 edge-to-edge：状态栏透明后由内容铺满，"
                         + "否则会出现一条与背板不同色的状态栏色带");
-        require(activity.contains("isAppearanceLightStatusBars"),
+        require(activity.contains("isAppearanceLightStatusBars")
+                        || activity.contains("ZhiThemeMode.appliedTo("),
                 ACTIVITY + " 必须按主题设置状态栏图标明暗（isAppearanceLightStatusBars）："
-                        + "浅色主题下白图标在白底上完全看不见");
-        require(activity.contains("ThemeMode.SYSTEM"),
-                ACTIVITY + " 判定深浅必须覆盖 ThemeMode.SYSTEM 分支："
+                        + "浅色主题下白图标在白底上完全看不见。"
+                        + "实现收在 ZhiThemeMode.appliedTo 里也可以，但这里必须调到它。");
+        require(themeMode.contains("isAppearanceLightStatusBars"),
+                THEME + " 必须真的设置状态栏图标明暗：两个 Activity 都转发到这里，"
+                        + "只留下调用点而实现没了的话两边一起变哑");
+        // 明暗必须**跟着 dark 走**，不能写死。写死一个值也能编译、也是"设了明暗"，
+        // 但浅色主题下白图标压在白背板上 —— 用户报的那个症状会原样回来。
+        require(squash(themeMode).contains("isAppearanceLightStatusBars=!dark")
+                        && squash(themeMode).contains("isAppearanceLightNavigationBars=!dark"),
+                THEME + " 的状态栏/导航栏图标明暗必须由 dark 取反得到（= !dark）："
+                        + "写死成常量的话，浅色主题下白图标在白底上完全看不见 —— "
+                        + "这正是用户报的「上面黑乎乎的」另一面");
+        require(themeMode.contains("ThemeMode.SYSTEM"),
+                THEME + " 判定深浅必须覆盖 ThemeMode.SYSTEM 分支："
                         + "否则「跟随系统」时图标明暗会固定在一种颜色上");
         require(!activity.contains("hide(WindowInsetsCompat"),
                 ACTIVITY + " 不得隐藏状态栏 —— 用户明确要求「把状态栏显示出来」");

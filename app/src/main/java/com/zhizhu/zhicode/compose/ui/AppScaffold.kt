@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import com.zhizhu.zhicode.compose.ui.debug.UiDebugPage
 import com.zhizhu.zhicode.compose.ui.debug.ZhiDebugHud
 import com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay
@@ -42,7 +41,7 @@ import com.zhizhu.zhicode.compose.model.SkillsState
 import com.zhizhu.zhicode.compose.model.RoleCardsState
 import com.zhizhu.zhicode.compose.model.MemoryState
 import com.zhizhu.zhicode.compose.model.SettingsDraft
-import com.zhizhu.zhicode.compose.model.ThemeMode
+import com.zhizhu.zhicode.compose.theme.ZhiThemeMode
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
@@ -82,13 +81,13 @@ private fun rememberWorkspaceViewModel(): WorkspaceViewModel {
 fun ZhiCodeApp(viewModel: WorkspaceViewModel = rememberWorkspaceViewModel()) {
     val state by viewModel.state.collectAsState()
 
-    val systemDark = isSystemInDarkTheme()
-    val isDark = when (state.themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> systemDark
-    }
+    // 深/浅只有一处判定（见 ZhiThemeMode 的推导）：应用设置 `ThemeMode` + 系统深浅。
+    // 原先这里和三处各写一份，其中沙箱页那份读的是系统而不是应用设置，于是
+    // 「设置里选浅色、系统是深色」时两屏颜色不一致。
+    val isDark = ZhiThemeMode.rememberCurrentDark(state.themeMode)
     val colors = if (isDark) darkColorScheme() else lightColorScheme()
+    // 应用内换主题时状态栏图标要跟着换 —— onResume 那条路径只在回到前台时补。
+    ZhiThemeMode.ApplySystemBars(isDark)
 
     // LocalZhiDark 必须**先**提供，之后才能求任何 ZhiColors 层级色：
     // 这些色函数靠 LocalZhiDark 判断深浅，读早了会拿到默认值 false（浅色），

@@ -366,6 +366,12 @@ run RiskBadgeTest "$PROJECT_ROOT"
 # 该跟不跟（长回复之后跟随断掉）与不该跟却跟（边看历史边被拽回底部）。
 # AutoScrollSmoothnessTest.java
 run AutoScrollSmoothnessTest "$PROJECT_ROOT"
+# ---------- 深浅色只有一个来源 ----------
+# 判定原先有三份，而且不一样：主界面/状态栏读应用设置（对），沙箱页读系统深浅（错）。
+# 「设置里选浅色、系统是深色」时两屏颜色不一致，而默认主题是跟随系统 ——
+# 在开发机上永远看不出来。守的是「判定只能出现一次」，不是某个色值。
+# ThemeConsistencyTest.java
+run ThemeConsistencyTest "$PROJECT_ROOT"
 # ---------- UI 调试页的入口门控与"真的铺开组件" ----------
 # 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
 # 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。

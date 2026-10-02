@@ -9,15 +9,17 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalContext
 import com.termux.app.zhicode.json.JsonItems
 import com.termux.app.zhicode.termux.TermuxShellExecutor
 import com.termux.shared.termux.TermuxConstants
 import com.zhizhu.zhicode.compose.theme.LocalZhiDark
 import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.theme.ZhiThemeMode
 import com.zhizhu.zhicode.compose.theme.zhiTextStyles
 import com.zhizhu.zhicode.compose.ui.sandbox.SandboxBoardUiState
 import com.zhizhu.zhicode.compose.ui.sandbox.SandboxDialog
@@ -56,12 +58,16 @@ import java.util.concurrent.Executors
  *
  * 本类因此只剩三件事：**持有状态**、**调后端**、**把动作接到后端上**。
  *
- * ## 主题深浅为什么跟随系统
+ * ## 主题深浅跟随**应用设置**
  *
- * 应用自己的 `ThemeMode` 目前只存在于 `WorkspaceViewModel` 的内存状态里、**没有落盘**
- * （`AppSettings` 刻意不含它，见 `SettingsModels` 的说明）。本 Activity 是独立启动的，
- * 拿不到那个 ViewModel，所以按系统深浅来 —— 这与应用默认值 `ThemeMode.SYSTEM` 一致，
- * 也是这里唯一不会说谎的选择。等 `ThemeMode` 落盘后，这里改成读它即可。
+ * 这一屏是独立启动的 Activity，拿不到主界面的 `WorkspaceViewModel`，所以它读的是
+ * [com.zhizhu.zhicode.compose.theme.ZhiThemeMode]（落盘的 `ThemeMode`），
+ * 与主界面同一处判定。
+ *
+ * 这里**曾经**写的是 `isSystemInDarkTheme()`，理由是"`ThemeMode` 还没落盘"。
+ * 落盘之后没跟着改，于是「设置里选浅色、系统是深色」时这一屏整片深色 ——
+ * 用户报的「沙箱在浅色模式下仍有问题」就是它。现在 `ThemeConsistencyTest`
+ * 钉住了这条：深浅判定只允许出现在 `theme/ZhiThemeMode.kt`。
  *
  * ## 诊断信息的两个来源
  *
@@ -169,10 +175,24 @@ class SandboxBoard : ComponentActivity() {
     }
 
     override fun onCreate(state: Bundle?) {
+        // 与 MainActivity 同款：edge-to-edge 必须在 super.onCreate **之前**，
+        // 否则窗口 decor 的布局策略要晚一帧才生效（能看到一次状态栏闪动）。
+        // 这一屏的内容是 Miuix Scaffold + TopAppBar，它自带
+        // defaultWindowInsetsPadding，所以让出状态栏高度这件事不用另外补。
+        enableEdgeToEdge()
         super.onCreate(state)
         setContent {
-            val isDark = isSystemInDarkTheme()
+            val context = LocalContext.current
+            // ⚠️ 读**应用自己的**主题设置，不是系统深浅。
+            //
+            // 这里原先写的是 `isSystemInDarkTheme()`，注释里还留着"等 ThemeMode 落盘后
+            // 改成读它即可"。现在 ThemeMode 已经落盘（ApiSettingsStore.THEME_MODE），
+            // 于是「设置里选浅色、系统是深色」不再是这一屏整片深色 —— 那正是用户报的
+            // 「沙箱在浅色模式下仍有问题」。
+            val isDark = ZhiThemeMode.rememberCurrentDark(context)
             val colors = if (isDark) darkColorScheme() else lightColorScheme()
+            // 状态栏图标明暗也走同一处，不再各写一份。
+            ZhiThemeMode.ApplySystemBars(isDark)
             // 顺序与 ZhiCodeApp 一致：LocalZhiDark 必须**先**提供，之后才能求任何
             // ZhiColors 层级色 —— 那些函数靠它判断深浅，读早了会拿到默认浅色。
             CompositionLocalProvider(LocalZhiDark provides isDark) {
