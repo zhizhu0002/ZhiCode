@@ -45,6 +45,8 @@ import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiImageRow
 import com.zhizhu.zhicode.compose.ui.ZhiImageViewer
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
+import com.zhizhu.zhicode.compose.ui.ZhiNoticeBar
+import com.zhizhu.zhicode.compose.ui.ZhiNoticeTone
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -685,71 +687,59 @@ private fun DiffCount(label: String, color: Color) {
     )
 }
 
-/** 错误卡片。 */
+/**
+ * 错误卡片。
+ *
+ * ## 外观与沙箱页的后端错误同款
+ *
+ * 原来是「左边一根 3dp 红竖条 + 红标题 + 正文」，而沙箱页那处是「深灰卡片配红字」，
+ * 输入器上方那处又是「带投影的浮动工具栏」—— 同一件"出错了"三种长相。
+ * 现在三处都走 [ZhiNoticeBar] 的通知条（整宽红底、无阴影、小圆角）。
+ *
+ * 正文仍然走 [ZhiMarkdown]：`ToolText.friendlyError` 会输出带 `代码` 与列表的
+ * 可操作建议，与回复正文保持一致 —— 这一条是功能，不因为换外观而丢。
+ */
 @Composable
 fun ErrorCard(item: ChatItem) {
-    val scheme = MiuixTheme.colorScheme
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 2.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .padding(top = 4.dp)
-                .width(3.dp)
-                .height(34.dp)
-                .background(ZhiColors.red(), RoundedCornerShape(1.dp)),
-        )
-        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
-            Text(
-                text = item.title,
-                color = ZhiColors.red(),
-                fontSize = ZhiTextScale.BodySmall,
-                fontWeight = FontWeight.Bold,
+    ZhiNoticeBar(
+        title = item.title.ifEmpty { "错误" },
+        tone = ZhiNoticeTone.ERROR,
+        modifier = Modifier.padding(vertical = 6.dp),
+        // 正文用 Markdown 渲染，所以要自己给 slot 而不是让通知条画一行纯文本。
+        // 见上面说明：错误正文里有 `代码` 与列表，纯文本会把它压平。
+        content = {
+            ZhiMarkdown(
+                source = item.body,
+                bodyFontSize = 13.sp,
+                modifier = Modifier.padding(top = 4.dp),
             )
-        // 错误正文也走 Markdown：`ToolText.friendlyError` 会输出带 `代码` 与列表的
-        // 可操作建议，与回复正文保持一致。
-        ZhiMarkdown(
-            source = item.body,
-            bodyFontSize = 13.sp,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-        }
-    }
+        },
+    )
 }
 
-/** 提示卡片（斜杠命令输出、计划审批结果等）。 */
+/**
+ * 提示卡片（斜杠命令输出、计划审批结果等）。
+ *
+ * 与 [ErrorCard] 同一个通知条分量，只有配色不同（琥珀 = [ZhiNoticeTone.WARN]）：
+ * 它和错误是同一层级的信息块，形状本就该一致。
+ */
 @Composable
 fun InfoCard(item: ChatItem) {
-    val scheme = MiuixTheme.colorScheme
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 2.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .padding(top = 3.dp)
-                .width(3.dp)
-                .height(28.dp)
-                .background(ZhiColors.amber(), RoundedCornerShape(1.dp)),
-        )
-        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
-        if (item.title.isNotEmpty()) {
-            Text(
-                text = item.title,
-                color = ZhiColors.amber(),
-                fontSize = ZhiTextScale.Caption,
-                fontWeight = FontWeight.Bold,
+    ZhiNoticeBar(
+        title = item.title.ifEmpty { null },
+        tone = ZhiNoticeTone.WARN,
+        modifier = Modifier.padding(vertical = 4.dp),
+        content = {
+            // 提示正文也走 Markdown。这些内容里大量使用 `反引号` 标记命令与参数，
+            // 原先那个"整段变等宽"的启发式太粗（一句里只要有反引号，全段都成等宽），
+            // 现在由行内解析只给反引号包住的部分加等宽 + 底色。
+            ZhiMarkdown(
+                source = item.body,
+                bodyFontSize = 12.sp,
+                modifier = Modifier.padding(top = 3.dp),
             )
-        }
-        // 提示正文也走 Markdown。这些内容里大量使用 `反引号` 标记命令与参数，
-        // 原先那个"整段变等宽"的启发式太粗（一句里只要有反引号，全段都成等宽），
-        // 现在由行内解析只给反引号包住的部分加等宽 + 底色。
-        ZhiMarkdown(
-            source = item.body,
-            bodyFontSize = 12.sp,
-            modifier = Modifier.padding(top = 3.dp),
-        )
-        }
-    }
+        },
+    )
 }
 
 

@@ -1,9 +1,12 @@
 package com.zhizhu.zhicode.compose.ui
+import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.theme.ZhiSpace
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -33,6 +36,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
@@ -955,6 +959,109 @@ fun ZhiHorizontalDivider(modifier: Modifier = Modifier, color: Color = Color.Uns
 @Composable
 fun ZhiVerticalDivider(modifier: Modifier = Modifier) {
     VerticalDivider(modifier = modifier)
+}
+
+/**
+ * 通知条的语义档。
+ *
+ * - [INFO]   中性提示（灰底）
+ * - [WARN]   警告/注意（琥珀底）—— 对话流里斜杠命令输出、计划审批结果那一类
+ * - [ERROR]  错误（红底）
+ */
+enum class ZhiNoticeTone { INFO, WARN, ERROR }
+
+/**
+ * 通知条（一条贴边的横幅）：整宽、**纯色底 + 同色系文字、没有阴影**。
+ *
+ * ## 为什么要有这个分量
+ *
+ * 同一件事（"出错了"）在这份工程里原来有**三种长相**：
+ *
+ * - 沙箱页 `ErrorDetail`：一张 `surfaceContainer` 的 **Card**（深灰）配红字 ——
+ *   看起来像一张普通卡片，只是里面的字恰好是红的；红色只出现在文字上，
+ *   颜色面积太小，一眼扫过去不觉得"这是出事了"。
+ * - 对话流 `ErrorCard`：左边一根 3dp 红竖条 + 红标题 + 正文。
+ * - 对话流 `MessageBar` 的错误档：红底红字，但是一个**带投影的浮动工具栏**。
+ *
+ * 三者讲同一件事却长得不一样。现在统一成这一种**通知条**：
+ * 整宽横幅、纯色底、无阴影，改配色只需要改这一处。
+ *
+ * ## 几何为什么是「小圆角 + 紧内边距」
+ *
+ * 圆角用 [ZhiRadius.inner]（10dp）而不是卡片的 14dp：通知条比卡片矮得多
+ * （两三行文字），14dp 圆角配这点高度会显得"泡"起来。10dp 配 40dp 左右的高度
+ * 观感是"有圆润感的横条"，这是参考图里那一条的样子。
+ *
+ * 内边距比卡片紧一档（竖直 8dp）：它是一条**通知**，不是一张内容卡，
+ * 不该有卡片那种舒展的留白。
+ *
+ * ## 用 `errorContainer` / `error` 这一对，而不是 `error` / `onError*`
+ *
+ * `errorContainer` 在深色档是**暗红底**，`error` 是它上面那个**亮红字**；
+ * 浅色档反过来（浅红底 + 深红字）。两端都是"底色的对比色"，
+ * 所以不用按深浅色分叉。`onErrorContainer` 只有浅色档才对得上。
+ *
+ * @param text 正文。可以是多行（后端错误会带完整的启动阶段）。
+ * @param title 可选标题（"错误"、"提示"）。空则不占一行。
+ * @param tone 决定底色与文字色，见 [ZhiNoticeTone]。
+ * @param content 正文的**自定义渲染**，给了它就不画 [text]。
+ *
+ *   ⚠️ 这个槽**刻意不把颜色传出去**：对话流的错误/提示正文要过 Markdown，
+ *   而 Markdown 里每类块（标题/引用/代码/表格）都有自己的主题色。
+ *   传一个"统一正文色"进去只会让调用方以为能覆盖，实际覆盖不了（代码块自带底色）。
+ *   标题仍然由这里的 [titleColor] 统一着成该档的主色 —— 那才是"这是错误"的信号。
+ */
+@Composable
+fun ZhiNoticeBar(
+    text: String = "",
+    modifier: Modifier = Modifier,
+    title: String? = null,
+    tone: ZhiNoticeTone = ZhiNoticeTone.INFO,
+    content: (@Composable () -> Unit)? = null,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val titleColor = when (tone) {
+        ZhiNoticeTone.ERROR -> scheme.error
+        ZhiNoticeTone.WARN -> ZhiColors.amber()
+        ZhiNoticeTone.INFO -> scheme.onSurfaceVariantSummary
+    }
+    val bodyColor = when (tone) {
+        ZhiNoticeTone.ERROR -> scheme.error
+        ZhiNoticeTone.WARN -> scheme.onSurface
+        ZhiNoticeTone.INFO -> scheme.onSurfaceVariantSummary
+    }
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        // 见上面「几何」那段：通知条比卡片矮，圆角跟着小一档。
+        shape = RoundedCornerShape(ZhiRadius.inner),
+        color = when (tone) {
+            ZhiNoticeTone.ERROR -> scheme.errorContainer
+            // 琥珀在主题里没有对应的容器色，用「琥珀按低透明度铺在表面色上」——
+            // 这样深浅色两档都成立，也不写死一个只在深色下对的十六进制值。
+            ZhiNoticeTone.WARN -> ZhiColors.amber().copy(alpha = 0.18f).compositeOver(scheme.surface)
+            ZhiNoticeTone.INFO -> scheme.surfaceContainer
+        },
+    ) {
+        Column(modifier = Modifier.padding(horizontal = ZhiSpace.m, vertical = ZhiSpace.s)) {
+            if (!title.isNullOrEmpty()) {
+                Text(
+                    text = title,
+                    color = titleColor,
+                    fontSize = ZhiTextScale.Caption,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            if (content != null) {
+                content()
+            } else if (text.isNotEmpty()) {
+                Text(
+                    text = text,
+                    color = bodyColor,
+                    fontSize = ZhiTextScale.Footnote,
+                )
+            }
+        }
+    }
 }
 
 /** 上下文用量细条。转发到 Miuix [LinearProgressIndicator]。 */

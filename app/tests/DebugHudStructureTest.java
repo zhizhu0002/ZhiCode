@@ -483,8 +483,18 @@ public final class DebugHudStructureTest {
         String messageBar = stripComments(read(root, MESSAGE_BAR));
         requireContains(messageBar, "fun MessageBar(",
                 MESSAGE_BAR + " 必须提供 MessageBar 组合函数");
-        requireContains(messageBar, "scheme.errorContainer",
-                "错误提示必须走主题的 errorContainer，不能在代码里写死红色");
+        // 这一条原来直接钉 `scheme.errorContainer` 出现在 MessageBar.kt 里。
+        // 现在错误那一档改走与沙箱页共用的通知条分量，配色搬到了 [ZhiNoticeBar]，
+        // 但**不变式没变**：错误必须是主题里的 errorContainer，不能写死红色。
+        // 所以断言拆成两半，并且加一条"路由"断言 —— 否则把 MessageBar 的错误分支
+        // 整个删掉，这条也照样过（它只要求"某处有 errorContainer"）。
+        requireContains(messageBar, "ZhiNoticeBar(",
+                "错误提示必须走共用的通知条分量（ZhiNoticeBar），与沙箱页同款");
+        requireContains(messageBar, "ZhiNoticeTone.ERROR",
+                "错误那一档必须显式传 ZhiNoticeTone.ERROR，否则会渲染成普通提示色");
+        String commonForNotice = stripComments(read(root, COMMON));
+        requireContains(commonForNotice, "scheme.errorContainer",
+                "通知条的错误底色必须走主题的 errorContainer，不能在代码里写死红色");
         requireContains(messageBar, "delay(",
                 "提示条必须自己超时消失：否则一次失败会永久占着输入器上方那条空间");
 

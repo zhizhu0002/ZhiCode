@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,9 +42,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 1. **位置**：作为悬浮列表的**一层**（在任务卡与输入器之间），而不是 `SnackbarHost`
  *    那种覆盖在内容之上的浮层。它参与 Column 的布局，所以**永远不会**压住输入器，
  *    也不需要猜"输入器现在多高"。
- * 2. **颜色**：错误走 `errorContainer` / `error`，普通提示走
- *    `surfaceContainer` / `onSurfaceVariantSummary` —— 都在主题里，
- *    不写死红绿，深浅色模式各自成立（截图里那种红底红字就是前者）。
+ * 2. **颜色**：错误走 [ZhiNoticeBar] 的通知条（`errorContainer` / `error`，红底红字），
+ *    普通提示走 `surfaceContainer` / `onSurfaceVariantSummary` —— 都在主题里，
+ *    不写死红绿，深浅色模式各自成立。
+ *    **错误那一档与沙箱页的后端错误共用同一个分量**（见 [ZhiNoticeBar]）：同一件事
+ *    在这份工程里原来两种长相（这里是浮动工具栏、那里是深灰卡片配红字），现在一致。
+ *    普通提示仍然保持原来的浮动工具栏（带模糊）—— 它不是"通知"，
+ *    只是输入器上方的轻提示，这一档的外观没有被这次改动碰到。
  * 3. **生命周期**：没有"每条提示都要手动 dismiss"的负担。消息一变就重新计时，
  *    到时自动消失；点一下可以立刻关掉。`SnackbarHostState` 的队列模型在
  *    "连续三次保存失败"时会把三条排队慢慢放，反馈反而迟了。
@@ -86,41 +91,47 @@ fun MessageBar(
         exit = slideOutVertically(ZhiMotion.exitSpec) { it / 2 } + fadeOut(ZhiMotion.fadeOutSpec),
     ) {
         val text = shown ?: return@AnimatedVisibility
-        val shape = RoundedCornerShape(ZhiRadius.floating)
-        FloatingToolbar(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    // 错误条**不做模糊**：错误常常伴随玻璃层刚好没铺满（空对话、切页瞬间），
-                    // 那时 `capture` 拿到的是空背景，模糊出来是一块灰斑，
-                    // 反而把红底红字压得不清楚。
-                    if (shownError || !glass.supported) Modifier
-                    else glass.blur(Modifier, shape, radius = 16f),
-                )
-                .clickable(onClick = onDismiss),
-            color = if (shownError) scheme.errorContainer
-            else glass.surfaceColor(scheme.surfaceContainer),
-            cornerRadius = ZhiRadius.floating,
-            outSidePadding = PaddingValues(
-                // 与任务卡、输入器共用同一个内缩值（见 Common.kt）。
-                horizontal = floatingHorizontalInset(wide),
-                vertical = 6.dp,
-            ),
-            shadowElevation = 6.dp,
-            showDivider = false,
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 4.dp)) {
-                Text(
+        // 与输入器、任务卡共用同一个内缩值（见 Common.kt 的 floatingHorizontalInset）。
+        val inset = PaddingValues(
+            horizontal = floatingHorizontalInset(wide),
+            vertical = 6.dp,
+        )
+        if (shownError) {
+            // 错误走与沙箱页**同一个**通知条分量，见 [ZhiNoticeBar] 的说明：
+            // 原来这里是一个带投影的浮动工具栏，而沙箱页那处是一张深灰 Card 配红字 ——
+            // 同一件事两种长相。现在两处都是"贴边红底横幅"。
+            //
+            // padding 而不是 FloatingToolbar 的 outSidePadding：通知条是**贴边**的，
+            // 不需要阴影与 squircle 底，也就用不上那个外壳。
+            Box(modifier = Modifier.fillMaxWidth().padding(inset)) {
+                ZhiNoticeBar(
                     text = text,
-                    fontSize = ZhiTextScale.Footnote,
-                    // 错误文字用 `error` 而不是 `onErrorContainer`：
-                    // `errorContainer` 是浅红底，`onErrorContainer` 在浅色模式下是深红、
-                    // 在深色模式下才是浅红 —— 而 `error` 恰好两端都是"底色的对比色"，
-                    // 与截图里"红底 / 更亮的红字"一致。
-                    color = if (shownError) scheme.error else scheme.onSurface,
-                    maxLines = MAX_LINES,
-                    overflow = TextOverflow.Ellipsis,
+                    tone = ZhiNoticeTone.ERROR,
+                    modifier = Modifier.clickable(onClick = onDismiss),
                 )
+            }
+        } else {
+            val shape = RoundedCornerShape(ZhiRadius.floating)
+            FloatingToolbar(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (!glass.supported) Modifier else glass.blur(Modifier, shape, radius = 16f))
+                    .clickable(onClick = onDismiss),
+                color = glass.surfaceColor(scheme.surfaceContainer),
+                cornerRadius = ZhiRadius.floating,
+                outSidePadding = inset,
+                shadowElevation = 6.dp,
+                showDivider = false,
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 4.dp)) {
+                    Text(
+                        text = text,
+                        fontSize = ZhiTextScale.Footnote,
+                        color = scheme.onSurface,
+                        maxLines = MAX_LINES,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
