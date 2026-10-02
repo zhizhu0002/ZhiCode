@@ -91,10 +91,22 @@ class ZcodeWireTest {
             requestId = "req-1",
             traceId = "trace-1",
             sessionType = ZcodeWire.SESSION_TYPE_MAIN,
+            agent = ZcodeWire.DEFAULT_AGENT,
         )
         assertEquals("req-1", headers["x-request-id"])
         assertEquals("trace-1", headers["x-zcode-trace-id"])
         assertEquals("main", headers["x-zcode-session-type"])
+        // 官方模型请求路径上有它、额度路径上没有（model-config.ts vs zcode-source-headers.ts）。
+        // 缺它正是真机上会话被拒 405/3012 的原因，所以它必须能被显式带上。
+        assertEquals("glm", headers["x-zcode-agent"])
+    }
+
+    @Test
+    fun theAgentHeaderIsNotSentUnlessAskedSoTheQuotaPathStaysUnchanged() {
+        // 额度请求刚被证明可用（补上 X-Device-Mid 之后），所以不去动它：
+        // X-ZCode-Agent 只给模型请求。
+        val headers = ZcodeWire.headers("https://gw.example.com", "k", null, "d")
+        assertFalse(headers.containsKey("x-zcode-agent"))
     }
 
     @Test
@@ -419,6 +431,39 @@ class ZcodeWireTest {
             listOf("GLM 5.3", "GLM 5.3 Flash"),
             ZcodeWire.filterEntitled(listOf("glm-5.3", "glm-5.3-flash")).values.toList(),
         )
+        // 匹配必须**不区分大小写**：服务端 capabilities 里回的是哪种大小写不由我们决定
+        // （官方的规范化函数存在本身就说明它见过小写）。用 == 比对时一次大小写差异
+        // 就会静默筛空 → 回落到整张表 → 用户选的仍是一个服务端可能不认的写法。
+        assertEquals(
+            "小写、大写、混合大小写都要认",
+            listOf("GLM 5.3", "GLM 5.3 Flash"),
+            ZcodeWire.filterEntitled(listOf("GLM-5.3", "glm-5.3-FLASH")).values.toList(),
+        )
+    }
+
+    @Test
+    fun modelIdsAreTheOfficialCanonicalUppercaseForm() {
+        // 官方规范 id 是大写（official-glm-model-id.ts 的 OFFICIAL_GLM_MODEL_IDS），
+        // 内置模型名单也用大写形式。模型名是**发给服务端的**，大小写由服务端定义。
+        assertTrue("GLM-5.3 必须在大写形式下存在：${ZcodeWire.MODEL_NAMES.keys}",
+            ZcodeWire.MODEL_NAMES.containsKey("GLM-5.3"))
+        assertTrue(ZcodeWire.MODEL_NAMES.containsKey("GLM-5.3-Flash"))
+        assertFalse("不许留小写的旧键（那是另一个应用的表）",
+            ZcodeWire.MODEL_NAMES.containsKey("glm-5.3"))
+    }
+
+    @Test
+    fun normalizeModelFoldsToTheCanonicalFormButKeepsUnknownNames() {
+        // 用户手打 glm-5.3 / GLM-5.3 / Glm-5.3 都要发成同一个官方形式。
+        assertEquals("GLM-5.3", ZcodeWire.normalizeModel("glm-5.3"))
+        assertEquals("GLM-5.3", ZcodeWire.normalizeModel("GLM-5.3"))
+        assertEquals("GLM-5.3", ZcodeWire.normalizeModel("  Glm-5.3  "))
+        assertEquals("GLM-5.3-Flash", ZcodeWire.normalizeModel("glm-5.3-flash"))
+        // 对不上的**原样发**：对方上新模型时我们这张表落后，用户的写法就是唯一能用的写法。
+        // 硬套一个"最接近"的名字只会把请求发到一个不存在的模型上。
+        assertEquals("glm-9.9-preview", ZcodeWire.normalizeModel("glm-9.9-preview"))
+        assertEquals("", ZcodeWire.normalizeModel(null))
+        assertEquals("", ZcodeWire.normalizeModel("   "))
     }
 
     @Test

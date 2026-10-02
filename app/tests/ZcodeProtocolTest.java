@@ -230,6 +230,25 @@ public final class ZcodeProtocolTest {
                         + "官方在模型请求上生成它们，服务端用它区分主对话与子代理");
         require(provider.contains("ZcodeWire.SESSION_TYPE_MAIN"),
                 ZCODE_PROVIDER + " 的会话请求必须带 x-zcode-session-type = main");
+        // 官方有**两条不同的头路径**，取值不一样，这一点必须钉住：
+        //   会话（model-config.ts）   有 X-ZCode-Agent: glm，没有 X-Device-Mid 之外的差异
+        //   额度（zcode-source-headers.ts）没有 X-ZCode-Agent
+        // 真机现象正好印证：补上 X-Device-Mid 后额度通了，会话仍 405/3012 —— 缺的就是这个头。
+        require(squash(provider).contains("agent=ZcodeWire.DEFAULT_AGENT"),
+                ZCODE_PROVIDER + " 的**会话**请求必须带 X-ZCode-Agent（官方 model-config.ts 有、"
+                        + "额度那条路径没有）：缺它时真机上会话被拒 405/3012 unusual activity");
+        require(squash(wire).contains("constvalDEFAULT_AGENT=\"glm\""),
+                ZCODE_WIRE + " 必须有 DEFAULT_AGENT = glm（官方就是硬编码这个值）");
+        // 额度请求刚被证明可用，别顺手给它也加上。
+        int quotaMethodAt = provider.indexOf("fun fetchBalance");
+        int openAt = provider.indexOf("private fun open(");
+        require(quotaMethodAt >= 0 && openAt > quotaMethodAt,
+                "定位不到 fetchBalance 的实现（方法被改名或重排了？）："
+                        + "本断言要检查它不带会话专用的头");
+        String fetchBalance = provider.substring(quotaMethodAt, openAt);
+        require(!fetchBalance.contains("agent ="),
+                ZCODE_PROVIDER + " 的**额度**请求不许带 X-ZCode-Agent："
+                        + "官方额度路径没有它，而那条路径刚在真机上被证明可用，不要动");
         // HTTP-Referer 由 baseUrl 推 —— 不写死域名（官方也只在等于默认 origin 时才改写）。
         require(wire.contains("fun originOf("),
                 ZCODE_WIRE + " 必须从 baseUrl 推 origin 供 HTTP-Referer 用："
@@ -346,6 +365,28 @@ public final class ZcodeProtocolTest {
                 UI_PICKER + " 的额度卡片必须在 quotaError 非空时也显示："
                         + "只按 quota 非空判断的话，读不到额度时卡片直接消失 ——"
                         + "而「卡片不见了」和「额度是 0」在界面上分不出来");
+
+        // ---- 9c. 模型名必须是官方规范形式（发给服务端的东西，大小写不由我们定）-----
+        // 官方把 GLM 规范 id 定义成大写（official-glm-model-id.ts 的 OFFICIAL_GLM_MODEL_IDS），
+        // 内置模型名单（zcode-builtin.json 的 builtinModelIds）用的也是大写。
+        // 之前这里是全小写 —— 照另一个应用的反编译表抄的，而那个表很可能是它自己从来没
+        // 跑通的原因之一。模型名是**发给服务端的**，写错就是一个我们看不懂的 invalid_request。
+        String sqWire = squash(wire);
+        require(sqWire.contains("\"GLM-5.3\"to\"GLM5.3\""),
+                ZCODE_WIRE + " 的内置模型表必须用官方规范大写 id（GLM-5.3）："
+                        + "官方 OFFICIAL_GLM_MODEL_IDS 与 zcode-builtin.json 都是大写形式");
+        require(!sqWire.contains("\"glm-5.3\"to"),
+                ZCODE_WIRE + " 不许把模型 id 写回全小写（glm-5.3）");
+        require(wire.contains("fun normalizeModel"),
+                ZCODE_WIRE + " 必须有 normalizeModel 把用户输入折成规范形式："
+                        + "官方有 normalizeOfficialGlmModelId，同一个角色");
+        require(sqWire.contains("it.equals(trimmed,ignoreCase=true)"),
+                ZCODE_WIRE + " 的 normalizeModel 必须**不区分大小写**地折算："
+                        + "用户手打 glm-5.3 时发出去的必须是服务端认的那个写法");
+        require(sqWire.contains("wanted=entitled.map{it.trim().lowercase(Locale.US)}.toSet()"),
+                ZCODE_WIRE + " 的 filterEntitled 必须不区分大小写匹配："
+                        + "服务端 capabilities 里回哪种大小写不由我们决定，"
+                        + "用 == 比对时一次大小写差异就会静默筛空并回落到整张表");
 
         // ---- 10. 「填入 ZCode 默认值」必须两个字段一起填 -------------------
         require(overlay.contains("填入 ZCode 默认值"),

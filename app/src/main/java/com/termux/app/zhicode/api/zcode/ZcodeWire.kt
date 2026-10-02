@@ -81,7 +81,25 @@ object ZcodeWire {
     /** 会话请求的 `x-zcode-session-type`：主对话是 `main`（官方 `ModelRequestSessionType`）。 */
     const val SESSION_TYPE_MAIN = "main"
 
-    /** 被风控挡回时服务端给的业务码，provider 用它决定文案。 */
+    /**
+     * `X-ZCode-Agent` 的取值。
+     *
+     * ## 为什么它是**只给会话请求**的
+     *
+     * 官方有两条不同的请求头路径，取值不一样：
+     *
+     * - `apps/zcode-cli/packages/bootstrap/src/model-config.ts`（**模型/会话**请求）
+     *   里有 `"X-ZCode-Agent": "glm"`；
+     * - `packages/shared/src/zcode-source-headers.ts`（**额度**等业务请求）里没有它。
+     *
+     * 真机现象正好印证了这个分叉：补上 `X-Device-Mid` 之后**额度通了**（它走第二条路），
+     * 而**会话仍然被拒** `405 / 3012 unusual activity`（它走第一条路，缺的正是这个头）。
+     *
+     * 所以这里做成参数而不是默认项：额度请求刚被证明可用，不去动它。
+     */
+    const val DEFAULT_AGENT = "glm"
+
+    /** 被风控挡回时服务端给的业务码。 */
     const val CODE_BLOCKED = 3012
 
     /**
@@ -199,6 +217,7 @@ object ZcodeWire {
      * @param requestId    请求级 `x-request-id`；仅会话请求用
      * @param traceId      请求级 `x-zcode-trace-id`；仅会话请求用
      * @param sessionType  请求级 `x-zcode-session-type`；仅会话请求用
+     * @param agent        `X-ZCode-Agent`；仅会话请求用（见 [DEFAULT_AGENT]）
      */
     fun headers(
         baseUrl: String?,
@@ -209,6 +228,7 @@ object ZcodeWire {
         requestId: String? = null,
         traceId: String? = null,
         sessionType: String? = null,
+        agent: String? = null,
     ): Map<String, String> {
         val user = parseExtraHeaders(extraHeaders).values
         // 版本优先取用户值：UA 与 X-ZCode-App-Version 必须说同一个版本，
@@ -238,6 +258,7 @@ object ZcodeWire {
         requestId?.let { out["x-request-id"] = it }
         traceId?.let { out["x-zcode-trace-id"] = it }
         sessionType?.let { out["x-zcode-session-type"] = it }
+        agent?.let { out["x-zcode-agent"] = it }
 
         // 用户值最后铺：同名（不分大小写）的默认项要让位。
         for ((name, value) in user) {
@@ -414,36 +435,64 @@ object ZcodeWire {
     }
 
     /** 归一化模型名：网关对大小写敏感，但用户手填时常带空格。 */
-    fun normalizeModel(model: String?): String = (model ?: "").trim()
+    /**
+     * 把用户给的模型名折成**官方规范形式**。
+     *
+     * 只做一件事：如果去掉大小写后能对上 [MODEL_NAMES] 里的某一项，就用那一项
+     * （官方 `normalizeOfficialGlmModelId` 的等价物）。所以用户在输入框里手打
+     * `glm-5.3`、`GLM-5.3`、`Glm-5.3` 都会发成 `GLM-5.3`。
+     *
+     * **对不上的原样发出去**：对方上新模型时我们这张表落后，那时用户的写法就是唯一
+     * 能用的写法 —— 硬套一个"最接近"的名字只会把请求发到一个不存在的模型上。
+     */
+    fun normalizeModel(model: String?): String {
+        val trimmed = (model ?: "").trim()
+        if (trimmed.isEmpty()) return ""
+        return MODEL_NAMES.keys.firstOrNull { it.equals(trimmed, ignoreCase = true) } ?: trimmed
+    }
 
     // ------------------------------------------------------------ 套餐模型目录
 
     /**
      * 这个服务的套餐模型（id → 显示名）。
      *
-     * 取值来自参考实现的 `ZcodeVault.modelPairs()`（11 个）。它**不是**凭据也不是端点，
-     * 而是"这个服务提供哪些模型"这件事本身 —— 所以放在这里而不是界面里：
-     * 下面 [filterEntitled] 要用它做筛选，两边分开就得在界面层再抄一份。
+     * ## 为什么 id 是**大写**的
      *
-     * ⚠️ 它是**静态快照**：对方上新模型时这份表不会自己变。所以界面上必须允许手填模型名，
+     * 官方把 GLM 的规范 id 定义成大写（`packages/shared/src/official-glm-model-id.ts`
+     * 的 `OFFICIAL_GLM_MODEL_IDS`：`GLM-5.3`、`GLM-5.3-Flash`、`GLM-5V-Turbo`…），
+     * 并提供了一个规范化函数把任意大小写折算过去（`glm-5.3` → `GLM-5.3`）。
+     * 内置模型名单（`zcode-builtin.json` 的 `builtinModelIds`）用的也是大写形式。
+     *
+     * 之前这里是全小写 —— 那是照另一个应用的反编译表抄的，而那个表很可能是它自己
+     * 从来没跑通的原因之一（它同样缺 `X-Device-Mid` 与 `X-ZCode-Agent`）。
+     * **模型名是发给服务端的**，大小写由服务端定义，不能由我们决定。
+     *
+     * ## 它仍然是静态快照
+     *
+     * 对方上新模型时这份表不会自己变。所以界面上必须允许手填模型名，
      * 而这个表只用于"给出好看的显示名"与"筛选套餐可用项"，不参与任何校验。
      */
     val MODEL_NAMES: Map<String, String> = linkedMapOf(
-        "glm-4.5-air" to "GLM 4.5 Air",
-        "glm-4.6" to "GLM 4.6",
-        "glm-4.6v" to "GLM 4.6V",
-        "glm-4.7" to "GLM 4.7",
-        "glm-5" to "GLM 5",
-        "glm-5-turbo" to "GLM 5 Turbo",
-        "glm-5v-turbo" to "GLM 5V Turbo",
-        "glm-5.1" to "GLM 5.1",
-        "glm-5.2" to "GLM 5.2",
-        "glm-5.3" to "GLM 5.3",
-        "glm-5.3-flash" to "GLM 5.3 Flash",
+        "GLM-4.5-Air" to "GLM 4.5 Air",
+        "GLM-4.6" to "GLM 4.6",
+        "GLM-4.6V" to "GLM 4.6V",
+        "GLM-4.7" to "GLM 4.7",
+        "GLM-5" to "GLM 5",
+        "GLM-5-Turbo" to "GLM 5 Turbo",
+        "GLM-5V-Turbo" to "GLM 5V Turbo",
+        "GLM-5.1" to "GLM 5.1",
+        "GLM-5.2" to "GLM 5.2",
+        "GLM-5.3" to "GLM 5.3",
+        "GLM-5.3-Flash" to "GLM 5.3 Flash",
     )
 
     /**
      * 用"套餐可用模型"筛一遍 [MODEL_NAMES]。
+     *
+     * 匹配**不区分大小写**：服务端在 `capabilities` 里回的是哪种大小写不由我们决定
+     * （官方的规范化函数存在本身就说明它见过小写），而这张表的 key 是官方规范形式。
+     * 用 `==` 比对的话，一次大小写差异就会让筛选**静默筛空** → 回落到整张表 →
+     * 用户选的仍是一个服务端可能不认的写法。
      *
      * 三种情况分开处理，与参考实现一致：
      *  - 套餐列表为空（额度没读到）→ **返回全部**，让用户至少还能选、还能手填；
@@ -453,7 +502,8 @@ object ZcodeWire {
      */
     fun filterEntitled(entitled: Collection<String>?): Map<String, String> {
         if (entitled.isNullOrEmpty()) return MODEL_NAMES
-        val keep = MODEL_NAMES.filterKeys { entitled.contains(it) }
+        val wanted = entitled.map { it.trim().lowercase(Locale.US) }.toSet()
+        val keep = MODEL_NAMES.filterKeys { it.lowercase(Locale.US) in wanted }
         return keep.ifEmpty { MODEL_NAMES }
     }
 

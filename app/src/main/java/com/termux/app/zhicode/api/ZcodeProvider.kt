@@ -78,6 +78,9 @@ class ZcodeProvider : ModelProvider {
                 requestId = ZcodeWire.newRequestId(),
                 traceId = ZcodeWire.newRequestId(),
                 sessionType = ZcodeWire.SESSION_TYPE_MAIN,
+                // 官方模型请求路径上有这个头（`model-config.ts`），而额度路径上没有。
+                // 缺它正是真机上会话被拒 405/3012 的原因。
+                agent = ZcodeWire.DEFAULT_AGENT,
             ),
         )
         val request = requests.begin(conn)
