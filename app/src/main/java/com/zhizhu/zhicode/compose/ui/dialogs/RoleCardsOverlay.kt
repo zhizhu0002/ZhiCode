@@ -8,12 +8,17 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.RoleCard
 import com.zhizhu.zhicode.compose.model.RoleCardEditor
 import com.zhizhu.zhicode.compose.model.RoleCardsState
+import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
@@ -182,26 +187,23 @@ private fun RoleCardEditorForm(
     onChange: ((RoleCardEditor) -> RoleCardEditor) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
+    // 见 ZhiFieldError：没碰过的字段不飘红（一打开表单就红一片像页面坏了）。
+    var nameTouched by remember(editor.id) { mutableStateOf(false) }
     Column {
         // 与设置主页同形态：表单收进分组卡。
         SettingsGroup("基本信息") {
             ZhiTextField(
                 value = editor.name,
-                onValueChange = { value -> onChange { it.copy(name = value) } },
+                onValueChange = { value ->
+                    nameTouched = true
+                    onChange { it.copy(name = value) }
+                },
                 label = "角色名称",
                 useLabelAsPlaceholder = true,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             )
-            editor.nameError?.let { error ->
-                Text(
-                    text = error,
-                    color = scheme.error,
-                    fontSize = ZhiTextScale.Footnote,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                )
-            }
+            ZhiFieldError(message = editor.nameError, touched = nameTouched)
         }
 
         SettingsGroup("角色卡内容") {

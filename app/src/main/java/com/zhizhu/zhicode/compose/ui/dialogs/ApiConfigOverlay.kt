@@ -18,6 +18,7 @@ import com.zhizhu.zhicode.compose.model.ApiConfigState
 import com.zhizhu.zhicode.compose.model.ApiProfile
 import com.zhizhu.zhicode.compose.model.ApiProfileDraft
 import com.zhizhu.zhicode.compose.model.ApiProtocol
+import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.theme.ZhiColors
@@ -192,6 +193,9 @@ private fun ApiProfileForm(
     // 地址是否走明文 HTTP：部分自建网关只有 http。这个开关对应引擎里的
     // usesCleartextTraffic 场景，正常应保持关闭。
     var allowCleartext by remember(draft.id) { mutableStateOf(draft.baseUrl.startsWith("http://")) }
+    // 见 ZhiFieldError：没碰过的字段不飘红。key 取 draft.id，换记录时归零。
+    var nameTouched by remember(draft.id) { mutableStateOf(false) }
+    var baseUrlTouched by remember(draft.id) { mutableStateOf(false) }
     var visionEnabled by remember(draft.id) { mutableStateOf(true) }
 
     // 明文开关与地址前缀强绑定：勾上就把 http:// 规范成 http://，
@@ -211,7 +215,10 @@ private fun ApiProfileForm(
         SettingsGroup("基本信息") {
             ZhiTextField(
                 value = draft.name,
-                onValueChange = { value -> onChange { it.copy(name = value) } },
+                onValueChange = { value ->
+                    nameTouched = true
+                    onChange { it.copy(name = value) }
+                },
                 label = "名称",
                 useLabelAsPlaceholder = true,
                 singleLine = true,
@@ -244,7 +251,10 @@ private fun ApiProfileForm(
         SettingsGroup("连接") {
             ZhiTextField(
                 value = draft.baseUrl,
-                onValueChange = { value -> onChange { it.copy(baseUrl = value) } },
+                onValueChange = { value ->
+                    baseUrlTouched = true
+                    onChange { it.copy(baseUrl = value) }
+                },
                 label = "Base URL",
                 useLabelAsPlaceholder = true,
                 singleLine = true,
@@ -291,14 +301,10 @@ private fun ApiProfileForm(
         }
 
         // 表单级校验失败时直接说清是哪一项，而不是只把保存键置灰。
-        val error = draft.nameError ?: draft.baseUrlError
-        if (error != null) {
-            Text(
-                text = error,
-                color = ZhiColors.red(),
-                fontSize = ZhiTextScale.Footnote,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            )
-        }
+        // touched 语义见 ZhiFieldError：没碰过任何输入框的新建表单不该一进来就飘红。
+        ZhiFieldError(
+            message = draft.nameError ?: draft.baseUrlError,
+            touched = nameTouched || baseUrlTouched,
+        )
     }
 }

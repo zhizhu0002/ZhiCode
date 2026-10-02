@@ -336,6 +336,11 @@ run DropdownImeGuardTest "$PROJECT_ROOT"
 # 界面设置（主题、搜索密钥）读写两条路径都有。
 # SettingsPersistenceTest.java
 run SettingsPersistenceTest "$PROJECT_ROOT"
+# ---------- 表单错误行的时机与对齐 ----------
+# 一打开表单就飘红（用户还没填就被指责）+ 错误行没有横向内缩（比同组输入框
+# 往左凸出一截，左边缘参差不齐）。两者都不报错，只「看着不对」。
+# FieldErrorAlignmentTest.java
+run FieldErrorAlignmentTest "$PROJECT_ROOT"
 # ---------- UI 调试页的入口门控与"真的铺开组件" ----------
 # 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
 # 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。

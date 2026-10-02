@@ -37,6 +37,7 @@ import com.zhizhu.zhicode.compose.model.SkillUrlDraft
 import com.zhizhu.zhicode.compose.model.SkillsState
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.ZhiAnchoredActionMenu
+import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiFloatingActionButton
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -956,15 +957,9 @@ private fun SkillEditDialog(
                     textStyle = MiuixTheme.textStyles.main.copy(fontFamily = FontFamily.Monospace),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp),
                 )
-                target.nameError?.let { error ->
-                    Text(
-                        text = error,
-                        color = scheme.error,
-                        fontSize = ZhiTextScale.Footnote,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    )
-                }
+                // 这里 touched 恒真：nameError 说的是**磁盘上那个文件名**本身不合法
+                // （不是「用户还没填」），打开就要说，否则问题会被藏到保存那一刻。
+                ZhiFieldError(message = target.nameError, touched = true)
                 Text(
                     text = if (target.empty) "内容为空：保存后会生成一个空文件。"
                     else "当前 ${target.body.length} 字。",
@@ -996,6 +991,8 @@ private fun SkillFileDialog(
     onDismiss: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
+    // 见 ZhiFieldError：没碰过文件名就不飘红。
+    var nameTouched by remember(draft) { mutableStateOf(false) }
     OverlayDialog(
         show = true,
         onDismissRequest = onDismiss,
@@ -1017,21 +1014,17 @@ private fun SkillFileDialog(
             Column(modifier = Modifier.fillMaxWidth()) {
                 ZhiTextField(
                     value = draft.fileName,
-                    onValueChange = { value -> onChange { it.copy(fileName = value) } },
+                    onValueChange = { value ->
+                        nameTouched = true
+                        onChange { it.copy(fileName = value) }
+                    },
                     label = "文件名",
                     useLabelAsPlaceholder = false,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                draft.nameError?.let { error ->
-                    Text(
-                        text = error,
-                        color = scheme.error,
-                        fontSize = ZhiTextScale.Footnote,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    )
-                }
+                // 「用户还没填」这一类：碰过才提示（见 ZhiFieldError）。
+                ZhiFieldError(message = draft.nameError, touched = nameTouched)
 
                 ZhiTextField(
                     value = draft.content,

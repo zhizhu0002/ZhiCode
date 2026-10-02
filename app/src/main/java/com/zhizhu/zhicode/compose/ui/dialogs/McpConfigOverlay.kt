@@ -33,6 +33,7 @@ import com.zhizhu.zhicode.compose.model.McpServerStatus
 import com.zhizhu.zhicode.compose.model.McpToolInfo
 import com.zhizhu.zhicode.compose.model.McpType
 import com.zhizhu.zhicode.compose.ui.ZhiAnchoredActionMenu
+import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiFloatingActionButton
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -559,17 +560,28 @@ private fun McpConnectionForm(
     // 表单滚动由外层 SettingsSubPage 的 LazyColumn 负责，这里不套 verticalScroll
     // （嵌套滚动容器会拿到无限高度约束而崩溃）。
     val scheme = MiuixTheme.colorScheme
+    // 「用户碰过哪一项」：没碰过就不飘红（见 FieldError 的说明）。
+    // key 取 originalName —— 换一条记录 / 新建表单时要重新归零，
+    // 否则上一条表单的红字会带到下一条上。
+    var nameTouched by remember(draft.originalName) { mutableStateOf(false) }
+    var commandTouched by remember(draft.originalName) { mutableStateOf(false) }
+    var urlTouched by remember(draft.originalName) { mutableStateOf(false) }
+    var envTouched by remember(draft.originalName) { mutableStateOf(false) }
+    var headersTouched by remember(draft.originalName) { mutableStateOf(false) }
     Column {
         SettingsGroup("服务器") {
             ZhiTextField(
                 value = draft.name,
-                onValueChange = { v -> onChange { it.copy(name = v) } },
+                onValueChange = { v ->
+                    nameTouched = true
+                    onChange { it.copy(name = v) }
+                },
                 label = "服务器名称",
                 useLabelAsPlaceholder = true,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             )
-            FieldError(draft.nameError)
+            FieldError(draft.nameError, nameTouched)
 
             OverlayDropdownPreference(
                 items = McpType.entries.map { it.label },
@@ -593,13 +605,16 @@ private fun McpConnectionForm(
             if (draft.type.needsCommand) {
                 ZhiTextField(
                     value = draft.command,
-                    onValueChange = { v -> onChange { it.copy(command = v) } },
+                    onValueChange = { v ->
+                        commandTouched = true
+                        onChange { it.copy(command = v) }
+                    },
                     label = "启动命令",
                     useLabelAsPlaceholder = true,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                 )
-                FieldError(draft.commandError)
+                FieldError(draft.commandError, commandTouched)
                 ZhiTextField(
                     value = draft.argsText,
                     onValueChange = { v -> onChange { it.copy(argsText = v) } },
@@ -610,32 +625,41 @@ private fun McpConnectionForm(
                 )
                 ZhiTextField(
                     value = draft.envText,
-                    onValueChange = { v -> onChange { it.copy(envText = v) } },
+                    onValueChange = { v ->
+                        envTouched = true
+                        onChange { it.copy(envText = v) }
+                    },
                     label = "环境变量 JSON（可选）",
                     useLabelAsPlaceholder = true,
                     singleLine = false,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                 )
-                FieldError(draft.envError)
+                FieldError(draft.envError, envTouched)
             } else {
                 ZhiTextField(
                     value = draft.url,
-                    onValueChange = { v -> onChange { it.copy(url = v) } },
+                    onValueChange = { v ->
+                        urlTouched = true
+                        onChange { it.copy(url = v) }
+                    },
                     label = "服务器 URL",
                     useLabelAsPlaceholder = true,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                 )
-                FieldError(draft.urlError)
+                FieldError(draft.urlError, urlTouched)
                 ZhiTextField(
                     value = draft.headersText,
-                    onValueChange = { v -> onChange { it.copy(headersText = v) } },
+                    onValueChange = { v ->
+                        headersTouched = true
+                        onChange { it.copy(headersText = v) }
+                    },
                     label = "请求头 JSON（可选）",
                     useLabelAsPlaceholder = true,
                     singleLine = false,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                 )
-                FieldError(draft.headersError)
+                FieldError(draft.headersError, headersTouched)
             }
 
             OverlayDropdownPreference(
@@ -976,15 +1000,12 @@ private fun McpImportDialog(
     }
 }
 
-/** 只在有错时占位，没错时不画——避免表单里到处是空行。 */
+/**
+ * MCP 表单里的校验提示：统一走 [ZhiFieldError]（见那里的两条纪律）。
+ *
+ * 这个转发函数保留着只是因为本文件的调用点已经写着 `FieldError(...)`；
+ * 想改缩进或颜色时**改 Common.kt 那一处**，别在这里长第二份。
+ */
 @Composable
-private fun FieldError(message: String?) {
-    if (message == null) return
-    Text(
-        text = message,
-        color = MiuixTheme.colorScheme.error,
-        fontSize = ZhiTextScale.Footnote,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-    )
-}
+private fun FieldError(message: String?, touched: Boolean = true) =
+    ZhiFieldError(message = message, touched = touched)

@@ -838,6 +838,35 @@ fun ZhiTextField(
 }
 
 /**
+ * 表单校验提示（表单里唯一该用的错误行）。
+ *
+ * <p>两条纪律，都是用户实测反馈出来的：
+ *
+ * <ol>
+ *   <li><b>没碰过的字段不飘红。</b>原先一打开表单就是一片红字（「请填写名称」
+ *       「必须填写启动命令」）—— 用户还没开始填就被指责，看上去像页面坏了。
+ *       [touched] 由调用点在**用户真的改过这一项**时置真。</li>
+ *   <li><b>横向内缩必须与同组输入框一致（12dp）。</b>原先各处只有 `top = 4.dp`，
+ *       于是错误行比它上面的输入框、比 `SmallTitle` 都往左凸出一截 ——
+ *       表单左边缘参差不齐，看着很不舒服。四处调用点当初各写了一份，
+ *       所以这里收成一个组件：以后不会再有第四个缩进值。</li>
+ * </ol>
+ */
+@Composable
+fun ZhiFieldError(message: String?, touched: Boolean = true) {
+    if (message == null || !touched) return
+    Text(
+        text = message,
+        color = MiuixTheme.colorScheme.error,
+        fontSize = ZhiTextScale.Footnote,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 2.dp),
+    )
+}
+
+/**
  * 手指位置的**只读**观察者。
  *
  * ## 为什么不用「换掉手势」的办法
