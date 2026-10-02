@@ -397,6 +397,115 @@ internal fun parseMarkdown(source: String, depth: Int = 0): List<MdBlock> {
     return blocks
 }
 
+// ------------------------------------------------------ 流式：已完结前缀的长度
+
+/**
+ * 在 [source] 里找出「最后一个块边界之后」的位置，用作流式渲染的切点。
+ *
+ * ## 为什么需要它
+ *
+ * 流式回复时正文每个 delta 变一次（`ZhiEngineController.DELTA_MERGE_MS = 32`，即每秒约 31 次），
+ * 而渲染层原本是 `remember(source) { parseMarkdown(source) }` —— 于是**整篇累积文本**每秒被
+ * 完整重解析 31 次：3 遍全串扫描 + `split('\n')` 建出所有行的数组 + 每个 block 一个对象。
+ * 一条 20 KB 的回复（约 600 行）累计是 O(n²) 的字符串与对象分配，
+ * 在 API 26~28 的老设备上就是 GC 抖动与掉帧。
+ *
+ * 切成「已完结前缀（settled）+ 在写尾部（tail）」之后，只有**跨过块边界**时才需要重解析
+ * 前缀（一条回复通常几十次），尾部用一个行内 `Text` 跟着走。
+ *
+ * ## 切在哪，以及为什么这是安全的
+ *
+ * 切点取「**不在围栏代码块内部**的空行」之后。空行是块级边界，所以前缀一定由**完整的块**
+ * 组成 —— 对它单独跑 [parseMarkdown]，结果与跑整篇时那一段的产出相同，不会出现
+ * 「半个表格」「半段引用」。围栏内部不看空行，否则代码块会被从中间切开。
+ *
+ * 围栏的开启/闭合判据与 [parseMarkdown] 内联循环**保持一致**：关闭围栏必须是同字符
+ * 且长度不短于开启围栏（见 `parseMarkdown` 里 `f2.second >= len`）；不一致会导致
+ * 「@@ 认为在围栏内、解析器认为在外」，切点就落到代码块中间了。
+ *
+ * 本函数**只做扫描，不做任何 substring**（行内容靠下标判断），所以每次 delta 调用的成本
+ * 是一次 O(n) 的字符遍历，没有分配。返回值是「尾部起点」，也是前缀的长度；
+ * 调用方保证 `source.substring(0, 返回) + source.substring(返回) == source`。
+ *
+ * 没有可切的位置（还没出现过块边界的空行）时返回 0 —— 调用方据此退回整段解析。
+ */
+internal fun settledPrefixLength(source: String): Int {
+    val n = source.length
+    if (n == 0) return 0
+
+    // 最后一个**非空白**字符的位置。
+    //
+    // 切点的判据是「它后面还有真正要渲染的内容」。只看「后面还有字符」是不够的：
+    // 流式输出里 `"a\n\n   "`（空行之后跟了几个刚敲下的空格）会被当成可切，
+    // 而尾部渲染出来是一个空 Text —— 白切一次，还会让 `remember(settled)` 在
+    // 这几帧里提前换 key。所以先求出内容边界，切点不得超过它。
+    var lastNonWs = -1
+    var j = n - 1
+    while (j >= 0) {
+        val c = source[j]
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+            lastNonWs = j
+            break
+        }
+        j--
+    }
+    if (lastNonWs < 0) return 0
+
+    var lineStart = 0
+    var openFenceChar = ' '
+    var openFenceLen = 0
+    var cut = 0
+
+    while (lineStart <= n) {
+        var lineEnd = source.indexOf('\n', lineStart)
+        if (lineEnd < 0) lineEnd = n
+
+        // 行内容区间 [s, e)：去掉行尾的 \r（CRLF）与行首空白
+        var s = lineStart
+        var e = lineEnd
+        if (e > s && source[e - 1] == '\r') e--
+        while (s < e && (source[s] == ' ' || source[s] == '\t')) s++
+
+        val fence = fenceRunAt(source, s, e)
+
+        if (openFenceChar != ' ') {
+            // 围栏内部：只有「同字符且不短于开启围栏」才算闭合（与 parseMarkdown 一致）
+            if (fence != null && fence.first == openFenceChar && fence.second >= openFenceLen) {
+                openFenceChar = ' '
+                openFenceLen = 0
+            }
+        } else if (fence != null) {
+            openFenceChar = fence.first
+            openFenceLen = fence.second
+        } else if (s == e) {
+            // 空行 = 块边界。只有它后面**确实还有要渲染的内容**时才算可切。
+            val next = lineEnd + 1
+            if (next <= lastNonWs) cut = next
+        }
+
+        if (lineEnd >= n) break
+        lineStart = lineEnd + 1
+    }
+    return cut
+}
+
+/**
+ * 判断区间 `[s, e)` 是不是围栏行，是则返回「字符 + 连续个数」。
+ *
+ * 与 [fenceInfo] 的判据相同（首字符是 ` 或 ~、连续 ≥3 个），区别是不建 String：
+ * 本函数在流式热路径上每行都会被调用一次，`substring` 会把省下来的分配又花回去。
+ * 不是围栏行时返回 null（不分配）。
+ */
+private fun fenceRunAt(source: String, s: Int, e: Int): Pair<Char, Int>? {
+    if (e - s < 3) return null
+    val ch = source[s]
+    if (ch != '`' && ch != '~') return null
+    var k = s + 1
+    while (k < e && source[k] == ch) k++
+    val len = k - s
+    return if (len >= 3) ch to len else null
+}
+
 // ------------------------------------------------------------------ 行内解析
 
 /** 强调能否在此处开启：标记之后不能是空白。 */

@@ -224,8 +224,19 @@ fun AssistantCard(
         Column(
             modifier = Modifier
                 .weight(1f)
-                .animateContentSize(
-                    animationSpec = ZhiMotion.sizeSpec,
+                // ⚠️ 流式期间**不挂** animateContentSize。
+                //
+                // 正文每 32ms（DELTA_MERGE_MS）长高一次，而尺寸动画每次变化都会被重新
+                // 触发 —— 结果是整张卡在整条回复期间一直在做"测量→布局→动画"，
+                // 而它就在 LazyColumn 的一个 item 里。老设备上这就是"流式一顿一顿"
+                // 最直接的来源。定稿后（streaming = false）再挂上：那时它只动一次，
+                // 用来平滑"思考面板展开/收起"这类真实的一次性尺寸变化。
+                .then(
+                    if (item.streaming) {
+                        Modifier
+                    } else {
+                        Modifier.animateContentSize(animationSpec = ZhiMotion.sizeSpec)
+                    },
                 ),
         ) {
             if (item.thinking.isNotEmpty() || item.processSteps.isNotEmpty()) {
@@ -234,7 +245,14 @@ fun AssistantCard(
             // 正文走 Markdown（标题/列表/代码块/表格/引用/链接…）。
             // 流式光标用一个独立的 Text 尾随，而不是拼进 Markdown 源里 ——
             // 拼进去的话光标会被当成行内内容参与解析（例如紧跟在 ` 后面会变成代码）。
-            ZhiMarkdown(source = item.body, bodyFontSize = 14.sp)
+            //
+            // `streaming` 传下去，Markdown 层据此只在**跨过块边界**时重解析前缀
+            // （见 settledPrefixLength）：不传的话每 32ms 会重建整篇。
+            ZhiMarkdown(
+                source = item.body,
+                bodyFontSize = 14.sp,
+                streaming = item.streaming,
+            )
             if (item.streaming) {
                 // 流式光标呼吸闪烁：之前是一块静止的字符，文本区里唯一「活着」的
                 // 记号却不动。「只有卡片在动」的观感有一半来自这里。
@@ -390,8 +408,15 @@ fun ToolGroupCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
-            .animateContentSize(
-                animationSpec = ZhiMotion.sizeSpec,
+            // 同 AssistantCard：工具还在跑的时候不挂尺寸动画 —— 工具输出每 200ms
+            // （PROGRESS_FLUSH_MS）长一次，动画会跟着重新触发，等于让整张组卡在
+            // 运行期间持续重测量。跑完后再挂上，用于平滑「展开/收起工具列表」。
+            .then(
+                if (item.groupCompleted) {
+                    Modifier
+                } else {
+                    Modifier.animateContentSize(animationSpec = ZhiMotion.sizeSpec)
+                },
             ),
         cornerRadius = ZhiRadius.card,
         insideMargin = GroupMargin,
@@ -506,8 +531,14 @@ private fun ToolRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 20.dp, top = 1.dp, end = 2.dp, bottom = 4.dp)
-            .animateContentSize(
-                animationSpec = ZhiMotion.sizeSpec,
+            // 运行中不挂尺寸动画：这段时间里状态行每秒都在换文字（elapsed），
+            // 而「运行中… → ⎿ 摘要 → 全量输出」的切换已经由 Crossfade 负责过渡。
+            .then(
+                if (activity.completed) {
+                    Modifier.animateContentSize(animationSpec = ZhiMotion.sizeSpec)
+                } else {
+                    Modifier
+                },
             ),
     ) {
         Row(

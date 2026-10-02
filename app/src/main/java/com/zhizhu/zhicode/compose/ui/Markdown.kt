@@ -67,15 +67,63 @@ fun ZhiMarkdown(
     source: String,
     modifier: Modifier = Modifier,
     bodyFontSize: TextUnit = 12.sp,
+    /**
+     * 这段文本是不是**正在流式写入**。
+     *
+     * 传 true 时才启用「已完结前缀 + 在写尾部」的分段渲染（见 [settledPrefixLength]）；
+     * 默认 false 走整段解析 —— 已定稿的消息不该有任何理由拆开解析。
+     *
+     * ⚠️ 调用方必须在流式结束时把它翻回 false：尾部是按**行内**渲染的（不做块级解析），
+     * 只有整段重解析一次，最后那一段的标题/列表/代码块才会拿到正确的块级样式。
+     */
+    streaming: Boolean = false,
 ) {
-    val blocks = remember(source) { parseMarkdown(source) }
+    val scheme = MiuixTheme.colorScheme
+    val inlineStyles = rememberInlineStyles(bodyFontSize)
+    val split = remember(source, streaming) { splitForStreaming(source, streaming) }
+    val blocks = remember(split.settled) { parseMarkdown(split.settled) }
 
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         blocks.forEach { block -> MdBlockView(block, bodyFontSize) }
+        // 在写尾部按行内渲染（不是纯文本）：模型正在写的那一段里的 `代码`、**粗体**
+        // 照常生效，只有块级语法（标题/列表/围栏）要等它跨过块边界。
+        if (split.tail.isNotEmpty()) {
+            Text(
+                text = rememberInline(split.tail, inlineStyles),
+                color = scheme.onSurface,
+                fontSize = bodyFontSize,
+                lineHeight = bodyFontSize * 1.5f,
+            )
+        }
     }
+}
+
+/**
+ * 流式渲染的切分结果。
+ *
+ * 用 `remember(source, streaming)` 一次性算出，**不要**在组合里各算各的：
+ * `settled` 只在跨块时变（几十次），`tail` 每个 delta 都变（短），
+ * 于是 `parseMarkdown` 的 key 也只在跨块时失效 —— 这正是这次优化的全部意义。
+ */
+private class MdStreamSplit(val settled: String, val tail: String)
+
+/**
+ * 短于这个长度就不切。
+ *
+ * 两个理由：一是短文本整段解析本来就比「切一次 + 建两个对象」更划算；
+ * 二是不切就没有「尾部按行内渲染」这回事，短消息在流式期间与最终形态**完全一致**，
+ * 不会出现"先看着像纯文本、定稿后突然多出标题样式"的跳变。
+ */
+private const val MinSettledChars = 512
+
+private fun splitForStreaming(source: String, streaming: Boolean): MdStreamSplit {
+    if (!streaming) return MdStreamSplit(source, "")
+    val cut = settledPrefixLength(source)
+    if (cut < MinSettledChars) return MdStreamSplit(source, "")
+    return MdStreamSplit(source.substring(0, cut), source.substring(cut))
 }
 
 /** 递归渲染一个块。引用块内部会有嵌套的块，所以这里必须能自我调用。 */
@@ -86,7 +134,7 @@ private fun MdBlockView(block: MdBlock, fontSize: TextUnit) {
 
     when (block) {
         is MdBlock.Heading -> Text(
-            text = inline(block.text, inlineStyles),
+            text = rememberInline(block.text, inlineStyles),
             color = scheme.onSurface,
             fontSize = when (block.level) {
                 1 -> (fontSize.value + 4).sp
@@ -100,7 +148,7 @@ private fun MdBlockView(block: MdBlock, fontSize: TextUnit) {
         )
 
         is MdBlock.Paragraph -> Text(
-            text = inline(block.text, inlineStyles),
+            text = rememberInline(block.text, inlineStyles),
             color = scheme.onSurface,
             fontSize = fontSize,
             lineHeight = fontSize * 1.5f,
@@ -179,7 +227,7 @@ private fun BulletRow(block: MdBlock.Bullet, fontSize: TextUnit, styles: InlineS
             )
         }
         Text(
-            text = inline(block.text, styles),
+            text = rememberInline(block.text, styles),
             color = scheme.onSurface,
             fontSize = fontSize,
             lineHeight = fontSize * 1.5f,
@@ -288,7 +336,7 @@ private fun TableRow(
     ) {
         for (c in 0 until cols) {
             Text(
-                text = inline(cells.getOrElse(c) { "" }, styles),
+                text = rememberInline(cells.getOrElse(c) { "" }, styles),
                 color = if (header) scheme.primary else scheme.onSurface,
                 fontSize = if (header) fontSize else (fontSize.value - 0.5).sp,
                 fontWeight = if (header) FontWeight.Bold else FontWeight.Normal,
@@ -319,6 +367,21 @@ private fun rememberInlineStyles(fontSize: TextUnit): InlineStyles {
         )
     }
 }
+
+/**
+ * [inline] 的 `remember` 包装。
+ *
+ * 每一步都值得：`inline` 会跑一遍 [parseInline]（逐字符扫描 + 大量 substring），
+ * 再 `buildAnnotatedString` 建一份带 span 副本的对象。而 `MdBlockView` 的调用点原本是
+ * 直接 `inline(block.text, styles)` —— 只要**任何**一次重组（父级状态变化、滚动时
+ * 复用、主题切换）就会把每个段落的行内解析重跑一遍。
+ *
+ * key 用 `(文本, 样式)`：`InlineStyles` 没有 `equals`，靠 [rememberInlineStyles] 返回的
+ * 同一个实例保证恒等；它在主题/字号不变时不会换新，所以不会破坏缓存。
+ */
+@Composable
+private fun rememberInline(text: String, styles: InlineStyles): AnnotatedString =
+    remember(text, styles) { inline(text, styles) }
 
 /**
  * [MdSpan] 列表 → [AnnotatedString]。

@@ -274,6 +274,13 @@ run SandboxPageStructureTest "$PROJECT_ROOT"
 # ---------- 写死的几何（长按触发 · 气泡宽度 · 弹窗宽度） ----------
 # LayoutConsistencyTest.java
 run LayoutConsistencyTest "$PROJECT_ROOT"
+# ---------- 流式渲染热路径（重解析 · 行内缓存 · 尺寸动画） ----------
+# 用户的要求是「在安卓 8 及以上也能流畅使用」。这三条守的都是**不会编译失败、
+# 也不会让界面坏掉、只会让老设备变慢**的东西：正文按每个 delta 重解析整篇、
+# 行内解析裸调不缓存、流式期间挂着尺寸动画。切点函数的行为由
+# MarkdownStreamSplitTest（JVM 单测）守，两者互补。
+# MarkdownStreamingTest.java
+run MarkdownStreamingTest "$PROJECT_ROOT"
 run R8ConfigTest "$PROJECT_ROOT"
 # ---------- 弹窗内滚动嵌套（防「点开某个弹窗直接闪退」重犯） ----------
 # 用户报告过「添加 MCP 服务器崩溃」，真因是 DialogShell 的 body 已带 verticalScroll，
