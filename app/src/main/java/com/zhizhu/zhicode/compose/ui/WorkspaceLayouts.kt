@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -74,7 +75,12 @@ internal fun WideWorkspace(
                     onSelect = viewModel::selectTab,
                 )
             }
-            PaneHost(state = state, viewModel = viewModel, isDark = isDark, glass = glass, modifier = Modifier.weight(1f))
+            // 副栏的面板同样会因为 `PaneHost` 里的 when(tab) 被销毁，滚动位置照丢，
+            // 所以这里也包一层。理由与 CompactWorkspace 里那段注释相同。
+            val secondaryPaneStateHolder = rememberSaveableStateHolder()
+            secondaryPaneStateHolder.SaveableStateProvider(state.tab.name) {
+                PaneHost(state = state, viewModel = viewModel, isDark = isDark, glass = glass, modifier = Modifier.weight(1f))
+            }
         }
     }
 }
@@ -97,6 +103,22 @@ internal fun CompactWorkspace(
         // 面板容器**不**留顶栏高度：blur 顶栏要内容从它底下滚过才有东西可采样。
         // 各面板自己处理首行可见位置 —— 对话列表用 topInset（contentPadding，
         // 滚动时消息穿过 blur 区），其余面板直接 padding 顶开（无需滚过顶栏）。
+        //
+        // ## 为什么要 SaveableStateHolder（切 tab 不再回到顶部）
+        //
+        // 下面的 `AnimatedContent` 在切换时会**销毁**离场的那个面板 —— 这是它的正常工作方式。
+        // 而三个面板的滚动位置都是 `rememberLazyListState()`（内部就是 `rememberSaveable`），
+        // 组合被销毁，位置就跟着没了，于是每次切回来都停在最上面。
+        // 用户的原话：「每次切换对话那一栏的 TAB，对话每次都会回到最上层」。
+        //
+        // `SaveableStateHolder` 正是为这个场景存在的：面板离开组合时，它把子树里所有
+        // `rememberSaveable` 的值存下来，回来时按 key 还回去。所以**不用改任何面板**，
+        // 在这外面加一层就够了（对话、终端、文件三个一起受益）。
+        //
+        // ⚠️ holder 必须在 `AnimatedContent` **外面**取：放在里面就跟着一起被销毁了，
+        // 等于没做。
+        val paneStateHolder = rememberSaveableStateHolder()
+
         // 面板切换动画：淡入淡出 + 轻微横向位移
         AnimatedContent(
             targetState = state.tab,
@@ -112,6 +134,8 @@ internal fun CompactWorkspace(
             modifier = Modifier.weight(1f),
             label = "workspacePane",
         ) { tab ->
+            // key 用 tab 名：每个 tab 各自记一份滚动位置。
+            paneStateHolder.SaveableStateProvider(tab.name) {
             if (tab == WorkspaceTab.CHAT) {
                 // 对话面板的留白由 ChatList 的 topInset 负责：它需要能滚到悬浮头部
                 // 下面被模糊。所以这里不额外顶开，避免双重留白。
@@ -123,16 +147,24 @@ internal fun CompactWorkspace(
                     glass = glass,
                 )
             } else {
-                // 变更 / 终端 / 文件三个面板：顶栏已在 Scaffold topBar 槽位占布局
-                // 高度（S1 重构），不再悬浮覆盖，面板不需要手工让位。
+                // ⚠️ 这三个面板（变更 / 终端 / 文件）必须**自己顶开顶栏高度**。
+                //
+                // 规则：Scaffold 的 content lambda **有意丢掉了 `padding.top`**
+                // （为了让顶栏 blur 有内容可采样），所以内容实际从 y=0 铺满 ——
+                // 任何不自己顶开的面板，头部都会被顶栏盖住：面板标题、向上按钮、
+                // 面包屑连同第一行一起消失。用户截图里"上面有一行被裁掉"就是这个。
+                //
+                // 对话面板**不**在这里补：它的留白由 ChatList 的 topInset 负责，
+                // 因为它需要能滚到顶栏下面被模糊。
                 PaneHost(
                     state = state,
                     viewModel = viewModel,
                     isDark = isDark,
                     glass = glass,
                     tabOverride = tab,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().padding(top = TopBarInsetWithTabs),
                 )
+            }
             }
         }
     }

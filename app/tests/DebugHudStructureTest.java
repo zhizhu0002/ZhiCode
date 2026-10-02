@@ -86,6 +86,9 @@ public final class DebugHudStructureTest {
     /** 宽窄屏的工作区布局（含底部导航栏与宽屏右栏）。 */
     private static final String WORKSPACE_LAYOUTS = SRC + "ui/WorkspaceLayouts.kt";
 
+    /** 文件面板：列表留白与行距（用户反馈过"太紧凑"）。 */
+    private static final String FILES_PANE = SRC + "ui/panes/FilesPane.kt";
+
     /** 顶栏。Tab 行已从它移到底部，见 §20。 */
     private static final String TOP_BAR = SRC + "ui/TopBar.kt";
 
@@ -786,13 +789,18 @@ public final class DebugHudStructureTest {
                 "selectModelPickerProfile 不得写 apiConfig：那个字段的语义是"
                         + "\"配置弹窗打开\"，写它会在模型面板上凭空弹出配置页");
 
-        // 加载态：用 Miuix 的加载圈居中显示，且转发只经 Common.kt。
+        // 加载态：用 Miuix 的加载指示器居中显示，且转发只经 Common.kt。
         requireContains(pickerFile, "ZhiLoadingIndicator(",
-                MODEL_PICKER + " 的加载态必须用 ZhiLoadingIndicator（Miuix 加载圈）");
-        requireContains(commonFile, "CircularProgressIndicator(",
-                COMMON + " 的 ZhiLoadingIndicator 必须转发到 Miuix CircularProgressIndicator");
+                MODEL_PICKER + " 的加载态必须用 ZhiLoadingIndicator");
+        // ⚠️ 换过实现：先是 `CircularProgressIndicator`（弧长会变的那种），
+        // 观感在居中放大时偏笨重，改用 Miuix 的轨道点式 `InfiniteProgressIndicator`。
+        // 断言绑的是"必须转发到 Miuix 的加载指示器"，不绑具体哪一个 ——
+        // 但两个都要是 Miuix 的，不能自绘。
+        requireContains(commonFile, "InfiniteProgressIndicator(",
+                COMMON + " 的 ZhiLoadingIndicator 必须转发到 Miuix 的加载指示器"
+                        + "（当前用 InfiniteProgressIndicator：细环 + 轨道点）");
         requireContains(pickerFile, "PickerLoading(",
-                MODEL_PICKER + " 必须有居中的加载态（圈 + 状态文字），而不是只留一行小字");
+                MODEL_PICKER + " 必须有居中的加载态（指示器 + 状态文字），而不是只留一行小字");
 
         // 高度：窗口高度必须取 LocalWindowInfo，**不能**取 BoxWithConstraints 的 maxHeight。
         //
@@ -806,15 +814,27 @@ public final class DebugHudStructureTest {
         require(!pickerFile.contains("BoxWithConstraints"),
                 MODEL_PICKER + " 不得用 BoxWithConstraints 算面板高度：sheet 测量内容时"
                         + "给的约束不是屏幕高度，实测那样算出来的最小高度完全不生效");
-        // 列表上限按窗口高度取比例 —— 这才让面板"有空间时长高"，且仍然**有界**
-        // （无界高度会让 LazyColumn 拿到 Infinity 约束直接崩，DialogScrollNestingTest）。
-        requireContains(pickerFile, "val listMaxHeight = (windowHeight * ModelListHeightFraction)",
-                MODEL_PICKER + " 的列表上限必须按窗口高度取比例，不能写死一个数");
+        // 列表上限按面板高度取（**有界**是硬性要求：无界高度会让 LazyColumn 拿到
+        // Infinity 约束直接崩，DialogScrollNestingTest 守着这条）。
+        requireContains(pickerFile, "val listMaxHeight = sheetHeight * 0.8f",
+                MODEL_PICKER + " 的列表上限必须由面板高度推出，不能写死一个数");
         requireContains(pickerFile, "heightIn(max = listMaxHeight)",
                 MODEL_PICKER + " 的列表必须保留 heightIn 上限：无界高度会让 LazyColumn 崩");
-        requireContains(pickerFile, "windowHeight * LoadingHeightFraction",
-                MODEL_PICKER + " 的加载态高度也必须按窗口高度给："
-                        + "否则加载时面板很矮、加载完突然长高，还跳一下");
+
+        // 面板**定高**，不随模型条数自适应。
+        //
+        // 用户的原话：「可以把 sheet 写高一点，（无论模型只有 1 还是 2 个）不要自适应」。
+        // 自适应的问题很具体：只有 1~2 个模型时面板缩成薄薄一条，加载指示器挤在一条缝里，
+        // 而且**切换 API 时高度会跳**（1 个模型 → 5 个模型）。
+        requireContains(pickerFile, "height(sheetHeight)",
+                MODEL_PICKER + " 的面板内容必须定高（height(sheetHeight)）："
+                        + "自适应会让只有 1~2 个模型时缩成一条、切 API 时高度跳动");
+        requireContains(pickerFile, "val sheetHeight = (windowHeight * SheetHeightFraction)",
+                MODEL_PICKER + " 的定高值必须按窗口高度算（并 clamp 上下限），不能写死一个数");
+        // 定高之后中间那块要 weight 吃掉余量，否则余量会掉到**按钮下面**变成一条空白。
+        requireContains(pickerFile, "Modifier.weight(1f).fillMaxWidth()",
+                MODEL_PICKER + " 定高列里的中间内容必须 weight(1f)："
+                        + "不 weight 的话按钮上方会留一条空白");
 
         // 动效：不许硬切。
         //
@@ -838,6 +858,91 @@ public final class DebugHudStructureTest {
                 "fadeIn(ZhiMotion.fadeInSpec) togetherWith fadeOut(ZhiMotion.fadeOutSpec)",
                 MODEL_PICKER + " 的 AnimatedContent 必须显式给 transitionSpec"
                         + "（fadeIn togetherWith fadeOut），并复用 ZhiMotion 的时长");
+
+        // ---- 22. 切 tab 不得把面板的滚动位置丢掉 ---------------------------------
+        //
+        // 用户的原话：「每次切换对话那一栏的 TAB，对话每次都会回到最上层」。
+        // 根因：`CompactWorkspace` 用 `AnimatedContent(targetState = state.tab)` 包着面板，
+        // 切换时**离场那个面板会被销毁** —— 而三个面板的滚动位置都是
+        // `rememberLazyListState()`（内部是 rememberSaveable），组合没了位置也就没了。
+        //
+        // 修法是在 AnimatedContent **外面**包一层 `SaveableStateHolder`：它专门干这件事，
+        // 面板离开时存下子树里所有 rememberSaveable 的值，回来时按 key 还回去。
+        // 所以这条测试断的是"那层 holder 在，且 key 是 tab"。
+        String layouts = stripComments(read(root, WORKSPACE_LAYOUTS));
+        requireContains(layouts, "rememberSaveableStateHolder()",
+                WORKSPACE_LAYOUTS + " 必须用 SaveableStateHolder 保住各 tab 的滚动位置："
+                        + "AnimatedContent 会销毁离场的面板，位置就是跟着它没的");
+        requireContains(layouts, ".SaveableStateProvider(",
+                WORKSPACE_LAYOUTS + " 必须用 SaveableStateProvider 按 tab 分别存状态");
+        // ⚠️ holder 必须在 AnimatedContent **外面**取。取在里面就跟着一起被销毁，
+        // 看着像做了、实际完全没生效 —— 这种"写了但没用"最难查。
+        int holderAt = layouts.indexOf("rememberSaveableStateHolder()");
+        int animatedAt = layouts.indexOf("AnimatedContent(");
+        require(holderAt > 0 && animatedAt > holderAt,
+                WORKSPACE_LAYOUTS + " 里 holder 必须在 AnimatedContent **之前**声明："
+                        + "放在里面会跟着面板一起被销毁，等于没做");
+        // 宽屏副栏只换内容、不换容器，但 PaneHost 内部的 when(tab) 同样会销毁面板，
+        // 所以两处都要有 provider。
+        require(countOf(layouts, "SaveableStateProvider(") >= 2,
+                WORKSPACE_LAYOUTS + " 宽窄两种布局都要有 SaveableStateProvider："
+                        + "宽屏副栏的 when(tab) 一样会销毁面板");
+
+        // ---- 23. 文件列表的留白走工程令牌，且行距只在一处给 ----------------------
+        //
+        // 用户反馈「文件一栏做的太紧凑了，列表可以宽散一点」。原来左右只留 4dp，
+        // 而行距在**两个地方**各给了一次（LazyColumn 无关 + Card 的 padding(vertical = 1.dp)）——
+        // 后一个几乎等于没有，还让"以后调行距要改两处"。
+        String filesPane = stripComments(read(root, FILES_PANE));
+        requireContains(filesPane, ".padding(horizontal = ZhiSpace.m)",
+                FILES_PANE + " 的列表左右留白必须走 ZhiSpace.m（12dp）："
+                        + "它的注释写的就是\"列表左右留白\"，之前那 4dp 实测太挤");
+        requireContains(filesPane, "Arrangement.spacedBy(ZhiSpace.xs)",
+                FILES_PANE + " 的行距必须由 LazyColumn 的 spacedBy 统一给");
+        require(!filesPane.contains("padding(vertical = 1.dp)"),
+                FILES_PANE + " 不得再在行上加 padding(vertical = 1.dp)："
+                        + "行距只在 spacedBy 一处给，两处会给调参带来两个入口");
+
+        // ---- 24. 非对话面板必须自己顶开顶栏高度 --------------------------------
+        //
+        // 事故：用户截图里文件列表"上面有一行被裁掉"，而面板的头部（"文件 · N 项"、
+        // 向上按钮、面包屑）整个不见了。
+        //
+        // 根因是**两句互相矛盾的注释**：AppScaffold 的 content lambda 有意丢掉了
+        // `padding.top`（为了顶栏 blur 有内容可采样），并注明"各面板自己用
+        // TopBarTotalInset 在内容头部留白"—— 而 `TopBarTotalInset` 这个常量**根本不存在**；
+        // 同时 WorkspaceLayouts 那边写着"顶栏已占布局高度，面板不需要手工让位"。
+        // 照着后一句做，面板就从 y=0 开始画，头部被顶栏盖住。
+        //
+        // ⚠️ 这条守卫断的是"AppScaffold 丢掉了 top padding"这个**前提**，
+        // 以及"非对话面板补了 inset"这个**结论**。只断结论的话，哪天前提改了
+        // （有人把 padding.top 加回来）就会变成双重留白，而测试照样绿。
+        //
+        // ⚠️⚠️ 凡是要查**注释里那句话**的，都必须用 `read` 的**原文**，
+        // 不能用 `stripComments` 的结果 —— 注释正是被它删掉的东西。
+        // （这个坑我在这份文件里踩过两次了：断言恒为真、看着在守其实什么都没守。）
+        String scaffoldRaw = read(root, APP_SCAFFOLD);
+        String layoutsRaw = read(root, WORKSPACE_LAYOUTS);
+        String scaffoldPad = stripComments(scaffoldRaw);
+
+        // 前提：那条 padding 里**只有** bottom，没有 top。
+        requireContains(scaffoldPad, "bottom = padding.calculateBottomPadding(),",
+                APP_SCAFFOLD + " 的 content lambda 必须保留 bottom padding");
+        require(!scaffoldPad.contains("top = padding.calculateTopPadding()"),
+                APP_SCAFFOLD + " 的 content lambda 不得再把 top padding 加回来："
+                        + "加了之后非对话面板又补一份 inset 就是双重留白。"
+                        + "真要加回来，得同时删掉下面那条『面板自己顶开』的断言");
+        // 结论：非对话面板自己顶开。
+        requireContains(layouts, "padding(top = TopBarInsetWithTabs)",
+                WORKSPACE_LAYOUTS + " 的非对话面板必须自己顶开顶栏高度："
+                        + "Scaffold 丢掉了 padding.top，不顶开的话面板头与第一行会被顶栏盖住");
+        // 那句骗过人的注释不得复活（查**原文**，注释会被 stripComments 删掉）。
+        require(!layoutsRaw.contains("面板不需要手工让位"),
+                WORKSPACE_LAYOUTS + " 不得再写『面板不需要手工让位』："
+                        + "这句话是错的（Scaffold 丢掉了 top padding），照着做会让面板头部被盖住");
+        require(!scaffoldRaw.contains("TopBarTotalInset"),
+                APP_SCAFFOLD + " 不得再引用 TopBarTotalInset：那个常量不存在，"
+                        + "注释指向一个不存在的常量比没有注释更糟（本次事故就是这么来的）");
     }
 
     /** 子串出现次数。 */

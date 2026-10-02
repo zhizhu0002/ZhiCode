@@ -265,8 +265,16 @@ private fun ZhiCodeScreen(
             },
         ) { padding ->
             // 顶栏 blur 需要内容从它**底下滚过**才有东西可采样：
-            // 去掉 padding.top，让内容 Box 从 y=0 铺满；各面板自己用
-            // TopBarTotalInset 在内容头部留白（见 WorkspaceLayouts）。
+            // 去掉 padding.top，让内容 Box 从 y=0 铺满，各面板自己在头部留白。
+            //
+            // ⚠️ 丢掉 top 是**有代价的**，改动这里之前必须知道：
+            // 任何从 y=0 开始画、又不自己顶开的面板，头部都会被顶栏盖住。
+            // 所以每个面板必须二选一 ——
+            //   · 对话面板：用 ChatList 的 topInset（**滚动内边距**，它要能滚过顶栏）；
+            //   · 其余面板：用 `TopBarInsetWithTabs` 的 **padding** 顶开
+            //     （见 WorkspaceLayouts 里 PaneHost 那个分支）。
+            // **新加面板时最容易漏的就是这一步**（文件面板就这么被盖过一次，
+            // 当时这里有一句指向并不存在的常量的注释，照它做就漏了）。
             Box(
                 modifier = Modifier.fillMaxSize().padding(
                     bottom = padding.calculateBottomPadding(),

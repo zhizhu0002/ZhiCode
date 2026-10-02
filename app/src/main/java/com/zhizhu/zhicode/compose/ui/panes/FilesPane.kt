@@ -84,9 +84,12 @@ fun FilesPane(
                     val listState = rememberLazyListState()
                     LazyColumn(
                         state = listState,
-                        // 左右只留 4dp：文件名要尽可能宽，列表本身已经是最外层容器，
-                        // 再往里缩只会让长文件名提前被省略号截掉。
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
+                        // 左右留白走工程统一的间距令牌 `ZhiSpace.m`（12dp，它的注释写的就是
+                        // "列表左右留白"）。之前这里是 4dp 并注明"文件名要尽可能宽" ——
+                        // 那个取舍换来的是**整列贴着屏幕边**，实测太挤；文件名长一点本来
+                        // 也会被省略号截掉，多这 8dp 并不会更早截断，但观感差别很大。
+                        modifier = Modifier.fillMaxSize().padding(horizontal = ZhiSpace.m),
+                        verticalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
                     ) {
                         items(entries, key = { it.path }) { entry ->
                             FileRow(entry = entry, onOpen = { onOpen(entry) })
@@ -219,9 +222,11 @@ private fun FileRow(entry: FileEntry, onOpen: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
     Card(
         onClick = onOpen,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+        // 行距由 LazyColumn 的 `spacedBy` 统一给（原来这里还有一个 `padding(vertical = 1.dp)`，
+        // 两个地方都给间距会让以后调行距要改两处，而且那 1dp 几乎等于没有）。
+        modifier = Modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(horizontal = ZhiSpace.s, vertical = 9.dp),
+        insideMargin = PaddingValues(horizontal = ZhiSpace.m, vertical = 11.dp),
         colors = CardDefaults.defaultColors(
             color = ZhiColors.cardSurface(),
             contentColor = scheme.onSurface,

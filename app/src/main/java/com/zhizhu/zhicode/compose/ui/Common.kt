@@ -43,7 +43,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
+import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
@@ -345,23 +345,48 @@ private fun ZhiPillSurface(
 }
 
 /**
- * 加载指示器：**转圈**的那种。转发到 Miuix [CircularProgressIndicator]。
+ * 加载指示器。转发到 Miuix **[InfiniteProgressIndicator]**：一圈细环 + 一个绕行的点。
  *
- * 只有"不确定进度"这一种形态 —— `progress = null` 就是 Miuix 的自转态。
- * 刻意不暴露确定进度（0f..1f 的那种）：本工程所有等待都是"不知道还要多久"
- * （拉模型目录、装运行时、跑命令），画一条走到 80% 就停住的进度条是**假精确**，
- * 比一个诚实的转圈更糟。哪天真有可量化的进度，再加参数。
+ * ## 为什么不用 `CircularProgressIndicator`
  *
- * [size] 传 null 时跟 Miuix 默认值走（不写死数值），这样它随主题的尺寸体系变化。
+ * 那个先是在这里用的，换掉是因为观感：它的自转态是"弧长还会变的一条弧"，
+ * 在**居中放大显示**时显得笨重；而 Miuix 这个轨道点式的更轻、更像 HyperOS 里
+ * 那种"正在转圈加载"的观感（同一个包里两个都提供，官方示例两种都用）。
+ * 换回前者只改这一个函数。
+ *
+ * ## 尺寸与颜色
+ *
+ * Miuix 的默认值是 `size = 20.dp, strokeWidth = 2.dp, orbitingDotSize = 2.dp`，
+ * `color` 默认是**写死的 `Color.Gray`**。20dp 是给"行内小图标位"用的，
+ * 放在面板中间太小、而且灰得看不出是加载中，所以：
+ * - 尺寸放大到 [LoadingIndicatorSize]（这个函数只有"页面中央等待"这一种用法）；
+ * - 颜色取主题 `primary`，深浅色各自成立，不写死。
+ *
+ * ## 只有"不确定进度"这一种形态
+ *
+ * 本工程所有等待都是"不知道还要多久"（拉模型目录、装运行时、跑命令）。
+ * 画一条走到 80% 就停住的确定进度条是**假精确**，比一个诚实的转圈更糟。
+ * 哪天真有可量化的进度，再加参数。
  */
 @Composable
-fun ZhiLoadingIndicator(modifier: Modifier = Modifier, size: Dp? = null) {
-    if (size == null) {
-        CircularProgressIndicator(modifier = modifier)
-    } else {
-        CircularProgressIndicator(modifier = modifier, size = size)
-    }
+fun ZhiLoadingIndicator(modifier: Modifier = Modifier, size: Dp = LoadingIndicatorSize) {
+    InfiniteProgressIndicator(
+        modifier = modifier,
+        color = MiuixTheme.colorScheme.primary,
+        size = size,
+        // 环与点都跟着 size 放大，比例与 Miuix 默认值一致（20 : 2 : 2 → 40 : 4 : 4）。
+        strokeWidth = size / 10,
+        orbitingDotSize = size / 10,
+    )
 }
+
+/**
+ * 加载指示器的直径。
+ *
+ * 40dp：是 Miuix 默认值（20dp）的两倍。默认那个是给行内小图标位准备的，
+ * 放在页面/面板正中央等待时太小、与旁边的文字不成比例。
+ */
+private val LoadingIndicatorSize = 40.dp
 
 /**
  * 分组小标题（"项目历史 · xxx"、"工作区"）。转发到 Miuix [SmallTitle]。

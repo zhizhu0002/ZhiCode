@@ -12,7 +12,9 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -155,33 +157,38 @@ private val PickerGroupSpacing = 12.dp
 private val ModelRowSpacing = 8.dp
 
 /**
- * 面板高度策略。
+ * 面板高度：**固定的**，不随模型条数自适应。
  *
- * ## ⚠️ 窗口高度必须取 `LocalWindowInfo`，不能取 `BoxWithConstraints.maxHeight`
+ * ## 为什么改成固定
  *
- * 这一条是**实测**出来的，不是猜的：最初在面板内容外面套了一层 `BoxWithConstraints`，
- * 想用它的 `maxHeight` 算比例。结果是面板反而**变矮了**，而且那个 `heightIn(min = …)`
- * 完全没生效 —— 因为 sheet 测量内容时给的约束**不是屏幕高度**（它要先量一次内容才能
- * 决定自己多高，量的时候约束是松的/无穷大），拿它乘比例只会得到 0 或无穷。
+ * 原来是"内容多高它就多高"（sheet 没有高度参数，高度只能由内容决定）。结果是
+ * 只有 1~2 个模型时面板缩成薄薄一条：加载圈挤在一条缝里、列表一闪就到底、
+ * 底部的按钮贴着屏幕最下沿，而且**切换 API 时高度会跳**（1 个模型 → 5 个模型）。
+ * 固定高度之后这几种情况都不再有。
  *
- * Miuix 自己在 `BottomSheetContentLayout` 里用的就是
- * `LocalWindowInfo.current.containerDpSize.height`（那正是它的布局数学所依据的值），
- * 这里跟随同一个来源。
+ * 高度取窗口高度的 [SheetHeightFraction]，并用 [SheetHeightCap] / [SheetHeightFloor]
+ * 兜住极高与极矮的屏。
  *
- * ## 空间怎么给
+ * ## 空间怎么分配（这一条和"定高"配套，不能只做一半）
  *
- * `OverlayBottomSheet` **没有高度参数**（0.9.4 的签名里只有 `sheetMaxWidth`），
- * 高度完全由内容决定。所以"把 sheet 做高一点"= **把内容做高**：
- * - 列表上限按窗口高度取 [ModelListHeightFraction]，长目录能占满该占的地方；
- * - 加载态给 [LoadingHeightFraction] 的高度，否则加载圈会挤在一条缝里，
- *   而且"加载中很矮 → 加载完突然长高"会跳一下。
- *
- * 不给整块内容强加最小高度（那样会在按钮下面留一片空白，很难看）。
+ * 内容列**定高**之后，中间那块（加载态 / 列表）用 `weight(1f)` 把余量吃掉 ——
+ * 这样按钮稳定落在面板底部，而不是"内容少时在按钮下面留一条空白"。
+ * 列表也因此有了**有界**高度（`weight` 给的是确定约束），
+ * 这仍然满足"无界高度会让 LazyColumn 崩"那条硬性要求。
  */
-private const val ModelListHeightFraction = 0.45f
-private val ModelListMaxHeightCap = 480.dp
-private const val LoadingHeightFraction = 0.3f
-private val LoadingMinHeight = 140.dp
+private const val SheetHeightFraction = 0.6f
+private val SheetHeightCap = 560.dp
+private val SheetHeightFloor = 320.dp
+
+/**
+ * 中间那块内容的标识：**换了 API 或加载状态变了，就换一块内容**。
+ *
+ * 必须把 `activeProfileId` 也算进来 —— 只盯 `loading` 的话，切 tab 时
+ * 如果新配置的目录**已经缓存**（状态直接从"列表A"变成"列表B"、中间没有 loading 态），
+ * AnimatedContent 会认为 targetState 没变、于是整块内容**硬切**。
+ * 这正是用户说的"TAB 切换太生硬"。
+ */
+private data class PickerContentKey(val profileId: String, val loading: Boolean)
 
 /**
  * API 切换 tab 栏（在模型名输入框的正上方）。
@@ -213,22 +220,19 @@ private fun ProfileTabs(
 }
 
 /**
- * 加载态：居中的加载圈 + 状态文字。
+ * 加载态：居中的加载指示器 + 状态文字。
  *
  * 之前加载时只有顶部一行小字，列表位置是空的 —— 看起来像"面板坏了"。
- * 现在把圈和文字放在列表本来的位置居中，一眼就知道是在等东西。
+ * 现在把指示器与文字放在列表本来的位置居中，一眼就知道是在等东西。
  *
- * 高度按窗口高度给（理由见上面的常量注释），这样面板在加载时就有像样的高度，
- * 不会"加载中很矮 → 加载完突然长高"跳一下。
+ * 高度**填满**调用方给的那块区域（定高列里的 weight 区）：面板高度已经是固定的，
+ * 所以这里不需要自己算高度，之前那套按窗口比例算 minHeight 的代码随之删掉。
  */
 @Composable
 private fun PickerLoading(status: String) {
     val scheme = MiuixTheme.colorScheme
-    val windowHeight = LocalWindowInfo.current.containerDpSize.height
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = (windowHeight * LoadingHeightFraction).coerceAtLeast(LoadingMinHeight)),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -344,13 +348,15 @@ private fun ModelList(
     picked: String,
     listMaxHeight: Dp,
     onPick: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     LazyColumn(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(bottom = PickerGroupSpacing)
-            // ⚠️ 高度必须**有界**：无界高度会让 LazyColumn 拿到 Infinity 约束直接崩
-            // （DialogScrollNestingTest）。上限由调用方按窗口高度算好传进来。
+            // ⚠️ 这个 heightIn 不能删：弹窗里的竖直 LazyColumn 若没有高度上限，
+            // 会拿到 Infinity 约束直接崩（DialogScrollNestingTest 守着这条）。
+            // 实际高度由调用方的 weight 决定，这里再给一个明确上限是第二道保险。
             .heightIn(max = listMaxHeight),
         verticalArrangement = Arrangement.spacedBy(ModelRowSpacing),
     ) {
@@ -382,28 +388,34 @@ private fun ModelPickerLoaded(
     // 一并删除，不留"没人用但还留着"的字段。
     if (picker.models.isEmpty()) return
 
-    // 分组标题在卡片**外面**（官方示例就是这样）。
-    //
-    // ## 为什么这里没有折叠箭头、没有吸顶分组头、没有底部提供方跳转条
-    //
-    // rikkahub 的面板这三样都有。它们成立的前提是它支持**多个提供方**：
-    // 分组头要能折叠是为了收起不看的那些提供方，跳转条是为了快速跳到某一个，
-    // 吸顶是为了在长列表里始终知道自己在哪个提供方下面。
-    //
-    // 而这个面板的每一份 API 记录**各自**就是一组（上面的 tab 栏负责在
-    // 它们之间切换），切进来的这一组永远只有一组：折叠 = 把列表收起来，
-    // 跳转条没有任何目标可跳，吸顶也没有第二种分组要区分。
-    // **画一个点了没用的控件比不画更糟** —— 用户会去点它，然后以为应用坏了。
-    ZhiSectionLabel(
-        text = "${picker.profileName} · ${picker.models.size} 个模型",
-        insideMargin = PickerSectionInsideMargin,
-    )
-    ModelList(
-        models = picker.models,
-        picked = picker.query,
-        listMaxHeight = listMaxHeight,
-        onPick = onPickModel,
-    )
+    // 铺满调用方给的那块区域（它是定高列里的 weight 区，所以高度有界）。
+    Column(modifier = Modifier.fillMaxSize()) {
+        // 分组标题在卡片**外面**（官方示例就是这样）。
+        //
+        // ## 为什么这里没有折叠箭头、没有吸顶分组头、没有底部提供方跳转条
+        //
+        // rikkahub 的面板这三样都有。它们成立的前提是它支持**多个提供方**：
+        // 分组头要能折叠是为了收起不看的那些提供方，跳转条是为了快速跳到某一个，
+        // 吸顶是为了在长列表里始终知道自己在哪个提供方下面。
+        //
+        // 而这个面板的每一份 API 记录**各自**就是一组（上面的 tab 栏负责在
+        // 它们之间切换），切进来的这一组永远只有一组：折叠 = 把列表收起来，
+        // 跳转条没有任何目标可跳，吸顶也没有第二种分组要区分。
+        // **画一个点了没用的控件比不画更糟** —— 用户会去点它，然后以为应用坏了。
+        ZhiSectionLabel(
+            text = "${picker.profileName} · ${picker.models.size} 个模型",
+            insideMargin = PickerSectionInsideMargin,
+        )
+        ModelList(
+            models = picker.models,
+            picked = picker.query,
+            listMaxHeight = listMaxHeight,
+            onPick = onPickModel,
+            // 列表吃掉标题之外的余量。定高面板下这一步是必需的：
+            // 不 weight 的话列表按内容高度算，余量会掉到**按钮下面**变成一条空白。
+            modifier = Modifier.weight(1f),
+        )
+    }
 }
 
 @Composable
@@ -417,13 +429,20 @@ private fun ModelPickerBody(
 ) {
     val scheme = MiuixTheme.colorScheme
 
-    // 面板高度完全由内容决定（sheet 没有高度参数），所以"做高一点"只能靠给列表更多空间。
-    // ⚠️ 窗口高度取 LocalWindowInfo（Miuix 自己的布局数学也用这个），
-    // 不能用 BoxWithConstraints 的 maxHeight —— 实测那一个是无效的，见上面的常量注释。
+    // ⚠️ 窗口高度取 LocalWindowInfo，不能取 BoxWithConstraints 的 maxHeight。
+    // 这一条是**实测**出来的：最初用后者算比例，面板反而变矮、heightIn(min=…) 完全不生效 ——
+    // sheet 要先量一次内容才能决定自己多高，量的时候给的约束不是屏幕高度。
+    // Miuix 自己在 BottomSheetContentLayout 里用的就是这个来源。
     val windowHeight = LocalWindowInfo.current.containerDpSize.height
-    val listMaxHeight = (windowHeight * ModelListHeightFraction).coerceAtMost(ModelListMaxHeightCap)
+    val sheetHeight = (windowHeight * SheetHeightFraction)
+        .coerceAtMost(SheetHeightCap)
+        .coerceAtLeast(SheetHeightFloor)
+    // 列表上限：定高面板里 weight 已经把它夹住了，这里再给一个明确上限是为了满足
+    // "弹窗里的 LazyColumn 必须自带 heightIn"那条防崩守卫（DialogScrollNestingTest）。
+    val listMaxHeight = sheetHeight * 0.8f
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    // 定高：面板高度不再随模型条数变化（只有 1~2 个模型时也保持这个高度）。
+    Column(modifier = Modifier.fillMaxWidth().height(sheetHeight)) {
         // 状态行走 Miuix 的分组小标题（`SmallTitle`）。它本来就是干这个的，
         // 之前用裸 `Text` + 自己挑颜色，正是不必要的自绘。
         ZhiSectionLabel(
@@ -436,19 +455,27 @@ private fun ModelPickerBody(
             insideMargin = PickerSectionInsideMargin,
         )
 
-        // 加载态与列表之间淡变过渡。之前是硬切：目录一回来，一整块内容"啪"地换掉 ——
-        // 而这两块**高度不同**，所以看起来既是变色又是跳高，这就是"生硬"的来源。
+        // 加载态与列表之间淡变过渡，并且**换 API 时也走这条过渡**。
+        //
+        // 之前 targetState 只盯 `picker.loading`，于是有两种生硬：
+        // 1. 目录回来时一整块"啪"地换掉；
+        // 2. 切 tab 时若新配置的目录**已缓存**（状态直接从"列表A"变成"列表B"、
+        //    中间根本没有 loading 态），AnimatedContent 认为 targetState 没变，
+        //    整块内容硬切 —— 这正是"TAB 切换太生硬"。
+        // 所以 key 里必须带上 `activeProfileId`（见 PickerContentKey 的注释）。
         //
         // 只把这一块包进 AnimatedContent（下面的 tab 栏、输入框、按钮都留在外面）：
         // 外面那些在两种状态下是同一批控件，让它们跟着淡变反而会闪。
         AnimatedContent(
-            targetState = picker.loading,
+            targetState = PickerContentKey(picker.activeProfileId, picker.loading),
+            // 中间那块吃掉定高列里的余量（理由见 SheetHeightFraction 的注释）。
+            modifier = Modifier.weight(1f).fillMaxWidth(),
             transitionSpec = {
                 fadeIn(ZhiMotion.fadeInSpec) togetherWith fadeOut(ZhiMotion.fadeOutSpec)
             },
             label = "modelPickerContent",
-        ) { loading ->
-            if (loading) {
+        ) { key ->
+            if (key.loading) {
                 PickerLoading(status = picker.status)
             } else {
                 ModelPickerLoaded(
