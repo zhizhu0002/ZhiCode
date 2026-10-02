@@ -60,7 +60,6 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
 fun ZhiSidebar(
     state: WorkspaceUiState,
     onNewSession: () -> Unit,
-    onProjectPath: () -> Unit,
     onOpenSession: (SessionSummary) -> Unit,
     onSessionActions: (SessionSummary) -> Unit,
     onDeleteSession: (SessionSummary) -> Unit,
@@ -87,9 +86,13 @@ fun ZhiSidebar(
                 onClick = onNewSession,
             )
             // rikkahub 式语义化入口：直接开页面/动作，不走命令行通道。
-            // 「当前项目上下文」（旧 = 发 /resume）删了：项目历史列表就在下面，
-            // 同一目标两条路径会让用户困惑该点哪个；恢复会话直接点历史里的会话。
-            SidebarRow(label = "项目路径与会话", icon = ZhiIcons.projectPath, onClick = onProjectPath)
+            //
+            // 「项目路径与会话」（旧 = 往输入器塞 `/status`）和「当前项目上下文」
+            // （旧 = `/resume`）都已删除。它们都把**一次会话动作**伪装成导航行：
+            // 前者发一条斜杠命令、后者要模型来选会话，点下去都不会立刻看到结果，
+            // 而正下方就是项目历史列表 —— 同一个目标两条路径，用户得猜该点哪个。
+            // 恢复会话直接点历史里的会话；项目信息在顶栏与设置里都能看到。
+            // （用户已确认：这两行删掉，之后按新的做法重做。）
 
             ZhiSectionLabel(
                 text = "项目历史 · ${state.projectName}",

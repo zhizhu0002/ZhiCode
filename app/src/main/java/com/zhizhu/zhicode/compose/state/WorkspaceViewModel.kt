@@ -711,6 +711,8 @@ class WorkspaceViewModel(
     private val SKILL_IMPORT_LIMIT_BYTES = 256 * 1024
 
     fun openSkills() {
+        // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
+        hideSidebarForNavigation()
         _state.update {
             // 子页永远坐在设置主页之上（rikkahub 的页面栈）：从侧栏入口进来时
             // 也把 hub 带起来，否则返回时子页关掉就直接回工作区，层断了。
@@ -1267,6 +1269,8 @@ class WorkspaceViewModel(
      * 引擎把启用中的内容作为 `<role_card>` 块拼进每一次系统提示词。
      */
     fun openRoleCards() {
+        // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
+        hideSidebarForNavigation()
         val context = getApplication<android.app.Application>()
         _state.update {
             // 同 openSkills：侧栏入口也要把设置主页垫在底下，保证返回层级完整。
@@ -1403,6 +1407,8 @@ class WorkspaceViewModel(
     // ---------- 记忆文件（ZhiCode.md） ----------
 
     fun openMemory() {
+        // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
+        hideSidebarForNavigation()
         // 同 openSkills：侧栏入口也把设置主页垫在底下。
         _state.update {
             it.copy(
@@ -1429,6 +1435,9 @@ class WorkspaceViewModel(
      * 失败时如实上报，不静默吞掉（例如清单里少声明了该 Activity）。
      */
     fun openSandbox() {
+        // 见 hideSidebarForNavigation。这一行尤其明显：沙箱是个**跨进程的 Activity**，
+        // 不收侧栏的话用户回到本应用时看到的还是那层侧栏，会以为"点了根本没打开"。
+        hideSidebarForNavigation()
         val context = getApplication<android.app.Application>()
         val started = runCatching {
             context.startActivity(
@@ -2667,6 +2676,8 @@ class WorkspaceViewModel(
      * 否则顶栏会显示一个跟实际请求无关的模型名。
      */
     fun openApiConfig() {
+        // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
+        hideSidebarForNavigation()
         viewModelScope.launch(Dispatchers.IO) {
             val state = ApiConfigStore.read(getApplication())
             _state.update {
@@ -2769,6 +2780,8 @@ class WorkspaceViewModel(
      * 没有网络也没有密钥解密，放 IO 线程反而让状态更新顺序更难推理。
      */
     fun openMcpConfig() {
+        // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
+        hideSidebarForNavigation()
         _state.update {
             // 同 openApiConfig：hub 垫底，返回回设置主页。
             it.copy(
@@ -3762,6 +3775,30 @@ class WorkspaceViewModel(
     }
     fun closeSidebar() = _state.update { it.copy(sidebarOpen = false) }
 
+    /**
+     * 侧栏里的每一行在打开目标页面之前都要调这个。
+     *
+     * ## 为什么它值得一个专门的函数
+     *
+     * 侧栏是画在内容**上层**的浮层（见 `AppScaffold` 的 Sidebar 分支），
+     * 而各个目标的 `openXxx()` 只负责把自己那面页推上来，谁也没管侧栏。
+     * 于是：点「设置」→ 设置页铺满，但**侧栏还盖在上面**；点「环境」同理；
+     * 点「ZhiCode 沙箱」更明显（那是个跨进程的 Activity）。
+     * 用户看到的是一层"点不动"的界面，得先返回一次才回到目标页 ——
+     * 症状是"点了没反应"，根因只是少关一层。
+     *
+     * 唯一例外是「新会话」：它本来就自己设了 `sidebarOpen = false`（见 [newSession]）。
+     *
+     * ## 为什么不写成"每个 openXxx 里各加一行"
+     *
+     * 那正是它坏掉的原因：四个入口各写一遍，加第五个时必然漏。
+     * 收口在这里之后，新增入口只有一条路可走。
+     */
+    private fun hideSidebarForNavigation() {
+        _state.update { it.copy(sidebarOpen = false) }
+    }
+
+
     // ---------- 工作区 ----------
 
     fun selectTab(tab: WorkspaceTab) {
@@ -3858,6 +3895,8 @@ class WorkspaceViewModel(
 
     /** 打开「环境自检」：现场跑一遍探测并生成可复制的报告。 */
     fun openEnvironment() {
+        // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
+        hideSidebarForNavigation()
         val reportText = buildEnvironmentReport()
         _state.update {
             it.copy(
@@ -3985,6 +4024,8 @@ class WorkspaceViewModel(
     fun openSettings() = _state.update {
         it.copy(
             settingsOpen = true,
+            // 见 hideSidebarForNavigation：点侧栏里的入口要先收起侧栏。
+            sidebarOpen = false,
             settingsDraft = SettingsDraft.from(it),
         )
     }
@@ -3997,7 +4038,11 @@ class WorkspaceViewModel(
      * 刻意不动 [openSettings] 的 draft：从设置页进来时它已经垫在栈底，
      * 返回时 draft 原样还在，所以调试完回到设置页不会丢未保存的改动。
      */
-    fun openUiDebug() = _state.update { it.copy(uiDebugOpen = true) }
+    fun openUiDebug() {
+        // 见 hideSidebarForNavigation。
+        hideSidebarForNavigation()
+        _state.update { it.copy(uiDebugOpen = true) }
+    }
 
     /** 关闭 UI 调试页。若它是由设置页打开的，设置主页会随之露出来（栈自动回退一层）。 */
     fun closeUiDebug() = _state.update { it.copy(uiDebugOpen = false) }

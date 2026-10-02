@@ -274,7 +274,6 @@ internal fun ZhiSidebarHost(
     ZhiSidebar(
         state = state,
         onNewSession = viewModel::newSession,
-        onProjectPath = { viewModel.onComposerChange("/status"); viewModel.send() },
         onOpenSession = viewModel::openSession,
         onSessionActions = viewModel::showSessionActions,
         onDeleteSession = { viewModel.deleteSession(it.id) },

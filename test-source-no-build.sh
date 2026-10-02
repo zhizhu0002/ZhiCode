@@ -263,6 +263,9 @@ run SkillsPageStructureTest "$PROJECT_ROOT"
 # 之后（MCP 属于 NETWORK，而它是永远放行的）—— 开关点得动、存得下，只是从不拦截。
 # McpToolGateStructureTest.java
 run McpToolGateStructureTest "$PROJECT_ROOT"
+# ---------- 侧栏导航（点任何一行都要收起侧栏，否则目标被浮层盖住） ----------
+# SidebarNavigationTest.java
+run SidebarNavigationTest "$PROJECT_ROOT"
 # ---------- 写死的几何（长按触发 · 气泡宽度 · 弹窗宽度） ----------
 # LayoutConsistencyTest.java
 run LayoutConsistencyTest "$PROJECT_ROOT"
