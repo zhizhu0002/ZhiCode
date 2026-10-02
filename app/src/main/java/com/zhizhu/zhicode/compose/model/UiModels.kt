@@ -25,6 +25,19 @@ data class ToolActivity(
     val expanded: Boolean = false,
     val awaitingPermission: Boolean = false,
     val kind: ToolKind = ToolKind.OTHER,
+    /**
+     * 本工具开始执行的时刻（`System.currentTimeMillis()`），0 表示还没有基准。
+     *
+     * ## 为什么需要它
+     *
+     * [elapsedMs] 是**跟着输出块**推过来的（引擎按 chunk 回调进度）。一个跑 30 秒
+     * 都不吐字的命令，那个值就停在最后一次进度的位置上，界面上看起来像卡死了。
+     * 有了起点，界面侧的定时刷新才能自己把秒数续下去（见 `ToolActions.displayElapsedMs`）。
+     *
+     * 从历史会话恢复出来的工具是**已完成**的，`startedAtMs` 保持 0 —— 那些工具的耗时
+     * 取引擎存下来的值即可，不需要也不应该重新计时。
+     */
+    val startedAtMs: Long = 0L,
 )
 
 /**
@@ -210,6 +223,15 @@ enum class ChoiceIntent {
 
     MESSAGE_ACTION,
     SESSION_ACTION,
+
+    /**
+     * 对话流里**单个工具**的操作菜单。
+     *
+     * 与 [MESSAGE_ACTION] 分开是必要的：工具组那一层只能拿到"哪一组"，
+     * 而这里的动作（复制命令 / 复制输出 / 展开这一条）全部作用在**某一行**上。
+     * 混在同一个 intent 里就会出现"点单个工具的 ⋯ 却弹出整组菜单"那个 bug。
+     */
+    TOOL_ACTION,
 
     /** 计划模式的目标澄清：选完（或自由回答）后才产出计划。 */
     PLAN_GOAL,

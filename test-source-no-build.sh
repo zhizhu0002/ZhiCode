@@ -249,6 +249,9 @@ run CodexProtocolTest "$PROJECT_ROOT"
 # ZcodeProtocolTest.java
 run ZcodeProtocolTest "$PROJECT_ROOT"
 
+# ToolInteractionTest.java
+run ToolInteractionTest "$PROJECT_ROOT"
+
 # ---------- 终端面板的行为契约 ----------
 # 终端外壳改用 Compose 重写（批 F 2/6）。它是全工程唯一一块「重写后无法用单测
 # 证明行为没变」的地方：手势 + IME + PTY 的组合，编译通过只能说明类型对得上。

@@ -99,6 +99,8 @@ internal fun ChatArea(
             },
             onToggleThinking = viewModel::toggleThinking,
             onMessageActions = viewModel::showMessageActions,
+            // 单个工具的 ⋯：动作作用在某一行上，所以把 toolId 一起传下去。
+            onToolActions = viewModel::showToolActions,
             // 长按消息的动作菜单：由那一条消息自己渲染（从手指位置长出来）
             anchoredMenu = { anchorId, fingerOffset ->
                 ZhiAnchoredMenuHost(state, viewModel, anchorId, fingerOffset)

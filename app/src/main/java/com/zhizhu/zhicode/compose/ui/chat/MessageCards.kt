@@ -28,10 +28,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.engine.ToolText
+import com.zhizhu.zhicode.compose.model.ToolActions
 import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ToolActivity
@@ -402,12 +405,36 @@ fun ToolGroupCard(
     onToggleTool: (String) -> Unit,
     /** 参数是**目标状态**：true 表示点下去后应展开，false 表示应收起。 */
     onToggleGroup: (Boolean) -> Unit,
-    onActions: () -> Unit,
+    /**
+     * 某一行的 `⋯`。**必须带 toolId**。
+     *
+     * 这里以前是 `onActions: () -> Unit`，来自整组那一层 —— 于是点单个工具的 `⋯`
+     * 弹出的是整组菜单，而且回调里根本不知道用户点的是哪一行。
+     * 单个工具的动作（复制命令 / 复制输出 / 展开这一条）都作用在某一行上，
+     * 所以行号必须传出去。
+     */
+    onToolActions: (String) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
     val anyExpanded = item.tools.any { it.expanded }
     val completed = item.tools.count { it.completed }
     val failed = item.tools.count { it.failed }
+
+    /*
+     * 运行中的秒表。
+     *
+     * `elapsedMs` 是跟着输出块推过来的（引擎按 chunk 回调进度），所以一个跑很久
+     * 都不吐字的命令，标签会冻在最后一次进度的值上，看起来像卡死。
+     * 这里按 500ms 续走一次（与参考实现的 `scheduleToolElapsedTicker` 同频），
+     * 取「起点至今」与「引擎值」的**较大者**（见 `ToolActions.displayElapsedMs`，
+     * 规则本身在纯逻辑层、有单测）。
+     *
+     * 整组都用同一个 `nowMs` 而不是每行各起一个 ticker：一次重组足够，而且同一组里
+     * 各行的秒数不会因为 ticker 相位不同而看起来错开。
+     *
+     * **没有运行中的工具时 ticker 不排队** —— 否则一个后台死循环会一直持有重组。
+     */
+    val runningClock = rememberRunningClock(item.tools.any { !it.completed })
 
     Card(
         modifier = Modifier
@@ -504,8 +531,10 @@ fun ToolGroupCard(
                 item.tools.forEach { tool ->
                     ToolRow(
                         activity = tool,
+                        nowMs = runningClock,
                         onToggle = { onToggleTool(tool.id) },
-                        onActions = onActions,
+                        // 传**这一行**的 id：菜单内容与动作都按它算。
+                        onActions = { onToolActions(tool.id) },
                     )
                 }
             }
@@ -528,6 +557,7 @@ fun ToolGroupCard(
 @Composable
 private fun ToolRow(
     activity: ToolActivity,
+    nowMs: Long,
     onToggle: () -> Unit,
     onActions: () -> Unit,
 ) {
@@ -664,7 +694,7 @@ private fun ToolRow(
         ) { region ->
             when (region) {
                 ToolStatusRegion.RUNNING -> Text(
-                    text = runningToolLabel(activity),
+                    text = runningToolLabel(activity, nowMs),
                     color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
                     fontSize = ZhiTextScale.Micro,
                     fontFamily = FontFamily.Monospace,
@@ -758,10 +788,40 @@ private fun ToolStatusGlyph(activity: ToolActivity) {
 }
 
 /** 运行中/等待授权的说明文字，对应原版 `runningToolLabel()`。 */
-private fun runningToolLabel(activity: ToolActivity): String = when {
-    activity.awaitingPermission -> "等待授权…"
-    activity.elapsedMs > 0 -> "运行中 · ${formatElapsed(activity.elapsedMs)}"
-    else -> "运行中…"
+/**
+ * 运行中/等待授权的说明文字，对应原版 `runningToolLabel()`。
+ *
+ * `nowMs` 是界面侧时钟（见 [rememberRunningClock]）。耗时取「起点至今」与「引擎推送值」
+ * 的较大者 —— 引擎那个值只在有输出时更新，光用它会让长时间不吐字的命令看起来卡死。
+ * 取值规则在 [ToolActions.displayElapsedMs]（纯逻辑、有单测）。
+ */
+private fun runningToolLabel(activity: ToolActivity, nowMs: Long): String {
+    val display = ToolActions.displayElapsedMs(activity.elapsedMs, activity.startedAtMs, nowMs)
+    return when {
+        activity.awaitingPermission -> "等待授权…"
+        display > 0 -> "运行中 · ${formatElapsed(display)}"
+        else -> "运行中…"
+    }
+}
+
+/**
+ * 运行中的刷新时钟：每 [periodMs] 返回一个新的「现在」。
+ *
+ * [active] 为 false 时**不排队下一次** —— 参考实现也是这么做的
+ * （`refreshToolElapsed` 只有在仍存在未完成工具时才重新 post），
+ * 否则一个常驻的定时器会一直触发重组。
+ */
+@Composable
+private fun rememberRunningClock(active: Boolean, periodMs: Long = 500L): Long {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(active) {
+        if (!active) return@LaunchedEffect
+        while (true) {
+            delay(periodMs)
+            now = System.currentTimeMillis()
+        }
+    }
+    return now
 }
 
 /**

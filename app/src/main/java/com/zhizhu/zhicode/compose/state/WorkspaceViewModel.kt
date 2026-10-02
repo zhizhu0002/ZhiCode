@@ -93,6 +93,7 @@ import com.zhizhu.zhicode.compose.model.SettingsDraft
 import com.zhizhu.zhicode.compose.model.SlashCommand
 import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.model.ToolActivity
+import com.zhizhu.zhicode.compose.model.ToolActions
 import com.zhizhu.zhicode.compose.model.ToolKind
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
@@ -206,6 +207,15 @@ class WorkspaceViewModel(
      */
     private var pendingSessionAction: SessionSummary? = null
     private var pendingMessageAction: ChatItem? = null
+
+    /**
+     * 工具操作的目标：`(哪一组, 哪一行)`。
+     *
+     * 必须**同时**记住两者。只记 toolId 的话，执行时要遍历整个 transcript 去找，
+     * 而工具 id 在单个会话内是唯一的、却可能出现在已被合并/清理的旧条目里；
+     * 只记 item 的话又定位不到行（正是"点单个工具弹出整组菜单"那个 bug 的成因）。
+     */
+    private var pendingToolAction: Pair<ChatItem, String>? = null
 
     private var modelCatalogJob: Job? = null
 
@@ -1994,6 +2004,10 @@ class WorkspaceViewModel(
             additions = added,
             deletions = deleted,
             kind = kindOf(name),
+            // 记下起点：引擎的 elapsedMs 只在有输出时被推过来，跑很久不吐字的命令
+            // 标签会冻在最后一次进度的值上。有了起点，界面侧的定时刷新才能续走
+            // （见 ToolActions.displayElapsedMs）。
+            startedAtMs = System.currentTimeMillis(),
         )
         liveTools[id] = LiveTool(groupId, name, command)
 
@@ -3660,7 +3674,13 @@ class WorkspaceViewModel(
         val options = when (item.kind) {
             ChatKind.USER -> listOf("复制", "再次发送", "编辑后发送")
             ChatKind.ASSISTANT, ChatKind.ERROR -> listOf("复制", "重试上一问")
-            else -> listOf("复制", if (item.groupCompleted) "已全部完成" else "执行中")
+            // 工具组这一层只留"复制整组概要"。
+            //
+            // 这里曾经给第二项是 `if (item.groupCompleted) "已全部完成" else "执行中"` —— 那是
+            // **状态文字冒充菜单项**：点下去什么都不发生，而用户会以为坏了。
+            // 单个工具该有的动作（复制命令/输出/diff、展开这一条）现在走
+            // [showToolActions]，那一层才知道用户点的是哪一行。
+            else -> listOf("复制概要")
         }
         // 与 showSessionActions 同理：动作在**选择器回调**里执行，那时拿到的只有选项文案，
         // 不记住来源就会"复制了别的消息"。
@@ -3676,6 +3696,116 @@ class WorkspaceViewModel(
                 )
             )
         }
+    }
+
+    /**
+     * 对话流里**单个工具**的 `⋯` 菜单。
+     *
+     * ## 为什么必须带 toolId
+     *
+     * 之前每一行的 `⋯` 用的是同一个"整组"回调，于是点单个工具弹出的是整组菜单，
+     * 回调里也不知道用户点的是哪一行。动作（复制命令 / 复制输出 / 复制实时输出 /
+     * 复制 Diff / 展开这一条）全部作用在某一行上，所以目标必须精确到行。
+     *
+     * ## 菜单内容由纯逻辑层决定
+     *
+     * 选项来自 [ToolActions.options]（表驱动、有单测），这里只负责把界面模型翻译成
+     * 它的判据。这样"哪个状态该有哪些动作"只有一处实现 —— 散在界面里写迟早会出现
+     * 两份不一样的菜单。
+     *
+     * 没有可用选项时**不弹菜单**，只提示一句：弹一个空菜单比不弹更让人困惑。
+     */
+    fun showToolActions(item: ChatItem, toolId: String) {
+        val tool = item.tools.firstOrNull { it.id == toolId }
+        if (tool == null) {
+            _state.update { it.copy(message = "找不到这个工具，操作已取消") }
+            return
+        }
+        val options = ToolActions.options(toolActionFlags(tool))
+        if (options.isEmpty()) {
+            _state.update { it.copy(message = "这个工具暂时没有可用操作") }
+            return
+        }
+        pendingToolAction = item to toolId
+        _state.update {
+            it.copy(
+                choicePicker = ChoicePickerState(
+                    title = tool.displayName.ifBlank { "工具操作" },
+                    intent = ChoiceIntent.TOOL_ACTION,
+                    // 锚到工具组那一条：菜单从它长出来，而不是从屏幕某个角落。
+                    anchorId = item.id,
+                    options = options.map { ChoiceOption(it) },
+                )
+            )
+        }
+    }
+
+    /**
+     * 界面模型 → [ToolActions.ToolActionFlags]。
+     *
+     * 判据全部取"用户此刻看得见的东西"：
+     * - `hasCommand`：`summary` 对命令类工具就是命令行（`ToolText.summary` 的产物）；
+     * - `hasOutput`：已经有输出**或**还在跑的实时输出（`output` 在运行中也会被填）；
+     * - `hasDiff`：用 [ToolText.isFileDiff] —— 与对话里那段输出是否按 diff 渲染
+     *   是同一个判据，两处分开就会"显示成 diff 却没有复制 Diff 这一项"。
+     */
+    private fun toolActionFlags(tool: ToolActivity): ToolActions.ToolActionFlags {
+        val isCommand = tool.kind == ToolKind.COMMAND
+        return ToolActions.ToolActionFlags(
+            isCommand = isCommand,
+            hasCommand = isCommand && tool.summary.isNotBlank(),
+            hasOutput = tool.output.isNotBlank(),
+            hasDiff = tool.output.isNotBlank() && ToolText.isFileDiff(tool.toolName, tool.output),
+            completed = tool.completed,
+            expanded = tool.expanded,
+        )
+    }
+
+    /**
+     * 执行工具菜单里的一个动作。
+     *
+     * 复制类的一律走 [copyText]（它已经处理了"内容为空 → 明确提示"），
+     * 展开/折叠类改的是 state 里那一条 —— 与点 `⌄` 走的同一条路。
+     */
+    private fun applyToolAction(target: ChatItem, toolId: String, label: String) {
+        val tool = target.tools.firstOrNull { it.id == toolId } ?: run {
+            _state.update { it.copy(message = "找不到这个工具，操作已取消") }
+            return
+        }
+
+        if (ToolActions.isToggle(label)) {
+            setToolExpanded(target.id, toolId, ToolActions.toggledTo(label))
+            return
+        }
+
+        when (ToolActions.copySource(label)) {
+            ToolActions.CopySource.COMMAND -> copyText(tool.summary, "工具命令")
+            ToolActions.CopySource.OUTPUT -> copyText(tool.output, "工具输出")
+            ToolActions.CopySource.LIVE_OUTPUT ->
+                // 运行中的实时输出就是 `output` 此刻的内容（进度回调持续写进去的）。
+                copyText(tool.output, "工具实时输出")
+            // diff 是输出里的一段：整份输出已经是 diff 文本，单独给"复制 Diff"
+            // 是为了让用户不必先展开、也不必在长文本里自己挑。
+            ToolActions.CopySource.DIFF -> copyText(tool.output, "工具 Diff")
+            ToolActions.CopySource.INPUT -> copyText(toolActionInput(target, toolId), "工具参数")
+            null -> _state.update { it.copy(message = "不支持的操作：$label") }
+        }
+    }
+
+    /**
+     * "复制参数"要复制的东西。
+     *
+     * 用界面上已经算好的 `summary`（命令类）或工具的展示名 —— 而不是再回到引擎的
+     * 原始入参去取：那个入参在本层已经没有保存（只有渲染需要的字段被留下来），
+     * 为了一个"复制"回头再加一份原始 JSON 的保留，代价大于收益。
+     */
+    private fun toolActionInput(item: ChatItem, toolId: String): String {
+        val tool = item.tools.firstOrNull { it.id == toolId }
+        if (tool == null) return ""
+        return listOfNotNull(
+            tool.displayName.takeIf { it.isNotBlank() },
+            tool.summary.takeIf { it.isNotBlank() },
+        ).joinToString(" · ")
     }
 
     // ---------- 剪贴板 ----------
@@ -3841,6 +3971,10 @@ class WorkspaceViewModel(
                     // 拿不到来源就不猜：宁可无反应，也不能复制到别的消息。
                     _state.update { it.copy(message = "找不到目标消息，操作已取消") }
                 } else when (option.label) {
+                    // 「复制概要」而不是「复制」：工具组没有正文，复制的是各工具的
+                    // 展示名与摘要。用动词说清"复制的是什么"比一个笼统的"复制"好 ——
+                    // 用户点下去才知道拿到的是概要而不是某一条的完整输出。
+                    "复制概要" -> copyMessage(target)
                     "复制" -> copyMessage(target)
                     "再次发送" -> {
                         // 复用用户消息的原文重发；工具组这类没有正文的目标不支持。
@@ -3852,10 +3986,18 @@ class WorkspaceViewModel(
                     }
                     "编辑后发送" -> _state.update { it.copy(composerText = target.body, message = "已放回输入框，可编辑后发送") }
                     "重试上一问" -> retryLastUserPrompt()
-                    // 这两种是状态展示项，点了不做任何事。
-                    "已全部完成", "执行中" -> Unit
                     else -> _state.update { it.copy(message = "不支持的操作：${option.label}") }
                 }
+            }
+            // 单个工具的操作。目标在选择器打开时就记住了（组 + 行）。
+            ChoiceIntent.TOOL_ACTION -> {
+                val target = pendingToolAction
+                pendingToolAction = null
+                _state.update { it.copy(choicePicker = null) }
+                if (target == null) {
+                    // 拿不到目标就不猜：宁可无反应，也不能复制到别的工具的输出。
+                    _state.update { it.copy(message = "找不到目标工具，操作已取消") }
+                } else applyToolAction(target.first, target.second, option.label)
             }
             ChoiceIntent.SESSION_ACTION -> {
                 val target = pendingSessionAction
@@ -4517,6 +4659,29 @@ class WorkspaceViewModel(
                     if (item.kind != ChatKind.TOOL_GROUP) item
                     else item.copy(
                         tools = item.tools.map { if (it.id == id) it.copy(expanded = !it.expanded) else it },
+                    )
+                },
+            )
+        }
+    }
+
+    /**
+     * 把某一条工具的展开状态设成**指定值**（不是取反）。
+     *
+     * 工具菜单里给的是"展开输出 / 折叠输出"这种**目标状态**的文案，所以必须能直接设值：
+     * 用取反的话，用户点"展开输出"时如果状态在这期间已经变了（比如刚跑完自动展开），
+     * 就会得到与文案相反的结果。
+     *
+     * 按 `(itemId, toolId)` 定位而不是只按 toolId：调用方手上就有这两个值，
+     * 而只按 toolId 遍历时，同一 id 若出现在多条条目里会一起被改。
+     */
+    private fun setToolExpanded(itemId: String, toolId: String, expanded: Boolean) {
+        _state.update { s ->
+            s.copy(
+                transcript = s.transcript.map { item ->
+                    if (item.id != itemId || item.kind != ChatKind.TOOL_GROUP) item
+                    else item.copy(
+                        tools = item.tools.map { if (it.id == toolId) it.copy(expanded = expanded) else it },
                     )
                 },
             )

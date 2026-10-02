@@ -1945,10 +1945,10 @@ private fun ConversationSection(resetToken: Int) {
                                     item = item,
                                     onToggleTool = { toolId -> feed.toggleTool(item.id, toolId) },
                                     onToggleGroup = { expanded -> feed.toggleGroup(item.id, expanded) },
-                                    onActions = {
+                                    onToolActions = { toolId ->
                                         fingerOffset = null
                                         menuFor = item.id
-                                        feed.note("点开工具组菜单")
+                                        feed.note("点开工具菜单 · $toolId")
                                     },
                                 )
                                 ChatKind.ERROR -> ErrorCard(item)

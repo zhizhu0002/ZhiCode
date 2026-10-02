@@ -81,6 +81,12 @@ fun ChatList(
     onToggleThinking: (String) -> Unit,
     onMessageActions: (ChatItem) -> Unit,
     /**
+     * 单个工具的 `⋯`。第二个参数是**那一行**的 toolId。
+     *
+     * 与 [onMessageActions] 分开：后者只知道"哪一组"，做不了"展开这一条"这类动作。
+     */
+    onToolActions: (ChatItem, String) -> Unit,
+    /**
      * 长按动作菜单的宿主插槽。在**每一项自己的布局里**调用，菜单就会贴那一项弹出
      * （见 `ZhiAnchoredActionMenu`）。
      *
@@ -279,9 +285,11 @@ fun ChatList(
                             // （id 不变），但语义上更清楚的是"动的是哪一条消息"。
                             onToggleTool = onToggleTool,
                             onToggleGroup = { expanded -> onToggleGroup(item.id, expanded) },
-                            onActions = {
+                            // `⋯` 是**单个工具**的操作，所以传的是那一行的 id，
+                            // 而不是整组（以前传整组，于是点单行弹出整组菜单）。
+                            onToolActions = { toolId ->
                                 fingerOffset = finger.offset()
-                                onMessageActions(item)
+                                onToolActions(item, toolId)
                             },
                         )
                         ChatKind.ERROR -> ErrorCard(shown)
