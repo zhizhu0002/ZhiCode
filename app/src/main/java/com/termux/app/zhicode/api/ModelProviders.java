@@ -39,6 +39,11 @@ public final class ModelProviders {
             case ANTHROPIC -> new AnthropicMessagesProvider();
             case OPENAI_CHAT -> new OpenAIChatCompletionsProvider();
             case OPENAI_RESPONSES -> new OpenAIResponsesProvider();
+            // Codex 变体与标准 Responses **共用**传输实现，但那个类会重读原始线上名
+            // 来分支（端点 / UA / 四个关联头 / store:false / 不发 max_output_tokens）。
+            // 这里各列一项而不是合并，是为了让 switch 保持"覆盖每个取值"的约束：
+            // 将来再加协议时，编译器会在这里拦住漏改。
+            case CODEX_RESPONSES -> new OpenAIResponsesProvider();
             case DEBUG_SCRIPTED -> debugScripted();
         };
     }

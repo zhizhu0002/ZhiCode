@@ -32,12 +32,16 @@ public final class ApiEndpointResolver {
     /**
      * 模型目录端点。
      *
-     * <p>三种协议都走同一个 {@code /v1/models}：这既是 OpenAI 的约定，
-     * 也是 Anthropic 与各兼容网关广为接受的路径。将来若出现没有标准目录接口的协议，
-     * 在 {@link ApiProtocol} 上加一项并在这里排除即可。
+     * <p>除 Codex 变体外都走同一个 {@code /v1/models}：这既是 OpenAI 的约定，
+     * 也是 Anthropic 与各兼容网关广为接受的路径。
+     *
+     * <p><b>为什么要为 Codex 单独排除</b>：那个后端（{@code .../backend-api/codex}）
+     * 没有 {@code /v1/models} 这个接口。照旧拼一个出来会让"拉模型列表"必然 404，
+     * 而失败的现象只是"列表空着"，看不出是"这个端点本来就不存在"。
+     * 返回空串表示**该协议没有目录接口**，调用方据此跳过这次请求、回落到手填模型名。
      *
      * <p>先校验地址、再判断协议，这个顺序是刻意的：地址没配是**配置缺失**，
-     * 报出来用户才知道要去填；协议不认识是**能力缺失**，此时返回空串让界面
+     * 报出来用户才知道要去填；协议没有目录接口是**能力缺失**，此时返回空串让界面
      * 回落到手填模型名。若反过来，一个「协议不认识 + 地址没填」的配置会得到
      * 「该协议没有目录接口」，用户会以为是协议的问题。
      *
@@ -46,7 +50,9 @@ public final class ApiEndpointResolver {
      */
     public static String modelCatalogEndpoint(SessionConfig config) {
         String base = stripTrailingSlash(ApiUrlPolicy.requireBaseUrl(config));
-        if (protocolOf(config) == null) return "";
+        ApiProtocol protocol = protocolOf(config);
+        if (protocol == null) return "";
+        if (protocol == ApiProtocol.CODEX_RESPONSES) return "";
         return withVersionSegment(base, MODELS_PATH);
     }
 

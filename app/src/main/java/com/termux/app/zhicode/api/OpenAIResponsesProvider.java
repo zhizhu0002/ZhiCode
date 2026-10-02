@@ -60,6 +60,19 @@ import java.util.UUID;
  */
 public final class OpenAIResponsesProvider implements ModelProvider {
 
+    /**
+     * Codex 变体的线上名。
+     *
+     * <p>定义在这里、由 {@link ApiProtocol#CODEX_RESPONSES} 引用（与
+     * {@link DebugScriptedProvider#WIRE_NAME} 同一约定）：枚举常量**不能**引用
+     * 自己类里声明在后面的静态字段，而放在实现类里既避开了这个限制，
+     * 也让"这个协议名属于谁"一目了然。
+     *
+     * <p>本类必须按**原始串**分支：{@code ApiProtocol} 把两种 Responses 变体
+     * 指向同一个传输实现，走进来之后再看是哪一个。
+     */
+    static final String WIRE_CODEX_RESPONSES = "codex-responses";
+
     /** Codex 客户端自称的版本号。改它等于对服务端声称是另一个客户端版本。 */
     private static final String CODEX_CLIENT_VERSION = "2.1.87";
 
@@ -87,7 +100,7 @@ public final class OpenAIResponsesProvider implements ModelProvider {
         if (config.apiKey == null || config.apiKey.trim().isEmpty()) {
             throw new IllegalStateException("API key is not configured");
         }
-        boolean codex = "codex-responses".equals(config.protocol);
+        boolean codex = WIRE_CODEX_RESPONSES.equals(config.protocol);
         HttpURLConnection conn = openConnection(baseUrl, config, codex);
         HttpRequestTracker.Scope request = requests.begin(conn);
         StreamDecoder decoder = new StreamDecoder(listener);

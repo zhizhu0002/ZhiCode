@@ -301,6 +301,17 @@ enum class ApiProtocol(val label: String) {
     ANTHROPIC("Anthropic"),
 
     /**
+     * Codex 变体（参考图表单里 `OpenAI Responses` 之后那一项）。
+     *
+     * 它**不是** `OPENAI_RESPONSES` 的别名，虽然共用同一个传输实现：
+     * 端点、UA 与四个关联头都不一样（`/responses` 而非 `/v1/responses`、
+     * 自称 `codex_cli_rs/<ver>`、外加 `originator`/`session-id`/`thread-id`/
+     * `x-client-request-id`），请求体也不一样（必须 `store:false`，
+     * 且**不能**发 `max_output_tokens`）。详见 `OpenAIResponsesProvider`。
+     */
+    CODEX_RESPONSES("Codex Responses"),
+
+    /**
      * 调试用：不发网络请求，按脚本产出回复（含真实的工具调用）。
      *
      * 只在 debug 构建里出现在协议下拉与「新增配置」的候选里（见

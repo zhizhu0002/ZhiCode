@@ -232,6 +232,14 @@ run NoBundledThirdPartyEndpointTest "$PROJECT_ROOT"
 # 那在上层只表现为「回复不完整」或「工具调用丢参数」，很难定位。
 # ApiWireContractTest.java
 run ApiWireContractTest "$PROJECT_ROOT"
+# ---------- Codex Responses 在协议下拉里真的能选到 ----------
+# 这是一个**已经实现、却谁也点不到**的功能：引擎侧那条 Codex 分支（/responses 端点、
+# codex_cli_rs 的 UA、四个关联头、store:false、不发 max_output_tokens）早就写完并有
+# 单测，但协议被当成 openai-responses 的别名，UI 只能产出 openai-responses ——
+# 用户在下拉里看不到 Codex，于是那条路径永远走不到。ApiWireContractTest 检查的是
+# 「实现文件里有没有那几个头」，抓不到「用户能不能选到」。
+# CodexProtocolTest.java
+run CodexProtocolTest "$PROJECT_ROOT"
 
 # ---------- 终端面板的行为契约 ----------
 # 终端外壳改用 Compose 重写（批 F 2/6）。它是全工程唯一一块「重写后无法用单测

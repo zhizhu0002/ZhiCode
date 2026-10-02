@@ -161,6 +161,18 @@ public class ApiPureLogicTest {
     }
 
     @Test
+    public void modelCatalogEndpoint_skipsCodexBecauseThatBackendHasNoModelsRoute() {
+        // Codex 后端没有 /v1/models。照旧拼一个出来，现象只是"模型列表空着"，
+        // 看不出是"这个端点本来就不存在"。返回空串 = 明确跳过，界面回落到手填。
+        assertEquals("", ApiEndpointResolver.modelCatalogEndpoint(
+                config("codex-responses", "https://chatgpt.com/backend-api/codex")));
+        // 而它的**会话**端点照旧要能算出来（不带 /v1 版本段）。
+        assertEquals("https://chatgpt.com/backend-api/codex/responses",
+                ApiEndpointResolver.sessionEndpoint(
+                        "https://chatgpt.com/backend-api/codex", "/responses", false));
+    }
+
+    @Test
     public void modelCatalogEndpoint_returnsBlankForUnknownProtocol() {
         // 返回空串而不是猜一个地址：调用方据此跳过这次请求，界面回落到手填模型名。
         assertEquals("", ApiEndpointResolver.modelCatalogEndpoint(config("gemini", "https://example.com")));

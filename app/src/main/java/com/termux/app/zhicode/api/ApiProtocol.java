@@ -15,16 +15,36 @@ package com.termux.app.zhicode.api;
  * 改了之后旧配置会被判成「未知协议」而拒绝加载。
  *
  * <h3>别名</h3>
- * 两个只在路由层存在的同义写法：{@code codex-responses} 与
- * {@code openai-compatible}。它们是历史上出现过的写法，报文格式与主名完全一致，
- * 所以归到同一个枚举值，而不是各建一项 —— 各建一项会让 {@code switch}
- * 出现永远走不到的分支，也会让人以为它们的报文不同。
+ * 只有一个真正的别名：{@code openai-compatible}（自建/第三方网关的常见写法）。
+ * 它的报文格式与 {@link #OPENAI_CHAT} 完全一致，所以归到同一个枚举值，
+ * 而不是另建一项 —— 另建一项会让 {@code switch} 出现永远走不到的分支。
+ *
+ * <h3>为什么 {@code codex-responses} 从别名升成了一等值</h3>
+ * 它原先也是按别名处理的，理由是"报文格式与主名一致"。那个理由**不成立**：
+ * 它与 {@link #OPENAI_RESPONSES} 在四处都不同 ——
+ * <ul>
+ *   <li>端点：{@code /responses} 而不是 {@code /v1/responses}；</li>
+ *   <li>UA：自称 {@code codex_cli_rs/<ver>}；</li>
+ *   <li>额外四个关联头：{@code originator} / {@code session-id} / {@code thread-id} /
+ *       {@code x-client-request-id}；</li>
+ *   <li>请求体：必须 {@code store:false}，且<b>不能</b>发 {@code max_output_tokens}。</li>
+ * </ul>
+ * 而 {@link ApiEndpointResolver#modelCatalogEndpoint} 还要为它单独排除模型目录
+ * （Codex 后端没有 {@code /v1/models}）—— 别名做不到这一点。
+ *
+ * <p>传输实现仍然共用（{@link ModelProviders} 把两者都指向
+ * {@code OpenAIResponsesProvider}），但那个类**必须**重读原始线上名才能分支，
+ * 所以在枚举里也如实各占一项：让"哪些协议名是认识的"与"它们各自怎么走"
+ * 都只有一处定义，而不是一半在枚举、一半靠 {@code equals} 猜。
  */
 enum ApiProtocol {
 
     ANTHROPIC("anthropic"),
     OPENAI_CHAT("openai-chat"),
     OPENAI_RESPONSES("openai-responses"),
+
+    /** Codex 变体。与 {@link #OPENAI_RESPONSES} 共用传输实现，但线上行为不同。 */
+    CODEX_RESPONSES(OpenAIResponsesProvider.WIRE_CODEX_RESPONSES),
 
     /**
      * **调试用**：不发网络请求，按脚本产出回复（见 {@link DebugScriptedProvider}）。
@@ -36,8 +56,6 @@ enum ApiProtocol {
      */
     DEBUG_SCRIPTED(DebugScriptedProvider.WIRE_NAME);
 
-    /** 与 {@link #OPENAI_RESPONSES} 同义的历史写法。 */
-    static final String ALIAS_CODEX_RESPONSES = "codex-responses";
     /** 与 {@link #OPENAI_CHAT} 同义的历史写法（自建/第三方网关常用）。 */
     static final String ALIAS_OPENAI_COMPATIBLE = "openai-compatible";
 
@@ -66,7 +84,6 @@ enum ApiProtocol {
         for (ApiProtocol protocol : values()) {
             if (protocol.wireName.equals(wire)) return protocol;
         }
-        if (ALIAS_CODEX_RESPONSES.equals(wire)) return OPENAI_RESPONSES;
         if (ALIAS_OPENAI_COMPATIBLE.equals(wire)) return OPENAI_CHAT;
         return null;
     }
