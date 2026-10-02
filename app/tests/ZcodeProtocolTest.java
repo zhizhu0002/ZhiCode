@@ -388,6 +388,23 @@ public final class ZcodeProtocolTest {
                         + "服务端 capabilities 里回哪种大小写不由我们决定，"
                         + "用 == 比对时一次大小写差异就会静默筛空并回落到整张表");
 
+        // ---- 9d. 3012 必须被翻译，不许以原始 JSON 丢给用户 -------------------
+        // 它看着像"请求写错了"（HTTP 405 + JSON），实际是**账号级风控**，与客户端实现无关：
+        // zai-org/feedback#716 里官方客户端 3.12.3/3.14.4 上一个字的输入同样被拒、
+        // headersApplied=true、额度接口正常，触发点是短时间并发调用后的持续标记。
+        // 不翻译的后果是每个人（包括我们）都会再花一轮去查请求哪一项不对。
+        require(sqWire.contains("fundescribeHttpFailure("),
+                ZCODE_WIRE + " 必须提供 describeHttpFailure 把 3012 翻成人能读的话");
+        require(sqWire.contains("constvalCODE_BLOCKED=3012"),
+                ZCODE_WIRE + " 必须把 3012 定义为具名常量，不许在别处散落字面量");
+        int blockedUses = countOccurrences(provider, "ZcodeWire.describeHttpFailure(");
+        require(blockedUses >= 2,
+                ZCODE_PROVIDER + " 的会话与额度两条失败路径都要过 describeHttpFailure（现在 "
+                        + blockedUses + " 处）：漏掉的那条会继续把原始 JSON 丢给用户");
+        require(provider.contains("truncate(text)"),
+                ZCODE_PROVIDER + " 必须保留原始的 HTTP 失败文案作为兜底："
+                        + "只认 3012 一个码，别的错误原样留着，否则会吞掉服务端真正有用的说明");
+
         // ---- 10. 「填入 ZCode 默认值」必须两个字段一起填 -------------------
         require(overlay.contains("填入 ZCode 默认值"),
                 UI_OVERLAY + " 必须有「填入 ZCode 默认值」入口："

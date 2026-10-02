@@ -467,6 +467,41 @@ class ZcodeWireTest {
     }
 
     @Test
+    fun blockedErrorBecomesAnActionableMessageInsteadOfRawJson() {
+        // 3012 看起来像"请求写错了"（HTTP 405 + 一段 JSON），实际是账号级风控，
+        // 且官方客户端同样中招（zai-org/feedback#716，官方 3.14.4 上一个字也失败）。
+        // 这里要保证它不再以原始 JSON 的形式出现 —— 那会让人往错的方向查一整轮。
+        val raw = """{"code":3012,"msg":"request has been blocked due to unusual activity.","logid":"202610021744498f418cccebcde8da33d9"}"""
+        val message = ZcodeWire.describeHttpFailure(405, raw)
+        assertNotNull("3012 必须被识别出来", message)
+        assertTrue("要说清不是本应用的问题：$message", message!!.contains("不是本应用的问题"))
+        assertTrue("要说清官方客户端同样会中招：$message", message.contains("官方客户端"))
+        // 要给出可行动作。注意**不能**在这里断言具体域名：纯逻辑层不许认识主机名
+        // （ZcodeProtocolTest 有一条守卫盯着），所以那句话说的是"网关提供方"。
+        assertTrue("要给出可行动作：$message", message.contains("联系") && message.contains("解除"))
+        assertTrue("要给一条用户自己就能试的退路：$message", message.contains("换一个网关地址"))
+        // logid 是向官方报障时唯一有用的东西，必须带出来。
+        assertTrue("必须带上 logid：$message", message.contains("202610021744498f418cccebcde8da33d9"))
+        assertFalse("不要把原始 JSON 整段丢给用户", message.contains("\"code\":3012"))
+    }
+
+    @Test
+    fun otherFailuresKeepTheirOriginalTextSoNothingIsSwallowed() {
+        // 只翻译认识的那一个码：别的错误原样留着，否则会把真正有用的服务端说明吞掉。
+        assertNull("401 不该被当成风控",
+            ZcodeWire.describeHttpFailure(401, """{"code":3001,"msg":"parameter error"}"""))
+        assertNull("3012 之外一律不认",
+            ZcodeWire.describeHttpFailure(400, """{"code":1210,"msg":"invalid request"}"""))
+        // 不是 JSON（比如网关回了一页 HTML）时也要 null，由调用方回落。
+        assertNull(ZcodeWire.describeHttpFailure(502, "<html>bad gateway</html>"))
+        assertNull(ZcodeWire.describeHttpFailure(405, null))
+        // 没有 logid 也要给出指引，不能因为缺字段就整段失效。
+        val noLogId = ZcodeWire.describeHttpFailure(405, """{"code":3012,"msg":"blocked"}""")
+        assertNotNull(noLogId)
+        assertFalse("没有 logid 时不该硬编一段空的", noLogId!!.contains("logid："))
+    }
+
+    @Test
     fun balanceEndpointCarriesOnlyTheVersionParameter() {
         // 没填版本时用内置默认（官方那边也是编译期常量），**不再**报错不发请求：
         // 代码有默认值却让用户去找一个数字，只会多一次失败。

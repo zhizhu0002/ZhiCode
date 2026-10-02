@@ -103,6 +103,45 @@ object ZcodeWire {
     const val CODE_BLOCKED = 3012
 
     /**
+     * 把网关的业务错误翻成一句**人能读、能行动**的话；不认识时返回 null。
+     *
+     * ## 为什么专门处理 3012
+     *
+     * 它看起来像"请求发错了"（HTTP **405 Method Not Allowed**，而请求体是
+     * `{"code":3012,"msg":"request has been blocked due to unusual activity."}`），
+     * 所以我们（和任何看到它的人）第一反应都是去查请求哪一项不对 —— 我为此把
+     * 请求头、模型名、端点逐项跟官方源码对齐过一轮，全部对上了，错误依旧。
+     *
+     * 真相是它**不是协议错误，是账号级风控标记**，而且与客户端实现无关：
+     * 官方反馈仓库 `zai-org/feedback` issue #716 里，报告者在 **官方客户端 3.12.3 /
+     * 3.14.4** 上用**一个字**的输入同样被拒，`headersApplied=true`，额度接口正常，
+     * 触发点是"短时间并发调用"之后被持续标记。也就是说：**头都发对了照样 3012**。
+     *
+     * 所以这一层的价值不在"修"，而在**不要让人往错的方向查**：把"这不是你的请求写错了、
+     * 也不是本应用的 bug、官方客户端同样会中招、要联系 z.ai 解除"直接说出来，
+     * 并把 `logid` 一并给出（那是向官方报障时唯一有用的东西）。
+     *
+     * @param status HTTP 状态码（3012 走的是 405；不同网关可能不同，所以不硬性要求）
+     * @param body   响应正文；不是 JSON 时返回 null，由调用方回落到原文
+     */
+    fun describeHttpFailure(status: Int, body: String?): String? {
+        val json = runCatching { JSONObject(body.orEmpty()) }.getOrNull() ?: return null
+        if (json.optInt("code", 0) != CODE_BLOCKED) return null
+        val logId = json.optString("logid", "").trim()
+        return buildString {
+            append("账号被网关风控拦截（HTTP ").append(status)
+            append(" / code ").append(CODE_BLOCKED).append(" unusual activity）。")
+            append("这不是本应用的问题：官方客户端同样会中招（额度接口照常可用），")
+            append("请求头与模型名也已逐项对齐官方源码。")
+            append("需要联系网关提供方解除该账号的标记；也可以在 API 配置里换一个网关地址再试。")
+            if (logId.isNotEmpty()) {
+                // logid 是报障时唯一有用的东西：没有它，对方查不到这一次请求。
+                append("\n报障时提供 logid：").append(logId)
+            }
+        }
+    }
+
+    /**
      * 会话端点。**注意不是 `/messages`** —— 那个网关把它挂在 `/anthropic/v1/messages` 下。
      *
      * 取值来自参考实现（反编译的 `ZcodeVault.messagesPath()`）。写错它的现象是 404，

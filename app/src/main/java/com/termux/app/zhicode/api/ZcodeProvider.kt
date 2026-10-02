@@ -102,9 +102,12 @@ class ZcodeProvider : ModelProvider {
             if (status < 200 || status >= 300) {
                 // 401/403 在这里最可能是"授权码不对"或"身份头没填对"，所以把响应体带上 ——
                 // 那个网关会在正文里说清是哪一个。
-                throw IllegalStateException(
-                    "ZCode HTTP $status: " + truncate(readAll(conn.errorStream)),
-                )
+                //
+                // 但 3012（风控）**不是**协议错误，见 ZcodeWire.describeHttpFailure 的说明：
+                // 它要的是一句"往哪查"的指引，而不是又一段原始 JSON。
+                val text = readAll(conn.errorStream)
+                ZcodeWire.describeHttpFailure(status, text)?.let { throw IllegalStateException(it) }
+                throw IllegalStateException("ZCode HTTP $status: " + truncate(text))
             }
 
             BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { reader ->
@@ -174,6 +177,7 @@ class ZcodeProvider : ModelProvider {
             request.markResponseStarted()
             val text = readAll(if (status in 200..299) conn.inputStream else conn.errorStream)
             if (status < 200 || status >= 300) {
+                ZcodeWire.describeHttpFailure(status, text)?.let { throw IllegalStateException(it) }
                 throw IllegalStateException("ZCode HTTP $status: " + truncate(text))
             }
             return ZcodeWire.parseBalancePayload(JSONObject(text))
