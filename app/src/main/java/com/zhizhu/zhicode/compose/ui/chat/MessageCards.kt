@@ -9,6 +9,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -225,6 +226,9 @@ fun AssistantCard(
         Column(
             modifier = Modifier
                 .weight(1f)
+                // clip 在 animateContentSize **外侧**：思考面板展开/收起时文字
+                // 按自然高度绘制、被逐帧露出来（详见 ToolGroupCard 的注释）。
+                .clipToBounds()
                 // ⚠️ 流式期间**不挂** animateContentSize。
                 //
                 // 正文每 32ms（DELTA_MERGE_MS）长高一次，而尺寸动画每次变化都会被重新
@@ -409,14 +413,25 @@ fun ToolGroupCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
-            // 同 AssistantCard：工具还在跑的时候不挂尺寸动画 —— 工具输出每 200ms
-            // （PROGRESS_FLUSH_MS）长一次，动画会跟着重新触发，等于让整张组卡在
-            // 运行期间持续重测量。跑完后再挂上，用于平滑「展开/收起工具列表」。
+            // 展开/收起的高度动画**只有这一处**，而裁剪层必须写在它**外侧**
+            // （clipToBounds 在 animateContentSize 之前）。
+            //
+            // ⚠️ 之前这里写成 `if (item.groupCompleted) 无动画 else 动画` —— 反了。
+            // 于是「点开一个已跑完的工具组」这个最常见的动作恰恰没有卡片动画：
+            // 外框瞬间撑开，内层各自挂着自己的 animateContentSize 单独滑动，用户
+            // 看到的就是「文字没跟着卡片的动画展开/缩回」。门控本意是"运行期间不挂"
+            // （工具输出每 200ms（PROGRESS_FLUSH_MS）长一次会把尺寸动画反复重新
+            // 触发，整张组卡持续重测量），所以跑完之后才该挂上。
+            //
+            // clip 在外的理由：裁剪层拿到的是**动画中的高度**，内层文字按自然高度
+            // 绘制、被逐帧露出来。反过来写（动画在外）裁剪层拿到的是自然高度，
+            // 一点也裁不到，文字仍然是瞬间全部出现。
+            .clipToBounds()
             .then(
                 if (item.groupCompleted) {
-                    Modifier
-                } else {
                     Modifier.animateContentSize(animationSpec = ZhiMotion.sizeSpec)
+                } else {
+                    Modifier
                 },
             ),
         cornerRadius = ZhiRadius.card,
@@ -481,11 +496,11 @@ fun ToolGroupCard(
             )
         }
         if (anyExpanded) {
-            Column(
-                modifier = Modifier.animateContentSize(
-                    animationSpec = ZhiMotion.sizeSpec,
-                ),
-            ) {
+            // ⚠️ 这里**不再**挂 animateContentSize。卡片本身已经在动（上面那处），
+            // 两层各挂一次的结果是：外框按动画高度走、内层按自己的动画滑动，
+            // 两者曲线不同步 —— 看起来就是文字在卡片里"自己飘"。高度的单一来源
+            // 是卡片，内层只负责按自然高度绘制、由卡片外层裁剪。
+            Column(modifier = Modifier.fillMaxWidth()) {
                 item.tools.forEach { tool ->
                     ToolRow(
                         activity = tool,
@@ -559,6 +574,9 @@ private fun ToolRow(
             .padding(start = 20.dp, top = 1.dp, end = 2.dp, bottom = 4.dp)
             // 运行中不挂尺寸动画：这段时间里状态行每秒都在换文字（elapsed），
             // 而「运行中… → ⎿ 摘要 → 全量输出」的切换已经由 Crossfade 负责过渡。
+            // clip 在动画**外侧**：展开输出时文字按自然高度绘制、被逐帧露出，
+            // 而不是整段先冒出来再等卡片长高。
+            .clipToBounds()
             .then(
                 if (activity.completed) {
                     Modifier.animateContentSize(animationSpec = ZhiMotion.sizeSpec)

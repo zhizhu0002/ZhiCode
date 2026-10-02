@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.TermuxTerminalPane
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.chat.rememberAutoFollow
 import com.zhizhu.zhicode.compose.model.TerminalLine
 import com.zhizhu.zhicode.compose.model.TerminalTone
 import com.zhizhu.zhicode.compose.theme.ZhiColors
@@ -312,8 +313,13 @@ private fun TerminalPlaceholder(
     // 滚动常常在真正滚到底之前就被取消掉，只能等某个空档才追上，看起来就是"滚一下停一下"。
     // 日志输出时本来也不该有动画（每一步都起动画会互相打断）。
     // 完整推导见 `ui/chat/ChatList.kt` 里那段同源注释（对话流踩过同一个坑）。
-    LaunchedEffect(lines.size) {
-        if (lines.isNotEmpty()) listState.requestScrollToItem(lines.size - 1)
+    //
+    // 跟/不跟走和对话流同一套判定（[rememberAutoFollow]）：之前这里无条件贴底，
+    // 于是一边看历史、一边有新行进来就会被一次次拽回去 —— 那是"自动滚动不顺畅"
+    // 最直接的一种。现在只有用户本来就贴底（或主动拖回底部）时才跟。
+    val autoFollow by rememberAutoFollow(listState)
+    LaunchedEffect(lines.size, autoFollow) {
+        if (autoFollow && lines.isNotEmpty()) listState.requestScrollToItem(lines.size - 1)
     }
 
     Surface(modifier = modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {

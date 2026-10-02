@@ -361,6 +361,11 @@ run StatusBarAndImeTest "$PROJECT_ROOT"
 # 红标天天出现就不再是信息 —— 这条同时守住判定表本身不许退化成「全都危险」。
 # RiskBadgeTest.java
 run RiskBadgeTest "$PROJECT_ROOT"
+# ---------- 自动吸底的跟/不跟（「滚动不顺」） ----------
+# 判错完全静默：不编译失败、不报错，只表现为手感不对。两个方向都难受 ——
+# 该跟不跟（长回复之后跟随断掉）与不该跟却跟（边看历史边被拽回底部）。
+# AutoScrollSmoothnessTest.java
+run AutoScrollSmoothnessTest "$PROJECT_ROOT"
 # ---------- UI 调试页的入口门控与"真的铺开组件" ----------
 # 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
 # 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。

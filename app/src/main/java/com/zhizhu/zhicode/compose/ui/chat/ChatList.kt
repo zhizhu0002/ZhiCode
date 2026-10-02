@@ -129,27 +129,21 @@ fun ChatList(
     /*
      * 是否跟随最新内容（吸底）。
      *
-     * ⚠️ 不能用「可见的末项是不是最后一项」来判断。内容增长本身就会把末项
+     * 判定挪进了 [rememberAutoFollow]（纯逻辑在 [AutoFollowPolicy]，有单测）：
+     *
+     * - **一开始滚动就立刻暂停** —— 否则用户按住往上拖的时候流式内容还会把他
+     *   拽回底部，手感是"手指和自动滚动在抢"。
+     * - **停手时按位置决定，带 8dp 滞回** —— 停在底部（或拖动过程中到过底部）
+     *   就恢复跟随，往旧内容方向拖过阈值就不跟。
+     *
+     * ⚠️ 不能用「可见的末项是不是最后一项」来判断：内容增长本身就会把末项
      * 顶出屏幕，于是在我们来得及滚动之前条件就已经变成 false —— 表现是
      * 回复长过一屏之后跟随就断了，得手动往下滑。
      *
-     * 改成只看**用户的动作**：他松手时停在底部就继续跟随，停在中途就暂停
-     * （他在看历史）。
-     *
-     * `isScrollInProgress` 在这里只反映用户拖动 / 惯性滚动：我们用的是
+     * ⚠️ `isScrollInProgress` 在这里只反映用户拖动 / 惯性滚动：我们用的是
      * `requestScrollToItem`，它不走挂起滚动、也不占滚动互斥锁，不会把它置真。
-     *
-     * 两个分支都要处理：
-     * - **一开始滚动就立刻暂停** —— 否则用户按住往上拖的时候流式内容还会把他
-     *   拽回底部（`autoFollow` 还是 true），手感是"手指和自动滚动在抢"。
-     * - **停手时按位置决定** —— 停在底部就恢复跟随，停在中途就不跟。
      */
-    var autoFollow by remember { mutableStateOf(true) }
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
-            autoFollow = if (scrolling) false else !listState.canScrollForward
-        }
-    }
+    val autoFollow by rememberAutoFollow(listState)
 
     /*
      * 上一次已处理的会话 id。
