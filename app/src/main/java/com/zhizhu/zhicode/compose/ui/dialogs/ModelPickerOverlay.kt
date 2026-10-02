@@ -396,9 +396,14 @@ private fun ModelPickerLoaded(
     // 铺满调用方给的那块区域（它是定高列里的 weight 区，所以高度有界）。
     Column(modifier = Modifier.fillMaxSize()) {
         // 额度卡片在列表**上面**：它是"我现在还剩多少"，比"我能选哪些"更该先看到。
-        if (picker.quota.isNotEmpty()) {
+        //
+        // 读不到额度时卡片**照样要出现**（只是内容换成原因）：额度是个网络请求，
+        // 失败很正常，而"卡片不见了"和"额度是 0"在界面上分不出来 ——
+        // 用户会以为自己没套餐。留着卡片才能看见原因，也才有那个「刷新」可点。
+        if (picker.quota.isNotEmpty() || picker.quotaError.isNotEmpty()) {
             QuotaCard(
                 quota = picker.quota,
+                error = picker.quotaError,
                 onRefresh = onRefreshQuota,
                 modifier = Modifier.padding(bottom = PickerGroupSpacing),
             )
@@ -446,10 +451,14 @@ private fun ModelPickerLoaded(
  * 额度是会被消耗的（也可能是别人在别处用掉的）。面板打开时拉一次之后，
  * 用户看着一个不再变化的数字会以为它坏了。给一个明确的刷新入口，
  * 比"每次展开都偷偷重拉"更好：后者会让用户在读数字时它突然跳一下。
+ *
+ * 顺带：额度读不到时卡片**不消失**，只是把 [error] 那句原因显示出来 ——
+ * 有那张卡片在，「刷新」才有个可点的地方。
  */
 @Composable
 private fun QuotaCard(
     quota: List<QuotaRow>,
+    error: String,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -474,6 +483,16 @@ private fun QuotaCard(
                 // 文案是动作而不是状态，所以用 SecondaryButton 而不是可点的文字：
                 // 可点文字在这套面板里没有可辨识的按下反馈。
                 SecondaryButton(text = "刷新", onClick = onRefresh)
+            }
+            if (quota.isEmpty() && error.isNotEmpty()) {
+                // 一行说明而不是一个空卡片：用户要的是"为什么没有数字"。
+                // 原文由协议层/数据层截断过（见 ModelCatalogStore.quotaFailureText）。
+                Text(
+                    text = error,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Footnote,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                )
             }
             quota.forEachIndexed { index, row ->
                 // 第一行与标题之间留一点空隙，行与行之间留得少一些。

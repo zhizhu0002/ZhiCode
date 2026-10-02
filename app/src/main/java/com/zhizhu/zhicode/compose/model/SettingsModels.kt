@@ -914,6 +914,14 @@ data class ModelPickerState(
      * 界面再算一遍迟早会和那边不一致。
      */
     val quota: List<QuotaRow> = emptyList(),
+    /**
+     * 额度读取失败的原因（空表示没失败）。
+     *
+     * 与 [quota] 分开而不是共用一个字段：额度成功时它是空的，失败时 [quota] 是空的 ——
+     * 但"没额度"和"读不到额度"是两件事，卡片要说的话也不一样（前者不显示卡片，
+     * 后者要说明为什么读不到并留一个「刷新」）。
+     */
+    val quotaError: String = "",
     /** [models] 旁边的一句补充，如「（仅套餐可用模型）」。 */
     val modelsNote: String = "",
     /**

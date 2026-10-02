@@ -351,19 +351,45 @@ class ZcodeWireTest {
     }
 
     @Test
-    fun balanceEndpointNeedsVersionAndPlatform() {
+    fun balanceEndpointTakesPlatformFromOsCategoryNotFromThePlatformHeader() {
         // 缺取值时**不发请求**：原样带 {v} 发出去只会 404，而 404 看不出是占位符没替换。
         val error = runCatching { ZcodeWire.balanceEndpoint("https://gw", emptyMap()) }.exceptionOrNull()
         assertNotNull(error)
         assertTrue("要说清缺哪一项", error!!.message!!.contains("X-ZCode-App-Version"))
+        assertTrue("也要说清另一个缺的是哪个头", error.message!!.contains("X-Os-Category"))
 
+        // 查询串的 platform 与请求头的 X-Platform 在参考实现里是**两个不同的值**：
+        // platform() = "linux"（查询串），X-Platform = "linux-x64"（请求头，硬编码）。
+        // 一开始这里按"名字对上"从 X-Platform 取，发出去的是 platform=linux-x64，
+        // 真机上被打回 HTTP 400 {"code":3001,"msg":"parameter error"}。
         val url = ZcodeWire.balanceEndpoint(
             "https://gw.example.com",
-            mapOf("X-ZCode-App-Version" to "3.14.0", "x-platform" to "linux-x64"),
+            mapOf("X-ZCode-App-Version" to "3.14.0", "x-os-category" to "linux"),
         )
         assertTrue("请求头名要大小写不敏感：$url", url.contains("app_version=3.14.0"))
-        assertTrue(url.contains("platform=linux-x64"))
+        assertTrue("platform 必须取 X-Os-Category 的值：$url", url.contains("platform=linux"))
+        assertFalse(
+            "platform 不许被 X-Platform 头的取值污染：$url",
+            url.contains("platform=linux-x64"),
+        )
         assertFalse("占位符必须被替换掉", url.contains("{v}") || url.contains("{p}"))
+    }
+
+    @Test
+    fun thePlatformHeaderAloneIsNotEnoughToReadTheQuota() {
+        // 只填了 X-Platform（没有 X-Os-Category）时**必须拒绝**，而不是猜一个值发出去：
+        // 猜错的后果正是那个 400 —— 报错不会说哪个参数不对。
+        val error = runCatching {
+            ZcodeWire.balanceEndpoint(
+                "https://gw.example.com",
+                mapOf("X-ZCode-App-Version" to "3.14.0", "X-Platform" to "linux-x64"),
+            )
+        }.exceptionOrNull()
+        assertNotNull("只有 X-Platform 时必须报缺，不能拿它顶替 platform", error)
+        assertTrue(
+            "缺项要指明是 X-Os-Category：${error!!.message}",
+            error.message!!.contains("X-Os-Category"),
+        )
     }
 
     @Test

@@ -3583,6 +3583,7 @@ class WorkspaceViewModel(
                             // 列表没拿到，额度卡片也一并清掉：留着上一次的数字
                             // 会让人以为那是当前的（它可能已经是刷新前的旧值）。
                             quota = emptyList(),
+                            quotaError = "",
                             modelsNote = "",
                         )
                     } else {
@@ -3592,6 +3593,9 @@ class WorkspaceViewModel(
                             else "已获取 ${fetched.models.size} 个模型",
                             models = fetched.models,
                             quota = fetched.quota,
+                            // 额度失败**不**让整次读取失败（见 ModelCatalogStore.Catalog）：
+                            // 模型列表照旧可用，原因只写在额度卡片里。
+                            quotaError = fetched.quotaError,
                             modelsNote = fetched.note,
                         )
                     },

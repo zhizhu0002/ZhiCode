@@ -53,6 +53,8 @@ public final class ZcodeProtocolTest {
             "app/src/main/java/com/zhizhu/zhicode/compose/ui/dialogs/ModelPickerOverlay.kt";
     private static final String UI_CATALOG_STORE =
             "app/src/main/java/com/zhizhu/zhicode/compose/data/ModelCatalogStore.kt";
+    private static final String UI_VM =
+            "app/src/main/java/com/zhizhu/zhicode/compose/state/WorkspaceViewModel.kt";
     private static final String FAST_SCRIPT = "test-jvm-fast.sh";
 
     /** 线上名：写进设置与会话文件，是持久化契约的一部分。 */
@@ -265,6 +267,41 @@ public final class ZcodeProtocolTest {
         require(squash(catalogStore).contains("ZcodeProvider().fetchBalance(config)"),
                 UI_CATALOG_STORE + " 必须只调一次 fetchBalance 同时拿到模型列表与额度："
                         + "分两次请求会多一次往返，还可能拿到互相不一致的两份数据");
+
+        // ---- 9b. 模型列表不许挂在额度请求成功上 ---------------------------
+        // 真机上出过这个画面：额度接口回 HTTP 400，面板里一个模型都选不到、只剩一行错误。
+        // 而模型名我们本来就写着（内置 11 项），额度只是一次网络请求 —— 它失败不该
+        // 让"能选哪些模型"也一起消失。参考实现同样是分开的：列表来自内置表，
+        // 额度另有卡片、失败只改那一行字。
+        String sqCatalog = squash(stripComments(catalogStore));
+        int tableAt = sqCatalog.indexOf("ZcodeWire.MODEL_NAMES");
+        int balanceAt = sqCatalog.indexOf("ZcodeProvider().fetchBalance(config)");
+        require(tableAt >= 0,
+                UI_CATALOG_STORE + " 的 ZCode 分支必须摆出内置模型表 ZcodeWire.MODEL_NAMES："
+                        + "列表得有个不依赖网络的来源");
+        require(balanceAt > tableAt,
+                UI_CATALOG_STORE + " 必须先摆好内置模型表再去请求额度："
+                        + "次序反过来说明列表又挂在请求成功上了 —— 额度一失败整张列表就没了");
+        require(sqCatalog.contains("quotaError"),
+                UI_CATALOG_STORE + " 必须把额度失败降级成一句 quotaError（显示在额度卡片里）："
+                        + "额度失败是常态，不该让整个面板只剩错误");
+        require(sqCatalog.contains("models=all,quotaError="),
+                UI_CATALOG_STORE + " 额度失败那条分支必须**照样给出整张内置表**"
+                        + "（`models = all` 与 quotaError 在同一个 Catalog 里）："
+                        + "只带一个原因、不带模型，就还是「额度一坏全都没得选」");
+        require(sqCatalog.contains("runCatching{ZcodeProvider().fetchBalance(config)}"),
+                UI_CATALOG_STORE + " 的额度请求必须被 runCatching 兜住（失败降级而不是整次失败）");
+        require(squash(read(root, UI_MODELS)).contains("valquotaError:String=\"\""),
+                UI_MODELS + " 的 ModelPickerState 必须有 quotaError 字段："
+                        + "「没有额度」与「读不到额度」是两件事，卡片要说的话也不一样");
+        // 接了字段却没人往下传 / 没人显示，是同一类漏法的下一环：状态里有了、用户看不到。
+        require(squash(read(root, UI_VM)).contains("quotaError=fetched.quotaError"),
+                UI_VM + " 必须把 fetched.quotaError 铺进面板状态："
+                        + "少了这一行，额度失败的原因就停在数据层，用户什么都看不到");
+        require(squash(read(root, UI_PICKER)).contains("picker.quotaError.isNotEmpty()"),
+                UI_PICKER + " 的额度卡片必须在 quotaError 非空时也显示："
+                        + "只按 quota 非空判断的话，读不到额度时卡片直接消失 ——"
+                        + "而「卡片不见了」和「额度是 0」在界面上分不出来");
 
         // ---- 10. 「填入 ZCode 默认值」必须两个字段一起填 -------------------
         require(overlay.contains("填入 ZCode 默认值"),

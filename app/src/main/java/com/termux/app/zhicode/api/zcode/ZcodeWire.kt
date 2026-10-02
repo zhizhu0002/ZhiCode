@@ -95,19 +95,34 @@ object ZcodeWire {
     /**
      * 额度端点，并把两个占位符替换掉。
      *
-     * `{v}`/`{p}` 的取值**从用户自己填的额外请求头里读**（`X-ZCode-App-Version` 与
-     * `X-Platform`）——不新增字段、也不内置：那两个值本来就属于那个客户端，
-     * 用户已经在配置里给了一份，再抄一份只会多一处会不一致的地方。
+     * `{v}`/`{p}` 的取值**从用户自己填的额外请求头里读** —— 不新增字段、也不内置：
+     * 那两个值本来就属于那个客户端，用户已经在配置里给了一份，再抄一份只会多一处
+     * 会不一致的地方。
+     *
+     * ## `{p}` 取的是 `X-Os-Category`，**不是** `X-Platform`
+     *
+     * 这两个在参考实现里是**不同的值**，而这一点在真机上就是把额度打回
+     * `HTTP 400 {"code":3001,"msg":"parameter error"}` 的原因：
+     *
+     * - 查询串的 `platform` 取 `ZcodeVault.platform()`，解出来是 `linux`；
+     * - 请求头的 `X-Platform` 是**硬编码**的 `linux-x64`（同一个类里另外写的字面量）。
+     *
+     * 一开始这里是按"名字对上就行"从 `X-Platform` 头取的，于是发出去的是
+     * `platform=linux-x64` —— 服务端那两个参数里有一个它认不出，直接判参数错误。
+     * 这类错**不会**说明是哪个参数不对，只能靠跟已知可用的那份实现逐字节对齐。
+     *
+     * 换到 `X-Os-Category` 是因为它恰好等于那个 `platform()` 的取值（`linux`），
+     * 于是既不用凭空内置一个值，也不用新增一个配置字段。
      *
      * 缺任一取值时**不发请求**，直接说明缺什么。原样带着 `{v}` 发出去只会得到 404，
      * 而 404 的报错看不出是"占位符没替换"。
      */
     fun balanceEndpoint(baseUrl: String?, extraHeaders: Map<String, String>): String {
         val version = headerValue(extraHeaders, "X-ZCode-App-Version")
-        val platform = headerValue(extraHeaders, "X-Platform")
+        val platform = headerValue(extraHeaders, "X-Os-Category")
         val missing = ArrayList<String>()
         if (version.isNullOrBlank()) missing += "X-ZCode-App-Version"
-        if (platform.isNullOrBlank()) missing += "X-Platform"
+        if (platform.isNullOrBlank()) missing += "X-Os-Category"
         if (missing.isNotEmpty()) {
             throw IllegalStateException(
                 "读取额度需要额外请求头里的 ${missing.joinToString("、")}（点「填入 ZCode 默认值」可一次填好）",
