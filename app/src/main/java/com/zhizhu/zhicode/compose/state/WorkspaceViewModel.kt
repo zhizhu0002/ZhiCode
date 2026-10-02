@@ -57,6 +57,7 @@ import com.zhizhu.zhicode.compose.model.MemoryEditor
 import com.zhizhu.zhicode.compose.model.MemoryFile
 import com.zhizhu.zhicode.compose.model.MemoryScope
 import com.zhizhu.zhicode.compose.model.MemoryState
+import com.zhizhu.zhicode.compose.model.ModelProfileTab
 import com.zhizhu.zhicode.compose.model.ModelPickerState
 import com.zhizhu.zhicode.compose.model.OpenFile
 import com.zhizhu.zhicode.compose.model.PermissionMode
@@ -191,6 +192,15 @@ class WorkspaceViewModel(
     private var pendingMessageAction: ChatItem? = null
 
     private var modelCatalogJob: Job? = null
+
+    /**
+     * 模型选择的落盘任务。
+     *
+     * 单独一个（而不是共用 `modelCatalogJob`）：两者生命周期完全不同 —— 拉目录是
+     * "开面板时一次、切配置时一次"，而选模型是"每点一行一次"，共用一个句柄会让
+     * 选模型把正在进行的目录请求取消掉（列表就此停在加载中）。
+     */
+    private var modelSaveJob: Job? = null
 
     /**
      * 会话级模型覆盖。
@@ -2593,12 +2603,21 @@ class WorkspaceViewModel(
      * 自然带上（原版的"下一完整轮生效"）。
      */
     fun showModelPicker() {
+        // 直接从存储读那几份 API 记录，而**不是**从 `s.apiConfig` 读：
+        // 后者的语义是"API 配置弹窗当前打开"，面板显示时它恰好是 null，
+        // 所以那样取值会永远落到 `s.profileName` 兜底上、tab 栏也永远没有数据。
+        val config = ApiConfigStore.read(getApplication())
+        val active = config.profiles.firstOrNull { it.id == config.activeId }
         _state.update { s ->
-            val active = s.apiConfig?.let { config -> config.profiles.firstOrNull { it.id == config.activeId } }
             s.copy(
                 modelPicker = ModelPickerState(
                     profileName = active?.name ?: s.profileName,
                     currentModel = active?.model?.takeIf { it.isNotBlank() } ?: s.modelLabel,
+                    // 面板一打开就先把"要用的模型名"填成当前生效的那个：
+                    // 高亮看的正是这个字段，不填的话刚打开时一行都不高亮。
+                    query = active?.model?.takeIf { it.isNotBlank() } ?: s.modelLabel,
+                    profiles = config.profiles.map { ModelProfileTab(it.id, it.name) },
+                    activeProfileId = config.activeId,
                 ),
             )
         }
@@ -2608,21 +2627,58 @@ class WorkspaceViewModel(
     fun closeModelPicker() {
         modelCatalogJob?.cancel()
         modelCatalogJob = null
+        modelSaveJob?.cancel()
+        modelSaveJob = null
         _state.update { it.copy(modelPicker = null) }
+    }
+
+    /**
+     * 切换面板里 tab 选中的那份 API 记录，并重新拉它自己的模型目录。
+     *
+     * ## 为什么不复用 [selectApiProfile]
+     *
+     * 那个函数会写 `apiConfig = state`，而 `apiConfig != null` 在本工程里的语义是
+     * **"API 配置弹窗当前打开"**（`AppScaffold` 用它决定显示哪个弹窗）。在模型面板里
+     * 调它就会在面板上凭空弹出一张配置页。这里只更新面板自己那份状态。
+     */
+    fun selectModelPickerProfile(profileId: String) {
+        // 换配置就用那份配置自己的模型，别把上一条配置的会话级覆盖带过去。
+        // 与 selectApiProfile 同一处理。
+        modelOverride = null
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = ApiConfigStore.select(getApplication(), profileId)
+            val config = ApiConfigStore.read(getApplication())
+            val active = config.profiles.firstOrNull { it.id == config.activeId }
+            _state.update { s ->
+                // 面板可能已经被关掉了：那就只同步摘要，不要把状态又塞回去。
+                val picker = s.modelPicker ?: return@update s
+                s.copy(
+                    modelPicker = picker.copy(
+                        profileName = active?.name ?: picker.profileName,
+                        currentModel = active?.model.orEmpty(),
+                        // 换配置后旧配置的模型名不能留在框里 —— 那会让「完成」把
+                        // A 家的模型名写到 B 家的配置上。清空比留错值安全。
+                        query = active?.model.orEmpty(),
+                        profiles = config.profiles.map { ModelProfileTab(it.id, it.name) },
+                        activeProfileId = config.activeId,
+                        loading = true,
+                        status = "正在从当前 API 获取模型…",
+                        models = emptyList(),
+                    ),
+                    message = if (result.isSuccess) "已切换 API 配置"
+                    else "切换失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+                )
+            }
+            // 面板还开着才需要重新拉目录；关掉了就不必再发一次请求。
+            if (_state.value.modelPicker != null) fetchModelCatalog()
+        }
+        // 摘要与引擎配置要立刻跟上，否则底栏还显示旧配置名。
+        syncActiveProfile()
+        syncRoleCardFromStore()
     }
 
     fun setModelQuery(text: String) {
         _state.update { s -> s.copy(modelPicker = s.modelPicker?.copy(query = text)) }
-    }
-
-    /**
-     * 搜索框：只过滤**看得见哪些行**，不动 [setModelQuery] 里那个"要用的模型名"。
-     *
-     * 两者分开的理由见 `ModelPickerState.search` 的注释 —— 合并的话，
-     * 搜索时敲的半个词会被当成模型名，点「使用模型」就把它写进了配置。
-     */
-    fun setModelSearch(text: String) {
-        _state.update { s -> s.copy(modelPicker = s.modelPicker?.copy(search = text)) }
     }
 
     private fun fetchModelCatalog() {
@@ -2654,6 +2710,26 @@ class WorkspaceViewModel(
     }
 
     /**
+     * 在列表里**点某一行**：立刻选中它并保存，但**不关面板**。
+     *
+     * 与 [applySelectedModel] 的区别只有"关不关面板"这一件事，但这一点决定了观感：
+     * 之前只有点底部按钮才写配置，于是高亮要等那一下才动 —— 用户点了一行却看不到
+     * 任何反馈，会以为没点上。现在点哪行哪行立刻变蓝，配置同时也已经存好了。
+     *
+     * 保存做成 **latest-wins**：连点几下时取消上一个写入任务。不取消的话多个 IO 写入
+     * 并发进行、完成顺序不定，最后落盘的可能是中间那一次点到的模型 —— 而界面上显示的
+     * 却是最后一次点的那个，两边就此分叉。
+     */
+    fun selectModel(model: String) {
+        val target = model.trim()
+        if (target.isEmpty()) return
+        // 先把界面上那一份改掉，点击的反馈必须是**同步**的（等 IO 回来才变蓝会顿一下）。
+        // 用于高亮的 `query` 就是"要用的模型名"，所以改它等于把高亮挪过去。
+        _state.update { s -> s.copy(modelPicker = s.modelPicker?.copy(query = target)) }
+        persistModel(target)
+    }
+
+    /**
      * 应用选定的模型：写进当前配置记录并重跑 `configure`，让下一次请求就用上新模型。
      *
      * 这里**不**走 `engineOverrides().model`：模型属于配置记录的持久化内容，
@@ -2663,8 +2739,14 @@ class WorkspaceViewModel(
         val target = model.trim()
         if (target.isEmpty()) return
         closeModelPicker()
+        persistModel(target)
+    }
+
+    /** [selectModel] 与 [applySelectedModel] 共用的落盘部分（区别只在调用方关不关面板）。 */
+    private fun persistModel(target: String) {
         modelOverride = target
-        viewModelScope.launch {
+        modelSaveJob?.cancel()
+        modelSaveJob = viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { ApiConfigStore.setDefaultModel(getApplication(), target) }
             // 覆盖值先生效，所以即使写配置失败模型也已经切换了；把这一点如实说出来，
             // 而不是报一个"保存失败"让人以为模型没换。

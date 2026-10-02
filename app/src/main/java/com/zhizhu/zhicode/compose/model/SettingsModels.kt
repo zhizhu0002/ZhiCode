@@ -358,41 +358,37 @@ data class ModelPickerState(
     val status: String = "正在从当前 API 获取模型…",
     val models: List<ModelOption> = emptyList(),
     /**
-     * 搜索框里的过滤串。
+     * 已配置的 API 记录，用于面板里的快速切换 tab 栏。
      *
-     * <p>**与 [query] 是两件事**，不能合并：
-     * - [query] 是"要用的模型名"，点「使用模型」时就是把它写回配置；
-     * - [search] 只影响**看得见哪些行**。
-     *
-     * <p>合并的后果是具体的：在搜索框里敲 `deep` 只想筛出 deepseek 那几条，
-     * 但 [query] 同时变成了 `deep` —— 这时点「使用模型」就会把一个**不存在的模型名**
-     * 写进配置（服务端随后 400）。分开之后搜索再随便敲也不会误改配置。
+     * <p>**必须在这里另存一份，不能现读 `WorkspaceUiState.apiConfig`**：那个字段的语义
+     * 是"API 配置弹窗当前打开"，面板显示时为 null（`closeApiConfig()` 会清掉），
+     * 所以从它取值会永远拿不到东西。
      */
-    val search: String = "",
+    val profiles: List<ModelProfileTab> = emptyList(),
+    /** 当前生效的 API 记录 id，与 [profiles] 配套。 */
+    val activeProfileId: String = "",
 ) {
     /**
-     * 按 [search] 过滤后的可见行。
+     * 当前生效的 API 在 [profiles] 里的下标；找不到时为 0。
      *
-     * <p>做成**派生属性**而不是在组合函数里现算：筛选规则有边界情况（前后空白、
-     * 大小写、id 与显示名两侧都能匹配），而这里恰好是能脱离 Compose 单测的地方。
-     *
-     * <p>匹配规则刻意选**大小写不敏感的子串**，不做模糊/子序列匹配：
-     * 这个列表里的字符串是用户发请求要用的模型标识符，**结果可预测**比"猜得准"重要。
-     * 模糊匹配会让明明存在的模型因为字符顺序不同而搜不到，用户只会以为目录里没有它。
-     *
-     * <p>[search] 为空白时返回**全部**（不是空）：刚打开面板时搜索框是空的，
-     * 这时必须看到完整目录。
+     * <p>做成**派生属性**而不是在组合函数里现算：`indexOfFirst` 在"没找到"时返回 -1，
+     * 而 Miuix 的 `TabRow` 需要一个合法下标 —— 直接把 -1 传下去会没有任何 tab 被选中，
+     * 看上去像控件坏了。这里的 0 兜底和边界情况都是能脱离 Compose 单测的。
      */
-    val visibleModels: List<ModelOption>
-        get() {
-            val needle = search.trim()
-            if (needle.isEmpty()) return models
-            return models.filter {
-                it.id.contains(needle, ignoreCase = true) ||
-                    it.displayName.contains(needle, ignoreCase = true)
-            }
-        }
+    val activeProfileIndex: Int
+        get() = profiles.indexOfFirst { it.id == activeProfileId }.coerceAtLeast(0)
+
+    /** 是否该显示切换 tab 栏：只有一条时它是死控件（切不了任何东西）。 */
+    val showProfileTabs: Boolean get() = profiles.size > 1
 }
+
+/**
+ * 面板 tab 栏里的一条 API 记录。
+ *
+ * <p>只留切换需要的两样东西（id 与显示名），不直接把 `ApiProfile` 放进面板状态：
+ * 那个类型带着 `apiKey` —— 面板没有任何理由持有密钥，少一个地方碰它少一处泄漏面。
+ */
+data class ModelProfileTab(val id: String, val name: String)
 
 /**
  * 首次进入时的 API 配置列表：**空**。

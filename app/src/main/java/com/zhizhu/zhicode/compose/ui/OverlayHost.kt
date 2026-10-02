@@ -94,12 +94,18 @@ internal fun ZhiOverlayHost(
         picker = state.modelPicker,
         onDismiss = viewModel::closeModelPicker,
         onQueryChange = viewModel::setModelQuery,
-        // 搜索只筛列表，与"要用的模型名"是两回事（见 ModelPickerState.search）
-        onSearchChange = viewModel::setModelSearch,
+        // 点一行：立刻选中并保存，面板不关（高亮就是在这一步跟过去的）
+        onPickModel = viewModel::selectModel,
+        // 换一份 API 记录：重新拉它自己的模型目录
+        onSelectProfile = viewModel::selectModelPickerProfile,
+        // 主按钮：选择在点击那一刻已经存好，这里只是应用手动输入的名字并收起面板
         onUse = viewModel::applySelectedModel,
-        onOpenApiConfig = {
+        onAddApi = {
             viewModel.closeModelPicker()
+            // 先打开配置页、再进空白表单：tab 栏已经承担了"切到已有配置"，
+            // 这个按钮剩下的语义就是**新增**，停在列表页与按钮名字不符。
             viewModel.openApiConfig()
+            viewModel.newApiProfile()
         },
     )
 }

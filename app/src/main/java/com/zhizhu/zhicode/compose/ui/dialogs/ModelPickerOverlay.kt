@@ -1,7 +1,14 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,13 +19,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.ModelOption
 import com.zhizhu.zhicode.compose.model.ModelPickerState
+import com.zhizhu.zhicode.compose.ui.ZhiLoadingIndicator
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSectionLabel
+import com.zhizhu.zhicode.compose.ui.ZhiSegmentedTabs
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
@@ -34,8 +47,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /**
  * 模型选择面板。
  *
- * 对应原版 `showModelPanel()`：标题带当前配置名、状态行、异步填充的模型列表、
- * 手动输入框、底部「管理 API / 使用模型」。
+ * 对应原版 `showModelPanel()`：API 切换 tab 栏、状态行、异步填充的模型列表、
+ * 手动输入框、底部「添加 API / 完成」。
  *
  * ## 为什么是底部 Sheet 而不是居中弹窗
  *
@@ -44,7 +57,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * 1. 它悬在屏幕中间，上方那条正在流式输出的回复被压掉一半 —— 而挑模型往往正是
  *    因为**看了正在生成的回复**才想换一个，这时最不该挡住的就是它；
- * 2. 手机竖屏下弹窗的可用高度比 sheet 小（上下都要留边距），长列表更早触发滚动。
+ * 2. 手机竖屏下弹窗的可用高度比弹窗小（上下都要留边距），长列表更早触发滚动。
  *
  * 底部 sheet 贴底、上不封顶（按内容涨到窗口高为止），正好把"被挡住的对话"留给
  * 用户看，这也是 rikkahub 的做法。
@@ -59,8 +72,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * ## 结构全部照 Miuix 自己的示例，不自己拼
  *
- * 这个面板前后改过四版，踩的坑有个共同点：**都是在"自己拼结构 + 自己挑颜色"**。
- * 每一处都有 Miuix 官方示例或组件可以直接照，照了就不会错：
+ * 这个面板前后改过五版，踩的坑有个共同点：**都是在"自己拼结构 + 自己挑颜色"**。
+ * 每一处都有 Miuix 官方示例或组件可以直接照：
  *
  * | 问题 | 之前的错法 | 官方做法 |
  * | --- | --- | --- |
@@ -76,7 +89,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * ## 选中态为什么是蓝色卡片
  *
- * 直接照 Miuix 自己的 Card 示例（就是那个"ShowIndication: true"的蓝卡）：
+ * 直接照 Miuix 自己的 Card 示例（那个"ShowIndication: true"的蓝卡）：
  * `CardDefaults.defaultColors(color = primaryVariant)` + 文字 `onPrimaryVariant`。
  * 深色下分别是 `#0073DD` 和 `#99C7F1` —— 蓝底浅蓝字。
  *
@@ -96,9 +109,10 @@ fun ModelPickerOverlay(
     picker: ModelPickerState?,
     onDismiss: () -> Unit,
     onQueryChange: (String) -> Unit,
-    onSearchChange: (String) -> Unit,
+    onPickModel: (String) -> Unit,
+    onSelectProfile: (String) -> Unit,
     onUse: (String) -> Unit,
-    onOpenApiConfig: () -> Unit,
+    onAddApi: () -> Unit,
 ) {
     OverlayBottomSheet(
         show = picker != null,
@@ -112,9 +126,10 @@ fun ModelPickerOverlay(
         ModelPickerBody(
             picker = current,
             onQueryChange = onQueryChange,
-            onSearchChange = onSearchChange,
+            onPickModel = onPickModel,
+            onSelectProfile = onSelectProfile,
             onUse = onUse,
-            onOpenApiConfig = onOpenApiConfig,
+            onAddApi = onAddApi,
         )
     }
 }
@@ -140,46 +155,96 @@ private val PickerGroupSpacing = 12.dp
 private val ModelRowSpacing = 8.dp
 
 /**
- * 模型列表的高度上限。
+ * 面板高度策略。
  *
- * 不能删：目录最多 250 项（引擎侧 `MAX_MODELS`），不封顶的话长列表会把面板顶出屏幕，
- * 底部的「使用模型」按钮就点不到了。这也是 `DialogScrollNestingTest` 的硬性要求 ——
- * 没有它，无限高的 [LazyColumn] 会拿到 Infinity 高度约束并直接崩。
+ * ## ⚠️ 窗口高度必须取 `LocalWindowInfo`，不能取 `BoxWithConstraints.maxHeight`
+ *
+ * 这一条是**实测**出来的，不是猜的：最初在面板内容外面套了一层 `BoxWithConstraints`，
+ * 想用它的 `maxHeight` 算比例。结果是面板反而**变矮了**，而且那个 `heightIn(min = …)`
+ * 完全没生效 —— 因为 sheet 测量内容时给的约束**不是屏幕高度**（它要先量一次内容才能
+ * 决定自己多高，量的时候约束是松的/无穷大），拿它乘比例只会得到 0 或无穷。
+ *
+ * Miuix 自己在 `BottomSheetContentLayout` 里用的就是
+ * `LocalWindowInfo.current.containerDpSize.height`（那正是它的布局数学所依据的值），
+ * 这里跟随同一个来源。
+ *
+ * ## 空间怎么给
+ *
+ * `OverlayBottomSheet` **没有高度参数**（0.9.4 的签名里只有 `sheetMaxWidth`），
+ * 高度完全由内容决定。所以"把 sheet 做高一点"= **把内容做高**：
+ * - 列表上限按窗口高度取 [ModelListHeightFraction]，长目录能占满该占的地方；
+ * - 加载态给 [LoadingHeightFraction] 的高度，否则加载圈会挤在一条缝里，
+ *   而且"加载中很矮 → 加载完突然长高"会跳一下。
+ *
+ * 不给整块内容强加最小高度（那样会在按钮下面留一片空白，很难看）。
  */
-private val ModelListMaxHeight = 420.dp
+private const val ModelListHeightFraction = 0.45f
+private val ModelListMaxHeightCap = 480.dp
+private const val LoadingHeightFraction = 0.3f
+private val LoadingMinHeight = 140.dp
 
 /**
- * 搜索框。
+ * API 切换 tab 栏（在模型名输入框的正上方）。
  *
- * 只在**目录已经拿到、且不止一条**时才出现：只有两三个模型时它占的位置比它省下的
- * 翻找更多，而目录拉失败时它更是一个筛不出任何东西的死控件（那种情况走下面的
- * 手动输入框）。上限 250 条（引擎侧 `MAX_MODELS`）才是它真正有用的场景。
+ * 用既有的 [ZhiSegmentedTabs]（Miuix `TabRowWithContour` 的转发）：`matchWidth = false`
+ * 时项数超出一屏会自动横向滚动 —— API 记录多了也放得下。
  *
- * 颜色与圆角**都用 Miuix 默认**：默认底色 `secondaryContainer`（`#434343`）本来就比
- * sheet 背板亮一档、看得见填充，之前覆写成 `surfaceContainerHigh` 反而把它抹成了背板色。
+ * ## 为什么只有多于一条时才画
+ *
+ * 只有一条时它是**死控件**：点了不会切到任何别的地方。这与下面"没有折叠箭头"是同一条
+ * 判断标准（画一个点了没用的控件比不画更糟）。判断放在 `ModelPickerState.showProfileTabs`
+ * 里，那样它可脱离 Compose 单测。
  */
 @Composable
-private fun ModelSearchField(
-    value: String,
-    onValueChange: (String) -> Unit,
+private fun ProfileTabs(
+    picker: ModelPickerState,
+    onSelectProfile: (String) -> Unit,
 ) {
-    val scheme = MiuixTheme.colorScheme
-    ZhiTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = "输入模型名称搜索",
-        useLabelAsPlaceholder = true,
-        singleLine = true,
-        leadingIcon = {
-            Icon(
-                imageVector = MiuixIcons.Basic.Search,
-                contentDescription = null,
-                tint = scheme.onSurfaceVariantSummary,
-                modifier = Modifier.size(20.dp),
-            )
+    if (!picker.showProfileTabs) return
+    ZhiSegmentedTabs(
+        tabs = picker.profiles.map { it.name },
+        selectedIndex = picker.activeProfileIndex,
+        onSelect = { index ->
+            // 越界保护：下标来自 Miuix 的回调，而 profiles 是状态，两者之间隔了一次重组。
+            picker.profiles.getOrNull(index)?.let { onSelectProfile(it.id) }
         },
         modifier = Modifier.fillMaxWidth().padding(bottom = PickerGroupSpacing),
     )
+}
+
+/**
+ * 加载态：居中的加载圈 + 状态文字。
+ *
+ * 之前加载时只有顶部一行小字，列表位置是空的 —— 看起来像"面板坏了"。
+ * 现在把圈和文字放在列表本来的位置居中，一眼就知道是在等东西。
+ *
+ * 高度按窗口高度给（理由见上面的常量注释），这样面板在加载时就有像样的高度，
+ * 不会"加载中很矮 → 加载完突然长高"跳一下。
+ */
+@Composable
+private fun PickerLoading(status: String) {
+    val scheme = MiuixTheme.colorScheme
+    val windowHeight = LocalWindowInfo.current.containerDpSize.height
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = (windowHeight * LoadingHeightFraction).coerceAtLeast(LoadingMinHeight)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            ZhiLoadingIndicator()
+            Text(
+                text = status,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = ZhiTextScale.Footnote,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            )
+        }
+    }
 }
 
 /**
@@ -207,29 +272,47 @@ private fun ModelRow(
     option: ModelOption,
     selected: Boolean,
     onPick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
     // `displayName` 与 `id` 相同时只显示一次，否则每行会重复两遍同一个名字
     // （服务端常常不给 display_name，那种情况下它会被回落成 id）。
     val duplicated = option.displayName == option.id
+
+    // 三个颜色都走淡变，而不是硬切。
+    //
+    // 为什么三个都要：选中时**底色与文字是同时变**的，只淡化其中一个会出现
+    // "字已经变浅蓝、底还是灰的"这种中间态，比不做动画更难看。
+    // 用的是 [ZhiMotion.colorSpec]（150ms + SinOut），与 Miuix 弹窗的淡出同一条曲线 ——
+    // 不是为了好看，而是为了**手感与 Miuix 组件一致**（这一点在 `Animations.kt` 里有完整说明）。
+    val cardColor by animateColorAsState(
+        targetValue = if (selected) scheme.primaryVariant else scheme.secondaryContainer,
+        animationSpec = ZhiMotion.colorSpec,
+        label = "modelRowCard",
+    )
+    val textColor by animateColorAsState(
+        targetValue = if (selected) scheme.onPrimaryVariant else scheme.onBackground,
+        animationSpec = ZhiMotion.colorSpec,
+        label = "modelRowTitle",
+    )
+    val subColor by animateColorAsState(
+        targetValue = if (selected) scheme.onPrimaryVariant else scheme.onSurfaceVariantSummary,
+        animationSpec = ZhiMotion.colorSpec,
+        label = "modelRowSummary",
+    )
+
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         // 官方 Card 示例用的就是这两个令牌；`color` 必须显式传而不是靠默认值 ——
         // `CardDefaults` 默认的 `surfaceContainer` 与 sheet 背板 `background` 同值
         // （都是 `#242424`），不传的话未选中的卡片在背板上完全看不出来。
-        colors = CardDefaults.defaultColors(
-            color = if (selected) scheme.primaryVariant else scheme.secondaryContainer,
-        ),
+        colors = CardDefaults.defaultColors(color = cardColor),
     ) {
         BasicComponent(
             title = option.displayName,
-            titleColor = BasicComponentDefaults.titleColor(
-                color = if (selected) scheme.onPrimaryVariant else scheme.onBackground,
-            ),
+            titleColor = BasicComponentDefaults.titleColor(color = textColor),
             summary = if (duplicated) null else option.id,
-            summaryColor = BasicComponentDefaults.summaryColor(
-                color = if (selected) scheme.onPrimaryVariant else scheme.onSurfaceVariantSummary,
-            ),
+            summaryColor = BasicComponentDefaults.summaryColor(color = subColor),
             role = Role.RadioButton,
             onClick = onPick,
             modifier = Modifier.fillMaxWidth(),
@@ -242,64 +325,103 @@ private fun ModelRow(
 /**
  * 模型列表：每个模型一张独立卡片（不是一张大卡装多行）。
  *
- * 这里刻意**不用**上面那条"一张 Card 装多行"的官方分组写法：那种写法是给
- * **设置项分组**用的（组内各行只是并列，没有"哪一行被选中"的概念）。而这里每行
- * 都有选中态，选中态要表达成一整张变色卡片 —— 装在同一张卡里的话，蓝底只能在
- * 大卡内部画一块，四角与卡片圆角对不上（这正是更早一版用裸色块时的毛病）。
+ * 这里刻意**不用**"一张 Card 装多行"的官方分组写法：那种写法是给**设置项分组**用的
+ * （组内各行只是并列，没有"哪一行被选中"的概念）。而这里每行都有选中态，选中态要
+ * 表达成一整张变色卡片 —— 装在同一张卡里的话，蓝底只能在大卡内部画一块，四角与卡片
+ * 圆角对不上（这正是更早一版用裸色块时的毛病）。
+ *
+ * ## 高亮跟随**点击**而不是跟随已保存的值
+ *
+ * 判据是 `model.id == picker.query`，而 `query` 就是"要用的模型名"。点一行会立刻
+ * 把 `query` 改过去（并同时存盘），所以点哪行哪行马上变蓝。
+ *
+ * 早先这里判的是 `picker.currentModel`（**已保存**的那个），于是必须点底部按钮
+ * 之后高亮才动 —— 用户点了一行却看不到任何反馈，会以为没点上。
  */
 @Composable
 private fun ModelList(
-    visible: List<ModelOption>,
-    currentModel: String,
-    search: String,
+    models: List<ModelOption>,
+    picked: String,
+    listMaxHeight: Dp,
     onPick: (String) -> Unit,
 ) {
-    val scheme = MiuixTheme.colorScheme
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = PickerGroupSpacing)
-            .heightIn(max = ModelListMaxHeight),
+            // ⚠️ 高度必须**有界**：无界高度会让 LazyColumn 拿到 Infinity 约束直接崩
+            // （DialogScrollNestingTest）。上限由调用方按窗口高度算好传进来。
+            .heightIn(max = listMaxHeight),
         verticalArrangement = Arrangement.spacedBy(ModelRowSpacing),
     ) {
-        items(visible, key = { it.id }) { model ->
+        items(models, key = { it.id }) { model ->
             ModelRow(
                 option = model,
-                selected = model.id == currentModel,
+                selected = model.id == picked,
                 onPick = { onPick(model.id) },
+                // 目录重排（切了 API、或服务端顺序变了）时让行**滑过去**而不是瞬移。
+                // 用 key 才有意义（上面 items 已给 key = id），否则 Compose 认不出
+                // "还是那一行、只是位置变了"，会当成整批新建。
+                modifier = Modifier.animateItem(),
             )
         }
-        if (visible.isEmpty()) {
-            // 搜不到时给一句话，而不是留一片空白 —— 空白与"还在加载"、
-            // "目录是空的"三种情况看起来一模一样。
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.defaultColors(color = scheme.secondaryContainer),
-                ) {
-                    Text(
-                        text = "没有匹配「$search」的模型",
-                        color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Footnote,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(BasicComponentDefaults.InsideMargin),
-                    )
-                }
-            }
-        }
+        // 这里原本还有一个"没有匹配「…」的模型"的空态：它是给**搜索**用的，
+        // 而调用方保证了 `models` 非空，所以搜索一去掉它就是一段死分支。
+        // "目录是空的"那种情况由上面的状态行负责说明（见 PickerLoading / status）。
     }
+}
+
+@Composable
+private fun ModelPickerLoaded(
+    picker: ModelPickerState,
+    listMaxHeight: Dp,
+    onPickModel: (String) -> Unit,
+) {
+    // 列表直接铺 `models`。这里曾经有一层搜索过滤（`visibleModels`），已按用户要求
+    // 去掉；去掉之后 `search` / `visibleModels` / `setModelSearch` 就是死代码，
+    // 一并删除，不留"没人用但还留着"的字段。
+    if (picker.models.isEmpty()) return
+
+    // 分组标题在卡片**外面**（官方示例就是这样）。
+    //
+    // ## 为什么这里没有折叠箭头、没有吸顶分组头、没有底部提供方跳转条
+    //
+    // rikkahub 的面板这三样都有。它们成立的前提是它支持**多个提供方**：
+    // 分组头要能折叠是为了收起不看的那些提供方，跳转条是为了快速跳到某一个，
+    // 吸顶是为了在长列表里始终知道自己在哪个提供方下面。
+    //
+    // 而这个面板的每一份 API 记录**各自**就是一组（上面的 tab 栏负责在
+    // 它们之间切换），切进来的这一组永远只有一组：折叠 = 把列表收起来，
+    // 跳转条没有任何目标可跳，吸顶也没有第二种分组要区分。
+    // **画一个点了没用的控件比不画更糟** —— 用户会去点它，然后以为应用坏了。
+    ZhiSectionLabel(
+        text = "${picker.profileName} · ${picker.models.size} 个模型",
+        insideMargin = PickerSectionInsideMargin,
+    )
+    ModelList(
+        models = picker.models,
+        picked = picker.query,
+        listMaxHeight = listMaxHeight,
+        onPick = onPickModel,
+    )
 }
 
 @Composable
 private fun ModelPickerBody(
     picker: ModelPickerState,
     onQueryChange: (String) -> Unit,
-    onSearchChange: (String) -> Unit,
+    onPickModel: (String) -> Unit,
+    onSelectProfile: (String) -> Unit,
     onUse: (String) -> Unit,
-    onOpenApiConfig: () -> Unit,
+    onAddApi: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
+
+    // 面板高度完全由内容决定（sheet 没有高度参数），所以"做高一点"只能靠给列表更多空间。
+    // ⚠️ 窗口高度取 LocalWindowInfo（Miuix 自己的布局数学也用这个），
+    // 不能用 BoxWithConstraints 的 maxHeight —— 实测那一个是无效的，见上面的常量注释。
+    val windowHeight = LocalWindowInfo.current.containerDpSize.height
+    val listMaxHeight = (windowHeight * ModelListHeightFraction).coerceAtMost(ModelListMaxHeightCap)
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // 状态行走 Miuix 的分组小标题（`SmallTitle`）。它本来就是干这个的，
@@ -314,42 +436,32 @@ private fun ModelPickerBody(
             insideMargin = PickerSectionInsideMargin,
         )
 
-        if (picker.models.size > 1) {
-            ModelSearchField(value = picker.search, onValueChange = onSearchChange)
+        // 加载态与列表之间淡变过渡。之前是硬切：目录一回来，一整块内容"啪"地换掉 ——
+        // 而这两块**高度不同**，所以看起来既是变色又是跳高，这就是"生硬"的来源。
+        //
+        // 只把这一块包进 AnimatedContent（下面的 tab 栏、输入框、按钮都留在外面）：
+        // 外面那些在两种状态下是同一批控件，让它们跟着淡变反而会闪。
+        AnimatedContent(
+            targetState = picker.loading,
+            transitionSpec = {
+                fadeIn(ZhiMotion.fadeInSpec) togetherWith fadeOut(ZhiMotion.fadeOutSpec)
+            },
+            label = "modelPickerContent",
+        ) { loading ->
+            if (loading) {
+                PickerLoading(status = picker.status)
+            } else {
+                ModelPickerLoaded(
+                    picker = picker,
+                    listMaxHeight = listMaxHeight,
+                    onPickModel = onPickModel,
+                )
+            }
         }
 
-        // 过滤规则见 `ModelPickerState.visibleModels`（派生属性，可脱离 Compose 单测）。
-        val visible = picker.visibleModels
-
-        if (picker.models.isNotEmpty()) {
-            // 分组标题在卡片**外面**（官方示例就是这样），文案里带上筛完的条数，
-            // 这样搜索时能立刻看到"还剩几个"。
-            //
-            // ## 为什么这里没有折叠箭头、没有吸顶分组头、没有底部提供方跳转条
-            //
-            // rikkahub 的面板这三样都有。它们成立的前提是它支持**多个提供方**：
-            // 分组头要能折叠是为了收起不看的那些提供方，跳转条是为了快速跳到某一个，
-            // 吸顶是为了在长列表里始终知道自己在哪个提供方下面。
-            //
-            // 而这个面板**永远只有一组** —— 一个 API 配置（profile）就对应一个提供方
-            // 与一份目录，`ModelPickerState` 里也只有单个 `profileName`。所以：
-            // 折叠 = 把整个列表收起来（等于关掉面板），跳转条没有任何目标可跳，
-            // 吸顶也没有第二种分组需要区分。**画一个点了没用的控件比不画更糟** ——
-            // 用户会去点它，然后以为应用坏了。
-            //
-            // 哪天真的支持多提供方了，这三样才谈得上加；那时应当先改 ModelPickerState
-            // 的数据模型（单个 profileName → 一组），而不是先画控件。
-            ZhiSectionLabel(
-                text = "${picker.profileName} · ${visible.size} 个模型",
-                insideMargin = PickerSectionInsideMargin,
-            )
-            ModelList(
-                visible = visible,
-                currentModel = picker.currentModel,
-                search = picker.search,
-                onPick = onQueryChange,
-            )
-        }
+        // tab 栏在模型名输入框的**正上方**：换一份 API 记录，下面那个框里的模型名
+        // 通常也要跟着换，两者挨着才看得出关系。
+        ProfileTabs(picker = picker, onSelectProfile = onSelectProfile)
 
         ZhiTextField(
             value = picker.query,
@@ -357,27 +469,25 @@ private fun ModelPickerBody(
             label = "模型名",
             useLabelAsPlaceholder = true,
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = PickerGroupSpacing),
         )
 
-        Text(
-            text = "点列表里的模型会填进上面的框；再点「使用模型」才生效。" +
-                "任务正在运行时切换，会在下一轮完整请求生效。",
-            color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-        )
+        // 这里原本有一行说明文字（"点列表里的模型会立刻选中并保存…"），已按用户要求去掉。
+        // 交互本身已经是自解释的：点一行立刻变蓝并落盘，按钮只剩「完成」。
 
         // 按钮照旧靠右，与居中弹窗时的位置一致：换容器不该顺手改按钮的排布，
-        // 否则用户得重新找一遍「使用模型」在哪。
+        // 否则用户得重新找一遍主按钮在哪。
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SecondaryButton(text = "管理 API", onClick = onOpenApiConfig)
+            SecondaryButton(text = "添加 API", onClick = onAddApi)
             PrimaryButton(
-                text = "使用模型",
+                // 选择已经在点击那一刻存好了，这个按钮只是"收起面板"。
+                // 文案因此是「完成」而不是「使用模型」—— 后者会让人以为不点它就不生效。
+                // 它同时也是**手动输入**那条路的重试点：在框里改了名字后点它就写回配置。
+                text = "完成",
                 enabled = picker.query.isNotBlank(),
                 onClick = { onUse(picker.query) },
                 modifier = Modifier.padding(start = 8.dp),

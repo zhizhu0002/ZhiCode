@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
@@ -340,6 +341,25 @@ private fun ZhiPillSurface(
             colors = colors,
             content = slot,
         )
+    }
+}
+
+/**
+ * 加载指示器：**转圈**的那种。转发到 Miuix [CircularProgressIndicator]。
+ *
+ * 只有"不确定进度"这一种形态 —— `progress = null` 就是 Miuix 的自转态。
+ * 刻意不暴露确定进度（0f..1f 的那种）：本工程所有等待都是"不知道还要多久"
+ * （拉模型目录、装运行时、跑命令），画一条走到 80% 就停住的进度条是**假精确**，
+ * 比一个诚实的转圈更糟。哪天真有可量化的进度，再加参数。
+ *
+ * [size] 传 null 时跟 Miuix 默认值走（不写死数值），这样它随主题的尺寸体系变化。
+ */
+@Composable
+fun ZhiLoadingIndicator(modifier: Modifier = Modifier, size: Dp? = null) {
+    if (size == null) {
+        CircularProgressIndicator(modifier = modifier)
+    } else {
+        CircularProgressIndicator(modifier = modifier, size = size)
     }
 }
 

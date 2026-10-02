@@ -65,6 +65,14 @@ public final class DebugHudStructureTest {
     private static final String MODEL_PICKER = SRC + "ui/dialogs/ModelPickerOverlay.kt";
 
     /**
+     * 共用组件层。
+     *
+     * Miuix 的组件要在这一层转发一次（见 §21：加载圈走 ZhiLoadingIndicator），
+     * 界面代码不直接 import Miuix —— 那样将来 Miuix 改签名会波及一片调用点。
+     */
+    private static final String COMMON = SRC + "ui/Common.kt";
+
+    /**
      * 设置相关的界面模型。
      *
      * ⚠️ 与 [MODELS]（`model/UiModels.kt`）是**两个文件**：`ModelPickerState` 住在
@@ -604,29 +612,31 @@ public final class DebugHudStructureTest {
                         + "「每次询问」「推理：自动」会被切成「推理: …」这类半截词，"
                         + "而它们本来就只需要自己的自然宽度");
 
-        // ---- 19. 模型选择面板：搜索与选择必须是两个字段 --------------------
+        // ---- 19. 模型面板：搜索已按用户要求移除，不得留下"没人用但还在"的字段 ----
         //
-        // 参考 rikkahub 的模型面板加了搜索框。最容易犯的错是**直接复用 `query`**：
-        // 那样在搜索框里敲 `deep` 只想筛行，但 `query` 同时变成了 `deep` ——
-        // 此时点「使用模型」就把它写进配置，服务端随后 400。
-        // 这个 bug 编译能过、单测不覆盖时也全绿，只在使用时才炸。
+        // 这一节原本守的是「搜索串与要用的模型名必须是两个字段」（复用 `query` 的话，
+        // 敲进搜索框的半个词会被当成模型名写进配置，服务端随后 400）。
+        // 现在搜索框整个去掉了，那个 bug 的前提不存在了，所以改守它的**反面**：
+        // 搜索留下的字段必须一并删掉，否则下一个人会以为还有搜索功能、
+        // 或者更糟 —— 在某处接上 `search` 而又忘了它不参与过滤。
         String modelsForPicker = stripComments(read(root, SETTINGS_MODELS));
-        requireContains(modelsForPicker, "val search: String",
-                SETTINGS_MODELS + " 的 ModelPickerState 必须有独立的 search 字段");
-        requireContains(modelsForPicker, "val visibleModels: List<ModelOption>",
-                "过滤要做成派生属性 visibleModels，才能脱离 Compose 单测");
-        requireContains(modelsForPicker, "if (needle.isEmpty()) return models",
-                "空搜索必须返回**全部**：返回空列表会让面板一打开就显示「没有匹配」");
+        require(!modelsForPicker.contains("val search: String"),
+                SETTINGS_MODELS + " 不得再留 search 字段：搜索框已移除，留着是死字段");
+        require(!modelsForPicker.contains("visibleModels"),
+                SETTINGS_MODELS + " 不得再留 visibleModels：它是搜索的过滤器，搜索没了它就是死代码");
 
         String pickerFile = stripComments(read(root, MODEL_PICKER));
         requireContains(pickerFile, "OverlayBottomSheet(",
                 MODEL_PICKER + " 必须用底部 Sheet 容器");
         requireContains(pickerFile, "ZhiTextField(",
-                MODEL_PICKER + " 的搜索框必须走工程统一的 ZhiTextField");
-        requireContains(pickerFile, "picker.visibleModels",
-                "面板必须用 visibleModels 过滤后的列表，而不是原始 models");
-        requireContains(pickerFile, "onSearchChange",
-                "搜索框必须接**独立的** onSearchChange，不能复用 onQueryChange");
+                MODEL_PICKER + " 的模型名输入框必须走工程统一的 ZhiTextField");
+        require(!pickerFile.contains("visibleModels"),
+                "面板必须直接铺 models：搜索过滤已移除");
+        require(!pickerFile.contains("onSearchChange"),
+                "面板不得再收 onSearchChange：搜索框已移除");
+        require(!pickerFile.contains("没有匹配"),
+                MODEL_PICKER + " 不得再留「没有匹配」的空态：那只有搜索才可能为空，"
+                        + "而调用方保证 models 非空 —— 留着就是一段永不执行的死分支");
         // ★ 卡片底色必须**显式**覆盖，且未选中用 secondaryContainer、选中用 primaryVariant。
         //
         // 这两条守的都是真实踩过的坑，不是风格偏好：
@@ -682,14 +692,11 @@ public final class DebugHudStructureTest {
                         + "它是 #242424，与 sheet 背板同值、填充会消失；默认的 secondaryContainer 才对");
 
         String overlayHost = stripComments(read(root, OVERLAY_HOST));
-        requireContains(overlayHost, "onSearchChange = viewModel::setModelSearch",
-                OVERLAY_HOST + " 必须把搜索接到 setModelSearch（而不是 setModelQuery）");
-
         String vmForSearch = stripComments(read(root, VIEW_MODEL));
-        requireContains(vmForSearch, "fun setModelSearch(",
-                VIEW_MODEL + " 必须提供 setModelSearch");
-        requireContains(vmForSearch, "copy(search = text)",
-                "setModelSearch 必须只改 search：改到 query 上就是上面那个 400 的 bug");
+        require(!overlayHost.contains("setModelSearch"),
+                OVERLAY_HOST + " 不得再把搜索接到 setModelSearch：搜索框已移除");
+        require(!vmForSearch.contains("fun setModelSearch("),
+                VIEW_MODEL + " 不得再留 setModelSearch：搜索框已移除");
 
         // 能力标签与收藏心形：上游目录只给 id + displayName（ModelCatalogClient
         // 只读 id/display_name/name），全工程也没有 favorites 概念。
@@ -710,6 +717,127 @@ public final class DebugHudStructureTest {
         require(read(root, MODEL_PICKER).contains("画一个点了没用的控件比不画更糟"),
                 MODEL_PICKER + " 必须保留\"不画死控件\"的理由说明："
                         + "否则以后有人照参考图补上折叠箭头，就多一个点了没反应的控件");
+
+        // ---- 21. 点选即生效：高亮跟点击走、点完就存、按钮只负责收起 ----------
+        //
+        // 用户的原话是「应该是点击这个东西，他会高亮（蓝色），而不是点击使用模型高亮，
+        // 而且选择该模型之后自动保存这个设置就可以吧使用模型改成完成之类的」。
+        // 这四条都是「改错了也不编译失败、只是点起来不对」的类型。
+        String commonFile = stripComments(read(root, COMMON));
+
+        // 高亮必须取 `query`（= 要用的模型名），它在点击那一刻就被改过去。
+        // 早先取的是 `currentModel`（**已保存**的值），而它只在按底部按钮时才变 ——
+        // 于是"点了一行却什么都不亮"，用户会以为没点上。
+        requireContains(pickerFile, "picked = picker.query",
+                MODEL_PICKER + " 的高亮必须跟随 picker.query（点击即改），"
+                        + "而不是 picker.currentModel（只有按按钮才改）—— "
+                        + "后者会让\"点了一行却没有反馈\"");
+        require(!pickerFile.contains("selected = model.id == picker.currentModel"),
+                MODEL_PICKER + " 的高亮不得再判 picker.currentModel：那是已保存的值，"
+                        + "点选之后要到按按钮才亮");
+
+        // 点击那一刻就落盘，且**不关**面板（关掉就没法接着挑/看高亮了）。
+        String vmForPick = stripComments(read(root, VIEW_MODEL));
+        requireContains(vmForPick, "fun selectModel(",
+                VIEW_MODEL + " 必须提供 selectModel：点击即保存用，与\"收起面板\"分开");
+        requireContains(vmForPick, "if (target.isEmpty()) return",
+                "selectModel 必须挡掉空白模型名：否则「完成」会把空串写进配置");
+        // latest-wins：连点几下时上一个写入任务要被取消，否则落盘的可能是中间那一次。
+        requireContains(vmForPick, "modelSaveJob?.cancel()",
+                "模型落盘必须是 latest-wins（取消上一个任务）：并发写入的完成顺序不定，"
+                        + "最后落盘的可能是中间点到的那个，而界面显示的是最后一次点的");
+
+        // selectModel 不得关闭面板；applySelectedModel 必须关闭 —— 这正是两者的分工。
+        int pickBody = vmForPick.indexOf("fun selectModel(");
+        int applyBody = vmForPick.indexOf("fun applySelectedModel(");
+        require(pickBody > 0 && applyBody > pickBody,
+                VIEW_MODEL + " 里 selectModel 必须排在 applySelectedModel 之前，本断言按此顺序取函数体");
+        String selectModelBody = vmForPick.substring(pickBody, applyBody);
+        require(!selectModelBody.contains("closeModelPicker()"),
+                "selectModel 不得关面板：关掉之后用户看不到高亮变没变，也没法接着挑下一个");
+        require(vmForPick.substring(applyBody, applyBody + 800).contains("closeModelPicker()"),
+                "applySelectedModel 必须关面板（它是「完成」按钮）");
+
+        // 按钮文案与分工。
+        requireContains(pickerFile, "\"完成\"",
+                MODEL_PICKER + " 主按钮文案必须是「完成」：选择在点击那一刻已经存好，"
+                        + "叫「使用模型」会让人以为不点它就不生效");
+        requireContains(pickerFile, "\"添加 API\"",
+                MODEL_PICKER + " 次按钮文案必须是「添加 API」");
+        require(!pickerFile.contains("\"管理 API\""),
+                MODEL_PICKER + " 不得再出现「管理 API」");
+        requireContains(stripComments(read(root, OVERLAY_HOST)), "viewModel.newApiProfile()",
+                OVERLAY_HOST + " 的「添加 API」必须直接进空白表单："
+                        + "tab 栏已经承担了\"切到已有配置\"，停在列表页与按钮名字不符");
+
+        // tab 栏：只有多于一条才画（一条时是死控件），且切换**不能**写 apiConfig。
+        requireContains(pickerFile, "if (!picker.showProfileTabs) return",
+                MODEL_PICKER + " 的 tab 栏必须按 showProfileTabs 门控："
+                        + "只有一条 API 记录时它是死控件（点了切不到任何地方）");
+        requireContains(pickerFile, "ZhiSegmentedTabs(",
+                MODEL_PICKER + " 的 tab 栏必须走既有的 ZhiSegmentedTabs（Miuix TabRowWithContour）");
+        // ⚠️ 这条守的是一个真会发生的 bug：`selectApiProfile` 会写 `apiConfig = state`，
+        // 而 `apiConfig != null` 在本工程里的语义就是"API 配置弹窗打开"——
+        // 在模型面板里复用它会在面板上凭空弹出一张配置页。
+        int switchBody = vmForPick.indexOf("fun selectModelPickerProfile(");
+        require(switchBody > 0, VIEW_MODEL + " 必须提供 selectModelPickerProfile");
+        String switchFn = vmForPick.substring(switchBody, Math.min(switchBody + 1600, vmForPick.length()));
+        require(!switchFn.contains("apiConfig ="),
+                "selectModelPickerProfile 不得写 apiConfig：那个字段的语义是"
+                        + "\"配置弹窗打开\"，写它会在模型面板上凭空弹出配置页");
+
+        // 加载态：用 Miuix 的加载圈居中显示，且转发只经 Common.kt。
+        requireContains(pickerFile, "ZhiLoadingIndicator(",
+                MODEL_PICKER + " 的加载态必须用 ZhiLoadingIndicator（Miuix 加载圈）");
+        requireContains(commonFile, "CircularProgressIndicator(",
+                COMMON + " 的 ZhiLoadingIndicator 必须转发到 Miuix CircularProgressIndicator");
+        requireContains(pickerFile, "PickerLoading(",
+                MODEL_PICKER + " 必须有居中的加载态（圈 + 状态文字），而不是只留一行小字");
+
+        // 高度：窗口高度必须取 LocalWindowInfo，**不能**取 BoxWithConstraints 的 maxHeight。
+        //
+        // ⚠️ 这条是实测出来的，不是风格偏好：最初用 BoxWithConstraints 算比例，结果面板
+        // 反而变矮、`heightIn(min = …)` 完全不生效 —— sheet 测量内容时给的约束不是屏幕
+        // 高度（它要先量一次内容才能决定自己多高）。Miuix 自己在 BottomSheetContentLayout
+        // 里用的就是 LocalWindowInfo.current.containerDpSize.height。
+        requireContains(pickerFile, "LocalWindowInfo.current.containerDpSize.height",
+                MODEL_PICKER + " 的窗口高度必须取 LocalWindowInfo（Miuix 自己也用它）："
+                        + "BoxWithConstraints 的 maxHeight 在这里是无效的");
+        require(!pickerFile.contains("BoxWithConstraints"),
+                MODEL_PICKER + " 不得用 BoxWithConstraints 算面板高度：sheet 测量内容时"
+                        + "给的约束不是屏幕高度，实测那样算出来的最小高度完全不生效");
+        // 列表上限按窗口高度取比例 —— 这才让面板"有空间时长高"，且仍然**有界**
+        // （无界高度会让 LazyColumn 拿到 Infinity 约束直接崩，DialogScrollNestingTest）。
+        requireContains(pickerFile, "val listMaxHeight = (windowHeight * ModelListHeightFraction)",
+                MODEL_PICKER + " 的列表上限必须按窗口高度取比例，不能写死一个数");
+        requireContains(pickerFile, "heightIn(max = listMaxHeight)",
+                MODEL_PICKER + " 的列表必须保留 heightIn 上限：无界高度会让 LazyColumn 崩");
+        requireContains(pickerFile, "windowHeight * LoadingHeightFraction",
+                MODEL_PICKER + " 的加载态高度也必须按窗口高度给："
+                        + "否则加载时面板很矮、加载完突然长高，还跳一下");
+
+        // 动效：不许硬切。
+        //
+        // 用户反馈"很多地方看起来很生硬"。这里守两条最容易回退成硬切的：
+        // 选中态的整块变色、以及加载态↔列表的整块替换。
+        // ⚠️ 必须断到**卡片底色那一个** animateColorAsState，不能只查 `animateColorAsState(` ——
+        // 同一行里还有标题色与副标题色两个动画，宽断言会被它们蒙过去：
+        // 把底色的淡变删掉，测试照样绿。
+        requireContains(pickerFile, "val cardColor by animateColorAsState(",
+                MODEL_PICKER + " 的选中底色必须走 animateColorAsState："
+                        + "硬切会让\"点一下整行啪地变蓝\"看起来很生硬");
+        requireContains(pickerFile, "ZhiMotion.colorSpec",
+                MODEL_PICKER + " 的动效必须用 ZhiMotion 的令牌，不能另写一条曲线："
+                        + "那会与 Miuix 组件的手感不一致（理由见 Animations.kt 的完整说明）");
+        requireContains(pickerFile, "AnimatedContent(",
+                MODEL_PICKER + " 的加载态与列表之间必须有过渡（AnimatedContent）："
+                        + "两块高度不同，硬切既是变色又是跳高");
+        // ⚠️ 同样要断**实际用法**：`import androidx.compose.animation.togetherWith`
+        // 那一行也含 "togetherWith"，只查这个词的话删掉用法测试照样绿。
+        requireContains(pickerFile,
+                "fadeIn(ZhiMotion.fadeInSpec) togetherWith fadeOut(ZhiMotion.fadeOutSpec)",
+                MODEL_PICKER + " 的 AnimatedContent 必须显式给 transitionSpec"
+                        + "（fadeIn togetherWith fadeOut），并复用 ZhiMotion 的时长");
     }
 
     /** 子串出现次数。 */
