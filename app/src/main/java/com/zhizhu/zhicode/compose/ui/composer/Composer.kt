@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -47,7 +46,7 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiFilledIconButton
-import com.zhizhu.zhicode.compose.ui.floatingHorizontalInset
+import com.zhizhu.zhicode.compose.ui.FloatingBottomShell
 import com.zhizhu.zhicode.compose.ui.ZhiPendingImageChip
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
@@ -61,7 +60,6 @@ import com.zhizhu.zhicode.compose.ui.ZhiTextDropdownChip
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.FloatingToolbar
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
@@ -115,14 +113,10 @@ fun Composer(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(
-                // 与任务卡、反馈条共用同一个内缩值（见 Common.kt）。
-                // 这三块是同一列，左边缘必须落在同一条线上。
-                start = floatingHorizontalInset(wide),
-                end = floatingHorizontalInset(wide),
-                top = 4.dp,
-                bottom = 10.dp,
-            ),
+            // 横向内缩**不在这里**做：交给 FloatingBottomShell（Common.kt）统一处理。
+            // 输入器、任务卡、反馈条是同一列，三块的横向内缩、圆角、阴影必须同源，
+            // 否则阴影档位不同会让"可见边缘"差出几 dp，看上去就是"不是同宽的"。
+            .padding(top = 4.dp, bottom = 10.dp),
     ) {
 
         // 斜杠面板展开/收起走动画
@@ -141,18 +135,9 @@ fun Composer(
         }
 
         // 输入框 + 发送键**并排**：输入箱在左（weight 1f），方角发送键在右。
-        // 两者都走 Miuix：箱子用 FloatingToolbar（圆角 + 阴影由组件库负责），
-        // 按键用转发到 IconButton 的 ZhiFilledIconButton(square = true)。
-        FloatingToolbar(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(glass.blur(Modifier, RoundedCornerShape(ZhiRadius.floating), radius = 24f)),
-            color = glass.surfaceColor(scheme.surfaceContainer),
-            cornerRadius = ZhiRadius.floating,
-            outSidePadding = PaddingValues(0.dp),
-            shadowElevation = 12.dp,
-            showDivider = false,
-        ) {
+        // 卡片统一走 FloatingBottomShell（Common.kt）：与任务卡、反馈条同一个
+        // 圆角 / 阴影 / 横向内缩来源，保证三块"同框"。
+        FloatingBottomShell(wide = wide, glass = glass) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -442,7 +427,7 @@ fun Composer(
             } // 底排 Row
 
             } // 悬浮面板内容 Column
-        } // FloatingToolbar 外层
+        } // FloatingBottomShell
     }
 }
 }

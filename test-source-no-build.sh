@@ -308,6 +308,27 @@ run R8ConfigTest "$PROJECT_ROOT"
 # 而表单里又套了一层 —— 编译通过、只有测量时才抛 Infinity maximum height constraints。
 # DialogScrollNestingTest.java
 run DialogScrollNestingTest "$PROJECT_ROOT"
+# ---------- 底部三块悬浮层同框 / 发送栏光标 / 全屏图片查看器 ----------
+# 三类"不报错、但看起来不对"的界面缺陷：三块各自调 FloatingToolbar 时阴影
+# 档位不一致（阴影画在卡片边界外面），看上去就是"不是同宽的"；Miuix 光标
+# 默认画成 borderColor 而输入器把描边调成透明，光标跟着一起消失；图片查看
+# 器的 Image 只约束宽不约束高，而 Miuix 弹窗的高度上限只在平板分支生效，
+# 竖屏长截图直接撑过整块屏幕。
+# FloatingShellAndCursorTest.java
+run FloatingShellAndCursorTest "$PROJECT_ROOT"
+# ---------- 搜索服务（RikkaHub 形态）+ 结果数 1-50 ----------
+# 三类删掉不会编译失败的退化：密钥制服务失败时静默回落免费后端（用户配了
+# Tavily 却拿到 DuckDuckGo 的结果）；结果数上限三处不同心圆（设置放宽了、
+# 工具还在夹回 10）；密钥/实例地址的配置链路断在中间某一环（字段加了但
+# 没透传 = 配了也白配）。
+# WebSearchBackendTest.java
+run WebSearchBackendTest "$PROJECT_ROOT"
+# ---------- 下拉菜单 × 输入法（菜单被键盘盖住） ----------
+# Miuix 浮层定位不认识 IME（windowBounds 只扣状态栏/导航栏），edge-to-edge 下
+# 窗口又不随键盘缩小 —— 键盘开着时打开页脚下拉，菜单整个落在键盘底下。
+# 修法是展开时收起键盘，锚点带着浮层一起上移。
+# DropdownImeGuardTest.java
+run DropdownImeGuardTest "$PROJECT_ROOT"
 # ---------- UI 调试页的入口门控与"真的铺开组件" ----------
 # 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
 # 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。

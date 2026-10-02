@@ -111,19 +111,18 @@ fun MessageBar(
                 )
             }
         } else {
-            val shape = RoundedCornerShape(ZhiRadius.floating)
-            FloatingToolbar(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(if (!glass.supported) Modifier else glass.blur(Modifier, shape, radius = 16f))
-                    .clickable(onClick = onDismiss),
-                color = glass.surfaceColor(scheme.surfaceContainer),
-                cornerRadius = ZhiRadius.floating,
-                outSidePadding = inset,
-                shadowElevation = 6.dp,
-                showDivider = false,
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 4.dp)) {
+            // 外壳走共用的 FloatingBottomShell：内缩/圆角/阴影/模糊与任务卡、
+            // 输入器同源 —— 三块在同一列上，宽度与观感必须一致
+            // （形态以之前的发送栏为准，见 Common.kt）。
+            // verticalPadding = 6dp：沿用反馈条原本的纵向呼吸空间。
+            FloatingBottomShell(wide = wide, glass = glass, verticalPadding = 6.dp) {
+                // 点一下就消失：错误分支走 ZhiNoticeBar 的 clickable，这里对齐。
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onDismiss)
+                        .padding(horizontal = 4.dp),
+                ) {
                     Text(
                         text = text,
                         fontSize = ZhiTextScale.Footnote,

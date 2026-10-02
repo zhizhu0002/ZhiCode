@@ -33,9 +33,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -54,6 +57,7 @@ import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.FloatingActionButton
+import top.yukonga.miuix.kmp.basic.FloatingToolbar
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -105,6 +109,50 @@ private val PillHeight = 24.dp
  * [wide] 是横屏/大屏档，比手机竖屏多留一段边距。
  */
 internal fun floatingHorizontalInset(wide: Boolean): Dp = if (wide) 24.dp else 12.dp
+
+/**
+ * 底部悬浮层**共用的外壳**：任务卡、反馈条、输入器都从这一个组件出。
+ *
+ * <p>之前三处各自调 Miuix [FloatingToolbar]，虽然横向内缩都是
+ * [floatingHorizontalInset]，但**阴影**（12 / 10 / 6dp）与**模糊半径**
+ * （24 / 16 / 24）各写各的。阴影是画在卡片边界**外面**的，
+ * 阴影档位不同，三张卡的"可见边缘"就差出好几 dp —— 看起来就是
+ * "不是同宽的"，而几何上它们其实对齐了。这种差异编译器看不见、
+ * 单测也不管，只有截图能暴露。
+ *
+ * <p>所以把外壳整个收进来：圆角、阴影、模糊半径、内缩的**摆放方式**都在
+ * 这一个地方定死，三块想不一致都不行。形态以**之前的发送栏**为准：
+ * 横向内缩做在布局层（卡片贴住布局框）、`outSidePadding` 清零、
+ * 阴影 12dp —— 内缩要是改走 `outSidePadding`，卡片会从布局框里再缩一圈，
+ * 三块虽然还是对齐的，但整列观感就变成另一回事了。
+ *
+ * @param verticalPadding 卡片**外**的纵向间距（任务卡 8dp、反馈条 6dp、
+ * 输入器 0 —— 它的外层 Column 自带 top 4 / bottom 10）。
+ */
+@Composable
+internal fun FloatingBottomShell(
+    wide: Boolean,
+    glass: Glass,
+    modifier: Modifier = Modifier,
+    verticalPadding: Dp = 0.dp,
+    content: @Composable () -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    FloatingToolbar(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = verticalPadding)
+            // 横向内缩在**布局层**，卡片贴住布局框 —— 与之前发送栏一致。
+            .padding(horizontal = floatingHorizontalInset(wide))
+            .then(glass.blur(Modifier, RoundedCornerShape(ZhiRadius.floating), radius = 24f)),
+        color = glass.surfaceColor(scheme.surfaceContainer),
+        cornerRadius = ZhiRadius.floating,
+        outSidePadding = PaddingValues(0.dp),
+        shadowElevation = 12.dp,
+        showDivider = false,
+        content = content,
+    )
+}
 
 /**
  * 顶栏/侧栏/工具行使用的图标按钮。转发到 Miuix [IconButton]（自带涟漪与按压反馈）。
@@ -599,6 +647,12 @@ fun ZhiIconDropdownMenu(
             },
         )
     }
+    // 打开菜单时先收起输入法：App 是 edge-to-edge，窗口不随键盘缩小，而 Miuix
+    // 浮层的定位（0.9.4 的 rememberListPopupLayoutInfo）只扣状态栏/导航栏、
+    // **不认识 IME** —— 键盘开着时菜单会整个落在键盘底下（用户实测"显示在下层"）。
+    // 收起键盘后锚点随 composer 上移，浮层跟着锚点走（ListPopupLayout 持续跟踪
+    // onGloballyPositioned），这也是原版 dialog 式菜单的天然行为。
+    val keyboard = LocalSoftwareKeyboardController.current
     OverlayIconDropdownMenu(
         entry = entry,
         modifier = modifier,
@@ -607,6 +661,7 @@ fun ZhiIconDropdownMenu(
         minWidth = minWidth,
         cornerRadius = cornerRadius,
         backgroundColor = backgroundColor,
+        onExpandedChange = { expanded -> if (expanded) keyboard?.hide() },
         content = content,
     )
 }
@@ -723,6 +778,16 @@ fun ZhiTextField(
     cornerRadius: Dp = TextFieldDefaults.CornerRadius,
     /** 传 null 用主题的正文样式（只补一个可见的文字色）。 */
     textStyle: TextStyle? = null,
+    /**
+     * 光标颜色。默认取主题的 primary，而**不是** Miuix 的默认值。
+     *
+     * Miuix `TextField` 的光标默认画成 `SolidColor(colors.borderColor)`
+     * （核过 0.9.4 源码），而本工程有输入框为了"只留外层方角框"把
+     * `borderColor` 设成了透明 —— 那一下连光标也一起透明了，
+     * 表现就是"发送栏没有光标"。所以这里显式给一个与描边无关的颜色，
+     * 以后再有透明描边的输入框也不会复现。
+     */
+    cursorBrush: Brush = SolidColor(MiuixTheme.colorScheme.primary),
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     interactionSource: MutableInteractionSource? = null,
     leadingIcon: (@Composable () -> Unit)? = null,
@@ -768,6 +833,7 @@ fun ZhiTextField(
         leadingIcon = leadingIcon,
         trailingIcon = trailingIcon,
         interactionSource = interactionSource,
+        cursorBrush = cursorBrush,
     )
 }
 

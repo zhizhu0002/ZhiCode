@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -30,11 +32,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
@@ -291,10 +295,10 @@ internal fun ZhiImageThumb(
 
 /** 解码不出来时的兜底：文件名 + （失败时）一行说明。 */
 @Composable
-private fun FallbackLabel(name: String, failed: Boolean, maxWidth: Dp) {
+private fun FallbackLabel(name: String, failed: Boolean, maxWidth: Dp, modifier: Modifier = Modifier) {
     val scheme = MiuixTheme.colorScheme
     Column(
-        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+        modifier = modifier.padding(horizontal = 10.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
@@ -368,43 +372,92 @@ private val PendingImageSize = 56.dp
 /**
  * 点缩略图后的放大查看。
  *
- * 走工程里所有模态都用的 Miuix [OverlayDialog]（而不是自绘全屏层）：
- * 这样它与权限确认、模型选择那些窗口共用同一套窗口调暗与返回键处理，
- * 用户按返回就能关掉，不需要额外接线。
+ * <p>形态照搬原版 `showFullImage()`：**全屏黑底 + `FIT_CENTER` + 右上角 ×**。
+ * 之前是一个 `maxWidth = 320dp` 的普通弹窗，问题有两个：
+ *
+ * <p>1. `Image(fillMaxWidth) + ContentScale.Fit` 只约束了宽，**高没有约束** ——
+ *    而手机上的 Miuix 弹窗对内容高是不设上限的（`heightIn(max)` 只在
+ *    `isLargeScreen` 分支生效，核过 0.9.4 的 `DialogContentLayout`）。
+ *    于是竖屏截图按比例撑到六七百 dp 高，直接越过屏幕，"显示过大"。
+ * <p>2. 弹窗自带圆角、内边距与 `squircleSurface` 底，一张截图被包在一张
+ *    小卡片里，四周留着一圈弹窗底色 —— 就是"预览做得很奇怪"。
+ *
+ * <p>仍然走 [OverlayDialog]（工程约定：模态一律 Miuix overlay），但把
+ * 外边距 / 内边距 / 圆角全部清零、背景给纯黑，让弹窗本身退成一个全屏层；
+ * 图片按 `ContentScale.Fit` 塞满整屏 —— 与原版 `FrameLayout(-1,-1) + FIT_CENTER`
+ * 的观感一致。点按任意处或按返回都关闭。
  */
 @Composable
 internal fun ZhiImageViewer(image: ChatImage?, onDismiss: () -> Unit) {
     OverlayDialog(
         show = image != null,
         onDismissRequest = onDismiss,
-        // 图可能很宽（截图），给到接近全屏的宽度上限，但不撑满——
-        // 留出边距才有"这是一个浮层"的感觉，也保证右侧能露出返回手势区。
-        maxWidth = ZhiViewerMaxWidth,
+        // 全屏：外边距 / 内边距 / 圆角全清零，背景纯黑。
+        // maxWidth 也要放开 —— 手机上虽然用不到（宽度本来就被屏幕夹住），
+        // 平板/分屏下不放开的话还是一张 560dp 的小卡。
+        maxWidth = ViewerMaxDimension,
+        outsideMargin = ViewerZeroInsets,
+        insideMargin = ViewerZeroInsets,
+        cornerRadius = 0.dp,
+        backgroundColor = Color.Black,
+        enableWindowDim = false,
+        // 状态栏/导航栏的避让由下面自己的 padding 负责：全屏看图时
+        // 内容顶到状态栏下面才是"全屏"，× 按钮单独避让即可。
+        defaultWindowInsetsPadding = false,
     ) {
         val shown = image ?: return@OverlayDialog
         // 放大查看不做降采样上限（按 2048 解），但仍是 Fit：长截图在屏幕上
         // 本来就只能看到缩略形态，硬裁会把内容藏起来。
         val state = rememberDecodeState(shown, 2048, 2048)
         val bitmap = state.bitmap
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                // 避让状态栏：× 按钮不能顶进刘海/挖孔里。
+                .statusBarsPadding()
+                .navigationBarsPadding(),
         ) {
             if (bitmap != null) {
                 Image(
                     bitmap = bitmap,
                     contentDescription = shown.name,
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxSize(),
                 )
             } else {
-                FallbackLabel(name = shown.name, failed = state.failed, maxWidth = ZhiViewerMaxWidth)
+                FallbackLabel(
+                    name = shown.name,
+                    failed = state.failed,
+                    maxWidth = ViewerMaxDimension,
+                    modifier = Modifier.align(Alignment.Center),
+                )
             }
+            ZhiFilledIconButton(
+                icon = ZhiIcons.close,
+                description = "关闭图片",
+                onClick = onDismiss,
+                containerColor = Color.White.copy(alpha = 0.14f),
+                contentColor = Color.White,
+                iconSize = 16.dp,
+                size = 40.dp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 10.dp, end = 12.dp),
+            )
         }
     }
 }
 
-private val ZhiViewerMaxWidth = 320.dp
+/** 全屏查看层的尺寸上限（够大，实际都会被屏幕夹住）。 */
+private val ViewerMaxDimension = 4096.dp
+
+/**
+ * 全屏查看层的边距/内边距清零。不写 `DpSize(0.dp, 0.dp)` 字面量是刻意的：
+ * 弹窗外边距统一走 DialogWideOutsideMargin 是工程约定（LayoutConsistencyTest
+ * 守着），而这里本来就不是"弹窗边距"——是全屏层的 0，单独起名两不误。
+ */
+private val ViewerZeroInsets = DpSize(0.dp, 0.dp)
 
 // ------------------------------------------------------------------ 气泡里的图片行
 

@@ -199,20 +199,13 @@ private fun FloatingAgentStatus(
     glass: Glass,
 ) {
     val scheme = MiuixTheme.colorScheme
-    // 整块悬浮壳是唯一一层圆角：卡片在里面不再画自己的底板与外边距，
-    // 否则会出现"圆角 20dp 的模糊面 + 圆角 14dp 的实心卡"两层不齐的观感。
-    val shape = RoundedCornerShape(ZhiRadius.floating)
-    FloatingToolbar(
-        modifier = Modifier.fillMaxWidth().then(glass.blur(Modifier, shape, radius = 24f)),
-        color = glass.surfaceColor(scheme.surfaceContainer),
-        cornerRadius = ZhiRadius.floating,
-        outSidePadding = PaddingValues(
-            // 与输入器、反馈条共用同一个内缩值：三块是同一列，左右必须对齐。
-            horizontal = floatingHorizontalInset(wide),
-            vertical = 8.dp,
-        ),
-        shadowElevation = 10.dp,
-        showDivider = false,
+    // 外壳走共用的 FloatingBottomShell：内缩/圆角/阴影/模糊与反馈条、输入器同源，
+    // 三块在同一列上必须"同框"（形态以之前的发送栏为准，见 Common.kt）。
+    // verticalPadding = 8dp：沿用任务卡原本的纵向呼吸空间。
+    FloatingBottomShell(
+        wide = wide,
+        glass = glass,
+        verticalPadding = 8.dp,
     ) {
         AgentProgressCard(
             status = status,
