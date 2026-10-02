@@ -242,9 +242,8 @@ private fun ComposerHost(
         onSend = viewModel::send,
         onStop = viewModel::stop,
         onRemoveAttachment = { viewModel.removeAttachment(it.id) },
-        // `+` 菜单的四个动作
+        // `+` 菜单的三个动作
         onAttachFile = viewModel::openAttachPicker,
-        onOpenSkills = viewModel::openSkills,
         onOpenFilesTab = { viewModel.selectTab(WorkspaceTab.FILES) },
         onPickImage = { pickImage.launch("image/*") },
         // 输入器里待发图片的缩略图数据（按附件 id 取，不进 state）

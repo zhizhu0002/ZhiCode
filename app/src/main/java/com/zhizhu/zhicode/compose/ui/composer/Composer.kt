@@ -83,9 +83,8 @@ fun Composer(
     onStop: () -> Unit,
     onPickSlash: (SlashCommand) -> Unit,
     onRemoveAttachment: (Attachment) -> Unit,
-    // ---- `+` 菜单的四个动作（原来只有一个 onAttach 直接弹相册）----
+    // ---- `+` 菜单的三个动作（原来只有一个 onAttach 直接弹相册）----
     onAttachFile: () -> Unit,
-    onOpenSkills: () -> Unit,
     onOpenFilesTab: () -> Unit,
     onPickImage: () -> Unit,
     /**
@@ -284,19 +283,13 @@ fun Composer(
                      * Compose 的 lambda 记忆化让它们跨重组保持同一实例，
                      * 所以这个 `remember` 是真的会命中。
                      */
-                    items = remember(onAttachFile, onOpenSkills, onOpenFilesTab, onPickImage) {
+                    items = remember(onAttachFile, onOpenFilesTab, onPickImage) {
                         listOf(
                             ZhiMenuItem(
                                 text = "附加项目文件",
                                 summary = "搜索并附加",
                                 icon = ZhiIcons.file,
                                 onClick = onAttachFile,
-                            ),
-                            ZhiMenuItem(
-                                text = "Skill 管理器",
-                                summary = "查看与编辑",
-                                icon = ZhiIcons.skill,
-                                onClick = onOpenSkills,
                             ),
                             ZhiMenuItem(
                                 text = "打开文件工作区",

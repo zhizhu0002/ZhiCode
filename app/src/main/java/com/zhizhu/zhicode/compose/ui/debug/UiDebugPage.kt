@@ -2448,7 +2448,6 @@ private fun ComposerSection(state: WorkspaceUiState, viewModel: WorkspaceViewMod
             onPickSlash = {},
             onRemoveAttachment = { viewModel.removeAttachment(it.id) },
             onAttachFile = viewModel::openAttachPicker,
-            onOpenSkills = viewModel::openSkills,
             onOpenFilesTab = {},
             onPickImage = {},
             // 调试页的输入器只是组件预览，附件缩略图没有待发数据可画；

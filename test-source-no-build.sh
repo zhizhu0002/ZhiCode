@@ -341,6 +341,14 @@ run SettingsPersistenceTest "$PROJECT_ROOT"
 # 往左凸出一截，左边缘参差不齐）。两者都不报错，只「看着不对」。
 # FieldErrorAlignmentTest.java
 run FieldErrorAlignmentTest "$PROJECT_ROOT"
+# ---------- 侧栏行高 + ＋ 菜单不得再放技能入口 ----------
+# 行高：48dp 承载两行内容时用户反馈「太狭窄」，守的是「两行必须有足够高度」
+# 这个不变量（值可再调，但不能回落到把两行压扁的量级）。
+# 菜单：撤掉 ＋ 菜单里的技能项，前提是设置页/斜杠命令入口仍在 ——
+# 两件事都合法、都不会编译失败，只能静态钉住。
+# SidebarMetricsTest.java  ComposerMenuTest.java
+run SidebarMetricsTest "$PROJECT_ROOT"
+run ComposerMenuTest "$PROJECT_ROOT"
 # ---------- UI 调试页的入口门控与"真的铺开组件" ----------
 # 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
 # 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。

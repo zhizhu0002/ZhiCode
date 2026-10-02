@@ -332,7 +332,13 @@ private fun SessionRowInner(
  * `bipush 56` → `heightIn`），而侧栏要在有限高度里塞下尽可能多的会话，
  * 所以从外面再套一层 `heightIn(max = …)`：内层的 min 会被外层 max 收敛下来。
  */
-private val SidebarRowMaxHeight = 38.dp
+private val SidebarRowMaxHeight = 46.dp
 
-/** 会话行最大高度（标题 + 元信息两行）。 */
-private val SessionRowMaxHeight = 48.dp
+/**
+ * 会话行最大高度（标题 + 元信息两行）。
+ *
+ * 原为 48dp，用户反馈「项目历史列表太狭窄了，可以加高一点点」——
+ * 加高到 58dp。两行的呼吸空间够了之后，标题与元信息不再贴在一起，
+ * 点起来也更好按（48dp 已接近 44dp 的可点下限，长标题更容易误触隔壁行）。
+ */
+private val SessionRowMaxHeight = 58.dp
