@@ -296,6 +296,12 @@ run ToolOutputBoundTest "$PROJECT_ROOT"
 # 断言的是**顺序**（IO 块必须在落盘之前），不是"文件里出现过 Dispatchers.IO"。
 # MainThreadIoBoundTest.java
 run MainThreadIoBoundTest "$PROJECT_ROOT"
+# ---------- 对话流时序（正文与工具卡按时序穿插） ----------
+# 批次边界只开新工具卡、不封口正文气泡的话，工具之后的正文会追加回
+# 工具之前的那个气泡 —— 正文全在上面、工具卡全在下面，时序是平的。
+# 这类问题不报错也不影响数据，只改变「哪段字落在哪个气泡里」，只能静态断言。
+# ChatStreamInterleaveTest.java
+run ChatStreamInterleaveTest "$PROJECT_ROOT"
 run R8ConfigTest "$PROJECT_ROOT"
 # ---------- 弹窗内滚动嵌套（防「点开某个弹窗直接闪退」重犯） ----------
 # 用户报告过「添加 MCP 服务器崩溃」，真因是 DialogShell 的 body 已带 verticalScroll，

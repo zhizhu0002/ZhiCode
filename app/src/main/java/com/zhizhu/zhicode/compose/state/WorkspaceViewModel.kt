@@ -1757,33 +1757,73 @@ class WorkspaceViewModel(
         }
     }
 
-    override fun onEngineText(delta: String) {
-        val existing = streamingAssistantId
-        if (existing == null) {
-            // 首个 delta 才创建气泡。原版是回合开始时就插一个空气泡、
-            // 结束时再丢弃空的；Compose 里那样会先闪一个空白块，观感更差，
-            // 所以改成延迟创建 —— 语义等价（空回复同样不会留下气泡）。
-            val id = nextId("a")
-            streamingAssistantId = id
-            _state.update { s ->
-                s.copy(
-                    transcript = s.transcript + ChatItem(
-                        id = id,
-                        kind = ChatKind.ASSISTANT,
-                        title = "智蛛",
-                        body = delta,
-                        streaming = true,
-                        processSteps = listOf("开始分析请求"),
-                    ),
-                    workingStatus = "正在回复…",
-                )
-            }
-            return
+    /**
+     * 取当前流式气泡的 id；没有就建一个。
+     *
+     * <p>原本只有 [onEngineText] 会建气泡。现在思考也要走这里 ——
+     * 工具批次结束后模型**先思考再说话**，如果思考不建气泡，那一段思考会被
+     * 静默丢掉（[onEngineThinking] 拿不到 id 就直接 return）。
+     *
+     * <p>「首个 delta 才创建」这件事没变。原版是回合开始时就插一个空气泡、
+     * 结束时再丢弃空的；Compose 里那样会先闪一个空白块，观感更差 ——
+     * 语义等价（空回复同样不会留下气泡，见 [finalizeStreaming] 的 keepIfEmpty）。
+     */
+    private fun ensureStreamingAssistant(): String {
+        streamingAssistantId?.let { return it }
+        val id = nextId("a")
+        streamingAssistantId = id
+        _state.update { s ->
+            s.copy(
+                transcript = s.transcript + ChatItem(
+                    id = id,
+                    kind = ChatKind.ASSISTANT,
+                    title = "智蛛",
+                    body = "",
+                    streaming = true,
+                    processSteps = listOf("开始分析请求"),
+                ),
+            )
         }
+        return id
+    }
+
+    /**
+     * 把当前流式气泡**封口**（定稿，不再往里追加），但不丢弃。
+     *
+     * <p>⚠️ 这是「正文与工具卡按时序穿插」的唯一支点：工具批次开始时必须先封口，
+     * 否则工具结束后模型继续说的那段会被追加到**工具之前**的同一个气泡里 ——
+     * 界面上的表现就是"正文全在最上面、工具卡全挤在下面"，时序完全是平的。
+     *
+     * <p>封口 ≠ 结束回合：正文气泡和工具卡都留在原位、顺序不变，
+     * 后续正文会开一个**新的**气泡接在工具卡后面（[ensureStreamingAssistant]）。
+     *
+     * <p>还在转圈的东西不受影响：[currentGroupId] 归 [onEngineToolBatchCompleted]
+     * 管，工具行自己的状态由 `ToolActivity.completed` 管。
+     */
+    private fun sealStreamingAssistant() {
+        val id = streamingAssistantId ?: return
+        streamingAssistantId = null
+        _state.update { s ->
+            s.copy(
+                transcript = s.transcript.mapNotNull { item ->
+                    when {
+                        item.id != id -> item
+                        // 一个字都没说过、也没思考过：这是延迟创建出来的空壳，
+                        // 留着就是一块空白卡，直接丢掉。
+                        item.body.isBlank() && item.thinking.isBlank() -> null
+                        else -> item.copy(streaming = false)
+                    }
+                },
+            )
+        }
+    }
+
+    override fun onEngineText(delta: String) {
+        val id = ensureStreamingAssistant()
         _state.update { s ->
             s.copy(
                 transcript = s.transcript.map {
-                    if (it.id == existing) it.copy(body = it.body + delta) else it
+                    if (it.id == id) it.copy(body = it.body + delta) else it
                 },
                 workingStatus = "正在回复…",
             )
@@ -1791,7 +1831,7 @@ class WorkspaceViewModel(
     }
 
     override fun onEngineThinking(delta: String) {
-        val id = streamingAssistantId ?: return
+        val id = ensureStreamingAssistant()
         _state.update { s ->
             s.copy(
                 transcript = s.transcript.map {
@@ -1808,7 +1848,15 @@ class WorkspaceViewModel(
     }
 
     override fun onEngineToolBatchStarted(toolIds: List<String>) {
-        // 一个批次 = 一张新的工具分组卡。批次边界由引擎给，界面不猜。
+        // ⚠️ 先封口正文气泡，再开新的工具分组卡。
+        //
+        // 一个批次 = 一张新的工具分组卡，批次边界由引擎给，界面不猜。
+        // 但批次边界同时意味着「上一段正文到此为止」—— 模型在工具之后说的话
+        // 是新的一段，必须有自己的气泡，否则时序就平了。
+        //
+        // 引擎在工具事件之前已经 flush 过文本缓冲（见 onToolUse 的 flushTextNow），
+        // 所以这里封到的一定是**已经显示出来**的那部分，不会把字留在后面。
+        sealStreamingAssistant()
         val groupId = nextId("g")
         currentGroupId = groupId
         _state.update { s ->
@@ -1832,7 +1880,15 @@ class WorkspaceViewModel(
             return
         }
 
-        val groupId = currentGroupId ?: nextId("g").also { currentGroupId = it }
+        // 防御路径：引擎没发批次开始事件就来了工具调用，这里自己开一张分组卡。
+        // 顺手把正文气泡封口 —— 理由与 onEngineToolBatchStarted 相同：
+        // 工具卡之前的正文到此为止，之后的要另起新气泡，否则时序是平的。
+        var groupId = currentGroupId
+        if (groupId == null) {
+            sealStreamingAssistant()
+            groupId = nextId("g")
+            currentGroupId = groupId
+        }
         val summary = ToolText.summary(name, input) ?: ""
         val command = input?.optString("command", "") ?: ""
         val (added, deleted) = ToolText.delta(name, input)
