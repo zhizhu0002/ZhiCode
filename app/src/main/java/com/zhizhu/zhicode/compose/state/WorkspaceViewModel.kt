@@ -3552,6 +3552,20 @@ class WorkspaceViewModel(
         _state.update { s -> s.copy(modelPicker = s.modelPicker?.copy(query = text)) }
     }
 
+    /**
+     * 重新拉一次模型目录（面板里额度卡片的「刷新」走这里）。
+     *
+     * 面板没开时直接返回：没有面板可更新，发出去的请求就只是白跑一趟。
+     * 拉取本身复用 [fetchModelCatalog]，它已经把 loading 态与失败态都处理好了。
+     */
+    fun refreshModelCatalog() {
+        if (_state.value.modelPicker == null) return
+        _state.update { s ->
+            s.copy(modelPicker = s.modelPicker?.copy(loading = true, status = "正在刷新模型与额度…"))
+        }
+        fetchModelCatalog()
+    }
+
     private fun fetchModelCatalog() {
         modelCatalogJob?.cancel()
         modelCatalogJob = viewModelScope.launch {
@@ -3566,13 +3580,19 @@ class WorkspaceViewModel(
                             loading = false,
                             status = ModelCatalogStore.friendlyError(result.exceptionOrNull()),
                             models = emptyList(),
+                            // 列表没拿到，额度卡片也一并清掉：留着上一次的数字
+                            // 会让人以为那是当前的（它可能已经是刷新前的旧值）。
+                            quota = emptyList(),
+                            modelsNote = "",
                         )
                     } else {
                         picker.copy(
                             loading = false,
-                            status = if (fetched.isEmpty()) "API 未返回可用模型，可手动输入"
-                            else "已获取 ${fetched.size} 个模型",
-                            models = fetched,
+                            status = if (fetched.models.isEmpty()) "API 未返回可用模型，可手动输入"
+                            else "已获取 ${fetched.models.size} 个模型",
+                            models = fetched.models,
+                            quota = fetched.quota,
+                            modelsNote = fetched.note,
                         )
                     },
                 )

@@ -49,6 +49,10 @@ public final class ZcodeProtocolTest {
             "app/src/main/java/com/zhizhu/zhicode/compose/data/ApiConfigStore.kt";
     private static final String UI_OVERLAY =
             "app/src/main/java/com/zhizhu/zhicode/compose/ui/dialogs/ApiConfigOverlay.kt";
+    private static final String UI_PICKER =
+            "app/src/main/java/com/zhizhu/zhicode/compose/ui/dialogs/ModelPickerOverlay.kt";
+    private static final String UI_CATALOG_STORE =
+            "app/src/main/java/com/zhizhu/zhicode/compose/data/ModelCatalogStore.kt";
     private static final String FAST_SCRIPT = "test-jvm-fast.sh";
 
     /** 线上名：写进设置与会话文件，是持久化契约的一部分。 */
@@ -231,5 +235,47 @@ public final class ZcodeProtocolTest {
                 FAST_SCRIPT + " 必须把 ZcodeWire.kt 列进 MAIN_KT_SOURCES");
         require(script.contains("ZcodeWireTest"),
                 FAST_SCRIPT + " 必须把 ZcodeWireTest 列进默认测试");
+
+        // ---- 8. 额度：数字与倒计时只允许有一处实现 -------------------------
+        // 界面自己再算一遍单位换算或倒计时分档，两处迟早不一致 —— 而那种不一致
+        // 表现为"两个地方数字不一样"，最难判哪个对。
+        String overlay = stripComments(read(root, UI_OVERLAY));
+        require(wire.contains("fun formatCountdown") && wire.contains("fun formatUnits"),
+                ZCODE_WIRE + " 必须提供 formatCountdown 与 formatUnits（唯一的实现处）");
+        for (String banned : new String[]{"86400", "3600", "10000.0", "100000000"}) {
+            require(!overlay.contains(banned),
+                    UI_OVERLAY + " 里不许出现倒计时/单位换算的阈值 " + banned + "："
+                            + "那些属于协议知识，只有 ZcodeWire 一处实现");
+        }
+        String picker = stripComments(read(root, UI_PICKER));
+        require(!picker.contains("86400") && !picker.contains("/ 10000.0"),
+                UI_PICKER + " 里不许自己算额度数字或倒计时");
+
+        // ---- 9. 额度必须来自真实解析，且走同一次请求 -----------------------
+        // 解析在 provider 里（它转调 ZcodeWire），store 只负责编排 —— 断言写在正确的层次上。
+        require(provider.contains("ZcodeWire.parseBalancePayload"),
+                ZCODE_PROVIDER + " 必须用 ZcodeWire.parseBalancePayload 解析额度响应："
+                        + "在 provider 里现场抠字段，等于让响应形状有了第二处实现");
+        require(!provider.contains("optLong(\"remaining_units\""),
+                ZCODE_PROVIDER + " 不许自己解析额度字段：那是 ZcodeWire 的职责（可单测）");
+        String catalogStore = read(root, UI_CATALOG_STORE);
+        require(catalogStore.contains("ZcodeWire.entitledModelIds"),
+                UI_CATALOG_STORE + " 的 ZCode 模型列表必须来自套餐 entitlement："
+                        + "参考实现就是拿额度返回里的 capabilities 筛出「仅套餐可用模型」");
+        require(squash(catalogStore).contains("ZcodeProvider().fetchBalance(config)"),
+                UI_CATALOG_STORE + " 必须只调一次 fetchBalance 同时拿到模型列表与额度："
+                        + "分两次请求会多一次往返，还可能拿到互相不一致的两份数据");
+
+        // ---- 10. 「填入 ZCode 默认值」必须两个字段一起填 -------------------
+        require(overlay.contains("填入 ZCode 默认值"),
+                UI_OVERLAY + " 必须有「填入 ZCode 默认值」入口："
+                        + "没有它，用户要自己找网关地址与那组身份头，这个协议基本不可用");
+        require(squash(overlay).contains("it.copy(baseUrl=ZCODE_GATEWAY,extraHeaders=ZCODE_HEADERS_JSON)")
+                        || squash(overlay).contains("copy(baseUrl=ZCODE_GATEWAY,extraHeaders=ZCODE_HEADERS_JSON)"),
+                UI_OVERLAY + " 的一次填入必须**同时**写 baseUrl 与 extraHeaders："
+                        + "只填一样必然连不上，而分两次填会让人以为步骤还没做完");
+        require(overlay.contains("填写 ZCode 授权码"),
+                UI_OVERLAY + " 的 ZCode 密钥框要提示「填写 ZCode 授权码」："
+                        + "同一件事在一边叫 API Key、一边叫授权码，用户会去找另一样东西");
     }
 }

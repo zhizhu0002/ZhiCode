@@ -55,9 +55,21 @@ object ZcodeWire {
      */
     const val USER_AGENT = "ZhiCodeAndroid-JavaNative/0.15"
 
-    /** 会话与额度端点。相对路径，拼在用户给的网关基址上。 */
-    private const val MESSAGES_PATH = "/messages"
-    private const val BALANCE_PATH = "/billing/balance"
+    /**
+     * 会话端点。**注意不是 `/messages`** —— 那个网关把它挂在 `/anthropic/v1/messages` 下。
+     *
+     * 取值来自参考实现（反编译的 `ZcodeVault.messagesPath()`）。写错它的现象是 404，
+     * 而错误信息只会说"请求失败"，看不出是路径少了一段。
+     */
+    private const val MESSAGES_PATH = "/anthropic/v1/messages"
+
+    /**
+     * 额度端点。`{v}`（客户端版本）与 `{p}`（平台）两个占位符必须被替换。
+     *
+     * 取值同样来自参考实现的 `billingBalancePath()`。注意它是**查询串**而不是路径段 ——
+     * 少一个 `?` 就会 404。
+     */
+    private const val BALANCE_PATH = "/billing/balance?app_version={v}&platform={p}"
 
     // ------------------------------------------------------------ 端点
 
@@ -80,7 +92,40 @@ object ZcodeWire {
 
     fun messagesEndpoint(baseUrl: String?): String = endpoint(baseUrl, MESSAGES_PATH)
 
-    fun balanceEndpoint(baseUrl: String?): String = endpoint(baseUrl, BALANCE_PATH)
+    /**
+     * 额度端点，并把两个占位符替换掉。
+     *
+     * `{v}`/`{p}` 的取值**从用户自己填的额外请求头里读**（`X-ZCode-App-Version` 与
+     * `X-Platform`）——不新增字段、也不内置：那两个值本来就属于那个客户端，
+     * 用户已经在配置里给了一份，再抄一份只会多一处会不一致的地方。
+     *
+     * 缺任一取值时**不发请求**，直接说明缺什么。原样带着 `{v}` 发出去只会得到 404，
+     * 而 404 的报错看不出是"占位符没替换"。
+     */
+    fun balanceEndpoint(baseUrl: String?, extraHeaders: Map<String, String>): String {
+        val version = headerValue(extraHeaders, "X-ZCode-App-Version")
+        val platform = headerValue(extraHeaders, "X-Platform")
+        val missing = ArrayList<String>()
+        if (version.isNullOrBlank()) missing += "X-ZCode-App-Version"
+        if (platform.isNullOrBlank()) missing += "X-Platform"
+        if (missing.isNotEmpty()) {
+            throw IllegalStateException(
+                "读取额度需要额外请求头里的 ${missing.joinToString("、")}（点「填入 ZCode 默认值」可一次填好）",
+            )
+        }
+        val path = BALANCE_PATH
+            .replace("{v}", encode(version!!))
+            .replace("{p}", encode(platform!!))
+        return endpoint(baseUrl, path)
+    }
+
+    /** 请求头名不区分大小写：用户手写 `x-zcode-app-version` 也该认。 */
+    private fun headerValue(headers: Map<String, String>, name: String): String? =
+        headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
+
+    /** URL 查询串里的值要转义（版本号里可能有 `+`，平台里有 `/`）。 */
+    private fun encode(value: String): String =
+        java.net.URLEncoder.encode(value, "UTF-8")
 
     // ------------------------------------------------------------ 请求头
 
@@ -97,11 +142,18 @@ object ZcodeWire {
      * @param extraHeaders 用户填的 JSON 对象（可为空/非法 —— 非法时**忽略并如实返回错误**，
      *                     而不是抛出去：一条配置写错不该让整个请求无法发出去，
      *                     但也不能静默当成"没有"）
+     * @param accept       `accept` 头的取值。会话要事件流，额度接口要 JSON ——
+     *                     用参数而不是让调用方改返回值，是为了让"返回的 Map 是否可写"
+     *                     不成为一个隐含约定（上一版就是在这里踩到了不可写）
      */
-    fun headers(apiKey: String?, extraHeaders: String?): Map<String, String> {
+    fun headers(
+        apiKey: String?,
+        extraHeaders: String?,
+        accept: String = "text/event-stream",
+    ): Map<String, String> {
         val out = linkedMapOf(
             "content-type" to "application/json",
-            "accept" to "text/event-stream",
+            "accept" to accept,
             "authorization" to "Bearer " + (apiKey ?: "").trim(),
             "anthropic-version" to ANTHROPIC_VERSION,
             "user-agent" to USER_AGENT,
@@ -250,33 +302,163 @@ object ZcodeWire {
         return out
     }
 
-    /**
-     * 从额度接口的返回里抠出一句人话。
-     *
-     * 这个接口的字段名不稳定，所以按一组候选找；一个都找不到时返回 null
-     * （界面据此不显示额度行，而不是显示一行空白或 `null`）。
-     */
-    fun parseBalance(json: JSONObject?): String? {
-        if (json == null) return null
-        val candidates = listOf("balance", "remaining", "quota", "credits", "amount")
-        for (key in candidates) {
-            if (!json.has(key)) continue
-            val value = json.opt(key)
-            if (value == null || value == JSONObject.NULL) continue
-            val text = value.toString().trim()
-            if (text.isNotEmpty()) return text
-        }
-        // 常见形态：数据在一层 data/result 里。
-        for (wrapper in listOf("data", "result")) {
-            json.optJSONObject(wrapper)?.let { inner ->
-                parseBalance(inner)?.let { return it }
-            }
-        }
-        return null
-    }
-
     /** 归一化模型名：网关对大小写敏感，但用户手填时常带空格。 */
     fun normalizeModel(model: String?): String = (model ?: "").trim()
+
+    // ------------------------------------------------------------ 套餐模型目录
+
+    /**
+     * 这个服务的套餐模型（id → 显示名）。
+     *
+     * 取值来自参考实现的 `ZcodeVault.modelPairs()`（11 个）。它**不是**凭据也不是端点，
+     * 而是"这个服务提供哪些模型"这件事本身 —— 所以放在这里而不是界面里：
+     * 下面 [filterEntitled] 要用它做筛选，两边分开就得在界面层再抄一份。
+     *
+     * ⚠️ 它是**静态快照**：对方上新模型时这份表不会自己变。所以界面上必须允许手填模型名，
+     * 而这个表只用于"给出好看的显示名"与"筛选套餐可用项"，不参与任何校验。
+     */
+    val MODEL_NAMES: Map<String, String> = linkedMapOf(
+        "glm-4.5-air" to "GLM 4.5 Air",
+        "glm-4.6" to "GLM 4.6",
+        "glm-4.6v" to "GLM 4.6V",
+        "glm-4.7" to "GLM 4.7",
+        "glm-5" to "GLM 5",
+        "glm-5-turbo" to "GLM 5 Turbo",
+        "glm-5v-turbo" to "GLM 5V Turbo",
+        "glm-5.1" to "GLM 5.1",
+        "glm-5.2" to "GLM 5.2",
+        "glm-5.3" to "GLM 5.3",
+        "glm-5.3-flash" to "GLM 5.3 Flash",
+    )
+
+    /**
+     * 用"套餐可用模型"筛一遍 [MODEL_NAMES]。
+     *
+     * 三种情况分开处理，与参考实现一致：
+     *  - 套餐列表为空（额度没读到）→ **返回全部**，让用户至少还能选、还能手填；
+     *  - 筛完为空（套餐里的模型不在我们的静态表里，说明对方上新了）→ 也返回全部，
+     *    否则用户会看到一个空列表，比"多出几个用不了的"更糟；
+     *  - 正常 → 只留交集。
+     */
+    fun filterEntitled(entitled: Collection<String>?): Map<String, String> {
+        if (entitled.isNullOrEmpty()) return MODEL_NAMES
+        val keep = MODEL_NAMES.filterKeys { entitled.contains(it) }
+        return keep.ifEmpty { MODEL_NAMES }
+    }
+
+    // ------------------------------------------------------------ 额度
+
+    /** 一档套餐额度。字段名对应网关返回的 `balances[]`。 */
+    data class BalanceRow(
+        val showName: String,
+        val totalUnits: Long,
+        val remainingUnits: Long,
+        val expiresAtSec: Long,
+        val modelIds: List<String>,
+    )
+
+    /** 额度响应里我们用到的那部分。 */
+    data class BalancePayload(
+        val serverTimeSec: Long,
+        val rows: List<BalanceRow>,
+    )
+
+    /**
+     * 解析额度响应。
+     *
+     * 形状（来自参考实现的 `fetchBalanceData` + 它的渲染代码）：
+     * ```
+     * {"code":0,"message":"…","data":{
+     *    "server_time":<秒>,
+     *    "balances":[{"show_name":…,"total_units":N,"remaining_units":N,
+     *                 "expires_at":<秒>,"capabilities":["model:glm-5.3",…]}]}}
+     * ```
+     *
+     * `code != 0` 时**抛错并带上 message**：那是业务层失败（授权码无效之类），
+     * 返回空列表会让界面显示"暂无套餐余额"——把"你的码不对"说成"你没有套餐"。
+     */
+    fun parseBalancePayload(json: JSONObject?): BalancePayload {
+        if (json == null) throw IllegalStateException("额度接口没有返回内容")
+        val code = json.optInt("code", 0)
+        if (code != 0) {
+            val message = json.optString("message").trim()
+            throw IllegalStateException(
+                if (message.isEmpty()) "额度接口返回 code $code" else "$message（code $code）",
+            )
+        }
+        val data = json.optJSONObject("data") ?: throw IllegalStateException("额度响应缺少 data")
+        val serverTime = data.optLong("server_time", System.currentTimeMillis() / 1000)
+        val array = data.optJSONArray("balances")
+        val rows = ArrayList<BalanceRow>()
+        if (array != null) {
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val capabilities = item.optJSONArray("capabilities")
+                val modelIds = ArrayList<String>()
+                if (capabilities != null) {
+                    for (j in 0 until capabilities.length()) {
+                        val raw = capabilities.optString(j, "")
+                        // 参考实现只认 "model:" 前缀的能力项。
+                        if (raw.startsWith("model:")) modelIds += raw.substring(6)
+                    }
+                }
+                rows += BalanceRow(
+                    showName = item.optString("show_name").trim(),
+                    totalUnits = item.optLong("total_units", 0),
+                    remainingUnits = item.optLong("remaining_units", 0),
+                    expiresAtSec = item.optLong("expires_at", 0),
+                    modelIds = modelIds,
+                )
+            }
+        }
+        return BalancePayload(serverTime, rows)
+    }
+
+    /** 套餐可用的模型 id（去重，保持出现顺序）。 */
+    fun entitledModelIds(payload: BalancePayload?): List<String> {
+        val seen = LinkedHashSet<String>()
+        payload?.rows?.forEach { seen.addAll(it.modelIds) }
+        return seen.toList()
+    }
+
+    /**
+     * 重置倒计时文案。
+     *
+     * 与参考实现同一套分档（它自己的渲染代码就是这么写的），四档的边界都落在
+     * 整数秒上：`<=0` 已过期、`<1 小时` 说分钟、`<1 天` 说 `H:MM`、再往上说天。
+     * `expiresAt` 非正表示**永久有效**（而不是"已过期"）——这两者的区别很重要。
+     */
+    fun formatCountdown(expiresAtSec: Long, serverTimeSec: Long): String {
+        if (expiresAtSec <= 0) return "永久有效"
+        val left = expiresAtSec - serverTimeSec
+        return when {
+            left <= 0 -> "已过期"
+            left < 3600 -> "剩 ${left / 60} 分钟重置"
+            left < 86400 -> "剩 ${left / 3600}:${String.format(Locale.US, "%02d", (left % 3600) / 60)} 重置"
+            else -> "剩 ${left / 86400} 天重置"
+        }
+    }
+
+    /**
+     * 额度数字的显示写法（与参考实现的 `fmtTokens` 一致）：
+     * `>= 1 亿` 用「亿」、`>= 1 万` 用「万」、再小就原样。
+     *
+     * 用 `Locale.US` 固定小数点：跟随系统区域的话，某些区域会把 `.` 写成 `,`，
+     * 而这里拼的是"300.0万"这种给人看的短标签，不是本地化数字。
+     */
+    fun formatUnits(units: Long): String = when {
+        units >= 100_000_000L -> String.format(Locale.US, "%.2f亿", units / 100_000_000.0)
+        units >= 10_000L -> String.format(Locale.US, "%.1f万", units / 10_000.0)
+        else -> units.toString()
+    }
+
+    /** 额度条的比例（0..1）。总量为 0 时给 0，而不是除零。 */
+    fun quotaFraction(row: BalanceRow): Float {
+        if (row.totalUnits <= 0L) return 0f
+        return (row.remainingUnits.toDouble() / row.totalUnits.toDouble())
+            .coerceIn(0.0, 1.0)
+            .toFloat()
+    }
 
     /** 判断一个模型名看起来是不是这个网关的（GLM 系列），用于给出更准的提示。 */
     fun looksLikeGlm(model: String?): Boolean {

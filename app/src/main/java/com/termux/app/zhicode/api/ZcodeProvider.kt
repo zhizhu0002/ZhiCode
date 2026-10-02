@@ -4,6 +4,7 @@ import com.termux.app.zhicode.api.zcode.ZcodeWire
 import com.termux.app.zhicode.model.AssistantTurn
 import com.termux.app.zhicode.model.SessionConfig
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -107,6 +108,59 @@ class ZcodeProvider : ModelProvider {
         return decoder.toTurn()
     }
 
+    // ---------------------------------------------------------------- 额度
+
+    /**
+     * 读一次套餐额度。返回**已解析**的余额（解析在 [ZcodeWire] 里，可单测）。
+     *
+     * 用 GET，不读 body；失败时把响应正文带上（与 [createMessage] 同样的理由：
+     * 这个网关会在正文里说清是授权码还是头不对）。
+     *
+     * ## 一处与参考实现的不同
+     *
+     * 参考实现的额度请求会带 `X-Device-Mid`（一个设备标识）。我们**不带**：
+     * 那是替用户向对方提交一份设备指纹，而这个功能不需要它。
+     * 若实测报错说必需，再加一个**仅本应用范围**的随机安装标识（存本地，
+     * 不是硬件标识）。
+     */
+    fun fetchBalance(config: SessionConfig): ZcodeWire.BalancePayload {
+        val baseUrl = ApiUrlPolicy.requireBaseUrl(config)
+        val apiKey = config.apiKey?.trim().orEmpty()
+        if (apiKey.isEmpty()) throw IllegalStateException("请先填写 ZCode 授权码")
+
+        val extra = ZcodeWire.parseExtraHeaders(config.extraHeaders)
+        extra.error?.let { throw IllegalStateException(it) }
+
+        // 额度要的是 JSON（不是 SSE）—— 由 headers 的 accept 参数决定，
+        // 而不是在返回的 Map 上回写（那个 Map 不保证可写）。
+        val headers = ZcodeWire.headers(apiKey, config.extraHeaders, accept = "application/json")
+        val endpoint = ZcodeWire.balanceEndpoint(baseUrl, headers)
+
+        val conn = URL(endpoint).openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"
+        conn.useCaches = false
+        conn.instanceFollowRedirects = false
+        conn.connectTimeout = CONNECT_TIMEOUT_MS
+        conn.readTimeout = READ_TIMEOUT_MS
+        for ((name, value) in headers) conn.setRequestProperty(name, value)
+
+        val request = requests.begin(conn)
+        try {
+            val status = conn.responseCode
+            request.markResponseStarted()
+            val text = readAll(if (status in 200..299) conn.inputStream else conn.errorStream)
+            if (status < 200 || status >= 300) {
+                throw IllegalStateException("ZCode HTTP $status: " + truncate(text))
+            }
+            return ZcodeWire.parseBalancePayload(JSONObject(text))
+        } catch (failure: java.io.IOException) {
+            if (Thread.currentThread().isInterrupted) throw failure
+            throw StreamFailure(request.failureCode(failure), request.failureMessage(failure), failure)
+        } finally {
+            request.close()
+        }
+    }
+
     // ---------------------------------------------------------------- 传输细节
 
     private fun open(endpoint: String, headers: Map<String, String>): HttpURLConnection {
@@ -155,5 +209,7 @@ class ZcodeProvider : ModelProvider {
 
     private companion object {
         const val MAX_ERROR_CHARS = 12_000
+        const val CONNECT_TIMEOUT_MS = 8_000
+        const val READ_TIMEOUT_MS = 12_000
     }
 }

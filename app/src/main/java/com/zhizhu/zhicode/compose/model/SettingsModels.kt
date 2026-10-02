@@ -412,6 +412,21 @@ data class ApiConfigState(
 /** 模型目录里的一项。[displayName] 可能与 [id] 相同，界面据此决定要不要重复显示。 */
 data class ModelOption(val id: String, val displayName: String)
 
+/**
+ * 模型选择面板里的一行套餐额度。
+ *
+ * 字段都是**显示用的文本**（`remaining`/`total`/`resetLabel` 已格式化）：这样界面层
+ * 不需要认识单位换算与倒计时分档，那些规则只有一处实现（见 `ZcodeWire`）。
+ */
+data class QuotaRow(
+    val name: String,
+    val remaining: String,
+    val total: String,
+    /** 剩余比例 0..1，用于进度条。 */
+    val fraction: Float,
+    val resetLabel: String,
+)
+
 /** MCP 服务器的连接方式。取值必须与引擎 `McpConfigStore.Server.type` 一致。 */
 enum class McpType(val value: String, val label: String) {
     STDIO("stdio", "标准输入输出（stdio）"),
@@ -892,6 +907,15 @@ data class ModelPickerState(
     val loading: Boolean = true,
     val status: String = "正在从当前 API 获取模型…",
     val models: List<ModelOption> = emptyList(),
+    /**
+     * 套餐额度行（目前只有 ZCode 会填）。空表示不显示额度卡片。
+     *
+     * 每行的数字与倒计时**已经是成品文案**（由协议层算好）：分档规则属于协议知识，
+     * 界面再算一遍迟早会和那边不一致。
+     */
+    val quota: List<QuotaRow> = emptyList(),
+    /** [models] 旁边的一句补充，如「（仅套餐可用模型）」。 */
+    val modelsNote: String = "",
     /**
      * 已配置的 API 记录，用于面板里的快速切换 tab 栏。
      *

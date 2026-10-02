@@ -39,29 +39,33 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 
+/** ZCode 的网关地址与那组身份头。**只用于「填入默认值」这个动作**，见下面的说明。 */
+private const val ZCODE_GATEWAY = "https://zcode.z.ai/api/v1/zcode-plan"
+
+private const val ZCODE_HEADERS_JSON =
+    """{"User-Agent":"ZCode/3.14.0 ai-sdk/anthropic/3.0.81","X-ZCode-App-Version":"3.14.0",""" +
+        """"X-Title":"Z Code@cli","X-Release-Channel":"production","X-ZCode-Agent":"glm",""" +
+        """"X-Platform":"linux-x64","X-Os-Category":"linux","X-Os-Version":"6.1.0-13-amd64",""" +
+        """"HTTP-Referer":"https://zcode.z.ai"}"""
+
 /**
- * ZCode 协议要填的两样东西，写成**可直接粘贴**的提示。
+ * ZCode 的说明与可粘贴取值。
  *
- * ## 为什么要给出具体取值
+ * ## 为什么给出具体取值，以及为什么用「填入」而不是内置
  *
- * 那个网关要求请求带一组身份头才受理，而它自己的客户端就是这么发的。
- * 让用户自己去猜这些取值是不现实的（名字、格式、大小写都得对），
- * 所以这里给成可粘贴的文本 —— 但**只是提示**：字段本身是用户可改的，
- * 值也只出现在这一段文字里，不在请求路径上参与任何判断。
+ * 那个网关要求请求带一组身份头才受理，取值由它自己的客户端决定。让用户自己猜是不现实的
+ * （名字、格式、大小写都得对），所以这里给成可用的文本。但**它是提示与预填，不是常量**：
+ * 按下「填入 ZCode 默认值」之后值就落进用户自己的配置里，之后请求只读那份配置。
  *
- * ## 一处坦白的取舍
- *
- * 本仓库的既有策略是「不预置任何厂商地址」（见 `ApiSettingsStore` 的类注释），
- * 而这段提示里带了网关地址与那组头的取值。这是一个**刻意的例外**，理由是：
- * 不写成提示的话这个协议对用户就是不可用的（他要从别处找这些值），
- * 而写成提示时它依然是"用户看见并主动粘贴"的，不是静默内置。
- * 取舍点在于「可用」与「不预置」之间，这里选了可用，并把它留在明面上。
+ * 这与本仓库「不预置任何厂商地址」的策略有一处**刻意的张力**，取舍写在下面：
+ * 不给这些值，这个协议对用户就是不可用的（他得从别处找）；给了，它就变成"用户看见并
+ * 主动应用的一份配置"。选了可用，同时把它留在明面上 —— 而不是藏在请求路径里。
  */
 private val ZCODE_HEADERS_HINT = """
-    网关填 Base URL：https://zcode.z.ai/api/v1/zcode-plan
-    额外请求头可直接粘贴下面这段（可自行修改）：
+    网关地址：$ZCODE_GATEWAY
+    额外请求头（点上面的「填入 ZCode 默认值」可一次填好，也可自行修改）：
 
-    {"User-Agent":"ZCode/3.14.0 ai-sdk/anthropic/3.0.81","X-ZCode-App-Version":"3.14.0","X-Title":"Z Code@cli","X-Release-Channel":"production","X-ZCode-Agent":"glm","X-Platform":"linux-x64","X-Os-Category":"linux","X-Os-Version":"6.1.0-13-amd64","HTTP-Referer":"https://zcode.z.ai"}
+    $ZCODE_HEADERS_JSON
 """.trimIndent()
 
 /**
@@ -286,6 +290,27 @@ private fun ApiProfileForm(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             )
 
+            /*
+             * ZCode 的「填入默认值」。
+             *
+             * 参考实现把网关地址与身份头内置在代码里、界面上写「无需填写，直连 ZCode 网关」。
+             * 我们改成一键填入，差别是**值落在用户的配置里**而不是藏在代码里的常量：
+             * 于是「请求发到哪、以谁的身份」在配置页看得见、改得动、排得动障。
+             *
+             * 一按同时填两样（网关 + 额外请求头）：它们是配套的，只填一样必然连不上，
+             * 而分开两次填会让人以为步骤没做完。
+             */
+            if (draft.protocol == ApiProtocol.ZCODE) {
+                BasicComponent(
+                    title = "填入 ZCode 默认值",
+                    summary = "一次填好网关地址与额外请求头（可再自行修改）",
+                    onClick = {
+                        baseUrlTouched = true
+                        onChange { it.copy(baseUrl = ZCODE_GATEWAY, extraHeaders = ZCODE_HEADERS_JSON) }
+                    },
+                )
+            }
+
             SwitchPreference(
                 title = "允许明文 HTTP",
                 summary = if (allowCleartext) "当前地址走 http（不加密）" else "仅使用 https",
@@ -298,7 +323,13 @@ private fun ApiProfileForm(
             ZhiTextField(
                 value = draft.apiKey,
                 onValueChange = { value -> onChange { it.copy(apiKey = value) } },
-                label = if (draft.isEditing) "API Key（留空 = 沿用原密钥）" else "API Key",
+                // ZCode 的密钥就是它的授权码；别的协议叫 API Key。同一件事在两边
+                // 用不同的名字，用户会以为还要另找一个"授权码"填在别处。
+                label = when {
+                    draft.isEditing -> "留空 = 沿用原密钥"
+                    draft.protocol == ApiProtocol.ZCODE -> "填写 ZCode 授权码"
+                    else -> "API Key"
+                },
                 useLabelAsPlaceholder = true,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),

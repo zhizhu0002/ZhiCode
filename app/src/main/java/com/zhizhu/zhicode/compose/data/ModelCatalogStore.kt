@@ -2,7 +2,10 @@ package com.zhizhu.zhicode.compose.data
 
 import android.content.Context
 import com.zhizhu.zhicode.compose.model.ModelOption
+import com.zhizhu.zhicode.compose.model.QuotaRow
 import com.termux.app.zhicode.api.ModelCatalogClient
+import com.termux.app.zhicode.api.ZcodeProvider
+import com.termux.app.zhicode.api.zcode.ZcodeWire
 import com.termux.app.zhicode.storage.ApiSettingsStore
 
 /**
@@ -24,12 +27,60 @@ internal object ModelCatalogStore {
 
     private const val MAX_ERROR_CHARS = 120
 
-    /** 用当前生效的 API 配置拉一次模型目录。 */
-    fun fetch(context: Context): Result<List<ModelOption>> = runCatching {
+    /**
+     * 一次读取的结果：可选模型 + 套餐额度。
+     *
+     * 做成一个对象而不是两次调用，是因为 ZCode 那边**两者出自同一个响应**：
+     * 额度接口既给出余额，也给出"套餐可用哪些模型"（`capabilities` 里的
+     * `model:` 项）。分两次调用会多一次往返，还可能拿到互相不一致的两份数据。
+     * 其他协议没有额度，[quota] 就是空的。
+     */
+    data class Catalog(
+        val models: List<ModelOption> = emptyList(),
+        val quota: List<QuotaRow> = emptyList(),
+        /** 显示在标题下的一句补充，如「（仅套餐可用模型）」。 */
+        val note: String = "",
+    )
+
+    /**
+     * 一行套餐额度。
+     *
+     * 直接用界面模型里的 `QuotaRow` 而不是在这里另定义一个：同一件事两个类型，
+     * 迟早要在中间加一次转换，而转换漏字段是不报错的（界面上只是少一行数字）。
+     */
+
+    /** 用当前生效的 API 配置拉一次模型目录（含 ZCode 的额度）。 */
+    fun fetch(context: Context): Result<Catalog> = runCatching {
         val config = ApiSettingsStore(context).load()
-        ModelCatalogClient()
-            .fetch(config, ModelCatalogClient.CancellationSignal { Thread.currentThread().isInterrupted })
-            .map { ModelOption(id = it.id, displayName = it.displayName) }
+
+        // 与协议层比对**线上名**而不是 ApiProtocol 枚举：那个枚举是 api 包的包内类型
+        // （compose 层看不到它，也不该看到），而线上名本来就是公开契约。
+        if (config.protocol == ZcodeWire.WIRE_NAME) {
+            // 只发一次请求，两个结果都从它来。
+            val payload = ZcodeProvider().fetchBalance(config)
+            val entitled = ZcodeWire.entitledModelIds(payload)
+            val names = ZcodeWire.filterEntitled(entitled)
+            return@runCatching Catalog(
+                models = names.map { (id, display) -> ModelOption(id = id, displayName = display) },
+                quota = payload.rows.map { row ->
+                    QuotaRow(
+                        name = row.showName.ifBlank { "套餐" },
+                        remaining = ZcodeWire.formatUnits(row.remainingUnits),
+                        total = ZcodeWire.formatUnits(row.totalUnits),
+                        fraction = ZcodeWire.quotaFraction(row),
+                        resetLabel = ZcodeWire.formatCountdown(row.expiresAtSec, payload.serverTimeSec),
+                    )
+                },
+                // 拿到套餐列表才敢说"仅套餐可用"；退回落表时那句话不成立。
+                note = if (entitled.isNotEmpty()) "（仅套餐可用模型）" else "",
+            )
+        }
+
+        Catalog(
+            models = ModelCatalogClient()
+                .fetch(config, ModelCatalogClient.CancellationSignal { Thread.currentThread().isInterrupted })
+                .map { ModelOption(id = it.id, displayName = it.displayName) },
+        )
     }
 
     /**
