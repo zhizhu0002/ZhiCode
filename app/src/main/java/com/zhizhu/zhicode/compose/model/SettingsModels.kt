@@ -230,21 +230,46 @@ data class SkillEntry(
  *
  * 技能不只有 `SKILL.md`：参考文档、脚本、示例都可以放在同一目录里一起分发
  * （`SkillStore.delete` 用递归删除就是为此）。详情页把它们列出来。
+ *
+ * [relativePath] 是**相对技能目录**的路径（`SKILL.md`、`reference/api.md`），
+ * 读写都用它当唯一标识 —— 只用 [name] 的话子目录里两个 `api.md` 会互相覆盖。
  */
 data class SkillFile(
     val name: String,
+    val relativePath: String,
     val sizeLabel: String,
     /** 是否是技能本体（`SKILL.md`）。列表里排最前，并用不同颜色标出来。 */
     val primary: Boolean,
 )
 
 /**
+ * 技能目录的**文件树**（详情页渲染用）。
+ *
+ * 参考实现的详情页就是递归树：技能可以带子目录，平铺一层会把 `reference/api.md`
+ * 显示成 `api.md`，用户看不出它在哪一层。
+ * ⚠️ 递归是这里的**核心能力**，不是排版细节 —— 退化成平铺就等于丢掉了子目录。
+ */
+sealed interface SkillFileNode {
+    /** 一个文件。 */
+    data class FileNode(val file: SkillFile) : SkillFileNode
+
+    /** 一个子目录，[children] 是它下面的内容（递归）。 */
+    data class DirNode(
+        val name: String,
+        val relativePath: String,
+        val children: List<SkillFileNode>,
+    ) : SkillFileNode
+}
+
+/**
  * Skill 管理面板的状态。
  *
- * 四种形态共用一个页面栈（见 `SettingsPageStack`），靠这几个字段区分：
- * - `detail != null` → 技能详情（该技能目录下的文件列表）
- * - `detail == null && createForm != null` → 手动添加（粘贴整份 SKILL.md）
- * - `editing != null` → 编辑某个文件
+ * 页面栈只有**两层**（列表 → 详情），靠下面这些字段区分额外形态：
+ * - `detail != null` → 技能详情（该技能目录下的文件树）
+ * - `detail == null && createForm != null` → 手动添加（对话框）
+ * - `editing != null` → 编辑某个文件（对话框）
+ * - `fileDraft != null` → 新建文件（对话框）
+ * - `urlDraft != null` → 从 URL 导入（对话框）
  * - 都为 null → 技能列表
  *
  * 用多个字段而不是一个 `mode` 枚举：各态需要携带的数据完全不同，
@@ -260,6 +285,8 @@ data class SkillsState(
     val editing: SkillEditTarget? = null,
     /** 「新建文件」表单，只在详情页里有意义。 */
     val fileDraft: SkillFileDraft? = null,
+    /** 「从 URL 导入」表单。 */
+    val urlDraft: SkillUrlDraft? = null,
 ) {
     /** 按 [query] 过滤后的列表。名称与说明都命中。 */
     val visibleSkills: List<SkillEntry>
@@ -269,71 +296,123 @@ data class SkillsState(
         }
 }
 
-/** 技能详情页的数据：技能本身 + 它目录下的文件。 */
+/** 技能详情页的数据：技能本身 + 它目录下的文件树。 */
 data class SkillDetail(
     val entry: SkillEntry,
-    val files: List<SkillFile>,
+    val tree: List<SkillFileNode>,
 )
 
 /**
  * 「手动添加技能」的表单（**对话框**，不是整页）。
  *
- * 形状照用户给的参考图：文件名 + 内容 + 取消/创建。
- * 文件名就是技能目录名，内容就是 `SKILL.md` 本体。
+ * 形状照参考实现：**一个「SKILL.md 内容」输入框 + 取消/保存**，没有独立的名字字段。
+ * 内容就是 `SKILL.md` 本体，技能名（也就是目录名）由内容的 frontmatter 解析得出 ——
+ * 用户手上拿到的本来就是一份完整的 SKILL.md，让它自己声明名字，
+ * 目录名就不会和内容里的 `name` 不一致。
  *
- * 以前这一项是**单独一整页**（还要再开一层编辑器），加一个技能要跨两级页面。
- * 做成对话框之后它就两个字段，一步到位。
+ * 以前这一项是**单独一整页**、还要再开一层编辑器，加一个技能要跨两级页面；
+ * 做成对话框之后一步到位。
  *
- * [fileName] 也允许由导入路径预填（从文件导入时用 [com.zhizhu.zhicode.compose.data.SkillStore.nameFromContent]
- * 解析 frontmatter 拿到名字填进来）—— 但**用户始终看得到、改得动**它，
- * 不像之前那样"名字由内容隐式决定、打错了只能重来"。
+ * [name] 为空且 [content] 非空 = 「有内容但解析不出名字」，这是**错误态**：
+ * 必须报出来并挡住提交，不能猜一个默认名（会建出用户没打算建的目录）。
  */
 data class SkillCreateDraft(
-    val fileName: String = "",
     val content: String = "",
     val scope: SkillScope = SkillScope.PROJECT,
+    /** 由 `SkillStore.nameFromContent` 从 [content] 的 frontmatter 解析得出。 */
+    val name: String = "",
 ) {
-    /** 与技能目录名同一套规则（见 SkillStore.isValidFileName）。 */
-    val nameError: String? = when {
-        fileName.isBlank() -> null // 还没开始输入，不要一上来就报错
-        fileName == "." || fileName == ".." -> "不能叫这个名字"
-        !Regex("[A-Za-z0-9._-]{1,64}").matches(fileName.trim()) -> "只能包含字母、数字、. _ -（1–64 个字符）"
-        else -> null
-    }
+    /** 内容非空但解析不出名字。空内容不算错（用户还没开始粘贴）。 */
+    val nameMissing: Boolean get() = content.isNotBlank() && name.isBlank()
 
-    val saveable: Boolean get() = fileName.isNotBlank() && nameError == null
+    /** 解析出来了、但字符集不合法（见 `SkillStore.isValidName`）。 */
+    val nameInvalid: Boolean get() = name.isNotBlank() && !Regex("[A-Za-z0-9._-]{1,64}").matches(name)
+
+    val saveable: Boolean get() = name.isNotBlank() && !nameInvalid
 }
 
-/** 「新建文件」表单（详情页里往技能目录加一个附加文件）。 */
+/**
+ * 「新建文件」表单（详情页里往技能目录加一个附加文件）。
+ *
+ * 名字允许带子目录（`reference/api.md`）：技能本来就支持分组，界面不给出这个入口的话，
+ * 树只能显示别处（导入、Agent）建出来的目录，用户在界面上永远造不出同样的结构。
+ * 每一段仍然要过同一套字符集规则。
+ */
 data class SkillFileDraft(
     val fileName: String = "",
     val content: String = "",
 ) {
+    /** 拆成每一段；末段的判断与 `SkillStore.isValidFileName` 保持一致。 */
+    private val segments: List<String> get() = fileName.trim().split('/')
+
     val nameError: String? = when {
         fileName.isBlank() -> null // 还没开始输入
-        fileName == "." || fileName == ".." -> "不能叫这个名字"
-        !Regex("[A-Za-z0-9._-]{1,64}").matches(fileName) -> "只能包含字母、数字、. _ -（1–64 个字符）"
+        fileName.startsWith("/") || fileName.endsWith("/") -> "路径不能以 / 开头或结尾"
+        segments.any { it.isEmpty() } -> "路径里不能有连续的 //"
+        segments.any { it == "." || it == ".." } -> "路径里不能有 . 或 .. 这样的段"
+        segments.any { !FILE_NAME_SEGMENT.matches(it) } -> "每一段只能包含字母、数字、. _ -（1–64 个字符）"
+        // SKILL.md 是技能本体，走「编辑」改它；用「新建文件」建它会走名字一致性校验
+        // （空内容没有 frontmatter 的 name），到时候报的错离用户很远。
+        fileName.trim().equals("SKILL.md", ignoreCase = true) -> "SKILL.md 是技能本体，请用「编辑」改它"
         else -> null
     }
 
     val saveable: Boolean get() = fileName.isNotBlank() && nameError == null
+
+    private companion object {
+        val FILE_NAME_SEGMENT = Regex("[A-Za-z0-9._-]{1,64}")
+    }
 }
 
 /**
- * 正在编辑的文件。
+ * 「从 URL 导入」表单。
  *
- * 技能不只有 `SKILL.md`，所以这里带的是**文件名**而不是"这个技能的内容"。
+ * 支持任意 http(s) 地址，不绑定某个代码托管站：地址指向**一份 SKILL.md**
+ * 就进「手动添加」让用户确认；指向**一个 zip** 就把里面的每个 SKILL.md 解开逐个导入。
+ * 解析与下载都在 `SkillImport` 里，这里只放界面状态。
+ */
+data class SkillUrlDraft(
+    val url: String = "",
+    val scope: SkillScope = SkillScope.PROJECT,
+    /** 下载中。这段时间要禁用「导入」，否则连点会并发拉好几份。 */
+    val loading: Boolean = false,
+) {
+    /** 只挡明显不是地址的输入；真正的合法性由下载那一步判（并给出具体原因）。 */
+    val ready: Boolean
+        get() {
+            val text = url.trim().lowercase(java.util.Locale.US)
+            return !loading && (text.startsWith("http://") || text.startsWith("https://")) &&
+                text.length > "https://".length
+        }
+}
+
+/**
+ * 正在编辑的文件（**对话框**，不是整页）。
+ *
+ * 技能不只有 `SKILL.md`，所以这里带的是**相对路径**而不是"这个技能的内容"。
  */
 data class SkillEditTarget(
     val name: String,
     val scope: SkillScope,
-    /** 技能目录里的文件名，通常是 `SKILL.md`，也可以是同目录的参考文档。 */
-    val fileName: String,
+    /** 技能目录里的相对路径，通常是 `SKILL.md`，也可以是 `reference/api.md`。 */
+    val relativePath: String,
     /** 编辑中的内容。保存前只在内存里，不落盘。 */
     val body: String,
+    /**
+     * 写 `SKILL.md` 时的名字冲突原因（null = 没问题）。
+     *
+     * 由 `WorkspaceViewModel` 在每次改动内容后重算 —— 判定要用 `SkillStore` 的
+     * frontmatter 解析，而 model 层不依赖 data 层。放在这里是为了让对话框能**实时**
+     * 提示"名字对不上"，而不是等用户点了保存才报错。
+     */
+    val nameError: String? = null,
 ) {
     /** 内容长度提示用。空内容不算错误，只提示一句。 */
     val empty: Boolean get() = body.isBlank()
+
+    val fileName: String get() = relativePath.substringAfterLast('/')
+
+    val saveable: Boolean get() = nameError == null
 }
 
 /**

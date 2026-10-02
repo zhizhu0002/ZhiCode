@@ -117,6 +117,7 @@ object ZhiIcons {
     // 文件类型
     val directory: ImageVector get() = set.Folder
     val file: ImageVector get() = set.File
+    val delete: ImageVector get() = set.Delete
 
     /** 工具卡片图标，按工具类别映射。 */
     fun tool(kind: ToolKind): ImageVector = when (kind) {

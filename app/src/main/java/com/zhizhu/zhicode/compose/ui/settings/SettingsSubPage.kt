@@ -1,5 +1,10 @@
 package com.zhizhu.zhicode.compose.ui.settings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -8,7 +13,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -189,6 +196,21 @@ internal fun SettingsSubPage(
      */
     floatingActionButton: (@Composable () -> Unit)? = null,
     /**
+     * 向下滚动时把 FAB 收起来（参考实现的详情页就是这么做的）。
+     *
+     * 默认 false：其它二级页的 FAB 是**主操作**（比如「添加技能」），
+     * 滚下去就消失会让人以为按钮坏了。技能详情页那个 FAB 不一样 ——
+     * 它是"往当前技能里加文件"，而列表越长越说明用户正在读文件、不是在加文件，
+     * 这时让它让开视线（也少挡住最后几行）是合理的。
+     *
+     * 收/放用 `AnimatedVisibility`（缩放 + 淡入淡出），不是直接换布局：
+     * 直接切会让 FAB"啪"地闪一下。方向由 [listState] 的滚动增量判定 ——
+     * 往上滑（delta < 0）就放出来，往下滑就收起来。用
+     * `firstVisibleItemIndex * 大常数 + offset` 拼成一个单调的滚动量：
+     * LazyColumn 里只取 offset 的话，跨列表项时会误判方向。
+     */
+    hideFabOnScrollDown: Boolean = false,
+    /**
      * 这一页的**整屏浮层**（bottom sheet / 对话框）挂载点。
      *
      * ⚠️ 浮层必须挂在这里，不能写在调用方的顶层。
@@ -214,6 +236,18 @@ internal fun SettingsSubPage(
     val scheme = MiuixTheme.colorScheme
     val listState = rememberLazyListState()
     val topAppBarScrollBehavior = MiuixScrollBehavior()
+
+    // FAB 的收放判定。`previousOffset` 刻意放在 derivedStateOf 外面（每次求值时更新），
+    // 这跟参考实现的写法一致：它比较的是"这一次求值"与"上一次求值"的滚动量之差。
+    var previousScroll by remember { mutableIntStateOf(0) }
+    val fabVisible by remember {
+        derivedStateOf {
+            val current = listState.firstVisibleItemIndex * 100_000 + listState.firstVisibleItemScrollOffset
+            val delta = current - previousScroll
+            previousScroll = current
+            delta <= 0
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -241,7 +275,19 @@ internal fun SettingsSubPage(
             )
         },
         // Miuix Scaffold 的原生 FAB 槽位：摆放、间距、insets 都由它负责。
-        floatingActionButton = { floatingActionButton?.invoke() },
+        floatingActionButton = {
+            floatingActionButton?.let { fab ->
+                if (hideFabOnScrollDown) {
+                    AnimatedVisibility(
+                        visible = fabVisible,
+                        enter = fadeIn() + scaleIn(),
+                        exit = fadeOut() + scaleOut(),
+                    ) { fab() }
+                } else {
+                    fab()
+                }
+            }
+        },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(

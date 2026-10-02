@@ -380,6 +380,7 @@ private fun ZhiCodeScreen(
                 onDismiss = viewModel::closeSkills,
                 onQueryChange = viewModel::setSkillQuery,
                 onNew = viewModel::newSkill,
+                onNewUrl = viewModel::newSkillUrl,
                 onOpenDetail = viewModel::openSkillDetail,
                 onCloseDetail = viewModel::closeSkillDetail,
                 onEdit = viewModel::editSkill,
@@ -396,6 +397,10 @@ private fun ZhiCodeScreen(
                 onSaveFile = viewModel::saveSkillFile,
                 onCancelFile = viewModel::cancelSkillFileDraft,
                 onImportFile = viewModel::importSkillFromUri,
+                onDeleteFile = viewModel::deleteSkillFile,
+                onUrlDraftChange = viewModel::updateSkillUrlDraft,
+                onUrlImport = viewModel::importSkillFromUrl,
+                onCancelUrl = viewModel::cancelSkillUrl,
             )
         }
         entry<SettingsKey.RoleCards>(swipeDismiss = swipeBack) {

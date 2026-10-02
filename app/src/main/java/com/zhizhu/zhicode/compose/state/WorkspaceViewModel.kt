@@ -22,6 +22,7 @@ import com.zhizhu.zhicode.compose.data.ModelCatalogStore
 import com.zhizhu.zhicode.compose.data.SessionReader
 import com.zhizhu.zhicode.compose.data.RoleCardStore
 import com.zhizhu.zhicode.compose.data.MemoryStore
+import com.zhizhu.zhicode.compose.data.SkillImport
 import com.zhizhu.zhicode.compose.data.SkillStore
 import com.zhizhu.zhicode.compose.data.WorkspacePaths
 import com.zhizhu.zhicode.compose.data.WorkspaceRepository
@@ -78,6 +79,7 @@ import com.zhizhu.zhicode.compose.model.SkillEditTarget
 import com.zhizhu.zhicode.compose.model.SkillEntry
 import com.zhizhu.zhicode.compose.model.SkillFileDraft
 import com.zhizhu.zhicode.compose.model.SkillScope
+import com.zhizhu.zhicode.compose.model.SkillUrlDraft
 import com.zhizhu.zhicode.compose.model.SkillsState
 import com.zhizhu.zhicode.compose.model.SettingsDraft
 import com.zhizhu.zhicode.compose.model.SlashCommand
@@ -740,9 +742,10 @@ class WorkspaceViewModel(
                     createForm = null,
                     editing = null,
                     fileDraft = null,
+                    urlDraft = null,
                     detail = SkillDetail(
                         entry = entry,
-                        files = SkillStore.listFiles(s.projectPath, entry.scope, entry.name),
+                        tree = SkillStore.listTree(s.projectPath, entry.scope, entry.name),
                     ),
                 ),
             )
@@ -772,8 +775,12 @@ class WorkspaceViewModel(
      * 在技能目录里新建一个附加文件。
      *
      * 重名**直接拒绝**而不是覆盖：这里建的是参考文档、脚本这类手写内容，
-     * 覆盖等于丢数据。技能本体（SKILL.md）也不允许用这个入口建，
-     * 那是 [createSkill] 的事 —— 两条路径分工会让"改了没反应"少一类。
+     * 覆盖等于丢数据。技能本体（SKILL.md）也不允许用这个入口建 ——
+     * 那是 [createSkill] 的事，而且空内容过不了名字一致性校验，
+     * 所以 `SkillFileDraft.nameError` 在输入阶段就把它挡掉了。
+     *
+     * 文件名允许带子目录（`reference/api.md`）：技能本来就支持分组，
+     * 界面不给出这个入口的话，树只能显示别处建出来的目录。
      */
     fun saveSkillFile() {
         val s = _state.value
@@ -802,7 +809,7 @@ class WorkspaceViewModel(
                     skills = skills.copy(
                         fileDraft = null,
                         detail = detail.copy(
-                            files = SkillStore.listFiles(state.projectPath, detail.entry.scope, detail.entry.name),
+                            tree = SkillStore.listTree(state.projectPath, detail.entry.scope, detail.entry.name),
                         ),
                     ),
                 )
@@ -811,24 +818,67 @@ class WorkspaceViewModel(
     }
 
     /**
+     * 删除技能目录里的一个附加文件。
+     *
+     * `SKILL.md` 由 `SkillStore.deleteFile` 拒绝（它是技能本体，删掉会留下一个
+     * 列表里看得见、点不开的幽灵技能），所以界面不额外挡一遍 —— 一处校验就够，
+     * 两处会分叉。
+     */
+    fun deleteSkillFile(relativePath: String) {
+        val s = _state.value
+        val detail = s.skills?.detail ?: return
+        val result = SkillStore.deleteFile(s.projectPath, detail.entry.scope, detail.entry.name, relativePath)
+        _state.update { state ->
+            state.copy(
+                skills = state.skills?.copy(
+                    detail = detail.copy(
+                        tree = SkillStore.listTree(state.projectPath, detail.entry.scope, detail.entry.name),
+                    ),
+                ),
+                message = if (result.isSuccess) "已删除 $relativePath"
+                else "删除失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+            )
+        }
+    }
+
+    /**
      * 打开发起「手动添加」对话框。
      *
-     * 表单从**空白**开始：用户自己填目录名与内容。
+     * 表单**预填一份示例 SKILL.md**（见 `SkillStore.starterTemplate`）：用户改一改就能存，
+     * 而不是面对一个空框猜 frontmatter 要写什么。里面的名字是占位符、过不了校验，
+     * 所以「保存」一开始是禁用的 —— 必须先换成自己的名字，
+     * 否则点两下就会建出一个没打算建的技能。
+     *
+     * 名字照常由内容解析得出（与 [updateSkillCreateDraft] 同一条规则），
+     * 不在这里单独存一份：两份来源必然会在用户改内容时不一致。
      */
-    fun newSkill() = _state.update {
-        it.copy(
-            skills = it.skills?.copy(
-                createForm = SkillCreateDraft(),
-                detail = null,
-                editing = null,
-            ),
-        )
+    fun newSkill() {
+        val content = SkillStore.starterTemplate
+        _state.update {
+            it.copy(
+                skills = it.skills?.copy(
+                    createForm = SkillCreateDraft(
+                        content = content,
+                        name = SkillStore.nameFromContent(content).orEmpty(),
+                    ),
+                    detail = null,
+                    editing = null,
+                ),
+            )
+        }
     }
 
     fun updateSkillCreateDraft(transform: (SkillCreateDraft) -> SkillCreateDraft) = _state.update {
         val skills = it.skills ?: return@update it
         val form = skills.createForm ?: return@update it
-        it.copy(skills = skills.copy(createForm = transform(form)))
+        val next = transform(form)
+        // 名字始终由内容**重新解析**，不单独存一份用户输入：
+        // 两份来源会在用户改内容时不一致，而目录名只看这一份。
+        it.copy(
+            skills = skills.copy(
+                createForm = next.copy(name = SkillStore.nameFromContent(next.content).orEmpty()),
+            ),
+        )
     }
 
     fun cancelSkillCreate() = _state.update {
@@ -836,24 +886,25 @@ class WorkspaceViewModel(
     }
 
     /**
-     * 手动添加：把表单里的内容写进以 [SkillCreateDraft.fileName] 命名的新目录。
+     * 手动添加：把表单内容写进以 frontmatter 里的 `name` 命名的新目录。
      *
-     * 这个名字是**用户在对话框里看得见、改得动**的，不再由内容隐式决定
-     * （见 `SkillCreateDraft` 的说明）。同名目录不覆盖，直接进编辑器让用户看现有内容
-     * （`SkillStore.create` 的返回值即此语义）。
+     * 名字解析不出来时**不提交**（`saveable` 为假）—— 猜一个目录名会建出
+     * 用户没打算建的东西。同名目录不覆盖，直接打开现有内容（`SkillStore.create`
+     * 的返回值即此语义）。
+     *
+     * ⚠️ 创建后只推**一层**页面（详情），**不能**同时设 `editing`：
+     * 那样页面栈会一次加两页（列表→详情→编辑器），视觉上就是"出现一个重复的"
+     * （用户报过的现象）。要改内容在详情页点 SKILL.md 即可。
      */
     fun createSkill() {
         val s = _state.value
         val form = s.skills?.createForm ?: return
         if (!form.saveable) return
-        val name = form.fileName.trim()
+        val name = form.name.trim()
         val result = SkillStore.create(s.projectPath, form.scope, name, form.content)
         result.fold(
             onSuccess = { created ->
-                val read = SkillStore.readFile(s.projectPath, form.scope, name, "SKILL.md")
-                val body = read.getOrElse { "" }
                 _state.update { state ->
-                    // 建完直接进这个技能的详情页 + 编辑器：用户下一步必然是要写内容。
                     val entry = SkillStore.list(state.projectPath)
                         .firstOrNull { it.name == name && it.scope == form.scope }
                         ?: SkillEntry(
@@ -868,16 +919,11 @@ class WorkspaceViewModel(
                             skills = SkillStore.list(state.projectPath),
                             detail = SkillDetail(
                                 entry = entry,
-                                files = SkillStore.listFiles(state.projectPath, form.scope, name),
+                                tree = SkillStore.listTree(state.projectPath, form.scope, name),
                             ),
-                            editing = SkillEditTarget(
-                                name = name,
-                                scope = form.scope,
-                                fileName = "SKILL.md",
-                                body = body,
-                            ),
+                            // 刻意不设 editing：见函数开头那条警告。
                         ),
-                        message = if (created) "已创建技能 $name" else "技能 $name 已存在，直接打开编辑",
+                        message = if (created) "已创建技能 $name" else "技能 $name 已存在，已为你打开",
                     )
                 }
             },
@@ -916,23 +962,21 @@ class WorkspaceViewModel(
             }
             result.fold(
                 onSuccess = { text ->
-                    // 解析出的名字只用来**预填**对话框里的文件名，不直接建目录：
-                    // 用户仍然看得到、改得动它。解析不出来就留空，让用户自己填。
-                    val suggested = SkillStore.nameFromContent(text).orEmpty()
+                    // 读进来直接进「手动添加」对话框，名字照常由内容解析（不另外预填字段）：
+                    // 表单只有一个内容框，与参考实现一致。
+                    val name = SkillStore.nameFromContent(text).orEmpty()
                     _state.update {
                         it.copy(
                             skills = it.skills?.copy(
                                 detail = null,
                                 editing = null,
-                                createForm = SkillCreateDraft(
-                                    fileName = suggested,
-                                    content = text,
-                                ),
+                                urlDraft = null,
+                                createForm = SkillCreateDraft(content = text, name = name),
                             ),
-                            message = if (suggested.isBlank()) {
-                                "已读取文件，请填写技能名"
+                            message = if (name.isBlank()) {
+                                "已读取文件，但 frontmatter 里没有 name 字段"
                             } else {
-                                "已读取文件，确认后点「创建」"
+                                "已读取文件，确认后点「保存」"
                             },
                         )
                     }
@@ -947,14 +991,145 @@ class WorkspaceViewModel(
     }
 
     /**
-     * 打开某个技能文件的编辑器。
-     *
-     * [fileName] 默认 `SKILL.md`（列表页的快捷「编辑」直接进本体）；
-     * 详情页里点某个附加文件时传那个文件名。
+     * 打开「从 URL 导入」对话框。
      */
-    fun editSkill(entry: SkillEntry, fileName: String = "SKILL.md") {
+    fun newSkillUrl() = _state.update {
+        it.copy(skills = it.skills?.copy(urlDraft = SkillUrlDraft(), editing = null, createForm = null))
+    }
+
+    fun updateSkillUrlDraft(transform: (SkillUrlDraft) -> SkillUrlDraft) = _state.update {
+        val skills = it.skills ?: return@update it
+        val draft = skills.urlDraft ?: return@update it
+        it.copy(skills = skills.copy(urlDraft = transform(draft)))
+    }
+
+    fun cancelSkillUrl() = _state.update {
+        it.copy(skills = it.skills?.copy(urlDraft = null))
+    }
+
+    /**
+     * 从 URL 导入。
+     *
+     * 两条分支（见 `SkillImport`）：
+     * - **zip** → 把里面每个 `SKILL.md` 解开逐个建技能（子目录也认），一次可以导入一整包；
+     * - **文本** → 不直接建，而是填进「手动添加」对话框让用户确认名字与作用域。
+     *
+     * 下载在 IO 线程，期间把表单标成 `loading` 并禁用按钮：不标的话用户会以为没反应，
+     * 连点几下就是几次并发下载。
+     *
+     * 所有失败原因都如实上报（不是 http(s) / HTTP 非 200 / 太大 / 既不是文本也不是 zip），
+     * 因为这四种的下一步动作完全不同。
+     */
+    fun importSkillFromUrl() {
         val s = _state.value
-        val body = SkillStore.readFile(s.projectPath, entry.scope, entry.name, fileName).getOrElse { error ->
+        val draft = s.skills?.urlDraft ?: return
+        if (!draft.ready) return
+        _state.update { it.copy(skills = it.skills?.copy(urlDraft = draft.copy(loading = true))) }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { SkillImport.download(draft.url) }
+            result.fold(
+                onSuccess = { bytes ->
+                    when {
+                        SkillImport.looksLikeZip(bytes) -> {
+                            val parsed = runCatching { SkillImport.skillsFromZip(bytes) }
+                            parsed.fold(
+                                onSuccess = { imported -> createImportedSkills(imported, draft.scope) },
+                                onFailure = { error -> failSkillUrl(error) },
+                            )
+                        }
+
+                        SkillImport.looksLikeText(bytes) -> {
+                            // 文本：进「手动添加」让用户看一眼名字与作用域再落盘。
+                            val text = bytes.toString(Charsets.UTF_8)
+                            val name = SkillStore.nameFromContent(text).orEmpty()
+                            _state.update { state ->
+                                state.copy(
+                                    skills = state.skills?.copy(
+                                        urlDraft = null,
+                                        createForm = SkillCreateDraft(
+                                            content = text,
+                                            scope = draft.scope,
+                                            name = name,
+                                        ),
+                                    ),
+                                    message = if (name.isBlank()) {
+                                        "已下载，但 frontmatter 里没有 name 字段"
+                                    } else {
+                                        "已下载，确认后点「保存」"
+                                    },
+                                )
+                            }
+                        }
+
+                        else -> _state.update { state ->
+                            state.copy(
+                                skills = state.skills?.copy(urlDraft = draft.copy(loading = false)),
+                                message = "这个地址既不是文本也不是 zip 压缩包",
+                                messageIsError = true,
+                            )
+                        }
+                    }
+                },
+                onFailure = { error -> failSkillUrl(error) },
+            )
+        }
+    }
+
+    private fun failSkillUrl(error: Throwable) = _state.update {
+        it.copy(
+            skills = it.skills?.copy(urlDraft = it.skills.urlDraft?.copy(loading = false)),
+            message = "导入失败：${error.message ?: "未知原因"}",
+            messageIsError = true,
+        )
+    }
+
+    /**
+     * 把 zip 里解出来的技能逐个落盘。
+     *
+     * 同名**不覆盖**（`SkillStore.create` 的既有语义）：用户可能已经在本地改过那份，
+     * 静默覆盖等于丢数据。结果里分别报"新建了几个 / 已存在几个"，
+     * 而不是笼统说一句"导入完成"——用户要能一眼看出哪个没进来。
+     */
+    private fun createImportedSkills(imported: List<SkillImport.ImportedSkill>, scope: SkillScope) {
+        val path = _state.value.projectPath
+        var created = 0
+        val skipped = mutableListOf<String>()
+        val failed = mutableListOf<String>()
+        imported.distinctBy { it.name }.forEach { skill ->
+            SkillStore.create(path, scope, skill.name, skill.content).fold(
+                onSuccess = { isNew -> if (isNew) created++ else skipped += skill.name },
+                onFailure = { failed += skill.name },
+            )
+        }
+        _state.update { state ->
+            state.copy(
+                skills = state.skills?.copy(
+                    urlDraft = null,
+                    skills = SkillStore.list(state.projectPath),
+                ),
+                message = buildString {
+                    append("已导入 $created 个技能")
+                    if (skipped.isNotEmpty()) append("，${skipped.size} 个已存在（未覆盖）")
+                    if (failed.isNotEmpty()) append("，${failed.size} 个失败：${failed.joinToString("、")}")
+                },
+                messageIsError = failed.isNotEmpty(),
+            )
+        }
+    }
+
+    /**
+     * 打开某个技能文件的编辑器（对话框）。
+     *
+     * [relativePath] 默认 `SKILL.md`（列表页的快捷「编辑」直接进本体）；
+     * 详情页里点某个附加文件时传那条相对路径（可能是 `reference/api.md`）。
+     *
+     * 还没进过详情时顺手把详情也置上：详情页是编辑对话框的**宿主页**
+     * （浮层挂在它的 Scaffold 里，见 `SettingsSubPage` 的 overlay 参数），
+     * 不置的话对话框没有宿主、点了也不会出现。
+     */
+    fun editSkill(entry: SkillEntry, relativePath: String = "SKILL.md") {
+        val s = _state.value
+        val body = SkillStore.readFile(s.projectPath, entry.scope, entry.name, relativePath).getOrElse { error ->
             _state.update { it.copy(message = "打开失败：${error.message ?: "未知原因"}", messageIsError = true) }
             return
         }
@@ -962,18 +1137,40 @@ class WorkspaceViewModel(
             it.copy(
                 skills = it.skills?.copy(
                     createForm = null,
-                    detail = it.skills.detail
-                        ?: SkillDetail(entry, SkillStore.listFiles(s.projectPath, entry.scope, entry.name)),
-                    editing = SkillEditTarget(entry.name, entry.scope, fileName, body),
+                    urlDraft = null,
+                    detail = it.skills.detail ?: SkillDetail(
+                        entry = entry,
+                        tree = SkillStore.listTree(s.projectPath, entry.scope, entry.name),
+                    ),
+                    editing = SkillEditTarget(
+                        name = entry.name,
+                        scope = entry.scope,
+                        relativePath = relativePath,
+                        body = body,
+                        nameError = nameErrorFor(relativePath, entry.name, body),
+                    ),
                 ),
             )
         }
     }
 
+    /** 只有 `SKILL.md` 有名字一致性约束；附加文件与目录名无关。 */
+    private fun nameErrorFor(relativePath: String, skillName: String, body: String): String? =
+        if (relativePath == "SKILL.md") SkillStore.nameConflict(skillName, body) else null
+
     fun updateSkillBody(body: String) = _state.update {
         val skills = it.skills ?: return@update it
         val editing = skills.editing ?: return@update it
-        it.copy(skills = skills.copy(editing = editing.copy(body = body)))
+        it.copy(
+            skills = skills.copy(
+                // 每次改动都重算名字冲突：对话框要能**实时**告诉用户"name 对不上"，
+                // 而不是等他点了保存再报错（那时内容可能已经写了几百行）。
+                editing = editing.copy(
+                    body = body,
+                    nameError = nameErrorFor(editing.relativePath, editing.name, body),
+                ),
+            ),
+        )
     }
 
     fun cancelSkillEdit() = _state.update {
@@ -983,26 +1180,32 @@ class WorkspaceViewModel(
     /**
      * 保存正在编辑的文件。
      *
-     * 保存后**回到原来那一页**（详情页还在就回详情页并刷新文件列表），
+     * 保存后**回到原来那一页**（详情页还在就回详情页并刷新文件树），
      * 而不是一路弹回列表 —— 那样用户想接着改第二个文件就得重新点进去。
+     *
+     * ⚠️ 失败时**不关对话框**：`SKILL.md` 的 `name` 与目录名不一致是这里最容易
+     * 踩到的错误（`SkillStore.writeFile` 会拒绝），关掉对话框等于让用户重新输入一遍。
+     * 保持打开、把原因显示出来，用户改一行就能再存。
      */
     fun saveSkill() {
         val s = _state.value
         val editing = s.skills?.editing ?: return
+        if (!editing.saveable) return
         val result = SkillStore.writeFile(
-            s.projectPath, editing.scope, editing.name, editing.fileName, editing.body,
+            s.projectPath, editing.scope, editing.name, editing.relativePath, editing.body,
         )
         _state.update { state ->
             val detail = state.skills?.detail
             state.copy(
                 skills = state.skills?.copy(
-                    editing = null,
+                    editing = if (result.isSuccess) null else editing,
                     detail = detail?.copy(
-                        files = SkillStore.listFiles(state.projectPath, detail.entry.scope, detail.entry.name),
+                        tree = SkillStore.listTree(state.projectPath, detail.entry.scope, detail.entry.name),
                     ),
                 ),
-                message = if (result.isSuccess) "${editing.fileName} 已保存"
+                message = if (result.isSuccess) "${editing.relativePath} 已保存"
                 else "保存失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+                messageIsError = result.isFailure,
             )
         }
     }
