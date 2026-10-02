@@ -191,6 +191,21 @@ dependencies {
     // 模糊效果：独立 artifact，Android 需 API 33+（RuntimeShader），用 isRuntimeShaderSupported() 门控
     implementation 'top.yukonga.miuix.kmp:miuix-blur-android:0.9.4'
 
+    /*
+     * 基线配置文件（app/src/main/baseline-prof.txt）的**装机器**。
+     *
+     * 它现在会由 activity-compose 间接带进来，所以包体与行为上"不写也能用" ——
+     * 但**不写就没人替它说话**：哪天 activity 的一次版本升级不再依赖它，
+     * 打好的 assets/dexopt/baseline.prof 就会静静地留在包里没人安装，
+     * 而首屏那几百毫秒的收益消失得毫无痕迹（profile 的收益本来就没人能"看出来"）。
+     * 显式声明把这件事变成一处可检查的、明确的意图。
+     *
+     * 为什么需要它：API 26~27 没有系统级的 profile 安装流程，要靠这里注册的
+     * Startup Initializer 在进程启动时把 baseline.prof 交给 ART；API 28+ 由系统自己处理。
+     * 本工程 minSdk 是 24 —— 也就是说**最低支持的那几档系统正是最需要它的时候**。
+     */
+    implementation 'androidx.profileinstaller:profileinstaller:1.4.0'
+
     // 原版引擎源码里用到了 androidx.annotation 的 @NonNull/@Nullable 等注解，仅编译期需要
     compileOnly 'androidx.annotation:annotation:1.8.1'
 

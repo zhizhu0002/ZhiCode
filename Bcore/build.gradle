@@ -38,7 +38,27 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false
+            /*
+             * 与 app 一致地开 R8（用户要求「全局开 R8」）。
+             *
+             * 这个模块的收益比 app 小 —— `Bcore/proguard-rules.pro` 把
+             * `top.niunaijun.blackbox.**` 与 `mirror.**` 整包 keep 住了
+             * （那是注解驱动反射的要求，见该文件），所以自己的类不会被改名或裁掉。
+             * 能压掉的是跟着进来的第三方（toml4j、FreeReflection、androidx.core）
+             * 里没人用到的部分。
+             *
+             * ⚠️ 库模块开 minify 是**先于使用方**发生的：R8 在 Bcore 自己的
+             * 变体上先跑一遍，产出的类再由 app 的 R8 处理。所以这里能看到的
+             * 「谁被用到」只有 Bcore 自己 —— 只靠 app 侧规则保不住的东西，
+             * 必须在**本模块**的 proguard-rules.pro（自己的构建）或
+             * consumer-rules.pro（导出给使用方）里声明。两者分工别搞混。
+             *
+             * 另一个必然后果：本模块的 R8 拿编译期 android.jar 当参照，
+             * 而 Bcore 要 hook 的正是 android.jar 里**不存在**的那些类
+             * （ActivityThread、ServiceManager、dalvik.system.* 等）。
+             * 具体 drop 的 -dontwarn 见 proguard-rules.pro 第 5 节。
+             */
+            minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }

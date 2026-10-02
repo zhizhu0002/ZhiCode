@@ -1,0 +1,75 @@
+# ZhiCode 的基线配置文件（baseline profile）。
+#
+# ## 这是什么
+#
+# 告诉 ART「这些方法在冷启动路径上」，安装时（或后台空闲时）由
+# androidx.profileinstaller 把它们 AOT 编译好。效果是首屏少几百毫秒的 JIT 预热。
+#
+# 格式是人类可读的（未混淆）类名 + 方法描述符，构建时由 AGP 按 mapping 重写：
+#
+#     Lcom/example/Foo;->bar(I)V
+#     Lcom/example/Foo;-><init>()V          # 构造器
+#     Lcom/example/Foo;-><clinit>()V        # static {}
+#
+# ## ⚠️ 这份是**手写的冷启动路径**，不是设备实测出来的
+#
+# 真正常用的做法是在真机上跑一遍启动、用 `am profile` 或 Macrobenchmark 采出
+# `baseline-prof.txt`。本工程没有那个条件（没有 x86_64 宿主、也没有 CI 设备），
+# 所以这里只覆盖**由代码结构就能确定**的那一段：Application → Activity →
+# ViewModel 构造与首次载入 → 主题 → 根 Composable。
+#
+# 因此有几条纪律：
+#
+# 1. **每一条都在编译产物里核对过**（用 javap 读 debug 的 classes.jar），
+#    不是照抄类名猜的。描述符写错的话 AGP 会报 "Baseline profile rule … not found"
+#    并把那一条丢掉 —— 构建日志里能看出来（本文件提交前特意看过一遍，无该告警）。
+# 2. **不写库里的类**。Compose / Miuix / AndroidX 各自**随包发布**了自己的
+#    baseline profile，AGP 会自动合并（构建产物里的
+#    `app/build/outputs/apk/release/baselineProfiles/{0,1}/` 就是它们）。
+#    在这里重复一遍不但没用，还会把「谁是热路径」这件事和上游的维护脱钩。
+# 3. **宁可少写**。写错了不会崩，只会白占几 KB 的 profile 体积；
+#    但把明显不是启动路径的方法塞进来，会让这份文件失去"可核对"这个唯一价值。
+#
+# ## 这几条为什么在路径上（对应代码）
+#
+# - ZhiCodeApplication：进程一启动就走 <clinit> / <init> / attachBaseContext / onCreate。
+# - MainActivity：onCreate 里 setContent，onResume 里续接被挂起的 APK 安装流程。
+# - WorkspaceViewModel：由 Activity 的 by viewModels 构造；initSessionState 里
+#   串起「同步生效配置 → 同步角色卡 → 确保工作区目录存在 → 列会话」，这是首屏
+#   真正花时间的一段（已下到 Dispatchers.IO，但类加载与首次调用仍在这里）。
+# - WorkspacePaths：ensureWorkspace 会调，属于启动期一定会加载的类。
+# - ZhiThemeKt / AppScaffoldKt：setContent 之后立刻进入的渲染入口。
+
+# ---- Application ----
+HSPLcom/zhizhu/zhicode/compose/ZhiCodeApplication;-><clinit>()V
+HSPLcom/zhizhu/zhicode/compose/ZhiCodeApplication;-><init>()V
+HSPLcom/zhizhu/zhicode/compose/ZhiCodeApplication;->attachBaseContext(Landroid/content/Context;)V
+HSPLcom/zhizhu/zhicode/compose/ZhiCodeApplication;->onCreate()V
+HSPLcom/zhizhu/zhicode/compose/ZhiCodeApplication;->installCrashLogger()V
+
+# ---- Activity ----
+HSPLcom/zhizhu/zhicode/compose/MainActivity;-><init>()V
+HSPLcom/zhizhu/zhicode/compose/MainActivity;->onCreate(Landroid/os/Bundle;)V
+HSPLcom/zhizhu/zhicode/compose/MainActivity;->onResume()V
+HSPLcom/zhizhu/zhicode/compose/MainActivity;->getViewModel()Lcom/zhizhu/zhicode/compose/state/WorkspaceViewModel;
+HSPLcom/zhizhu/zhicode/compose/MainActivity;->onCreate$lambda$0(Lcom/zhizhu/zhicode/compose/MainActivity;Landroidx/compose/runtime/Composer;I)V
+
+# ---- ViewModel ----
+HSPLcom/zhizhu/zhicode/compose/state/WorkspaceViewModelFactory;-><init>(Landroid/app/Application;Lcom/zhizhu/zhicode/compose/data/WorkspaceRepository;)V
+HSPLcom/zhizhu/zhicode/compose/state/WorkspaceViewModelFactory;->create(Ljava/lang/Class;)Landroidx/lifecycle/ViewModel;
+HSPLcom/zhizhu/zhicode/compose/state/WorkspaceViewModel;-><init>(Landroid/app/Application;Lcom/zhizhu/zhicode/compose/data/WorkspaceRepository;)V
+HSPLcom/zhizhu/zhicode/compose/state/WorkspaceViewModel;->initSessionState()V
+HSPLcom/zhizhu/zhicode/compose/state/WorkspaceViewModel;->syncActiveProfile()V
+HSPLcom/zhizhu/zhicode/compose/state/WorkspaceViewModel;->syncRoleCardFromStore()V
+HSPLcom/zhizhu/zhicode/compose/state/WorkspaceViewModel;->ensureWorkspace()V
+
+# ---- 工作区路径 ----
+HSPLcom/zhizhu/zhicode/compose/data/WorkspacePaths;-><clinit>()V
+HSPLcom/zhizhu/zhicode/compose/data/WorkspacePaths;->defaultProject()Ljava/lang/String;
+HSPLcom/zhizhu/zhicode/compose/data/WorkspacePaths;->ensure(Ljava/lang/String;)Z
+HSPLcom/zhizhu/zhicode/compose/data/WorkspacePaths;->exists(Ljava/lang/String;)Z
+
+# ---- 渲染入口 ----
+HSPLcom/zhizhu/zhicode/compose/theme/ZhiThemeKt;-><clinit>()V
+HSPLcom/zhizhu/zhicode/compose/ui/AppScaffoldKt;->ZhiCodeApp(Lcom/zhizhu/zhicode/compose/state/WorkspaceViewModel;Landroidx/compose/runtime/Composer;II)V
+HSPLcom/zhizhu/zhicode/compose/ui/AppScaffoldKt;->ZhiCodeScreen(Lcom/zhizhu/zhicode/compose/model/WorkspaceUiState;Lcom/zhizhu/zhicode/compose/state/WorkspaceViewModel;ZLandroidx/compose/runtime/Composer;I)V
