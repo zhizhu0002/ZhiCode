@@ -101,6 +101,10 @@ public final class SessionConfig {
     public boolean webSearchEnabled = true;
     public String webSearchProvider = "auto";
     public int webSearchMaxResults = 6;
+    /** 密钥制搜索服务（tavily/exa/brave）的 Key；免费后端忽略。 */
+    public String webSearchApiKey = "";
+    /** SearXNG 实例地址；只有 provider=searxng 用到。 */
+    public String webSearchBaseUrl = "";
     public int webFetchMaxChars = 30000;
     public int webTimeoutMs = 15000;
 
@@ -164,6 +168,8 @@ public final class SessionConfig {
         copy.webSearchEnabled = webSearchEnabled;
         copy.webSearchProvider = webSearchProvider;
         copy.webSearchMaxResults = webSearchMaxResults;
+        copy.webSearchApiKey = webSearchApiKey;
+        copy.webSearchBaseUrl = webSearchBaseUrl;
         copy.webFetchMaxChars = webFetchMaxChars;
         copy.webTimeoutMs = webTimeoutMs;
 

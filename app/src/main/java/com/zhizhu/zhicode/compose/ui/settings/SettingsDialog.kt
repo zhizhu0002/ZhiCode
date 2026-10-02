@@ -260,16 +260,42 @@ private fun NetworkPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit)
     // 关闭联网搜索时后续配置全部折叠（官方 SettingsPage 的 AnimatedVisibility 模式）
     androidx.compose.animation.AnimatedVisibility(visible = draft.webSearchEnabled) {
         Column {
+            // 搜索服务（形态参考 RikkaHub 的「搜索服务」页）：免费后端与密钥制后端
+            // 并列，选中哪个哪个生效；密钥按服务各存一份，切换服务不丢。
             SettingsChoice(
-                title = "搜索后端",
+                title = "搜索服务",
                 options = WebSearchProvider.entries.map { it.label },
                 selectedIndex = WebSearchProvider.entries.indexOf(draft.webSearchProvider),
                 onSelect = { onChange(draft.copy(webSearchProvider = WebSearchProvider.entries[it])) },
                 summary = draft.webSearchProvider.detail,
             )
 
+            // 密钥 / 实例地址跟着选中的服务走：选 Tavily 出 Key 框，选 SearXNG 出地址框。
+            if (draft.webSearchProvider.needsKey) {
+                SettingsTextField(
+                    title = "${draft.webSearchProvider.label} API Key",
+                    value = draft.webSearchKeys[draft.webSearchProvider] ?: "",
+                    onValueChange = {
+                        onChange(draft.copy(
+                            webSearchKeys = draft.webSearchKeys
+                                + (draft.webSearchProvider to it.trim())))
+                    },
+                    summary = draft.webSearchProvider.detail,
+                    singleLine = true,
+                )
+            }
+            if (draft.webSearchProvider.needsBaseUrl) {
+                SettingsTextField(
+                    title = "SearXNG 实例地址",
+                    value = draft.webSearchSearxngUrl,
+                    onValueChange = { onChange(draft.copy(webSearchSearxngUrl = it.trim())) },
+                    summary = "如 https://searx.example.com，实例需开启 JSON 输出（format=json）",
+                    singleLine = true,
+                )
+            }
+
             SettingsIntField(
-                title = "默认搜索结果数（1-10）",
+                title = "默认搜索结果数（1-50）",
                 value = draft.webSearchMaxResults,
                 min = WEB_RESULTS_MIN,
                 max = WEB_RESULTS_MAX,

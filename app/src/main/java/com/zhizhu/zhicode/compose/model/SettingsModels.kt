@@ -16,11 +16,27 @@ enum class SettingsCategory(val label: String, val tabLabel: String) {
     EXTENSIONS("扩展功能", "扩展"),
 }
 
-/** 联网搜索后端。对应原版 `webProviderValues` = {auto, duckduckgo, bing}。 */
-enum class WebSearchProvider(val label: String, val detail: String) {
-    AUTO("自动", "按顺序尝试 DuckDuckGo → Bing"),
-    DUCKDUCKGO("DuckDuckGo", "只走 DuckDuckGo"),
-    BING("Bing RSS", "只走 Bing 的 RSS 结果"),
+/**
+ * 搜索服务（形态参考 RikkaHub 的「搜索服务」页：免费后端与密钥制后端并列，
+ * 选中哪个哪个生效；密钥按服务各存一份，切换服务不丢）。
+ *
+ * [needsKey]/[needsBaseUrl] 决定设置页在选中该项时追加哪些输入框：
+ * 密钥制服务缺 Key 时搜索会明确报错（提示去哪里配），而不是静默回落免费后端 ——
+ * 用户配了 Tavily 却拿到 DuckDuckGo 的结果才是真正的坑。
+ */
+enum class WebSearchProvider(
+    val label: String,
+    val detail: String,
+    val needsKey: Boolean = false,
+    val needsBaseUrl: Boolean = false,
+) {
+    AUTO("自动（免费）", "按顺序尝试 DuckDuckGo → Bing"),
+    DUCKDUCKGO("DuckDuckGo", "免费，无需密钥"),
+    BING("Bing RSS", "免费，无需密钥"),
+    TAVILY("Tavily", "为 LLM 优化的 AI 搜索，Key 从 tavily.com 获取", needsKey = true),
+    EXA("Exa", "面向 AI 的语义搜索，Key 从 exa.ai 获取", needsKey = true),
+    BRAVE("Brave", "Brave Search API，Key 从 brave.com/search/api 获取", needsKey = true),
+    SEARXNG("SearXNG", "自建元搜索，填实例地址（需开 JSON 输出）", needsBaseUrl = true),
 }
 
 /** API 协议。对应参考图表单里「协议」值框的 `OpenAI Responses`。 */
@@ -650,6 +666,10 @@ data class AppSettings(
     val webSearchProvider: WebSearchProvider = WebSearchProvider.AUTO,
     val webSearchMaxResults: Int = 5,
     val webSearchTimeoutSec: Int = 15,
+    /** 密钥制搜索服务的 Key，按服务各存一份；切换服务不丢。 */
+    val webSearchKeys: Map<WebSearchProvider, String> = emptyMap(),
+    /** SearXNG 实例地址（如 https://searx.example.com），仅 SearXNG 服务用到。 */
+    val webSearchSearxngUrl: String = "",
     val autoCompact: Boolean = true,
     /** 自动压缩上限，取值 50..100（百分比）。 */
     val autoCompactPercent: Int = 80,
@@ -659,9 +679,9 @@ data class AppSettings(
     val activeProfileId: String = "",
 )
 
-/** 结果数合法区间，原版为 1–10。 */
+/** 结果数合法区间。原版为 1–10；应用户要求放宽到 50（密钥制服务扛得住这个量）。 */
 const val WEB_RESULTS_MIN = 1
-const val WEB_RESULTS_MAX = 10
+const val WEB_RESULTS_MAX = 50
 
 /** 联网超时合法区间（秒），原版为 5000–60000ms。 */
 const val WEB_TIMEOUT_MIN_SEC = 5
@@ -747,6 +767,8 @@ data class SettingsDraft(
     val webSearchProvider: WebSearchProvider,
     val webSearchMaxResults: Int,
     val webSearchTimeoutSec: Int,
+    val webSearchKeys: Map<WebSearchProvider, String>,
+    val webSearchSearxngUrl: String,
     val autoCompact: Boolean,
     val autoCompactPercent: Int,
     /** 当前分类 Tab。放在 draft 里，取消时一并丢弃，重新打开总是回到第一类。 */
@@ -772,6 +794,8 @@ data class SettingsDraft(
                 webSearchProvider = s.webSearchProvider,
                 webSearchMaxResults = s.webSearchMaxResults,
                 webSearchTimeoutSec = s.webSearchTimeoutSec,
+                webSearchKeys = s.webSearchKeys,
+                webSearchSearxngUrl = s.webSearchSearxngUrl,
                 autoCompact = s.autoCompact,
                 autoCompactPercent = s.autoCompactPercent,
             )
@@ -801,6 +825,8 @@ data class SettingsDraft(
             webSearchProvider = webSearchProvider,
             webSearchMaxResults = clampWebResults(webSearchMaxResults),
             webSearchTimeoutSec = clampWebTimeoutSec(webSearchTimeoutSec),
+            webSearchKeys = webSearchKeys,
+            webSearchSearxngUrl = webSearchSearxngUrl.trim(),
             autoCompact = autoCompact,
             autoCompactPercent = clampCompactPercent(autoCompactPercent),
             customSystemPrompt = customSystemPrompt,

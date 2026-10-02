@@ -1692,9 +1692,16 @@ class WorkspaceViewModel(
                 WebSearchProvider.AUTO -> "auto"
                 WebSearchProvider.DUCKDUCKGO -> "duckduckgo"
                 WebSearchProvider.BING -> "bing"
+                WebSearchProvider.TAVILY -> "tavily"
+                WebSearchProvider.EXA -> "exa"
+                WebSearchProvider.BRAVE -> "brave"
+                WebSearchProvider.SEARXNG -> "searxng"
             },
             webSearchMaxResults = s.settings.webSearchMaxResults,
             webTimeoutSec = s.settings.webSearchTimeoutSec,
+            // 密钥只发给**当前选中**的服务；切换服务时各自取各自的 Key，不串。
+            webSearchApiKey = s.settings.webSearchKeys[s.settings.webSearchProvider] ?: "",
+            webSearchBaseUrl = s.settings.webSearchSearxngUrl,
             rootExecutionEnabled = s.settings.rootExecutionEnabled,
             sandboxAgentFullAccess = s.settings.sandboxAgentFullAccess,
             forcedKeepAliveEnabled = s.settings.forcedKeepAliveEnabled,

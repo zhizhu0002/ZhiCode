@@ -75,7 +75,7 @@ public final class SettingsPageStructureTest {
         // 逐个锚定「调用点 + 标题」：只数 `SettingsIntField(` 出现几次是不够的，
         // 那样把某一项换回滚轮、另一项复制成两条也能凑够数目。
         String[] titles = {
-                "默认搜索结果数（1-10）",
+                "默认搜索结果数（1-50）",
                 "联网超时（秒）",
                 "上下文窗口",
                 "自动压缩上限（50-100%，安全缓冲优先）",

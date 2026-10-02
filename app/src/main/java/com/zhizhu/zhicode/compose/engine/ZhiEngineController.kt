@@ -51,6 +51,10 @@ internal data class EngineOverrides(
     val webSearchProvider: String? = null,
     val webSearchMaxResults: Int? = null,
     val webTimeoutSec: Int? = null,
+    /** 密钥制搜索服务（Tavily/Exa/Brave）的 Key；只在选中的服务需要时非空。 */
+    val webSearchApiKey: String? = null,
+    /** SearXNG 实例地址；只有 searxng 服务用到。 */
+    val webSearchBaseUrl: String? = null,
     val rootExecutionEnabled: Boolean? = null,
     val sandboxAgentFullAccess: Boolean? = null,
     val forcedKeepAliveEnabled: Boolean? = null,
@@ -192,6 +196,8 @@ internal class ZhiEngineController(
         o.webSearchProvider?.let { if (it.isNotBlank()) config.webSearchProvider = it }
         o.webSearchMaxResults?.let { if (it > 0) config.webSearchMaxResults = it }
         o.webTimeoutSec?.let { if (it > 0) config.webTimeoutMs = it * 1000 }
+        o.webSearchApiKey?.let { if (it.isNotBlank()) config.webSearchApiKey = it }
+        o.webSearchBaseUrl?.let { config.webSearchBaseUrl = it }
         o.rootExecutionEnabled?.let { config.rootExecutionEnabled = it }
         o.sandboxAgentFullAccess?.let { config.sandboxAgentFullAccess = it }
         o.forcedKeepAliveEnabled?.let { config.forcedKeepAliveEnabled = it }
