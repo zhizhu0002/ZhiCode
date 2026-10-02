@@ -104,6 +104,22 @@ public final class LayoutConsistencyTest {
                 "UserBubble 需要可用宽度才能把上限表达成比例，"
                         + "所以要用 BoxWithConstraints 取 maxWidth");
 
+        // ---- 2b. 流式文字的切换必须有过渡，不许只让卡片自己动 ----------------
+        //
+        // 用户原话："有些文本没有动画，只有card有"。当时卡片高度有 animateContentSize，
+        // 但思考面板展开/收起、工具行状态区（运行中→摘要→输出）、工具组标题
+        // 的文字都是瞬间蹦出来/消失的，流式光标也是一块静止的字符。
+        require(cards.split(Pattern.quote("Crossfade(")).length - 1 >= 3,
+                "思考面板 / 工具行状态区 / 工具组标题的文字切换必须走 Crossfade 淡变"
+                        + "（至少 3 处）：只让卡片高度动、文字瞬间跳变是被点名的观感问题。"
+                        + "淡变时长必须取 ZhiMotion 的令牌，不要写裸 tween。");
+        require(cards.contains("rememberInfiniteTransition("),
+                "流式光标必须闪烁（rememberInfiniteTransition + graphicsLayer），"
+                        + "静止的 ▍ 看不出流式还在进行");
+        require(cards.contains("AnimatedVisibility(") && cards.contains("ContextFooter("),
+                "上下文页脚必须用 AnimatedVisibility 淡入，"
+                        + "不许在流式结束时瞬间出现");
+
         // ---- 3. 弹窗宽度必须取自 ZhiDialogWidth ------------------------------
         String shell = stripComments(read(root, DIALOG_SHELL));
         require(shell.contains("object ZhiDialogWidth"),

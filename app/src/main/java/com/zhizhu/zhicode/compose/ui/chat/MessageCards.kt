@@ -1,7 +1,16 @@
 package com.zhizhu.zhicode.compose.ui.chat
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,6 +57,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiImageViewer
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
 import com.zhizhu.zhicode.compose.ui.ZhiNoticeBar
 import com.zhizhu.zhicode.compose.ui.ZhiNoticeTone
+import top.yukonga.miuix.kmp.anim.SinOutEasing
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -225,14 +236,34 @@ fun AssistantCard(
             // 拼进去的话光标会被当成行内内容参与解析（例如紧跟在 ` 后面会变成代码）。
             ZhiMarkdown(source = item.body, bodyFontSize = 14.sp)
             if (item.streaming) {
+                // 流式光标呼吸闪烁：之前是一块静止的字符，文本区里唯一「活着」的
+                // 记号却不动。「只有卡片在动」的观感有一半来自这里。
+                // 周期 = 淡入 300ms 去程 + 300ms 回程；alpha 走 draw 层，不重组。
+                val cursor = rememberInfiniteTransition(label = "stream-cursor")
+                val cursorAlpha by cursor.animateFloat(
+                    initialValue = 1f,
+                    targetValue = 0.15f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(ZhiMotion.FADE_IN_MILLIS, easing = SinOutEasing),
+                        repeatMode = RepeatMode.Reverse,
+                    ),
+                    label = "stream-cursor-alpha",
+                )
                 Text(
                     text = "▍",
                     color = scheme.onSurfaceVariantSummary,
                     fontSize = ZhiTextScale.BodySmall,
-                    modifier = Modifier.padding(top = 1.dp),
+                    modifier = Modifier
+                        .padding(top = 1.dp)
+                        .graphicsLayer { alpha = cursorAlpha },
                 )
             }
-            if (!item.streaming && item.contextTokens >= 0) {
+            // 上下文页脚淡入：流式一结束它就出现，之前是瞬间蹦出来的。
+            AnimatedVisibility(
+                visible = !item.streaming && item.contextTokens >= 0,
+                enter = fadeIn(ZhiMotion.fadeInSpec),
+                exit = fadeOut(ZhiMotion.fadeOutSpec),
+            ) {
                 ContextFooter(
                     tokens = item.contextTokens,
                     window = item.contextWindow,
@@ -298,41 +329,45 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                     )
                 }
             }
-        if (item.thinkingExpanded) {
-            // 展开/折叠走动画，高度平滑变化
-            Column(
-                modifier = Modifier.animateContentSize(
-                    animationSpec = ZhiMotion.sizeSpec,
-                ),
-            ) {
-                if (item.processSteps.isNotEmpty()) {
-                    item.processSteps.forEach { step ->
+        // 展开/收起：高度由 AssistantCard 外层的 animateContentSize 平滑过渡，
+        // 两份文字本身再用 Crossfade 淡变 —— 之前只有卡片高度在动，
+        // 文字是瞬间蹦出来/消失的。
+        Crossfade(
+            targetState = item.thinkingExpanded,
+            animationSpec = ZhiMotion.fadeOutSpec,
+            label = "thinking-panel",
+        ) { expanded ->
+            if (expanded) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (item.processSteps.isNotEmpty()) {
+                        item.processSteps.forEach { step ->
+                            Text(
+                                text = "· $step",
+                                color = scheme.onSurfaceVariantSummary,
+                                fontSize = ZhiTextScale.Caption,
+                                modifier = Modifier.padding(start = 6.dp, top = 2.dp),
+                            )
+                        }
+                    }
+                    if (item.thinking.isNotEmpty()) {
                         Text(
-                            text = "· $step",
+                            text = item.thinking,
                             color = scheme.onSurfaceVariantSummary,
                             fontSize = ZhiTextScale.Caption,
-                            modifier = Modifier.padding(start = 6.dp, top = 2.dp),
+                            modifier = Modifier.padding(start = 6.dp, top = 4.dp),
                         )
                     }
                 }
-                if (item.thinking.isNotEmpty()) {
-                    Text(
-                        text = item.thinking,
-                        color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Caption,
-                        modifier = Modifier.padding(start = 6.dp, top = 4.dp),
-                    )
-                }
+            } else if (item.thinking.isNotEmpty()) {
+                Text(
+                    text = item.thinking,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Caption,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
             }
-        } else if (item.thinking.isNotEmpty()) {
-            Text(
-                text = item.thinking,
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Caption,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 6.dp),
-            )
         }
     }
 }
@@ -383,13 +418,21 @@ fun ToolGroupCard(
                 tint = scheme.onSurfaceVariantSummary,
                 modifier = Modifier.size(14.dp),
             )
-            Text(
-                text = if (item.groupCompleted && failed == 0) "已运行 ${item.tools.size} 个工具" else "正在运行工具",
-                color = scheme.onSurface,
-                fontSize = ZhiTextScale.BodySmall,
-                fontWeight = FontWeight.Medium,
+            // 「正在运行工具 → 已运行 N 个工具」：文字淡变，不再瞬间跳字。
+            // Crossfade 只管 alpha，宽度/高度交给外层布局自然过渡。
+            Crossfade(
+                targetState = item.groupCompleted && failed == 0,
+                animationSpec = ZhiMotion.fadeOutSpec,
+                label = "group-label",
                 modifier = Modifier.padding(start = 5.dp),
-            )
+            ) { done ->
+                Text(
+                    text = if (done) "已运行 ${item.tools.size} 个工具" else "正在运行工具",
+                    color = scheme.onSurface,
+                    fontSize = ZhiTextScale.BodySmall,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
             Box(modifier = Modifier.weight(1f))
             // 计数用 Miuix Badge：失败时换成红色容器
             Badge(
@@ -535,50 +578,59 @@ private fun ToolRow(
             )
         }
 
-        when {
-            // 运行中 / 等待授权：底部一行状态说明
-            !activity.completed -> Text(
-                text = runningToolLabel(activity),
-                color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Micro,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(start = 23.dp, top = 2.dp),
-            )
-            // 折叠且有详情：只显示 ⎿ 紧凑摘要
-            hasDetails && !activity.expanded -> Text(
-                text = "  ⎿  " + compactToolSummary(activity),
-                color = if (activity.failed) ZhiColors.red() else scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(start = 23.dp, bottom = 2.dp),
-            )
-            // 展开：全量输出。
-            //
-            // 写文件类工具（Write / Edit / MultiEdit / Delete）的输出是**统一 diff**，
-            // 逐行着色渲染：+绿 / −红 / @@ 用强调色 / 文件头弱化。与「变更」面板共用
-            // `DiffLines`（`ui/panes/ChangesPane.kt`）—— 着色规则只有那一份，
-            // 否则同一份 diff 在对话里与变更面板里会长得不一样。
-            //
-            // 左右不留给外层 Card：着色条要顶到卡片两边（像 diff 该有的样子），
-            // 所以 insideMargin 只给上下；横向留白由每一行自己出（见 DiffLines）。
-            activity.expanded && hasDetails -> Card(
-                modifier = Modifier.padding(start = 23.dp, top = 5.dp),
-                cornerRadius = ZhiRadius.inner,
-                insideMargin = if (activity.isFileDiff()) PaddingValues(vertical = 6.dp) else PaddingValues(8.dp),
-                colors = CardDefaults.defaultColors(
-                    color = ZhiColors.cardInnerSurface(),
-                    contentColor = scheme.onSurfaceVariantSummary,
-                ),
-            ) {
-                if (activity.isFileDiff()) {
-                    DiffLines(activity.output)
-                } else {
-                    Text(
-                        text = activity.output,
-                        fontSize = ZhiTextScale.Footnote,
-                        fontFamily = FontFamily.Monospace,
-                    )
+        // 状态区切换（运行中 → 折叠摘要 → 展开输出）整块 Crossfade 淡变：
+        // 高度仍由外层 Column 的 animateContentSize 管，文字不再瞬间跳变。
+        // 目标态收敛成枚举：运行中 elapsedMs 一直在变，但 region 不变，
+        // Crossfade 就不会被打断重放。
+        Crossfade(
+            targetState = toolStatusRegion(activity),
+            animationSpec = ZhiMotion.fadeOutSpec,
+            label = "tool-status",
+        ) { region ->
+            when (region) {
+                ToolStatusRegion.RUNNING -> Text(
+                    text = runningToolLabel(activity),
+                    color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Micro,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(start = 23.dp, top = 2.dp),
+                )
+                ToolStatusRegion.COLLAPSED -> Text(
+                    text = "  ⎿  " + compactToolSummary(activity),
+                    color = if (activity.failed) ZhiColors.red() else scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Footnote,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(start = 23.dp, bottom = 2.dp),
+                )
+                // 展开：全量输出。
+                //
+                // 写文件类工具（Write / Edit / MultiEdit / Delete）的输出是**统一 diff**，
+                // 逐行着色渲染：+绿 / −红 / @@ 用强调色 / 文件头弱化。与「变更」面板共用
+                // `DiffLines`（`ui/panes/ChangesPane.kt`）—— 着色规则只有那一份，
+                // 否则同一份 diff 在对话里与变更面板里会长得不一样。
+                //
+                // 左右不留给外层 Card：着色条要顶到卡片两边（像 diff 该有的样子），
+                // 所以 insideMargin 只给上下；横向留白由每一行自己出（见 DiffLines）。
+                ToolStatusRegion.EXPANDED -> Card(
+                    modifier = Modifier.padding(start = 23.dp, top = 5.dp),
+                    cornerRadius = ZhiRadius.inner,
+                    insideMargin = if (activity.isFileDiff()) PaddingValues(vertical = 6.dp) else PaddingValues(8.dp),
+                    colors = CardDefaults.defaultColors(
+                        color = ZhiColors.cardInnerSurface(),
+                        contentColor = scheme.onSurfaceVariantSummary,
+                    ),
+                ) {
+                    if (activity.isFileDiff()) {
+                        DiffLines(activity.output)
+                    } else {
+                        Text(
+                            text = activity.output,
+                            fontSize = ZhiTextScale.Footnote,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
                 }
+                ToolStatusRegion.QUIET -> Unit
             }
         }
     }
@@ -635,6 +687,21 @@ private fun runningToolLabel(activity: ToolActivity): String = when {
     activity.awaitingPermission -> "等待授权…"
     activity.elapsedMs > 0 -> "运行中 · ${formatElapsed(activity.elapsedMs)}"
     else -> "运行中…"
+}
+
+/**
+ * 工具行状态区（Crossfade 的目标态）：运行中 / 折叠摘要 / 展开输出 / 无内容。
+ *
+ * 收敛成枚举而不是拿布尔组合当 key：运行中的 `elapsedMs` 每秒都在变，
+ * 但只要 completed/expanded 没翻转，region 就不变 —— Crossfade 不会被打断重放。
+ */
+private enum class ToolStatusRegion { RUNNING, COLLAPSED, EXPANDED, QUIET }
+
+private fun toolStatusRegion(activity: ToolActivity): ToolStatusRegion = when {
+    !activity.completed -> ToolStatusRegion.RUNNING
+    activity.output.isBlank() -> ToolStatusRegion.QUIET
+    activity.expanded -> ToolStatusRegion.EXPANDED
+    else -> ToolStatusRegion.COLLAPSED
 }
 
 /**
