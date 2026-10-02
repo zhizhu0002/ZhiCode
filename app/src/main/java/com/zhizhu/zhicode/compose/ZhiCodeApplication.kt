@@ -8,6 +8,7 @@ import com.zhizhu.zhicode.sandbox.SandboxConsole
 import com.zhizhu.zhicode.sandbox.SandboxProcess
 import com.zhizhu.zhicode.sandbox.SandboxStage
 import com.zhizhu.zhicode.sandbox.SandboxShell
+import com.termux.app.zhicode.api.zcode.ZcodeDeviceMid
 import com.termux.shared.termux.TermuxConstants
 
 /**
@@ -36,6 +37,11 @@ class ZhiCodeApplication : Application() {
 
         // 必须是第一个动作：后面所有路径都依赖它
         TermuxConstants.configure(base)
+
+        // ZCode 的设备标识要在任何请求发出之前就位。晚一步的话 provider 会回退到
+        // 进程内的临时值 —— 那个值每次启动都不同，服务端认不出是同一台设备，
+        // 额度与套餐模型就会时有时无。见 ZcodeDeviceMid 的说明。
+        ZcodeDeviceMid.install(base)
 
         SandboxConsole.init(base)
         // 阶段日志按 pid 分文件，必须尽早初始化：引擎 attach/create 的每一步都靠它留痕，

@@ -8,30 +8,40 @@ import java.util.Locale
 /**
  * ZCode 协议的**纯逻辑**层（刻意不 import 任何 `android.*`）。
  *
- * ## 与参考实现（反编译 IQ Code 的 `ZcodePlanProvider` + `ZcodeVault`）的关系
+ * ## 依据是官方开源源码，不是反编译
  *
- * 报文形状与它一致：请求是 **Anthropic Messages** 的形态（`model` / `max_tokens` /
- * `stream` / `system` 缓存块 / `messages` / `tools` / `metadata.user_id`），
- * 响应走 Anthropic 的事件流（`message_start` / `content_block_delta` / `message_stop`），
- * 模型是 GLM 系列，另有额度查询。
+ * 报文形状：请求是 **Anthropic Messages** 的形态（`model` / `max_tokens` / `stream` /
+ * `system` 缓存块 / `messages` / `tools` / `metadata.user_id`），响应走 Anthropic 的
+ * 事件流（`message_start` / `content_block_delta` / `message_stop`），另有额度查询。
  *
- * ### 一处刻意的不照做
+ * 具体的取值与请求头清单来自 **`zai-org/ZCode`（Apache-2.0，ZCode 官方客户端本体）**：
+ * `packages/shared/src/zcode-source-headers.ts`（来源头全集）、
+ * `apps/zcode-cli/packages/bootstrap/src/runtime-platform-headers.ts`（平台头取法）、
+ * `packages/services/src/model-provider/zaiStartPlanBilling.ts` 与
+ * `packages/shared/src/zcodeEndpoint.ts`（端点构造）、
+ * `apps/zcode-cli/packages/adapters/src/model/runner-attribution.ts`（请求级归因头）。
  *
- * 参考实现把**网关地址与一整套身份标识**（`X-ZCode-Agent`、`HTTP-Referer`、`X-Title`、
- * `X-Platform: linux-x64`、`X-Os-Category: linux`…）用 XOR 混淆藏在 `ZcodeVault` 里，
- * 界面上写「无需填写，直连 ZCode 网关」。那些值**不是我们的**：它们是那个产品的
- * 官方客户端身份（`X-Platform` / `X-Os-Version` 明确自称官方 Linux CLI），
- * 混进本应用等于用别人的凭据去消费别人的服务；而且对方一旦撤销那个标识，
- * 所有用户会同时失效，我们连原因都看不到。
+ * ### 为什么以前不是这么做的（这段历史要留着，否则会被改回去）
  *
- * 所以这里的做法是：
+ * 最早这里是照 IQ Code（另一个应用）的反编译结果写的。当时有两个判断，现在都变了：
  *
- * - **网关地址**就是配置里已有的 `baseUrl`（用户自己填）；
- * - **授权码**就是 `apiKey`；
- * - **身份头**由用户在 `extraHeaders`（JSON 对象）里自己给，我们不预置任何一条。
+ * 1. 「那些身份标识是**别人的**，内置等于冒充另一个产品」—— 那个客户端后来以
+ *    **Apache-2.0 开源**了，这些头是它公开的协议契约，不是泄露出来的私密凭据。
+ * 2. 「网关地址与版本不该写死」—— 这条**仍然成立**，而且现在更要紧：地址依旧只能
+ *    来自用户填的 `baseUrl`（`HTTP-Referer` 也从它推 origin），我们一个域名都不内置。
  *
- * 这样机制完全一样、能力不减少，但「连到哪、以谁的身份」是用户自己决定的，
- * 也才排得动障。
+ * 而真正逼着改的是真机上的两个错：额度恒回 `400 / 3001 parameter error`、
+ * 会话恒回 `405 / 3012 request has been blocked due to unusual activity`。
+ * 官方源码把第一个错的原因写得很直白（见 [ZcodeDeviceMid]）：**缺 `X-Device-Mid`**。
+ * 也就是说此前"只发功能上必需的头"这个取舍，代价是这个协议根本用不了。
+ *
+ * ### 现在的规则
+ *
+ * - **地址**：`baseUrl`（用户填）。不内置任何主机名。
+ * - **授权码**：`apiKey`（用户填）。
+ * - **请求头**：内置官方那一套**默认值**，并且**每一条都能被用户的 `extraHeaders` 覆盖**。
+ *   默认值里有意义的那些（版本号、来源标识）本来就是那个客户端的公开取值；
+ *   用户要连别的兼容网关时，覆盖是唯一能生效的方式。
  *
  * ## 为什么这一层要单独存在
  *
@@ -48,12 +58,31 @@ object ZcodeWire {
     const val ANTHROPIC_VERSION = "2023-06-01"
 
     /**
-     * 我们自己的 UA。
+     * `User-Agent` 的默认值。
      *
-     * 刻意**不**自称别人的官方客户端：改这一行的后果是"对服务端声称是另一个客户端"，
-     * 而那正是我们要避免的事。用户若确实需要冒充某个身份，用 [extraHeaders] 覆盖。
+     * **必须与 [DEFAULT_APP_VERSION] 说同一个版本**：官方客户端是
+     * `ZCode/${appVersion}`（`zcode-source-headers.ts`），UA 与
+     * `X-ZCode-App-Version` 说两个版本是自相矛盾的，反而更容易被风控挑出来。
      */
-    const val USER_AGENT = "ZhiCodeAndroid-JavaNative/0.15"
+    const val DEFAULT_APP_VERSION = "3.14.3"
+
+    /** 官方在非 macOS/Windows 上给的取值（`normalizeOsCategory`）。 */
+    const val DEFAULT_OS_CATEGORY = "linux"
+
+    /** 官方在 Linux x64 上的 `X-Platform`（`${platform}-${arch}`）。 */
+    const val DEFAULT_PLATFORM = "linux-x64"
+
+    /** 官方 `ZCODE_SOURCE_HEADERS` 里的 `X-Title` 形态：`Z Code@<source>`。 */
+    const val DEFAULT_SOURCE_TITLE = "Z Code@cli"
+
+    /** 官方 `ZCODE_ENV` 默认就是 production。 */
+    const val DEFAULT_RELEASE_CHANNEL = "production"
+
+    /** 会话请求的 `x-zcode-session-type`：主对话是 `main`（官方 `ModelRequestSessionType`）。 */
+    const val SESSION_TYPE_MAIN = "main"
+
+    /** 被风控挡回时服务端给的业务码，provider 用它决定文案。 */
+    const val CODE_BLOCKED = 3012
 
     /**
      * 会话端点。**注意不是 `/messages`** —— 那个网关把它挂在 `/anthropic/v1/messages` 下。
@@ -64,12 +93,20 @@ object ZcodeWire {
     private const val MESSAGES_PATH = "/anthropic/v1/messages"
 
     /**
-     * 额度端点。`{v}`（客户端版本）与 `{p}`（平台）两个占位符必须被替换。
+     * 额度端点。
      *
-     * 取值同样来自参考实现的 `billingBalancePath()`。注意它是**查询串**而不是路径段 ——
-     * 少一个 `?` 就会 404。
+     * **只有 `app_version` 一个查询参数，没有 `platform`。**
+     *
+     * 这一条踩过坑，所以写清楚：官方源码里额度地址是
+     * `${origin}/api/v1/zcode-plan/billing/balance`（`zcodeEndpoint.ts`），
+     * 请求时只 `url.searchParams.set("app_version", ZCODE_VERSION)`
+     * （`zaiStartPlanBilling.ts`）。我最早照另一个应用的反编译结果多带了一个
+     * `platform=`，真机上那条请求就被拒成 `parameter error` —— 服务端不会说是哪个
+     * 参数多余，只会说参数错误。**多余的参数和缺失的参数在这一层是同一个报错。**
+     *
+     * `{v}` 仍是占位符：取值从用户填的 `X-ZCode-App-Version` 头里读，见 [balanceEndpoint]。
      */
-    private const val BALANCE_PATH = "/billing/balance?app_version={v}&platform={p}"
+    private const val BALANCE_PATH = "/billing/balance?app_version={v}"
 
     // ------------------------------------------------------------ 端点
 
@@ -93,44 +130,24 @@ object ZcodeWire {
     fun messagesEndpoint(baseUrl: String?): String = endpoint(baseUrl, MESSAGES_PATH)
 
     /**
-     * 额度端点，并把两个占位符替换掉。
+     * 额度端点，并把 `{v}` 替换掉。
      *
-     * `{v}`/`{p}` 的取值**从用户自己填的额外请求头里读** —— 不新增字段、也不内置：
-     * 那两个值本来就属于那个客户端，用户已经在配置里给了一份，再抄一份只会多一处
-     * 会不一致的地方。
+     * `{v}` 优先取用户填的 `X-ZCode-App-Version`，没填就用 [DEFAULT_APP_VERSION]
+     * （官方那边同样是一个编译期常量 `ZCODE_VERSION`，不需要用户填）。
      *
-     * ## `{p}` 取的是 `X-Os-Category`，**不是** `X-Platform`
+     * 上一版在这里**硬性要求**用户填那个头，缺了就报错不发请求 —— 那是自找的麻烦：
+     * 代码本来就有默认值，让用户去"找一个数字"只会多一次失败。
      *
-     * 这两个在参考实现里是**不同的值**，而这一点在真机上就是把额度打回
-     * `HTTP 400 {"code":3001,"msg":"parameter error"}` 的原因：
-     *
-     * - 查询串的 `platform` 取 `ZcodeVault.platform()`，解出来是 `linux`；
-     * - 请求头的 `X-Platform` 是**硬编码**的 `linux-x64`（同一个类里另外写的字面量）。
-     *
-     * 一开始这里是按"名字对上就行"从 `X-Platform` 头取的，于是发出去的是
-     * `platform=linux-x64` —— 服务端那两个参数里有一个它认不出，直接判参数错误。
-     * 这类错**不会**说明是哪个参数不对，只能靠跟已知可用的那份实现逐字节对齐。
-     *
-     * 换到 `X-Os-Category` 是因为它恰好等于那个 `platform()` 的取值（`linux`），
-     * 于是既不用凭空内置一个值，也不用新增一个配置字段。
-     *
-     * 缺任一取值时**不发请求**，直接说明缺什么。原样带着 `{v}` 发出去只会得到 404，
+     * 留下的硬性检查只有一条：**替换必须真的发生**。原样带着 `{v}` 发出去只会 404，
      * 而 404 的报错看不出是"占位符没替换"。
      */
     fun balanceEndpoint(baseUrl: String?, extraHeaders: Map<String, String>): String {
         val version = headerValue(extraHeaders, "X-ZCode-App-Version")
-        val platform = headerValue(extraHeaders, "X-Os-Category")
-        val missing = ArrayList<String>()
-        if (version.isNullOrBlank()) missing += "X-ZCode-App-Version"
-        if (platform.isNullOrBlank()) missing += "X-Os-Category"
-        if (missing.isNotEmpty()) {
-            throw IllegalStateException(
-                "读取额度需要额外请求头里的 ${missing.joinToString("、")}（点「填入 ZCode 默认值」可一次填好）",
-            )
-        }
-        val path = BALANCE_PATH
-            .replace("{v}", encode(version!!))
-            .replace("{p}", encode(platform!!))
+            ?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_APP_VERSION
+        val path = BALANCE_PATH.replace("{v}", encode(version))
+        // 兜底断言：占位符拼错时这里立刻炸，而不是发一个带 {v} 的地址出去。
+        check(!path.contains("{")) { "额度端点仍有未替换的占位符：$path" }
         return endpoint(baseUrl, path)
     }
 
@@ -145,37 +162,112 @@ object ZcodeWire {
     // ------------------------------------------------------------ 请求头
 
     /**
-     * 组装请求头：我们的最小默认集，再让用户给的覆盖/追加。
+     * 组装请求头：官方的来源头默认集，再让用户给的覆盖/追加。
      *
-     * 默认集只有四类**功能上必需**的东西（内容类型、接受类型、鉴权、协议版本）；
-     * 身份类的头一条都不预置，见类注释。
+     * 默认集逐条对应官方 `buildZCodeSourceHeadersFromContext()`（`zcode-source-headers.ts`）：
+     * `User-Agent` / `HTTP-Referer` / `X-Title` / `X-ZCode-App-Version` / `X-Platform` /
+     * `X-Release-Channel` / `X-Client-Language` / `X-Client-Timezone` / `X-Os-Category` /
+     * `X-Os-Version` / `X-Device-Mid`，外加功能性的 `content-type` / `accept` /
+     * `authorization` / `anthropic-version`。
      *
-     * 用户值**覆盖**同名默认项是有意的：他要伪装成别的客户端（或那个网关要求
-     * 特定的 `User-Agent`）时，覆盖是唯一能生效的方式。
+     * ## 为什么要补齐（而不是只发"功能上必需"的那几个）
      *
+     * 只发最小集时，真机上额度恒回 `400 / 3001 parameter error`、会话恒回
+     * `405 / 3012 ... unusual activity`。官方源码说明了原因：这个网关按来源头判定
+     * 请求来源，缺 `X-Device-Mid` 时额度接口**直接判参数错误**。
+     *
+     * ## `HTTP-Referer` 从 baseUrl 推
+     *
+     * 不写死域名：官方也只在"等于默认 origin"时才改写它（`nodeApiClient.ts`）。
+     * 我们从用户填的 `baseUrl` 取 origin —— 用户把地址指到别处时，这个头跟着走，
+     * 「请求发到哪」和「对端看到我们来自哪」始终一致。取不到合法 origin 时**不发这个头**
+     * （发一个错的来源比不发更容易被拒）。
+     *
+     * ## 覆盖顺序
+     *
+     * 用户值**最后**铺上去，所以能覆盖任意一条默认项（包括 `User-Agent` 和
+     * `X-Device-Mid`）。这是有意的：要连别的兼容网关时，覆盖是唯一能生效的方式。
+     *
+     * @param baseUrl      用户填的网关地址，用来推 `HTTP-Referer`
      * @param apiKey       授权码；空白表示未配置，由 provider 拦下并给出明确提示
      * @param extraHeaders 用户填的 JSON 对象（可为空/非法 —— 非法时**忽略并如实返回错误**，
      *                     而不是抛出去：一条配置写错不该让整个请求无法发出去，
      *                     但也不能静默当成"没有"）
-     * @param accept       `accept` 头的取值。会话要事件流，额度接口要 JSON ——
-     *                     用参数而不是让调用方改返回值，是为了让"返回的 Map 是否可写"
-     *                     不成为一个隐含约定（上一版就是在这里踩到了不可写）
+     * @param accept       `accept` 头的取值。会话要事件流，额度接口要 JSON
+     * @param deviceMid    设备标识（见 [ZcodeDeviceMid]）。为 null 时**不发这个头**，
+     *                     而不是发一个空串：空串同样会被判参数错误，但报错一样看不懂
+     * @param requestId    请求级 `x-request-id`；仅会话请求用
+     * @param traceId      请求级 `x-zcode-trace-id`；仅会话请求用
+     * @param sessionType  请求级 `x-zcode-session-type`；仅会话请求用
      */
     fun headers(
+        baseUrl: String?,
         apiKey: String?,
         extraHeaders: String?,
+        deviceMid: String?,
         accept: String = "text/event-stream",
+        requestId: String? = null,
+        traceId: String? = null,
+        sessionType: String? = null,
     ): Map<String, String> {
+        val user = parseExtraHeaders(extraHeaders).values
+        // 版本优先取用户值：UA 与 X-ZCode-App-Version 必须说同一个版本，
+        // 否则两处自相矛盾（见 DEFAULT_APP_VERSION 的说明）。
+        val version = headerValue(user, "X-ZCode-App-Version")
+            ?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_APP_VERSION
+
         val out = linkedMapOf(
             "content-type" to "application/json",
             "accept" to accept,
             "authorization" to "Bearer " + (apiKey ?: "").trim(),
             "anthropic-version" to ANTHROPIC_VERSION,
-            "user-agent" to USER_AGENT,
+            "user-agent" to "ZCode/$version",
+            "x-zcode-app-version" to version,
+            "x-title" to DEFAULT_SOURCE_TITLE,
+            "x-release-channel" to DEFAULT_RELEASE_CHANNEL,
+            "x-platform" to DEFAULT_PLATFORM,
+            "x-os-category" to DEFAULT_OS_CATEGORY,
+            "x-os-version" to System.getProperty("os.version").orEmpty(),
+            "x-client-language" to clientLanguage(),
+            "x-client-timezone" to java.util.TimeZone.getDefault().id,
         )
-        out.putAll(parseExtraHeaders(extraHeaders).values)
+        originOf(baseUrl)?.let { out["http-referer"] = it }
+        deviceMid?.takeIf { it.isNotBlank() }?.let { out["x-device-mid"] = it }
+        // 请求级归因头只在会话请求上带（官方额度请求不带它们）。
+        requestId?.let { out["x-request-id"] = it }
+        traceId?.let { out["x-zcode-trace-id"] = it }
+        sessionType?.let { out["x-zcode-session-type"] = it }
+
+        // 用户值最后铺：同名（不分大小写）的默认项要让位。
+        for ((name, value) in user) {
+            out.keys.firstOrNull { it.equals(name, ignoreCase = true) }?.let { out.remove(it) }
+            out[name] = value
+        }
         return out
     }
+
+    /**
+     * 从用户填的 baseUrl 取 origin（`scheme://host[:port]`）。
+     *
+     * 解析不出来就返回 null —— 调用方据此**不发** `HTTP-Referer`。拼一个半截的
+     * origin 出去只会换来一个同样看不懂的 4xx。
+     */
+    fun originOf(baseUrl: String?): String? = runCatching {
+        val uri = java.net.URI((baseUrl ?: "").trim())
+        val scheme = uri.scheme ?: return null
+        val host = uri.host ?: return null
+        val port = if (uri.port > 0) ":${uri.port}" else ""
+        "$scheme://$host$port"
+    }.getOrNull()
+
+    /** 客户端语言，与官方一样取运行时的区域设置（取不到给 `unknown`，官方同此）。 */
+    private fun clientLanguage(): String =
+        runCatching { Locale.getDefault().toLanguageTag() }
+            .getOrNull()?.takeIf { it.isNotBlank() } ?: "unknown"
+
+    /** 会话请求的请求级头各一个随机 UUID（官方来自 `randomUUID()`）。 */
+    fun newRequestId(): String = java.util.UUID.randomUUID().toString()
 
     /** 解析结果：解析失败时 [error] 非空，[values] 为空（调用方据此报出来）。 */
     data class ExtraHeaders(val values: Map<String, String>, val error: String?)
@@ -267,8 +359,12 @@ object ZcodeWire {
     /**
      * `metadata.user_id` 的取值：一个 JSON 字符串。
      *
-     * 里面的 `device_id` 由用户配置提供（可以为空）。这里**不生成任何设备标识** ——
-     * 生成一个假的"设备指纹"发出去，等于替用户向对方提供了一份伪造的身份信息。
+     * `device_id` 传的是 [ZcodeDeviceMid] 那个**本应用自己的安装标识**（官方也是同一个
+     * deviceMid：`anthropic-request-metadata.ts` 用 `ensureCliDeviceMid()` 填这一格）。
+     * `account_uuid` 与 `session_id` 官方同样传空。
+     *
+     * 这里仍然**不生成任何硬件指纹**：`device_id` 的值来自一个随机 UUID，
+     * 与 IMEI / ANDROID_ID / 机型 / 系统版本无关，卸载重装即变。
      */
     fun metadataUserId(deviceId: String?): String {
         val json = JSONObject()

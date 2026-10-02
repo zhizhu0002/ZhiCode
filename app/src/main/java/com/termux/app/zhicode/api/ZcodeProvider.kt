@@ -1,5 +1,6 @@
 package com.termux.app.zhicode.api
 
+import com.termux.app.zhicode.api.zcode.ZcodeDeviceMid
 import com.termux.app.zhicode.api.zcode.ZcodeWire
 import com.termux.app.zhicode.model.AssistantTurn
 import com.termux.app.zhicode.model.SessionConfig
@@ -64,7 +65,21 @@ class ZcodeProvider : ModelProvider {
         }
 
         val endpoint = ZcodeWire.messagesEndpoint(baseUrl)
-        val conn = open(endpoint, ZcodeWire.headers(apiKey, config.extraHeaders))
+        // 会话请求带三个**请求级**归因头（官方 `createModelRequestAttributionHeaders`）：
+        // 服务端用 x-zcode-session-type 区分主对话/子代理，另外两个用于链路追踪。
+        // 额度请求不带它们 —— 官方那边也只在模型请求上生成。
+        val conn = open(
+            endpoint,
+            ZcodeWire.headers(
+                baseUrl = baseUrl,
+                apiKey = apiKey,
+                extraHeaders = config.extraHeaders,
+                deviceMid = deviceId(),
+                requestId = ZcodeWire.newRequestId(),
+                traceId = ZcodeWire.newRequestId(),
+                sessionType = ZcodeWire.SESSION_TYPE_MAIN,
+            ),
+        )
         val request = requests.begin(conn)
         val decoder = AnthropicMessagesProvider.StreamDecoder(listener)
 
@@ -133,7 +148,13 @@ class ZcodeProvider : ModelProvider {
 
         // 额度要的是 JSON（不是 SSE）—— 由 headers 的 accept 参数决定，
         // 而不是在返回的 Map 上回写（那个 Map 不保证可写）。
-        val headers = ZcodeWire.headers(apiKey, config.extraHeaders, accept = "application/json")
+        val headers = ZcodeWire.headers(
+            baseUrl = baseUrl,
+            apiKey = apiKey,
+            extraHeaders = config.extraHeaders,
+            deviceMid = deviceId(),
+            accept = "application/json",
+        )
         val endpoint = ZcodeWire.balanceEndpoint(baseUrl, headers)
 
         val conn = URL(endpoint).openConnection() as HttpURLConnection
@@ -177,17 +198,21 @@ class ZcodeProvider : ModelProvider {
     }
 
     /**
-     * `metadata.user_id` 里的设备标识。
+     * `X-Device-Mid` 与 `metadata.user_id.device_id` 的取值。
      *
-     * **刻意留空**。参考实现会塞一个设备标识进去，但我们这边没有这个字段，
-     * 而"没字段就现编一个"是不对的：那等于替用户向对方提交一份**伪造的设备指纹**，
-     * 而且它会随实现变化，反而更难排查。
+     * 由 [ZcodeDeviceMid] 生成并落盘：一个随机 UUID，**本应用自己的**安装标识。
      *
-     * 留空是否会被网关拒绝，目前**没有证据**（参考实现里这个字段是纯信息性的：
-     * `account_uuid` 与 `session_id` 它自己也都传空）。所以先传空 ——
-     * 如果实测报错说明它必需，再按报错加一个**本应用范围**的安装标识（不是硬件标识）。
+     * ## 这一段以前是 `return ""`，那是错的
+     *
+     * 前面留空时的理由是"不替用户提交一份伪造的设备指纹"。那个顾虑本身没错，
+     * 但它把这个头当成了可选装饰 —— 官方源码说明它**不是**：缺它时额度接口
+     * 直接判 `parameter error`（`packages/server/src/stdioDeviceMid.ts` 注释原文）。
+     * 真机上额度卡片一直显示 `3001 parameter error`，就是这一行造成的。
+     *
+     * 现在的判断是：这个值本来就该由**客户端自己**生成（官方也是客户端生成后存本地），
+     * 它不是硬件指纹，也不需要用户知道 —— 让用户填它只会填错。
      */
-    private fun deviceId(): String = ""
+    private fun deviceId(): String = ZcodeDeviceMid.get()
 
     private fun readAll(stream: InputStream?): String {
         if (stream == null) return ""

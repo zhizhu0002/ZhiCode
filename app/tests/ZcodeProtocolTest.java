@@ -55,6 +55,8 @@ public final class ZcodeProtocolTest {
             "app/src/main/java/com/zhizhu/zhicode/compose/data/ModelCatalogStore.kt";
     private static final String UI_VM =
             "app/src/main/java/com/zhizhu/zhicode/compose/state/WorkspaceViewModel.kt";
+    private static final String APP_CLASS =
+            "app/src/main/java/com/zhizhu/zhicode/compose/ZhiCodeApplication.kt";
     private static final String FAST_SCRIPT = "test-jvm-fast.sh";
 
     /** 线上名：写进设置与会话文件，是持久化契约的一部分。 */
@@ -135,6 +137,18 @@ public final class ZcodeProtocolTest {
         return text.replaceAll("\\s+", "");
     }
 
+    /** 数一段文本里出现几次（用来确定"两条链路都传了"这种要求）。 */
+    private static int countOccurrences(String text, String needle) {
+        int count = 0;
+        int from = 0;
+        while (true) {
+            int at = text.indexOf(needle, from);
+            if (at < 0) return count;
+            count++;
+            from = at + needle.length();
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         Path root = Paths.get(args.length == 0 ? "." : args[0]).toAbsolutePath().normalize();
         String engine = stripComments(read(root, ENG_PROTOCOL));
@@ -184,7 +198,7 @@ public final class ZcodeProtocolTest {
                 ANTHROPIC + " 的 readEvent 必须是包内可见（去掉 private）才能被复用；"
                         + "放宽可见性是有意的最小改动，比复制一份实现好");
 
-        // ---- 4. 网关与身份标识不许进请求路径 -------------------------------
+        // ---- 4. 网关地址不许进请求路径 -------------------------------------
         require(!provider.contains(GATEWAY_HOST),
                 ZCODE_PROVIDER + " 不许出现网关主机名（" + GATEWAY_HOST + "）："
                         + "地址必须来自用户填的 baseUrl —— 写死之后「请求发到哪」就不透明了，"
@@ -196,14 +210,44 @@ public final class ZcodeProtocolTest {
                 UI_OVERLAY + " 应当把网关地址写在可粘贴提示里："
                         + "不给的话这个协议对用户就是不可用的（他得从别处找这个值）");
 
-        // ---- 5. 那组身份头只能出现在提示里 ---------------------------------
-        // 判据取一个只属于「冒充官方 CLI」的取值：X-Platform 自称 linux。
-        for (String baked : new String[]{"linux-x64", "X-ZCode-Agent", "zcode_cli_rs"}) {
-            require(!provider.contains(baked),
-                    ZCODE_PROVIDER + " 不许内置身份标识 " + baked + "："
-                            + "那是那个服务自己客户端的标识，内置等于替用户宣称一个身份");
-            require(!wire.contains(baked), ZCODE_WIRE + " 不许内置身份标识 " + baked);
-        }
+        // ---- 5. 来源头按官方客户端在运行时生成 ------------------------------
+        // 这一节此前是反过来的：它要求 provider/wire **不许**出现身份标识，理由是
+        // "那是别人的客户端身份"。两个事实让那个判断失效了：
+        //   1. 那个客户端（zai-org/ZCode）以 Apache-2.0 开源，这些头是它公开的协议契约；
+        //   2. 只发"功能上必需"的头时，真机上额度恒回 400/3001 parameter error、
+        //      会话恒回 405/3012 blocked —— 官方源码写明缺 X-Device-Mid 就会被判参数错误。
+        // 所以现在钉住的是"按官方那套发"，以及一条仍然成立的底线：地址只来自 baseUrl。
+        require(wire.contains("X-Device-Mid") || wire.contains("x-device-mid"),
+                ZCODE_WIRE + " 必须发 X-Device-Mid：缺它时额度接口被判 parameter error"
+                        + "（官方 packages/server/src/stdioDeviceMid.ts 的注释原文）");
+        // provider 的两条链路（会话 + 额度）都必须把它传下去。
+        int deviceMidUses = countOccurrences(provider, "deviceMid = deviceId()");
+        require(deviceMidUses >= 2,
+                ZCODE_PROVIDER + " 的会话与额度两条链路都必须带上 deviceMid（现在只有 "
+                        + deviceMidUses + " 处）：只给其中一条，另一条还是会 parameter error");
+        require(provider.contains("ZcodeWire.newRequestId()"),
+                ZCODE_PROVIDER + " 的会话请求必须带请求级归因头（x-request-id / x-zcode-trace-id）："
+                        + "官方在模型请求上生成它们，服务端用它区分主对话与子代理");
+        require(provider.contains("ZcodeWire.SESSION_TYPE_MAIN"),
+                ZCODE_PROVIDER + " 的会话请求必须带 x-zcode-session-type = main");
+        // HTTP-Referer 由 baseUrl 推 —— 不写死域名（官方也只在等于默认 origin 时才改写）。
+        require(wire.contains("fun originOf("),
+                ZCODE_WIRE + " 必须从 baseUrl 推 origin 供 HTTP-Referer 用："
+                        + "写死域名会让「请求发到哪」与「对端看到我们来自哪」不一致");
+        require(!provider.contains("HTTP-Referer") && !provider.contains("http-referer"),
+                ZCODE_PROVIDER + " 不许自己拼 HTTP-Referer：那是 ZcodeWire.headers 的职责");
+        // 版本号只有一处：UA 与 X-ZCode-App-Version 必须说同一个版本。
+        require(squash(wire).contains("constvalDEFAULT_APP_VERSION=\"3.14.3\""),
+                ZCODE_WIRE + " 必须有一个默认版本常量（官方对应编译期常量 ZCODE_VERSION）："
+                        + "它是额度查询 app_version 与默认 User-Agent 的共同来源");
+        require(squash(wire).contains("\"user-agent\"to\"ZCode/$version\""),
+                ZCODE_WIRE + " 的默认 User-Agent 必须由那个版本拼出来："
+                        + "两处各写一个字面量，迟早会一个改了另一个没改");
+        // 设备标识必须在应用启动时注入，否则每次启动都是一个新身份，
+        // 服务端认不出是同一台设备，额度与套餐模型会时有时无。
+        require(read(root, APP_CLASS).contains("ZcodeDeviceMid.install("),
+                APP_CLASS + " 的 attachBaseContext 必须调用 ZcodeDeviceMid.install："
+                        + "没注入时 provider 会回退到进程内的临时值，每次启动换一个身份");
 
         // ---- 6. extraHeaders 必须真的从配置流到请求 -------------------------
         require(session.contains("public String extraHeaders"),

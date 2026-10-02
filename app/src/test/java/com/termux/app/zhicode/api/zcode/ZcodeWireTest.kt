@@ -49,23 +49,94 @@ class ZcodeWireTest {
     // ------------------------------------------------------------ 请求头
 
     @Test
-    fun defaultHeadersCarryOnlyWhatIsFunctionallyNeeded() {
-        val headers = ZcodeWire.headers("code-123", null)
+    fun defaultHeadersCarryTheOfficialSourceHeaderSet() {
+        val headers = ZcodeWire.headers(
+            baseUrl = "https://gw.example.com/api/v1/plan",
+            apiKey = "code-123",
+            extraHeaders = null,
+            deviceMid = "dev-mid-1",
+        )
         assertEquals("Bearer code-123", headers["authorization"])
         assertEquals("application/json", headers["content-type"])
         assertEquals("text/event-stream", headers["accept"])
         assertEquals(ZcodeWire.ANTHROPIC_VERSION, headers["anthropic-version"])
-        // 身份类的头一条都不预置 —— 那是用户的事，见 ZcodeWire 的类注释。
-        assertFalse(headers.containsKey("originator"))
-        assertFalse(headers.containsKey("x-zcode-agent"))
+
+        // 缺 X-Device-Mid 会被服务端判 parameter error（官方 stdioDeviceMid.ts 的注释），
+        // 所以它必须默认带上。
+        assertEquals("dev-mid-1", headers["x-device-mid"])
+        // UA 与 X-ZCode-App-Version 必须说同一个版本：两处不一致是自相矛盾。
+        assertEquals("ZCode/${ZcodeWire.DEFAULT_APP_VERSION}", headers["user-agent"])
+        assertEquals(ZcodeWire.DEFAULT_APP_VERSION, headers["x-zcode-app-version"])
+        // HTTP-Referer 由 baseUrl 推 origin，不写死域名。
+        assertEquals("https://gw.example.com", headers["http-referer"])
+        assertEquals(ZcodeWire.DEFAULT_PLATFORM, headers["x-platform"])
+        assertEquals(ZcodeWire.DEFAULT_OS_CATEGORY, headers["x-os-category"])
+        assertEquals(ZcodeWire.DEFAULT_RELEASE_CHANNEL, headers["x-release-channel"])
+        assertEquals(ZcodeWire.DEFAULT_SOURCE_TITLE, headers["x-title"])
+        assertTrue("语言/时区要真发出去：${headers["x-client-language"]}", !headers["x-client-language"].isNullOrBlank())
+        assertTrue(!headers["x-client-timezone"].isNullOrBlank())
+
+        // 请求级归因头**只在会话请求**上带，这里没传就不该出现。
+        assertFalse(headers.containsKey("x-request-id"))
+        assertFalse(headers.containsKey("x-zcode-session-type"))
+    }
+
+    @Test
+    fun sessionOnlyAttributionHeadersAreAddedWhenAsked() {
+        val headers = ZcodeWire.headers(
+            baseUrl = "https://gw.example.com",
+            apiKey = "k",
+            extraHeaders = null,
+            deviceMid = "d",
+            requestId = "req-1",
+            traceId = "trace-1",
+            sessionType = ZcodeWire.SESSION_TYPE_MAIN,
+        )
+        assertEquals("req-1", headers["x-request-id"])
+        assertEquals("trace-1", headers["x-zcode-trace-id"])
+        assertEquals("main", headers["x-zcode-session-type"])
+    }
+
+    @Test
+    fun aBlankDeviceMidIsOmittedRatherThanSentEmpty() {
+        // 发空串同样会被判参数错误，但报错一样看不懂 —— 不如不发，让日志里能看出是"没有"。
+        val headers = ZcodeWire.headers("https://gw.example.com", "k", null, "   ")
+        assertFalse(headers.containsKey("x-device-mid"))
+    }
+
+    @Test
+    fun anUnparsableBaseUrlOmitsTheRefererInsteadOfSendingHalfOfIt() {
+        // 半截 origin 换来的是同样看不懂的 4xx；不发这个头至少不会误报来源。
+        val headers = ZcodeWire.headers("not a url", "k", null, "d")
+        assertFalse(headers.containsKey("http-referer"))
+        assertNull(ZcodeWire.originOf("not a url"))
     }
 
     @Test
     fun userHeadersOverrideDefaultsSoImpersonationIsPossible() {
         // 覆盖是唯一能让"网关要求特定 UA"生效的方式；不覆盖的话这个字段就没用了。
-        val headers = ZcodeWire.headers("k", """{"User-Agent":"ZCode/3.14.0"}""")
+        val headers = ZcodeWire.headers(
+            baseUrl = "https://gw.example.com",
+            apiKey = "k",
+            extraHeaders = """{"User-Agent":"ZCode/3.14.0","X-Platform":"darwin-arm64"}""",
+            deviceMid = "d",
+        )
         assertEquals("ZCode/3.14.0", headers["User-Agent"])
+        // 覆盖要**替换**而不是并存：同名的另一种大小写必须被去掉，否则会发两条头出去。
+        assertFalse("不许同时留下默认的那条 X-Platform", headers.containsKey("x-platform"))
+        assertEquals("darwin-arm64", headers["X-Platform"])
         assertEquals("Bearer k", headers["authorization"])
+        // 只改 UA 不会连带改版本头（它们是两件事，谁改谁生效）。
+        assertEquals(ZcodeWire.DEFAULT_APP_VERSION, headers["x-zcode-app-version"])
+    }
+
+    @Test
+    fun theUserAgentFollowsTheVersionHeaderWhenTheUserOverridesIt() {
+        // UA 与版本头说两个版本是自相矛盾的，反而更容易被风控挑出来。
+        // 所以版本由用户给定时，默认 UA 必须跟着走。
+        val headers = ZcodeWire.headers("https://gw.example.com", "k", """{"X-ZCode-App-Version":"9.9.9"}""", "d")
+        assertEquals("ZCode/9.9.9", headers["user-agent"])
+        assertEquals("9.9.9", headers["X-ZCode-App-Version"])
     }
 
     @Test
@@ -351,45 +422,25 @@ class ZcodeWireTest {
     }
 
     @Test
-    fun balanceEndpointTakesPlatformFromOsCategoryNotFromThePlatformHeader() {
-        // 缺取值时**不发请求**：原样带 {v} 发出去只会 404，而 404 看不出是占位符没替换。
-        val error = runCatching { ZcodeWire.balanceEndpoint("https://gw", emptyMap()) }.exceptionOrNull()
-        assertNotNull(error)
-        assertTrue("要说清缺哪一项", error!!.message!!.contains("X-ZCode-App-Version"))
-        assertTrue("也要说清另一个缺的是哪个头", error.message!!.contains("X-Os-Category"))
+    fun balanceEndpointCarriesOnlyTheVersionParameter() {
+        // 没填版本时用内置默认（官方那边也是编译期常量），**不再**报错不发请求：
+        // 代码有默认值却让用户去找一个数字，只会多一次失败。
+        val fallback = ZcodeWire.balanceEndpoint("https://gw.example.com", emptyMap())
+        assertTrue("默认版本要真的用上：$fallback", fallback.contains("app_version=${ZcodeWire.DEFAULT_APP_VERSION}"))
 
-        // 查询串的 platform 与请求头的 X-Platform 在参考实现里是**两个不同的值**：
-        // platform() = "linux"（查询串），X-Platform = "linux-x64"（请求头，硬编码）。
-        // 一开始这里按"名字对上"从 X-Platform 取，发出去的是 platform=linux-x64，
-        // 真机上被打回 HTTP 400 {"code":3001,"msg":"parameter error"}。
         val url = ZcodeWire.balanceEndpoint(
             "https://gw.example.com",
-            mapOf("X-ZCode-App-Version" to "3.14.0", "x-os-category" to "linux"),
+            mapOf("x-zcode-app-version" to "3.14.3"),
         )
-        assertTrue("请求头名要大小写不敏感：$url", url.contains("app_version=3.14.0"))
-        assertTrue("platform 必须取 X-Os-Category 的值：$url", url.contains("platform=linux"))
-        assertFalse(
-            "platform 不许被 X-Platform 头的取值污染：$url",
-            url.contains("platform=linux-x64"),
-        )
-        assertFalse("占位符必须被替换掉", url.contains("{v}") || url.contains("{p}"))
-    }
+        assertTrue("请求头名要大小写不敏感：$url", url.contains("app_version=3.14.3"))
+        assertFalse("占位符必须被替换掉", url.contains("{v}"))
 
-    @Test
-    fun thePlatformHeaderAloneIsNotEnoughToReadTheQuota() {
-        // 只填了 X-Platform（没有 X-Os-Category）时**必须拒绝**，而不是猜一个值发出去：
-        // 猜错的后果正是那个 400 —— 报错不会说哪个参数不对。
-        val error = runCatching {
-            ZcodeWire.balanceEndpoint(
-                "https://gw.example.com",
-                mapOf("X-ZCode-App-Version" to "3.14.0", "X-Platform" to "linux-x64"),
-            )
-        }.exceptionOrNull()
-        assertNotNull("只有 X-Platform 时必须报缺，不能拿它顶替 platform", error)
-        assertTrue(
-            "缺项要指明是 X-Os-Category：${error!!.message}",
-            error.message!!.contains("X-Os-Category"),
-        )
+        // 官方端点**没有** platform 参数（zcodeEndpoint.ts + zaiStartPlanBilling.ts）。
+        // 多带一个参数时服务端只回 "parameter error"，不会说是哪个参数多余 ——
+        // 所以这条断言是防止它被"顺手加回来"。
+        for (candidate in listOf(fallback, url)) {
+            assertFalse("额度端点不许带 platform：$candidate", candidate.contains("platform"))
+        }
     }
 
     @Test

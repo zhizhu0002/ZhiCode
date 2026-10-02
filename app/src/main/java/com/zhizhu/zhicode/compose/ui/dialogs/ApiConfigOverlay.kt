@@ -39,33 +39,46 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 
-/** ZCode 的网关地址与那组身份头。**只用于「填入默认值」这个动作**，见下面的说明。 */
+/** ZCode 的网关地址。**只用于「填入默认值」这个动作**，见下面的说明。 */
 private const val ZCODE_GATEWAY = "https://zcode.z.ai/api/v1/zcode-plan"
 
-private const val ZCODE_HEADERS_JSON =
-    """{"User-Agent":"ZCode/3.14.0 ai-sdk/anthropic/3.0.81","X-ZCode-App-Version":"3.14.0",""" +
-        """"X-Title":"Z Code@cli","X-Release-Channel":"production","X-ZCode-Agent":"glm",""" +
-        """"X-Platform":"linux-x64","X-Os-Category":"linux","X-Os-Version":"6.1.0-13-amd64",""" +
-        """"HTTP-Referer":"https://zcode.z.ai"}"""
+/**
+ * 预填的额外请求头。
+ *
+ * **只有版本号是这里该有的东西**。其余的头（`User-Agent`、`X-Title`、`X-Platform`、
+ * `X-Os-Category`、`X-Release-Channel`、`X-Client-Language`、`X-Client-Timezone`、
+ * `HTTP-Referer`、`X-Device-Mid`）现在由 `ZcodeWire` 按官方客户端的取值**在运行时**
+ * 生成 —— 写进这里只会把它们冻在填入那一刻（语言、时区、系统版本、设备标识都会变），
+ * 而且多一份会与代码里那份不一致的副本。
+ *
+ * 版本号留在明面上是因为它**会过期**：ZCode 发了新版，这个数字要跟着改，
+ * 而它是"这个协议在跟谁说话"的一部分。它同时决定额度查询串里的 `app_version`
+ * 与默认 `User-Agent`（两处必须说同一个版本）。
+ */
+private const val ZCODE_HEADERS_JSON = """{"X-ZCode-App-Version":"3.14.3"}"""
 
 /**
  * ZCode 的说明与可粘贴取值。
  *
  * ## 为什么给出具体取值，以及为什么用「填入」而不是内置
  *
- * 那个网关要求请求带一组身份头才受理，取值由它自己的客户端决定。让用户自己猜是不现实的
- * （名字、格式、大小写都得对），所以这里给成可用的文本。但**它是提示与预填，不是常量**：
- * 按下「填入 ZCode 默认值」之后值就落进用户自己的配置里，之后请求只读那份配置。
+ * 那个网关要求请求带一组来源头才受理，取值由它自己的客户端决定（现在那份客户端是
+ * 开源的，取值有据可查）。让用户自己猜是不现实的（名字、格式、大小写都得对），
+ * 所以这里给成可用的文本。但**它是提示与预填，不是常量**：按下「填入 ZCode 默认值」
+ * 之后值就落进用户自己的配置里，之后请求只读那份配置。
  *
  * 这与本仓库「不预置任何厂商地址」的策略有一处**刻意的张力**，取舍写在下面：
- * 不给这些值，这个协议对用户就是不可用的（他得从别处找）；给了，它就变成"用户看见并
+ * 不给这个地址，这个协议对用户就是不可用的（他得从别处找）；给了，它就变成"用户看见并
  * 主动应用的一份配置"。选了可用，同时把它留在明面上 —— 而不是藏在请求路径里。
  */
 private val ZCODE_HEADERS_HINT = """
     网关地址：$ZCODE_GATEWAY
-    额外请求头（点上面的「填入 ZCode 默认值」可一次填好，也可自行修改）：
 
-    $ZCODE_HEADERS_JSON
+    其余请求头由应用在运行时按官方客户端的取值生成（版本、来源、语言、时区、设备标识），
+    上面只预填了**版本号** —— 它连着额度查询的 app_version，ZCode 发新版时改这里。
+    任何一条都可以在这里覆盖，例如：
+
+    {"X-ZCode-App-Version":"3.14.3","User-Agent":"ZCode/3.14.3"}
 """.trimIndent()
 
 /**
