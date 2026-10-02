@@ -233,12 +233,22 @@ public final class ToolInteractionTest {
                         + "在界面里另写一套候选集/断开规则，两份迟早不一致");
         require(squash(cards).contains("Segment.Single->"),
                 CARDS + " 必须分别处理 Single 与 Group 两种段");
-        // 单条那一段里**不许有 Card**：这是"扁平一行"与"带标题的卡片"的分界线。
-        require(!squash(singleBranch(cards)).contains("Card("),
-                CARDS + " 的 Single 分支里不许出现 Card(：单条工具就是一行，"
-                        + "套上卡片就又回到「单独一条 Bash 也被包进大卡里」那个样子了");
-        require(squash(singleBranch(cards)).contains("key(tool.id){ToolRow("),
-                CARDS + " 的 Single 分支必须 key(tool.id) { ToolRow(...) }");
+        // 单条那一段必须**自己一张卡**（用户要求「给调用工具加个框」），
+        // 但卡里**不许有标题行/子标签/计数徽章** —— 之前那张大卡的问题不在于"有框"，
+        // 而在于框顶上多了一行整批的汇总（「已运行 N 个工具」「修改 1 处代码」），
+        // 挂在单独一条命令上面就是假信息。
+        require(squash(singleBranch(cards)).contains("Card("),
+                CARDS + " 的 Single 分支必须给这一条工具一个 Card（加个框）："
+                        + "没有框时命令行与输出块直接浮在页面上，看不出边界");
+        require(!squash(singleBranch(cards)).contains("Badge("),
+                CARDS + " 的 Single 分支里不许有 Badge：单条工具的卡不冒充整批的汇总");
+        require(squash(singleBranch(cards)).contains("SingleMargin"),
+                CARDS + " 的单条卡必须用 SingleMargin（比组卡紧一档的内边距）："
+                        + "两张卡在同一屏里挨着出现时要看得出装的是一条还是一组");
+        require(squash(singleBranch(cards)).contains("key(tool.id){")
+                        && squash(singleBranch(cards)).contains("ToolRow("),
+                CARDS + " 的 Single 分支必须 key(tool.id) 包住这一条工具（现在中间还夹着 Card）："
+                        + "工具是边跑边追加的，按位置归属会让行内状态串到别的行上");
         // 通用计数标题不许回来 —— 它回答"有几个"而不是"在干什么"。
         require(!squash(cards).contains("已运行"),
                 CARDS + " 里不许再出现「已运行 N 个工具」："

@@ -102,6 +102,15 @@ private val BubbleMaxWidthFraction = 0.86f
 private val GroupMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
 private val RowMargin = PaddingValues(horizontal = 9.dp, vertical = 7.dp)
 
+/**
+ * 单条工具那张卡的内边距。
+ *
+ * 比 [GroupMargin] 紧一档：单条卡里只有一行标题 + 最多一个输出块，而组卡还要装下
+ * 表头与副行。两张卡在同一屏里挨着出现时，内边距差一档才看得出"这张装的是
+ * 一条工具、那张装的是一组"。
+ */
+private val SingleMargin = PaddingValues(horizontal = 8.dp, vertical = 5.dp)
+
 /** 空态，对应原版 addEmptyState()。 */
 @Composable
 fun EmptyState() {
@@ -409,18 +418,18 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
 /**
  * 一个**工具批次**在对话流里的样子。
  *
- * ## 为什么不是一个批次一张卡片
+ * ## 一个批次不是一张卡片
  *
  * 之前这里是"每个批次套一张「已运行 N 个工具」卡片"，于是单独一条 `Bash` 也被包进
- * 一张带标题的大卡里。参考实现（IQ Code）不是那样：一个批次里的工具会先被切成若干段
- * （见 [ToolGrouping]），
+ * 一张**带标题、带子标签、带计数徽章**的大卡里 —— 那三点是与参考实现不一致的地方
+ * （IQ Code 的组标题直接说干了什么，而且只有"连续的 read/search 且 ≥2"才有组）。
  *
- * - **单条工具** → 直接一行，没有卡片、没有标题、没有徽章
- *   （`addToolCard(item, destination)`）；
- * - **连续的 read/search 且 ≥2** → 才折成一张卡片，卡片的标题直接说干了什么
- *   （`addCollapsedToolActivity`）。
- *
- * 所以这一层只做一件事：按段把两种长相排出来，顺序不变。
+ * 现在的分工：
+ * - 一个批次先按 [ToolGrouping] 切成若干段；
+ * - **单条工具**各自一张卡（视觉上仍是一个框），但**没有标题行、没有子标签、没有徽章**
+ *   —— 卡片只负责"这一条工具自成一块"，不冒充整批的汇总；
+ * - **连续的 read/search 且 ≥2** → 折成一张卡，标题是
+ *   「正在搜索 2 个模式、读取 3 个文件」这种**说明干了什么**的话。
  */
 @Composable
 fun ToolBatch(
@@ -441,6 +450,7 @@ fun ToolBatch(
      */
     onToolAction: (String, String) -> Unit,
 ) {
+    val scheme = MiuixTheme.colorScheme
     val segments = remember(item.tools) {
         ToolGrouping.group(item.tools.map { it.toGroupingEntry() })
     }
@@ -461,7 +471,9 @@ fun ToolBatch(
      */
     val runningClock = rememberRunningClock(item.tools.any { !it.completed })
 
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+    // 段与段之间的间隔：单条卡与组卡各自带垂直留白，所以这里不再额外加 padding
+    // （两边都加会让"两条命令之间"的缝比"命令与它的输出之间"还宽）。
+    Column(modifier = Modifier.fillMaxWidth()) {
         segments.forEach { segment ->
             when (segment) {
                 is ToolGrouping.Segment.Single -> {
@@ -470,13 +482,30 @@ fun ToolBatch(
                     // 展开态）是按**位置**归属的：工具是边跑边追加的，新工具插进来之后
                     // 位置会挪，于是"打开的菜单"和"展开的输出"会串到另一行上。
                     key(tool.id) {
-                        ToolRow(
-                            activity = tool,
-                            nowMs = runningClock,
-                            onToggle = { onToggleTool(tool.id) },
-                            // 传**这一行**的 id：菜单内容与动作都按它算。
-                            onToolAction = { label -> onToolAction(tool.id, label) },
-                        )
+                        // 单条工具**也给它一个框**（用户要求：「给调用工具加个框」）。
+                        // 框里只有这一条工具自己 —— 没有批次标题、没有被批次计数冒充的
+                        // 子标签、没有徽章。之前那张大卡的问题不在于"有框"，而在于框顶上
+                        // 多了一行「已运行 N 个工具 / 修改 1 处代码」：那是**整批的汇总**，
+                        // 挂在单独一条命令上面就成了假信息。
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp),
+                            cornerRadius = ZhiRadius.card,
+                            insideMargin = SingleMargin,
+                            colors = CardDefaults.defaultColors(
+                                color = ZhiColors.cardSurface(),
+                                contentColor = scheme.onSurface,
+                            ),
+                        ) {
+                            ToolRow(
+                                activity = tool,
+                                nowMs = runningClock,
+                                onToggle = { onToggleTool(tool.id) },
+                                // 传**这一行**的 id：菜单内容与动作都按它算。
+                                onToolAction = { label -> onToolAction(tool.id, label) },
+                            )
+                        }
                     }
                 }
                 is ToolGrouping.Segment.Group -> {
