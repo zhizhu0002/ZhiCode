@@ -50,7 +50,10 @@ import com.zhizhu.zhicode.compose.model.ChoiceOption
 import com.zhizhu.zhicode.compose.model.ChoicePickerState
 import com.zhizhu.zhicode.compose.model.DiffState
 import com.zhizhu.zhicode.compose.model.EffortLevel
+import com.zhizhu.zhicode.compose.model.FileDeletePrompt
 import com.zhizhu.zhicode.compose.model.FileEntry
+import com.zhizhu.zhicode.compose.model.FileNameForm
+import com.zhizhu.zhicode.compose.model.FileRoot
 import com.zhizhu.zhicode.compose.model.McpScope
 import com.zhizhu.zhicode.compose.model.McpServer
 import com.zhizhu.zhicode.compose.model.McpServerDraft
@@ -95,7 +98,9 @@ import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.ui.zhiFormatSize
+import com.termux.app.zhicode.core.FileOps
 import com.termux.app.zhicode.core.PlanApprovalGate
+import com.termux.app.zhicode.core.StorageLinks
 import com.termux.app.zhicode.storage.ApiSettingsStore
 import org.json.JSONArray
 import org.json.JSONObject
@@ -429,6 +434,9 @@ class WorkspaceViewModel(
             // 否则用户会看到一个跟实际请求无关的模型名。
             syncActiveProfile()
             syncRoleCardFromStore()
+            // 共享存储的授权状态要**实测**：文件面板切到「共享存储」时，
+            // 没授权只会看到"0 项"，而原因（没给「所有文件访问权限」）必须说出来。
+            refreshSharedStoragePermission()
             ensureWorkspace()
             val sessions = SessionReader.list(_state.value.projectPath)
             _state.update { it.copy(sessions = sessions) }
@@ -4547,10 +4555,196 @@ class WorkspaceViewModel(
     }
 
     /** 文件面板的根路径（内置 Termux home 不存在时回退到应用私有目录）。 */
-    /** 文件面板的根 = 当前项目路径（不是 Termux home），这样面包屑与「上一级」都以项目为界。 */
-    private fun rootPath(): String = _state.value.projectPath
+    /**
+     * 文件面板当前的根，取决于用户在界面上选的 [FileRoot]。
+     *
+     * 原先这里恒等于 `projectPath`，于是面板被关在项目里 —— HOME 与共享存储
+     * 都走不到（面包屑点不出去，「上一级」也会被弹回来）。
+     */
+    private fun rootPath(): String = when (_state.value.fileRoot) {
+        FileRoot.PROJECT -> _state.value.projectPath
+        FileRoot.HOME -> TermuxConstants.TERMUX_HOME_DIR_PATH
+        FileRoot.SHARED -> StorageLinks.EXTERNAL_ROOT
+    }
 
-    fun closeFile() = _state.update { it.copy(openFile = null) }
+    /** 切换文件面板的根。切过去时**回到该根的顶层**，而不是停在别的根里的路径上。 */
+    fun switchFileRoot(root: FileRoot) {
+        _state.update {
+            it.copy(
+                fileRoot = root,
+                filePath = when (root) {
+                    FileRoot.PROJECT -> it.projectPath
+                    FileRoot.HOME -> TermuxConstants.TERMUX_HOME_DIR_PATH
+                    FileRoot.SHARED -> StorageLinks.EXTERNAL_ROOT
+                },
+                openFile = null,
+                fileDraft = null,
+                fileNameForm = null,
+                fileDeletePrompt = null,
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
+    }
+
+    /** 共享存储没授权时，跳去系统那个「所有文件访问权限」页面。 */
+    fun refreshSharedStoragePermission() {
+        val granted = runCatching {
+            android.os.Environment.isExternalStorageManager()
+        }.getOrDefault(false)
+        _state.update { it.copy(sharedStorageGranted = granted) }
+    }
+
+    // ---------- 文件：编辑与保存 ----------
+
+    /** 进入编辑态。只对**文本**文件有意义（二进制/读失败的预览不该被保存回去）。 */
+    fun startEditingFile() {
+        val open = _state.value.openFile ?: return
+        if (!isEditablePreview(open)) {
+            _state.update { it.copy(message = "这个文件不能编辑（二进制或读取失败）") }
+            return
+        }
+        _state.update { it.copy(fileDraft = open.content) }
+    }
+
+    fun updateFileDraft(text: String) = _state.update { it.copy(fileDraft = text) }
+
+    /** 放弃改动。没有这一步的话，误点「编辑」就只能靠保存来退出。 */
+    fun cancelEditingFile() = _state.update {
+        it.copy(fileDraft = null, message = "已放弃改动")
+    }
+
+    /**
+     * 保存编辑中的内容。
+     *
+     * 成功后**重新读一遍**这个文件（而不是把草稿写进 openFile）：读回来的是磁盘上
+     * 真实的样子。写盘可能被截断、可能有编码问题，用草稿冒充成功等于对用户说谎。
+     */
+    fun saveFile() {
+        val open = _state.value.openFile ?: return
+        val draft = _state.value.fileDraft ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val error = FileOps.write(File(open.path), draft)
+            if (error != null) {
+                _state.update { it.copy(message = "保存失败：$error") }
+                return@launch
+            }
+            val reread = FileBrowser.read(open.path)
+            _state.update {
+                it.copy(openFile = reread, fileDraft = null, message = "已保存 ${open.name}")
+            }
+            reloadFiles()
+        }
+    }
+
+    /**
+     * 「可编辑」的判据。
+     *
+     * [FileBrowser.read] 对二进制返回的是一句给人看的提示（"（二进制文件，N 字节…）"），
+     * 对读失败返回"（读取失败…）"。把这两句当正文保存回去会把文件**写坏** ——
+     * 所以它们不能进入编辑态。判据是"内容是不是那两句提示"，
+     * 而不是"文件大不大"，因为 4MB 的文本是合法的、80 字节的二进制不是。
+     */
+    private fun isEditablePreview(open: OpenFile): Boolean =
+        !open.content.startsWith("（二进制文件，") && !open.content.startsWith("（读取失败")
+
+    // ---------- 文件：新建 / 重命名 / 删除 ----------
+
+    /** 打开「新建文件」表单。[directory] 为真时建目录。 */
+    fun newFileForm(directory: Boolean) {
+        val path = _state.value.filePath
+        val base = if (directory) "新建文件夹" else "新建文件.txt"
+        _state.update {
+            it.copy(
+                fileNameForm = FileNameForm(
+                    title = if (directory) "新建文件夹" else "新建文件",
+                    draft = FileOps.suggestName(File(path), base),
+                ),
+            )
+        }
+    }
+
+    /** 打开「重命名」表单。 */
+    fun renameForm(entry: FileEntry) {
+        _state.update {
+            it.copy(fileNameForm = FileNameForm(title = "重命名", target = entry, draft = entry.name))
+        }
+    }
+
+    fun updateFileNameDraft(text: String) = _state.update { s ->
+        s.copy(fileNameForm = s.fileNameForm?.copy(draft = text))
+    }
+
+    fun cancelFileNameForm() = _state.update { it.copy(fileNameForm = null) }
+
+    /**
+     * 提交「新建 / 重命名」。
+     *
+     * 新建之后**立刻打开它**（文件）或**走进去**（目录）—— 「新建了个文件然后还要自己找出来」
+     * 是一步没必要的操作。重命名则刷新列表即可（当前内容还开着，路径没变）。
+     */
+    fun submitFileNameForm() {
+        val form = _state.value.fileNameForm ?: return
+        val dir = File(_state.value.filePath)
+        viewModelScope.launch(Dispatchers.IO) {
+            val name = form.draft
+            val error = if (form.target != null) {
+                FileOps.rename(File(form.target.path), name)
+            } else {
+                // 用扩展名猜是文件还是目录：表单里带 `.` 的当文件建。
+                if (name.contains('.')) FileOps.createFile(dir, name)
+                else FileOps.createDirectory(dir, name)
+            }
+            if (error != null) {
+                _state.update { it.copy(message = error) }
+                return@launch
+            }
+            _state.update { it.copy(fileNameForm = null) }
+            val created = File(dir, name)
+            if (form.target == null && created.isDirectory) {
+                navigateTo(created.absolutePath)
+            } else {
+                reloadFiles()
+                if (form.target == null && created.isFile) {
+                    val opened = FileBrowser.read(created.absolutePath)
+                    _state.update { it.copy(openFile = opened) }
+                }
+                _state.update { it.copy(message = if (form.target != null) "已重命名为 $name" else "已新建 $name") }
+            }
+        }
+    }
+
+    /** 打开删除确认（带"会一起消失多少条"）。 */
+    fun requestDelete(entry: FileEntry) {
+        _state.update {
+            it.copy(fileDeletePrompt = FileDeletePrompt(entry = entry, count = FileOps.countForDelete(File(entry.path))))
+        }
+    }
+
+    fun cancelDelete() = _state.update { it.copy(fileDeletePrompt = null) }
+
+    fun confirmDelete() {
+        val prompt = _state.value.fileDeletePrompt ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val error = FileOps.delete(File(prompt.entry.path))
+            if (error != null) {
+                _state.update { it.copy(message = error, fileDeletePrompt = null) }
+                return@launch
+            }
+            _state.update { s ->
+                s.copy(
+                    fileDeletePrompt = null,
+                    // 删掉的正是当前打开的文件时要把它关掉，否则面板会一直显示
+                    // 一个已经不存在的文件的正文 —— 再点保存就会把它**建回来**。
+                    openFile = if (s.openFile?.path == prompt.entry.path) null else s.openFile,
+                    fileDraft = if (s.openFile?.path == prompt.entry.path) null else s.fileDraft,
+                    message = "已删除 ${prompt.entry.name}",
+                )
+            }
+            reloadFiles()
+        }
+    }
+
+    fun closeFile() = _state.update { it.copy(openFile = null, fileDraft = null) }
 
     // ---------- 操作反馈 ----------
     //

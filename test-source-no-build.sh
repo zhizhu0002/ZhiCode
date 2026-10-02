@@ -378,6 +378,13 @@ run ThemeConsistencyTest "$PROJECT_ROOT"
 # 名字跟 Termux 不一致、失败让几十秒的安装整个炸掉。
 # StorageAccessTest.java
 run StorageAccessTest "$PROJECT_ROOT"
+# ---------- 文件面板必须可读写 ----------
+# 源码注释一度写着「本期为只读浏览 + 只读查看，不做写入」，而且根被钉死在项目目录上。
+# 退回只读**不会编译失败**，只会在用户真去改的时候才发现。另守三条写坏的具体形状：
+# 删除确认不报代价、删掉当前打开的文件却不关编辑器（再保存会把它建回来）、
+# 二进制预览也能进编辑态（保存回去就把文件写坏）。
+# FilePanelWriteTest.java
+run FilePanelWriteTest "$PROJECT_ROOT"
 # ---------- UI 调试页的入口门控与"真的铺开组件" ----------
 # 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
 # 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。

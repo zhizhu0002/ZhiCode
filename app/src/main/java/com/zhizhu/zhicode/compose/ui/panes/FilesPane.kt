@@ -30,9 +30,17 @@ import com.termux.shared.termux.TermuxConstants
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
+import com.zhizhu.zhicode.compose.model.FileDeletePrompt
 import com.zhizhu.zhicode.compose.model.FileEntry
+import com.zhizhu.zhicode.compose.model.FileNameForm
+import com.zhizhu.zhicode.compose.model.FileRoot
 import com.zhizhu.zhicode.compose.model.OpenFile
+import com.zhizhu.zhicode.compose.ui.ZhiFieldError
+import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
 import top.yukonga.miuix.kmp.basic.BreadcrumbBar
 import top.yukonga.miuix.kmp.basic.BreadcrumbItem
 import top.yukonga.miuix.kmp.basic.Card
@@ -47,7 +55,16 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /**
  * 文件面板，对应原版 renderFiles() / showFileBrowser() / showFileEditor()。
- * 本期为只读浏览 + 只读查看，不做写入。
+ *
+ * <h3>从「只读查看」改成可读写</h3>
+ *
+ * 这一屏原先是「只读浏览 + 只读查看，不做写入」，而且根被钉死在项目目录上
+ * （`rootPath() = projectPath`）—— 于是 HOME 与共享存储都走不到，
+ * 「上一级」也会被弹回项目顶部。用户要的「挂载 home 目录（需要可读写）」
+ * 在应用内的对应物就是这一屏：**能改**、而且**能去三个根**。
+ *
+ * 写操作全部走 `FileOps`（纯 Java、有 26 条单测）：名字校验、原子保存、
+ * 删除不跟符号链接。这里只负责把它的结果如实画出来。
  */
 @Composable
 fun FilesPane(
@@ -64,20 +81,89 @@ fun FilesPane(
      * 默认空串 = 目录真的为空，此时不显示任何提示。
      */
     emptyNote: String = "",
+    // ---- 可读写相关（都来自 FileOps 封装好的操作） ----
+    root: FileRoot = FileRoot.PROJECT,
+    onSwitchRoot: (FileRoot) -> Unit = {},
+    draft: String? = null,
+    onStartEdit: () -> Unit = {},
+    onDraftChange: (String) -> Unit = { _ -> },
+    onSave: () -> Unit = {},
+    onCancelEdit: () -> Unit = {},
+    nameForm: FileNameForm? = null,
+    onNewFile: () -> Unit = {},
+    onNewDirectory: () -> Unit = {},
+    onRename: (FileEntry) -> Unit = {},
+    onRequestDelete: (FileEntry) -> Unit = {},
+    onNameDraftChange: (String) -> Unit = { _ -> },
+    onSubmitName: () -> Unit = {},
+    onCancelName: () -> Unit = {},
+    deletePrompt: FileDeletePrompt? = null,
+    onConfirmDelete: () -> Unit = {},
+    onCancelDelete: () -> Unit = {},
+    sharedStorageGranted: Boolean = true,
 ) {
     val scheme = MiuixTheme.colorScheme
     Surface(modifier = modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
         Column(modifier = Modifier.fillMaxSize()) {
+            FileRootSwitcher(selected = root, onSelect = onSwitchRoot)
             if (openFile == null) {
                 PaneHeader(
                     title = "文件",
-                    actionIcon = ZhiIcons.upLevel,
-                    actionDescription = "上一级目录",
-                    onAction = onUp,
                     subtitle = "${entries.size} 项",
+                    // 行尾三个动作：新建文件 / 新建文件夹 / 上一级。
+                    // 用 actions 槽而不是 actionIcon —— 只给一个图标按钮的话
+                    // 「上一级」和「新建」只能二选一。
+                    actions = {
+                        ZhiIconButton(
+                            icon = ZhiIcons.file,
+                            description = "新建文件",
+                            onClick = onNewFile,
+                            iconSize = 16.dp,
+                            compact = 30.dp,
+                        )
+                        ZhiIconButton(
+                            icon = ZhiIcons.directory,
+                            description = "新建文件夹",
+                            onClick = onNewDirectory,
+                            iconSize = 16.dp,
+                            compact = 30.dp,
+                        )
+                        ZhiIconButton(
+                            icon = ZhiIcons.upLevel,
+                            description = "上一级目录",
+                            onClick = onUp,
+                            iconSize = 16.dp,
+                            compact = 30.dp,
+                        )
+                    },
                 )
                 // 路径用 Miuix BreadcrumbBar 展示，点击任一层级都能直接跳转
                 FileBreadcrumbBar(filePath = filePath, onNavigate = onNavigate)
+                nameForm?.let { form ->
+                    FileNameFormCard(
+                        form = form,
+                        onDraftChange = onNameDraftChange,
+                        onSubmit = onSubmitName,
+                        onCancel = onCancelName,
+                    )
+                }
+                deletePrompt?.let { prompt ->
+                    FileDeleteCard(
+                        prompt = prompt,
+                        onConfirm = onConfirmDelete,
+                        onCancel = onCancelDelete,
+                    )
+                }
+                // 共享存储没授权时说清怎么开 —— 否则用户看到的是一个空列表，
+                // 而原因（「所有文件访问权限」）在界面上完全没有痕迹。
+                if (root == FileRoot.SHARED && !sharedStorageGranted) {
+                    Text(
+                        text = "共享存储需要「所有文件访问权限」：系统设置 → 应用 → ZhiCode → 权限 → 文件和媒体 → 允许管理所有文件。",
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = ZhiTextScale.Caption,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 6.dp),
+                    )
+                }
                 // 不做常驻过滤框：Miuix InputField 有 45dp 最小高度，
                 // 常驻会把文件列表挤下去，与"文件 UI 紧凑"的要求冲突。
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -92,7 +178,12 @@ fun FilesPane(
                         verticalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
                     ) {
                         items(entries, key = { it.path }) { entry ->
-                            FileRow(entry = entry, onOpen = { onOpen(entry) })
+                            FileRow(
+                                entry = entry,
+                                onOpen = { onOpen(entry) },
+                                onRename = { onRename(entry) },
+                                onDelete = { onRequestDelete(entry) },
+                            )
                         }
                         // 目录不存在时把原因说出来，而不是让面板空着（"0 项"）
                         // 让用户以为应用坏了。
@@ -116,37 +207,195 @@ fun FilesPane(
                     )
                 }
             } else {
+                val editing = draft != null
                 PaneHeader(
                     title = openFile.name,
-                    actionIcon = ZhiIcons.close,
-                    actionDescription = "关闭文件",
-                    onAction = onCloseFile,
-                    subtitle = openFile.language + " · 只读",
+                    subtitle = if (editing) "${openFile.language} · 编辑中" else "${openFile.language} · 只读",
+                    actions = {
+                        if (editing) {
+                            ZhiIconButton(
+                                icon = ZhiIcons.done,
+                                description = "保存",
+                                onClick = onSave,
+                                iconSize = 16.dp,
+                                compact = 30.dp,
+                            )
+                            ZhiIconButton(
+                                icon = ZhiIcons.close,
+                                description = "放弃改动",
+                                onClick = onCancelEdit,
+                                iconSize = 16.dp,
+                                compact = 30.dp,
+                            )
+                        } else {
+                            ZhiIconButton(
+                                icon = ZhiIcons.edit,
+                                description = "编辑",
+                                onClick = onStartEdit,
+                                iconSize = 16.dp,
+                                compact = 30.dp,
+                            )
+                            ZhiIconButton(
+                                icon = ZhiIcons.close,
+                                description = "关闭文件",
+                                onClick = onCloseFile,
+                                iconSize = 16.dp,
+                                compact = 30.dp,
+                            )
+                        }
+                    },
                 )
                 FileBreadcrumbBar(filePath = openFile.path, onNavigate = onNavigate)
-                val lines = remember(openFile.path) { openFile.content.split('\n') }
-                Surface(modifier = Modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
-                    LazyColumn(modifier = Modifier.fillMaxSize().padding(vertical = 3.dp)) {
-                        items(lines.size) { index ->
-                            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
-                                Text(
-                                    text = "${index + 1}",
-                                    color = scheme.onSurfaceVariantSummary,
-                                    fontSize = ZhiTextScale.Footnote,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.width(26.dp),
-                                )
-                                Text(
-                                    text = lines[index].ifEmpty { " " },
-                                    color = scheme.onSurface,
-                                    fontSize = ZhiTextScale.Footnote,
-                                    fontFamily = FontFamily.Monospace,
-                                )
+                if (editing) {
+                    // 编辑态：整块可滚动的多行输入框。用等宽字体 —— 缩进与列对齐
+                    // 在读代码时是有意义的信息，换了比例字体就没法看了。
+                    ZhiTextField(
+                        value = draft,
+                        onValueChange = onDraftChange,
+                        modifier = Modifier.fillMaxSize().padding(horizontal = ZhiSpace.m, vertical = 4.dp),
+                        minLines = 12,
+                        textStyle = MiuixTheme.textStyles.main.copy(fontFamily = FontFamily.Monospace),
+                    )
+                } else {
+                    val lines = remember(openFile.path) { openFile.content.split('\n') }
+                    Surface(modifier = Modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
+                        LazyColumn(modifier = Modifier.fillMaxSize().padding(vertical = 3.dp)) {
+                            items(lines.size) { index ->
+                                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
+                                    Text(
+                                        text = "${index + 1}",
+                                        color = scheme.onSurfaceVariantSummary,
+                                        fontSize = ZhiTextScale.Footnote,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.width(26.dp),
+                                    )
+                                    Text(
+                                        text = lines[index].ifEmpty { " " },
+                                        color = scheme.onSurface,
+                                        fontSize = ZhiTextScale.Footnote,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 根切换条。
+ *
+ * 三个根是三种不同的活儿（项目=代码、HOME=配置、共享存储=用户的文件），
+ * 放在标题栏下方一行，而不是藏进菜单里 —— 换根是这一屏最常用的动作之一。
+ */
+@Composable
+private fun FileRootSwitcher(selected: FileRoot, onSelect: (FileRoot) -> Unit) {
+    val scheme = MiuixTheme.colorScheme
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
+    ) {
+        FileRoot.entries.forEach { root ->
+            val active = root == selected
+            Card(
+                onClick = { if (!active) onSelect(root) },
+                modifier = Modifier.weight(1f),
+                cornerRadius = ZhiRadius.inner,
+                insideMargin = PaddingValues(vertical = 6.dp),
+                colors = CardDefaults.defaultColors(
+                    color = if (active) scheme.primaryContainer else ZhiColors.cardSurface(),
+                    contentColor = if (active) scheme.onPrimaryContainer else scheme.onSurface,
+                ),
+                pressFeedbackType = PressFeedbackType.None,
+            ) {
+                Text(
+                    text = root.label,
+                    fontSize = ZhiTextScale.Footnote,
+                    fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 「新建 / 重命名」表单。
+ *
+ * 错误行用 [ZhiFieldError] 而不是自己写 Text：标题栏下方那一条要和其他表单
+ * 「左边缘对齐、只在有错时才出现」的规则一致（见 `FieldErrorAlignmentTest`）。
+ */
+@Composable
+private fun FileNameFormCard(
+    form: FileNameForm,
+    onDraftChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 4.dp)) {
+        Text(
+            text = form.title,
+            color = MiuixTheme.colorScheme.onSurface,
+            fontSize = ZhiTextScale.Caption,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(start = 12.dp, bottom = 4.dp),
+        )
+        ZhiTextField(
+            value = form.draft,
+            onValueChange = onDraftChange,
+            singleLine = true,
+            label = if (form.target == null) "名字" else "新名字",
+        )
+        ZhiFieldError(form.error)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
+        ) {
+            SecondaryButton(text = "取消", onClick = onCancel, modifier = Modifier.weight(1f))
+            PrimaryButton(
+                text = "确定",
+                onClick = onSubmit,
+                enabled = form.saveable,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/**
+ * 删除确认。
+ *
+ * 逐字说清代价：删一个目录会带走里面的全部内容，而「确定删除 sub 吗？」
+ * 等于没告诉用户这件事。条数来自 `FileOps.countForDelete`。
+ */
+@Composable
+private fun FileDeleteCard(
+    prompt: FileDeletePrompt,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 4.dp)) {
+        Text(
+            text = if (prompt.destructive) {
+                "删除「${prompt.entry.name}」？\n其中的 ${prompt.count - 1} 项内容会一起消失，无法撤销。"
+            } else {
+                "删除「${prompt.entry.name}」？无法撤销。"
+            },
+            color = if (prompt.destructive) ZhiColors.red() else scheme.onSurface,
+            fontSize = ZhiTextScale.Caption,
+            modifier = Modifier.padding(start = 12.dp, bottom = 4.dp),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
+        ) {
+            SecondaryButton(text = "取消", onClick = onCancel, modifier = Modifier.weight(1f))
+            PrimaryButton(text = "删除", onClick = onConfirm, modifier = Modifier.weight(1f))
         }
     }
 }
@@ -216,9 +465,18 @@ private fun breadcrumbItems(filePath: String): List<BreadcrumbItem> {
  * 文件行：此前 vertical = 20dp 导致行高约 60dp，一屏放不下几个文件（V2）。
  * 收到 11dp ≈ 40dp 行高，仍在 Material 触摸目标下限（48dp）附近，密度观感
  * 与 Miuix 设置列表行一致。
+ *
+ * <p>行尾两个动作（重命名 / 删除）用 [ZhiIconButton] 的 `compact` 压到 30dp ——
+ * 与 `PaneHeader` 的做法一致：Miuix `TextButton` 写死 `MinWidth=58dp`/`MinHeight=40dp`，
+ * 在这条 40dp 高的行里放不下，图标按钮才是能安全压小的那个。
  */
 @Composable
-private fun FileRow(entry: FileEntry, onOpen: () -> Unit) {
+private fun FileRow(
+    entry: FileEntry,
+    onOpen: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
     val scheme = MiuixTheme.colorScheme
     Card(
         onClick = onOpen,
@@ -226,7 +484,7 @@ private fun FileRow(entry: FileEntry, onOpen: () -> Unit) {
         // 两个地方都给间距会让以后调行距要改两处，而且那 1dp 几乎等于没有）。
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(horizontal = ZhiSpace.m, vertical = 11.dp),
+        insideMargin = PaddingValues(start = ZhiSpace.m, end = ZhiSpace.xs, top = 4.dp, bottom = 4.dp),
         colors = CardDefaults.defaultColors(
             color = ZhiColors.cardSurface(),
             contentColor = scheme.onSurface,
@@ -258,6 +516,22 @@ private fun FileRow(entry: FileEntry, onOpen: () -> Unit) {
                     fontSize = ZhiTextScale.Micro,
                 )
             }
+            ZhiIconButton(
+                icon = ZhiIcons.edit,
+                description = "重命名",
+                onClick = onRename,
+                tint = scheme.onSurfaceVariantSummary,
+                iconSize = 14.dp,
+                compact = 30.dp,
+            )
+            ZhiIconButton(
+                icon = ZhiIcons.delete,
+                description = "删除",
+                onClick = onDelete,
+                tint = ZhiColors.red(),
+                iconSize = 14.dp,
+                compact = 30.dp,
+            )
         }
     }
 }

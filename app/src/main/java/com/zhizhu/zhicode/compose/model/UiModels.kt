@@ -1,5 +1,7 @@
 package com.zhizhu.zhicode.compose.model
 
+import com.termux.app.zhicode.core.FileOps
+
 /** 对话流中的条目类型。对应原 蜘蛛 的 ChatItem 分类。 */
 enum class ChatKind { USER, ASSISTANT, TOOL_GROUP, ERROR, INFO }
 
@@ -258,6 +260,58 @@ data class OpenFile(
 )
 
 /**
+ * 文件面板的根（三选一）。
+ *
+ * <p>做成可切换而不是固定一个根，是因为这三处是**三种不同的活儿**：
+ * 项目里是代码，HOME 里是配置（`.bashrc`、脚本），共享存储里是用户真正
+ * 要处理的文件（下载、截图、导出）。原先面板被 `rootPath() = projectPath`
+ * 关在项目里，HOME 与共享存储都走不到。
+ *
+ * <p>⚠️ 共享存储那一路要**先给「所有文件访问权限」**才列得出东西，
+ * 否则 `list()` 返回 null。界面据 [WorkspaceUiState.fileNote] 那条
+ * 「无法读取（权限不足）」如实呈现，而不是显示"0 项"骗人。
+ */
+enum class FileRoot(val label: String) {
+    PROJECT("项目"),
+    HOME("HOME"),
+    SHARED("共享存储"),
+}
+
+/**
+ * 「新建 / 重命名」共用的名字表单。
+ *
+ * <p>两者只差一件事：重命名有 [target]，新建没有。合成一个模型是为了让
+ * 校验规则、错误显示、保存按钮的可用性只写一份 —— 分成两套的话，
+ * 「名字里不能有 /」这类规则迟早只有一边生效。
+ */
+data class FileNameForm(
+    val title: String,
+    /** 重命名时被改的那条；新建时为 null。 */
+    val target: FileEntry? = null,
+    val draft: String = "",
+) {
+    /** 校验结果，直接显示给用户。规则见 `FileOps.nameError`。 */
+    val error: String? get() = FileOps.nameError(draft)
+
+    val saveable: Boolean get() = error == null
+}
+
+/**
+ * 删除确认。
+ *
+ * <p>[count] 是**会一起消失的条目数（含自己）**。删除一个目录会带走里面的全部内容，
+ * 只说「确定删除 sub 吗？」等于没告诉用户代价。数字来自
+ * `FileOps.countForDelete`（不跟符号链接进去 —— 跟进去会虚高）。
+ */
+data class FileDeletePrompt(
+    val entry: FileEntry,
+    val count: Int,
+) {
+    /** 是不是"会带走别的东西"的那种删除。 */
+    val destructive: Boolean get() = count > 1
+}
+
+/**
  * 「附加项目文件」的一条搜索结果。
  *
  * 放在 model 包而不是作为 `FileSearch` 的内部类：它出现在公开的
@@ -368,6 +422,19 @@ data class WorkspaceUiState(
      */
     val fileNote: String = "",
     val openFile: OpenFile? = null,
+    /** 文件面板的根：项目 / HOME / 共享存储。 */
+    val fileRoot: FileRoot = FileRoot.PROJECT,
+    /**
+     * 编辑中的正文。**null 表示只读查看**（不是"空文件"）——
+     * 这个区别是刻意的：空文件也必须能进入编辑态去写内容。
+     */
+    val fileDraft: String? = null,
+    /** 非空即「新建 / 重命名」表单打开。 */
+    val fileNameForm: FileNameForm? = null,
+    /** 非空即删除确认打开。 */
+    val fileDeletePrompt: FileDeletePrompt? = null,
+    /** 共享存储当前是否给过「所有文件访问权限」。界面据此提示怎么开。 */
+    val sharedStorageGranted: Boolean = false,
     /**
      * 非空即「附加项目文件」面板打开（输入器 `+` 的第一项）。
      *
