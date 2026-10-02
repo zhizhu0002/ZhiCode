@@ -178,6 +178,16 @@ internal class ZhiEngineController(
         applyOverrides(base, overrides)
         sessionConfig = base
         engine().configure(base)
+        // ⚠️ 这里必须落盘。原先只把值写进内存与引擎，`ApiSettingsStore.save()` 在
+        // 整个工程里**零调用方** —— 于是权限模式、推理档、上下文窗口、项目目录、
+        // 联网搜索那一整套、自动压缩、自定义提示词，全都重启即丢。它们的存储键与
+        // 读取路径一直齐备，缺的就是这一次写入。
+        //
+        // 不需要去抖或线程转发：`save()` 内部只做 SharedPreferences.apply()
+        // （内存立即生效、磁盘异步写），唯一的重活——密钥加密——只在密钥**真的变了**
+        // 时发生，而这里的 base 来自 store.load()，密钥与库里一致，不会触发。
+        // 调用频率是「每条消息一次」，不是热路径。
+        runCatching { store.save(base) }
         return base
     }
 

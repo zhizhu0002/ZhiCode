@@ -329,6 +329,13 @@ run WebSearchBackendTest "$PROJECT_ROOT"
 # 修法是展开时收起键盘，锚点带着浮层一起上移。
 # DropdownImeGuardTest.java
 run DropdownImeGuardTest "$PROJECT_ROOT"
+# ---------- 设置必须落盘 ----------
+# 引擎侧持久化表齐备、读路径也在跑，但写路径（ApiSettingsStore.save）在整个
+# 工程里零调用方 —— 结果是「设置重启就丢」，而读得到默认值正好掩盖了它。
+# 这条守的是写路径存在、每组设置有键+注册+字段、以及不在 SessionConfig 里的
+# 界面设置（主题、搜索密钥）读写两条路径都有。
+# SettingsPersistenceTest.java
+run SettingsPersistenceTest "$PROJECT_ROOT"
 # ---------- UI 调试页的入口门控与"真的铺开组件" ----------
 # 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
 # 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。

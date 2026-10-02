@@ -99,10 +99,14 @@ public final class ApiSettingsStore {
         static final String WEB_SEARCH_ENABLED = "web_search_enabled";
         static final String WEB_SEARCH_PROVIDER = "web_search_provider";
         static final String WEB_SEARCH_MAX_RESULTS = "web_search_max_results";
+        static final String WEB_SEARCH_SEARXNG_URL = "web_search_searxng_url";
         static final String WEB_FETCH_MAX_CHARS = "web_fetch_max_chars";
         static final String WEB_TIMEOUT = "web_timeout_ms";
 
         static final String BUNDLED_PURGE = "bundled_endpoint_purge_version";
+
+        /** 纯界面设置（不属于 SessionConfig，见 getThemeMode 的说明）。 */
+        static final String THEME_MODE = "theme_mode";
 
         private Key() {}
     }
@@ -222,6 +226,10 @@ public final class ApiSettingsStore {
                 item(c -> c.webSearchProvider, (c, v) -> c.webSearchProvider = (String) v));
         SETTINGS.put(Key.WEB_SEARCH_MAX_RESULTS,
                 item(c -> c.webSearchMaxResults, (c, v) -> c.webSearchMaxResults = (Integer) v));
+        // SearXNG 实例地址：不是密钥，跟着全局设置走。
+        SETTINGS.put(Key.WEB_SEARCH_SEARXNG_URL,
+                textItem(c -> c.webSearchBaseUrl, (c, v) -> c.webSearchBaseUrl = v,
+                        ApiSettingsStore::trimToEmpty));
         SETTINGS.put(Key.WEB_FETCH_MAX_CHARS,
                 item(c -> c.webFetchMaxChars, (c, v) -> c.webFetchMaxChars = (Integer) v));
         SETTINGS.put(Key.WEB_TIMEOUT, item(c -> c.webTimeoutMs, (c, v) -> c.webTimeoutMs = (Integer) v));
@@ -515,6 +523,75 @@ public final class ApiSettingsStore {
                 .edit()
                 .putBoolean(Key.FORCED_KEEP_ALIVE, enabled)
                 .apply();
+    }
+
+    // ------------------------------------------------ 界面侧设置（非 SessionConfig）
+
+    /**
+     * 主题模式（{@code system} / {@code light} / {@code dark}）。
+     *
+     * <p>主题是**纯界面**概念，{@link SessionConfig} 里没有它的位置（引擎不关心
+     * 界面长什么样），但那不代表它可以不落盘 —— 用户选的主题重启就丢，
+     * 与「设置保存不完善」是同一件事。键由本类拥有，写入也由本类负责，
+     * 与 {@link #setForcedKeepAliveEnabled} 同一个约定。
+     */
+    public static String getThemeMode(Context context, String fallback) {
+        if (context == null) return fallback;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        String value = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(Key.THEME_MODE, "");
+        return isBlank(value) ? fallback : value.trim();
+    }
+
+    public static void setThemeMode(Context context, String mode) {
+        if (context == null) return;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(Key.THEME_MODE, mode == null ? "" : mode.trim())
+                .apply();
+    }
+
+    /**
+     * 搜索服务的密钥（按服务各存一份），**加密**存放。
+     *
+     * <p>复用 {@link com.termux.app.zhicode.security.AndroidSecretStore} 的
+     * profile 分槽：槽位 id 用 {@code websearch:<服务名>} 这种命名空间前缀，
+     * 与真实的 API 配置 id 天然不会撞（那些是 UUID）。
+     *
+     * <p>为什么不塞进 prefs：那是**明文**。API 配置的密钥走的是加密槽，
+     * 搜索服务没有理由比它宽松 —— 同一台设备上两处密钥、两种保护强度是最难解释的。
+     * revision 固定 0：这里不需要「换密钥就搬家」那套语义。
+     */
+    public static void setWebSearchKey(Context context, String provider, String value) {
+        if (context == null || isBlank(provider)) return;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        try {
+            new com.termux.app.zhicode.security.AndroidSecretStore(app)
+                    .setApiKey(webSearchSlot(provider), 0, trimToEmpty(value));
+        } catch (Exception ignored) {
+            // 与 AndroidSecretStore 的其它调用点一致：加密不可用时**不抛**给界面，
+            // 由 getWebSearchKey 读回空值，用户看到的是「没配上」，而不是一次崩溃。
+        }
+    }
+
+    public static String getWebSearchKey(Context context, String provider) {
+        if (context == null || isBlank(provider)) return "";
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        try {
+            return trimToEmpty(new com.termux.app.zhicode.security.AndroidSecretStore(app)
+                    .getApiKey(webSearchSlot(provider), 0));
+        } catch (RuntimeException failure) {
+            return "";
+        }
+    }
+
+    private static String webSearchSlot(String provider) {
+        return "websearch:" + provider.trim().toLowerCase(java.util.Locale.US);
     }
 
     // ------------------------------------------------------------ 全局字段读写

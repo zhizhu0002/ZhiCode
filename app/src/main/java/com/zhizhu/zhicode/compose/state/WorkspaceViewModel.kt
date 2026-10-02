@@ -92,6 +92,7 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.ui.zhiFormatSize
 import com.termux.app.zhicode.core.PlanApprovalGate
+import com.termux.app.zhicode.storage.ApiSettingsStore
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
@@ -419,6 +420,7 @@ class WorkspaceViewModel(
      */
     private fun initSessionState() {
         viewModelScope.launch(Dispatchers.IO) {
+            restoreUiSettings()
             // 顶栏的模型名/密钥状态要反映**真实生效**的配置，
             // 否则用户会看到一个跟实际请求无关的模型名。
             syncActiveProfile()
@@ -427,6 +429,38 @@ class WorkspaceViewModel(
             val sessions = SessionReader.list(_state.value.projectPath)
             _state.update { it.copy(sessions = sessions) }
             sessions.firstOrNull()?.let { openSession(it) }
+        }
+    }
+
+    /**
+     * 读回**不在 SessionConfig 里**的那几项界面设置（主题、搜索服务密钥）。
+     *
+     * 其余设置（权限模式、推理档、上下文窗口、项目目录、联网搜索一整套、自动压缩、
+     * 自定义提示词、沙箱全权、Root、保活）都是 [SessionConfig] 的字段，
+     * 由引擎侧的持久化表负责，这里不重复。
+     *
+     * 密钥从**加密槽**读回，与 API 配置的密钥同一套保护。
+     */
+    private suspend fun restoreUiSettings() = withContext(Dispatchers.IO) {
+        val stored = runCatching {
+            ApiSettingsStore.getThemeMode(getApplication(), ThemeMode.SYSTEM.name.lowercase())
+        }.getOrDefault(ThemeMode.SYSTEM.name.lowercase())
+        val theme = ThemeMode.entries.firstOrNull { it.name.equals(stored, ignoreCase = true) }
+            ?: ThemeMode.SYSTEM
+        val keys = WebSearchProvider.entries
+            .filter { it.needsKey }
+            .associateWith { provider ->
+                runCatching {
+                    ApiSettingsStore.getWebSearchKey(getApplication(), provider.name.lowercase())
+                }.getOrDefault("")
+            }
+            .filterValues { it.isNotBlank() }
+        _state.update {
+            it.copy(
+                themeMode = theme,
+                settings = it.settings.copy(webSearchKeys = keys),
+                settingsDraft = it.settingsDraft?.copy(themeMode = theme, webSearchKeys = keys),
+            )
         }
     }
 
@@ -3926,13 +3960,17 @@ class WorkspaceViewModel(
         }
     }
 
-    fun cycleThemeMode() = _state.update {
-        val next = when (it.themeMode) {
-            ThemeMode.SYSTEM -> ThemeMode.LIGHT
-            ThemeMode.LIGHT -> ThemeMode.DARK
-            ThemeMode.DARK -> ThemeMode.SYSTEM
+    fun cycleThemeMode() {
+        var next = ThemeMode.SYSTEM
+        _state.update {
+            next = when (it.themeMode) {
+                ThemeMode.SYSTEM -> ThemeMode.LIGHT
+                ThemeMode.LIGHT -> ThemeMode.DARK
+                ThemeMode.DARK -> ThemeMode.SYSTEM
+            }
+            it.copy(themeMode = next, message = "主题：${next.label}")
         }
-        it.copy(themeMode = next, message = "主题：${next.label}")
+        persistTheme(next)
     }
 
     // ---------- 内置 Termux 运行环境 ----------
@@ -4221,8 +4259,30 @@ class WorkspaceViewModel(
      * `clampWebResults` / `projectPath.ifBlank` 这些归一化，绕过它就等于把用户
      * 原始输入直接塞进引擎配置。
      */
-    fun applySettingsDraft(draft: SettingsDraft) = _state.update {
-        draft.applyTo(it, keepDraft = true)
+    fun applySettingsDraft(draft: SettingsDraft) {
+        _state.update { draft.applyTo(it, keepDraft = true) }
+        // 主题与搜索密钥**不在** SessionConfig 里，configure() 那次落盘罩不到它们，
+        // 各自在这里补一次（密钥走加密槽，见 ApiSettingsStore.setWebSearchKey）。
+        persistTheme(draft.themeMode)
+        persistWebSearchKey(draft)
+    }
+
+    /**
+     * 把主题写回磁盘。
+     *
+     * 主题是纯界面概念，但它「选完重启就丢」与设置不落盘是同一件事 ——
+     * 用户的感受是「这个软件的设置根本记不住」。
+     */
+    private fun persistTheme(mode: ThemeMode) {
+        runCatching { ApiSettingsStore.setThemeMode(getApplication(), mode.name.lowercase()) }
+    }
+
+    /** 持久化**当前选中服务**的密钥（界面只可能改这一个）。 */
+    private fun persistWebSearchKey(draft: SettingsDraft) {
+        val provider = draft.webSearchProvider
+        if (!provider.needsKey) return
+        val key = draft.webSearchKeys[provider].orEmpty()
+        runCatching { ApiSettingsStore.setWebSearchKey(getApplication(), provider.name.lowercase(), key) }
     }
 
     /**
