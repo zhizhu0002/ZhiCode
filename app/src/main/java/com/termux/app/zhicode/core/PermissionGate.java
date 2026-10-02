@@ -82,21 +82,25 @@ public final class PermissionGate {
         // 而且不会有任何报错。
         //
         // bypass 仍然优先：那一档是用户明确说过"别问我"，逐工具审批不该推翻它。
-        // PLAN / DONT_ASK 也照旧拒绝（它们的语义是"不执行需要确认的东西"，
-        // 不是"那就直接执行"）。
+        //
+        // ⚠️ 这里**只**剩 PLAN 直接拒绝。原先 DONT_ASK 也走这一支 return false，
+        // 于是「不询问」被实现成了「不问也不做」—— 用户看到的是设置成不询问之后
+        // **几乎所有命令都执行失败**，而且失败原因指向权限，很难联想到是模式语义反了。
+        // 它的正确语义由下面那段注释与 UI 文案共同定义（不询问，但高风险仍提示）。
         if (tool.requiresApproval(call.input) && !PermissionModePolicy.BYPASS.equals(mode)) {
-            if (PermissionModePolicy.PLAN.equals(mode) || PermissionModePolicy.DONT_ASK.equals(mode)) {
-                return false;
-            }
+            if (PermissionModePolicy.PLAN.equals(mode)) return false;
             return ask(call, kind, mode, listener);
         }
 
         // 见类注释：三段「不用问」的判断，顺序无关但都要在询问之前。
         if (isAlwaysAllowed(kind)) return true;
         if (PermissionModePolicy.BYPASS.equals(mode)) return true;
-        if (PermissionModePolicy.PLAN.equals(mode) || PermissionModePolicy.DONT_ASK.equals(mode)) {
-            return false;
-        }
+        // DONT_ASK = 「不问就做」。上面那段已经把需要批准的高危调用拿去问用户了，
+        // 走到这里说明这次调用本身不需要批准 —— 那就直接放行。
+        // （原先返回 false，等于把「不询问」变成「全部拒绝」。）
+        if (PermissionModePolicy.DONT_ASK.equals(mode)) return true;
+        // PLAN 是只读语义：任何需要落盘的调用都不执行。
+        if (PermissionModePolicy.PLAN.equals(mode)) return false;
         if (writesAreAccepted(mode, kind)) return true;
 
         return ask(call, kind, mode, listener);

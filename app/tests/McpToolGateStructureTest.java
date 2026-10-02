@@ -109,10 +109,24 @@ public final class McpToolGateStructureTest {
         // bypass 仍然要能压过它：那一档是用户明确说过"别问我"。
         require(has(gate, "tool.requiresApproval(call.input) && !PermissionModePolicy.BYPASS.equals(mode)"),
             "bypass 权限模式必须仍然能压过逐工具审批：那一档的语义是「别问我」");
-        // PLAN / DONT_ASK 不能被这条路径绕过成"直接执行"。
-        require(has(gate, "if (PermissionModePolicy.PLAN.equals(mode) || PermissionModePolicy.DONT_ASK.equals(mode)) { return false; }"),
-            "PLAN / DONT_ASK 必须仍然拒绝：它们的语义是「不执行需要确认的东西」，"
+        // PLAN / DONT_ASK 都不能让这条路径被"直接执行"绕过。
+        //
+        // ⚠️ 两者**实现方式不同**，这是刻意的：
+        //   PLAN     → 直接拒绝（只读语义：不执行任何需要确认的东西）；
+        //   DONT_ASK → 走 ask()（「不询问」= 不问就做，但需要批准的高危调用仍要提示，
+        //              与 UI 文案「不再弹出确认，高风险操作仍会提示」一致）。
+        //
+        // 原先两者都 return false，于是「不询问」被实现成「不问也不做」——
+        // 用户看到的是切到不询问之后**几乎所有命令都执行失败**。
+        // 这里守的**不变量**是「gated 调用在 PLAN/DONT_ASK 下不会被静默放行」，
+        // 而不是某一行字面量。
+        require(has(gate, "if (PermissionModePolicy.PLAN.equals(mode)) return false;"),
+            "PLAN 必须仍然拒绝需要确认的调用：它的语义是「不执行需要确认的东西」，"
                 + "而不是「那就直接执行」");
+        int gatedAsks = gate.indexOf("return ask(call, kind, mode, listener);", approvalCheck);
+        require(gatedAsks > 0,
+            "DONT_ASK 下 gated 调用必须走 ask()：它既不能被静默放行，"
+                + "也不能被拒绝 —— 后者就是把「不询问」变成「不问也不做」的原 bug");
 
         // ---- 2. ZhiTool 的默认实现与 McpTool 的覆写 ---------------------------
         require(has(zhiTool, "default boolean requiresApproval(JSONObject input)") && has(zhiTool, "return false;"),
