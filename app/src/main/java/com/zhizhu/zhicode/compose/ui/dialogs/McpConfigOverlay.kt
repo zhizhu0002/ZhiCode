@@ -64,7 +64,11 @@ fun McpConfigOverlay(
     // 那时 form 已经是 null 了。见 rememberLastNonNull 的说明。
     val shownForm = rememberLastNonNull(form)
     SettingsPageStack(
-        current = if (form == null) SettingsPageKey("mcp.list", 0) else SettingsPageKey("mcp.form", 1),
+        // 路径含最底下那一页：栈要靠整条路径算层级与方向。
+        path = listOf(
+            SettingsPageKey("mcp.list", 0),
+            if (form != null) SettingsPageKey("mcp.form", 1) else null,
+        ).filterNotNull(),
         onBack = if (form == null) onDismiss else onCancelForm,
     ) { key ->
         // ⚠️ 分支必须看**正在渲染的那一页**（key），不能看当前状态：

@@ -276,26 +276,32 @@ data class SkillDetail(
 )
 
 /**
- * 「手动添加技能」的表单。
+ * 「手动添加技能」的表单（**对话框**，不是整页）。
  *
- * 与参考实现一致：不再单独问名称，而是让用户**粘贴一整份 SKILL.md**，
- * 名字从内容的 frontmatter 里解析出来并实时回显。
+ * 形状照用户给的参考图：文件名 + 内容 + 取消/创建。
+ * 文件名就是技能目录名，内容就是 `SKILL.md` 本体。
  *
- * [name] 为空且 [content] 非空即为「有内容但解析不出名字」——这是错误态，
- * 必须报出来并挡住提交，不能猜一个默认名。
+ * 以前这一项是**单独一整页**（还要再开一层编辑器），加一个技能要跨两级页面。
+ * 做成对话框之后它就两个字段，一步到位。
+ *
+ * [fileName] 也允许由导入路径预填（从文件导入时用 [com.zhizhu.zhicode.compose.data.SkillStore.nameFromContent]
+ * 解析 frontmatter 拿到名字填进来）—— 但**用户始终看得到、改得动**它，
+ * 不像之前那样"名字由内容隐式决定、打错了只能重来"。
  */
 data class SkillCreateDraft(
+    val fileName: String = "",
     val content: String = "",
     val scope: SkillScope = SkillScope.PROJECT,
-    /** 由 [com.zhizhu.zhicode.compose.data.SkillStore.nameFromContent] 解析得到。 */
-    val name: String = "",
 ) {
-    /** 内容非空但解析不出名字。空内容不算错（用户还没开始粘贴）。 */
-    val nameMissing: Boolean get() = content.isNotBlank() && name.isBlank()
+    /** 与技能目录名同一套规则（见 SkillStore.isValidFileName）。 */
+    val nameError: String? = when {
+        fileName.isBlank() -> null // 还没开始输入，不要一上来就报错
+        fileName == "." || fileName == ".." -> "不能叫这个名字"
+        !Regex("[A-Za-z0-9._-]{1,64}").matches(fileName.trim()) -> "只能包含字母、数字、. _ -（1–64 个字符）"
+        else -> null
+    }
 
-    val nameInvalid: Boolean get() = name.isNotBlank() && !Regex("[A-Za-z0-9._-]{1,64}").matches(name)
-
-    val saveable: Boolean get() = name.isNotBlank() && !nameInvalid
+    val saveable: Boolean get() = fileName.isNotBlank() && nameError == null
 }
 
 /** 「新建文件」表单（详情页里往技能目录加一个附加文件）。 */

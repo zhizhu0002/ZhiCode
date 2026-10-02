@@ -48,8 +48,11 @@ fun MemoryOverlay(
     // 退出动画期间离场页仍在绘制，那时 editing 已经是 null —— 见 rememberLastNonNull 的说明。
     val shownEditing = rememberLastNonNull(editing)
     SettingsPageStack(
-        current = if (editing == null) SettingsPageKey("memory.list", 0)
-        else SettingsPageKey("memory.editor", 1),
+        // 路径含最底下那一页：栈要靠整条路径算层级与方向。
+        path = listOf(
+            SettingsPageKey("memory.list", 0),
+            if (editing != null) SettingsPageKey("memory.editor", 1) else null,
+        ).filterNotNull(),
         onBack = if (editing == null) onDismiss else onCancelEdit,
     ) { key ->
         // ⚠️ 分支必须看**正在渲染的那一页**（key），不能看当前状态。

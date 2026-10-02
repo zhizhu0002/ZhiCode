@@ -811,9 +811,9 @@ class WorkspaceViewModel(
     }
 
     /**
-     * 打开发起「手动添加」表单。
+     * 打开发起「手动添加」对话框。
      *
-     * 表单从**空白内容**开始：用户要粘贴一整份 SKILL.md，名字由内容解析得出。
+     * 表单从**空白**开始：用户自己填目录名与内容。
      */
     fun newSkill() = _state.update {
         it.copy(
@@ -828,14 +828,7 @@ class WorkspaceViewModel(
     fun updateSkillCreateDraft(transform: (SkillCreateDraft) -> SkillCreateDraft) = _state.update {
         val skills = it.skills ?: return@update it
         val form = skills.createForm ?: return@update it
-        val next = transform(form)
-        // 名字始终由内容**重新解析**，不单独存一份用户输入：
-        // 两份来源会在用户改内容时不一致，而目录名只看这一份。
-        it.copy(
-            skills = skills.copy(
-                createForm = next.copy(name = SkillStore.nameFromContent(next.content).orEmpty()),
-            ),
-        )
+        it.copy(skills = skills.copy(createForm = transform(form)))
     }
 
     fun cancelSkillCreate() = _state.update {
@@ -843,17 +836,17 @@ class WorkspaceViewModel(
     }
 
     /**
-     * 手动添加：把用户粘贴的整份 SKILL.md 写进新目录。
+     * 手动添加：把表单里的内容写进以 [SkillCreateDraft.fileName] 命名的新目录。
      *
-     * 名字来自内容的 frontmatter（由 [updateSkillCreateDraft] 解析）。
-     * 解析不出名字时**不提交** —— 猜一个目录名会建出用户没打算建的东西。
-     * 同名目录不覆盖，直接进编辑器让用户看现有内容（`SkillStore.create` 的返回值即此语义）。
+     * 这个名字是**用户在对话框里看得见、改得动**的，不再由内容隐式决定
+     * （见 `SkillCreateDraft` 的说明）。同名目录不覆盖，直接进编辑器让用户看现有内容
+     * （`SkillStore.create` 的返回值即此语义）。
      */
     fun createSkill() {
         val s = _state.value
         val form = s.skills?.createForm ?: return
         if (!form.saveable) return
-        val name = form.name.trim()
+        val name = form.fileName.trim()
         val result = SkillStore.create(s.projectPath, form.scope, name, form.content)
         result.fold(
             onSuccess = { created ->
@@ -923,16 +916,21 @@ class WorkspaceViewModel(
             }
             result.fold(
                 onSuccess = { text ->
-                    val name = SkillStore.nameFromContent(text).orEmpty()
+                    // 解析出的名字只用来**预填**对话框里的文件名，不直接建目录：
+                    // 用户仍然看得到、改得动它。解析不出来就留空，让用户自己填。
+                    val suggested = SkillStore.nameFromContent(text).orEmpty()
                     _state.update {
                         it.copy(
                             skills = it.skills?.copy(
                                 detail = null,
                                 editing = null,
-                                createForm = SkillCreateDraft(content = text, name = name),
+                                createForm = SkillCreateDraft(
+                                    fileName = suggested,
+                                    content = text,
+                                ),
                             ),
-                            message = if (name.isBlank()) {
-                                "已读取文件，但 frontmatter 里没有 name 字段"
+                            message = if (suggested.isBlank()) {
+                                "已读取文件，请填写技能名"
                             } else {
                                 "已读取文件，确认后点「创建」"
                             },

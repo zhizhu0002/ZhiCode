@@ -63,8 +63,11 @@ fun RoleCardsOverlay(
     // 退出动画期间离场页仍在绘制，那时 editor 已经是 null —— 见 rememberLastNonNull 的说明。
     val shownEditor = rememberLastNonNull(editor)
     SettingsPageStack(
-        current = if (editor == null) SettingsPageKey("roleCards.list", 0)
-        else SettingsPageKey("roleCards.editor", 1),
+        // 路径含最底下那一页：栈要靠整条路径算层级与方向。
+        path = listOf(
+            SettingsPageKey("roleCards.list", 0),
+            if (editor != null) SettingsPageKey("roleCards.editor", 1) else null,
+        ).filterNotNull(),
         onBack = if (editor == null) onDismiss else onCancelEditor,
     ) { key ->
         // ⚠️ 分支必须看**正在渲染的那一页**（key），不能看当前状态。

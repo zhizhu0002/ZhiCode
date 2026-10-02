@@ -36,6 +36,7 @@ public final class SkillsPageStructureTest {
     private static final String SKILLS_OVERLAY = SRC + "ui/dialogs/SkillsOverlay.kt";
     private static final String SKILL_STORE = SRC + "data/SkillStore.kt";
     private static final String MODELS = SRC + "model/SettingsModels.kt";
+    private static final String VIEW_MODEL = SRC + "state/WorkspaceViewModel.kt";
 
     private static void require(boolean value, String message) {
         if (!value) throw new AssertionError(message);
@@ -53,6 +54,28 @@ public final class SkillsPageStructureTest {
     /** 去掉所有空白后再比较：检查代码形态时不该被缩进/换行影响。 */
     private static boolean has(String source, String needle) {
         return source.replaceAll("\\s+", "").contains(needle.replaceAll("\\s+", ""));
+    }
+
+    /**
+     * 从 [from] 处的调用开始，找到它那个 `{ … }` 块的**结束下标之后**一位。
+     *
+     * <p>用途：判断某个调用是"在另一个调用的 lambda 里面"还是"在外面"。
+     * 只比源码先后顺序是不行的 —— 被检查的东西排在后面，不代表它在里面。
+     *
+     * <p>⚠️ 这是**朴素**的括号计数，会被字符串字面量里未配平的 `{` / `}` 带偏
+     * （本仓库的 Kotlin 里有字符串模板与注释，实测就踩到了）。
+     * 所以能用别的判据就别用它 —— 现在的浮层断言改成了直接查挂载点。
+     */
+    private static int endOfBlock(String source, int from) {
+        int open = source.indexOf('{', from);
+        if (open < 0) throw new AssertionError("找不到代码块：offset " + from);
+        int depth = 0;
+        for (int i = open; i < source.length(); i++) {
+            char c = source.charAt(i);
+            if (c == '{') depth++;
+            else if (c == '}' && --depth == 0) return i + 1;
+        }
+        throw new AssertionError("代码块没有配平：offset " + from);
     }
 
     private static int countOf(String source, String needle) {
@@ -74,6 +97,7 @@ public final class SkillsPageStructureTest {
         String skills = stripComments(read(root, SKILLS_OVERLAY));
         String store = stripComments(read(root, SKILL_STORE));
         String models = stripComments(read(root, MODELS));
+        String viewModel = stripComments(read(root, VIEW_MODEL));
 
         // ---- 1. 多态二级页必须走页面栈 ---------------------------------------
         //
@@ -107,18 +131,79 @@ public final class SkillsPageStructureTest {
                     file + " 必须用 SettingsPageStack 承载它的多个页面状态");
         }
 
-        // ---- 2. 页面栈本身的两个不能省的细节 ---------------------------------
-        require(has(subPage, "rememberSaveableStateHolder()")
-                        && subPage.contains("SaveableStateProvider("),
-                "SettingsPageStack 必须用 SaveableStateHolder 保留各页状态："
-                        + "AnimatedContent 会销毁离场页，列表的滚动位置会丢（回到最顶上）");
-        // holder 必须在 AnimatedContent **之前**求值，否则它自己也活不过页面切换。
-        require(subPage.indexOf("rememberSaveableStateHolder()") < subPage.indexOf("AnimatedContent("),
-                "rememberSaveableStateHolder 必须在 AnimatedContent 外面（源码顺序上先出现）");
-        require(has(subPage, "BackHandler(enabled=current.depth>0")
-                        && has(subPage, "BackHandler("),
-                "SettingsPageStack 必须用 BackHandler 让系统返回先退回上一层："
-                        + "少了它，三级页按返回会直接关掉整个二级页");
+        // ---- 2. 页面栈必须用 Miuix 官方的 NavDisplay，而不是手搓的整页滑动 --------
+        //
+        // 第一版是 `AnimatedContent` + `slideInHorizontally` / `slideOutHorizontally`，
+        // 用户实测报了**两个毛病**，两个都出在它身上：
+        //   · 卡 —— 那是**布局**型动画（改 `Modifier.offset`），整屏 Scaffold +
+        //     LazyColumn 每帧重新测量布局；Miuix 自己的转场走 graphicsLayer，
+        //     源码里明确写着 "cost zero recomposition"。
+        //   · 奇怪 —— 进入用 spring（会过冲）、退出用 tween(200)，两条曲线时长不匹配，
+        //     而且没有官方转场自带的 dim 与跟随屏幕圆角的裁剪。
+        //
+        // 所以这里守两件事：用的是 NavDisplay + MiuixDefault，且**不再有**手搓的
+        // 整页水平滑动。后者是真正的回归点 —— 谁再写回去，症状要用户滑一遍才发现。
+        require(has(subPage, "NavDisplay(") && has(subPage, "NavTransitions.MiuixDefault"),
+                "SettingsPageStack 必须用 Miuix 的 NavDisplay + NavTransitions.MiuixDefault："
+                        + "手搓 AnimatedContent + slide 是布局型动画，整屏每帧重排会卡，"
+                        + "且进出曲线时长不匹配、没有官方 dim 与圆角裁剪");
+        require(!has(subPage, "slideInHorizontally") && !has(subPage, "slideOutHorizontally"),
+                "不得再用手搓的整页水平滑动转场（那是上面那两个毛病的根因）");
+        require(has(subPage, "NavDisplayEffects(") && has(subPage, "rememberNavSystemCornerRadius()"),
+                "页面栈的转场效果层必须与外层 AppScaffold 一致：跟随屏幕圆角的裁剪 + 调暗");
+        // key 必须是值相等的 data class：Miuix 拿 key 实例做 entry 的 contentKey
+        // （页面状态的存档标识），toString() 必须由值派生，否则进程重启后状态静默重置。
+        require(has(subPage, "internal data class SettingsPageKey(")
+                        && has(subPage, "SettingsPageKey(val id: String, val depth: Int) : NavKey"),
+                "SettingsPageKey 必须是实现 NavKey 的 data class（值相等 + 值派生的 toString）");
+        // 调用方必须传**整条路径**：根页的 id 只有调用方知道，栈里合成一个"根"键
+        // 会与 entry 对不上、页面渲染成空白。
+        require(has(subPage, "path: List<SettingsPageKey>"),
+                "SettingsPageStack 必须接收完整路径（含最底下那一页），不能只收当前页");
+
+        // ---- 2b. FAB 必须走 Scaffold 的原生槽位 --------------------------------
+        //
+        // 用户报「skill 的加号点不了」。当时 FAB 是在页面里套 Box + align(BottomEnd)
+        // 手工盖上去的 —— 它不归 Scaffold 管，位置/层级/点击都会被内容层影响。
+        require(has(subPage, "floatingActionButton: (@Composable () -> Unit)? = null")
+                        && has(subPage, "floatingActionButton = { floatingActionButton?.invoke() }"),
+                "SettingsSubPage 必须把 FAB 转发给 Miuix Scaffold 的 floatingActionButton 槽位");
+        require(!has(skills, "align(Alignment.BottomEnd)"),
+                "技能列表的 FAB 不得再用 Box + align(BottomEnd) 手工叠在页面上："
+                        + "那样它的点击与布局都不归 Scaffold 管（用户报过「加号点不了」）");
+        require(has(skills, "floatingActionButton = {") && has(skills, "ZhiFloatingActionButton("),
+                "技能列表必须通过 floatingActionButton 槽位挂 ZhiFloatingActionButton");
+
+        // ---- 2c. 整屏浮层必须挂在**某个 Scaffold 里** --------------------------
+        //
+        // 「点加号完全没反应」的真正根因（我是实际复现之后才查清的）：
+        // Miuix 的弹层不是画在哪都行 —— `DialogLayout` 只是把一个 DialogState
+        // 注册进 **Scaffold 提供的**那个列表（`LocalDialogStates` /
+        // `LocalRootDialogStates`，见 Miuix `Scaffold.kt` 的 CompositionLocalProvider），
+        // 真正的绘制由该 Scaffold 的 `MiuixPopupHost` 负责。
+        //
+        // 而二级页是 `NavDisplay` 的 entry，与工作区那个 Scaffold 是**兄弟**：
+        // 它们自己这一层**没有任何 Scaffold**。所以浮层写在二级页顶层就等于没宿主，
+        // 点了完全没有反应、也没有任何报错。
+        //
+        // 判据直接查机制本身（不再用括号配平那种脆弱写法）：
+        //   · SettingsSubPage 必须有 overlay 挂载点，且在它自己的 Scaffold 内调用；
+        //   · 技能页的浮层必须从 overlay 传入，不能在顶层自己画。
+        require(has(subPage, "overlay: (@Composable () -> Unit)? = null")
+                        && has(subPage, "overlay?.invoke()"),
+                "SettingsSubPage 必须提供 overlay 挂载点并在自己的 Scaffold 里调用它："
+                        + "Miuix 的弹层靠 Scaffold 提供宿主，而二级页那一层没有 Scaffold");
+        require(has(skills, "overlay = {") && has(skills, "AddSkillSheet("),
+                "技能页的浮层必须通过 SettingsSubPage 的 overlay 传入（那里才有 Scaffold 宿主）");
+        require(has(skills, "SkillCreateDialog("),
+                "「手动添加」必须是对话框（SkillCreateDialog），不是新开一层页面");
+        require(!has(skills, "SettingsPageKey(\"skills.create\""),
+                "「手动添加」不得再占一层页面栈：两个字段的表单开一整页没有意义");
+        // 官方 demo 的形态是一个 Card 包住若干行；每行各套一张卡会碎成一堆便签。
+        require(has(skills, "CardDefaults.defaultColors(color = scheme.secondaryContainer)"),
+                "sheet 里的 Card 必须显式给 secondaryContainer：sheet 背板是 background，"
+                        + "而 Card 默认色是 surfaceContainer —— 暗色下是同一个值（#242424），"
+                        + "不传就是一张看不见的卡");
 
         // ---- 3. 技能文件名不得逃出技能目录 -----------------------------------
         //
@@ -143,22 +228,26 @@ public final class SkillsPageStructureTest {
                 "fileInSkillDir 必须被读 / 写 / 判重 / 列表 / 新建五条路径都用到，实际只用了 "
                         + (countOf(store, "fileInSkillDir(") - 1) + " 次");
 
-        // ---- 4. 手动添加：名字从内容解析，解析不出就不许提交 ------------------
+        // ---- 4. 手动添加：名字是用户**看得见、改得动**的 ------------------------
         //
-        // 同样要锚在**函数体**上：只查"文件里提到过 frontMatterBlock"没用 ——
-        // `describe()` 也在用它，把 nameFromContent 改成全文扫描照样绿（实测如此）。
-        require(has(store, "fun nameFromContent(content: String): String? = frontMatterBlock(content)"),
-                "技能名必须从 SKILL.md 的 frontmatter 块里解析，不能全文扫描正文里的 name:");
-        require(has(skills, "draft.nameMissing ->")
-                        && has(skills, "action=\"创建\"to(if(draft.saveable)onCreateelse null)"),
-                "「手动添加」必须在解析不出名字时明确报错**并禁用提交**："
-                        + "回退到默认名会建出用户没打算建的目录");
-        // 提交资格本身也留在模型里，界面上的报错与它必须同步。
-        require(has(models, "val saveable: Boolean get() = name.isNotBlank() && !nameInvalid"),
-                "SkillCreateDraft.saveable 必须要求有合法名字，不能无论内容如何都能提交");
-        // ⚠️ 锚在**用户看得见的那两项**与**真的拉起选择器**上，不能只查标识符
-        // `onImportFile`：把它改名成 `onImportFileGone` 时，旧断言照样是绿的
-        // （子串匹配），于是"这条路被删掉了"这件事完全没被守住。
+        // 形状照参考图：文件名 + 内容 + 取消/创建，做成**对话框**。
+        // 早先的版本让名字由内容的 frontmatter 隐式决定（解析不出来就不让提交），
+        // 用户改主意只能重来；现在名字是表单里的一个字段。
+        //
+        // 仍然要守住的两条：
+        //   · 名字必须过与目录名同一套校验（否则会建出引擎拒绝加载的目录）；
+        //   · 解析 frontmatter 的能力还在（导入文件时用来**预填**名字）。
+        require(has(models, "data class SkillCreateDraft(")
+                        && has(models, "val fileName: String = \"\"")
+                        && has(models, "val content: String = \"\""),
+                "SkillCreateDraft 必须是「文件名 + 内容」（对话框的两个字段）");
+        require(has(models, "val saveable: Boolean get() = fileName.isNotBlank() && nameError == null")
+                        && has(models, "fileName == \".\" || fileName == \"..\""),
+                "提交资格必须要求文件名合法，且挡住 `.` / `..` 这两个名字");
+        require(has(store, "fun nameFromContent(") && store.contains("frontMatterBlock"),
+                "解析 frontmatter 的能力必须保留（导入文件时用它预填技能名）");
+        require(has(viewModel, "val suggested = SkillStore.nameFromContent(text).orEmpty()"),
+                "从文件导入必须**预填**解析出的名字，而不是直接建目录");
         require(skills.contains("从文件导入") && skills.contains("pickSkillFile.launch("),
                 "「添加技能」选择表必须提供从文件导入这条路，并且真的拉起选择器"
                         + "（不做 GitHub 导入：要联网 + 解压，与离线构建、不加依赖冲突）");

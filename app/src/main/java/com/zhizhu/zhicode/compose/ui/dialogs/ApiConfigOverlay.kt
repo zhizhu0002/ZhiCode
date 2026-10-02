@@ -67,7 +67,11 @@ fun ApiConfigOverlay(
     // 二级整页（与设置主页同款骨架），列表/表单两态走**页面栈**：
     // 只写一个 when 分支的话两态会被硬切，没有任何转场动画。
     SettingsPageStack(
-        current = if (form == null) SettingsPageKey("api.list", 0) else SettingsPageKey("api.form", 1),
+        // 路径含最底下那一页：栈要靠整条路径算层级与方向。
+        path = listOf(
+            SettingsPageKey("api.list", 0),
+            if (form != null) SettingsPageKey("api.form", 1) else null,
+        ).filterNotNull(),
         onBack = if (form == null) onDismiss else onCancelForm,
     ) { key ->
         // ⚠️ 分支必须看**正在渲染的那一页**（key），不能看当前状态。
