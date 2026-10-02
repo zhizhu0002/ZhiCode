@@ -163,15 +163,9 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
  *   `UiDebugPageStructureTest` 守着）。
  * - 输入框走 `ZhiTextField`（工程唯一转发点，见 `TextFieldConventionTest`）。
  * - 对话流与任务卡直接调用**生产组件**，不是仿制版。
- * - 未收纳官方组件（NavigationRail / BreadcrumbBar / SearchBar / ColorPicker /
- *   PullToRefresh / Snackbar / Tooltip / NumberPicker 等）：本工程没有用到它们，
- *   摆出来只会增加维护面而没有调试价值。
- *
- *   注意 `NavigationBar` **不在**这个名单里了 —— 工作区切换已经改用它（窄屏底部，
- *   见 `WorkspaceNavigationBar`）。这一页不做它是因为它在整个应用底部、由 Scaffold
- *   的 bottomBar 槽位持有，摆进这一页的画廊会同时出现两条底部导航栏。
- *   （这条注释以前把 `NavigationBar` 列在"没有用到"里，那句话本身是对的，
- *   但容易让人以为它不可用 —— 所以写清原因。）
+ * - 未收纳官方组件（NavigationBar / NavigationRail / BreadcrumbBar / SearchBar /
+ *   ColorPicker / PullToRefresh / Snackbar / Tooltip / NumberPicker 等）：本工程没有
+ *   用到它们，摆出来只会增加维护面而没有调试价值。
  *
  * ## 入口与返回
  *

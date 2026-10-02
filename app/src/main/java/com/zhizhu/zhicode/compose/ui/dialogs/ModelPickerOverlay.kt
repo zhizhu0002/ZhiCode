@@ -2,6 +2,7 @@ package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,15 +23,14 @@ import com.zhizhu.zhicode.compose.model.ModelOption
 import com.zhizhu.zhicode.compose.model.ModelPickerState
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
-import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.basic.Search
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
@@ -280,14 +281,41 @@ private fun ModelPickerBody(
 }
 
 /**
- * 目录里的一行（卡片式，与参考图一致）。
+ * 目录里的一行：**布局照搬 rikkahub，组件仍是 Miuix 原生**。
  *
- * 选中态用 `primaryContainer` 铺满整行，而不是只在左侧画一个勾：
- * 参考图里当前模型那一条是**整块高亮**的，一眼就能从二三十行里认出来；
- * 一个小勾在长列表里很容易被扫过去。
+ * ## 几何直接借鉴 rikkahub 的 `ModelItem`
  *
- * `displayName` 与 `id` 相同时只显示一次，否则每行会重复两遍同一个名字
- * （服务端常常不给 display_name，那种情况下它会被回落成 id）。
+ * 它也是 Compose（`androidx.compose.foundation` + `material3`），而 Miuix 建在同一套
+ * Compose 原语上，所以**布局数字可以照搬**、只需要把颜色令牌换掉：
+ *
+ * | 项 | rikkahub | 这里 |
+ * | --- | --- | --- |
+ * | 行内边距 | 16dp 横 / 12dp 纵 | 同 |
+ * | 头像与文字间距 | 12dp | 同（由 `startAction` 侧提供） |
+ * | 头像 | `Surface` 内 32dp 内容 + 4dp 内边距（共 40dp） | 同 |
+ * | 选中底色 | `primaryContainer` | `secondaryContainer`（见下） |
+ *
+ * ## 组件为什么仍用 `BasicComponent` 而不是照抄它的 `Row`
+ *
+ * rikkahub 那一段是自己拼 `Row` + `Column`，因为它还要塞能力标签的 `FlowRow`
+ * （我们没有那类数据）。`BasicComponent` 是 Miuix 原生的"一行：前置槽 + 标题 +
+ * 副标题 + 尾部槽"，**本来就带 `startAction`** —— 头像放进去刚好对上 rikkahub 的
+ * "头像在左、文字在右"结构，同时保留 Miuix 的按压反馈与行高规则。
+ * 照抄 `Row` 反而会丢掉这些，那才是"失了 Miuix 的原生框架"。
+ *
+ * ## 选中色为什么是 `secondaryContainer` 而不是 `primaryContainer`
+ *
+ * rikkahub 用的确实是 `primaryContainer`，但那是 Material3 的**动态取色**结果，
+ * 在它的暗色截图里是低调的暗红/暗蓝。Miuix 的 `primaryContainer` 在暗色下是**高饱和蓝**，
+ * 直接套用会得到"整行亮蓝、白字、很扎眼"——实测反馈就是"太亮"。
+ * 所以换 `secondaryContainer`（同族的次级容器色，暗色下明显更收敛），
+ * 前景相应换成 `onSecondaryContainer`。**要更醒目就把这两个令牌换回 primary 那对**，
+ * 只改这两行。
+ *
+ * ## 为什么没有对勾
+ *
+ * rikkahub 的选中只靠整块底色表达，没有对勾。这里按它来；如果哪天觉得"
+ * 一屏几十行里光靠底色不够醒目"，`endActions` 槽就是放对勾的位置。
  */
 @Composable
 private fun ModelRow(
@@ -297,47 +325,73 @@ private fun ModelRow(
 ) {
     val scheme = MiuixTheme.colorScheme
     val duplicated = option.displayName == option.id
-    // 每行是**自己一张 Miuix Card**（参考图就是这样：模型之间有一条缝），
-    // 而不是共用一个外层 Card 再靠分割线分开。
-    //
-    // 用 Miuix `Card` 而不是裸 `Surface`：Card 是这套设计系统里的行容器（自带形状裁剪
-    // 与按压反馈），而且**它支持容器色** —— `BasicComponent` 没有颜色参数（只有 modifier），
-    // 把底色写进 modifier 会画出一个**直角**色块、与卡片圆角对不上。
-    // 这样既拿到了参考图那种"整块高亮"的观感，又没离开 Miuix 的组件。
     Card(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.inner,
         insideMargin = PaddingValues(0.dp),
+        // ⚠️ 未选中用 `surfaceContainerHigh` 而不是 rikkahub 的 `surface`：
+        // Miuix 里 `surface` 与面板底色同色，卡片会"消失"、行与行之间没有界线。
         colors = CardDefaults.defaultColors(
-            color = if (selected) scheme.primaryContainer else scheme.surfaceContainerHigh,
-            contentColor = if (selected) scheme.onPrimaryContainer else scheme.onSurface,
+            color = if (selected) scheme.secondaryContainer else scheme.surfaceContainerHigh,
+            contentColor = if (selected) scheme.onSecondaryContainer else scheme.onSurface,
         ),
     ) {
         BasicComponent(
             title = option.displayName,
             titleColor = BasicComponentDefaults.titleColor(
-                color = if (selected) scheme.onPrimaryContainer else scheme.onBackground,
+                color = if (selected) scheme.onSecondaryContainer else scheme.onBackground,
             ),
             summary = if (duplicated) null else option.id,
             summaryColor = BasicComponentDefaults.summaryColor(
-                color = if (selected) scheme.onPrimaryContainer else scheme.onSurfaceVariantSummary,
+                color = if (selected) scheme.onSecondaryContainer else scheme.onSurfaceVariantSummary,
             ),
-            startAction = {
-                // 选中标记跟 Miuix 下拉列表一致：Check 图标 + 它自己的尺寸常量。
-                // 不用 Checkbox（固定 26dp 且是圆的，配 11~13sp 行文字偏大），
-                // 理由详见 Dialogs.kt 里的同一处注释。
-                if (selected) {
-                    Icon(
-                        imageVector = MiuixIcons.Basic.Check,
-                        contentDescription = null,
-                        tint = scheme.onPrimaryContainer,
-                        modifier = Modifier.size(DropdownDefaults.CheckIconSize),
-                    )
-                }
-            },
+            startAction = { ModelAvatar(option.id) },
             onClick = onPick,
-            insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            // 与 rikkahub 一致的 16 / 12dp。之前是 Miuix 默认（12 / 10dp），
+            // 行显得挤；改这个是因为参考图的行明显更"透气"。
+            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+/**
+ * 模型头像：首字方块。
+ *
+ * ## 几何与回落路径都照搬 rikkahub
+ *
+ * 它的 `AutoAIIcon` 先按名字查 `assets/icons/<name>.svg`，**查不到就回落到
+ * `TextAvatar`** —— 一个 `secondaryContainer` 底、首字大写、自动缩字号的方块
+ * （`UIAvatar.kt`）。我们没有任何品牌资产、也不该为此内置一批厂商 logo
+ * （等于替各家做标识，还会过期），所以直接走它的**回落路径**：
+ * 尺寸同样是「32dp 内容 + 4dp 内边距」，底色同样取自容器的次级色。
+ *
+ * ## 为什么圆角走 `ZhiRadius.inner`
+ *
+ * rikkahub 用的是 `MaterialTheme.shapes.small`，Miuix 没有对应的 shapes 别名，
+ * 而我们自己的圆角令牌里 `inner`（10dp）就是这个层级 —— 换令牌、不换观感。
+ */
+@Composable
+private fun ModelAvatar(modelId: String) {
+    val scheme = MiuixTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(ZhiRadius.inner),
+        color = scheme.secondaryContainer,
+    ) {
+        Box(
+            modifier = Modifier.padding(4.dp).size(32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                // 首字大写，与 rikkahub 的 `text.take(1).uppercase()` 一致。
+                // 空 id 理论上不会到这里（ModelCatalogClient 会丢弃空 id），
+                // 但真遇到也不要画一个空白方块。
+                text = modelId.trim().take(1).uppercase().ifEmpty { "?" },
+                color = scheme.onSecondaryContainer,
+                fontSize = ZhiTextScale.BodySmall,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+        }
     }
 }
