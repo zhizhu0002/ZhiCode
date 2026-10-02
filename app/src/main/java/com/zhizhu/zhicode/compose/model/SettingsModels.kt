@@ -203,11 +203,94 @@ data class McpServerDraft(
     }
 }
 
+/**
+ * 「测试连接」的结果：一台服务器 + 它提供的工具。
+ *
+ * 与 [McpServer]（配置）分开：配置是**用户写的**，它是**服务器答的**。
+ * 合成一个类型的话，没测过的服务器就没有工具清单，于是要么用空列表冒充
+ * "这台服务器没有工具"，要么到处都是可空字段。
+ */
+data class McpServerStatus(
+    val name: String,
+    val connected: Boolean,
+    /** 失败原因（`connected` 为 true 时是空串）。 */
+    val error: String,
+    val tools: List<McpToolInfo> = emptyList(),
+)
+
+/**
+ * 服务器提供的一个工具。
+ *
+ * [enabled] / [approval] 是**用户设置**（存在 mcp.json 的 `tools` 里），
+ * 与服务器返回的描述混在一起传上来：界面上一行里要同时显示"这是什么工具"
+ * 与两个开关，分两次查会让这一行的状态有两个来源。
+ */
+data class McpToolInfo(
+    val name: String,
+    val description: String,
+    /** JSON Schema 里的属性名，用来提示这个工具要哪些参数。 */
+    val parameters: List<String> = emptyList(),
+    /** 需要参数的子集（渲染时用不同颜色标出来）。 */
+    val required: Set<String> = emptySet(),
+    val enabled: Boolean = true,
+    val approval: Boolean = false,
+) {
+    companion object {
+        /** 从引擎 `listServers()` 里的一项解析。字段缺失一律用安全的缺省值。 */
+        fun parse(tools: org.json.JSONArray?): List<McpToolInfo> = buildList {
+            if (tools == null) return@buildList
+            for (index in 0 until tools.length()) {
+                val tool = tools.optJSONObject(index) ?: continue
+                val name = tool.optString("name", "")
+                if (name.isEmpty()) continue
+                val schema = tool.optJSONObject("inputSchema")
+                val properties = schema?.optJSONObject("properties")
+                val required = schema?.optJSONArray("required")
+                add(
+                    McpToolInfo(
+                        name = name,
+                        description = tool.optString("description", ""),
+                        parameters = properties?.keys()?.asSequence()?.toList().orEmpty(),
+                        required = buildSet {
+                            if (required == null) return@buildSet
+                            for (i in 0 until required.length()) {
+                                required.optString(i, "").takeIf { it.isNotEmpty() }?.let { add(it) }
+                            }
+                        },
+                        enabled = tool.optBoolean("enabled", true),
+                        approval = tool.optBoolean("approval", false),
+                    ),
+                )
+            }
+        }
+    }
+}
+
+/** 从 JSON 导入的结果。[added] 真正加进去的，[skipped] 同名跳过的，[invalid] 认不出的。 */
+data class McpImportResult(
+    val added: List<String>,
+    val skipped: List<String>,
+    val invalid: List<String>,
+)
+
 /** MCP 配置页状态：与 API 配置同样共用一个弹窗，`form` 非空即为表单页。 */
 data class McpConfigState(
     val servers: List<McpServer>,
     val filePath: String,
     val form: McpServerDraft? = null,
+    /**
+     * 「测试连接」的结果，按服务器名索引。
+     *
+     * 只在用户点过测试之后才有内容 —— 引擎侧的测试会**真的起子进程/发 HTTP**，
+     * 不能在打开页面时自动跑（见 `ZhiEngineController.mcpStatus`）。
+     */
+    val status: Map<String, McpServerStatus> = emptyMap(),
+    /** 正在测试的服务器名（空集表示没有在测）。 */
+    val testing: Set<String> = emptySet(),
+    /** 「从 JSON 导入」对话框的文本。`null` = 对话框没开。 */
+    val importText: String? = null,
+    /** 导入对话框的错误提示（解析失败时才有）。 */
+    val importError: String? = null,
 )
 
 /** Skill 的作用域。目录约定必须与引擎 `SkillTool` 一致，见 `SkillStore`。 */

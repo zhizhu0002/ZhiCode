@@ -258,6 +258,11 @@ run SettingsPageStructureTest "$PROJECT_ROOT"
 # when 硬切，而 AppScaffold 的页面栈只反映"这一页开着没有"。
 # SkillsPageStructureTest.java
 run SkillsPageStructureTest "$PROJECT_ROOT"
+# ---------- MCP 逐工具开关（放行顺序 · 禁用拦截 · 三处序列化 · 缺省启用） ----------
+# 这个功能有四处「改坏了不会编译失败」：把逐工具审批的判断挪到 isAlwaysAllowed
+# 之后（MCP 属于 NETWORK，而它是永远放行的）—— 开关点得动、存得下，只是从不拦截。
+# McpToolGateStructureTest.java
+run McpToolGateStructureTest "$PROJECT_ROOT"
 # ---------- 写死的几何（长按触发 · 气泡宽度 · 弹窗宽度） ----------
 # LayoutConsistencyTest.java
 run LayoutConsistencyTest "$PROJECT_ROOT"

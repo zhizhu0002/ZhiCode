@@ -69,6 +69,14 @@ public final class McpRuntime {
      *
      * <p>单个服务器出错**不**影响其它服务器：那一行会带上 {@code ok:false} 与错误原因。
      * 让整次列举失败会让一个配错的服务器挡住所有可用的服务器。
+     *
+     * <h3>被用户禁用的工具会从这里消失</h3>
+     * 这是「那个开关真的有用」的落点：{@code mcp_list} 是模型发现工具的**唯一入口**，
+     * 把它过滤掉，模型就永远看不到那个工具名。每个工具还会带上 {@code enabled} 与
+     * {@code approval} 两个字段，界面据此渲染开关。
+     *
+     * <p>不在这里过滤也可以（{@link #call} 还会再挡一次），但那样模型会先花一次调用
+     * 去试一个注定失败的工具，然后把失败信息读进上下文。
      */
     public JSONArray listServers() {
         JSONArray rows = new JSONArray();
@@ -77,7 +85,16 @@ public final class McpRuntime {
             JSONObject row = new JSONObject();
             try {
                 row.put("server", server.name).put("type", server.type).put("scope", server.scope);
-                JSONArray tools = toolsOf(server);
+                JSONArray tools = new JSONArray();
+                for (JSONObject tool : JsonItems.of(toolsOf(server))) {
+                    String name = tool.optString("name", "");
+                    boolean toolEnabled = server.isToolEnabled(name);
+                    // 标记写在**过滤之前**：界面要看到"这个工具被关掉了"，
+                    // 只把启用的发下去的话，用户会以为那个工具从服务器上消失了。
+                    tool.put("enabled", toolEnabled);
+                    tool.put("approval", server.isToolApprovalRequired(name));
+                    if (toolEnabled) tools.put(tool);
+                }
                 row.put("ok", true).put("tools", tools);
             } catch (Exception failure) {
                 try {
@@ -100,6 +117,13 @@ public final class McpRuntime {
         if (toolName == null || toolName.trim().isEmpty()) {
             return ToolExecutionResult.error("MCP tool name is empty");
         }
+        // 被用户禁用的工具在这里**再挡一次**。不能只靠 listServers 里过滤掉：
+        // 模型可能在关闭之前就见过这个名字（或从对话历史里记住了），
+        // 而"列表里没有"不构成任何保护。
+        if (!server.isToolEnabled(toolName)) {
+            return ToolExecutionResult.error(
+                "MCP tool disabled by user: " + serverName + "/" + toolName);
+        }
         try {
             JSONObject params = new JSONObject()
                 .put("name", toolName)
@@ -116,6 +140,25 @@ public final class McpRuntime {
         } catch (Exception failure) {
             return ToolExecutionResult.error("MCP call failed: " + messageOf(failure));
         }
+    }
+
+    /**
+     * 某个远端工具是否被用户标了「需要审批」。
+     *
+     * <p>给 {@code McpTool.requiresApproval} 用。**只读配置，不连服务器** ——
+     * 权限判定发生在每次工具调用上，那里绝不能去起进程或发 HTTP：
+     * 一次判定要等 30 秒（连接超时），而且会在用户还没批准之前就把服务器拉起来了。
+     *
+     * @return 服务器或工具不存在时返回 false（不拦）
+     */
+    public boolean requiresApproval(String serverName, String toolName) {
+        McpConfigStore.Server server = store.find(serverName);
+        if (server == null || !server.enabled) return false;
+        if (toolName == null || toolName.trim().isEmpty()) return false;
+        // 被禁用的工具不在这里拦：它会被 call() 拒绝。这里答的是"要不要问用户"，
+        // 而一个注定失败的调用不值得弹窗。
+        if (!server.isToolEnabled(toolName)) return false;
+        return server.isToolApprovalRequired(toolName);
     }
 
     private JSONArray toolsOf(McpConfigStore.Server server) throws Exception {

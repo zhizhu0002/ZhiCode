@@ -54,6 +54,7 @@ import com.zhizhu.zhicode.compose.model.FileEntry
 import com.zhizhu.zhicode.compose.model.McpScope
 import com.zhizhu.zhicode.compose.model.McpServer
 import com.zhizhu.zhicode.compose.model.McpServerDraft
+import com.zhizhu.zhicode.compose.model.McpServerStatus
 import com.zhizhu.zhicode.compose.model.McpType
 import com.zhizhu.zhicode.compose.model.MemoryEditor
 import com.zhizhu.zhicode.compose.model.MemoryFile
@@ -2843,6 +2844,153 @@ class WorkspaceViewModel(
                 mcpConfig = McpStore.read(),
                 message = if (result.isSuccess) "已删除 MCP 服务器：${server.name}"
                 else "删除失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+            )
+        }
+    }
+
+    /**
+     * 「测试连接」：真的去连这台服务器，拿回它的工具清单。
+     *
+     * ## 为什么必须由用户动作触发
+     *
+     * `ZhiEngineController.mcpStatus()` 是**阻塞且昂贵**的：每台服务器都要起一次
+     * 子进程或发一轮 HTTP，单台超时 30 秒。如果在打开 MCP 页时自动跑一遍，
+     * "打开设置看一眼"就会变成"把每台服务器都启动一次" —— 在用户还没决定要改什么
+     * 之前就产生了副作用，而且页面会卡住。
+     *
+     * ## 为什么按名字单独测
+     *
+     * 引擎的接口是"列出所有启用的服务器"（没有单台的入口），所以这里测完之后
+     * **只把那台的结果**并进状态：把其它服务器的结果也一起刷新会让人以为
+     * "我只测了 A，为什么 B 的状态也变了"。
+     */
+    fun testMcpServer(name: String) {
+        viewModelScope.launch {
+            _state.update { state ->
+                val config = state.mcpConfig ?: return@update state
+                state.copy(mcpConfig = config.copy(testing = config.testing + name))
+            }
+            val result = withContext(Dispatchers.IO) { engine.mcpStatus() }
+            _state.update { state ->
+                val config = state.mcpConfig ?: return@update state
+                val testing = config.testing - name
+                result.fold(
+                    onSuccess = { rows ->
+                        val row = rows.firstOrNull { it.name.equals(name, ignoreCase = true) }
+                        state.copy(
+                            mcpConfig = config.copy(
+                                testing = testing,
+                                // 没在结果里出现 = 这台被停用了（引擎只列启用的），
+                                // 明确记一条而不是留着旧状态：留着会显示一个
+                                // 与当前配置不符的"已连接"。
+                                status = config.status + (name to (row ?: McpServerStatus(
+                                    name = name,
+                                    connected = false,
+                                    error = "该服务器已停用，未被测试",
+                                ))),
+                            ),
+                            message = when {
+                                row == null -> "已停用，跳过测试：$name"
+                                row.connected -> "$name 已连接，发现 ${row.tools.size} 个工具"
+                                else -> "$name 连接失败"
+                            },
+                            messageIsError = row?.connected == false,
+                        )
+                    },
+                    onFailure = { error ->
+                        state.copy(
+                            mcpConfig = config.copy(testing = testing),
+                            message = "测试失败：${error.message ?: "未知原因"}",
+                            messageIsError = true,
+                        )
+                    },
+                )
+            }
+        }
+    }
+
+    /**
+     * 打开「从 JSON 导入」对话框。
+     */
+    fun openMcpImport() = _state.update {
+        it.copy(
+            mcpConfig = it.mcpConfig?.copy(importText = "", importError = null, form = null),
+        )
+    }
+
+    fun updateMcpImportText(text: String) = _state.update {
+        it.copy(mcpConfig = it.mcpConfig?.copy(importText = text, importError = null))
+    }
+
+    fun cancelMcpImport() = _state.update {
+        it.copy(mcpConfig = it.mcpConfig?.copy(importText = null, importError = null))
+    }
+
+    /**
+     * 执行导入。同名**跳过不覆盖**（用户可能已经在本机改过那份配置），
+     * 认不出的条目也一并报出来 —— 只说"导入完成"会让用户以为全都进来了。
+     */
+    fun importMcpJson() {
+        val text = _state.value.mcpConfig?.importText ?: return
+        val result = McpStore.importJson(text)
+        result.fold(
+            onSuccess = { imported ->
+                _state.update {
+                    it.copy(
+                        mcpConfig = McpStore.read(),
+                        message = buildString {
+                            append("已导入 ${imported.added.size} 个服务器")
+                            if (imported.skipped.isNotEmpty()) {
+                                append("，${imported.skipped.size} 个同名已跳过")
+                            }
+                            if (imported.invalid.isNotEmpty()) {
+                                append("，${imported.invalid.size} 个缺少 url/command 未导入")
+                            }
+                        },
+                        messageIsError = imported.added.isEmpty(),
+                    )
+                }
+            },
+            onFailure = { error ->
+                _state.update {
+                    it.copy(
+                        mcpConfig = it.mcpConfig?.copy(
+                            importError = error.message ?: "无法解析",
+                        ),
+                    )
+                }
+            },
+        )
+    }
+
+    /**
+     * 写入某个工具的「启用 / 需要审批」。
+     *
+     * ⚠️ 写完之后必须把**状态里的那一行**也改掉：引擎侧的过滤要到下次
+     * `mcpStatus()` 才会生效，而用户点完开关立刻要看的就是那一行的变化。
+     * 只写磁盘不改状态的话，开关会弹回去 —— 看起来像"点了没反应"。
+     */
+    fun setMcpToolOptions(serverName: String, toolName: String, enabled: Boolean, approval: Boolean) {
+        val result = McpStore.setToolOptions(serverName, toolName, enabled, approval)
+        _state.update { state ->
+            val config = state.mcpConfig ?: return@update state
+            val status = config.status[serverName] ?: return@update state
+            state.copy(
+                mcpConfig = config.copy(
+                    status = config.status + (serverName to status.copy(
+                        tools = status.tools.map { tool ->
+                            if (tool.name == toolName) tool.copy(enabled = enabled, approval = approval) else tool
+                        },
+                    )),
+                ),
+                message = if (result.isSuccess) {
+                    val tool = status.tools.firstOrNull { it.name == toolName }
+                    val label = tool?.let { if (enabled) "已启用" else "已停用" } ?: "已更新"
+                    "$toolName：$label" + if (approval) "（调用前需要确认）" else ""
+                } else {
+                    "保存失败：${result.exceptionOrNull()?.message ?: "未知原因"}"
+                },
+                messageIsError = result.isFailure,
             )
         }
     }

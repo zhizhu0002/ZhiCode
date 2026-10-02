@@ -31,6 +31,29 @@ public interface ZhiTool {
     /** 权限分类，用于决定要不要向用户确认。 */
     PermissionKind permissionKind();
 
+    /**
+     * 这一次调用是否**必须**由用户确认（不看权限分类的默认规则）。
+     *
+     * <h3>为什么需要它：分类是静态的，而需求是逐次的</h3>
+     * {@link #permissionKind()} 回答的是"这个工具属于哪一类"，所以它只能给出
+     * 一个**整类**的规则。但有些限制是逐次、逐目标的：MCP 就是典型 ——
+     * 同一个 {@code mcp_call} 工具，用户可能只对其中某一个远端工具要求确认。
+     *
+     * <p>默认 false：绝大多数工具不需要这个能力，让它们都实现一遍只是噪音。
+     *
+     * <p>⚠️ 引擎必须**在"这类工具永远放行"的判断之前**查这个方法。MCP 属于
+     * {@link PermissionKind#NETWORK}，而 NETWORK 是永远放行的 ——
+     * 放在那之后，这个开关就是个摆设：点了没有任何效果，也不会报错。
+     *
+     * <p>仍然受 {@code bypass} 权限模式压制：那档是用户明确说过"别问我"。
+     *
+     * @param input 模型给的调用参数（与 {@link #execute} 收到的是同一份）。
+     *              可能缺字段、可能是空对象，实现方要自己宽容处理。
+     */
+    default boolean requiresApproval(JSONObject input) {
+        return false;
+    }
+
     ToolExecutionResult execute(SessionConfig config, JSONObject input) throws Exception;
 
     /**

@@ -74,6 +74,23 @@ public final class PermissionGate {
         String mode = PermissionModePolicy.normalize(effectiveMode);
         ZhiTool.PermissionKind kind = tool.permissionKind();
 
+        // 「这个工具这次必须问」要**最先**判，且必须在 isAlwaysAllowed 之前。
+        //
+        // ⚠️ 顺序是这段代码的全部要点：MCP 属于 NETWORK，而 NETWORK 在
+        // isAlwaysAllowed 里是**永远放行**的。把这个判断放到它后面，逐工具审批
+        // 就是个摆设 —— 开关点得动、存得下、界面也对，只是从不拦截任何东西，
+        // 而且不会有任何报错。
+        //
+        // bypass 仍然优先：那一档是用户明确说过"别问我"，逐工具审批不该推翻它。
+        // PLAN / DONT_ASK 也照旧拒绝（它们的语义是"不执行需要确认的东西"，
+        // 不是"那就直接执行"）。
+        if (tool.requiresApproval(call.input) && !PermissionModePolicy.BYPASS.equals(mode)) {
+            if (PermissionModePolicy.PLAN.equals(mode) || PermissionModePolicy.DONT_ASK.equals(mode)) {
+                return false;
+            }
+            return ask(call, kind, mode, listener);
+        }
+
         // 见类注释：三段「不用问」的判断，顺序无关但都要在询问之前。
         if (isAlwaysAllowed(kind)) return true;
         if (PermissionModePolicy.BYPASS.equals(mode)) return true;

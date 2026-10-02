@@ -43,6 +43,11 @@ public final class McpConfigStore {
         private static final String KEY_HEADERS = "headers";
         private static final String KEY_SCOPE = "scope";
         private static final String KEY_ENABLED = "enabled";
+        private static final String KEY_TOOLS = "tools";
+
+        /** {@link #tools} 里每一项的键。 */
+        private static final String TOOL_ENABLED = "enabled";
+        private static final String TOOL_APPROVAL = "approval";
 
         private static final String DEFAULT_TYPE = "stdio";
         private static final String DEFAULT_SCOPE = "user";
@@ -61,6 +66,20 @@ public final class McpConfigStore {
         public String scope = DEFAULT_SCOPE;
         public boolean enabled = true;
 
+        /**
+         * 单个工具的设置：工具名 → {@code {"enabled":bool,"approval":bool}}。
+         *
+         * <h3>缺省必须是「启用」</h3>
+         * 没有这条记录 = 启用、不需审批。这条规则的重要性在于**升级路径**：
+         * 已有配置里根本没有 {@code tools} 字段，若把"没记录"当成禁用，
+         * 升级一次就会把用户所有的 MCP 工具悄悄关掉，而界面上那几个开关
+         * 只是关着、看不出发生过什么。
+         *
+         * <p>只在用户**显式关掉或显式打开审批**时才写记录 —— 这样配置文件也不会
+         * 因为一次测试连接就被塞满默认值。
+         */
+        public JSONObject tools = new JSONObject();
+
         /** 深拷贝。改副本不会影响已保存的对象，反之亦然。 */
         public Server copy() {
             Server clone = new Server();
@@ -73,7 +92,50 @@ public final class McpConfigStore {
             clone.headers = deepCopy(headers);
             clone.scope = scope;
             clone.enabled = enabled;
+            clone.tools = deepCopy(tools);
             return clone;
+        }
+
+        /** 某个工具是否启用。没有记录就是启用（见 {@link #tools} 的说明）。 */
+        public boolean isToolEnabled(String toolName) {
+            JSONObject entry = toolEntry(toolName);
+            return entry == null || entry.optBoolean(TOOL_ENABLED, true);
+        }
+
+        /**
+         * 某个工具是否「每次调用都要用户确认」。
+         *
+         * <p>这个标志只有在 {@code McpTool} 把它转成 {@code requiresApproval} 之后
+         * 才有实际效果 —— 光存在配置里是不会拦任何东西的。
+         */
+        public boolean isToolApprovalRequired(String toolName) {
+            JSONObject entry = toolEntry(toolName);
+            return entry != null && entry.optBoolean(TOOL_APPROVAL, false);
+        }
+
+        /**
+         * 写入一个工具的设置。两个值都是默认值时**删掉记录**而不是写一份默认值：
+         * 配置文件应当只记录用户真正改过的东西。
+         */
+        public void setToolOptions(String toolName, boolean toolEnabled, boolean approvalRequired) {
+            if (toolName == null || toolName.trim().isEmpty()) return;
+            try {
+                if (tools == null) tools = new JSONObject();
+                if (toolEnabled && !approvalRequired) {
+                    tools.remove(toolName);
+                    return;
+                }
+                tools.put(toolName, new JSONObject()
+                    .put(TOOL_ENABLED, toolEnabled)
+                    .put(TOOL_APPROVAL, approvalRequired));
+            } catch (Throwable ignored) {
+                // JSONObject.put 在这里不会失败；真失败也只能保留原设置。
+            }
+        }
+
+        private JSONObject toolEntry(String toolName) {
+            if (toolName == null || tools == null) return null;
+            return tools.optJSONObject(toolName);
         }
 
         JSONObject toJson() throws Exception {
@@ -88,7 +150,8 @@ public final class McpConfigStore {
                 .put(KEY_ENV, env == null ? new JSONObject() : env)
                 .put(KEY_HEADERS, headers == null ? new JSONObject() : headers)
                 .put(KEY_SCOPE, scope)
-                .put(KEY_ENABLED, enabled);
+                .put(KEY_ENABLED, enabled)
+                .put(KEY_TOOLS, tools == null ? new JSONObject() : tools);
         }
 
         /**
@@ -115,6 +178,8 @@ public final class McpConfigStore {
             // 默认启用：一份「存在但被禁用」的配置在界面上与不存在很难区分，
             // 而用户写下它就是要用它。
             server.enabled = source.optBoolean(KEY_ENABLED, true);
+            JSONObject tools = source.optJSONObject(KEY_TOOLS);
+            if (tools != null) server.tools = deepCopy(tools);
             return server;
         }
     }

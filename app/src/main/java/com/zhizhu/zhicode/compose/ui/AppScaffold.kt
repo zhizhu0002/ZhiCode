@@ -372,6 +372,12 @@ private fun ZhiCodeScreen(
                 onDraftChange = viewModel::updateMcpDraft,
                 onSave = viewModel::saveMcpServer,
                 onCancelForm = viewModel::cancelMcpForm,
+                onTest = viewModel::testMcpServer,
+                onToolOptionsChange = viewModel::setMcpToolOptions,
+                onOpenImport = viewModel::openMcpImport,
+                onImportTextChange = viewModel::updateMcpImportText,
+                onImportConfirm = viewModel::importMcpJson,
+                onImportCancel = viewModel::cancelMcpImport,
             )
         }
         entry<SettingsKey.Skills>(swipeDismiss = swipeBack) {

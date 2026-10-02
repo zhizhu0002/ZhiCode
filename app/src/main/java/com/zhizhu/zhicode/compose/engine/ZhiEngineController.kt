@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.EffortLevel
+import com.zhizhu.zhicode.compose.model.McpServerStatus
+import com.zhizhu.zhicode.compose.model.McpToolInfo
 import com.zhizhu.zhicode.compose.model.PermissionMode
 import com.zhizhu.zhicode.compose.model.TaskState
 import com.termux.app.zhicode.core.ZhiCodeEngine
@@ -343,6 +345,41 @@ internal class ZhiEngineController(
         check(!isBusy()) { "任务正在运行，完成后再压缩上下文" }
         val engine = engine ?: error("引擎尚未初始化")
         engine.compactContext(instructions.trim())
+    }
+
+    /**
+     * 列出已启用的 MCP 服务器及其工具清单（界面「测试连接」用）。
+     *
+     * ⚠️ **阻塞且昂贵**：每台服务器都要真的起一次子进程或发一轮 HTTP，单台超时 30 秒。
+     * 所以必须放 IO 线程，且**只能由用户点「测试连接」触发** ——
+     * 在打开 MCP 页时自动跑一遍，等于把"看配置"变成"把每台服务器都启动一次"，
+     * 而且在用户还没决定要改什么之前就产生了副作用。
+     *
+     * 解析在这里做（而不是把 JSON 交给界面）：界面模型应当由一处产出，
+     * 两处各自解析同一份协议 JSON 迟早会分叉。单个服务器失败**不**影响整体，
+     * 那一行会带上 `ok=false` 与错误原因 —— 让一个配错的服务器挡住其它可用的，
+     * 是最难查的一种"功能没了"。
+     */
+    fun mcpStatus(): Result<List<McpServerStatus>> = runCatching {
+        val engine = engine ?: error("引擎尚未初始化")
+        parseMcpStatus(engine.mcpServers())
+    }
+
+    private fun parseMcpStatus(rows: JSONArray): List<McpServerStatus> = buildList {
+        for (index in 0 until rows.length()) {
+            val row = rows.optJSONObject(index) ?: continue
+            val name = row.optString("server", "")
+            if (name.isEmpty()) continue
+            val ok = row.optBoolean("ok", false)
+            add(
+                McpServerStatus(
+                    name = name,
+                    connected = ok,
+                    error = if (ok) "" else row.optString("error", "未知原因"),
+                    tools = McpToolInfo.parse(row.optJSONArray("tools")),
+                ),
+            )
+        }
     }
 
     /**

@@ -35,12 +35,26 @@ public final class ToolRegistry {
     /** 名字 → 实现。见类注释：必须是保持插入顺序的 Map。 */
     private final Map<String, ZhiTool> byName = new LinkedHashMap<>();
 
+    /**
+     * MCP 运行时。界面（「测试连接」与工具清单）要用同一个实例。
+     *
+     * <p>必须是**这一个**：它持有 MCP 的会话与进程状态，另建一个会让同一次测试
+     * 与真实调用落在不同的运行时上，两边看到的服务器状态可能不一致。
+     */
+    private final McpRuntime mcpRuntime;
+
     public ToolRegistry(Context context) {
         TermuxShellExecutor shell = new TermuxShellExecutor(context);
         AndroidIntentBridge intentBridge = new AndroidIntentBridge(context);
         McpRuntime mcp = new McpRuntime();
+        this.mcpRuntime = mcp;
 
         for (ZhiTool tool : builtIns(context, shell, intentBridge, mcp)) register(tool);
+    }
+
+    /** 见 {@link #mcpRuntime}。 */
+    public McpRuntime mcpRuntime() {
+        return mcpRuntime;
     }
 
     /**

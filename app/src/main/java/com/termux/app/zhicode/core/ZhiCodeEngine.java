@@ -716,6 +716,20 @@ public final class ZhiCodeEngine {
         return ContextCompactor.autoCompactThreshold(config);
     }
 
+    /**
+     * 列出已启用的 MCP 服务器及其工具清单（界面「测试连接」用）。
+     *
+     * <p>⚠️ 这是**阻塞且昂贵**的：每台服务器都要真的起一次子进程或发一轮 HTTP，
+     * 单台超时 30 秒。调用方必须放在后台线程，且只能由用户动作触发 ——
+     * 打开设置页就自动跑一遍，等于把"看配置"变成"把每台服务器都启动一次"。
+     *
+     * <p>不会因为某台失败就整体失败：那一行会带 {@code ok:false} 与原因
+     * （见 {@code McpRuntime.listServers}）。
+     */
+    public JSONArray mcpServers() {
+        return tools.mcpRuntime().listServers();
+    }
+
     public int effectiveContextWindowTokens() {
         return ContextCompactor.effectiveContextWindow(config);
     }

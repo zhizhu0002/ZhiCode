@@ -66,6 +66,20 @@ public final class McpTool implements ZhiTool {
     /** MCP 调用会出网，所以按网络权限对待，而不是内部工具。 */
     @Override public PermissionKind permissionKind() { return PermissionKind.NETWORK; }
 
+    /**
+     * 逐工具审批：用户可以为某一个远端工具单独要求确认。
+     *
+     * <p>{@code mcp_list} 不涉及这一步（它只是列清单）。
+     *
+     * <p>参数缺失时返回 false（不拦）：{@code input} 是模型给的，可能什么都没有。
+     * 那种情况下这次调用本来就会被 {@code runtime.call} 拒绝（服务器或工具名为空），
+     * 额外的确认框只会让用户对着一个必然失败的调用点一次"允许"。
+     */
+    @Override public boolean requiresApproval(JSONObject input) {
+        if (list) return false;
+        return runtime.requiresApproval(input.optString("server", ""), input.optString("tool", ""));
+    }
+
     @Override public ToolExecutionResult execute(SessionConfig config, JSONObject input) {
         if (list) return ToolExecutionResult.ok(runtime.listServers().toString());
         return runtime.call(input.optString("server", ""), input.optString("tool", ""),

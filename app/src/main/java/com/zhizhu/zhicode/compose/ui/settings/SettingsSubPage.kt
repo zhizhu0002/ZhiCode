@@ -6,9 +6,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
@@ -231,6 +234,20 @@ internal fun SettingsSubPage(
      *    → 不会因为列表项滚出可视区被销毁而把浮层一起关掉。
      */
     overlay: (@Composable () -> Unit)? = null,
+    /**
+     * 顶栏与滚动区之间的**固定**内容（目前只有 MCP 表单的 TAB 栏用）。
+     *
+     * ⚠️ 它和 [content] 的区别是「会不会被滚走」：header 不随内容滚动，
+     * 所以放在里面的是**切换控件**（TAB 栏）—— 切到「工具」那页往下滚了几屏之后
+     * 还得能切回「基本设置」，而切不回去的 TAB 栏等于没有。
+     *
+     * ⚠️ 它必须自己吃掉顶栏的高度（见实现里的 `padding.calculateTopPadding()`）：
+     * Miuix 的 Scaffold 把 body 放在 (0,0)、顶栏画在它**上面**
+     * （`Scaffold.kt` 的 `bodyContentPlaceable.place(0, 0)` 之后才 place TopBar），
+     * 所以 body 里 y=0 的东西是**被顶栏盖住**的。滚动区的做法是把顶栏高度算进
+     * `contentPadding`，固定内容没有那层 padding，只能自己补。
+     */
+    header: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -289,31 +306,46 @@ internal fun SettingsSubPage(
             }
         },
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .overScrollVertical()
-                    .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
-                contentPadding = PaddingValues(
-                    top = padding.calculateTopPadding(),
-                    // FAB 是悬浮的，会盖住列表最后几行 —— 底部留出它的高度 + 间距，
-                    // 否则最后一条永远被压着点不到。Scaffold 给的 bottom padding
-                    // 已经算进了 FAB（见它的 FabSpacing 分支），这里再补一点余量。
-                    bottom = padding.calculateBottomPadding() + 16.dp,
-                ),
-            ) {
-                item(key = "subPageBody") { content() }
+        // 竖向三段：固定 header（顶栏之下、不随内容滚）/ 滚动区 / 浮层。
+        // 滚动区用 weight(1f) 吃掉剩余高度，header 有多高都不会把列表挤没。
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (header != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // 见 header 参数的说明：body 在 (0,0)，顶栏画在它上面，
+                        // 不补这个 padding 的话 header 会被顶栏整个盖住。
+                        .padding(top = padding.calculateTopPadding()),
+                ) { header() }
             }
-            VerticalScrollBar(
-                adapter = rememberScrollBarAdapter(listState),
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .fillMaxHeight(),
-            )
-            // 浮层挂在 Scaffold 的 composition 里、LazyColumn 之外 —— 见 overlay 参数的说明。
-            overlay?.invoke()
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .overScrollVertical()
+                        .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
+                    contentPadding = PaddingValues(
+                        // header 自己已经顶掉了顶栏高度，这里再算一次会让内容
+                        // 凭空多出一段与顶栏等高的空白。
+                        top = if (header == null) padding.calculateTopPadding() else 0.dp,
+                        // FAB 是悬浮的，会盖住列表最后几行 —— 底部留出它的高度 + 间距，
+                        // 否则最后一条永远被压着点不到。Scaffold 给的 bottom padding
+                        // 已经算进了 FAB（见它的 FabSpacing 分支），这里再补一点余量。
+                        bottom = padding.calculateBottomPadding() + 16.dp,
+                    ),
+                ) {
+                    item(key = "subPageBody") { content() }
+                }
+                VerticalScrollBar(
+                    adapter = rememberScrollBarAdapter(listState),
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .fillMaxHeight(),
+                )
+                // 浮层挂在 Scaffold 的 composition 里、LazyColumn 之外 —— 见 overlay 参数的说明。
+                overlay?.invoke()
+            }
         }
     }
 }
