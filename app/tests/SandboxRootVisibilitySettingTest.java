@@ -17,6 +17,23 @@ public final class SandboxRootVisibilitySettingTest {
         return new String(Files.readAllBytes(root.resolve(path)), StandardCharsets.UTF_8);
     }
 
+    /**
+     * 取某个函数的源码（从签名起、到下一个顶格 `internal fun `/`fun ` 之前），并去掉空白。
+     *
+     * 定长切片会切进下一个函数（那里可能正好有要找的调用），所以在下一个函数声明处截断 ——
+     * `SwitchPreference(` 在 SettingsRows.kt 里出现多次，不这么切就分不清是谁调的。
+     */
+    private static String functionBody(String source, String signature) {
+        int start = source.indexOf(signature);
+        if (start < 0) return "";
+        int next = source.length();
+        for (String marker : new String[]{"\ninternal fun ", "\nfun ", "\n@Composable"}) {
+            int at = source.indexOf(marker, start + signature.length());
+            if (at >= 0 && at < next) next = at;
+        }
+        return source.substring(start, next).replaceAll("\\s+", "");
+    }
+
     public static void main(String[] args) throws Exception {
         Path root = Paths.get(args.length == 0 ? "." : args[0]).toAbsolutePath().normalize();
         String store = read(root, "app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxPrefs.java");
@@ -62,11 +79,18 @@ public final class SandboxRootVisibilitySettingTest {
                         && provider.contains("put(\"hide_root\", ZhiSandbox.isRootHidden())"),
                 "the private sandbox RPC must expose the effective setting");
         // 这里原来钉的是 `new Switch(this)` —— 那是**平台 View 的书写形态**，不是不变式。
-        // 改成 Compose 之后组件换成了 Miuix 的 `SwitchPreference`（这本来就是这次改动的目的：
+        // 改成 Compose 之后组件换成了 Miuix 的开关（这本来就是那次改动的目的：
         // 平台 Switch 在 Material v1 主题下是青色、且被塞进 64dp 盒子压变形）。
-        // 于是断言换成「这个开关用的是 Miuix 的开关组件、且文案还在」，
-        // 其余三条（文案、在飞压住、失败回滚）一字不改。
-        require(has(dashboard, "SwitchPreference(") && dashboard.contains("隐藏 Root"),
+        //
+        // 这一轮又把调用点从裸 `SwitchPreference` 换成设置页的统一分量 `SettingsToggle`
+        // （沙箱页的开关因此和设置页的分组卡逐像素同款）。**断言没有被放松**：
+        // 除了「这个开关用的是 Miuix 的开关组件、且文案还在」，还额外要求
+        // `SettingsToggle` 真的是 `SwitchPreference` 的薄转发 —— 否则这个锚点
+        // 可以靠一个名字像开关、实际画个 Text 的函数蒙过去。
+        String settingsRows = read(root, "app/src/main/java/com/zhizhu/zhicode/compose/ui/settings/SettingsRows.kt");
+        require(functionBody(settingsRows, "fun SettingsToggle(").contains("SwitchPreference("),
+                "SettingsToggle 必须是 Miuix SwitchPreference 的薄转发，否则下面那条断言不算数");
+        require(dashboard.contains("SettingsToggle(") && dashboard.contains("隐藏 Root"),
                 "the sandbox dashboard must expose a Root hiding switch");
         // 用 squash 比较：断言的是「回滚语义」（切走时禁用并压住交互，失败时恢复），
         // 不该被 setRootSwitch(previous, false) 这类逗号后的空格写法左右。

@@ -99,6 +99,25 @@ class SandboxBoard : ComponentActivity() {
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
 
     /**
+     * 「诊断」专用的第二条线程。
+     *
+     * ⚠️ 诊断**绝不能**排在 [worker] 上，这是用户报「诊断也读不出来什么」的根因。
+     *
+     * `SandboxRpcService.dispatch` 入口是 `ZhiSandbox.awaitReady(12000)`：引擎没就绪时
+     * 每个 RPC 都要烧满 **12 秒**才抛「引擎初始化超时」。`reload()` 在唯一的 worker 线程上
+     * 连做 `status` + `list`（≈24 秒），失败后还会 `Thread.sleep` 再 `reload()` 重试，
+     * 于是那条线程可以连续几十秒不空。
+     *
+     * 而诊断的取值（`fetchStagesFromBackend`）原来也是 `worker.execute { … }` ——
+     * 排在后面永远轮不到。表现就是弹窗停在「正在读取…」再也不动：
+     * **专门用来解释「后端为什么卡住」的工具，被「后端卡住」本身饿死了。**
+     *
+     * 所以诊断走独立线程；并且本地那两块（事件记录、阶段文件）根本不需要控制器，
+     * 先把它们显示出来（见 [showDiagnostics]），后端那一块回来了再补。
+     */
+    private val diagnostics: ExecutorService = Executors.newSingleThreadExecutor()
+
+    /**
      * 看门狗超时。
      *
      * 8 秒：控制器就在同机同 UID，正常往返是毫秒级 —— 这个值已经远超"慢"，
@@ -206,6 +225,7 @@ class SandboxBoard : ComponentActivity() {
     override fun onDestroy() {
         destroyed = true
         worker.shutdownNow()
+        diagnostics.shutdownNow()
         super.onDestroy()
     }
 
@@ -276,6 +296,16 @@ class SandboxBoard : ComponentActivity() {
      *
      * 只在错误文本确实表示"还没初始化好"时才重试 —— 无条件重试会把真正的配置错误也拖成
      * 两轮无谓等待，反而更难看清原因。
+     *
+     * ⚠️ `Unknown authority` 必须算「还没好」。
+     *
+     * 这个错误来自 `ContentResolver.call`：宿主去连控制器 provider 时，
+     * 系统说「不认识这个 authority」。但 authority（`${applicationId}.sandbox.control`）
+     * 在合并后的清单里是**对的**（构建产物核对过），所以它不是配置错误 ——
+     * 是**provider 还没注册完**：宿主进程先起来、控制器的 `onCreate` 还在跑，
+     * 这中间的一段窗口里查 authority 就会得到这个结果。
+     * 原来它不在可重试名单里，于是冷启动第一次进这一页必然显示「后端异常」，
+     * 点「刷新」又好了 —— 表现就是"时好时坏"。
      */
     private fun retryOrShow(error: String?) {
         if (destroyed) return
@@ -283,7 +313,8 @@ class SandboxBoard : ComponentActivity() {
         val transientFailure = message.contains("初始化") ||
             message.contains("timeout") ||
             message.contains("超时") ||
-            message.contains("Application.onCreate")
+            message.contains("Application.onCreate") ||
+            message.contains("authority")
         if (startupRetry < MAX_STARTUP_RETRY && transientFailure) {
             startupRetry++
             setStatus("沙箱后端启动中… 自动重试 $startupRetry/$MAX_STARTUP_RETRY")
@@ -299,20 +330,41 @@ class SandboxBoard : ComponentActivity() {
         showBackendError(message)
     }
 
+    /**
+     * 后端拿不到状态时的兜底界面。
+     *
+     * ⚠️ 两个开关**不能停在界面上的旧值**。
+     *
+     * 原来这里只清了 `packages` 与两个在飞标志，`hideRoot` / `floatingLog` 原样留着 ——
+     * 于是后端一挂，界面显示「隐藏 Root 开 / 悬浮窗开」，而真实值是
+     * `hide_root=true` / `show_floating_log=false`（实测：`iqsandbox status`）。
+     * 用户看到的是**两个都在开**，其中一个是假的，而且没有任何提示说它不可信。
+     *
+     * 现在改成回读**持久化设置**（`SandboxPrefs`）：它读的是同一个
+     * `sandbox/settings.json`，也就是控制器自己读的那份 —— 不需要控制器就能拿到真值。
+     * 读不到时 `SandboxPrefs` 内部回退到安全默认值（两个都开），与控制器一致。
+     *
+     * 回读在 worker 之外做（磁盘读，毫秒级）；`setRootSwitch(..., interactive = false)`
+     * 顺带把开关压成不可点 —— 后端不通时点它只会再失败一次。
+     */
     private fun showBackendError(error: String) {
         if (destroyed) return
         val stage = readStartupStage()
+        val persistedRoot = runCatching { SandboxPrefs.isRootHidden(this) }.getOrDefault(true)
+        val persistedLog = runCatching { SandboxPrefs.isFloatingLogEnabled(this) }.getOrDefault(true)
         runOnUiThread {
             if (destroyed) return@runOnUiThread
             ui.value = ui.value.copy(
                 status = "沙箱后端异常",
                 statusTone = SandboxStatusTone.DANGER,
                 packages = emptyList(),
-                hideRootInteractive = false,
                 errorDetail = "BlackBox 后端没有正常响应。\n\n" + error +
                     "\n\n最后启动阶段：\n" + stage +
                     "\n\n点右上角「诊断」可查看完整 ZhiCode 沙箱事件与各进程阶段。",
             )
+            // 见本函数说明：这两个值来自持久化设置，不是"猜"的。
+            setRootSwitch(persistedRoot, false)
+            setFloatingLog(persistedLog, false)
         }
     }
 
@@ -690,14 +742,32 @@ class SandboxBoard : ComponentActivity() {
     private fun showDiagnostics() {
         setStatus("正在读取诊断信息…")
         showDetail("ZhiCode 沙箱诊断")
-        worker.execute {
-            val text = StringBuilder()
-            text.append(SandboxConsole.snapshot(this))
-            text.append("\n===== 各进程启动阶段 =====\n")
-            text.append(fetchStagesFromBackend())
-            text.append("\n===== 引擎阶段文件（$LEGACY_STAGE_FILE）=====\n")
-            text.append(readStartupStage())
-            updateDetail(text.toString())
+
+        // ⚠️ 两件事必须在 [diagnostics] 上做，一件都不能挪到主线程：
+        //
+        // 1. `SandboxConsole.snapshot()` 内部要跑 `logcat -d`（还带 3 秒兜底等待），
+        //    在按钮回调里直接调它 = 主线程卡住好几秒，界面完全不动。
+        //    （第一版就是这么写的，表现是「点诊断像没反应」。）
+        // 2. 向后端要阶段 —— 见 [diagnostics] 字段的说明，不能排在 worker 上。
+        //
+        // 拆成两段显示：**本地内容先出**（它不需要控制器，毫秒级），
+        // 后端那一块回来了再补。顺序反过来就会出现「后端卡住 ⇒ 用户只看到『正在读取…』」，
+        // 而「卡在哪一步」的答案本来就躺在阶段文件里。
+        diagnostics.execute {
+            val local = StringBuilder()
+                .append(SandboxConsole.snapshot(this))
+                .append("\n===== 引擎阶段文件（$LEGACY_STAGE_FILE）=====\n")
+                .append(readStartupStage())
+                .toString()
+            if (destroyed) return@execute
+
+            val backendHeading = "\n===== 各进程启动阶段 =====\n"
+            updateDetail(local + backendHeading + "正在向控制器索取…\n")
+
+            val stages = fetchStagesFromBackend()
+            if (destroyed) return@execute
+            // 补上后端结果时把本地那块一起带上：updateDetail 是整体替换，不是追加。
+            updateDetail(local + backendHeading + stages)
         }
     }
 

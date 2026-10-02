@@ -49,15 +49,26 @@ public final class SandboxConsole {
      * 快照的最终字符上限。
      *
      * <p>这是在「够用来定位问题」与「不要把上下文占满」之间取的折中值。
-     * 超出部分一律<b>截尾保留</b>而不是截头：最近发生的事才是排错时需要的。
+     *
+     * <p><b>⚠️ 这个上限是「阶段 + 事件」优先的，不是「谁在后面留谁」。</b>
+     * 见 {@link #snapshot} 的说明：这里以前对整份快照做 {@code tail()}（截头留尾），
+     * 而 logcat 排在最后且自带一份同样大的上限 —— 于是一份完整 logcat 就能把
+     * 进程阶段与事件时间线整个挤掉，用户点开「诊断」看到的全是 libc 的
+     * {@code Access denied finding property} 刷屏，真正的诊断信息一条都看不到。
      */
     private static final int MAX_TEXT = 420_000;
 
     /** 事件文件尾部读取上限。取快照总上限的一半，给阶段与 logcat 留出空间。 */
     private static final int MAX_EVENT_TAIL = MAX_TEXT / 2;
 
-    /** logcat 行缓冲上限，避免 `logcat -d` 输出过大时先在内存里爆掉。 */
-    private static final int MAX_LOGCAT_CHARS = MAX_TEXT;
+    /**
+     * logcat 那一段的字符上限。
+     *
+     * <p>刻意远小于 {@link #MAX_TEXT}：logcat 是三者里最吵、最不值钱的一份
+     * （前面把阶段与事件放好了，logcat 只是佐证）。它只吃「剩下的预算」，
+     * 因此不可能再把前两段挤掉。
+     */
+    private static final int MAX_LOGCAT_CHARS = 120_000;
 
     /** 写文件与读文件的进程内互斥。跨进程一致性由「追加写 + 只读尾部」保证。 */
     private static final Object LOCK = new Object();
@@ -107,7 +118,21 @@ public final class SandboxConsole {
         }
     }
 
-    /** 完整诊断快照：环境、各进程阶段、事件时间线、logcat tail。 */
+    /**
+     * 完整诊断快照：环境、各进程阶段、事件时间线、logcat tail。
+     *
+     * <p><b>⚠️ 分段限额，不做整体截断。</b>
+     *
+     * <p>以前这里是「拼完全部内容再做一次 {@code tail(text, MAX_TEXT)}」——
+     * 保留末尾、砍掉开头。而 logcat 排在最后、又自带一份和总上限一样大的额度，
+     * 于是一份完整 logcat 足以把前面「进程阶段」与「事件时间线」整段挤掉。
+     * 用户点「诊断」看到的第一屏就是 libc 的 property 警告刷屏，
+     * 反馈是「诊断也读不出来什么」—— 信息其实抓到了，是被后拼的那段挤走的。
+     *
+     * <p>现在改成：先把阶段与事件放好（这两段是排错的主证据，**永不截断**），
+     * logcat 只吃剩下的预算（见 {@link #MAX_LOGCAT_CHARS}）。
+     * 顺序不变，所以「第一屏就是主证据」这件事也顺带成立了。
+     */
     public static String snapshot(Context context) {
         StringBuilder text = new StringBuilder(MAX_TEXT + 1024);
         text.append("ZhiCode 沙箱 调试快照\n")
@@ -120,10 +145,13 @@ public final class SandboxConsole {
                 .append("===== 进程阶段（按 pid） =====\n")
                 .append(SandboxStage.dump(context))
                 .append("\n===== 事件时间线 =====\n")
-                .append(eventTail())
-                .append("\n===== APP-UID LOGCAT =====\n")
-                .append(logcatTail());
-        return tail(text.toString(), MAX_TEXT);
+                .append(eventTail());
+
+        // logcat 最后，且额度是「总上限减掉已用」，再夹在 MAX_LOGCAT_CHARS 之内。
+        int remaining = MAX_TEXT - text.length();
+        int budget = Math.min(MAX_LOGCAT_CHARS, Math.max(8_000, remaining));
+        text.append("\n===== APP-UID LOGCAT =====\n").append(logcatTail(budget));
+        return text.toString();
     }
 
     /** 清空事件文件并留一条标记，这样快照里能看出「清过」而不是「一直没日志」。 */
@@ -179,19 +207,27 @@ public final class SandboxConsole {
     }
 
     /**
-     * 抓一份 logcat。
+     * 抓一份 logcat，最多 [budget] 个字符。
      *
      * <p>{@code -d} 表示 dump 后退出（不阻塞），{@code -v threadtime} 带上线程与时间戳。
      * 一边读一边削掉超出上限的头部：{@code logcat -d} 的输出可能很大，
      * 先全读进内存再截断等于把上限设在内存上而不是字符数上。
+     *
+     * <p>{@code *:V libc:S} 是 logcat 的**过滤表达式**（过滤器是包含式的，
+     * 所以要显式写「全部 tag 都放行、只把 libc 静音」）。这里的 {@code *} 不会被 shell 展开 ——
+     * ProcessBuilder 不经过 shell。
+     * 之所以专门静音 libc：它在应用启动阶段会为每个 property 打一行
+     * {@code Access denied finding property "persist.vendor.…"}，一次启动几百行，
+     * 把这一段的预算全吃光。那既不是本应用的问题，也没有诊断价值
+     * （用户点「诊断」看到的第一屏就是它，反馈是「读不出来什么」）。
      */
-    private static String logcatTail() {
+    private static String logcatTail(int budget) {
         StringBuilder out = new StringBuilder();
         // 注意用全限定名：本文件 import 了 android.os.Process（为了 Process.myPid()），
         // 裸写 Process 会指到它，而它没有 waitFor/destroy。
         java.lang.Process process = null;
         try {
-            process = new ProcessBuilder("logcat", "-d", "-v", "threadtime")
+            process = new ProcessBuilder("logcat", "-d", "-v", "threadtime", "*:V", "libc:S")
                     .redirectErrorStream(true)
                     .start();
             try (InputStream stream = process.getInputStream()) {
@@ -199,7 +235,7 @@ public final class SandboxConsole {
                 int read;
                 while ((read = stream.read(chunk)) != -1) {
                     out.append(new String(chunk, 0, read, StandardCharsets.UTF_8));
-                    if (out.length() > MAX_LOGCAT_CHARS) trimHead(out, MAX_LOGCAT_CHARS);
+                    if (out.length() > budget) trimHead(out, budget);
                 }
             }
         } catch (Throwable error) {
@@ -227,9 +263,5 @@ public final class SandboxConsole {
     /** 毫秒级时间戳。跨进程排序靠它，所以精度比格式好看更重要。 */
     private static String stamp() {
         return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
-    }
-
-    private static String tail(String value, int max) {
-        return value.length() <= max ? value : value.substring(value.length() - max);
     }
 }

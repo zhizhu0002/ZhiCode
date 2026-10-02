@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
@@ -61,12 +62,19 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 一张卡里放多行 preference（行间**不画分隔线**）是 Miuix 官方 example 的写法，
  * 也是 rikkahub 的 CardGroup 观感 —— 每行各套一张卡会让整页碎成一堆便签。
  * 主页与五个二级页共用这一个分组原语。
+ *
+ * [horizontalPadding] 供**已经自己留了页边距**的页面传 0：沙箱页的 `LazyColumn`
+ * 上挂着整页的 12dp 内边距，分组再各加一次就变成 24dp。默认值不变，老调用点无感。
  */
 @Composable
-internal fun SettingsGroup(title: String, content: @Composable () -> Unit) {
-    SettingsGroupHeader(title, modifier = Modifier.padding(horizontal = 12.dp))
+internal fun SettingsGroup(
+    title: String,
+    horizontalPadding: Dp = 12.dp,
+    content: @Composable () -> Unit,
+) {
+    SettingsGroupHeader(title, modifier = Modifier.padding(horizontal = horizontalPadding))
     Card(
-        modifier = Modifier.padding(horizontal = 12.dp),
+        modifier = Modifier.padding(horizontal = horizontalPadding),
         cornerRadius = ZhiRadius.card,
         insideMargin = PaddingValues(0.dp),
     ) {

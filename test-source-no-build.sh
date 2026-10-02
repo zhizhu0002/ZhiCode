@@ -266,6 +266,11 @@ run McpToolGateStructureTest "$PROJECT_ROOT"
 # ---------- 侧栏导航（点任何一行都要收起侧栏，否则目标被浮层盖住） ----------
 # SidebarNavigationTest.java
 run SidebarNavigationTest "$PROJECT_ROOT"
+# ---------- 沙箱页（弹窗宿主挂载点 · 骨架同二级页 · 卡片动作分层） ----------
+# 这一页是独立 Activity 里的整页，自己拼骨架，于是拼出过只有真机上点得出来的毛病：
+# 弹窗宿主写在 Scaffold 之外 → 四个框全部不显示且不报错（点了没反应，状态卡在非 null）。
+# SandboxPageStructureTest.java
+run SandboxPageStructureTest "$PROJECT_ROOT"
 # ---------- 写死的几何（长按触发 · 气泡宽度 · 弹窗宽度） ----------
 # LayoutConsistencyTest.java
 run LayoutConsistencyTest "$PROJECT_ROOT"

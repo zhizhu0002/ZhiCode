@@ -1,46 +1,65 @@
 package com.zhizhu.zhicode.compose.ui.sandbox
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
-import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
+import com.zhizhu.zhicode.compose.ui.ZhiAnchoredActionMenu
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiNoticeBar
+import com.zhizhu.zhicode.compose.ui.ZhiNoticeTone
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
+import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
+import com.zhizhu.zhicode.compose.ui.settings.SettingsToggle
+import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar
-import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.basic.VerticalScrollBar
+import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
-import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 /**
  * 「ZhiCode 沙箱」管理界面的 Compose 主体。
@@ -142,26 +161,60 @@ fun ZhiSandboxScreen(
     onConfirmAction: (SandboxDialog.ConfirmAction) -> Unit,
     onConfirmFridaInstall: (SandboxDialog.FridaInstall) -> Unit,
 ) {
+    val scheme = MiuixTheme.colorScheme
+    val listState = rememberLazyListState()
+    val topAppBarScrollBehavior = MiuixScrollBehavior()
+
     Scaffold(
         topBar = {
-            SandboxTopBar(onBack = onBack, onDiagnostics = onDiagnostics)
+            // 与设置二级页（SettingsSubPage）同款：Miuix TopAppBar + 大标题随滚动折叠 +
+            // 官方的 Back 图标。这里原本是 SmallTopAppBar（固定小标题）配
+            // `ZhiIcons.upLevel` 手动 `rotate(-90f)` 假装左箭头 —— 同一个应用里两套头部。
+            TopAppBar(
+                title = "ZhiCode 沙箱",
+                scrollBehavior = topAppBarScrollBehavior,
+                color = scheme.surface,
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = MiuixIcons.Back,
+                            contentDescription = "返回",
+                            tint = scheme.onBackground,
+                        )
+                    }
+                },
+                actions = {
+                    TextButton(text = "诊断", onClick = onDiagnostics)
+                },
+            )
         },
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
-            contentPadding = PaddingValues(top = 10.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
+        // 列表与浮层同处一层 Box：浮层在 LazyColumn 之外，不会因为列表项滚出可视区被销毁。
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .overScrollVertical()
+                    .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection)
+                    .padding(horizontal = ZhiSpace.m),
+                contentPadding = PaddingValues(
+                    // 大标题会折叠，顶栏高度由 padding 给：不能像固定头那样写死。
+                    top = padding.calculateTopPadding(),
+                    bottom = padding.calculateBottomPadding() + 16.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 item { StatusLine(state.status, state.statusTone) }
 
-                // 两个开关放同一张卡片，与设置页的「分组卡片」观感一致。
-                // 原来它们各占一行、开关被挤在 64dp 宽的固定盒子里，滑块视觉上溢出。
+                // 两个开关放同一张分组卡，与设置页的「分组卡片」逐像素同款：
+                // 组标题走 SmallTitle、行本体走 SwitchPreference（都是 Miuix 的组件）。
+                // 原来是自己搭 Card + SwitchPreference，没有组标题、内边距也不一样。
                 item {
-                    Card(
-                        cornerRadius = ZhiRadius.card,
-                        insideMargin = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
-                    ) {
-                        SwitchPreference(
+                    // horizontalPadding = 0：这个 LazyColumn 上已经挂了整页的 12dp 内边距，
+                    // 分组再各加一次会变成 24dp。
+                    SettingsGroup("沙箱行为", horizontalPadding = 0.dp) {
+                        SettingsToggle(
                             title = "隐藏 Root",
                             summary = if (state.hideRootInteractive) {
                                 "正在应用…"
@@ -171,11 +224,11 @@ fun ZhiSandboxScreen(
                             checked = state.hideRoot,
                             onCheckedChange = { wanted ->
                                 // 处理中直接丢弃点击：连点会让界面值与服务端值错位
-                                if (state.hideRootInteractive) return@SwitchPreference
+                                if (state.hideRootInteractive) return@SettingsToggle
                                 onToggleHideRoot(wanted)
                             },
                         )
-                        SwitchPreference(
+                        SettingsToggle(
                             title = "日志悬浮窗",
                             summary = if (state.floatingLogInteractive) {
                                 "正在应用…"
@@ -184,7 +237,7 @@ fun ZhiSandboxScreen(
                             },
                             checked = state.floatingLog,
                             onCheckedChange = { wanted ->
-                                if (state.floatingLogInteractive) return@SwitchPreference
+                                if (state.floatingLogInteractive) return@SettingsToggle
                                 onToggleFloatingLog(wanted)
                             },
                         )
@@ -226,47 +279,38 @@ fun ZhiSandboxScreen(
                         )
                     }
                 }
+            }
+
+            VerticalScrollBar(
+                adapter = rememberScrollBarAdapter(listState),
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+            )
+
+            // ⚠️ 弹窗宿主**必须**在这个 Scaffold 的 composition 之内。
+            //
+            // 原来它写在 `Scaffold(...) { }` 的**外面**，于是四个框（诊断详情、
+            // 隐藏 Root 确认、清数据/卸载确认、Frida 安装确认）全都不显示，
+            // 而且 `state.dialog` 停在非 null —— 点了没反应，界面也不报错。
+            //
+            // 原因是 Miuix 的弹层不是"就地画"的：`DialogLayout` 只是把一个
+            // `DialogState` 注册进 **Scaffold 提供的**那张表
+            // （`MiuixPopupUtils.kt` 的 `LocalRootDialogStates.current ?: LocalDialogStates.current`），
+            // 真正的绘制由 Scaffold 的 `MiuixPopupHost` 负责
+            // （`Scaffold.kt` 的 `CompositionLocalProvider`）。在 Scaffold 之外，
+            // 这两个 local 都还是各自的默认值（`null` / 一个空的 `mutableStateListOf`），
+            // 于是状态被加进一张**没人画的孤儿表**。
+            //
+            // 这与技能页当初「加号点不了」是同一个坑，`SettingsSubPage` 的 `overlay`
+            // 参数注释里已经写过一次 —— 新增整页时最容易漏的就是这一步。
+            SandboxDialogHost(
+                dialog = state.dialog,
+                onDismiss = onDismissDialog,
+                onConfirmRootVisibility = onConfirmRootVisibility,
+                onConfirmAction = onConfirmAction,
+                onConfirmFridaInstall = onConfirmFridaInstall,
+            )
         }
     }
-
-    SandboxDialogHost(
-        dialog = state.dialog,
-        onDismiss = onDismissDialog,
-        onConfirmRootVisibility = onConfirmRootVisibility,
-        onConfirmAction = onConfirmAction,
-        onConfirmFridaInstall = onConfirmFridaInstall,
-    )
-}
-
-/**
- * 顶栏：返回 + 标题 + 诊断。
- *
- * 返回用「上箭头旋转 -90°」而不是新画一个图标：`ZhiIcons` 里没有专门的返回箭头，
- * 而 ArrowUp 与左箭头是同一个字形旋转关系，转一下比再塞一个自绘 path 更省。
- */
-@Composable
-private fun SandboxTopBar(onBack: () -> Unit, onDiagnostics: () -> Unit) {
-    val scheme = MiuixTheme.colorScheme
-    SmallTopAppBar(
-        title = "ZhiCode 沙箱",
-        color = scheme.surface,
-        navigationIcon = {
-            ZhiIconButton(
-                icon = ZhiIcons.upLevel,
-                description = "返回",
-                onClick = onBack,
-                iconSize = 18.dp,
-                modifier = Modifier.rotate(-90f),
-            )
-        },
-        actions = {
-            TextButton(
-                text = "诊断",
-                onClick = onDiagnostics,
-                cornerRadius = ZhiRadius.button,
-            )
-        },
-    )
 }
 
 /** 状态行：后端状态、重试进度、错误原因都落在这里。 */
@@ -293,27 +337,24 @@ private fun StatusLine(status: String, tone: SandboxStatusTone) {
  * 旧实现把这段文字直接塞进列表区（红色 `TextView`，可选中）。这里保留「内联、可选中、
  * 带完整启动阶段」这三个性质 —— 后端没起来时，这段文字就是唯一能说明原因的东西，
  * 不能藏进需要再点一下的弹窗里。
+ *
+ * ## 为什么改成 [ZhiNoticeBar]
+ *
+ * 原来这里是一张 `Card(colors = surfaceContainer)` 里面放红字：**看起来就是一张普通卡片**，
+ * 只是字恰好是红的。红色只落在文字上，色块面积太小，一眼扫过去不像"出事了"。
+ * 现在改用与对话流错误同款的**通知条**（红底红字、无阴影），
+ * 两处讲同一件事的地方长相一致。
+ *
+ * `SelectionContainer` 保留：后端错误常常需要整段复制去搜。
  */
 @Composable
 private fun ErrorDetail(detail: String) {
-    val scheme = MiuixTheme.colorScheme
     SelectionContainer {
-        Card(
+        ZhiNoticeBar(
+            text = detail,
+            tone = ZhiNoticeTone.ERROR,
             modifier = Modifier.fillMaxWidth(),
-            cornerRadius = ZhiRadius.card,
-            insideMargin = PaddingValues(horizontal = 14.dp, vertical = ZhiSpace.m),
-            colors = CardDefaults.defaultColors(
-                color = scheme.surfaceContainer,
-                contentColor = scheme.error,
-            ),
-        ) {
-            Text(
-                text = detail,
-                color = scheme.error,
-                fontSize = ZhiTextScale.Caption,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+        )
     }
 }
 
@@ -350,9 +391,18 @@ private fun EmptyState() {
 /**
  * 单个沙箱应用。
  *
- * 六个动作分两行：Miuix `ButtonDefaults` 的最小尺寸是 58×40dp（实测），
- * 一行塞六个会低于最小宽度而把文字挤断，所以运行/停止/清数据一行、卸载与两个调试入口一行。
- * 每颗按钮 `weight(1f)` 等分，行内高度由 Miuix 自己的 minHeight 决定 —— 不再手写 40/44dp。
+ * ## 为什么不是「六个按钮排两行」
+ *
+ * 原来三个高频动作一行、卸载与两个调试入口一行，每颗按钮 `weight(1f)` 等分 ——
+ * 于是「进程 / SO 基址」只有 1/3 屏宽，而 Miuix `ButtonDefaults` 的最小尺寸是
+ * 58×40dp、文字还会被挤断。更根本的问题是：**调试入口不是每次都会用的动作**，
+ * 把它们跟「运行 / 停止」并排摆，日常操作反而更难看清（六个同权重的按钮 = 没有主次）。
+ *
+ * 现在按设置页的读法分三层：包名走 [BasicComponent] 当标题行（高度、按压态、
+ * 左右留白由 Miuix 负责），运行 / 停止 / 清数据一行（都是日常操作），
+ * 「进程 / SO 基址」「Frida」两个调试入口与「卸载」收进行尾的 ⋮ 溢出菜单 ——
+ * 与 MCP 列表页同一套写法（[ZhiAnchoredActionMenu] + `OverlayDropdownPopup`）。
+ * 卸载进菜单而不是留在明面上：它是破坏性动作，且不该和「运行」抢视线。
  */
 @Composable
 private fun AppCard(
@@ -365,40 +415,63 @@ private fun AppCard(
     onFrida: (String) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
+    // 溢出菜单的锚点。按下标分发，顺序与下面 labels 一一对应。
+    var menuOpen by remember(packageName) { mutableStateOf(false) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.card,
-        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        insideMargin = PaddingValues(0.dp),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = packageName,
-                color = scheme.onBackground,
-                fontSize = ZhiTextScale.Body,
-                fontWeight = FontWeight.Bold,
+            BasicComponent(
+                title = packageName,
+                summary = "沙箱内已安装",
+                titleColor = BasicComponentDefaults.titleColor(color = scheme.onBackground),
+                startAction = {
+                    Icon(
+                        imageVector = ZhiIcons.sandbox,
+                        contentDescription = null,
+                        tint = scheme.onSurfaceVariantSummary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+                endActions = {
+                    ZhiIconButton(
+                        icon = ZhiIcons.more,
+                        description = "更多操作",
+                        onClick = { menuOpen = true },
+                        iconSize = 18.dp,
+                    )
+                },
             )
-            ActionRow {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 Action("运行", Modifier.weight(1f)) { onLaunch(packageName) }
                 Action("停止", Modifier.weight(1f)) { onStop(packageName) }
                 Action("清数据", Modifier.weight(1f)) { onClearData(packageName) }
             }
-            ActionRow {
-                Action("卸载", Modifier.weight(1f)) { onUninstall(packageName) }
-                Action("进程 / SO 基址", Modifier.weight(1f)) { onProcesses(packageName) }
-                Action("Frida", Modifier.weight(1f)) { onFrida(packageName) }
+
+            if (menuOpen) {
+                ZhiAnchoredActionMenu(
+                    // 顺序即下标，与下面的分发一一对应，别重排。
+                    labels = listOf("进程 / SO 基址", "Frida", "卸载"),
+                    onSelect = { index ->
+                        menuOpen = false
+                        when (index) {
+                            0 -> onProcesses(packageName)
+                            1 -> onFrida(packageName)
+                            else -> onUninstall(packageName)
+                        }
+                    },
+                    onDismiss = { menuOpen = false },
+                    fingerOffset = null,
+                )
             }
         }
     }
-}
-
-@Composable
-private fun ActionRow(content: @Composable () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        content = { content() },
-    )
 }
 
 @Composable
