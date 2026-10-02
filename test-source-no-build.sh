@@ -356,6 +356,11 @@ run ComposerMenuTest "$PROJECT_ROOT"
 # 部分输入法据此切到安全/密码键盘 —— 用户报的正是这个。
 # StatusBarAndImeTest.java
 run StatusBarAndImeTest "$PROJECT_ROOT"
+# ---------- 「高风险」红标按命令内容判 ----------
+# 原先 highRisk = (kind == SYSTEM || SHELL)，等于每个 shell 命令都挂红标。
+# 红标天天出现就不再是信息 —— 这条同时守住判定表本身不许退化成「全都危险」。
+# RiskBadgeTest.java
+run RiskBadgeTest "$PROJECT_ROOT"
 # ---------- UI 调试页的入口门控与"真的铺开组件" ----------
 # 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
 # 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。

@@ -31,6 +31,8 @@ cd "$PROJECT_ROOT" || exit 1
 MAIN_SOURCES=(
     app/src/main/java/com/termux/app/zhicode/core/PermissionGate.java
     app/src/main/java/com/termux/app/zhicode/core/PermissionModePolicy.java
+    app/src/main/java/com/termux/app/zhicode/core/RiskClassifier.java
+    app/src/main/java/com/termux/app/zhicode/model/SessionConfig.java
     app/src/main/java/com/termux/app/zhicode/tools/WebSearchJson.java
     app/src/main/java/com/termux/app/zhicode/tools/WebSearchTool.java
 )
@@ -38,6 +40,7 @@ MAIN_SOURCES=(
 # 需要编译并运行的测试类（相对 app/src/test/java、点号包名）。
 DEFAULT_TESTS=(
     com.termux.app.zhicode.core.PermissionModeMatrixTest
+    com.termux.app.zhicode.core.RiskClassifierTest
     com.termux.app.zhicode.api.ApiPureLogicTest
     com.termux.app.zhicode.tools.WebSearchJsonTest
 )
@@ -95,7 +98,15 @@ OUT=".test-jvm"
 # 增量判断偷懒但正确：只要有一个源文件比 OUT 里的标记新就重编。
 NEED_BUILD=0
 STAMP="$OUT/.stamp"
+# 上一次编了哪些测试类。**必须记**：只按时间戳判断的话，
+# `test-jvm-fast.sh A` 之后跑默认三件套会复用只含 A 的 classes 目录，
+# 另外两个类变成 ClassNotFoundException（看起来像"环境坏了"）。
+TARGETS_FILE="$OUT/.targets"
+WANT_TARGETS="$(printf '%s\n' "${TARGETS[@]}")"
 if [ ! -f "$STAMP" ]; then
+    NEED_BUILD=1
+elif [ "$(cat "$TARGETS_FILE" 2>/dev/null)" != "$WANT_TARGETS" ]; then
+    rm -rf "$OUT/classes"
     NEED_BUILD=1
 else
     for f in "${MAIN_SOURCES[@]}"; do
@@ -122,6 +133,7 @@ if [ "$NEED_BUILD" = "1" ]; then
         exit 1
     fi
     touch "$STAMP"
+    printf '%s\n' "${TARGETS[@]}" > "$TARGETS_FILE"
 fi
 
 # ---- 运行：JUnitCore ----

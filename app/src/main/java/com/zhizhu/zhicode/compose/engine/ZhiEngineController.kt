@@ -15,6 +15,7 @@ import com.termux.app.zhicode.core.PermissionGate
 import com.termux.app.zhicode.core.PermissionModePolicy
 import com.termux.app.zhicode.core.PlanApprovalGate
 import com.termux.app.zhicode.core.QuestionGate
+import com.termux.app.zhicode.core.RiskClassifier
 import com.termux.app.zhicode.tools.WebFetchTool
 import com.termux.app.zhicode.tools.WebSearchTool
 import com.termux.app.zhicode.model.PlanWorkflowState
@@ -24,7 +25,6 @@ import com.termux.app.zhicode.model.ToolExecutionResult
 import com.zhizhu.zhicode.compose.model.PlanApproval
 import com.termux.app.zhicode.storage.ApiSettingsStore
 import com.termux.app.zhicode.tasks.TaskStore
-import com.termux.app.zhicode.tools.ZhiTool
 import org.json.JSONObject
 import java.io.File
 
@@ -55,6 +55,8 @@ internal data class EngineOverrides(
     val webSearchApiKey: String? = null,
     /** SearXNG 实例地址；只有 searxng 服务用到。 */
     val webSearchBaseUrl: String? = null,
+    /** 当前生效搜索服务的每服务选项（JSON，如 depth/topic/language）。 */
+    val webSearchServiceConfig: String? = null,
     val rootExecutionEnabled: Boolean? = null,
     val sandboxAgentFullAccess: Boolean? = null,
     val forcedKeepAliveEnabled: Boolean? = null,
@@ -208,6 +210,8 @@ internal class ZhiEngineController(
         o.webTimeoutSec?.let { if (it > 0) config.webTimeoutMs = it * 1000 }
         o.webSearchApiKey?.let { if (it.isNotBlank()) config.webSearchApiKey = it }
         o.webSearchBaseUrl?.let { config.webSearchBaseUrl = it }
+        // 空串也要写：用户在设置里清掉地址/选项之后，引擎侧不该继续用旧值。
+        o.webSearchServiceConfig?.let { config.webSearchServiceConfig = it }
         o.rootExecutionEnabled?.let { config.rootExecutionEnabled = it }
         o.sandboxAgentFullAccess?.let { config.sandboxAgentFullAccess = it }
         o.forcedKeepAliveEnabled?.let { config.forcedKeepAliveEnabled = it }
@@ -566,10 +570,15 @@ internal class ZhiEngineController(
     override fun onPermissionRequest(request: PermissionGate.PermissionRequest?) {
         if (request == null) return
         val gen = generation
-        val kind = request.kind
-        val highRisk = kind == ZhiTool.PermissionKind.SYSTEM || kind == ZhiTool.PermissionKind.SHELL
         val call = request.call
         val name = call?.name ?: "工具"
+        // 「高风险」按**命令内容**判，不按工具种类判。
+        //
+        // 原先这里是 `kind == SYSTEM || kind == SHELL` —— 等于凡是跑 shell 的都挂红标，
+        // 于是 `ls` 和 `rm -rf /` 长得一模一样。红标天天出现就不再是信息，用户学会的
+        // 是忽略它。判定表在 RiskClassifier（纯 JVM，有单测）。
+        val highRisk = runCatching { RiskClassifier.isHighRisk(name, call?.input) }
+            .getOrDefault(false)
         val summary = ToolText.summary(name, call?.input) ?: ""
         onMainForGeneration(gen) {
             flushTextNow()

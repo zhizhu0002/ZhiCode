@@ -27,3 +27,10 @@ release.properties
 # test-source-no-build.sh 的编译缓存（它把 app/tests/*.java 编译一次成 jar 再跑）。
 # 是产物、可随时重建，不进版本库。
 .test-build/
+
+# 快路径单测的编译缓存（test-jvm-fast.sh）
+.test-jvm/
+
+# 临时产物：APK 抽查解包、构建日志
+.apkchk/
+.build-*.log
