@@ -33,6 +33,84 @@ class ToolActionsTest {
         expanded = expanded,
     )
 
+    // ------------------------------------------------------------ 判据构造
+
+    /**
+     * 界面与 ViewModel **共用**这一份映射（`ToolActions.flags`）：
+     * 界面拿它渲染菜单，VM 之外的调用点不再各自判一次"有没有 diff"。
+     */
+    @Test
+    fun theFlagsMappingIsSharedByTheUiAndNobodyReimplementsIt() {
+        val command = ToolActions.flags(
+            kind = ToolKind.COMMAND,
+            summary = "ls -la",
+            output = "total 0\n",
+            isFileDiff = false,
+            completed = true,
+            expanded = false,
+        )
+        assertEquals(
+            ToolActions.ToolActionFlags(
+                isCommand = true,
+                hasCommand = true,
+                hasOutput = true,
+                hasDiff = false,
+                completed = true,
+                expanded = false,
+            ),
+            command,
+        )
+
+        // 非命令类工具即使摘要非空也不该冒出"复制命令"——判据跟着 kind 走，不是跟着文案走。
+        val read = ToolActions.flags(
+            kind = ToolKind.READ,
+            summary = "app/build.gradle",
+            output = "…",
+            isFileDiff = false,
+            completed = false,
+            expanded = false,
+        )
+        assertFalse(read.isCommand)
+        assertFalse(read.hasCommand)
+    }
+
+    /**
+     * 没有输出就谈不上 diff。
+     *
+     * 调用方只回答"这段输出是不是统一 diff"（`ToolText.isFileDiff`），
+     * "有没有输出"这个合取由 [ToolActions.flags] 补上 —— 否则一个还没吐字的
+     * 写文件类工具会同时拿到"复制 Diff"和一句空输出。
+     */
+    @Test
+    fun aDiffFlagWithoutOutputIsDropped() {
+        val running = ToolActions.flags(
+            kind = ToolKind.EDIT,
+            summary = "app/Main.kt",
+            output = "",
+            isFileDiff = true,
+            completed = false,
+            expanded = false,
+        )
+        assertFalse(running.hasOutput)
+        assertFalse(running.hasDiff)
+        // 于是菜单退到"复制参数"这一档，而不是给一个复制不出东西的 Diff。
+        assertEquals(listOf(ToolActions.COPY_INPUT), ToolActions.options(running))
+    }
+
+    /** 命令类工具的命令行只认 `summary`：空串就不该出现"复制命令"。 */
+    @Test
+    fun aBlankCommandLineIsNotOffered() {
+        val blank = ToolActions.flags(
+            kind = ToolKind.COMMAND,
+            summary = "   ",
+            output = "",
+            isFileDiff = false,
+            completed = false,
+            expanded = false,
+        )
+        assertFalse(blank.hasCommand)
+    }
+
     // ------------------------------------------------------------ 决策表
 
     @Test

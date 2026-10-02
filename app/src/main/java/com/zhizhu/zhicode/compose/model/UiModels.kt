@@ -5,8 +5,6 @@ import com.termux.app.zhicode.core.FileOps
 /** 对话流中的条目类型。对应原 蜘蛛 的 ChatItem 分类。 */
 enum class ChatKind { USER, ASSISTANT, TOOL_GROUP, ERROR, INFO }
 
-/** 工具类别，用于聚合卡的文案（"搜索 N 个模式 / 读取 N 个文件"）。 */
-enum class ToolKind { SEARCH, READ, EDIT, COMMAND, OTHER }
 
 enum class RiskLevel { NORMAL, HIGH }
 
@@ -224,14 +222,14 @@ enum class ChoiceIntent {
     MESSAGE_ACTION,
     SESSION_ACTION,
 
-    /**
-     * 对话流里**单个工具**的操作菜单。
-     *
-     * 与 [MESSAGE_ACTION] 分开是必要的：工具组那一层只能拿到"哪一组"，
-     * 而这里的动作（复制命令 / 复制输出 / 展开这一条）全部作用在**某一行**上。
-     * 混在同一个 intent 里就会出现"点单个工具的 ⋯ 却弹出整组菜单"那个 bug。
-     */
-    TOOL_ACTION,
+    // ⚠️ 这里**没有** TOOL_ACTION，而且不能再加回来。
+    //
+    // 它曾经存在：单个工具的 `⋯` 把菜单塞进 `choicePicker`，再由界面按 anchorId 认领。
+    // 但 [ChoicePickerState.isActionMenu] 只认上面这两个 intent，于是工具菜单**退化成
+    // 屏幕中央的对话框** —— 一个只作用于某一行的动作，弹窗出现在屏幕正中。
+    // 现在那个 `⋯` 是 Miuix 下拉菜单（与输入器底排同一组件），菜单内容仍是
+    // `ToolActions.options(...)`，选中的文案直接走 `applyToolAction(itemId, toolId, label)`。
+    // 也就是说：工具菜单不再需要经过本枚举，也不需要在这一层中转。
 
     /** 计划模式的目标澄清：选完（或自由回答）后才产出计划。 */
     PLAN_GOAL,

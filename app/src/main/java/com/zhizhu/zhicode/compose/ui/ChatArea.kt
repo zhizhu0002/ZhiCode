@@ -99,8 +99,10 @@ internal fun ChatArea(
             },
             onToggleThinking = viewModel::toggleThinking,
             onMessageActions = viewModel::showMessageActions,
-            // 单个工具的 ⋯：动作作用在某一行上，所以把 toolId 一起传下去。
-            onToolActions = viewModel::showToolActions,
+            // 单个工具的 ⋯ 菜单里选中了一项：动作作用在某一行上，所以把 toolId 一起传下去。
+            // 传的是**消息 id**（不是 ChatItem）—— VM 只需要一个能在 transcript 里定位的键，
+            // 拿整条消息进去反而会让"动作作用在旧快照上"变得可能。
+            onToolAction = { item, toolId, label -> viewModel.applyToolAction(item.id, toolId, label) },
             // 长按消息的动作菜单：由那一条消息自己渲染（从手指位置长出来）
             anchoredMenu = { anchorId, fingerOffset ->
                 ZhiAnchoredMenuHost(state, viewModel, anchorId, fingerOffset)

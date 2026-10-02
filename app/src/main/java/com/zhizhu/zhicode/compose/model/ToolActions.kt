@@ -57,6 +57,44 @@ object ToolActions {
     )
 
     /**
+     * 界面模型 → [ToolActionFlags] 的**唯一**一份映射。
+     *
+     * ## 为什么必须只有一份
+     *
+     * 菜单现在由**界面自己**渲染（`ToolRow` 里的 Miuix 下拉菜单，与输入器底排同一个组件），
+     * 而动作仍然由 ViewModel 分派。两边各自判一次"有没有 diff、跑完没"，迟早会出现
+     * 「界面显示『展开修改』而 VM 按『展开输出』处理」这种对不上的组合 —— 而且不会编译失败。
+     * 所以判据的构造收进这里：界面与 VM 都调它，`options()` 只认它产出的旗标。
+     *
+     * @param kind        工具类别；只有 [ToolKind.COMMAND] 才有"命令"可复制
+     * @param summary     界面上那一行摘要（命令类工具它就是命令行）
+     * @param output      已经拿到的输出（运行中的实时输出也在里面）
+     * @param isFileDiff  输出是不是统一 diff。**由调用方用 `ToolText.isFileDiff` 算好**：
+     *                    那个判据在 `engine/ToolText`，而本文件刻意不 import `android.*`
+     *                    （快回路要求），所以只能把结论传进来，不能在内部重算。
+     */
+    fun flags(
+        kind: ToolKind,
+        summary: String,
+        output: String,
+        isFileDiff: Boolean,
+        completed: Boolean,
+        expanded: Boolean,
+    ): ToolActionFlags {
+        val isCommand = kind == ToolKind.COMMAND
+        return ToolActionFlags(
+            isCommand = isCommand,
+            hasCommand = isCommand && summary.isNotBlank(),
+            hasOutput = output.isNotBlank(),
+            // diff 是输出里的一段：没有输出就谈不上 diff，这个合取放在这里
+            // （调用方只回答"这段输出是不是 diff"）。
+            hasDiff = output.isNotBlank() && isFileDiff,
+            completed = completed,
+            expanded = expanded,
+        )
+    }
+
+    /**
      * 按状态给出该显示的菜单项（可能为空 —— 那就不要弹菜单）。
      *
      * 分支顺序照参考实现：先处理"命令 + 有输出"这一档（它们的选项最具体），

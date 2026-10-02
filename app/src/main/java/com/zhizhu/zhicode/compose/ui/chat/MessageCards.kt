@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -53,6 +54,8 @@ import com.zhizhu.zhicode.compose.model.ToolKind
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
+import com.zhizhu.zhicode.compose.ui.ZhiIconDropdownMenu
+import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
 import com.zhizhu.zhicode.compose.ui.panes.DiffLines
 import com.zhizhu.zhicode.compose.ui.panes.OutputLines
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -406,14 +409,17 @@ fun ToolGroupCard(
     /** 参数是**目标状态**：true 表示点下去后应展开，false 表示应收起。 */
     onToggleGroup: (Boolean) -> Unit,
     /**
-     * 某一行的 `⋯`。**必须带 toolId**。
+     * 某一行的 `⋯` 菜单里**选中了一项**。两个参数：那一行的 toolId + 菜单文案。
      *
      * 这里以前是 `onActions: () -> Unit`，来自整组那一层 —— 于是点单个工具的 `⋯`
      * 弹出的是整组菜单，而且回调里根本不知道用户点的是哪一行。
      * 单个工具的动作（复制命令 / 复制输出 / 展开这一条）都作用在某一行上，
      * 所以行号必须传出去。
+     *
+     * 菜单**本身**由这一行自己画（Miuix 下拉菜单，见 [ToolRow]），这里只负责
+     * 把"选中了哪一行的哪一项"交给上层去执行。
      */
-    onToolActions: (String) -> Unit,
+    onToolAction: (String, String) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
     val anyExpanded = item.tools.any { it.expanded }
@@ -529,13 +535,19 @@ fun ToolGroupCard(
             // 是卡片，内层只负责按自然高度绘制、由卡片外层裁剪。
             Column(modifier = Modifier.fillMaxWidth()) {
                 item.tools.forEach { tool ->
-                    ToolRow(
-                        activity = tool,
-                        nowMs = runningClock,
-                        onToggle = { onToggleTool(tool.id) },
-                        // 传**这一行**的 id：菜单内容与动作都按它算。
-                        onActions = { onToolActions(tool.id) },
-                    )
+                    // ⚠️ 每一行都要 `key`，否则行内的 `remember`（展开态、下拉菜单的
+                    // 展开态）是按**位置**归属的：工具是边跑边追加的，新工具插进来之后
+                    // 位置会挪，于是"打开的菜单"和"展开的输出"会串到另一行上。
+                    // 用 tool.id 之后，状态跟着工具走。
+                    key(tool.id) {
+                        ToolRow(
+                            activity = tool,
+                            nowMs = runningClock,
+                            onToggle = { onToggleTool(tool.id) },
+                            // 传**这一行**的 id：菜单内容与动作都按它算。
+                            onToolAction = { label -> onToolAction(tool.id, label) },
+                        )
+                    }
                 }
             }
         }
@@ -550,7 +562,8 @@ fun ToolGroupCard(
  * - 行首是**状态字形**：`✓`(完成) / `×`(失败) / `●`(运行中) / `○`(等待授权)；
  * - 名称 11.5sp 粗体；摘要 10.5sp 等宽、单行省略、`weight(1f)`；
  * - `+N` / `−N` 是**纯文字着色**（9.5sp 等宽），不套底色胶囊；
- * - 右端 `⋯` 打开操作菜单，`⌄` / `⌃` 折叠展开（仅完成且有详情时出现）；
+ * - 右端 `⋯` 打开操作菜单（**Miuix 下拉菜单**，与输入器底排同一组件），
+ *   `⌄` / `⌃` 折叠展开（仅完成且有详情时出现）；
  * - Bash 的命令**不放标题行**（原版注释：否则命令会出现两次），改为独立下一行；
  * - 折叠态只显示 `⎿ 摘要`（等宽、缩进 23dp），展开态才渲染全量输出。
  */
@@ -559,7 +572,8 @@ private fun ToolRow(
     activity: ToolActivity,
     nowMs: Long,
     onToggle: () -> Unit,
-    onActions: () -> Unit,
+    /** 这一行的菜单里选中了一项（参数是菜单文案）。 */
+    onToolAction: (String) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
     val isCommand = activity.kind == ToolKind.COMMAND
@@ -590,6 +604,18 @@ private fun ToolRow(
     ) {
         compactToolSummary(activity)
     }
+
+    // 这一行菜单的判据。构造规则只在 `ToolActions.flags` 一处实现（VM 分派动作时用的是
+    // 同一份），所以这里**不算**"有没有 diff"这类结论，只把"输出是不是 diff"的结论喂进去
+    // —— 那个结论来自 `ToolText.isFileDiff`（见上面的 isFileDiff）。
+    val menuFlags = ToolActions.flags(
+        kind = activity.kind,
+        summary = activity.summary,
+        output = activity.output,
+        isFileDiff = isFileDiff,
+        completed = activity.completed,
+        expanded = activity.expanded,
+    )
 
     // 整行点击：Miuix Surface(onClick)（color = Transparent 不填色，仅取按压反馈）
     Surface(
@@ -648,15 +674,46 @@ private fun ToolRow(
             if (activity.additions > 0) DiffCount("+${activity.additions}", ZhiColors.green())
             if (activity.deletions > 0) DiffCount("−${activity.deletions}", ZhiColors.red())
 
-            // ⋯ 与 ⌄/⌃ 都转发到 Miuix IconButton（compact 覆盖其 40dp 最小尺寸）
-            ZhiIconButton(
-                icon = ZhiIcons.more,
-                description = "工具操作",
-                onClick = onActions,
-                tint = scheme.onSurfaceVariantSummary,
-                iconSize = 15.dp,
-                compact = 25.dp,
-            )
+            // ⋯ 的菜单内容只由 `ToolActions` 决定（判据的构造也在那里，界面与 VM 共用）：
+            // 这样"哪个状态该有哪些动作"只有一份实现，界面这边只负责把它渲染出来。
+            //
+            // ⚠️ `items` 必须 `remember`：`ZhiIconDropdownMenu` 内部按 `remember(items, …)`
+            // 缓存整份 `DropdownEntry`，而写在参数位置上的 `map { … }` 每次重组都是新的
+            // List 实例 —— 身份不等，那份缓存永远命不中，等于没做。
+            // key 取旗标与回调：旗标是 data class（按值比较），回调在 ToolGroupCard 里
+            // 捕获的是稳定值，两者跨重组都能命中。
+            val menuItems = remember(menuFlags, onToolAction) {
+                ToolActions.options(menuFlags).map { label ->
+                    ZhiMenuItem(text = label, onClick = { onToolAction(label) })
+                }
+            }
+
+            // ⋯ 与 ⌄/⌃ 都转发到 Miuix IconButton。
+            //
+            // `⋯` 这一个走 **`ZhiIconDropdownMenu`**（= Miuix `OverlayIconDropdownMenu`），
+            // 与输入器底排的 `+`、权限、推理**同一个组件**：触发按钮自己持有展开态、
+            // 按下时进入 hold-down 态、面板由 Miuix 贴着按钮弹出。
+            //
+            // ⚠️ 以前这里是一个普通 `ZhiIconButton` + VM 里的一份 `choicePicker` 状态，
+            // 于是点它弹出来的是**屏幕中央的对话框**（`ChoiceIntent.TOOL_ACTION` 不在
+            // `isActionMenu` 的名单里，选择器被交给居中的 `ChoicePickerOverlay`）——
+            // 动作明明只作用于这一行，弹窗却出现在屏幕中央，位置与语义对不上。
+            // 现在展开态就在这一行自己的组合里，不需要任何坐标换算，也不会锚偏。
+            ZhiIconDropdownMenu(
+                items = menuItems,
+                minHeight = 25.dp,
+                minWidth = 25.dp,
+                cornerRadius = 12.5.dp,
+                // 透明底：底色是工具组那张 Card，触发按钮不该再画一层
+                backgroundColor = Color.Transparent,
+            ) {
+                Icon(
+                    imageVector = ZhiIcons.more,
+                    contentDescription = "工具操作",
+                    tint = scheme.onSurfaceVariantSummary,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
 
             if (showChevron) {
                 ZhiIconButton(

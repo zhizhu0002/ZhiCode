@@ -18,6 +18,11 @@ import java.util.*;
  * <b>三、决策表出现第二份实现</b>。"哪个状态该有哪些动作"只允许在 `ToolActions` 里算；
  * 界面若自己再判一次"有没有 diff ⇒ 显示哪个菜单"，两份迟早不一致。
  *
+ * <b>四、菜单退化成居中对话框</b>。菜单曾经经过 `choicePicker` 中转，而
+ * `ChoiceIntent.TOOL_ACTION` 不在 `ChoicePickerState.isActionMenu` 的名单里 ——
+ * 于是点某一行的 `⋯`，弹出来的是**屏幕正中的对话框**。现在它必须是
+ * Miuix 下拉菜单（`ZhiIconDropdownMenu`，与输入器底排同一组件）。
+ *
  * <p>与 `ZcodeProtocolTest` 一样，这里做的是**文本级**检查，因此：
  * 注释里提到这些词也会被抓到 —— 那正是想要的（提都不该在别处以那种形式提）。
  */
@@ -131,46 +136,76 @@ public final class ToolInteractionTest {
         String chatList = stripComments(read(root, CHAT_LIST));
         String chatArea = stripComments(read(root, CHAT_AREA));
 
-        // ---- 1. 回调必须带 toolId（这一条正是那个"点单行弹整组菜单"的 bug）----
-        require(squash(cards).contains("onToolActions:(String)->Unit"),
-                CARDS + " 的 ToolGroupCard 必须接收 onToolActions: (String) -> Unit："
-                        + "参数是**那一行**的 toolId —— 少了它，回调里根本不知道用户点的是哪一行");
-        require(squash(cards).contains("onActions={onToolActions(tool.id)}"),
-                CARDS + " 必须把每一行自己的 id 传出去（onActions = { onToolActions(tool.id) }）："
-                        + "传整组的回调就是那个 bug 本身");
-        require(!squash(cards).contains("onActions=onActions"),
-                CARDS + " 不许把外层的 onActions 直接透传给每一行：那会让所有行共用一个动作");
-
-        // 从 ChatList 一路到 ChatArea 都要带上 toolId，断在中间任何一处都是"点了没反应"。
-        require(squash(chatList).contains("onToolActions:(ChatItem,String)->Unit"),
-                CHAT_LIST + " 必须声明 onToolActions: (ChatItem, String) -> Unit");
-        require(squash(chatList).contains("onToolActions(item,toolId)"),
-                CHAT_LIST + " 必须把 (item, toolId) 一起转发出去");
-        require(squash(chatArea).contains("onToolActions=viewModel::showToolActions"),
-                CHAT_AREA + " 必须把 onToolActions 接到 viewModel.showToolActions");
-
-        // ---- 2. ViewModel 侧：单行菜单的入口与目标 ----
-        require(squash(vm).contains("funshowToolActions(item:ChatItem,toolId:String)"),
-                VM + " 必须有 showToolActions(item, toolId)："
-                        + "签名里没有 toolId 就无法为某一行构造菜单");
-        require(squash(vm).contains("pendingToolAction"),
-                VM + " 必须记住待执行的工具操作目标："
-                        + "选择器回调里只能拿到选项文案，不记住就会作用于别的工具");
-        require(squash(vm).contains("ChoiceIntent.TOOL_ACTION"),
-                VM + " 必须用独立的 ChoiceIntent.TOOL_ACTION 分派工具动作："
-                        + "混进 MESSAGE_ACTION 会让两类动作争同一个目标字段");
-        require(squash(uiModels).contains("TOOL_ACTION,"),
-                UI_MODELS + " 的 ChoiceIntent 必须有 TOOL_ACTION");
-        require(squash(vm).contains("funapplyToolAction("),
-                VM + " 必须有 applyToolAction 执行菜单项");
-
-        // 菜单内容必须来自纯逻辑层，而不是在 VM 里现拼。
-        require(squash(vm).contains("ToolActions.options(toolActionFlags(tool))"),
-                VM + " 的菜单项必须由 ToolActions.options 决定："
-                        + "在 VM 里另拼一份，两份菜单迟早不一致");
-        require(squash(vm).contains("ToolText.isFileDiff(tool.toolName,tool.output)"),
-                VM + " 的 hasDiff 判据必须复用 ToolText.isFileDiff："
+        // ---- 1. `⋯` 必须是 Miuix 下拉菜单触发器，且回调必须带 toolId ----
+        //
+        // 这一节钉的是两件事，它们曾经一起坏掉：
+        //   a) 每一行的 `⋯` 用的是同一个"整组"回调 —— 点单行弹整组菜单，回调里也不知道
+        //      用户点的是哪一行；
+        //   b) 菜单经过 `choicePicker` 中转 —— 而 `ChoiceIntent.TOOL_ACTION` 不在
+        //      `isActionMenu` 的名单里，于是**退化成屏幕中央的对话框**：一个只作用于
+        //      某一行的动作，弹窗却出现在屏幕正中。
+        // 现在菜单由那一行自己画（Miuix `OverlayIconDropdownMenu`，与输入器底排的
+        // `+` / 权限 / 推理同一个组件），选中的文案随 (itemId, toolId) 一起回到 ViewModel。
+        require(squash(cards).contains("ZhiIconDropdownMenu("),
+                CARDS + " 的 ⋯ 必须是 Miuix 下拉菜单触发器（ZhiIconDropdownMenu）："
+                        + "与输入器底排的 + / 权限 / 推理同一个组件。用普通 IconButton + "
+                        + "外部状态就会重演「只作用于某一行的动作却弹出居中对话框」");
+        require(squash(cards).contains("ToolActions.options(menuFlags)"),
+                CARDS + " 的菜单项必须由 ToolActions.options 决定："
+                        + "在界面里另拼一份，两份菜单迟早不一致");
+        require(squash(cards).contains("ToolActions.flags("),
+                CARDS + " 的菜单判据必须来自 ToolActions.flags —— 它是界面与 VM 共用的"
+                        + "唯一一份「哪个状态该有哪个动作」映射");
+        require(squash(cards).contains("ToolText.isFileDiff(toolName,output)"),
+                CARDS + " 的 hasDiff 判据必须复用 ToolText.isFileDiff："
                         + "自己再判一次会出现「显示成 diff 却没有复制 Diff 这一项」");
+        require(!squash(cards).contains("choicePicker"),
+                CARDS + " 不许再碰 choicePicker：工具菜单不再经过选择器中转");
+        require(squash(cards).contains("onToolAction:(String,String)->Unit"),
+                CARDS + " 的 ToolGroupCard 必须接收 onToolAction: (String, String) -> Unit："
+                        + "参数是**那一行**的 toolId 与菜单文案 —— 少了 toolId，回调里根本"
+                        + "不知道用户点的是哪一行");
+        require(squash(cards).contains("onToolAction={label->onToolAction(tool.id,label)}"),
+                CARDS + " 必须把每一行自己的 id 传出去："
+                        + "onToolAction = { label -> onToolAction(tool.id, label) }");
+        require(!squash(cards).contains("onToolAction=onToolAction"),
+                CARDS + " 不许把外层的回调直接透传给每一行：那会让所有行共用一组动作");
+        // 每行必须 `key(tool.id)`：工具是边跑边追加的，按位置归属会让"打开的菜单 /
+        // 展开的输出"串到新插入的那一行上。
+        require(squash(cards).contains("key(tool.id){ToolRow("),
+                CARDS + " 的每一行必须 `key(tool.id) { ToolRow(...) }`："
+                        + "工具边跑边追加，按位置归属会让行内状态串行");
+
+        // 从 ChatList 一路到 ChatArea 都要带上 toolId 与文案，断在中间任何一处都是"点了没反应"。
+        require(squash(chatList).contains("onToolAction:(ChatItem,String,String)->Unit"),
+                CHAT_LIST + " 必须声明 onToolAction: (ChatItem, String, String) -> Unit");
+        require(squash(chatList).contains("onToolAction(item,toolId,label)"),
+                CHAT_LIST + " 必须把 (item, toolId, label) 一起转发出去");
+        require(squash(chatArea).contains(
+                        "onToolAction={item,toolId,label->viewModel.applyToolAction(item.id,toolId,label)}"),
+                CHAT_AREA + " 必须把 onToolAction 接到 viewModel.applyToolAction(itemId, toolId, label)");
+        require(squash(chatArea).contains("applyToolAction(item.id,toolId,label)"),
+                CHAT_AREA + " 必须把**消息 id**（不是整条 ChatItem）交给 ViewModel："
+                        + "VM 只需要能在 transcript 里定位目标的键");
+
+        // ---- 2. ViewModel 侧：只有"执行"，不再有"弹菜单" ----
+        require(squash(vm).contains("funapplyToolAction(itemId:String,toolId:String,label:String)"),
+                VM + " 必须有 applyToolAction(itemId, toolId, label)："
+                        + "目标与文案一起从界面传进来，一进来就能执行");
+        require(!squash(vm).contains("pendingToolAction"),
+                VM + " 不许再有 pendingToolAction：它存在的唯一理由是"
+                        + "「菜单经过选择器中转、回调里只剩文案」，那条路已经删掉了");
+        require(!squash(vm).contains("TOOL_ACTION"),
+                VM + " 不许再出现 ChoiceIntent.TOOL_ACTION："
+                        + "工具菜单不再经过 choicePicker");
+        require(!squash(uiModels).contains("TOOL_ACTION,"),
+                UI_MODELS + " 的 ChoiceIntent 不许再有 TOOL_ACTION："
+                        + "`isActionMenu` 只认 MESSAGE_ACTION / SESSION_ACTION，"
+                        + "用 TOOL_ACTION 的后果就是工具菜单退化成居中对话框");
+        require(!squash(chatArea).contains("showToolActions"),
+                CHAT_AREA + " 不许再引用 showToolActions（那个入口已经不存在）");
+        require(!squash(vm).contains("ToolActionFlags("),
+                VM + " 不许自己构造 ToolActionFlags：判据的构造只有 ToolActions.flags 一份");
 
         // ---- 3. 菜单里不许出现状态文字冒充动作 ----
         // 只查 TOOL_GROUP 那一档附近的文本：banned 词在别处（比如"执行中"用于状态行）是合理的。

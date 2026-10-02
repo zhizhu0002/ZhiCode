@@ -49,6 +49,7 @@ MAIN_KT_SOURCES=(
     app/src/main/java/com/termux/app/zhicode/core/ProviderLog.kt
     app/src/main/java/com/termux/app/zhicode/api/zcode/ZcodeWire.kt
     app/src/main/java/com/termux/app/zhicode/api/zcode/ZcodeHarness.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/model/ToolKind.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/ToolActions.kt
 )
 

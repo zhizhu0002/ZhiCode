@@ -81,11 +81,14 @@ fun ChatList(
     onToggleThinking: (String) -> Unit,
     onMessageActions: (ChatItem) -> Unit,
     /**
-     * 单个工具的 `⋯`。第二个参数是**那一行**的 toolId。
+     * 某一行的 `⋯` 菜单里选中了一项。参数：**哪一组**、**哪一行**、菜单文案。
      *
      * 与 [onMessageActions] 分开：后者只知道"哪一组"，做不了"展开这一条"这类动作。
+     *
+     * 菜单本身由那一行自己画（Miuix 下拉菜单），这里只转发"选中了什么" —— 所以
+     * 不需要手指位置，也不需要把菜单状态放进 ViewModel。
      */
-    onToolActions: (ChatItem, String) -> Unit,
+    onToolAction: (ChatItem, String, String) -> Unit,
     /**
      * 长按动作菜单的宿主插槽。在**每一项自己的布局里**调用，菜单就会贴那一项弹出
      * （见 `ZhiAnchoredActionMenu`）。
@@ -287,10 +290,7 @@ fun ChatList(
                             onToggleGroup = { expanded -> onToggleGroup(item.id, expanded) },
                             // `⋯` 是**单个工具**的操作，所以传的是那一行的 id，
                             // 而不是整组（以前传整组，于是点单行弹出整组菜单）。
-                            onToolActions = { toolId ->
-                                fingerOffset = finger.offset()
-                                onToolActions(item, toolId)
-                            },
+                            onToolAction = { toolId, label -> onToolAction(item, toolId, label) },
                         )
                         ChatKind.ERROR -> ErrorCard(shown)
                         ChatKind.INFO -> InfoCard(shown)

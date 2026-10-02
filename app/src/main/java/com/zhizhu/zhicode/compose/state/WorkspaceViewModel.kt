@@ -208,14 +208,9 @@ class WorkspaceViewModel(
     private var pendingSessionAction: SessionSummary? = null
     private var pendingMessageAction: ChatItem? = null
 
-    /**
-     * 工具操作的目标：`(哪一组, 哪一行)`。
-     *
-     * 必须**同时**记住两者。只记 toolId 的话，执行时要遍历整个 transcript 去找，
-     * 而工具 id 在单个会话内是唯一的、却可能出现在已被合并/清理的旧条目里；
-     * 只记 item 的话又定位不到行（正是"点单个工具弹出整组菜单"那个 bug 的成因）。
-     */
-    private var pendingToolAction: Pair<ChatItem, String>? = null
+    // ⚠️ 这里**没有** `pendingToolAction`：工具菜单由那一行自己渲染（Miuix 下拉菜单），
+    // 目标（组 id + 行 id）与文案一起从界面传进来，不需要在选择器回调里回头找目标。
+    // 它曾经存在是因为菜单要经过 `choicePicker` 中转 —— 那条路已经删掉了。
 
     private var modelCatalogJob: Job? = null
 
@@ -3678,8 +3673,9 @@ class WorkspaceViewModel(
             //
             // 这里曾经给第二项是 `if (item.groupCompleted) "已全部完成" else "执行中"` —— 那是
             // **状态文字冒充菜单项**：点下去什么都不发生，而用户会以为坏了。
-            // 单个工具该有的动作（复制命令/输出/diff、展开这一条）现在走
-            // [showToolActions]，那一层才知道用户点的是哪一行。
+            // 单个工具该有的动作（复制命令/输出/diff、展开这一条）走那一行自己的
+            // `⋯` 菜单（Miuix 下拉菜单 → [applyToolAction]），只有那一行知道
+            // 用户点的是哪一条。
             else -> listOf("复制概要")
         }
         // 与 showSessionActions 同理：动作在**选择器回调**里执行，那时拿到的只有选项文案，
@@ -3699,75 +3695,36 @@ class WorkspaceViewModel(
     }
 
     /**
-     * 对话流里**单个工具**的 `⋯` 菜单。
+     * 对话流里**单个工具**的 `⋯` 菜单里选中了一项 —— 执行它。
      *
-     * ## 为什么必须带 toolId
+     * ## 为什么这里只有"执行"，没有"弹菜单"
      *
-     * 之前每一行的 `⋯` 用的是同一个"整组"回调，于是点单个工具弹出的是整组菜单，
-     * 回调里也不知道用户点的是哪一行。动作（复制命令 / 复制输出 / 复制实时输出 /
-     * 复制 Diff / 展开这一条）全部作用在某一行上，所以目标必须精确到行。
+     * 菜单由**那一行自己**渲染（Miuix 下拉菜单，与输入器底排同一个组件，
+     * 见 `ui/chat/MessageCards.kt` 的 `ToolRow`）。所以这一层不需要
+     * `choicePicker` 中转、也不需要"记住用户点的是哪一条"——
+     * 目标（组 id + 行 id）与文案一起从界面传进来，一进来就能执行。
      *
-     * ## 菜单内容由纯逻辑层决定
+     * 之前这里是 `showToolActions(item, toolId)`：先把菜单塞进 `choicePicker`，
+     * 再由界面按 `anchorId` 认领。而 `ChoiceIntent.TOOL_ACTION` 不在
+     * `ChoicePickerState.isActionMenu` 的名单里，于是它退化成**屏幕中央的对话框** ——
+     * 一个只作用于某一行的动作，弹窗却出现在屏幕正中。
      *
-     * 选项来自 [ToolActions.options]（表驱动、有单测），这里只负责把界面模型翻译成
-     * 它的判据。这样"哪个状态该有哪些动作"只有一处实现 —— 散在界面里写迟早会出现
-     * 两份不一样的菜单。
+     * ## 菜单内容仍然只由纯逻辑层决定
      *
-     * 没有可用选项时**不弹菜单**，只提示一句：弹一个空菜单比不弹更让人困惑。
+     * 选项来自 [ToolActions.options]（表驱动、有单测），界面按同一份判据渲染。
+     * 这一层负责**分派**：文案 → 动作。文案是 [ToolActions] 里的常量，
+     * 所以两边不会各写一份。
+     *
+     * @param itemId 工具组那一条消息的 id（工具存在它下面）
+     * @param toolId 那一行工具的 id
+     * @param label  菜单文案（[ToolActions] 的常量）
      */
-    fun showToolActions(item: ChatItem, toolId: String) {
-        val tool = item.tools.firstOrNull { it.id == toolId }
-        if (tool == null) {
-            _state.update { it.copy(message = "找不到这个工具，操作已取消") }
+    fun applyToolAction(itemId: String, toolId: String, label: String) {
+        val target = _state.value.transcript.firstOrNull { it.id == itemId }
+        if (target == null) {
+            _state.update { it.copy(message = "找不到目标工具，操作已取消") }
             return
         }
-        val options = ToolActions.options(toolActionFlags(tool))
-        if (options.isEmpty()) {
-            _state.update { it.copy(message = "这个工具暂时没有可用操作") }
-            return
-        }
-        pendingToolAction = item to toolId
-        _state.update {
-            it.copy(
-                choicePicker = ChoicePickerState(
-                    title = tool.displayName.ifBlank { "工具操作" },
-                    intent = ChoiceIntent.TOOL_ACTION,
-                    // 锚到工具组那一条：菜单从它长出来，而不是从屏幕某个角落。
-                    anchorId = item.id,
-                    options = options.map { ChoiceOption(it) },
-                )
-            )
-        }
-    }
-
-    /**
-     * 界面模型 → [ToolActions.ToolActionFlags]。
-     *
-     * 判据全部取"用户此刻看得见的东西"：
-     * - `hasCommand`：`summary` 对命令类工具就是命令行（`ToolText.summary` 的产物）；
-     * - `hasOutput`：已经有输出**或**还在跑的实时输出（`output` 在运行中也会被填）；
-     * - `hasDiff`：用 [ToolText.isFileDiff] —— 与对话里那段输出是否按 diff 渲染
-     *   是同一个判据，两处分开就会"显示成 diff 却没有复制 Diff 这一项"。
-     */
-    private fun toolActionFlags(tool: ToolActivity): ToolActions.ToolActionFlags {
-        val isCommand = tool.kind == ToolKind.COMMAND
-        return ToolActions.ToolActionFlags(
-            isCommand = isCommand,
-            hasCommand = isCommand && tool.summary.isNotBlank(),
-            hasOutput = tool.output.isNotBlank(),
-            hasDiff = tool.output.isNotBlank() && ToolText.isFileDiff(tool.toolName, tool.output),
-            completed = tool.completed,
-            expanded = tool.expanded,
-        )
-    }
-
-    /**
-     * 执行工具菜单里的一个动作。
-     *
-     * 复制类的一律走 [copyText]（它已经处理了"内容为空 → 明确提示"），
-     * 展开/折叠类改的是 state 里那一条 —— 与点 `⌄` 走的同一条路。
-     */
-    private fun applyToolAction(target: ChatItem, toolId: String, label: String) {
         val tool = target.tools.firstOrNull { it.id == toolId } ?: run {
             _state.update { it.copy(message = "找不到这个工具，操作已取消") }
             return
@@ -3989,16 +3946,9 @@ class WorkspaceViewModel(
                     else -> _state.update { it.copy(message = "不支持的操作：${option.label}") }
                 }
             }
-            // 单个工具的操作。目标在选择器打开时就记住了（组 + 行）。
-            ChoiceIntent.TOOL_ACTION -> {
-                val target = pendingToolAction
-                pendingToolAction = null
-                _state.update { it.copy(choicePicker = null) }
-                if (target == null) {
-                    // 拿不到目标就不猜：宁可无反应，也不能复制到别的工具的输出。
-                    _state.update { it.copy(message = "找不到目标工具，操作已取消") }
-                } else applyToolAction(target.first, target.second, option.label)
-            }
+            // 单个工具的动作**不经过这里**：那一行的 `⋯` 是 Miuix 下拉菜单，
+            // 选中的文案直接走 applyToolAction(itemId, toolId, label)，
+            // 不存在"弹菜单 → 回调里回头找目标"这一段。
             ChoiceIntent.SESSION_ACTION -> {
                 val target = pendingSessionAction
                 pendingSessionAction = null
