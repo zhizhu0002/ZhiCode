@@ -20,7 +20,10 @@ import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
+import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
+import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Text
@@ -57,29 +60,41 @@ fun McpConfigOverlay(
 ) {
     if (config == null) return
     val form = config.form
-    if (form == null) {
-        SettingsSubPage(
-            title = "MCP 服务器",
-            onBack = onDismiss,
-            action = "添加" to onNew,
-        ) {
-            McpServerList(
-                config = config,
-                onEdit = onEdit,
-                onToggle = onToggle,
-                onDelete = onDelete,
-            )
-        }
-    } else {
-        SettingsSubPage(
-            title = if (form.isEditing) "编辑 MCP 服务器" else "添加 MCP 服务器",
-            onBack = onCancelForm,
-            action = "保存" to (if (form.saveable) onSave else null),
-        ) {
-            McpServerForm(
-                draft = form,
-                onChange = onDraftChange,
-            )
+    // 用「最后一次非空」而不是直接读 form：退出动画期间离场页还在画，
+    // 那时 form 已经是 null 了。见 rememberLastNonNull 的说明。
+    val shownForm = rememberLastNonNull(form)
+    SettingsPageStack(
+        current = if (form == null) SettingsPageKey("mcp.list", 0) else SettingsPageKey("mcp.form", 1),
+        onBack = if (form == null) onDismiss else onCancelForm,
+    ) { key ->
+        // ⚠️ 分支必须看**正在渲染的那一页**（key），不能看当前状态：
+        // 退出动画期间 key 还是 mcp.form 而 form 已经变 null，
+        // 按状态分支会让离场页画成列表，动画就废了。
+        val draft = if (key.id == "mcp.form") shownForm else null
+        if (draft == null) {
+            SettingsSubPage(
+                title = "MCP 服务器",
+                onBack = onDismiss,
+                action = "添加" to onNew,
+            ) {
+                McpServerList(
+                    config = config,
+                    onEdit = onEdit,
+                    onToggle = onToggle,
+                    onDelete = onDelete,
+                )
+            }
+        } else {
+            SettingsSubPage(
+                title = if (draft.isEditing) "编辑 MCP 服务器" else "添加 MCP 服务器",
+                onBack = onCancelForm,
+                action = "保存" to (if (draft.saveable) onSave else null),
+            ) {
+                McpServerForm(
+                    draft = draft,
+                    onChange = onDraftChange,
+                )
+            }
         }
     }
 }

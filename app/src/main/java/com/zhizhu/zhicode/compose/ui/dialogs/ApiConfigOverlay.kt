@@ -23,7 +23,10 @@ import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
+import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
+import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -59,30 +62,40 @@ fun ApiConfigOverlay(
 ) {
     if (config == null) return
     val form = config.form
-    // 二级整页（与设置主页同款骨架），列表/表单两态复用一个页面栈
-    if (form == null) {
-        SettingsSubPage(
-            title = "API 配置记录",
-            onBack = onDismiss,
-            action = "新增" to onNew,
-        ) {
-            ApiProfileList(
-                config = config,
-                onEdit = onEdit,
-                onSelect = onSelect,
-                onDelete = onDelete,
-            )
-        }
-    } else {
-        SettingsSubPage(
-            title = if (form.isEditing) "编辑 API 配置" else "新增 API 配置",
-            onBack = onCancelForm,
-            action = "保存" to (if (form.saveable) onSave else null),
-        ) {
-            ApiProfileForm(
-                draft = form,
-                onChange = onDraftChange,
-            )
+    // 退出动画期间离场页仍在绘制，那时 form 已经是 null —— 见 rememberLastNonNull 的说明。
+    val shownForm = rememberLastNonNull(form)
+    // 二级整页（与设置主页同款骨架），列表/表单两态走**页面栈**：
+    // 只写一个 when 分支的话两态会被硬切，没有任何转场动画。
+    SettingsPageStack(
+        current = if (form == null) SettingsPageKey("api.list", 0) else SettingsPageKey("api.form", 1),
+        onBack = if (form == null) onDismiss else onCancelForm,
+    ) { key ->
+        // ⚠️ 分支必须看**正在渲染的那一页**（key），不能看当前状态。
+        val draft = if (key.id == "api.form") shownForm else null
+        if (draft == null) {
+            SettingsSubPage(
+                title = "API 配置记录",
+                onBack = onDismiss,
+                action = "新增" to onNew,
+            ) {
+                ApiProfileList(
+                    config = config,
+                    onEdit = onEdit,
+                    onSelect = onSelect,
+                    onDelete = onDelete,
+                )
+            }
+        } else {
+            SettingsSubPage(
+                title = if (draft.isEditing) "编辑 API 配置" else "新增 API 配置",
+                onBack = onCancelForm,
+                action = "保存" to (if (draft.saveable) onSave else null),
+            ) {
+                ApiProfileForm(
+                    draft = draft,
+                    onChange = onDraftChange,
+                )
+            }
         }
     }
 }

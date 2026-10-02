@@ -49,6 +49,7 @@ import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
+import top.yukonga.miuix.kmp.basic.FloatingActionButton
 import top.yukonga.miuix.kmp.basic.HorizontalDivider
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -215,6 +216,38 @@ fun ZhiFilledIconButton(
                 modifier = Modifier.size(iconSize),
             )
         }
+    }
+}
+
+/**
+ * 右下角的悬浮操作按钮。
+ *
+ * 转发到 Miuix 的 [FloatingActionButton]，**不改它的默认值**：圆形、`primary` 底色、
+ * 带阴影 —— 这就是 HyperOS 的原生样子。以前这类入口在本工程里是顶栏的一个 TextButton
+ * （「新建」），列表长了以后要滑到顶部才够得着；FAB 是悬浮的，滚动时一直可用。
+ *
+ * 放在 Common.kt 而不是直接在各页 import：这样"用 Miuix 原生 FAB"只有一处声明，
+ * 后来的人要改尺寸/颜色时也只有一个地方要动。
+ */
+@Composable
+fun ZhiFloatingActionButton(
+    onClick: () -> Unit,
+    description: String,
+    modifier: Modifier = Modifier,
+    icon: ImageVector = ZhiIcons.attach,
+    containerColor: Color = Color.Unspecified,
+) {
+    val scheme = MiuixTheme.colorScheme
+    FloatingActionButton(
+        onClick = onClick,
+        modifier = modifier,
+        containerColor = if (containerColor == Color.Unspecified) scheme.primary else containerColor,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = description,
+            tint = scheme.onPrimary,
+        )
     }
 }
 

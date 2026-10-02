@@ -94,6 +94,9 @@ object ZhiIcons {
     /** 消息 / 工具行的「更多操作」（对应原版的 ⋯）。 */
     val more: ImageVector get() = set.More
 
+    /** 列表筛选框的放大镜。技能列表用它。 */
+    val search: ImageVector get() = set.Search
+
     /** 工具行右端的展开/收起箭头（对应原版的 ⌄ / ⌃）。 */
     val chevronDown: ImageVector get() = set.ExpandMore
     val chevronUp: ImageVector get() = set.ExpandLess

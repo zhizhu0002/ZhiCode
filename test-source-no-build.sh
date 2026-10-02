@@ -253,6 +253,11 @@ run AnchoredMenuStructureTest "$PROJECT_ROOT"
 # ---------- 设置页（数值项是可输入的文本框 · 自动保存 · 唯一写入路径） ----------
 # SettingsPageStructureTest.java
 run SettingsPageStructureTest "$PROJECT_ROOT"
+# ---------- 二级页转场（多态页必须走页面栈）与技能页安全边界 ----------
+# 用户报过「设置很多地方的动画非常不完整（比如三级窗口）」：根因是多态二级页被
+# when 硬切，而 AppScaffold 的页面栈只反映"这一页开着没有"。
+# SkillsPageStructureTest.java
+run SkillsPageStructureTest "$PROJECT_ROOT"
 # ---------- 写死的几何（长按触发 · 气泡宽度 · 弹窗宽度） ----------
 # LayoutConsistencyTest.java
 run LayoutConsistencyTest "$PROJECT_ROOT"

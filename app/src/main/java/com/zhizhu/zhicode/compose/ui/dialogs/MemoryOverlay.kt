@@ -15,7 +15,10 @@ import com.zhizhu.zhicode.compose.model.MemoryFile
 import com.zhizhu.zhicode.compose.model.MemoryState
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
+import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
+import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Text
@@ -42,27 +45,37 @@ fun MemoryOverlay(
 ) {
     if (state == null) return
     val editing = state.editing
-    if (editing == null) {
-        SettingsSubPage(
-            title = "记忆文件 · ZhiCode.md",
-            onBack = onDismiss,
-            action = "完善" to onRunInit,
-        ) {
-            MemoryFileList(
-                state = state,
-                onEdit = onEdit,
-            )
-        }
-    } else {
-        SettingsSubPage(
-            title = editing.title,
-            onBack = onCancelEdit,
-            action = "保存" to onSave,
-        ) {
-            MemoryEditorBody(
-                editing = editing,
-                onBodyChange = onBodyChange,
-            )
+    // 退出动画期间离场页仍在绘制，那时 editing 已经是 null —— 见 rememberLastNonNull 的说明。
+    val shownEditing = rememberLastNonNull(editing)
+    SettingsPageStack(
+        current = if (editing == null) SettingsPageKey("memory.list", 0)
+        else SettingsPageKey("memory.editor", 1),
+        onBack = if (editing == null) onDismiss else onCancelEdit,
+    ) { key ->
+        // ⚠️ 分支必须看**正在渲染的那一页**（key），不能看当前状态。
+        val open = if (key.id == "memory.editor") shownEditing else null
+        if (open == null) {
+            SettingsSubPage(
+                title = "记忆文件 · ZhiCode.md",
+                onBack = onDismiss,
+                action = "完善" to onRunInit,
+            ) {
+                MemoryFileList(
+                    state = state,
+                    onEdit = onEdit,
+                )
+            }
+        } else {
+            SettingsSubPage(
+                title = open.title,
+                onBack = onCancelEdit,
+                action = "保存" to onSave,
+            ) {
+                MemoryEditorBody(
+                    editing = open,
+                    onBodyChange = onBodyChange,
+                )
+            }
         }
     }
 }

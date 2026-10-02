@@ -226,41 +226,103 @@ data class SkillEntry(
 )
 
 /**
+ * 技能目录里的一个文件。
+ *
+ * 技能不只有 `SKILL.md`：参考文档、脚本、示例都可以放在同一目录里一起分发
+ * （`SkillStore.delete` 用递归删除就是为此）。详情页把它们列出来。
+ */
+data class SkillFile(
+    val name: String,
+    val sizeLabel: String,
+    /** 是否是技能本体（`SKILL.md`）。列表里排最前，并用不同颜色标出来。 */
+    val primary: Boolean,
+)
+
+/**
  * Skill 管理面板的状态。
  *
- * 三种形态共用一个弹窗，靠这两个字段区分：
- * - `createForm != null` → 新建表单（问名称与存放位置）
- * - `editing != null` → 编辑 SKILL.md
- * - 两者都为 null → 列表
+ * 四种形态共用一个页面栈（见 `SettingsPageStack`），靠这几个字段区分：
+ * - `detail != null` → 技能详情（该技能目录下的文件列表）
+ * - `detail == null && createForm != null` → 手动添加（粘贴整份 SKILL.md）
+ * - `editing != null` → 编辑某个文件
+ * - 都为 null → 技能列表
  *
- * 用两个字段而不是一个 `mode` 枚举：新建与编辑需要携带的数据完全不同，
+ * 用多个字段而不是一个 `mode` 枚举：各态需要携带的数据完全不同，
  * 塞进一个 sealed 层级只会让调用方多写一层 when。
  */
 data class SkillsState(
     val skills: List<SkillEntry>,
+    /** 列表页的筛选词。技能会越攒越多，找起来需要一个入口。 */
+    val query: String = "",
+    /** 正在查看的技能（详情页）。 */
+    val detail: SkillDetail? = null,
     val createForm: SkillCreateDraft? = null,
     val editing: SkillEditTarget? = null,
+    /** 「新建文件」表单，只在详情页里有意义。 */
+    val fileDraft: SkillFileDraft? = null,
+) {
+    /** 按 [query] 过滤后的列表。名称与说明都命中。 */
+    val visibleSkills: List<SkillEntry>
+        get() = if (query.isBlank()) skills
+        else skills.filter {
+            it.name.contains(query, ignoreCase = true) || it.summary.contains(query, ignoreCase = true)
+        }
+}
+
+/** 技能详情页的数据：技能本身 + 它目录下的文件。 */
+data class SkillDetail(
+    val entry: SkillEntry,
+    val files: List<SkillFile>,
 )
 
-/** 新建技能的表单。 */
+/**
+ * 「手动添加技能」的表单。
+ *
+ * 与参考实现一致：不再单独问名称，而是让用户**粘贴一整份 SKILL.md**，
+ * 名字从内容的 frontmatter 里解析出来并实时回显。
+ *
+ * [name] 为空且 [content] 非空即为「有内容但解析不出名字」——这是错误态，
+ * 必须报出来并挡住提交，不能猜一个默认名。
+ */
 data class SkillCreateDraft(
-    val name: String = "",
+    val content: String = "",
     val scope: SkillScope = SkillScope.PROJECT,
+    /** 由 [com.zhizhu.zhicode.compose.data.SkillStore.nameFromContent] 解析得到。 */
+    val name: String = "",
+) {
+    /** 内容非空但解析不出名字。空内容不算错（用户还没开始粘贴）。 */
+    val nameMissing: Boolean get() = content.isNotBlank() && name.isBlank()
+
+    val nameInvalid: Boolean get() = name.isNotBlank() && !Regex("[A-Za-z0-9._-]{1,64}").matches(name)
+
+    val saveable: Boolean get() = name.isNotBlank() && !nameInvalid
+}
+
+/** 「新建文件」表单（详情页里往技能目录加一个附加文件）。 */
+data class SkillFileDraft(
+    val fileName: String = "",
+    val content: String = "",
 ) {
     val nameError: String? = when {
-        name.isBlank() -> null // 还没开始输入，不要一上来就报错
-        !Regex("[A-Za-z0-9._-]{1,64}").matches(name.trim()) -> "只能包含字母、数字、. _ -（1–64 个字符）"
+        fileName.isBlank() -> null // 还没开始输入
+        fileName == "." || fileName == ".." -> "不能叫这个名字"
+        !Regex("[A-Za-z0-9._-]{1,64}").matches(fileName) -> "只能包含字母、数字、. _ -（1–64 个字符）"
         else -> null
     }
 
-    val saveable: Boolean get() = name.isNotBlank() && nameError == null
+    val saveable: Boolean get() = fileName.isNotBlank() && nameError == null
 }
 
-/** 正在编辑的技能。 */
+/**
+ * 正在编辑的文件。
+ *
+ * 技能不只有 `SKILL.md`，所以这里带的是**文件名**而不是"这个技能的内容"。
+ */
 data class SkillEditTarget(
     val name: String,
     val scope: SkillScope,
-    val path: String,
+    /** 技能目录里的文件名，通常是 `SKILL.md`，也可以是同目录的参考文档。 */
+    val fileName: String,
     /** 编辑中的内容。保存前只在内存里，不落盘。 */
     val body: String,
 ) {

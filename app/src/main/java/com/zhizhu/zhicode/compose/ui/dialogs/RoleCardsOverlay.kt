@@ -18,7 +18,10 @@ import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
+import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
+import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.icon.MiuixIcons
@@ -57,30 +60,40 @@ fun RoleCardsOverlay(
 ) {
     if (state == null) return
     val editor = state.editor
-    if (editor == null) {
-        SettingsSubPage(
-            title = "自定义角色卡",
-            onBack = onDismiss,
-            action = "新建" to onNew,
-        ) {
-            RoleCardList(
-                state = state,
-                onEdit = onEdit,
-                onSelect = onSelect,
-                onDisable = onDisable,
-                onDelete = onDelete,
-            )
-        }
-    } else {
-        SettingsSubPage(
-            title = if (editor.isEditing) "编辑角色卡" else "新建角色卡",
-            onBack = onCancelEditor,
-            action = "保存" to (if (editor.saveable) onSave else null),
-        ) {
-            RoleCardEditorForm(
-                editor = editor,
-                onChange = onDraftChange,
-            )
+    // 退出动画期间离场页仍在绘制，那时 editor 已经是 null —— 见 rememberLastNonNull 的说明。
+    val shownEditor = rememberLastNonNull(editor)
+    SettingsPageStack(
+        current = if (editor == null) SettingsPageKey("roleCards.list", 0)
+        else SettingsPageKey("roleCards.editor", 1),
+        onBack = if (editor == null) onDismiss else onCancelEditor,
+    ) { key ->
+        // ⚠️ 分支必须看**正在渲染的那一页**（key），不能看当前状态。
+        val open = if (key.id == "roleCards.editor") shownEditor else null
+        if (open == null) {
+            SettingsSubPage(
+                title = "自定义角色卡",
+                onBack = onDismiss,
+                action = "新建" to onNew,
+            ) {
+                RoleCardList(
+                    state = state,
+                    onEdit = onEdit,
+                    onSelect = onSelect,
+                    onDisable = onDisable,
+                    onDelete = onDelete,
+                )
+            }
+        } else {
+            SettingsSubPage(
+                title = if (open.isEditing) "编辑角色卡" else "新建角色卡",
+                onBack = onCancelEditor,
+                action = "保存" to (if (open.saveable) onSave else null),
+            ) {
+                RoleCardEditorForm(
+                    editor = open,
+                    onChange = onDraftChange,
+                )
+            }
         }
     }
 }
