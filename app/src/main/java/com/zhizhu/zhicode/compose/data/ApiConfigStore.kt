@@ -42,6 +42,7 @@ internal object ApiConfigStore {
             it.protocol = draft.protocol.toEngineProtocol()
             it.baseUrl = draft.baseUrl.trim()
             it.defaultModel = draft.model.trim()
+            it.extraHeaders = draft.extraHeaders.trim()
         }
         val replaceKey = !draft.isEditing || draft.apiKey.isNotBlank()
         val saved = store.saveProfile(target, draft.apiKey, replaceKey)
@@ -104,6 +105,7 @@ internal object ApiConfigStore {
         // 密钥**故意不回填**：界面上不该出现已保存的密钥。
         apiKey = "",
         model = defaultModel,
+        extraHeaders = extraHeaders,
     )
 
     /**
@@ -123,6 +125,7 @@ internal object ApiConfigStore {
         "anthropic" -> ApiProtocol.ANTHROPIC
         "openai-chat", "openai-compatible" -> ApiProtocol.OPENAI_CHAT
         "codex-responses" -> ApiProtocol.CODEX_RESPONSES
+        "zcode" -> ApiProtocol.ZCODE
         // 调试配置在发布包里也要能**显示**出来（它可能已经被写进设置）。
         // 认不出来会被回落成 OPENAI_RESPONSES，用户会看到一条"看着正常、
         // 却怎么都调不通"的配置 —— 那不是更糟，而是更难查。
@@ -137,6 +140,7 @@ internal object ApiConfigStore {
         // 必须逐字是引擎的线上名，否则引擎会当作未知协议拒绝（那是一条已经
         // 实现好的 Codex 分支，写错一个字符就永远走不到）。
         ApiProtocol.CODEX_RESPONSES -> "codex-responses"
+        ApiProtocol.ZCODE -> "zcode"
         ApiProtocol.DEBUG_SCRIPTED -> "debug-scripted"
     }
 }

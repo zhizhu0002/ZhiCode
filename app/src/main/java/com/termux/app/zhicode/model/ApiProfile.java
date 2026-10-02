@@ -32,6 +32,8 @@ public final class ApiProfile {
     private static final String KEY_NAME = "name";
     private static final String KEY_PROTOCOL = "protocol";
     private static final String KEY_BASE_URL = "base_url";
+    /** 额外请求头的存盘键。键名一旦发布就不能改（改了旧配置读不回这个字段）。 */
+    private static final String KEY_EXTRA_HEADERS = "extra_headers";
     private static final String KEY_DEFAULT_MODEL = "default_model";
     private static final String KEY_REVISION = "revision";
     private static final String KEY_CREDENTIAL_REVISION = "credential_revision";
@@ -41,6 +43,13 @@ public final class ApiProfile {
     public String name;
     public String protocol;
     public String baseUrl;
+    /**
+     * 额外请求头（JSON 对象文本，可为空）。
+     *
+     * <p>放在**明文设置**里而不是密钥槽：它通常只是几个头名，而且用户要能看见自己填了什么；
+     * 真需要保密的令牌应该填进密钥框（那个走 Keystore 加密）。
+     */
+    public String extraHeaders;
     /** 新建会话时预填的模型名；用户可以为单次会话改掉它。 */
     public String defaultModel;
     /** 配置本身的版本号，每次修改 +1。 */
@@ -53,6 +62,10 @@ public final class ApiProfile {
         name = DEFAULT_NAME;
         protocol = DEFAULT_PROTOCOL;
         baseUrl = "";
+        // 必须给非 null 初值：JSONObject.put(key, null) 会**删掉**这个键，
+        // 于是新建的配置序列化出来就没有 extra_headers，来回读一遍变成 null，
+        // 而 null 传到请求头解析那边又会被当成"没配" —— 一路都不报错，只是很绕。
+        extraHeaders = "";
         defaultModel = "";
         revision = FIRST_REVISION;
         credentialRevision = FIRST_REVISION;
@@ -64,6 +77,7 @@ public final class ApiProfile {
         copy.name = name;
         copy.protocol = protocol;
         copy.baseUrl = baseUrl;
+        copy.extraHeaders = extraHeaders;
         copy.defaultModel = defaultModel;
         copy.revision = revision;
         copy.credentialRevision = credentialRevision;
@@ -78,6 +92,7 @@ public final class ApiProfile {
                 .put(KEY_NAME, name)
                 .put(KEY_PROTOCOL, protocol)
                 .put(KEY_BASE_URL, baseUrl)
+                .put(KEY_EXTRA_HEADERS, extraHeaders)
                 .put(KEY_DEFAULT_MODEL, defaultModel)
                 .put(KEY_REVISION, revision)
                 .put(KEY_CREDENTIAL_REVISION, credentialRevision);
@@ -100,6 +115,7 @@ public final class ApiProfile {
         profile.name = trimmed(json.optString(KEY_NAME, profile.name));
         profile.protocol = trimmed(json.optString(KEY_PROTOCOL, profile.protocol));
         profile.baseUrl = trimmed(json.optString(KEY_BASE_URL, profile.baseUrl));
+        profile.extraHeaders = trimmed(json.optString(KEY_EXTRA_HEADERS, profile.extraHeaders));
         profile.defaultModel = trimmed(json.optString(KEY_DEFAULT_MODEL, profile.defaultModel));
         profile.revision = Math.max(FIRST_REVISION, json.optInt(KEY_REVISION, profile.revision));
         profile.credentialRevision = Math.max(FIRST_REVISION,

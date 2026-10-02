@@ -44,6 +44,7 @@ public final class ModelProviders {
             // 这里各列一项而不是合并，是为了让 switch 保持"覆盖每个取值"的约束：
             // 将来再加协议时，编译器会在这里拦住漏改。
             case CODEX_RESPONSES -> new OpenAIResponsesProvider();
+            case ZCODE -> new ZcodeProvider();
             case DEBUG_SCRIPTED -> debugScripted();
         };
     }

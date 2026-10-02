@@ -40,6 +40,31 @@ import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 
 /**
+ * ZCode 协议要填的两样东西，写成**可直接粘贴**的提示。
+ *
+ * ## 为什么要给出具体取值
+ *
+ * 那个网关要求请求带一组身份头才受理，而它自己的客户端就是这么发的。
+ * 让用户自己去猜这些取值是不现实的（名字、格式、大小写都得对），
+ * 所以这里给成可粘贴的文本 —— 但**只是提示**：字段本身是用户可改的，
+ * 值也只出现在这一段文字里，不在请求路径上参与任何判断。
+ *
+ * ## 一处坦白的取舍
+ *
+ * 本仓库的既有策略是「不预置任何厂商地址」（见 `ApiSettingsStore` 的类注释），
+ * 而这段提示里带了网关地址与那组头的取值。这是一个**刻意的例外**，理由是：
+ * 不写成提示的话这个协议对用户就是不可用的（他要从别处找这些值），
+ * 而写成提示时它依然是"用户看见并主动粘贴"的，不是静默内置。
+ * 取舍点在于「可用」与「不预置」之间，这里选了可用，并把它留在明面上。
+ */
+private val ZCODE_HEADERS_HINT = """
+    网关填 Base URL：https://zcode.z.ai/api/v1/zcode-plan
+    额外请求头可直接粘贴下面这段（可自行修改）：
+
+    {"User-Agent":"ZCode/3.14.0 ai-sdk/anthropic/3.0.81","X-ZCode-App-Version":"3.14.0","X-Title":"Z Code@cli","X-Release-Channel":"production","X-ZCode-Agent":"glm","X-Platform":"linux-x64","X-Os-Category":"linux","X-Os-Version":"6.1.0-13-amd64","HTTP-Referer":"https://zcode.z.ai"}
+""".trimIndent()
+
+/**
  * API 配置窗口：列表页与编辑表单**共用一个弹窗**。
  *
  * [config] 的 `form` 非空即显示表单，否则显示列表 —— 对应原版的两张页面。
@@ -278,6 +303,34 @@ private fun ApiProfileForm(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             )
+        }
+
+        /*
+         * 额外请求头：**只在 ZCode 协议下出现**。
+         *
+         * 那个网关要求带一组特定的身份头才受理，而那是它自己客户端的标识 ——
+         * 我们不内置（内置等于替用户宣称一个身份，且对方一改所有人都一起断）。
+         * 所以做成用户填，并把需要填的内容**直接写在提示里**：可见、可改、可排查。
+         *
+         * 对别的协议不显示这个框：它在那里只会让人以为"是不是还差一项没填"。
+         */
+        if (draft.protocol == ApiProtocol.ZCODE) {
+            SettingsGroup("额外请求头（ZCode）") {
+                ZhiTextField(
+                    value = draft.extraHeaders,
+                    onValueChange = { value -> onChange { it.copy(extraHeaders = value) } },
+                    label = "JSON 对象，留空则不加",
+                    useLabelAsPlaceholder = true,
+                    singleLine = false,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+                Text(
+                    text = ZCODE_HEADERS_HINT,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Footnote,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
         }
 
         SettingsGroup("模型") {

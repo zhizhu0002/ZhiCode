@@ -30,6 +30,18 @@ public final class SessionConfig {
     public String protocol = "openai-responses";
     /** 用户填的 API 地址。在设置里配置之前**刻意**是空的（不内置任何厂商地址）。 */
     public String baseUrl = "";
+    /**
+     * 额外请求头，一个 JSON 对象（如 {@code {"User-Agent":"..."}}）。空串表示不加。
+     *
+     * <p>存在的理由：有些网关（ZCode 那种）要求请求带上特定的身份头才受理，
+     * 而那些头的取值**不是我们的**——它是那个服务自己的客户端标识。把它写死在代码里
+     * 等于替用户宣称了一个身份，而且对方一改，所有人都一起断、我们连原因都看不到。
+     * 交给用户填，才能既用得上、又随时能改、还能排查。
+     *
+     * <p>由 provider 侧解析（见 {@code ZcodeWire.parseExtraHeaders}），
+     * 非法 JSON 会被明确报出来，而不是静默忽略。
+     */
+    public String extraHeaders = "";
     public String apiKey = "";
     /** 当前生效的配置文件 id 与其版本，用于识别「配置已被改过」。 */
     public String profileId = "";
@@ -144,6 +156,7 @@ public final class SessionConfig {
 
         copy.protocol = protocol;
         copy.baseUrl = baseUrl;
+        copy.extraHeaders = extraHeaders;
         copy.apiKey = apiKey;
         copy.profileId = profileId;
         copy.profileRevision = profileRevision;

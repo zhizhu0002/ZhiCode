@@ -240,6 +240,14 @@ run ApiWireContractTest "$PROJECT_ROOT"
 # 「实现文件里有没有那几个头」，抓不到「用户能不能选到」。
 # CodexProtocolTest.java
 run CodexProtocolTest "$PROJECT_ROOT"
+# ---------- ZCode：接通了，而且没把别人的身份嵌进来 ----------
+# 两类退化，第二类更要紧：①引擎侧写了 provider、UI 里却选不到（Codex 就是这么漏的）；
+# ②把网关地址或那组身份头硬编码进请求路径 —— 后果不是报错，而是「请求发到哪」
+# 对用户不透明、对方一改所有人一起断、并且替用户向第三方宣称了一个客户端身份。
+# 所以这里专门断言那些取值**不在** provider 与纯逻辑层里，只允许出现在界面的
+# 可粘贴提示中（用户看得见、能改）。另外钉住它复用 Anthropic 的 SSE 分帧而不是重写。
+# ZcodeProtocolTest.java
+run ZcodeProtocolTest "$PROJECT_ROOT"
 
 # ---------- 终端面板的行为契约 ----------
 # 终端外壳改用 Compose 重写（批 F 2/6）。它是全工程唯一一块「重写后无法用单测

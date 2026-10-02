@@ -78,6 +78,8 @@ public final class ApiSettingsStore {
         // 以下与 SessionConfig 的字段一一对应，见 SETTINGS。
         static final String PROTOCOL = "protocol";
         static final String BASE_URL = "base_url";
+        /** 额外请求头（JSON 对象文本）。与 {@link SessionConfig#extraHeaders} 对应。 */
+        static final String EXTRA_HEADERS = "extra_headers";
         static final String MODEL = "model";
         static final String VISION_ENABLED = "vision_enabled";
         static final String EFFORT = "effort";
@@ -203,6 +205,8 @@ public final class ApiSettingsStore {
     static {
         SETTINGS.put(Key.PROTOCOL, item(c -> c.protocol, (c, v) -> c.protocol = (String) v));
         SETTINGS.put(Key.BASE_URL, textItem(c -> c.baseUrl, (c, v) -> c.baseUrl = v, ApiSettingsStore::trimToEmpty));
+        SETTINGS.put(Key.EXTRA_HEADERS,
+                textItem(c -> c.extraHeaders, (c, v) -> c.extraHeaders = v, ApiSettingsStore::trimToEmpty));
         SETTINGS.put(Key.MODEL, item(c -> c.model, (c, v) -> c.model = (String) v));
         SETTINGS.put(Key.EFFORT, item(c -> c.effort, (c, v) -> c.effort = (String) v));
         SETTINGS.put(Key.VISION_ENABLED, item(c -> c.visionEnabled, (c, v) -> c.visionEnabled = (Boolean) v));
@@ -423,6 +427,7 @@ public final class ApiSettingsStore {
         saved.name = firstNonBlank(saved.name, "API 配置");
         saved.protocol = firstNonBlank(saved.protocol, defaults.protocol);
         saved.baseUrl = trimToEmpty(saved.baseUrl);
+        saved.extraHeaders = trimToEmpty(saved.extraHeaders);
         saved.defaultModel = trimToEmpty(saved.defaultModel);
         saved.revision = 1;
         saved.credentialRevision = 1;
@@ -461,8 +466,14 @@ public final class ApiSettingsStore {
         ApiProfile updated = profile.copy();
         updated.protocol = firstNonBlank(config.protocol, updated.protocol);
         updated.baseUrl = trimToEmpty(config.baseUrl);
+        updated.extraHeaders = trimToEmpty(config.extraHeaders);
         updated.defaultModel = firstNonBlank(config.model, updated.defaultModel);
-        if (!sameEndpoint(profile, updated)) updated.revision++;
+        // 请求头变了也要算一次修改：修订号是「这份配置被改过」的标记，
+        // 只认地址的话，改了头却不算改动，缓存里那份旧配置就会被继续用。
+        if (!sameEndpoint(profile, updated)
+                || !trimToEmpty(profile.extraHeaders).equals(updated.extraHeaders)) {
+            updated.revision++;
+        }
 
         String previousKey = apiKeyFor(profile);
         String nextKey = trimToEmpty(config.apiKey);
@@ -907,6 +918,7 @@ public final class ApiSettingsStore {
         config.credentialRevision = profile.credentialRevision;
         config.protocol = profile.protocol;
         config.baseUrl = profile.baseUrl;
+        config.extraHeaders = profile.extraHeaders;
         config.model = profile.defaultModel;
         config.apiKey = apiKey;
     }

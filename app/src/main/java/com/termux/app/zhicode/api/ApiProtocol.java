@@ -1,5 +1,7 @@
 package com.termux.app.zhicode.api;
 
+import com.termux.app.zhicode.api.zcode.ZcodeWire;
+
 /**
  * 本工程支持的传输协议，以及它们的线上名字。
  *
@@ -45,6 +47,16 @@ enum ApiProtocol {
 
     /** Codex 变体。与 {@link #OPENAI_RESPONSES} 共用传输实现，但线上行为不同。 */
     CODEX_RESPONSES(OpenAIResponsesProvider.WIRE_CODEX_RESPONSES),
+
+    /**
+     * ZCode：Anthropic Messages 形状，但网关地址与身份头**全部来自用户配置**。
+     *
+     * <p>报文与事件流与 {@link #ANTHROPIC} 一致（因此复用它的
+     * {@code StreamDecoder}），差别只在连接与请求头。之所以仍单列一项：
+     * 它要额外读 {@code extraHeaders}、模型目录也不走 {@code /v1/models}，
+     * 而且用户需要在下拉里看到自己在用哪一家。
+     */
+    ZCODE(ZcodeWire.WIRE_NAME),
 
     /**
      * **调试用**：不发网络请求，按脚本产出回复（见 {@link DebugScriptedProvider}）。

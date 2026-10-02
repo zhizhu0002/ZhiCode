@@ -47,6 +47,7 @@ MAIN_SOURCES=(
 MAIN_KT_SOURCES=(
     app/src/main/java/com/termux/app/zhicode/core/DocumentTree.kt
     app/src/main/java/com/termux/app/zhicode/core/ProviderLog.kt
+    app/src/main/java/com/termux/app/zhicode/api/zcode/ZcodeWire.kt
 )
 
 # 需要编译并运行的测试类（相对 app/src/test/java、点号包名）。
@@ -57,6 +58,7 @@ DEFAULT_TESTS=(
     com.termux.app.zhicode.core.FileOpsTest
     com.termux.app.zhicode.core.DocumentTreeTest
     com.termux.app.zhicode.core.ProviderLogTest
+    com.termux.app.zhicode.api.zcode.ZcodeWireTest
     com.termux.app.zhicode.api.ApiPureLogicTest
     com.termux.app.zhicode.tools.WebSearchJsonTest
 )

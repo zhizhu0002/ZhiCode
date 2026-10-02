@@ -53,6 +53,9 @@ public final class ApiEndpointResolver {
         ApiProtocol protocol = protocolOf(config);
         if (protocol == null) return "";
         if (protocol == ApiProtocol.CODEX_RESPONSES) return "";
+        // ZCode 的模型列表由它自己的端点提供（见 ZcodeProvider / ZcodeWire），
+        // 不走通用的 /v1/models。拼一个出来只会 404，而现象只是"列表空着"。
+        if (protocol == ApiProtocol.ZCODE) return "";
         return withVersionSegment(base, MODELS_PATH);
     }
 

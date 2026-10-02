@@ -312,6 +312,15 @@ enum class ApiProtocol(val label: String) {
     CODEX_RESPONSES("Codex Responses"),
 
     /**
+     * ZCode（Z.ai 的套餐网关）。
+     *
+     * 报文形状与 [ANTHROPIC] 相同，差别在连接与请求头：网关地址、授权码、
+     * 以及它要求的**额外身份头**都由用户自己填（见 [ApiProfileDraft.extraHeaders]）。
+     * 我们不内置它的地址，也不内置它的客户端标识 —— 理由见 `ZcodeWire` 的类注释。
+     */
+    ZCODE("ZCode"),
+
+    /**
      * 调试用：不发网络请求，按脚本产出回复（含真实的工具调用）。
      *
      * 只在 debug 构建里出现在协议下拉与「新增配置」的候选里（见
@@ -338,6 +347,8 @@ data class ApiProfile(
     val baseUrl: String,
     val apiKey: String,
     val model: String,
+    /** 额外请求头（JSON 对象文本），空串表示不加。见 [ApiProfileDraft.extraHeaders]。 */
+    val extraHeaders: String = "",
 ) {
     /** 参考图卡片第二行的 `协议名 · 模型名` 形式。 */
     val summary: String get() = "${protocol.label} · ${model.ifBlank { "未设置模型" }}"
@@ -351,6 +362,17 @@ data class ApiProfileDraft(
     val baseUrl: String = "",
     val apiKey: String = "",
     val model: String = "",
+    /**
+     * 额外请求头（JSON 对象文本），空串表示不加。
+     *
+     * 目前只有 [ApiProtocol.ZCODE] 用得上：那个网关要求特定的身份头才受理。
+     * 做成用户填而不是内置，是因为那些头的取值属于那个服务的客户端标识，
+     * 写死在代码里等于替用户宣称一个身份，而且对方一改所有人都一起断。
+     *
+     * 只有 ZCode 协议下才显示这个输入框（见 `ApiConfigOverlay`）——
+     * 对别的协议显示一个"额外请求头"框，只会让人以为那是必需项。
+     */
+    val extraHeaders: String = "",
     /** 编辑已有记录时为真：密钥框留空表示"沿用原密钥"。 */
     val isEditing: Boolean = false,
 ) {
@@ -369,6 +391,7 @@ data class ApiProfileDraft(
             baseUrl = profile.baseUrl,
             apiKey = "",
             model = profile.model,
+            extraHeaders = profile.extraHeaders,
             isEditing = true,
         )
     }
