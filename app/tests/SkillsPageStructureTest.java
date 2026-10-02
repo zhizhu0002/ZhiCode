@@ -136,10 +136,11 @@ public final class SkillsPageStructureTest {
                         && countOf(store, "File(dir, FILE_NAME)") == 0,
                 "不得绕过 fileInSkillDir 直接 File(dir, …)：路径解析必须只有一处");
         // ⚠️ 计数要算上**定义那一行**：`private fun fileInSkillDir(...)` 本身也算一次。
-        // 所以「定义 + 读 + 写 + 判重 + 列表」= 5。之前写成 4，于是把 readFile 的调用
-        // 删掉（剩下 4 次）仍然能过 —— 这条守卫当时是没牙的。
-        require(countOf(store, "fileInSkillDir(") >= 5,
-                "fileInSkillDir 必须被读 / 写 / 判重 / 列表四条路径都用到，实际只用了 "
+        // 所以「定义 + 读 + 写 + 判重 + 列表 + 新建」= 6。
+        // 这个阈值前后写错过两次（4 / 5），每次都是删掉一条真实调用后仍然能过 ——
+        // 校准办法是 `grep -c` 数一遍实际值，不要凭记忆推。
+        require(countOf(store, "fileInSkillDir(") >= 6,
+                "fileInSkillDir 必须被读 / 写 / 判重 / 列表 / 新建五条路径都用到，实际只用了 "
                         + (countOf(store, "fileInSkillDir(") - 1) + " 次");
 
         // ---- 4. 手动添加：名字从内容解析，解析不出就不许提交 ------------------
@@ -155,10 +156,24 @@ public final class SkillsPageStructureTest {
         // 提交资格本身也留在模型里，界面上的报错与它必须同步。
         require(has(models, "val saveable: Boolean get() = name.isNotBlank() && !nameInvalid"),
                 "SkillCreateDraft.saveable 必须要求有合法名字，不能无论内容如何都能提交");
-        require(skills.contains("onImportFile"),
-                "「添加技能」选择表必须提供从文件导入这条路（不做 GitHub 导入）");
+        // ⚠️ 锚在**用户看得见的那两项**与**真的拉起选择器**上，不能只查标识符
+        // `onImportFile`：把它改名成 `onImportFileGone` 时，旧断言照样是绿的
+        // （子串匹配），于是"这条路被删掉了"这件事完全没被守住。
+        require(skills.contains("从文件导入") && skills.contains("pickSkillFile.launch("),
+                "「添加技能」选择表必须提供从文件导入这条路，并且真的拉起选择器"
+                        + "（不做 GitHub 导入：要联网 + 解压，与离线构建、不加依赖冲突）");
         require(!skills.contains("GitHub"),
                 "本工程不联网构建，技能页不得出现 GitHub 导入");
+
+        // ---- 5. 详情页必须真的列多文件 ---------------------------------------
+        // 这是这次重做的核心能力：技能不只有 SKILL.md，参考文档要能列出来、点进去编辑。
+        // 「详情页退化成只有一份 SKILL.md 的编辑器」不会编译失败，只是能力悄悄没了。
+        require(has(skills, "detail.files.forEach")
+                        && has(skills, "onEdit(detail.entry, file.name)")
+                        && has(skills, "file.primary"),
+                "技能详情页必须列出该技能目录下的**所有**文件，并支持逐个点进编辑器");
+        require(has(store, "fun listFiles(") && has(store, "it.name != FILE_NAME"),
+                "SkillStore.listFiles 必须把 SKILL.md 排在最前（它是本体，不能淹没在附件里）");
 
         System.out.println("SkillsPageStructureTest PASS");
     }
