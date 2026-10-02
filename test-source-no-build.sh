@@ -250,6 +250,9 @@ run TextFieldConventionTest "$PROJECT_ROOT"
 # ---------- 长按动作菜单的接线（防"长按后什么都不弹/两边同时弹"） ----------
 # AnchoredMenuStructureTest.java
 run AnchoredMenuStructureTest "$PROJECT_ROOT"
+# ---------- 设置页（数值项是可输入的文本框 · 自动保存 · 唯一写入路径） ----------
+# SettingsPageStructureTest.java
+run SettingsPageStructureTest "$PROJECT_ROOT"
 # ---------- 写死的几何（长按触发 · 气泡宽度 · 弹窗宽度） ----------
 # LayoutConsistencyTest.java
 run LayoutConsistencyTest "$PROJECT_ROOT"

@@ -22,7 +22,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.COMPACT_PERCENT_MAX
 import com.zhizhu.zhicode.compose.model.COMPACT_PERCENT_MIN
-import com.zhizhu.zhicode.compose.model.CONTEXT_WINDOW_PRESETS
 import com.zhizhu.zhicode.compose.model.EffortLevel
 import com.zhizhu.zhicode.compose.model.PermissionMode
 import com.zhizhu.zhicode.compose.model.SettingsDraft
@@ -33,6 +32,7 @@ import com.zhizhu.zhicode.compose.model.WEB_TIMEOUT_MAX_SEC
 import com.zhizhu.zhicode.compose.model.WEB_TIMEOUT_MIN_SEC
 import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.model.formatTokenCountShort
+import com.zhizhu.zhicode.compose.model.parseTokenCount
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Scaffold
@@ -45,16 +45,26 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 蜘蛛 设置页：标题 + × / 分类 Tab / 设置行 / 取消·保存。
+ * 蜘蛛 设置页：标题 + 返回 / 分组设置行。
+ *
+ * ## 没有「保存」按钮：改动即时生效
+ *
+ * 原来这里有一对「取消 / 保存」，draft 只在点保存时才写回 state。实际上「保存」
+ * 除了把值搬进内存 state 之外什么都没做（不落盘、不下发引擎），却让每次改一项都要
+ * 先把页面拉到底点一下右上角 —— 所以改成**自动保存**：任一改动立刻写回 state，
+ * 返回只是关页面。
+ *
+ * draft 仍然保留，但语义变了：它不再是一份“待提交副本”，而是**这一屏的显示源**
+ * （见 `AppScaffold` 的 `settingsUi = state.settingsDraft ?: lastSettingsDraft`），
+ * 也承载「项目目录留空 = 不改动」这类字段级语义。
  *
  * ## 设置行不是手写的
  *
- * 页面骨架（弹窗外壳、分类 Tab、标题、底部按钮）用 Miuix 组件搭；
+ * 页面骨架（弹窗外壳、分组、标题）用 Miuix 组件搭；
  * 每一条设置项走 `ui/settings/SettingsRows.kt`，那里全部转发到 `miuix-preference`
  * 的 `*Preference` 组件（见该文件表格）。本文件只负责**把 SettingsDraft 的字段
  * 接到那些组件上**，不再自己画值框、下拉和滚轮。
@@ -64,23 +74,18 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * `WindowDialog` 创建**独立 Android Window**，`Scaffold` 提供的 `popupHost` 不会被它继承，
  * 于是 `Overlay*` 系列（本页所有选择器）在里面不可靠，而且主窗口的 `LayerBackdrop`
  * 也采不到它的背景。`OverlayDialog` 参数集与它一致，是 drop-in 替换。
- *
- * ## draft 语义
- *
- * 所有改动都通过 [onChange] 回传新的 [SettingsDraft]，「保存」才写回 state，
- * 「取消」直接丢弃 draft，所以取消是真正无副作用的。
  */
 @Composable
 fun SettingsDialog(
     draft: SettingsDraft?,
     onChange: (SettingsDraft) -> Unit,
     onDismiss: () -> Unit,
-    onSave: () -> Unit,
     onNavigate: (String) -> Unit,
 ) {
     // 整页设置，骨架全部用 Miuix 原生组件，照官方 example 的 SettingsPage 模式：
     // Scaffold + SmallTopAppBar(MiuixScrollBehavior) + LazyColumn(overScroll+nestedScroll)。
-    // 返回键 = MiuixIcons.Back + 原生 IconButton；保存走顶栏 TextButton。
+    // 返回键 = MiuixIcons.Back + 原生 IconButton。顶栏**没有动作按钮**：改动即时生效，
+    // 没有需要用户再确认一次的东西（见文件顶部「没有保存按钮」一节）。
     if (draft == null) return
 
     val scheme = MiuixTheme.colorScheme
@@ -105,9 +110,6 @@ fun SettingsDialog(
                             tint = scheme.onBackground,
                         )
                     }
-                },
-                actions = {
-                    TextButton(text = "保存", onClick = onSave)
                 },
             )
         },
@@ -186,13 +188,14 @@ private fun ModelServicePage(
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
 ) {
-    // rikkahub hub 的「当前值行」：图标 + 标题 + 当前值当副标题 + 行尾箭头，
+    // rikkahub hub 的「当前值行」：标题 + 当前值当副标题 + 行尾箭头，
     // 细节进二级页。原先这里用 SettingsEntry 且写了一句「密钥不会回填」的长说明，
     // 该说明在二级页里已有，这里按 hub 惯例收成一行当前值。
-    SettingsIconEntry(
-        title = "API 配置记录",
-        summary = "${draft.profileName} · ${draft.modelLabel}",
-        icon = ZhiIcons.projectPath,
+    // 不带行首图标：这一屏只有它一个入口有图标，会显得像另一种优先级；
+    // 而且那个图标是自绘的文件夹，与同屏 Miuix 图标不是一套。
+    SettingsEntry(
+        title = "API 配置",
+        valueText = "${draft.profileName} · ${draft.modelLabel}",
         onClick = { onNavigate("apiProfiles") },
     )
 
@@ -265,37 +268,41 @@ private fun NetworkPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit)
                 summary = draft.webSearchProvider.detail,
             )
 
-            // 纯数字项走 Miuix 滚轮选择器
-            SettingsNumber(
+            SettingsIntField(
                 title = "默认搜索结果数（1-10）",
                 value = draft.webSearchMaxResults,
-                options = (WEB_RESULTS_MIN..WEB_RESULTS_MAX).toList(),
+                min = WEB_RESULTS_MIN,
+                max = WEB_RESULTS_MAX,
+                parse = { it.trim().toIntOrNull() },
                 onValueChange = { onChange(draft.copy(webSearchMaxResults = it)) },
             )
 
-            SettingsNumber(
+            SettingsIntField(
                 title = "联网超时（秒）",
                 value = draft.webSearchTimeoutSec,
-                options = (WEB_TIMEOUT_MIN_SEC..WEB_TIMEOUT_MAX_SEC step 5).toList(),
+                min = WEB_TIMEOUT_MIN_SEC,
+                max = WEB_TIMEOUT_MAX_SEC,
+                parse = { it.trim().toIntOrNull() },
                 onValueChange = { onChange(draft.copy(webSearchTimeoutSec = it)) },
+                summary = "支持 ${WEB_TIMEOUT_MIN_SEC}-${WEB_TIMEOUT_MAX_SEC} 秒",
             )
         }
     }
 }
 
-/** 上下文窗口的候选：预设值 + 当前值（当前值可能来自自定义输入）。 */
-private fun contextWindowOptions(current: Int): List<Int> =
-    (CONTEXT_WINDOW_PRESETS + current).distinct().sorted()
-
 @Composable
 private fun ContextProjectPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
-    val windowOptions = contextWindowOptions(draft.contextWindow)
-
-    SettingsChoice(
+    SettingsIntField(
         title = "上下文窗口",
-        options = windowOptions.map(::formatTokenCountShort),
-        selectedIndex = windowOptions.indexOf(draft.contextWindow),
-        onSelect = { onChange(draft.copy(contextWindow = windowOptions[it])) },
+        value = draft.contextWindow,
+        // 上下文窗口不设人为上限：给多少就是多少，超出实际支持量由引擎侧处理。
+        // `parseTokenCount` 已经挡掉了非正数与解析失败，这里只兜住上下界。
+        min = 1,
+        max = Int.MAX_VALUE,
+        parse = ::parseTokenCount,
+        // 显示成 `200k` 而不是 `200000`：写作写法与标题里提示的 `128k / 1.5m` 一致。
+        format = ::formatTokenCountShort,
+        onValueChange = { onChange(draft.copy(contextWindow = it)) },
         summary = "支持 128k / 1.5m 写法",
     )
 
@@ -306,10 +313,12 @@ private fun ContextProjectPage(draft: SettingsDraft, onChange: (SettingsDraft) -
     )
 
     androidx.compose.animation.AnimatedVisibility(visible = draft.autoCompact) {
-        SettingsNumber(
+        SettingsIntField(
             title = "自动压缩上限（50-100%，安全缓冲优先）",
             value = draft.autoCompactPercent,
-            options = (COMPACT_PERCENT_MIN..COMPACT_PERCENT_MAX step 5).toList(),
+            min = COMPACT_PERCENT_MIN,
+            max = COMPACT_PERCENT_MAX,
+            parse = { it.trim().toIntOrNull() },
             onValueChange = { onChange(draft.copy(autoCompactPercent = it)) },
         )
     }
@@ -379,7 +388,7 @@ private fun ProjectPathField(draft: SettingsDraft, onChange: (SettingsDraft) -> 
 @Composable
 private fun ExtensionsPage(onNavigate: (String) -> Unit) {
     // rikkahub 式入口行：图标 + 标题 + 副标题；Miuix 用 ArrowPreference 的 startAction。
-    // 注意：这里不放「API 配置记录」——那条带当前生效值的入口留在上面的
+    // 注意：这里不放「API 配置」——那条带当前生效值的入口留在上面的
     // 「模型与对话」组里，同一目标只保留一条路径（hub 的规矩）。
     SettingsIconEntry(
         title = "Model Context Protocol（MCP）",

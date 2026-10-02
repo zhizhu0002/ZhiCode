@@ -343,9 +343,8 @@ private fun ZhiCodeScreen(
         entry<SettingsKey.Hub>(swipeDismiss = swipeBack) {
             SettingsDialog(
                 draft = settingsUi,
-                onChange = viewModel::setSettingsDraft,
+                onChange = viewModel::applySettingsDraft,
                 onDismiss = viewModel::closeSettings,
-                onSave = viewModel::saveSettings,
                 onNavigate = viewModel::navigateFromSettings,
             )
         }

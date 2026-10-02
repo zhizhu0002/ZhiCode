@@ -7,7 +7,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiColors
@@ -38,7 +43,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * | 设置项类型 | 采用的 Miuix 组件 |
  * |---|---|
  * | 枚举 / 选项选择 | [OverlayDropdownPreference] |
- * | 纯数字选择 | [OverlaySpinnerPreference] |
+ * | 数值输入 | [BasicComponent] + `bottomAction` 里的 [TextField]（见 [SettingsIntField]） |
+ * | 纯数字滚轮 | [OverlaySpinnerPreference]（设置页已不用，只剩调试页的组件陈列） |
  * | 布尔开关 | [SwitchPreference] |
  * | 入口（跳走做别的事） | [ArrowPreference] |
  * | 只读展示（色值） | [ArrowPreference] + `startAction` 色块 |
@@ -107,7 +113,10 @@ internal fun SettingsChoice(
  *
  * [options] 是**候选值序列**（可为步长序列，如 5,10,…,60）；组件按下标工作，
  * 所以「步长 5」这种序列能被正确表达。
- * [options] 为空（如自动压缩已关闭）时整行不可点，只显示 [summary] 说明。
+ * [options] 为空时整行不可点，只显示 [summary] 说明。
+ *
+ * 设置页的数值项已经换成 [SettingsIntField]（滚轮只能挑枚举出来的候选值，
+ * 用户想要别的值就只能改代码）。这里留着是给调试页的组件陈列用。
  */
 @Composable
 internal fun SettingsNumber(
@@ -132,6 +141,62 @@ internal fun SettingsNumber(
         summaryColor = hintColors(warn = false),
         maxHeight = 260.dp,
         enabled = enabled,
+    )
+}
+
+/**
+ * 数值型设置项（自由输入）。
+ *
+ * 以前这类行走 [OverlaySpinnerPreference]（滚轮挑一个候选值）。问题在候选是**枚举出来的**：
+ * 上下文窗口只有 128k/200k/1m/1.5m 四个值，联网超时只能按 5 秒步长跳 —— 用户想要
+ * 别的值就只能改代码。而这些数本来就是文本可表达的（`128k` / `1.5m`），
+ * 所以改用与「项目目录」同一套壳：标题 + 说明 + 底下一个输入框。
+ *
+ * ## 输入过程中**绝不回写**文本框
+ *
+ * 直觉做法是"发现越界就立刻把文本改成合法值"，但那样最小值为 5 的项根本没法输入：
+ * 打 `15` 的第一个字符 `1` 会被判成越界、clamp 成 `5`、文本被改成 `5`，
+ * 接着那个 `5` 就变成 `55`。最小值越大（压缩上限是 50）越离谱。
+ *
+ * 所以分两步：
+ *
+ * 1. **输入时**：解析不出来（`1.`、空串、超 Int 范围）就只回显、不提交；
+ *    能解析就按边界 clamp 后提交，但**文本框保持用户打进去的样子**。
+ * 2. **失焦时**：把文本框收敛成真实值。这一步才是"屏幕上那个数字 == 真实值"
+ *    的保证 —— 用户打了 `999`（范围 1-10）会看到它变成 `10`。
+ *
+ * 单纯只做第 1 步的话，屏幕上会留着一个跟真实值不一致的数（`999` 而实际是 10），
+ * 用户会以为 999 生效了 —— 那比不画这个控件更糟。所以第 2 步不能省。
+ */
+@Composable
+internal fun SettingsIntField(
+    title: String,
+    value: Int,
+    min: Int,
+    max: Int,
+    parse: (String) -> Int?,
+    onValueChange: (Int) -> Unit,
+    summary: String? = null,
+    /** 显示用的写法。上下文窗口要显示成 `200k` 而不是 `200000`。 */
+    format: (Int) -> String = { it.toString() },
+) {
+    // 文本框自己持有一份文本：真实值是被 clamp 过的，而用户打进来的字可能还没成型。
+    var text by remember { mutableStateOf(format(value)) }
+
+    SettingsTextField(
+        title = title,
+        value = text,
+        // 失焦时收敛。`value` 在每次重组时重新捕获，所以这里拿到的是**最新**的真实值。
+        modifier = Modifier.onFocusChanged { focus ->
+            if (!focus.isFocused) text = format(value)
+        },
+        onValueChange = { raw ->
+            // 一律先如实回显用户打的字；输入过程中**绝不**改写文本框（见上面的说明）。
+            text = raw
+            // 解析不出来（空串、`1.`、超 Int 范围）就是不提交：等用户打完，或失焦时收敛。
+            parse(raw)?.let { onValueChange(it.coerceIn(min, max)) }
+        },
+        summary = summary,
     )
 }
 
@@ -217,6 +282,7 @@ internal fun SettingsTextField(
     value: String,
     onValueChange: (String) -> Unit,
     summary: String? = null,
+    modifier: Modifier = Modifier,
     /**
      * 是否单行。
      *
@@ -235,7 +301,9 @@ internal fun SettingsTextField(
             ZhiTextField(
                 value = value,
                 onValueChange = onValueChange,
-                modifier = Modifier.fillMaxWidth(),
+                // [modifier] 下发给 ZhiTextField 的输入框本体，
+                // 调用点靠它挂 `onFocusChanged`（数值项失焦时要把文本收敛成真实值）。
+                modifier = modifier.fillMaxWidth(),
                 singleLine = singleLine,
                 minLines = minLines,
             )

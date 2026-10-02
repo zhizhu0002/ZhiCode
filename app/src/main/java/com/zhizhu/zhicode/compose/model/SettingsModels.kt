@@ -549,7 +549,14 @@ data class SettingsDraft(
     }
 
     /** 保存时写回 state。数值字段在这里统一 clamp，UI 层不需要各自校验。 */
-    fun applyTo(state: WorkspaceUiState): WorkspaceUiState = state.copy(
+    /**
+     * 把 draft 写回 state。
+     *
+     * [keepDraft] 是给设置页的自动保存用的：那一屏的 draft 同时是显示源，
+     * 写回后不能清掉，否则页面会立刻被 onDismiss 之外的东西关掉。
+     * `false` 时清掉 draft —— 那是「提交并关闭」的旧语义，现在只剩测试与直接调用会走。
+     */
+    fun applyTo(state: WorkspaceUiState, keepDraft: Boolean = false): WorkspaceUiState = state.copy(
         themeMode = themeMode,
         permissionMode = permissionMode,
         effort = effort,
@@ -568,6 +575,6 @@ data class SettingsDraft(
             autoCompactPercent = clampCompactPercent(autoCompactPercent),
             customSystemPrompt = customSystemPrompt,
         ),
-        settingsDraft = null,
+        settingsDraft = if (keepDraft) this else null,
     )
 }

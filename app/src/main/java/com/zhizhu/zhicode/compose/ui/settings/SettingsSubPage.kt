@@ -32,7 +32,9 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
  * 并存时观感割裂 —— 弹窗宽度封顶、滚动高度受限、按钮位置和整页不一致。
  * 收敛到一个壳之后，二级页和主页只有标题与动作差异。
  *
- * [action]（如「新增 / 保存」）放顶栏 TextButton，与设置主页的「保存」同位。
+ * [action]（如「新增 / 保存」）放顶栏 TextButton。设置主页的顶栏**没有**动作按钮
+ * （那一屏是自动保存，见 SettingsDialog 顶部说明），但二级页的动作是真的要提交一次
+ * 的操作（新增一条 API 配置、保存一张角色卡），所以仍留在右上角。
  */
 @Composable
 internal fun SettingsSubPage(

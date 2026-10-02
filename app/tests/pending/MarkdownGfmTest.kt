@@ -526,22 +526,33 @@ class MarkdownGfmTest {
     // ================================================================== §6.5 删除线
 
     @Test
-    fun `§6-5 两个波浪号是删除线（示例 491）`() {
-        assertEquals("<del>Hi</del> Hello, world!", inl("~~Hi~~ Hello, world!"))
+    fun `§6-5 两个波浪号是删除线（规范示例）`() {
+        assertEquals(
+            "<del>Hi</del> Hello, <del>there</del> world!",
+            inl("~~Hi~~ Hello, ~there~ world!"),
+        )
     }
 
     @Test
-    fun `§6-5 一个波浪号也是删除线（示例 492）`() {
+    fun `§6-5 一个波浪号也是删除线（规范示例）`() {
         assertEquals("<del>Hi</del> Hello, world!", inl("~Hi~ Hello, world!"))
     }
 
     @Test
-    fun `§6-5 数量不匹配就不是删除线（示例 494）`() {
-        assertEquals("~~foo~", inl("~~foo~"))
+    fun `§6-5 三个及以上波浪号不是删除线（规范示例）`() {
+        assertEquals("This will ~~~not~~~ strike.", inl("This will ~~~not~~~ strike."))
     }
 
     @Test
-    fun `§6-5 删除线不跨段落（示例 495）`() {
+    fun `§6-5 必须是数量相当的一对（"matching pair"）`() {
+        // 规范原文是 "wrapped in a matching pair of one or two tildes"：
+        // 数量不等就不算一对。规范示例没给出这种输入，判据取自这句话本身。
+        assertEquals("~~foo~", inl("~~foo~"))
+        assertEquals("~foo~~", inl("~foo~~"))
+    }
+
+    @Test
+    fun `§6-5 删除线不跨段落（规范示例）`() {
         assertEquals("p(This ~~has a)|p(new paragraph~~.)", dump("This ~~has a\n\nnew paragraph~~."))
     }
 

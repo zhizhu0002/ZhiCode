@@ -3512,19 +3512,19 @@ class WorkspaceViewModel(
         }
     }
 
-    /** 弹窗内任意一项改动都走这里，保证 draft 只有一份写入路径。 */
-    fun updateSettingsDraft(transform: (SettingsDraft) -> SettingsDraft) = _state.update {
-        val draft = it.settingsDraft ?: return@update it
-        it.copy(settingsDraft = transform(draft))
-    }
-
-    /** 设置弹窗直接回传整份 draft 时的入口（等价于 [updateSettingsDraft] 忽略旧值）。 */
-    fun setSettingsDraft(draft: SettingsDraft) = _state.update { it.copy(settingsDraft = draft) }
-
-    /** 「保存」：唯一把 draft 写回 state 的入口，并关闭弹窗。 */
-    fun saveSettings() = _state.update {
-        val draft = it.settingsDraft ?: return@update it
-        draft.applyTo(it).copy(message = "设置已保存")
+    /**
+     * 设置页的**唯一**改动入口：既更新 draft（页面显示的来源），又立刻写回 state。
+     *
+     * 设置页改成自动保存后就不再需要「保存 / 取消」两个按钮：改动即时生效，
+     * 返回只是关页面。draft 仍然保留 —— 页面用它做显示源，
+     * 某些字段（如项目目录留空）的「未改动」语义也靠它。
+     *
+     * ⚠️ 这里**必须**走 [SettingsDraft.applyTo] 而不是各自 `copy`：`applyTo` 里有
+     * `clampWebResults` / `projectPath.ifBlank` 这些归一化，绕过它就等于把用户
+     * 原始输入直接塞进引擎配置。
+     */
+    fun applySettingsDraft(draft: SettingsDraft) = _state.update {
+        draft.applyTo(it, keepDraft = true)
     }
 
     /**
