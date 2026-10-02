@@ -372,6 +372,12 @@ run AutoScrollSmoothnessTest "$PROJECT_ROOT"
 # 在开发机上永远看不出来。守的是「判定只能出现一次」，不是某个色值。
 # ThemeConsistencyTest.java
 run ThemeConsistencyTest "$PROJECT_ROOT"
+# ---------- 能访问手机共享存储（~/storage） ----------
+# 参考 Termux 的 termux-setup-storage：六个指向 /storage/emulated/0 的符号链接。
+# 出错的方式全都静默 —— 只挂在安装路径上（老用户等于没有）、建了但指错、
+# 名字跟 Termux 不一致、失败让几十秒的安装整个炸掉。
+# StorageAccessTest.java
+run StorageAccessTest "$PROJECT_ROOT"
 # ---------- UI 调试页的入口门控与"真的铺开组件" ----------
 # 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
 # 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。

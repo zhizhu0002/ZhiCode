@@ -32,6 +32,7 @@ MAIN_SOURCES=(
     app/src/main/java/com/termux/app/zhicode/core/PermissionGate.java
     app/src/main/java/com/termux/app/zhicode/core/PermissionModePolicy.java
     app/src/main/java/com/termux/app/zhicode/core/RiskClassifier.java
+    app/src/main/java/com/termux/app/zhicode/core/StorageLinks.java
     app/src/main/java/com/termux/app/zhicode/model/SessionConfig.java
     app/src/main/java/com/termux/app/zhicode/tools/WebSearchJson.java
     app/src/main/java/com/termux/app/zhicode/tools/WebSearchTool.java
@@ -41,6 +42,7 @@ MAIN_SOURCES=(
 DEFAULT_TESTS=(
     com.termux.app.zhicode.core.PermissionModeMatrixTest
     com.termux.app.zhicode.core.RiskClassifierTest
+    com.termux.app.zhicode.core.StorageLinksTest
     com.termux.app.zhicode.api.ApiPureLogicTest
     com.termux.app.zhicode.tools.WebSearchJsonTest
 )

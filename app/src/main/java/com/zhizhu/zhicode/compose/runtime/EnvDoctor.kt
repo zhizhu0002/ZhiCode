@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
 import android.provider.Settings
+import com.termux.app.zhicode.core.StorageLinks
 import com.termux.shared.termux.TermuxConstants
 import java.io.File
 
@@ -168,21 +169,17 @@ object EnvDoctor {
     // ---------------------------------------------------------------- 存储
 
     private fun storageInfo(context: Context, sb: StringBuilder) {
-        val storage = File(TermuxConstants.TERMUX_HOME_DIR_PATH, "storage")
+        val home = File(TermuxConstants.TERMUX_HOME_DIR_PATH)
+        val storage = File(home, "storage")
         sb.appendLine("## 存储访问")
         sb.appendLine("~/storage    : ${if (storage.isDirectory) "存在" else "未创建"}")
-        if (storage.isDirectory) {
-            val links = storage.listFiles().orEmpty()
-            if (links.isEmpty()) {
-                sb.appendLine("  (空)")
-            } else {
-                for (link in links.sortedBy { it.name }) {
-                    val target = runCatching { link.canonicalPath }.getOrDefault("?")
-                    val reachable = runCatching { File(target).canRead() }.getOrDefault(false)
-                    sb.appendLine("  ${link.name} -> $target  可达=$reachable")
-                }
-            }
-        }
+        // 逐条实测（链接在不在 / 指向哪 / 读不读得到）。三件事分别可能出问题，
+        // 合成一个 OK/FAIL 就查不出是哪一种 —— 报告的价值全在"如实呈现"。
+        for (line in StorageLinks.describe(home)) sb.appendLine(line)
+        sb.appendLine("共享存储根   : ${StorageLinks.EXTERNAL_ROOT}  "
+            + "存在=${File(StorageLinks.EXTERNAL_ROOT).isDirectory}  "
+            + "可读=${runCatching { File(StorageLinks.EXTERNAL_ROOT).canRead() }.getOrDefault(false)}  "
+            + "可写=${runCatching { File(StorageLinks.EXTERNAL_ROOT).canWrite() }.getOrDefault(false)}")
         sb.appendLine("外部存储状态 : ${Environment.getExternalStorageState()}")
         sb.appendLine("sdcard 可读  : ${runCatching { File("/sdcard").canRead() }.getOrDefault(false)}")
         sb.appendLine()

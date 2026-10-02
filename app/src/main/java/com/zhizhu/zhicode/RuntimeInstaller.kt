@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.system.Os
 import java.nio.file.Files
+import com.termux.app.zhicode.core.StorageLinks
 import com.termux.app.zhicode.termux.TermuxShellExecutor
 import com.termux.shared.termux.TermuxConstants
 import java.io.ByteArrayOutputStream
@@ -209,6 +210,9 @@ class RuntimeInstaller(private val context: Context) {
         File(prefix, "var/lib/apt/lists/partial").mkdirs()
         installAptCompatibility(prefix)
         installDpkgWrapper(prefix)
+        // 存储链接也在这里补：老版本装完的环境没有 ~/storage，而用户不会为了这个
+        // 手动重装一遍（重装要几十秒）。repairIfInstalled 本来就跑在每次启动的路径上。
+        setupStorageLinks()
         TermuxShellExecutor.cleanupOrphanedPackageManagers()
     }
 
@@ -278,11 +282,28 @@ class RuntimeInstaller(private val context: Context) {
 
         File(home, "tmp").mkdirs()
         File(home, "projects").mkdirs()
+        setupStorageLinks()
 
         FileTree.deleteRecursive(staging)
         FileTree.deleteRecursive(backup)
 
         report(progress, "Termux 已就绪", 100)
+    }
+
+    /**
+     * 建 {@code $HOME/storage/} 那六个指向共享存储的符号链接。
+     *
+     * 失败**不抛**：用户可能还没给「所有文件访问权限」，这时链接建不出来是
+     * 预期之内的事，而它不该让整个几十秒的安装白跑一遍。真正的状态由
+     * {@code EnvDoctor} 的「存储访问」一节如实报出来。
+     */
+    fun setupStorageLinks() {
+        runCatching {
+            StorageLinks.setup(
+                File(TermuxConstants.TERMUX_HOME_DIR_PATH),
+                File(StorageLinks.EXTERNAL_ROOT),
+            )
+        }
     }
 
     // -------------------------------------------------------------- 前置校验
