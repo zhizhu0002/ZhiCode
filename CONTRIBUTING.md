@@ -25,8 +25,23 @@ bash test-source-no-build.sh
 | `TextFieldConventionTest` | 绕过 `ZhiTextField` 用裸输入框 | 会同时丢掉「可见的文字色」与「正确的光标位置」，且不报错 |
 | `AnchoredMenuStructureTest` | 长按菜单接线断裂 / 观察器消费事件 | 消费事件会顶掉卡片的点击、长按与无障碍语义 |
 | `LayoutConsistencyTest` | 宽度写字面量、气泡用强制比例、触发方式写成点击 | 「太宽太窄」与「点击误触发」都不会编译失败 |
+| `MarkdownStreamingTest` | 流式每 32ms 重解析整篇、行内解析不缓存、流式期间挂尺寸动画 | 不报错，只是每次回复都掉帧；"变慢"没有主人 |
+| `ToolOutputBoundTest` | 超长输出没有行数上限、对整份输出做 O(n) 字符串手术、下拉 `items` 未缓存 | 上千行的 diff 会在**同一个 LazyColumn item** 里生成上千个节点，懒加载复用彻底失效 |
+| `MainThreadIoBoundTest` | 磁盘 IO 在主线程、热路径组件收整份 `WorkspaceUiState`、`@Immutable` 与字段类型不自洽 | 几百毫秒够不到 ANR 门槛，只会被当成"这应用有点卡" |
+| `R8ConfigTest` | R8 被关掉、JNI 名字绑定的 keep 被删、baseline profile 规则非法 | 只在**运行期**炸（终端起不来、沙箱打不开），编译与单测全绿 |
+| `DialogScrollNestingTest` | 弹窗内嵌套滚动 | 编译通过，只有测量时才抛 `Infinity maximum height constraints` |
 
 确实需要例外时，**加进白名单并写明理由**，不要改断言本身。
+
+### 加了新的「不会编译失败」的约束，就配一条守卫
+
+这类约束（性能、约定、配置）的共同点是**错了没人报错**，所以它们的正确性只能靠断言。
+加守卫时请一并做两件事：
+
+1. **在 `test-source-no-build.sh` 里注册**（守卫自己会断言这一条，漏了它就红）；
+2. **逐条反向验证**：把源码改坏 → 必须 FAIL → 还原。
+   顺序很重要 —— 先确认"改坏了会红"，这条断言才算真的有牙。
+   写成 `if` 里恒真的条件、或者被自己的注释喂饱的 `contains`，都会让守卫变成装饰品。
 
 ## 关于提交历史（一次已完成的改写）
 
@@ -76,6 +91,29 @@ bash test-source-no-build.sh
    这样库升级只影响一个文件。
 2. **尺寸/颜色/字阶取自既有 token**：`ZhiColors`、`ZhiRadius`、`ZhiTextScale`、`ZhiDialogWidth`、
    `ZhiMotion`。要加新档位就加到 token 里（并写清理由），不要在调用点写新数字。
+
+弹窗上有一批**只有真机才看得出来**的坑（贴底、隐身、按钮被挤出屏幕、点一下窗口就关……），
+以及几个**刻意不用**的 Miuix 组件。动手前请先读 [`docs/ui-miuix.md`](docs/ui-miuix.md)。
+
+## 改性能相关代码前
+
+`docs/performance.md` 里每条取舍都写了「不这么做会发生什么」。其中最容易踩的是：
+
+- **不要把 `animateContentSize` 挂到流式中的内容上** —— 内容每 32ms 变一次，动画会被反复重新触发；
+- **不要在 `LazyColumn` 的单个 item 里渲染上千个节点** —— 那个 item 会比视口还高，懒加载复用失效；
+- **不要把整份 `WorkspaceUiState` 传给只读几个字段的组件**；
+- **不要给含 `List` 的类加 `@Immutable`** —— Kotlin 的 `List` 背后可能是 `ArrayList`，
+  这个承诺在类型上核实不了，标上去之后一次原地 `add` 就会让界面静默停更。
+
+## 改构建配置前
+
+R8 规则、baseline profile、签名配置都只有**在运行期或发布时**才会暴露问题，见
+[`docs/build-and-release.md`](docs/build-and-release.md)。特别是：
+
+- 别用 `-dontoptimize` / `-dontshrink` 之类把 R8 变成空转；
+- 往 baseline profile 加规则时，**每条必须带 `H`/`S`/`P` 至少一个 flag**，否则构建直接失败；
+- **别把 `Bcore` 的 `minifyEnabled` 关回去**。它开着的时候如果因为 Missing class 编不过，
+  正确做法是补 `-dontwarn`，不是关 R8。
 
 ## 许可
 
