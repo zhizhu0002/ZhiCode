@@ -3,6 +3,8 @@
 package com.zhizhu.zhicode.compose.ui.settings
 
 import androidx.compose.foundation.layout.Column
+import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
@@ -30,7 +32,6 @@ import com.zhizhu.zhicode.compose.model.WEB_RESULTS_MAX
 import com.zhizhu.zhicode.compose.model.WEB_RESULTS_MIN
 import com.zhizhu.zhicode.compose.model.WEB_TIMEOUT_MAX_SEC
 import com.zhizhu.zhicode.compose.model.WEB_TIMEOUT_MIN_SEC
-import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import com.zhizhu.zhicode.compose.model.parseTokenCount
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -161,7 +162,7 @@ private fun AllSettingsPages(
     // 顺序按使用频率：模型最先，扩展收尾。
     // rikkahub 的分组顺序：通用最先（主题/联网这类看一眼就走的），模型服务其次，
     // 扩展收尾。组名也从功能视角改成 rikkahub 的叫法。
-    SettingsGroup("通用") { GeneralPage(draft, onChange) }
+    SettingsGroup("通用") { GeneralPage(draft, onChange, onNavigate) }
     SettingsGroup("模型与服务") { ModelServicePage(draft, onChange, onNavigate) }
     SettingsGroup("上下文与项目") { ContextProjectPage(draft, onChange) }
     SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) }
@@ -170,7 +171,11 @@ private fun AllSettingsPages(
 
 /** 通用组：主题模式 + 联网搜索（rikkahub 的 generalSettings / search 合并）。 */
 @Composable
-private fun GeneralPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
+private fun GeneralPage(
+    draft: SettingsDraft,
+    onChange: (SettingsDraft) -> Unit,
+    onNavigate: (String) -> Unit,
+) {
     SettingsChoice(
         title = "主题模式",
         options = ThemeMode.entries.map(::themeLabel),
@@ -179,7 +184,7 @@ private fun GeneralPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit)
         // 不写「右上角 ☼/☾ 可快速切换」——顶栏早就没有这个快捷键了，
         // 指向不存在入口的说明比没有说明更糟。
     )
-    NetworkPage(draft, onChange)
+    NetworkPage(draft, onChange, onNavigate)
 }
 
 @Composable
@@ -259,7 +264,12 @@ private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) ->
 }
 
 @Composable
-private fun NetworkPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
+private fun NetworkPage(
+    draft: SettingsDraft,
+    onChange: (SettingsDraft) -> Unit,
+    onNavigate: (String) -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
     SettingsToggle(
         title = "联网搜索",
         checked = draft.webSearchEnabled,
@@ -269,39 +279,20 @@ private fun NetworkPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit)
     // 关闭联网搜索时后续配置全部折叠（官方 SettingsPage 的 AnimatedVisibility 模式）
     androidx.compose.animation.AnimatedVisibility(visible = draft.webSearchEnabled) {
         Column {
-            // 搜索服务（形态参考 RikkaHub 的「搜索服务」页）：免费后端与密钥制后端
-            // 并列，选中哪个哪个生效；密钥按服务各存一份，切换服务不丢。
-            SettingsChoice(
+            // 搜索服务已改成**独立整页**（RikkaHub 形态：多服务列表 + 每服务专属选项）。
+            // 这里只留入口 —— 原先是一排「类型下拉 + 一个 Key 框 + 实例地址框」，
+            // 只能配一个服务，而这一页要能配多个、每个还有自己的 depth/topic/语言。
+            // 入口行与 API 配置记录同一个形态（都是"配置对象列表"）。
+            BasicComponent(
                 title = "搜索服务",
-                options = WebSearchProvider.entries.map { it.label },
-                selectedIndex = WebSearchProvider.entries.indexOf(draft.webSearchProvider),
-                onSelect = { onChange(draft.copy(webSearchProvider = WebSearchProvider.entries[it])) },
-                summary = draft.webSearchProvider.detail,
+                titleColor = BasicComponentDefaults.titleColor(color = scheme.onBackground),
+                summary = "添加 Tavily / Exa / Brave / Perplexity / SearXNG 等；点一个设为当前使用",
+                summaryColor = BasicComponentDefaults.summaryColor(
+                    color = scheme.onSurfaceVariantSummary,
+                ),
+                onClick = { onNavigate("searchServices") },
+                insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             )
-
-            // 密钥 / 实例地址跟着选中的服务走：选 Tavily 出 Key 框，选 SearXNG 出地址框。
-            if (draft.webSearchProvider.needsKey) {
-                SettingsTextField(
-                    title = "${draft.webSearchProvider.label} API Key",
-                    value = draft.webSearchKeys[draft.webSearchProvider] ?: "",
-                    onValueChange = {
-                        onChange(draft.copy(
-                            webSearchKeys = draft.webSearchKeys
-                                + (draft.webSearchProvider to it.trim())))
-                    },
-                    summary = draft.webSearchProvider.detail,
-                    singleLine = true,
-                )
-            }
-            if (draft.webSearchProvider.needsBaseUrl) {
-                SettingsTextField(
-                    title = "SearXNG 实例地址",
-                    value = draft.webSearchSearxngUrl,
-                    onValueChange = { onChange(draft.copy(webSearchSearxngUrl = it.trim())) },
-                    summary = "如 https://searx.example.com，实例需开启 JSON 输出（format=json）",
-                    singleLine = true,
-                )
-            }
 
             SettingsIntField(
                 title = "默认搜索结果数（1-50）",
@@ -310,6 +301,7 @@ private fun NetworkPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit)
                 max = WEB_RESULTS_MAX,
                 parse = { it.trim().toIntOrNull() },
                 onValueChange = { onChange(draft.copy(webSearchMaxResults = it)) },
+                summary = "服务未单独指定条数时用它",
             )
 
             SettingsIntField(

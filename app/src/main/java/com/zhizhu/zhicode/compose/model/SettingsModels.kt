@@ -24,6 +24,261 @@ enum class SettingsCategory(val label: String, val tabLabel: String) {
  * 密钥制服务缺 Key 时搜索会明确报错（提示去哪里配），而不是静默回落免费后端 ——
  * 用户配了 Tavily 却拿到 DuckDuckGo 的结果才是真正的坑。
  */
+/**
+ * 搜索服务配置里的字段名（**持久化契约**：改一个名字等于丢掉用户已填的配置）。
+ *
+ * <p>刻意放在**顶层**而不是 [SearchServiceType] 的 companion 里：枚举项的构造参数
+ * 在 companion 初始化**之前**求值，`SearchFieldName.API_KEY` 在那个位置会编译失败
+ * （"Companion object ... is uninitialized here"）。这不是风格问题，是语言规则。
+ */
+object SearchFieldName {
+    const val API_KEY = "apiKey"
+    const val BASE_URL = "baseUrl"
+    const val DEPTH = "depth"
+    const val TOPIC = "topic"
+    const val MODEL = "model"
+    const val LANGUAGE = "language"
+    const val SUMMARY = "summary"
+    const val URL_TEMPLATE = "urlTemplate"
+    const val HEADERS = "headers"
+    const val JSON_ITEMS_PATH = "itemsPath"
+    const val JSON_TITLE_PATH = "titlePath"
+    const val JSON_URL_PATH = "urlPath"
+    const val JSON_TEXT_PATH = "textPath"
+}
+
+/**
+ * 搜索服务**类型**目录（形态参考 RikkaHub 的「搜索服务」页）。
+ *
+ * ## 为什么从「一个枚举」改成「类型 + 多实例」
+ *
+ * 上一版是一个 `enum WebSearchProvider` 下拉：只能配一个、只有 Key 与实例地址两种
+ * 字段。RikkaHub 的形态是**列表**：可以同时配多个服务、每个服务有自己的 Key 与
+ * 专属选项（depth / topic / 语言 / 安全搜索 / 结果数），点其中一个设为当前使用。
+ * 这一版对齐它。
+ *
+ * ## 字段声明放在枚举里，而不是散在 UI 里
+ *
+ * [fields] 描述「这个类型需要哪些输入框」。设置页照着它渲染，新增一个服务类型
+ * 只需要在这里加一项 + 在 [WebSearchJson]/`WebSearchTool` 加一个解析/请求分支，
+ * 不用碰 UI 代码 —— 否则每加一家都要在 UI 里再写一段 if。
+ *
+ * [keyUrl] 是「去哪里申请 Key」。RikkaHub 每个服务都带这个指引，
+ * 值得照做：没有它，用户看到一个空 Key 框只能自己去找文档。
+ */
+enum class SearchServiceType(
+    val label: String,
+    val detail: String,
+    /** 申请 Key 的页面；免密钥服务为 null。 */
+    val keyUrl: String? = null,
+    /** 这个类型需要的输入字段（除「名称」之外）。 */
+    val fields: List<SearchField> = emptyList(),
+) {
+    DUCKDUCKGO("DuckDuckGo", "免费公开入口，无需密钥；偶尔会限流"),
+    BING("Bing RSS", "免费走 Bing 的 RSS 结果，无需密钥"),
+    SEARXNG(
+        "SearXNG",
+        "自建元搜索，实例需开启 JSON 输出（settings.yml 里 format=json）",
+        fields = listOf(
+            SearchField(SearchFieldName.BASE_URL, "实例地址", "如 https://searx.example.com", required = true),
+            SearchField(SearchFieldName.LANGUAGE, "语言", "如 zh-CN / en（留空为实例默认）"),
+        ),
+    ),
+    TAVILY(
+        "Tavily",
+        "为 LLM 优化的 AI 搜索，支持检索深度与主题",
+        keyUrl = "https://tavily.com",
+        fields = listOf(
+            SearchField(SearchFieldName.API_KEY, "API Key", required = true, secret = true),
+            SearchField(SearchFieldName.DEPTH, "检索深度", "basic / advanced（advanced 更慢更贵但更全）", options = listOf("basic", "advanced")),
+            SearchField(SearchFieldName.TOPIC, "主题", "general / news / finance", options = listOf("general", "news", "finance")),
+        ),
+    ),
+    EXA(
+        "Exa",
+        "面向 AI 的语义搜索",
+        keyUrl = "https://exa.ai",
+        fields = listOf(SearchField(SearchFieldName.API_KEY, "API Key", required = true, secret = true)),
+    ),
+    BRAVE(
+        "Brave",
+        "Brave Search API，独立索引",
+        keyUrl = "https://brave.com/search/api/",
+        fields = listOf(SearchField(SearchFieldName.API_KEY, "API Key", required = true, secret = true)),
+    ),
+    PERPLEXITY(
+        "Perplexity",
+        "搜索增强模型，能直接给出带引用的回答",
+        keyUrl = "https://www.perplexity.ai/settings/api",
+        fields = listOf(
+            SearchField(SearchFieldName.API_KEY, "API Key", required = true, secret = true),
+            SearchField(SearchFieldName.MODEL, "模型", "如 sonar / sonar-pro（留空用 sonar）"),
+        ),
+    ),
+    LINKUP(
+        "LinkUp",
+        "可配检索深度的搜索 API",
+        keyUrl = "https://www.linkup.so",
+        fields = listOf(
+            SearchField(SearchFieldName.API_KEY, "API Key", required = true, secret = true),
+            SearchField(SearchFieldName.DEPTH, "检索深度", "standard / deep", options = listOf("standard", "deep")),
+        ),
+    ),
+    JINA(
+        "Jina",
+        "Jina Reader 的检索接口（s.jina.ai）",
+        keyUrl = "https://jina.ai/reader/",
+        fields = listOf(SearchField(SearchFieldName.API_KEY, "API Key", required = true, secret = true)),
+    ),
+    FIRECRAWL(
+        "Firecrawl",
+        "抓取型服务，返回结构化正文",
+        keyUrl = "https://firecrawl.dev",
+        fields = listOf(SearchField(SearchFieldName.API_KEY, "API Key", required = true, secret = true)),
+    ),
+    BOCHA(
+        "博查 Bocha",
+        "中文搜索服务，可选 AI 摘要",
+        keyUrl = "https://open.bochaai.com",
+        fields = listOf(
+            SearchField(SearchFieldName.API_KEY, "API Key", required = true, secret = true),
+            SearchField(SearchFieldName.SUMMARY, "AI 摘要", "true / false", options = listOf("false", "true")),
+        ),
+    ),
+    METASO(
+        "秘塔 Metaso",
+        "中文 AI 搜索",
+        keyUrl = "https://metaso.cn",
+        fields = listOf(SearchField(SearchFieldName.API_KEY, "API Key", required = true, secret = true)),
+    ),
+    ZHIPU(
+        "智谱 Zhipu",
+        "智谱的联网搜索工具",
+        keyUrl = "https://open.bigmodel.cn",
+        fields = listOf(SearchField(SearchFieldName.API_KEY, "API Key", required = true, secret = true)),
+    ),
+
+    /**
+     * 自定义 HTTP 检索。
+     *
+     * <p>RikkaHub 在这个位置是「Custom JS」（在沙箱里跑一段 JS）。本工程刻意**不新增
+     * 依赖**，而 Android 上没有内置 JS 引擎（{@code javax.script} 不存在，
+     * Rhino/Duktape 都是新依赖），所以换成不写代码的等价物：给一个 URL 模板
+     * （`%s` 处填查询词）+ 结果数组的 JSON 路径。覆盖绝大多数自建/内部检索 API。
+     */
+    CUSTOM_HTTP(
+        "自定义 HTTP",
+        "自己填检索地址与结果字段名；%s 处会被替换成查询词",
+        fields = listOf(
+            SearchField(SearchFieldName.URL_TEMPLATE, "检索地址模板", "如 https://my.api/search?q=%s&n=%d", required = true),
+            SearchField(SearchFieldName.HEADERS, "请求头 JSON", "如 {\"Authorization\":\"Bearer xxx\"}"),
+            SearchField(SearchFieldName.JSON_ITEMS_PATH, "结果数组路径", "如 data.items（点号分隔；留空视为根数组）"),
+            SearchField(SearchFieldName.JSON_TITLE_PATH, "标题字段", "默认 title"),
+            SearchField(SearchFieldName.JSON_URL_PATH, "链接字段", "默认 url"),
+            SearchField(SearchFieldName.JSON_TEXT_PATH, "摘要字段", "默认 text / content / snippet 依次尝试"),
+        ),
+    ),
+    ;
+
+    /** 是否需要密钥（决定编辑页要不要渲染 Key 输入框）。 */
+    val needsKey: Boolean get() = fields.any { it.name == SearchFieldName.API_KEY && it.required }
+
+}
+
+/** 搜索服务的一个输入字段。见 [SearchServiceType.fields]。 */
+data class SearchField(
+    val name: String,
+    val label: String,
+    val hint: String = "",
+    val required: Boolean = false,
+    /** 非空即「只能从这几个值里选」，界面用下拉而不是文本框。 */
+    val options: List<String> = emptyList(),
+    /** 敏感值（Key）：走加密存储，读回时**不回填**到表单。 */
+    val secret: Boolean = false,
+)
+
+/**
+ * 一条搜索服务配置（RikkaHub 的「已添加的服务」一条）。
+ *
+ * [config] 存非敏感字段（实例地址 / 深度 / 主题…），密钥单独走加密槽、不在这里，
+ * 与 API 配置的密钥同一套规矩。
+ */
+data class SearchService(
+    val id: String,
+    val name: String,
+    val type: SearchServiceType,
+    val enabled: Boolean = true,
+    val config: Map<String, String> = emptyMap(),
+) {
+    /** 列表第二行：类型名 + 关键配置摘要。 */
+    val subtitle: String
+        get() = buildString {
+            append(type.label)
+            config[SearchFieldName.BASE_URL]?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
+            config[SearchFieldName.MODEL]?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it) }
+        }
+}
+
+/** 搜索服务编辑表单草稿。 */
+data class SearchServiceDraft(
+    val id: String?,
+    val name: String,
+    val type: SearchServiceType,
+    val enabled: Boolean,
+    val config: Map<String, String>,
+    /** 用户这次输入的密钥；编辑既有记录时留空 = 沿用原密钥。 */
+    val apiKey: String = "",
+) {
+    val isEditing: Boolean get() = !id.isNullOrBlank()
+
+    val nameError: String? get() = if (name.isBlank()) "请填写名称（用于在列表里区分）" else null
+
+    /** 缺必填字段时要指出**是哪一项**，而不是只说「配置有误」。 */
+    val fieldError: String? get() = type.fields
+        .firstOrNull { it.required && it.name != SearchFieldName.API_KEY && config[it.name].isNullOrBlank() }
+        ?.let { "请填写${it.label}" }
+
+    val keyError: String?
+        get() = if (type.needsKey && !isEditing && apiKey.isBlank()) "请填写 ${type.label} 的 API Key" else null
+
+    val saveable: Boolean get() = nameError == null && fieldError == null && keyError == null
+
+    companion object {
+        fun from(service: SearchService) = SearchServiceDraft(
+            id = service.id,
+            name = service.name,
+            type = service.type,
+            enabled = service.enabled,
+            config = service.config,
+            // 密钥**不**回填：界面上不该出现已保存的密钥（与 API 配置同一条规矩）。
+            apiKey = "",
+        )
+
+        fun blank() = SearchServiceDraft(
+            id = null,
+            name = "",
+            type = SearchServiceType.TAVILY,
+            enabled = true,
+            config = emptyMap(),
+        )
+    }
+}
+
+/** 搜索服务页的状态。[form] 非空即编辑页，否则列表页。 */
+data class SearchServicesState(
+    val services: List<SearchService> = emptyList(),
+    val activeId: String = "",
+    val form: SearchServiceDraft? = null,
+)
+
+/**
+ * 联网搜索后端（历史类型）。
+ *
+ * @deprecated 已被 [SearchService] 取代：它只能配一个服务、只有 Key 与实例地址两种
+ * 字段，而 RikkaHub 的形态是「多服务列表 + 每服务专属选项」。保留只是因为
+ * [AppSettings.webSearchProvider] 这个**持久化键**还在被读取 ——
+ * 老用户的配置会在首次启动时迁移成一条 [SearchService]。
+ */
 enum class WebSearchProvider(
     val label: String,
     val detail: String,

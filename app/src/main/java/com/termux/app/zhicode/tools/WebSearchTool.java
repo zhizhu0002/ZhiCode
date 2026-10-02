@@ -133,7 +133,7 @@ public final class WebSearchTool implements ZhiTool {
         // 密钥制 / 自建服务优先：选了它们就要说到做到，缺配置时**明确报错**
         // （提示去设置里配），而不是静默回落免费后端 —— 用户配了 Tavily 却
         // 拿到 DuckDuckGo 的结果，比一次失败难查得多。
-        if (isProvider(provider, "tavily", "exa", "brave", "searxng")) {
+        if (isKeyedService(provider) || isProvider(provider, "searxng", "custom_http")) {
             try {
                 raw = keyedSearch(provider, query, wanted, config);
             } catch (Exception failure) {
@@ -199,16 +199,42 @@ public final class WebSearchTool implements ZhiTool {
                                          SessionConfig config) throws Exception {
         switch (provider) {
             case "tavily":
-                return tavily(query, wanted, requireKey(config), config.webTimeoutMs);
+                return tavily(query, wanted, requireKey(config), config);
             case "exa":
-                return exa(query, wanted, requireKey(config), config.webTimeoutMs);
+                return exa(query, wanted, requireKey(config), config);
             case "brave":
-                return brave(query, wanted, requireKey(config), config.webTimeoutMs);
+                return brave(query, wanted, requireKey(config), config);
+            case "perplexity":
+                return perplexity(query, wanted, requireKey(config), config);
+            case "linkup":
+                return linkup(query, wanted, requireKey(config), config);
+            case "jina":
+                return jina(query, wanted, requireKey(config), config);
+            case "firecrawl":
+                return firecrawl(query, wanted, requireKey(config), config);
+            case "bocha":
+                return bocha(query, wanted, requireKey(config), config);
+            case "metaso":
+                return metaso(query, wanted, requireKey(config), config);
+            case "zhipu":
+                return zhipu(query, wanted, requireKey(config), config);
             case "searxng":
                 return searxng(query, wanted, requireSearxngUrl(config), config.webTimeoutMs);
+            case "custom_http":
+                return customHttp(query, wanted, config);
             default:
                 throw new IllegalStateException("未知搜索服务：" + provider);
         }
+    }
+
+    /**
+     * 这家服务要不要密钥。
+     *
+     * <p>免费后端（auto/duckduckgo/bing）不需要；其余都要 —— 少一家漏掉的表现是
+     * 「配了 Key 却当成免费后端用」，所以做成**白名单式**判断而不是逐个列举。
+     */
+    private static boolean isKeyedService(String provider) {
+        return !isProvider(provider, "auto", "duckduckgo", "bing", "searxng");
     }
 
     private static String requireKey(SessionConfig config) {
@@ -217,6 +243,25 @@ public final class WebSearchTool implements ZhiTool {
             throw new IllegalStateException("未配置 API Key，请到 设置 → 联网搜索 → 搜索服务 里填写");
         }
         return key;
+    }
+
+    /** 每服务选项：读 config 里的 JSON，缺字段就给默认。 */
+    private static String option(SessionConfig config, String name, String fallback) {
+        if (config.webSearchServiceConfig == null || config.webSearchServiceConfig.trim().isEmpty()) {
+            return fallback;
+        }
+        try {
+            String value = new JSONObject(config.webSearchServiceConfig).optString(name, "").trim();
+            return value.isEmpty() ? fallback : value;
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean optionBool(SessionConfig config, String name, boolean fallback) {
+        String value = option(config, name, "");
+        if (value.isEmpty()) return fallback;
+        return "true".equalsIgnoreCase(value) || "1".equals(value);
     }
 
     private static String requireSearxngUrl(SessionConfig config) {
@@ -235,35 +280,44 @@ public final class WebSearchTool implements ZhiTool {
             case "tavily": return "Tavily";
             case "exa": return "Exa";
             case "brave": return "Brave";
+            case "perplexity": return "Perplexity";
+            case "linkup": return "LinkUp";
+            case "jina": return "Jina";
+            case "firecrawl": return "Firecrawl";
+            case "bocha": return "博查";
+            case "metaso": return "秘塔";
+            case "zhipu": return "智谱";
             case "searxng": return "SearXNG";
+            case "custom_http": return "自定义 HTTP";
             default: return provider;
         }
     }
 
     /**
      * Tavily：{@code POST https://api.tavily.com/search}，Bearer 鉴权。
+     * 支持 {@code depth}（basic/advanced）与 {@code topic}（general/news/finance）。
      * 响应解析见 [WebSearchJson.parseTavily]。
      */
-    private static List<Hit> tavily(String query, int wanted, String key, int timeout)
+    private static List<Hit> tavily(String query, int wanted, String key, SessionConfig config)
             throws Exception {
-        HttpURLConnection connection = postJson("https://api.tavily.com/search", timeout,
-                "authorization", "Bearer " + key);
+        HttpURLConnection connection = postJson("https://api.tavily.com/search",
+                config.webTimeoutMs, "authorization", "Bearer " + key);
         writeBody(connection, new JSONObject()
                 .put("query", query)
                 .put("max_results", wanted)
-                .put("search_depth", "basic"));
+                .put("search_depth", option(config, "depth", "basic"))
+                .put("topic", option(config, "topic", "general")));
         return WebSearchJson.parseTavily(readJson(connection));
     }
 
     /**
      * Exa：{@code POST https://api.exa.ai/search}，{@code x-api-key} 鉴权。
      * 要正文要显式给 {@code contents.text}，不给的话响应里只有标题与 URL。
-     * 响应解析见 [WebSearchJson.parseExa]。
      */
-    private static List<Hit> exa(String query, int wanted, String key, int timeout)
+    private static List<Hit> exa(String query, int wanted, String key, SessionConfig config)
             throws Exception {
-        HttpURLConnection connection = postJson("https://api.exa.ai/search", timeout,
-                "x-api-key", key);
+        HttpURLConnection connection = postJson("https://api.exa.ai/search",
+                config.webTimeoutMs, "x-api-key", key);
         writeBody(connection, new JSONObject()
                 .put("query", query)
                 .put("numResults", wanted)
@@ -274,40 +328,175 @@ public final class WebSearchTool implements ZhiTool {
 
     /**
      * Brave：{@code GET https://api.search.brave.com/res/v1/web/search}，
-     * {@code x-subscription-token} 鉴权。结果嵌在 {@code web} 底下，
-     * 响应解析见 [WebSearchJson.parseBrave]。
+     * {@code x-subscription-token} 鉴权。结果嵌在 {@code web} 底下。
      */
-    private static List<Hit> brave(String query, int wanted, String key, int timeout)
+    private static List<Hit> brave(String query, int wanted, String key, SessionConfig config)
             throws Exception {
         String url = "https://api.search.brave.com/res/v1/web/search?q="
                 + URLEncoder.encode(query, "UTF-8") + "&count=" + wanted;
-        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-        connection.setConnectTimeout(timeout);
-        connection.setReadTimeout(timeout);
-        connection.setRequestProperty("accept", "application/json");
-        connection.setRequestProperty("x-subscription-token", key);
-        return WebSearchJson.parseBrave(readJson(connection));
+        return WebSearchJson.parseBrave(readJson(getJson(url, config.webTimeoutMs,
+                "x-subscription-token", key)));
     }
 
     /**
-     * SearXNG：{@code GET {实例}/search?q=&format=json}。实例必须在设置里
-     * 开启 JSON 输出（{@code search.format=json}），否则拿到的是 HTML 页，
-     * 解析为 0 条 —— 报错里要提示这一层。响应解析见 [WebSearchJson.parseSearxng]。
+     * Perplexity：{@code POST /chat/completions}，回答形如 OpenAI Chat。
+     *
+     * <p>它返回的是**一段带引用的回答**而不是结果列表，所以「摘要」取回答正文本身，
+     * URL 取 {@code citations} 里的条目 —— 那些才是可点开核对的来源。
+     */
+    private static List<Hit> perplexity(String query, int wanted, String key, SessionConfig config)
+            throws Exception {
+        HttpURLConnection connection = postJson("https://api.perplexity.ai/chat/completions",
+                config.webTimeoutMs, "authorization", "Bearer " + key);
+        writeBody(connection, new JSONObject()
+                .put("model", option(config, "model", "sonar"))
+                .put("messages", new JSONArray().put(new JSONObject()
+                        .put("role", "user")
+                        .put("content", query))));
+        return WebSearchJson.parsePerplexity(readJson(connection), wanted);
+    }
+
+    /** LinkUp：{@code POST https://api.linkup.so/v1/search}，可配 {@code depth}。 */
+    private static List<Hit> linkup(String query, int wanted, String key, SessionConfig config)
+            throws Exception {
+        HttpURLConnection connection = postJson("https://api.linkup.so/v1/search",
+                config.webTimeoutMs, "authorization", "Bearer " + key);
+        writeBody(connection, new JSONObject()
+                .put("q", query)
+                .put("depth", option(config, "depth", "standard"))
+                .put("outputType", "searchResults"));
+        return WebSearchJson.parseLinkup(readJson(connection));
+    }
+
+    /**
+     * Jina Reader 的检索接口：{@code GET https://s.jina.ai/?q=}，返回 Markdown 文本。
+     *
+     * <p>它是**纯文本**返回（不是 JSON），所以这里不解析结构，而是把它整段当作
+     * 一条「摘要」交给模型 —— 与其它服务的形态不同，这是它本身的接口形态决定的。
+     */
+    private static List<Hit> jina(String query, int wanted, String key, SessionConfig config)
+            throws Exception {
+        String url = "https://s.jina.ai/?q=" + URLEncoder.encode(query, "UTF-8");
+        HttpURLConnection connection = getJson(url, config.webTimeoutMs,
+                "authorization", "Bearer " + key);
+        return WebSearchJson.parsePlainText(readLimited(connection, MAX_RESPONSE_BYTES));
+    }
+
+    /** Firecrawl：{@code POST https://api.firecrawl.dev/v1/search}。 */
+    private static List<Hit> firecrawl(String query, int wanted, String key, SessionConfig config)
+            throws Exception {
+        HttpURLConnection connection = postJson("https://api.firecrawl.dev/v1/search",
+                config.webTimeoutMs, "authorization", "Bearer " + key);
+        writeBody(connection, new JSONObject()
+                .put("query", query)
+                .put("limit", wanted));
+        return WebSearchJson.parseFirecrawl(readJson(connection));
+    }
+
+    /** 博查：{@code POST https://api.bochaai.com/v1/web-search}，可选 AI 摘要。 */
+    private static List<Hit> bocha(String query, int wanted, String key, SessionConfig config)
+            throws Exception {
+        HttpURLConnection connection = postJson("https://api.bochaai.com/v1/web-search",
+                config.webTimeoutMs, "authorization", "Bearer " + key);
+        writeBody(connection, new JSONObject()
+                .put("query", query)
+                .put("count", wanted)
+                .put("summary", optionBool(config, "summary", false)));
+        return WebSearchJson.parseBocha(readJson(connection));
+    }
+
+    /** 秘塔：{@code POST https://metaso.cn/api/v1/search}。 */
+    private static List<Hit> metaso(String query, int wanted, String key, SessionConfig config)
+            throws Exception {
+        HttpURLConnection connection = postJson("https://metaso.cn/api/v1/search",
+                config.webTimeoutMs, "authorization", "Bearer " + key);
+        writeBody(connection, new JSONObject()
+                .put("q", query)
+                .put("scope", "webpage")
+                .put("includeSummary", false)
+                .put("size", String.valueOf(wanted)));
+        return WebSearchJson.parseMetaso(readJson(connection));
+    }
+
+    /** 智谱：{@code POST https://open.bigmodel.cn/api/paas/v4/tools}，{@code web_search} 工具。 */
+    private static List<Hit> zhipu(String query, int wanted, String key, SessionConfig config)
+            throws Exception {
+        HttpURLConnection connection = postJson("https://open.bigmodel.cn/api/paas/v4/tools",
+                config.webTimeoutMs, "authorization", "Bearer " + key);
+        writeBody(connection, new JSONObject()
+                .put("tool", "web-search-pro")
+                .put("messages", new JSONArray().put(new JSONObject()
+                        .put("role", "user")
+                        .put("content", query))));
+        return WebSearchJson.parseZhipu(readJson(connection), wanted);
+    }
+
+    /**
+     * SearXNG：{@code GET {实例}/search?q=&format=json}。实例必须开启 JSON 输出
+     * （{@code search.formats} 里要有 json），否则拿到的是 HTML 页、解析为 0 条 ——
+     * 报错里要提示这一层，否则用户只会看到「搜不到」。
      */
     private static List<Hit> searxng(String query, int wanted, String base, int timeout)
             throws Exception {
-        String url = base + "/search?q=" + URLEncoder.encode(query, "UTF-8")
-                + "&format=json";
+        String url = base + "/search?q=" + URLEncoder.encode(query, "UTF-8") + "&format=json";
+        List<Hit> hits = WebSearchJson.parseSearxng(readJson(getJson(url, timeout, null, null)));
+        if (hits.isEmpty()) {
+            throw new IllegalStateException(
+                    "实例返回了 0 条结果 —— 多数是实例没开 JSON 输出（settings.yml 里启用 formats: [json]）");
+        }
+        return hits;
+    }
+
+    /**
+     * 自定义 HTTP 检索（对应 RikkaHub 的「Custom JS」，见 SearchServiceType 的说明）。
+     *
+     * <p>不做代码执行，只做模板替换 + JSON 路径取值：
+     * {@code %s} 是查询词、{@code %d} 是条数；结果数组与三个字段名都由用户指定。
+     * 这样既覆盖了自建/内部检索 API，又不需要引入 JS 引擎。
+     */
+    private static List<Hit> customHttp(String query, int wanted, SessionConfig config)
+            throws Exception {
+        String template = option(config, "urlTemplate", "");
+        if (template.isEmpty()) {
+            throw new IllegalStateException(
+                    "未配置检索地址模板，请到 设置 → 联网搜索 → 搜索服务 里填写");
+        }
+        String url = String.format(java.util.Locale.US, template,
+                URLEncoder.encode(query, "UTF-8"), wanted);
+        HttpURLConnection connection = getJson(url, config.webTimeoutMs, null, null);
+        String headers = option(config, "headers", "");
+        if (!headers.isEmpty()) {
+            JSONObject obj = new JSONObject(headers);
+            for (java.util.Iterator<String> it = obj.keys(); it.hasNext(); ) {
+                String name = it.next();
+                connection.setRequestProperty(name, obj.optString(name, ""));
+            }
+        }
+        return WebSearchJson.parseCustom(
+                readJsonAllowArray(connection),
+                option(config, "itemsPath", ""),
+                option(config, "titlePath", "title"),
+                option(config, "urlPath", "url"),
+                option(config, "textPath", ""));
+    }
+
+    /**
+     * GET + JSON 头（可选鉴权头）。
+     *
+     * <p>{@code authHeader} 为 null 时不设鉴权 —— SearXNG 与自定义 HTTP 都可能
+     * 不需要它，硬塞一个空 {@code Authorization} 反而会被某些实例拒绝。
+     */
+    private static HttpURLConnection getJson(String url, int timeout,
+                                            String authHeader, String authValue)
+            throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         connection.setConnectTimeout(timeout);
         connection.setReadTimeout(timeout);
         connection.setRequestProperty("accept", "application/json");
-        List<Hit> hits = WebSearchJson.parseSearxng(readJson(connection));
-        if (hits.isEmpty()) {
-            throw new IllegalStateException(
-                    "实例返回了 0 条结果 —— 多数是实例没开 JSON 输出（settings 里启用 format=json）");
+        if (authHeader != null && authValue != null) {
+            connection.setRequestProperty(authHeader, authValue);
         }
-        return hits;
+        return connection;
     }
 
     /** POST JSON 请求的公共前缀（超时 / 头）；鉴权头各家不同，由调用方传。 */
@@ -336,11 +525,30 @@ public final class WebSearchTool implements ZhiTool {
 
     /** 读整个响应体并解析成 JSON；非 2xx 直接带状态码报错（错误体对模型没有价值）。 */
     private static JSONObject readJson(HttpURLConnection connection) throws Exception {
+        return new JSONObject(readJsonText(connection));
+    }
+
+    /**
+     * 读 JSON，允许顶层是**数组**（自定义 HTTP 常见）。
+     *
+     * <p>包成 {@code {"items": [...]}} 再交给解析器：调用方（[WebSearchJson.parseCustom]）
+     * 只需要处理一种顶层形状，少一个分支就少一处能写错的地方。
+     */
+    private static JSONObject readJsonAllowArray(HttpURLConnection connection) throws Exception {
+        String text = readJsonText(connection);
+        String trimmed = text.trim();
+        if (trimmed.startsWith("[")) {
+            return new JSONObject().put("items", new JSONArray(trimmed));
+        }
+        return new JSONObject(trimmed);
+    }
+
+    private static String readJsonText(HttpURLConnection connection) throws Exception {
         int status = connection.getResponseCode();
         if (status < 200 || status >= 300) {
             throw new IllegalStateException("HTTP " + status);
         }
-        return new JSONObject(readLimited(connection, MAX_RESPONSE_BYTES));
+        return readLimited(connection, MAX_RESPONSE_BYTES);
     }
 
     // ------------------------------------------------------- 后端一：DuckDuckGo

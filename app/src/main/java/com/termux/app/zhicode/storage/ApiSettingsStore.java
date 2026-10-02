@@ -110,6 +110,12 @@ public final class ApiSettingsStore {
         /** 纯界面设置（不属于 SessionConfig，见 getThemeMode 的说明）。 */
         static final String THEME_MODE = "theme_mode";
 
+        /** 搜索服务列表（RikkaHub 形态：多实例 + 当前生效项）。 */
+        static final String SEARCH_SERVICES = "search_services_v1";
+        static final String ACTIVE_SEARCH_SERVICE = "active_search_service_id";
+        /** 老配置（单个 provider）迁移成服务列表的一次性标记。 */
+        static final String SEARCH_MIGRATION = "search_service_migration_v1";
+
         private Key() {}
     }
 
@@ -628,6 +634,100 @@ public final class ApiSettingsStore {
                 .edit()
                 .putBoolean(Key.TERMINAL_CHAR_MODE, enabled)
                 .apply();
+    }
+
+    // -------------------------------------------------------------- 搜索服务
+
+    /**
+     * 搜索服务列表（RikkaHub 形态）。
+     *
+     * <p>返回 {@code [服务 JSON 数组, 当前生效 id]}。刻意返回字符串而不是对象数组：
+     * 界面侧的模型在 Kotlin 包（{@code compose.model}），引擎侧不该依赖它 ——
+     * 中间这层 JSON 就是两边的契约，与 `McpConfigStore` 同一个做法。
+     */
+    public static String[] readSearchServices(Context context) {
+        if (context == null) return new String[]{"[]", ""};
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        android.content.SharedPreferences prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        return new String[]{
+                prefs.getString(Key.SEARCH_SERVICES, "[]"),
+                prefs.getString(Key.ACTIVE_SEARCH_SERVICE, ""),
+        };
+    }
+
+    public static void writeSearchServices(Context context, String servicesJson, String activeId) {
+        if (context == null) return;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(Key.SEARCH_SERVICES, servicesJson == null ? "[]" : servicesJson)
+                .putString(Key.ACTIVE_SEARCH_SERVICE, activeId == null ? "" : activeId)
+                .apply();
+    }
+
+    public static boolean isSearchMigrationDone(Context context) {
+        if (context == null) return true;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        return app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(Key.SEARCH_MIGRATION, false);
+    }
+
+    public static void markSearchMigrationDone(Context context) {
+        if (context == null) return;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(Key.SEARCH_MIGRATION, true)
+                .apply();
+    }
+
+    /**
+     * 某条搜索服务的密钥（**加密**存放，按 service id 分槽）。
+     *
+     * <p>槽名带 {@code search:} 命名空间：搜索服务 id 与 API 配置 id 都在同一份
+     * 加密存储里，没有前缀迟早会撞。
+     */
+    public static void setSearchServiceKey(Context context, String serviceId, String value) {
+        if (context == null || isBlank(serviceId)) return;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        try {
+            new com.termux.app.zhicode.security.AndroidSecretStore(app)
+                    .setApiKey(searchSlot(serviceId), 0, trimToEmpty(value));
+        } catch (Exception ignored) {
+            // 与其它调用点一致：加密不可用时不抛给界面，读回空值即可。
+        }
+    }
+
+    public static String getSearchServiceKey(Context context, String serviceId) {
+        if (context == null || isBlank(serviceId)) return "";
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        try {
+            return trimToEmpty(new com.termux.app.zhicode.security.AndroidSecretStore(app)
+                    .getApiKey(searchSlot(serviceId), 0));
+        } catch (RuntimeException failure) {
+            return "";
+        }
+    }
+
+    public static void removeSearchServiceKey(Context context, String serviceId) {
+        if (context == null || isBlank(serviceId)) return;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        try {
+            new com.termux.app.zhicode.security.AndroidSecretStore(app)
+                    .removeApiKey(searchSlot(serviceId), 0);
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private static String searchSlot(String serviceId) {
+        return "search:" + serviceId.trim();
     }
 
     // ------------------------------------------------------------ 全局字段读写

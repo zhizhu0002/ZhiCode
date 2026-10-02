@@ -36,6 +36,8 @@ public final class WebSearchBackendTest {
             "app/src/main/java/com/termux/app/zhicode/model/SessionConfig.java";
     private static final String CONTROLLER =
             "app/src/main/java/com/zhizhu/zhicode/compose/engine/ZhiEngineController.kt";
+    private static final String SEARCH_PAGE =
+            "app/src/main/java/com/zhizhu/zhicode/compose/ui/dialogs/SearchServicesOverlay.kt";
     private static final String VM =
             "app/src/main/java/com/zhizhu/zhicode/compose/state/WorkspaceViewModel.kt";
 
@@ -84,16 +86,32 @@ public final class WebSearchBackendTest {
         require(sqModels.contains("webSearchKeys:Map<WebSearchProvider,String>"),
                 MODELS + " 必须按服务各存一份 Key：单一 Key 字段会在切换服务时互相覆盖");
 
-        // ---- 2. 设置页：条件输入框 + 标题 1-50 ------------------------------
-        require(squash(dialog).contains("title=\"搜索服务\""),
-                DIALOG + " 必须有「搜索服务」选择项（RikkaHub 形态）");
-        require(dialog.contains("needsKey") && dialog.contains("needsBaseUrl"),
-                DIALOG + " 必须按 needsKey/needsBaseUrl 条件渲染 Key / 实例地址输入框："
-                        + "固定显示会让所有服务都带着无关输入框");
-        require(dialog.contains("webSearchKeys[draft.webSearchProvider]"),
-                DIALOG + " 的 Key 输入框必须读写当前选中服务的条目（切换服务不丢）");
+        // ---- 2. 设置页只留入口；字段渲染在独立的服务页 ----------------------
+        //
+        // ⚠️ 这一版把「设置页里一个下拉 + 一个 Key 框」换成了 RikkaHub 形态的
+        // **独立整页**（多服务列表 + 每服务专属选项）。所以旧断言（"设置页必须按
+        // needsKey 渲染 Key 框"）已经过期 —— 守的不变量换成下面三条。
+        require(squash(dialog).contains("onClick={onNavigate(\"searchServices\")}"),
+                DIALOG + " 必须留「搜索服务」入口行（指向独立整页）："
+                        + "服务列表与每服务选项都在那一页里");
         require(dialog.contains("默认搜索结果数（1-50）"),
                 DIALOG + " 的结果数标题必须与实际上限一致（1-50）");
+
+        // 服务页按类型声明渲染字段（而不是每种类型一段 if），并按需显示 Key / 地址。
+        String overlay = stripComments(read(root, SEARCH_PAGE));
+        require(squash(overlay).contains("draft.type.fields.forEach"),
+                SEARCH_PAGE + " 必须按服务类型声明渲染字段（type.fields.forEach）："
+                        + "每加一家服务都要在这里再写一段 if 的话，迟早会漏");
+        require(overlay.contains("SearchFieldName.API_KEY"),
+                SEARCH_PAGE + " 的 Key 输入框必须按字段名判断（API_KEY）");
+        require(overlay.contains("field.options"), 
+                SEARCH_PAGE + " 必须支持「只能选几个值」的字段（depth / topic 用下拉）");
+
+        // 列表 + 当前生效项 + 增删改选：RikkaHub 那套交互必须有。
+        for (String op : new String[]{"onSelect", "onEdit", "onDelete", "onNew"}) {
+            require(overlay.contains(op),
+                    SEARCH_PAGE + " 缺少 " + op + " —— 服务列表必须具备增删改与「设为当前」");
+        }
 
         // ---- 3. 工具：上限、分发、互斥、缺配置报错 ---------------------------
         require(sqTool.contains("MAX_RESULTS=50"),
@@ -112,8 +130,12 @@ public final class WebSearchBackendTest {
                         + "不能掉进 auto 的免费回落里");
         require(tool.contains("requireKey(") && tool.contains("设置 → 联网搜索 → 搜索服务"),
                 TOOL + " 缺 Key 时必须报错并指路设置页，而不是静默回落免费后端");
-        // 解析层独立成类（无 android import），四家都有。
-        for (String parser : new String[]{"parseTavily", "parseExa", "parseBrave", "parseSearxng"}) {
+        // 解析层独立成类（无 android import，可 JVM 单测），每家一个解析器。
+        for (String parser : new String[]{
+                "parseTavily", "parseExa", "parseBrave", "parseSearxng",
+                "parsePerplexity", "parseLinkup", "parseFirecrawl",
+                "parseBocha", "parseMetaso", "parseZhipu",
+                "parsePlainText", "parseCustom"}) {
             require(json.contains(parser), JSON + " 缺少解析器 " + parser);
         }
 
@@ -132,5 +154,27 @@ public final class WebSearchBackendTest {
                 VM + " 的协议映射必须覆盖新服务");
         require(vm.contains("webSearchKeys[s.settings.webSearchProvider]"),
                 VM + " 必须取**当前选中服务**的 Key：发错服务的 Key 比不发更糟");
+
+        // ---- 5. 生效服务必须真的送到引擎（RikkaHub 形态的关键接线）---------
+        //
+        // 「列表里能切、实际请求还用老配置」是这次改造最容易出的问题：
+        // 服务页一切正常、守卫也全绿，只有发出去的请求还是旧后端。
+        require(vm.contains("SearchServiceStore.active(getApplication())"),
+                VM + " 的 engineOverrides 必须读**当前生效**的搜索服务："
+                        + "读不到的话，用户在列表里切来切去，实际发出去还是旧配置");
+        require(squash(vm).contains("webSearchProvider=activeService?.type?.name?.lowercase()"),
+                VM + " 必须把生效服务的类型名作为 provider 下发："
+                        + "服务类型的小写名就是引擎侧的 provider（见 WebSearchTool.providerName）");
+        require(vm.contains("webSearchServiceConfig"),
+                VM + " 必须把每服务选项（depth/topic/…）下发给引擎："
+                        + "只下发 provider 名的话，用户在编辑页填的选项全部无效");
+        require(vm.contains("getSearchServiceKey(getApplication(), it.id)"),
+                VM + " 必须取**生效服务那条记录**的密钥（按 id，不能按类型）："
+                        + "同一种类型可以配多条（比如两个 SearXNG 实例）");
+
+        // 切换服务之后要立刻生效，不等下一次进设置。
+        require(vm.contains("syncSearchServiceToEngine()"),
+                VM + " 在选择/保存/删除搜索服务之后必须重新下发配置："
+                        + "否则用户切了服务却要等下一次发消息才生效（而界面已经显示「使用中」）");
     }
 }

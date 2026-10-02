@@ -5,6 +5,7 @@ import com.zhizhu.zhicode.compose.ui.debug.UiDebugPage
 import com.zhizhu.zhicode.compose.ui.debug.ZhiDebugHud
 import com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.McpConfigOverlay
+import com.zhizhu.zhicode.compose.ui.dialogs.SearchServicesOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.MemoryOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.RoleCardsOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.SkillsOverlay
@@ -36,6 +37,7 @@ import com.zhizhu.zhicode.compose.theme.LocalZhiDark
 import com.zhizhu.zhicode.compose.theme.zhiTextStyles
 import com.zhizhu.zhicode.compose.model.ApiConfigState
 import com.zhizhu.zhicode.compose.model.McpConfigState
+import com.zhizhu.zhicode.compose.model.SearchServicesState
 import com.zhizhu.zhicode.compose.model.SkillsState
 import com.zhizhu.zhicode.compose.model.RoleCardsState
 import com.zhizhu.zhicode.compose.model.MemoryState
@@ -119,6 +121,7 @@ private fun ZhiCodeScreen(
     var lastSettingsDraft by remember { mutableStateOf<SettingsDraft?>(null) }
     var lastApiConfig by remember { mutableStateOf<ApiConfigState?>(null) }
     var lastMcpConfig by remember { mutableStateOf<McpConfigState?>(null) }
+    var lastSearchServices by remember { mutableStateOf<SearchServicesState?>(null) }
     var lastSkills by remember { mutableStateOf<SkillsState?>(null) }
     var lastRoleCards by remember { mutableStateOf<RoleCardsState?>(null) }
     var lastMemory by remember { mutableStateOf<MemoryState?>(null) }
@@ -131,6 +134,8 @@ private fun ZhiCodeScreen(
     lastApiConfig = apiUi
     val mcpUi = state.mcpConfig ?: lastMcpConfig
     lastMcpConfig = mcpUi
+    val searchServicesUi = state.searchServices ?: lastSearchServices
+    lastSearchServices = searchServicesUi
     val skillsUi = state.skills ?: lastSkills
     lastSkills = skillsUi
     val roleCardsUi = state.roleCards ?: lastRoleCards
@@ -180,6 +185,7 @@ private fun ZhiCodeScreen(
             when {
                 state.apiConfig != null -> add(SettingsKey.Api)
                 state.mcpConfig != null -> add(SettingsKey.Mcp)
+                state.searchServices != null -> add(SettingsKey.Search)
                 state.skills != null -> add(SettingsKey.Skills)
                 state.roleCards != null -> add(SettingsKey.RoleCards)
                 state.memory != null -> add(SettingsKey.Memory)
@@ -233,6 +239,8 @@ private fun ZhiCodeScreen(
                 state.uiDebugOpen -> viewModel.closeUiDebug()
                 state.apiConfig != null -> viewModel.closeApiConfig()
                 state.mcpConfig != null -> viewModel.closeMcpConfig()
+                state.searchServices != null -> viewModel.closeSearchServices()
+                state.searchServices != null -> viewModel.closeSearchServices()
                 state.skills != null -> viewModel.closeSkills()
                 state.roleCards != null -> viewModel.closeRoleCards()
                 state.memory != null -> viewModel.closeMemory()
@@ -361,6 +369,19 @@ private fun ZhiCodeScreen(
                 onCancelForm = viewModel::cancelApiProfileForm,
             )
         }
+        entry<SettingsKey.Search>(swipeDismiss = swipeBack) {
+            SearchServicesOverlay(
+                state = searchServicesUi,
+                onDismiss = viewModel::closeSearchServices,
+                onNew = viewModel::newSearchService,
+                onEdit = viewModel::editSearchService,
+                onSelect = viewModel::selectSearchService,
+                onDelete = viewModel::deleteSearchService,
+                onDraftChange = viewModel::updateSearchServiceDraft,
+                onSave = viewModel::saveSearchService,
+                onCancelForm = viewModel::cancelSearchServiceForm,
+            )
+        }
         entry<SettingsKey.Mcp>(swipeDismiss = swipeBack) {
             McpConfigOverlay(
                 config = mcpUi,
@@ -471,6 +492,7 @@ private sealed interface SettingsKey : NavKey {
     data object Hub : SettingsKey
     data object Api : SettingsKey
     data object Mcp : SettingsKey
+    data object Search : SettingsKey
     data object Skills : SettingsKey
     data object RoleCards : SettingsKey
     data object Memory : SettingsKey

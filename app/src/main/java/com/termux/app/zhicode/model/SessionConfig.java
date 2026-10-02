@@ -99,12 +99,27 @@ public final class SessionConfig {
     // ------------------------------------------------------------ 联网工具
 
     public boolean webSearchEnabled = true;
+    /**
+     * 搜索后端。取值见 {@code WebSearchTool.providerName}：免费后端是
+     * {@code auto} / {@code duckduckgo} / {@code bing}，其余是**服务类型的小写名**
+     * （{@code tavily} / {@code searxng} / {@code custom_http} …）。
+     */
     public String webSearchProvider = "auto";
     public int webSearchMaxResults = 6;
-    /** 密钥制搜索服务（tavily/exa/brave）的 Key；免费后端忽略。 */
+    /** 密钥制搜索服务（tavily/exa/brave…）的 Key；免费后端忽略。 */
     public String webSearchApiKey = "";
-    /** SearXNG 实例地址；只有 provider=searxng 用到。 */
+    /** 兼容字段：SearXNG 实例地址（也等价于 config 里的 baseUrl）。 */
     public String webSearchBaseUrl = "";
+    /**
+     * 当前生效搜索服务的**每服务选项**（JSON 对象，如
+     * {@code {"depth":"advanced","topic":"news","language":"zh-CN"}}）。
+     *
+     * <p>为什么是一个 JSON 串而不是几个具名字段：每家的选项不同（Tavily 有
+     * depth/topic，LinkUp 只有 depth，SearXNG 有 language…），把并集做成字段会让
+     * SessionConfig 长出一堆只对一家有意义的属性，而新增一家又要改这个类。
+     * 这里是**透传**：界面按服务类型声明字段、工具按服务类型读字段。
+     */
+    public String webSearchServiceConfig = "";
     public int webFetchMaxChars = 30000;
     public int webTimeoutMs = 15000;
 
@@ -170,6 +185,7 @@ public final class SessionConfig {
         copy.webSearchMaxResults = webSearchMaxResults;
         copy.webSearchApiKey = webSearchApiKey;
         copy.webSearchBaseUrl = webSearchBaseUrl;
+        copy.webSearchServiceConfig = webSearchServiceConfig;
         copy.webFetchMaxChars = webFetchMaxChars;
         copy.webTimeoutMs = webTimeoutMs;
 

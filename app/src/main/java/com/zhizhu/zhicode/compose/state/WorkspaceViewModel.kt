@@ -82,6 +82,10 @@ import com.zhizhu.zhicode.compose.model.SkillFileDraft
 import com.zhizhu.zhicode.compose.model.SkillScope
 import com.zhizhu.zhicode.compose.model.SkillUrlDraft
 import com.zhizhu.zhicode.compose.model.SkillsState
+import com.zhizhu.zhicode.compose.data.SearchServiceStore
+import com.zhizhu.zhicode.compose.model.SearchFieldName
+import com.zhizhu.zhicode.compose.model.SearchService
+import com.zhizhu.zhicode.compose.model.SearchServiceDraft
 import com.zhizhu.zhicode.compose.model.SettingsDraft
 import com.zhizhu.zhicode.compose.model.SlashCommand
 import com.zhizhu.zhicode.compose.model.ThemeMode
@@ -1723,6 +1727,16 @@ class WorkspaceViewModel(
      */
     private fun engineOverrides(): EngineOverrides {
         val s = _state.value
+        // 搜索后端：**有生效的服务就用它**，否则回落到免费后端（auto）。
+        //
+        // 这是这次改造的关键接线：搜索服务页是"多服务列表 + 当前生效项"，
+        // 而引擎只认「一个 provider + 一份配置」。同步一次之后两边就一致了 ——
+        // 缺了这一段，用户在列表里切来切去，实际发出去的还是老配置（而界面不会报错）。
+        val activeService = runCatching { SearchServiceStore.active(getApplication()) }.getOrNull()
+        val serviceKey = activeService?.let {
+            runCatching { ApiSettingsStore.getSearchServiceKey(getApplication(), it.id) }.getOrDefault("")
+        }.orEmpty()
+        val legacyKey = s.settings.webSearchKeys[s.settings.webSearchProvider] ?: ""
         return EngineOverrides(
             permissionMode = s.permissionMode.toEngineMode(),
             effort = s.effort.toEngineEffort(),
@@ -1733,20 +1747,26 @@ class WorkspaceViewModel(
             autoCompact = s.settings.autoCompact,
             autoCompactPercent = s.settings.autoCompactPercent,
             webSearchEnabled = s.settings.webSearchEnabled,
-            webSearchProvider = when (s.settings.webSearchProvider) {
-                WebSearchProvider.AUTO -> "auto"
-                WebSearchProvider.DUCKDUCKGO -> "duckduckgo"
-                WebSearchProvider.BING -> "bing"
-                WebSearchProvider.TAVILY -> "tavily"
-                WebSearchProvider.EXA -> "exa"
-                WebSearchProvider.BRAVE -> "brave"
-                WebSearchProvider.SEARXNG -> "searxng"
-            },
+            // 服务类型的小写名就是引擎侧的 provider（见 WebSearchTool.providerName）。
+            webSearchProvider = activeService?.type?.name?.lowercase()
+                ?: when (s.settings.webSearchProvider) {
+                    WebSearchProvider.AUTO -> "auto"
+                    WebSearchProvider.DUCKDUCKGO -> "duckduckgo"
+                    WebSearchProvider.BING -> "bing"
+                    WebSearchProvider.TAVILY -> "tavily"
+                    WebSearchProvider.EXA -> "exa"
+                    WebSearchProvider.BRAVE -> "brave"
+                    WebSearchProvider.SEARXNG -> "searxng"
+                },
             webSearchMaxResults = s.settings.webSearchMaxResults,
             webTimeoutSec = s.settings.webSearchTimeoutSec,
-            // 密钥只发给**当前选中**的服务；切换服务时各自取各自的 Key，不串。
-            webSearchApiKey = s.settings.webSearchKeys[s.settings.webSearchProvider] ?: "",
-            webSearchBaseUrl = s.settings.webSearchSearxngUrl,
+            // 密钥取**生效服务**的那一份；没有服务时回落到老配置的单键。
+            webSearchApiKey = if (activeService != null) serviceKey else legacyKey,
+            webSearchBaseUrl = activeService?.config?.get(SearchFieldName.BASE_URL)
+                ?: s.settings.webSearchSearxngUrl,
+            webSearchServiceConfig = activeService?.config?.let { config ->
+                runCatching { org.json.JSONObject(config.toMap()).toString() }.getOrDefault("")
+            } ?: "",
             rootExecutionEnabled = s.settings.rootExecutionEnabled,
             sandboxAgentFullAccess = s.settings.sandboxAgentFullAccess,
             forcedKeepAliveEnabled = s.settings.forcedKeepAliveEnabled,
@@ -2823,6 +2843,124 @@ class WorkspaceViewModel(
     }
 
     fun closeApiConfig() = _state.update { it.copy(apiConfig = null) }
+
+    // ---------------------------------------------------------------- 搜索服务
+
+    /**
+     * 打开「搜索服务」页（形态对齐 RikkaHub：多服务列表 + 当前生效项）。
+     *
+     * 与 [openApiConfig] 同一套页面栈规矩：设置主页垫在底下，返回才有回退目标。
+     */
+    fun openSearchServices() {
+        hideSidebarForNavigation()
+        viewModelScope.launch(Dispatchers.IO) {
+            // 先把老版「单个 provider」迁成一条服务，否则老用户的配置会在这次打开时
+            // 看起来"全都消失了"（列表空、而搜索也回落到免费后端）。
+            SearchServiceStore.migrateLegacyIfNeeded(
+                getApplication(),
+                _state.value.settings.webSearchProvider,
+                _state.value.settings.webSearchSearxngUrl,
+                _state.value.settings.webSearchKeys[_state.value.settings.webSearchProvider].orEmpty(),
+            )
+            val services = SearchServiceStore.read(getApplication())
+            _state.update {
+                it.copy(
+                    searchServices = services,
+                    settingsOpen = true,
+                    settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+                )
+            }
+        }
+    }
+
+    fun closeSearchServices() = _state.update { it.copy(searchServices = null) }
+
+    /** 编辑页返回：只关表单、留在列表（与 API/MCP 页的 cancelForm 同一语义）。 */
+    fun cancelSearchServiceForm() = _state.update {
+        it.copy(searchServices = it.searchServices?.copy(form = null))
+    }
+
+    fun newSearchService() = _state.update {
+        it.copy(searchServices = it.searchServices?.copy(form = SearchServiceDraft.blank()))
+    }
+
+    fun editSearchService(service: SearchService) = _state.update {
+        it.copy(searchServices = it.searchServices?.copy(form = SearchServiceDraft.from(service)))
+    }
+
+    fun updateSearchServiceDraft(transform: (SearchServiceDraft) -> SearchServiceDraft) = _state.update {
+        it.copy(searchServices = it.searchServices?.copy(form = transform(it.searchServices.form ?: SearchServiceDraft.blank())))
+    }
+
+    fun saveSearchService() {
+        val draft = _state.value.searchServices?.form ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = SearchServiceStore.save(getApplication(), draft)
+            result.fold(
+                onSuccess = {
+                    val services = SearchServiceStore.read(getApplication())
+                    _state.update { s ->
+                        s.copy(
+                            searchServices = services,
+                            message = "已保存搜索服务：${draft.name}",
+                            messageIsError = false,
+                        )
+                    }
+                    syncSearchServiceToEngine()
+                },
+                onFailure = { failure ->
+                    _state.update {
+                        it.copy(message = failure.message ?: "保存失败", messageIsError = true)
+                    }
+                },
+            )
+        }
+    }
+
+    fun selectSearchService(serviceId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            SearchServiceStore.select(getApplication(), serviceId).fold(
+                onSuccess = {
+                    val services = SearchServiceStore.read(getApplication())
+                    val name = services.services.firstOrNull { it.id == serviceId }?.name.orEmpty()
+                    _state.update {
+                        it.copy(searchServices = services, message = "搜索服务已切换：$name", messageIsError = false)
+                    }
+                    syncSearchServiceToEngine()
+                },
+                onFailure = {
+                    _state.update { s -> s.copy(message = "切换失败", messageIsError = true) }
+                },
+            )
+        }
+    }
+
+    fun deleteSearchService(serviceId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            SearchServiceStore.delete(getApplication(), serviceId).fold(
+                onSuccess = {
+                    val services = SearchServiceStore.read(getApplication())
+                    _state.update {
+                        it.copy(searchServices = services, message = "已删除搜索服务", messageIsError = false)
+                    }
+                    syncSearchServiceToEngine()
+                },
+                onFailure = {
+                    _state.update { s -> s.copy(message = "删除失败", messageIsError = true) }
+                },
+            )
+        }
+    }
+
+    /**
+     * 把「当前生效的搜索服务」推给引擎。
+     *
+     * 与 [syncActiveProfile] 同一类操作：切换服务之后下一次请求就该走新服务，
+     * 而不是等用户再进一次设置。
+     */
+    private fun syncSearchServiceToEngine() {
+        runCatching { engine.configure(engineOverrides()) }
+    }
 
     /** 新增：给一张空表单。 */
     fun newApiProfile() = _state.update {
@@ -4316,6 +4454,7 @@ class WorkspaceViewModel(
             "apiProfiles" -> openApiConfig()
             "mcp" -> openMcpConfig()
             "skills" -> openSkills()
+            "searchServices" -> openSearchServices()
             "roleCards" -> openRoleCards()
             "memory" -> openMemory()
             "uiDebug" -> openUiDebug()

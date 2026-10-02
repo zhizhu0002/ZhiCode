@@ -403,6 +403,12 @@ data class WorkspaceUiState(
     /** 非空即 API 配置窗口打开（列表或编辑表单）。 */
     val apiConfig: com.zhizhu.zhicode.compose.model.ApiConfigState? = null,
     val mcpConfig: com.zhizhu.zhicode.compose.model.McpConfigState? = null,
+    /**
+     * 非空即「搜索服务」整页打开（RikkaHub 形态：多服务列表 + 当前生效项）。
+     *
+     * 与 [apiConfig] 平级：两者都是「列表 + 编辑表单」的两级页面，走同一套页面栈规矩。
+     */
+    val searchServices: com.zhizhu.zhicode.compose.model.SearchServicesState? = null,
     val skills: com.zhizhu.zhicode.compose.model.SkillsState? = null,
     val roleCards: com.zhizhu.zhicode.compose.model.RoleCardsState? = null,
     val memory: com.zhizhu.zhicode.compose.model.MemoryState? = null,
