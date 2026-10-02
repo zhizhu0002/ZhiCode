@@ -75,4 +75,28 @@ public final class ApiEndpointResolver {
         boolean versioned = base.toLowerCase(Locale.US).endsWith("/" + VERSION_SEGMENT);
         return versioned ? base + "/" + path : base + "/" + VERSION_SEGMENT + "/" + path;
     }
+
+    /**
+     * 会话端点（{@code chat/completions} / {@code responses} / {@code messages}
+     * 这类 POST 端点）。
+     *
+     * <p>比模型目录多一层宽容：用户除了 {@code https://host} 与
+     * {@code https://host/v1} 两种习惯之外，还会把**完整端点**整个粘进来。
+     * 三种写法必须得到同一个地址，否则就是 404。
+     *
+     * <p>这条去重规则原先只长在 chat 端点上；responses 与 messages 各自
+     * 直接拼 {@code /v1/...}，用户 base 里带了 {@code /v1} 就会拼出
+     * {@code /v1/v1/responses} —— 实测表现是「同一份配置，chat 能通、
+     * responses/anthropic 全 404」。收编到这里之后，新协议没有机会再漏。
+     *
+     * @param leafPath 带前导斜杠的端点叶子，如 {@code "/responses"}
+     * @param versioned 该端点是否带 {@code /v1} 版本段（codex 变体不带）
+     */
+    static String sessionEndpoint(String baseUrl, String leafPath, boolean versioned) {
+        String base = stripTrailingSlash(baseUrl);
+        String lower = base.toLowerCase(Locale.US);
+        if (lower.endsWith(leafPath)) return base;
+        if (versioned && lower.endsWith("/" + VERSION_SEGMENT)) return base + leafPath;
+        return versioned ? base + "/" + VERSION_SEGMENT + leafPath : base + leafPath;
+    }
 }

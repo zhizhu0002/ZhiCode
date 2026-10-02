@@ -144,16 +144,12 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
      * <p>{@code /v1} 与 {@code /chat/completions} 都做去重：用户填的地址习惯不统一，
      * 而拼重的结果是 404，表现却是「模型不回复」，很难联想到是地址多了两段。
      *
-     * <p>小写化显式用 {@link Locale#ROOT}：默认 locale 下土耳其语的
-     * {@code "I".toLowerCase()} 得到的是无点的 {@code ı}，
-     * 于是一个全大写的地址会被判成「没带 /v1」而再拼一次。
+     * <p>去重规则收编在 {@link ApiEndpointResolver#sessionEndpoint} ——
+     * responses 与 messages 起初漏掉了同样的处理，实测就是 404；
+     * 三个会话端点必须共用同一条规则。
      */
     private static String chatEndpoint(String baseUrl) {
-        String base = ApiEndpointResolver.stripTrailingSlash(baseUrl);
-        String lower = base.toLowerCase(Locale.ROOT);
-        if (lower.endsWith("/chat/completions")) return base;
-        if (lower.endsWith("/v1")) return base + "/chat/completions";
-        return base + "/v1/chat/completions";
+        return ApiEndpointResolver.sessionEndpoint(baseUrl, "/chat/completions", true);
     }
 
     private static void writeRequestBody(HttpURLConnection conn, JSONObject body) throws IOException {

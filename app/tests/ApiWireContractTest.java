@@ -65,15 +65,26 @@ public final class ApiWireContractTest {
         }
 
         // ---------------------------------------------------------- 端点拼接
-        // 三家规则不同，且这个差异是有意的：Responses 有个 codex 变体不要 /v1 前缀。
-        require(anthropic.contains("\"/v1/messages\""), "Anthropic 端点必须是 base + /v1/messages");
-        require(responses.contains("\"/v1/responses\"") && responses.contains("\"/responses\""),
-                "Responses 端点必须区分标准（/v1/responses）与 codex（/responses）");
+        // 三家规则**必须相同**（Responses 的 codex 变体除外）：去重规则原先只长在
+        // chat 上，responses/messages 直接拼 /v1/...，用户 base 带 /v1 就拼出
+        // /v1/v1/...（实测 404）。现在统一收编在 ApiEndpointResolver.sessionEndpoint。
+        require(resolver.contains("sessionEndpoint"),
+                "ApiEndpointResolver 必须提供 sessionEndpoint —— 会话端点的 /v1 去重唯一出处");
+        for (String[] pair : new String[][]{{"anthropic", anthropic}, {"chat", chat},
+                {"responses", responses}}) {
+            require(pair[1].contains("ApiEndpointResolver.sessionEndpoint("),
+                    pair[0] + " 的会话端点必须走 sessionEndpoint：自己拼 /v1/... 会把"
+                            + "已带 /v1 的 base 拼成 /v1/v1/...（404）");
+        }
+        require(anthropic.contains("\"/messages\""), "Anthropic 端点叶子必须是 /messages（版本段由 sessionEndpoint 补）");
+        // Responses 的叶子统一是 /responses，标准变体的版本段用 !codex 表达；
+        // 把整条 "/v1/responses" 当叶子传进去会拼成 /v1/v1/responses（JVM 测试抓过）。
+        require(responses.contains("\"/responses\"") && responses.contains("!codex"),
+                "Responses 端点必须区分标准（带 /v1）与 codex（不带），叶子统一为 /responses");
         require(responses.contains("\"codex-responses\".equals(config.protocol)"),
                 "codex 变体必须按协议名判定");
-        // Chat 侧必须自己去掉重复的 /v1 与 /chat/completions，否则会拼出 /v1/v1/... 的 404。
-        require(chat.contains("/chat/completions") && chat.contains("\"/v1\""),
-                "Chat 端点必须能识别已带 /v1 或 /chat/completions 的 base，避免拼重");
+        require(chat.contains("/chat/completions"),
+                "Chat 端点必须以 /chat/completions 为叶子交给 sessionEndpoint 去重");
         // 模型目录端点：三种协议统一走 /v1/models，且要避免 /v1/v1/models。
         require(resolver.contains("modelCatalogEndpoint") && resolver.contains("\"v1\"")
                         && resolver.contains("\"models\""),

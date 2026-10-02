@@ -61,7 +61,8 @@ public final class AnthropicMessagesProvider implements ModelProvider {
      */
     static final String API_VERSION = "2023-06-01";
 
-    private static final String MESSAGES_PATH = "/v1/messages";
+    /** 端点叶子；{@code /v1} 版本段由 sessionEndpoint 负责（用户 base 常带 /v1）。 */
+    private static final String MESSAGES_PATH = "/messages";
     private static final String USER_AGENT = "ZhiCodeAndroid-JavaNative/0.15";
 
     /** 错误体回显上限。上游偶尔把整个 HTML 错误页塞进来，全量拼进消息会淹掉真正的信息。 */
@@ -143,7 +144,8 @@ public final class AnthropicMessagesProvider implements ModelProvider {
     }
 
     private static HttpURLConnection openConnection(String baseUrl, SessionConfig config) throws IOException {
-        String endpoint = ApiEndpointResolver.stripTrailingSlash(baseUrl) + MESSAGES_PATH;
+        // /v1 去重见 sessionEndpoint：base 里带了 /v1 就不能再拼一份（否则 404）。
+        String endpoint = ApiEndpointResolver.sessionEndpoint(baseUrl, MESSAGES_PATH, true);
         HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
         conn.setRequestMethod("POST");
         conn.setDoOutput(true);

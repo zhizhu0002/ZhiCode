@@ -174,6 +174,47 @@ public class ApiPureLogicTest {
         assertEquals("", ApiEndpointResolver.stripTrailingSlash(null));
     }
 
+    @Test
+    public void sessionEndpoint_neverDoublesVersionSegment() {
+        // 这个 bug 在 chat 端点上修过、在 responses/messages 上漏过：同一份 base，
+        // chat 能通、另两个 404（拼成了 /v1/v1/...）。三种 base 习惯必须同址。
+        for (String base : new String[]{"https://example.com", "https://example.com/v1",
+                "https://example.com/v1/"}) {
+            assertEquals("chat，base=" + base,
+                    "https://example.com/v1/chat/completions",
+                    ApiEndpointResolver.sessionEndpoint(base, "/chat/completions", true));
+            assertEquals("responses，base=" + base,
+                    "https://example.com/v1/responses",
+                    ApiEndpointResolver.sessionEndpoint(base, "/responses", true));
+            assertEquals("messages，base=" + base,
+                    "https://example.com/v1/messages",
+                    ApiEndpointResolver.sessionEndpoint(base, "/messages", true));
+        }
+    }
+
+    @Test
+    public void sessionEndpoint_fullEndpointPastedInIsUsedAsIs() {
+        // 用户会把完整端点整个粘进来，必须原样使用而不是再拼一层。
+        assertEquals("https://example.com/v1/chat/completions",
+                ApiEndpointResolver.sessionEndpoint("https://example.com/v1/chat/completions",
+                        "/chat/completions", true));
+        assertEquals("https://example.com/v1/messages",
+                ApiEndpointResolver.sessionEndpoint("https://example.com/v1/messages",
+                        "/messages", true));
+        // 大写 V1 的端点同理：判定小写化，粘贴的原串保留。
+        assertEquals("https://example.com/V1/messages",
+                ApiEndpointResolver.sessionEndpoint("https://example.com/V1/messages",
+                        "/messages", true));
+    }
+
+    @Test
+    public void sessionEndpoint_codexVariantHasNoVersionSegment() {
+        // codex 端点不带 /v1（versioned=false）：叶子路径直接拼在 base 上。
+        assertEquals("https://chatgpt.com/backend-api/codex/responses",
+                ApiEndpointResolver.sessionEndpoint("https://chatgpt.com/backend-api/codex",
+                        "/responses", false));
+    }
+
     // ============================================================ ApiUrlPolicy
 
     @Test

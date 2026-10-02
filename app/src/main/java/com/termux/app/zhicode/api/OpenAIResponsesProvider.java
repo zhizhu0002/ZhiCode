@@ -139,8 +139,11 @@ public final class OpenAIResponsesProvider implements ModelProvider {
 
     private static HttpURLConnection openConnection(String baseUrl, SessionConfig config,
                                                     boolean codex) throws IOException {
-        String path = codex ? "/responses" : "/v1/responses";
-        HttpURLConnection conn = (HttpURLConnection) new URL(ApiEndpointResolver.stripTrailingSlash(baseUrl) + path).openConnection();
+        // 端点拼接待 /v1 去重（用户 base 里常带 /v1）：见 sessionEndpoint 的说明。
+        // 叶子统一是 /responses，标准变体的 /v1 版本段由 versioned 负责 ——
+        // 这里要是传整条 "/v1/responses" 当叶子，标准分支就会拼成 /v1/v1/responses。
+        String endpoint = ApiEndpointResolver.sessionEndpoint(baseUrl, "/responses", !codex);
+        HttpURLConnection conn = (HttpURLConnection) new URL(endpoint).openConnection();
         conn.setRequestMethod("POST");
         conn.setDoOutput(true);
         conn.setUseCaches(false);
