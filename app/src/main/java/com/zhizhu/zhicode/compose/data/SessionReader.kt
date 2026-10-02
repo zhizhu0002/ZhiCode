@@ -133,11 +133,16 @@ internal object SessionReader {
                                     // 不读出来的话，恢复历史后展开一条 Bash 只能看到
                                     // `truncateCommand` 截过的摘要（前两行 + `…`）。
                                     command = input?.optString("command", "") ?: "",
+                                    // 折叠组副行/表头要用的两个字段。历史记录里
+                                    // 原始入参还在（存在 chunk 的 input 里），所以
+                                    // 从历史恢复出来的组也能算出正确的"读取 N 个文件"。
+                                    hint = ToolText.activityHint(name, input),
+                                    readRequests = ToolText.readRequestCount(name, input),
                                 )
                                 if (toolId.isNotEmpty()) toolGroupIndex[toolId] = groupIndex
                                 val group = items[groupIndex]
                                 val tools = group.tools + activity
-                                items[groupIndex] = group.copy(tools = tools, groupLabel = groupLabel(tools))
+                                items[groupIndex] = group.copy(tools = tools)
                             }
                         }
                     } else {
@@ -339,20 +344,6 @@ internal object SessionReader {
         "Edit", "MultiEdit", "Write", "Move", "Delete", "Mkdir", "Copy" -> ToolKind.EDIT
         "Bash", "Root", "BashTool" -> ToolKind.COMMAND
         else -> ToolKind.OTHER
-    }
-
-    private fun groupLabel(tools: List<ToolActivity>): String {
-        val parts = mutableListOf<String>()
-        val searches = tools.count { it.kind == ToolKind.SEARCH }
-        val reads = tools.count { it.kind == ToolKind.READ }
-        val edits = tools.count { it.kind == ToolKind.EDIT }
-        val commands = tools.count { it.kind == ToolKind.COMMAND }
-        if (searches > 0) parts += "搜索 $searches 个模式"
-        if (reads > 0) parts += "读取 $reads 个文件"
-        if (edits > 0) parts += "修改 $edits 处代码"
-        if (commands > 0) parts += "执行 $commands 条命令"
-        if (parts.isEmpty()) parts += "调用 ${tools.size} 个工具"
-        return parts.joinToString("、")
     }
 
     /**

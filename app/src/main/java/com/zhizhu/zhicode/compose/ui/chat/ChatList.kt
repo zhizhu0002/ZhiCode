@@ -36,6 +36,7 @@ import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
 import com.zhizhu.zhicode.compose.model.TaskState
+import com.zhizhu.zhicode.compose.model.ToolGrouping
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
@@ -77,7 +78,14 @@ private data class ContentStamp(
 fun ChatList(
     state: WorkspaceUiState,
     onToggleTool: (String) -> Unit,
-    onToggleGroup: (String, Boolean) -> Unit,
+    /**
+     * 展开/收起**一个折叠组**。第二个参数是那一组的 groupKey（首成员 toolId）。
+     *
+     * 以前传的是"目标状态 + 整批的成员列表"，因为展开态记在成员的 `expanded` 上；
+     * 现在分组由界面按 `ToolGrouping` 推导、展开态记在 `ChatItem.expandedGroups` 上，
+     * 所以这一层只需要说清"哪一组"。
+     */
+    onToggleGroup: (String, String) -> Unit,
     onToggleThinking: (String) -> Unit,
     onMessageActions: (ChatItem) -> Unit,
     /**
@@ -298,12 +306,14 @@ fun ChatList(
                                 onMessageActions(item)
                             },
                         )
-                        ChatKind.TOOL_GROUP -> ToolGroupCard(
+                        ChatKind.TOOL_GROUP -> ToolBatch(
                             item = shown,
                             // 传**原始** id：折叠动作要写到 state 上，用 shown 的 id 会指向同一条
                             // （id 不变），但语义上更清楚的是"动的是哪一条消息"。
                             onToggleTool = onToggleTool,
-                            onToggleGroup = { expanded -> onToggleGroup(item.id, expanded) },
+                            // 组键由界面从 toolId 推导（见 ToolGrouping），所以这里传的是
+                            // **哪一组**，而不是"整批的成员列表要收起"。
+                            onToggleGroup = { groupKey -> onToggleGroup(item.id, groupKey) },
                             // `⋯` 是**单个工具**的操作，所以传的是那一行的 id，
                             // 而不是整组（以前传整组，于是点单行弹出整组菜单）。
                             onToolAction = { toolId, label -> onToolAction(item, toolId, label) },
@@ -437,6 +447,15 @@ private fun ChatItem.fullyExpanded(): ChatItem = when (kind) {
     ChatKind.ASSISTANT -> copy(thinkingExpanded = true, streaming = streaming)
     ChatKind.TOOL_GROUP -> copy(
         groupCompleted = true,
+        // 折叠组默认收起，调试模式要把**每一组**都摊开 —— 展开态记在
+        // `expandedGroups` 上，所以这里按键集合给全（而不是像以前那样
+        // 把每个成员的 `expanded` 置真：那个标志位管的是"这条工具的输出展开"，
+        // 两件事不共用）。
+        expandedGroups = ToolGrouping
+            .group(tools.map { ToolGrouping.Entry(it.id, it.toolName) })
+            .filterIsInstance<ToolGrouping.Segment.Group>()
+            .map { it.key }
+            .toSet(),
         // 只有"已完成且有输出"的工具才有可展开的内容 —— 与卡片自身的判断保持一致，
         // 否则运行中/等待授权的行会被强行展开，露出一片空白。
         tools = tools.map { tool ->

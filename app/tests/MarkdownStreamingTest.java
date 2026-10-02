@@ -149,13 +149,15 @@ public final class MarkdownStreamingTest {
 
         String group = functionBody(cards, "fun ToolGroupCard(");
         require(!group.isEmpty(), CARDS + " 里找不到 ToolGroupCard");
-        require(squash(group).contains("if(item.groupCompleted){Modifier.animateContentSize("),
-                "ToolGroupCard 必须按 item.groupCompleted 门控 animateContentSize，"
+        require(squash(group).contains("if(done){Modifier.animateContentSize("),
+                "ToolGroupCard 必须按「**这一组自己**是否跑完」门控 animateContentSize，"
                         + "且方向是「跑完才挂」：工具输出每 200ms 冲刷一次，运行期间挂动画"
                         + "等于让整张组卡持续重测量；反过来写（跑完不挂、跑起来才挂）会让"
                         + "「点开一个已跑完的工具组」这个最常见的动作恰恰没有卡片动画 —— "
-                        + "用户看到的正是「文字没跟着卡片的动画展开/缩回」。");
-        require(!squash(group).contains("if(anyExpanded){Column(modifier=Modifier.animateContentSize("),
+                        + "用户看到的正是「文字没跟着卡片的动画展开/缩回」。"
+                        + "⚠️ 门控只能取**本组**的完成态（ToolGrouping.isDone），"
+                        + "取整批的 groupCompleted 会让同一批里已读完的那组也一直不挂动画。");
+        require(!squash(group).contains("if(expanded){Column(modifier=Modifier.animateContentSize("),
                 "ToolGroupCard 的展开列表不许再挂自己的 animateContentSize："
                         + "两层各挂一次，外框按动画高度走、内层按自己的曲线滑动，"
                         + "两者不同步就是「文字在卡片里自己飘」。高度的单一来源是卡片。");

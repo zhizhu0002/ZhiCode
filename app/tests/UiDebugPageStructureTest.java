@@ -72,7 +72,9 @@ public final class UiDebugPageStructureTest {
 
         // ---- 3. 必须真的调用生产组件 ----------------------------------------
         String[] required = {
-                "UserBubble(", "AssistantCard(", "ToolGroupCard(", "ErrorCard(", "InfoCard(",
+                // `ToolBatch` 而不是 `ToolGroupCard`：工具批次现在按分段渲染
+                // （单条扁平 / 连续 read-search ≥2 才成组），调试页要展示的是**整批**。
+                "UserBubble(", "AssistantCard(", "ToolBatch(", "ErrorCard(", "InfoCard(",
                 "EmptyState(", "AgentProgressCard(", "Composer(", "ZhiSegmentedTabs(",
                 "SettingsGroup(",
         };

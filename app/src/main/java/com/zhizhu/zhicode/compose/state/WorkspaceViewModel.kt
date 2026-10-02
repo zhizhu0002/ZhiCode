@@ -1974,7 +1974,6 @@ class WorkspaceViewModel(
                 transcript = s.transcript + ChatItem(
                     id = groupId,
                     kind = ChatKind.TOOL_GROUP,
-                    groupLabel = "",
                     tools = emptyList(),
                 ),
             )
@@ -2020,6 +2019,11 @@ class WorkspaceViewModel(
             startedAtMs = SystemClock.elapsedRealtime(),
             // 原始命令行（未截断）：折叠态用 summary，展开态要看完整的那一份。
             command = command,
+            // 折叠组副行要显示的路径/模式。规则与 `summary` **不同**（见 ToolText.activityHint），
+            // 所以在这里按参考实现的 `toolActivityHint` 算好存下来。
+            hint = ToolText.activityHint(name, input),
+            // `ReadMany` 读了几个文件 —— 组表头要按实际条数计入"读取 N 个文件"。
+            readRequests = ToolText.readRequestCount(name, input),
         )
         liveTools[id] = LiveTool(groupId, name, command)
 
@@ -2031,7 +2035,10 @@ class WorkspaceViewModel(
                     if (item.id != groupId) item
                     else {
                         val tools = item.tools + activity
-                        item.copy(tools = tools, groupLabel = groupLabel(tools))
+                        // ⚠️ 这里**不再**算一个批次级的汇总标签：一个批次里的工具会按
+                        // 连续 read/search 被切成若干段（见 `ToolGrouping`），每段自己
+                        // 带标题，批次级那个标签没有渲染位置了。
+                        item.copy(tools = tools)
                     }
                 },
                 workingStatus = "正在执行 $name…",
@@ -2502,20 +2509,6 @@ class WorkspaceViewModel(
         "Edit", "MultiEdit", "Write", "Move", "Delete", "Mkdir", "Copy" -> ToolKind.EDIT
         "Bash", "Root", "BashTool" -> ToolKind.COMMAND
         else -> ToolKind.OTHER
-    }
-
-    private fun groupLabel(tools: List<ToolActivity>): String {
-        val parts = mutableListOf<String>()
-        val searches = tools.count { it.kind == ToolKind.SEARCH }
-        val reads = tools.count { it.kind == ToolKind.READ }
-        val edits = tools.count { it.kind == ToolKind.EDIT }
-        val commands = tools.count { it.kind == ToolKind.COMMAND }
-        if (searches > 0) parts += "搜索 $searches 个模式"
-        if (reads > 0) parts += "读取 $reads 个文件"
-        if (edits > 0) parts += "修改 $edits 处代码"
-        if (commands > 0) parts += "执行 $commands 条命令"
-        if (parts.isEmpty()) parts += "调用 ${tools.size} 个工具"
-        return parts.joinToString("、")
     }
 
     private fun subtitleFor(tool: String): String = when (tool) {
@@ -4695,17 +4688,30 @@ class WorkspaceViewModel(
     }
 
     /**
-     * 批量设置工具组里各成员的展开状态。
+     * 展开/收起一个**折叠组**。
      *
-     * [collapseIds] 是**要收起的成员 id 集合**：集合内的成员收起，其余展开。
-     * 因此"全部展开"传空集，"全部收起"传全部成员 id。
+     * @param id       工具批次那一条消息的 id
+     * @param groupKey 组键 = 组内首成员的 toolId（见 [ToolGrouping.Segment.Group.key]）
+     *
+     * 记的是 [ChatItem.expandedGroups] 这份集合，而**不是**把组里每个成员的
+     * `expanded` 置真/置假 —— 成员的 `expanded` 是"这条工具的输出展开"，
+     * 两件事共用一个标志位时，点开一条工具的输出会连带把整组摊开。
+     *
+     * 组键由界面按 toolId 推导后传进来，所以这一层不需要知道"哪几条属于哪一组"。
      */
-    fun toggleGroupExpanded(id: String, collapseIds: Set<String>) {
+    fun toggleGroupExpanded(id: String, groupKey: String) {
+        if (groupKey.isEmpty()) return
         _state.update { s ->
             s.copy(
                 transcript = s.transcript.map { item ->
-                    if (item.id != id || item.kind != ChatKind.TOOL_GROUP) item
-                    else item.copy(tools = item.tools.map { it.copy(expanded = it.id !in collapseIds) })
+                    if (item.id != id || item.kind != ChatKind.TOOL_GROUP) {
+                        item
+                    } else {
+                        val open = item.expandedGroups
+                        item.copy(
+                            expandedGroups = if (groupKey in open) open - groupKey else open + groupKey,
+                        )
+                    }
                 },
             )
         }

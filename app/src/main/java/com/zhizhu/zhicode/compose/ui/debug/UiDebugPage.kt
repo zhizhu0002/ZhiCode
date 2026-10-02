@@ -78,7 +78,7 @@ import com.zhizhu.zhicode.compose.ui.chat.AssistantCard
 import com.zhizhu.zhicode.compose.ui.chat.EmptyState
 import com.zhizhu.zhicode.compose.ui.chat.ErrorCard
 import com.zhizhu.zhicode.compose.ui.chat.InfoCard
-import com.zhizhu.zhicode.compose.ui.chat.ToolGroupCard
+import com.zhizhu.zhicode.compose.ui.chat.ToolBatch
 import com.zhizhu.zhicode.compose.ui.chat.UserBubble
 import com.zhizhu.zhicode.compose.ui.composer.Composer
 import com.zhizhu.zhicode.compose.ui.rememberFingerTracker
@@ -414,16 +414,24 @@ private class DebugConversation {
         note("展开/折叠工具输出 · $toolId")
     }
 
-    fun toggleGroup(msgId: String, expanded: Boolean) {
+    /**
+     * 展开/收起一个折叠组（界面上是点组表头）。
+     *
+     * 展开态记在 `expandedGroups` 上，所以这里只改那一个集合 —— 不去动成员的
+     * `expanded`（那个管的是"这条工具的输出展开"）。顺便把整批的工具输出都摊开/收起，
+     * 因为调试页要的是"看清楚每一条"。
+     */
+    fun toggleGroup(msgId: String, groupKey: String) {
         updateMsg(msgId) { item ->
+            val open = groupKey in item.expandedGroups
             item.copy(
-                groupCompleted = expanded,
+                expandedGroups = if (open) item.expandedGroups - groupKey else item.expandedGroups + groupKey,
                 tools = item.tools.map { tool ->
-                    if (tool.completed && tool.output.isNotBlank()) tool.copy(expanded = expanded) else tool
+                    if (tool.completed && tool.output.isNotBlank()) tool.copy(expanded = !open) else tool
                 },
             )
         }
-        note(if (expanded) "展开全部工具输出" else "折叠全部工具输出")
+        note("切换折叠组 · $groupKey")
     }
 
     fun toggleImage(id: String) {
@@ -497,7 +505,6 @@ private class DebugConversation {
                     item = ChatItem(
                         id = id,
                         kind = ChatKind.TOOL_GROUP,
-                        groupLabel = "执行 1 项",
                         tools = listOf(tool),
                     ),
                 ),
@@ -507,7 +514,6 @@ private class DebugConversation {
                 item.copy(
                     tools = item.tools + tool,
                     groupCompleted = false,
-                    groupLabel = "执行 ${item.tools.size + 1} 项",
                 )
             }
         }
@@ -707,7 +713,6 @@ private fun initialSamples(): List<DebugItem> = listOf(
         item = ChatItem(
             id = "dbg-tools-0",
             kind = ChatKind.TOOL_GROUP,
-            groupLabel = "搜索 1 个模式 · 读取 2 个文件 · 编辑 2 个文件 · 执行 2 条命令",
             groupCompleted = false,
             tools = listOf(
                 ToolActivity(
@@ -843,13 +848,12 @@ private fun initialSamples(): List<DebugItem> = listOf(
             contextWindow = 200_000,
         ),
     ),
-    // 全部完成的工具组：标题走「已运行 N 个工具」那条分支，且没有运行中的行。
+    // 全部完成的工具组：组标题走「已读取 N 个文件」那条分支，且没有运行中的行。
     DebugItem.Msg(
         id = "dbg-tools-completed",
         item = ChatItem(
             id = "dbg-tools-completed",
             kind = ChatKind.TOOL_GROUP,
-            groupLabel = "读取 2 个文件 · 其他 1 项",
             groupCompleted = true,
             tools = listOf(
                 ToolActivity(
@@ -888,13 +892,12 @@ private fun initialSamples(): List<DebugItem> = listOf(
             ),
         ),
     ),
-    // 单工具组（组里只有一条）：确认"一个工具"时标题不会写成复数、卡片高度不塌。
+    // 单工具组（组里只有一条）：确认单条**不成组**时不会画出组标题、卡片高度不塌。
     DebugItem.Msg(
         id = "dbg-tools-single",
         item = ChatItem(
             id = "dbg-tools-single",
             kind = ChatKind.TOOL_GROUP,
-            groupLabel = "执行 1 条命令",
             groupCompleted = true,
             tools = listOf(
                 ToolActivity(
@@ -1941,10 +1944,10 @@ private fun ConversationSection(resetToken: Int) {
                                         feed.note("长按 · 助手回复")
                                     },
                                 )
-                                ChatKind.TOOL_GROUP -> ToolGroupCard(
+                                ChatKind.TOOL_GROUP -> ToolBatch(
                                     item = item,
                                     onToggleTool = { toolId -> feed.toggleTool(item.id, toolId) },
-                                    onToggleGroup = { expanded -> feed.toggleGroup(item.id, expanded) },
+                                    onToggleGroup = { groupKey -> feed.toggleGroup(item.id, groupKey) },
                                     onToolAction = { toolId, label ->
                                         fingerOffset = null
                                         menuFor = item.id

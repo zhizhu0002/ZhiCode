@@ -56,6 +56,22 @@ data class ToolActivity(
      * （参考实现同样是 `item.expanded ? command : truncateCommand(command)`）。
      */
     val command: String = "",
+    /**
+     * 这一条在折叠组副行里要显示的路径 / 模式（`ToolText.activityHint` 的产物）。
+     *
+     * 为什么不拿 [summary] 凑合：两者的字段回退规则是**不一样**的（`stat` 取 `path`、
+     * `ls` 的默认值是 `.`），而且 `ReadMany` 在 [summary] 里没有分支（原版也没有），
+     * 副行却要显示"第一个路径 · +N"。所以在登记工具时就按参考实现的
+     * `toolActivityHint` 算好存下来，而不是渲染时猜。
+     */
+    val hint: String = "",
+    /**
+     * `ReadMany` 这一次读了几个文件（其余工具是 0）。
+     *
+     * 组表头要把 `ReadMany` 按**它实际带了几条路径**计入"读取 N 个文件"
+     * （见 [ToolGrouping.label]）：算成 1 的话，一个读了 20 个文件的组会显示"读取 1 个文件"。
+     */
+    val readRequests: Int = 0,
 )
 
 /**
@@ -91,8 +107,22 @@ data class ChatItem(
     val thinkingExpanded: Boolean = false,
     val processSteps: List<String> = emptyList(),
     val tools: List<ToolActivity> = emptyList(),
-    val groupLabel: String = "",
+    // ⚠️ 这里**没有**批次级的汇总标签（曾经叫 `groupLabel`：「修改 1 处代码」这类）。
+    //
+    // 它没有任何渲染位置了：参考实现里，一个批次里的工具分成两种长相 ——
+    // 单个工具就是**扁平一行**（没有标题、没有徽章），只有"连续的 read/search 且 ≥2"
+    // 才折成一组，而那一组的标题直接说明干了什么（「正在搜索 2 个模式、读取 3 个文件」，
+    // 见 `ToolGrouping.label`）。留着批次级标签只会让人以为还要在哪儿画它。
     val groupCompleted: Boolean = false,
+    /**
+     * 已经展开的**折叠组**（值是 `ToolGrouping.Segment.Group.key`，即首成员的 toolId）。
+     *
+     * 为什么要单独一份，而不是像以前那样拿"组里有没有成员 `expanded`"当整组展开：
+     * 成员自己的 `expanded` 是**那条工具的输出**展开（点行尾的 `⌄`），
+     * 而这里是**整组展开**（点组表头）—— 两件事共用一个标志位时，
+     * 点开一条工具的输出会连带把整组摊开，而且收起时也不知道该收哪一层。
+     */
+    val expandedGroups: Set<String> = emptySet(),
     val contextTokens: Int = -1,
     val contextWindow: Int = 0,
     val streaming: Boolean = false,

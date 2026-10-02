@@ -127,6 +127,19 @@ public final class ToolInteractionTest {
         return text.replaceAll("\\s+", "");
     }
 
+    /**
+     * 取 `ToolBatch` 里 `Segment.Single ->` 那一段（到 `Segment.Group ->` 为止）。
+     *
+     * 用来断言"单条工具的画法里不许有卡片" —— 这条只能在那个分支里查，
+     * 整个文件里当然有 `Card(`（组卡片自己要用）。
+     */
+    private static String singleBranch(String cards) {
+        int at = cards.indexOf("Segment.Single ->");
+        if (at < 0) return "";
+        int end = cards.indexOf("Segment.Group ->", at);
+        return end < 0 ? cards.substring(at) : cards.substring(at, end);
+    }
+
     private static int countOccurrences(String text, String needle) {
         int count = 0;
         int from = 0;
@@ -205,6 +218,66 @@ public final class ToolInteractionTest {
         require(squash(chatArea).contains("applyToolAction(item.id,toolId,label)"),
                 CHAT_AREA + " 必须把**消息 id**（不是整条 ChatItem）交给 ViewModel："
                         + "VM 只需要能在 transcript 里定位目标的键");
+
+        // ---- 1b. 批次必须按"分段"渲染：单条工具是扁平行，成组才用卡片 ----
+        //
+        // 这一节钉的是那个观感差异：ZhiCode 曾经把**每个**批次套进一张
+        // 「已运行 N 个工具」卡片，于是单独一条 Bash 也被包进带标题的大卡里；
+        // 而参考实现（IQ Code）里单条工具就是一行（`addToolCard(item, destination)`），
+        // 只有"连续的 read/search 且 ≥2"才折成一张卡片（`addCollapsedToolActivity`）。
+        require(squash(cards).contains("funToolBatch("),
+                CARDS + " 必须有 ToolBatch：批次按分段渲染");
+        require(squash(chatList).contains("ChatKind.TOOL_GROUP->ToolBatch("),
+                CHAT_LIST + " 的 TOOL_GROUP 必须交给 ToolBatch（不是整批一张卡片）");
+        require(squash(cards).contains("ToolGrouping.group("),                CARDS + " 的分段必须来自 ToolGrouping.group："
+                        + "在界面里另写一套候选集/断开规则，两份迟早不一致");
+        require(squash(cards).contains("Segment.Single->"),
+                CARDS + " 必须分别处理 Single 与 Group 两种段");
+        // 单条那一段里**不许有 Card**：这是"扁平一行"与"带标题的卡片"的分界线。
+        require(!squash(singleBranch(cards)).contains("Card("),
+                CARDS + " 的 Single 分支里不许出现 Card(：单条工具就是一行，"
+                        + "套上卡片就又回到「单独一条 Bash 也被包进大卡里」那个样子了");
+        require(squash(singleBranch(cards)).contains("key(tool.id){ToolRow("),
+                CARDS + " 的 Single 分支必须 key(tool.id) { ToolRow(...) }");
+        // 通用计数标题不许回来 —— 它回答"有几个"而不是"在干什么"。
+        require(!squash(cards).contains("已运行"),
+                CARDS + " 里不许再出现「已运行 N 个工具」："
+                        + "组标题必须说明干了什么（见 ToolGrouping.label）");
+        require(!squash(cards).contains("正在运行工具"),
+                CARDS + " 里不许再出现「正在运行工具」这种通用标题");
+        require(squash(cards).contains("ToolGrouping.label(") && squash(cards).contains("ToolGrouping.subtitle("),
+                CARDS + " 的组标题与副行必须来自 ToolGrouping："
+                        + "文案与计数口径只有那一处实现（有单测）");
+        require(squash(cards).contains("ToolGrouping.isDone(") && squash(cards).contains("ToolGrouping.hasFailure("),
+                CARDS + " 的组状态必须按**这一组**算（ToolGrouping.isDone/hasFailure）："
+                        + "取整批的状态会让同批里已读完的那组一直显示「正在读取」");
+        // 判据的构造与渲染用的必须是同一份映射。
+        require(squash(cards).contains("privatefunToolActivity.toGroupingEntry()"),
+                CARDS + " 必须有一处 ToolActivity → ToolGrouping.Entry 的映射："
+                        + "hint/readRequests 要在登记工具时算好，而不是渲染时猜");
+        // 展开态不许再借成员的 expanded（那个管的是"这条工具的输出展开"）。
+        require(squash(uiModels).contains("valexpandedGroups:Set<String>=emptySet()"),
+                UI_MODELS + " 的 ChatItem 必须有 expandedGroups："
+                        + "整组展开与单行输出展开是两件事，共用一个标志位时"
+                        + "点开一条工具的输出会连带把整组摊开");
+        require(squash(vm).contains("funtoggleGroupExpanded(id:String,groupKey:String)"),
+                VM + " 的 toggleGroupExpanded 必须收 groupKey："
+                        + "分组由界面按 toolId 推导，VM 不该再算「哪几条属于哪一组」");
+        // 只查签名是弱守卫：把函数体写成"永远置空集合"同样能编译、同样能通过上面那条。
+        // 真正的契约是它必须**按 groupKey 增删**那个集合。
+        require(squash(vm).contains("expandedGroups=if(groupKeyinopen)open-groupKeyelseopen+groupKey"),
+                VM + " 的 toggleGroupExpanded 必须按 groupKey 在 expandedGroups 里增删："
+                        + "写成固定值（例如恒置空集）会编译通过、但点表头永远展不开");
+        require(!squash(vm).contains("groupLabel"),
+                VM + " 里不许再有 groupLabel：批次级汇总标签已经没有渲染位置了");
+        require(!squash(uiModels).contains("valgroupLabel:String"),
+                UI_MODELS + " 的 ChatItem 不许再有 groupLabel（死状态）");
+        // 调试模式要求"把每一组都摊开"，所以它必须按 ToolGrouping 算出组的 key 集合
+        // 塞进 expandedGroups —— 只写 `expandedGroups = emptySet()` 同样能编译，
+        // 而表现是"调试模式下折叠组全是收起的"，正是那个模式要避免的。
+        require(squash(chatList).contains("expandedGroups=ToolGrouping.group("),
+                CHAT_LIST + " 的 fullyExpanded 必须按 ToolGrouping 算出组键集合塞进 expandedGroups："
+                        + "调试模式的意义就是「没有藏起来的东西」");
 
         // ---- 2. ViewModel 侧：只有"执行"，不再有"弹菜单" ----
         require(squash(vm).contains("funapplyToolAction(itemId:String,toolId:String,label:String)"),

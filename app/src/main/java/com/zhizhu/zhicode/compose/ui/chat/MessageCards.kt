@@ -10,6 +10,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -52,6 +53,7 @@ import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ErrorSummary
 import com.zhizhu.zhicode.compose.model.ToolActivity
+import com.zhizhu.zhicode.compose.model.ToolGrouping
 import com.zhizhu.zhicode.compose.model.LiveOutput
 import com.zhizhu.zhicode.compose.model.ToolKind
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
@@ -404,13 +406,28 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
     }
 }
 
-/** 折叠工具组卡片，对应原版 addCollapsedToolActivity() + collapsedActivityLabel()。 */
+/**
+ * 一个**工具批次**在对话流里的样子。
+ *
+ * ## 为什么不是一个批次一张卡片
+ *
+ * 之前这里是"每个批次套一张「已运行 N 个工具」卡片"，于是单独一条 `Bash` 也被包进
+ * 一张带标题的大卡里。参考实现（IQ Code）不是那样：一个批次里的工具会先被切成若干段
+ * （见 [ToolGrouping]），
+ *
+ * - **单条工具** → 直接一行，没有卡片、没有标题、没有徽章
+ *   （`addToolCard(item, destination)`）；
+ * - **连续的 read/search 且 ≥2** → 才折成一张卡片，卡片的标题直接说干了什么
+ *   （`addCollapsedToolActivity`）。
+ *
+ * 所以这一层只做一件事：按段把两种长相排出来，顺序不变。
+ */
 @Composable
-fun ToolGroupCard(
+fun ToolBatch(
     item: ChatItem,
     onToggleTool: (String) -> Unit,
-    /** 参数是**目标状态**：true 表示点下去后应展开，false 表示应收起。 */
-    onToggleGroup: (Boolean) -> Unit,
+    /** 参数是**那一组**的 groupKey（首成员 toolId）。 */
+    onToggleGroup: (String) -> Unit,
     /**
      * 某一行的 `⋯` 菜单里**选中了一项**。两个参数：那一行的 toolId + 菜单文案。
      *
@@ -424,10 +441,9 @@ fun ToolGroupCard(
      */
     onToolAction: (String, String) -> Unit,
 ) {
-    val scheme = MiuixTheme.colorScheme
-    val anyExpanded = item.tools.any { it.expanded }
-    val completed = item.tools.count { it.completed }
-    val failed = item.tools.count { it.failed }
+    val segments = remember(item.tools) {
+        ToolGrouping.group(item.tools.map { it.toGroupingEntry() })
+    }
 
     /*
      * 运行中的秒表。
@@ -435,15 +451,91 @@ fun ToolGroupCard(
      * `elapsedMs` 是跟着输出块推过来的（引擎按 chunk 回调进度），所以一个跑很久
      * 都不吐字的命令，标签会冻在最后一次进度的值上，看起来像卡死。
      * 这里按 500ms 续走一次（与参考实现的 `scheduleToolElapsedTicker` 同频），
-     * 取「起点至今」与「引擎值」的**较大者**（见 `ToolActions.displayElapsedMs`，
+     * 取「起点至今」与「引擎推送值」的**较大者**（见 `ToolActions.displayElapsedMs`，
      * 规则本身在纯逻辑层、有单测）。
      *
-     * 整组都用同一个 `nowMs` 而不是每行各起一个 ticker：一次重组足够，而且同一组里
+     * 整个批次共用同一个 `nowMs` 而不是每行各起一个 ticker：一次重组足够，而且同屏里
      * 各行的秒数不会因为 ticker 相位不同而看起来错开。
      *
      * **没有运行中的工具时 ticker 不排队** —— 否则一个后台死循环会一直持有重组。
      */
     val runningClock = rememberRunningClock(item.tools.any { !it.completed })
+
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        segments.forEach { segment ->
+            when (segment) {
+                is ToolGrouping.Segment.Single -> {
+                    val tool = item.tools.firstOrNull { it.id == segment.entry.toolId } ?: return@forEach
+                    // ⚠️ 每一行都要 `key`，否则行内的 `remember`（展开态、下拉菜单的
+                    // 展开态）是按**位置**归属的：工具是边跑边追加的，新工具插进来之后
+                    // 位置会挪，于是"打开的菜单"和"展开的输出"会串到另一行上。
+                    key(tool.id) {
+                        ToolRow(
+                            activity = tool,
+                            nowMs = runningClock,
+                            onToggle = { onToggleTool(tool.id) },
+                            // 传**这一行**的 id：菜单内容与动作都按它算。
+                            onToolAction = { label -> onToolAction(tool.id, label) },
+                        )
+                    }
+                }
+                is ToolGrouping.Segment.Group -> {
+                    val members = segment.members.mapNotNull { member ->
+                        item.tools.firstOrNull { it.id == member.toolId }
+                    }
+                    if (members.isEmpty()) return@forEach
+                    key(segment.key) {
+                        ToolGroupCard(
+                            members = members,
+                            expanded = segment.key in item.expandedGroups,
+                            onToggle = { onToggleGroup(segment.key) },
+                            nowMs = runningClock,
+                            onToggleTool = onToggleTool,
+                            onRowAction = onToolAction,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 界面模型 → 分组判据。字段一一对应，于是两边不会各判一次"算不算候选"。 */
+private fun ToolActivity.toGroupingEntry(): ToolGrouping.Entry = ToolGrouping.Entry(
+    toolId = id,
+    name = toolName,
+    hint = hint,
+    readRequests = readRequests,
+    completed = completed,
+    failed = failed,
+)
+
+/**
+ * 折叠组卡片，对应原版 `addCollapsedToolActivity()` + `collapsedActivityLabel()`。
+ *
+ * 只由 [ToolBatch] 在"连续的 read/search 且 ≥2"时调用 —— 单条工具绝不走这里。
+ */
+@Composable
+private fun ToolGroupCard(
+    members: List<ToolActivity>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    nowMs: Long,
+    onToggleTool: (String) -> Unit,
+    /** 传给每一行的回调（**带 toolId**，见 [ToolBatch] 的说明）。 */
+    onRowAction: (String, String) -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    // 这张卡片只需要"这一组"自己的判据，所以在这里重建一份 Segment.Group —
+    // 判据仍然出自 ToolGrouping，不在这里另写一套计数。
+    val group = remember(members) {
+        ToolGrouping.Segment.Group(
+            key = members.first().id,
+            members = members.map { it.toGroupingEntry() },
+        )
+    }
+    val done = ToolGrouping.isDone(group)
+    val failed = ToolGrouping.hasFailure(group)
 
     Card(
         modifier = Modifier
@@ -464,7 +556,9 @@ fun ToolGroupCard(
             // 一点也裁不到，文字仍然是瞬间全部出现。
             .clipToBounds()
             .then(
-                if (item.groupCompleted) {
+                // 门控取**这一组自己**是否跑完（不是整批）：一批里可能既有已读完的一组、
+                // 又有还在跑的命令，用整批的状态会让跑完的那组也一直不挂动画。
+                if (done) {
                     Modifier.animateContentSize(animationSpec = ZhiMotion.sizeSpec)
                 } else {
                     Modifier
@@ -478,9 +572,9 @@ fun ToolGroupCard(
         ),
     ) {
         // 表头点击走 Miuix Surface(onClick)：不再手写 Modifier.clickable。
-        // 传目标状态：已展开时点一下应收起（此前误传 anyExpanded，导致展开后收不回）
+        // 传的是"切换"：展开态由 `ChatItem.expandedGroups` 记账，这一层不去推目标状态。
         Surface(
-            onClick = { onToggleGroup(!anyExpanded) },
+            onClick = onToggle,
             modifier = Modifier.fillMaxWidth(),
             color = Color.Transparent,
             contentColor = scheme.onSurface,
@@ -489,66 +583,75 @@ fun ToolGroupCard(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // 行首是**状态字形**，与单条工具行同一个口径：有失败 → 红，跑完 → 绿，
+            // 否则强调色（参考实现：`failed>0 ? RED : (done ? GREEN : ACCENT)`）。
+            //
+            // 这里原来显示的是「正在运行工具 / 已运行 N 个工具」加一个计数徽章 ——
+            // 那是**计数**，回答了"有几个"，却没回答"在干什么"。参考实现的组标题
+            // 直接说干了什么（「正在搜索 2 个模式、读取 3 个文件」），计数也就在里面了。
             Icon(
-                imageVector = if (anyExpanded) ZhiIcons.collapse else ZhiIcons.expand,
-                contentDescription = if (anyExpanded) "折叠工具列表" else "展开工具列表",
-                tint = scheme.onSurfaceVariantSummary,
-                modifier = Modifier.size(14.dp),
+                imageVector = when {
+                    failed -> ZhiIcons.failed
+                    done -> ZhiIcons.done
+                    else -> ZhiIcons.pending
+                },
+                contentDescription = null,
+                tint = when {
+                    failed -> ZhiColors.red()
+                    done -> ZhiColors.green()
+                    else -> scheme.primary
+                },
+                modifier = Modifier.size(13.dp),
             )
-            // 「正在运行工具 → 已运行 N 个工具」：文字淡变，不再瞬间跳字。
-            // Crossfade 只管 alpha，宽度/高度交给外层布局自然过渡。
+            // 组标题同样是**会变的文字**（「正在读取 2 个文件」→「已读取 2 个文件」，
+            // 计数与失败数也在涨），所以走 Crossfade 淡变 —— 只让卡片高度动、
+            // 文字瞬间跳变正是被点名过的观感问题。
             Crossfade(
-                targetState = item.groupCompleted && failed == 0,
+                targetState = ToolGrouping.label(group, batchDone = done),
                 animationSpec = ZhiMotion.fadeOutSpec,
                 label = "group-label",
-                modifier = Modifier.padding(start = 5.dp),
-            ) { done ->
+                modifier = Modifier.padding(start = 6.dp).weight(1f),
+            ) { text ->
                 Text(
-                    text = if (done) "已运行 ${item.tools.size} 个工具" else "正在运行工具",
+                    text = text,
                     color = scheme.onSurface,
                     fontSize = ZhiTextScale.BodySmall,
                     fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Box(modifier = Modifier.weight(1f))
-            // 计数用 Miuix Badge：失败时换成红色容器
-            Badge(
-                containerColor = if (failed > 0) ZhiColors.red() else scheme.surfaceContainerHighest,
-                contentColor = if (failed > 0) scheme.onPrimary else scheme.onSurfaceVariantSummary,
-            ) {
-                Text(
-                    text = "$completed/${item.tools.size}" + if (failed > 0) " · $failed 失败" else "",
-                    fontSize = ZhiTextScale.Footnote,
-                )
-            }
-        }
-        } // Surface(onClick) 表头
-        if (item.groupLabel.isNotEmpty()) {
-            Text(
-                text = item.groupLabel,
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Caption,
-                modifier = Modifier.padding(start = 18.dp, top = 2.dp),
+            // 折叠箭头放右端：与单条工具行的 `⌄`/`⌃` 同一侧、同一含义，
+            // 于是"点哪儿会展开"在这一屏里只有一种解释。
+            Icon(
+                imageVector = if (expanded) ZhiIcons.chevronUp else ZhiIcons.chevronDown,
+                contentDescription = if (expanded) "收起这一组" else "展开这一组",
+                tint = scheme.onSurfaceVariantSummary,
+                modifier = Modifier.size(14.dp),
             )
         }
-        if (anyExpanded) {
+        } // Surface(onClick) 表头
+        Text(
+            text = ToolGrouping.subtitle(group, expanded = expanded, batchDone = done),
+            color = if (failed) ZhiColors.red() else scheme.onSurfaceVariantSummary,
+            fontSize = ZhiTextScale.Caption,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 19.dp, top = 2.dp),
+        )
+        if (expanded) {
             // ⚠️ 这里**不再**挂 animateContentSize。卡片本身已经在动（上面那处），
             // 两层各挂一次的结果是：外框按动画高度走、内层按自己的动画滑动，
             // 两者曲线不同步 —— 看起来就是文字在卡片里"自己飘"。高度的单一来源
             // 是卡片，内层只负责按自然高度绘制、由卡片外层裁剪。
             Column(modifier = Modifier.fillMaxWidth()) {
-                item.tools.forEach { tool ->
-                    // ⚠️ 每一行都要 `key`，否则行内的 `remember`（展开态、下拉菜单的
-                    // 展开态）是按**位置**归属的：工具是边跑边追加的，新工具插进来之后
-                    // 位置会挪，于是"打开的菜单"和"展开的输出"会串到另一行上。
-                    // 用 tool.id 之后，状态跟着工具走。
+                members.forEach { tool ->
                     key(tool.id) {
                         ToolRow(
                             activity = tool,
-                            nowMs = runningClock,
+                            nowMs = nowMs,
                             onToggle = { onToggleTool(tool.id) },
-                            // 传**这一行**的 id：菜单内容与动作都按它算。
-                            onToolAction = { label -> onToolAction(tool.id, label) },
+                            onToolAction = { label -> onRowAction(tool.id, label) },
                         )
                     }
                 }
@@ -718,7 +821,16 @@ private fun ToolRow(
                     imageVector = ZhiIcons.more,
                     contentDescription = "工具操作",
                     tint = scheme.onSurfaceVariantSummary,
-                    modifier = Modifier.size(15.dp),
+                    // ⚠️ 转 90° 才是**横排**的 `⋯`。
+                    //
+                    // Miuix 的 `More` 图标是竖排三点（三个点的 x 坐标完全相同，见
+                    // `miuix-icons/.../extended/More.kt`），而参考实现那一行用的是横排
+                    // 省略号 —— 它在标题行右端、旁边紧挨着 `⌄`，竖排三点在视觉上会和
+                    // 那个折叠箭头撞在一起。
+                    //
+                    // 用 `rotate` 而不是换成 `Text("⋯")`：字符字形依赖字体，
+                    // 等宽字体缺字时会显示成方块（这也是本工程放弃手写 ✓/×/○/● 的原因）。
+                    modifier = Modifier.size(15.dp).rotate(90f),
                 )
             }
 

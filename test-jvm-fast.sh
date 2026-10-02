@@ -54,6 +54,7 @@ MAIN_KT_SOURCES=(
     app/src/main/java/com/zhizhu/zhicode/compose/model/LiveOutput.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/ErrorSummary.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/ChatNavigation.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/model/ToolGrouping.kt
 )
 
 # 需要编译并运行的测试类（相对 app/src/test/java、点号包名）。
@@ -71,6 +72,7 @@ DEFAULT_TESTS=(
     com.zhizhu.zhicode.compose.model.LiveOutputTest
     com.zhizhu.zhicode.compose.model.ErrorSummaryTest
     com.zhizhu.zhicode.compose.model.ChatNavigationTest
+    com.zhizhu.zhicode.compose.model.ToolGroupingTest
 )
 
 # 哪些目标是 Kotlin。

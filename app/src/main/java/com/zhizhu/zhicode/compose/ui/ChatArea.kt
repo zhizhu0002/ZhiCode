@@ -90,13 +90,10 @@ internal fun ChatArea(
         ChatList(
             state = state,
             onToggleTool = viewModel::toggleToolExpanded,
-            onToggleGroup = { id, expand ->
-                val toolIds = state.transcript
-                    .firstOrNull { it.id == id }?.tools?.map { it.id }.orEmpty()
-                // toggleGroupExpanded 的第二参是「要收起的成员集合」：
-                // 收起时把全部成员传进去，展开时传空集。
-                viewModel.toggleGroupExpanded(id, if (expand) emptySet() else toolIds.toSet())
-            },
+            // 组键由界面按 toolId 推导（见 ToolGrouping），所以这里直接把它交给 VM ——
+            // 以前要在这里先把整批的 toolIds 算出来当"要收起的成员集合"，那是把
+            // 界面的分组结构算进了 ViewModel 的记账方式里。
+            onToggleGroup = viewModel::toggleGroupExpanded,
             onToggleThinking = viewModel::toggleThinking,
             onMessageActions = viewModel::showMessageActions,
             // 单个工具的 ⋯ 菜单里选中了一项：动作作用在某一行上，所以把 toolId 一起传下去。
