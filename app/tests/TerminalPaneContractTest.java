@@ -228,11 +228,16 @@ public final class TerminalPaneContractTest {
             "back-key=escape 的判定必须保留");
 
         // ---- 6. 11 项快捷动作：标签与顺序都是契约 ----
+        //
+        // 标签这里是中文（原来照抄上游 Termux 的英文菜单）。**顺序一条没松**：
+        // 调用方按下标分发，重排会让「字体变大」点成「结束 shell」。
+        // `termux.properties` 保留原文 —— 那是文件名，翻掉就对不上了。
         String[] actions = {
-            "Paste", "Copy selection", "Reset terminal", "New session", "Rename session",
-            "Close session", "Kill shell", "Font smaller", "Font larger",
-            "Reload termux.properties", "Toggle wake lock",
+            "粘贴", "复制选中内容", "重置终端", "新建会话", "重命名会话",
+            "关闭会话", "结束 shell", "字体变小", "字体变大",
+            "重载 termux.properties", "切换常亮锁",
         };
+        require(actions.length == 11, "快捷动作必须是 11 项：下标分发是按 0..10 写死的");
         int cursor = -1;
         for (String action : actions) {
             int at = dialogs.indexOf("\"" + action + "\"");
@@ -248,13 +253,29 @@ public final class TerminalPaneContractTest {
 
         // ---- 7. 会话抽屉的动作与文案 ----
         String[] chromeTexts = {
-            "Termux sessions", "＋  New session", "⌨  Toggle keyboard", "↻  Reload properties",
-            "running", "finished", "●  ", "○  ",
+            "终端会话", "＋  新建会话", "⌨  切换键盘", "↻  重载 termux.properties",
+            "运行中", "已结束", "●  ", "○  ",
         };
         for (String text : chromeTexts) {
             require(chrome.contains("\"" + text + "\""),
-                "抽屉里缺少它原来的文字：" + text);
+                "抽屉里缺少它应有的文字：" + text);
         }
+
+        // ---- 7b. 终端只能有一条头部 ----
+        //
+        // 以前这里叠了两条：`PaneHeader("终端", projectName)` + 一条手写的
+        // `TerminalToolbar`（42dp，☰ / 会话名 / ⌨ / ⋮），而文件、变更两个面板只有一条。
+        // 现在三个动作走 PaneHeader 的 `actions` 槽，手写工具栏必须彻底删掉 ——
+        // 留着它（哪怕没人调）就还有被重新接上的可能。
+        require(!squash(chrome).contains("funTerminalToolbar("),
+            "手写的 TerminalToolbar 必须删掉：终端头部只留 PaneHeader 一条");
+        require(squash(chrome).contains("funRowScope.TerminalHeaderActions("),
+            "三个动作必须收进 PaneHeader 的 actions 槽（TerminalHeaderActions）");
+        require(squash(pane).contains("actions={TerminalHeaderActions("),
+            "RealTerminalPane 必须把 TerminalHeaderActions 接在 PaneHeader 的 actions 上");
+        // 副标题现在是「当前会话名，没有会话时退回项目名」——项目名不能丢。
+        require(squash(pane).contains("subtitle=state.title.ifBlank{projectName}"),
+            "头部副标题必须是当前会话名，且没有会话时退回项目名");
 
         // ---- 8. DRAWER 与 KEYBOARD 这两个动作的目标是界面而不是 PTY ----
         require(chrome.isEmpty() || pane.contains("\"DRAWER\""),

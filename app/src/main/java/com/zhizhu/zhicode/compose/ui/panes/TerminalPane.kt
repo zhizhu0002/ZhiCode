@@ -182,20 +182,25 @@ private fun RealTerminalPane(
 
     Surface(modifier = modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
         Column(modifier = Modifier.fillMaxSize()) {
+            // 只留一条头。这里原来还画的是 `PaneHeader("终端", projectName)`，紧接着
+            // 下面 RealTerminalPane 又画一条自己的工具栏（☰ / 会话名 / ⌨ / ⋮）——
+            // 于是终端比文件、变更两个面板多一行标题。现在三块面板同构：
+            // 标题 + 副标题（当前会话名，没会话时退回项目名）+ 行尾动作。
             PaneHeader(
                 title = "终端",
-                subtitle = projectName,
-            )
-            // 抽屉要盖住"工具栏 + 终端 + 扩展键"这三段（和原实现一样，
-            // 它当时是往面板的 FrameLayout 里加一层全高视图），所以这三段同处一个 Box。
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    TerminalToolbar(
-                        title = state.title,
+                subtitle = state.title.ifBlank { projectName },
+                actions = {
+                    TerminalHeaderActions(
                         onMenu = { drawerOpen = true },
                         onKeyboard = { pane.toggleKeyboard() },
                         onMore = { quickActionsOpen = true },
                     )
+                },
+            )
+            // 抽屉要盖住"终端 + 扩展键"这两段（和原实现一样，
+            // 它当时是往面板的 FrameLayout 里加一层全高视图），所以这两段同处一个 Box。
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxSize()) {
                     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         val failure = state.failureDetail
                         val notice = state.runtimeNotice

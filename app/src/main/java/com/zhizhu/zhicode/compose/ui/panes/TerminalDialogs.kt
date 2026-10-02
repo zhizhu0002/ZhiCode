@@ -11,7 +11,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
@@ -20,37 +19,51 @@ import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
 import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 
 /**
  * 终端面板的两个对话框：快捷动作与重命名会话。
  *
  * <p>它们以前是 Java 里现拼的 `AlertDialog`（`setItems` 十一项 + 一个带 `EditText` 的改名框），
- * 与全应用的 Miuix 弹窗风格不一致，也不跟随主题。功能与**文字逐字不变**。
+ * 与全应用的 Miuix 弹窗风格不一致，也不跟随主题。功能不变，文案已从英文改为中文
+ * （只有 `termux.properties` 这种文件名保留原文）。
  */
 
 /**
  * 快捷动作清单。
  *
  * 顺序即下标，与 Java 侧原来的 `switch (w)` 一一对应 —— 调用方按这个下标分发，
- * **不要重排**：重排会让"字体变大"点成"杀掉 shell"这种不可逆动作。
+ * **不要重排**：重排会让「字体变大」点成「结束 shell」这种不可逆动作。
+ *
+ * ⚠️ 上面这句注释里**不能**用半角引号去引那两条文案：守卫是按
+ * `"标签"` 在文件里的出现次序检查顺序的，注释里先出现一次就会把它当成列表项，
+ * 报「位置不对」而实际代码没错。这个坑 `stripComments` 与顺序检查都会踩，
+ * 所以这里统一用「」。
+ *
+ * 文案原来全是英文（沿用上游 Termux 的 `AlertDialog.setItems`），现在改成中文；
+ * 只有 `termux.properties` 保留原文 —— 那是**文件名**，翻掉就对不上了。
  */
 private val QuickActions = listOf(
-    "Paste",
-    "Copy selection",
-    "Reset terminal",
-    "New session",
-    "Rename session",
-    "Close session",
-    "Kill shell",
-    "Font smaller",
-    "Font larger",
-    "Reload termux.properties",
-    "Toggle wake lock",
+    "粘贴",
+    "复制选中内容",
+    "重置终端",
+    "新建会话",
+    "重命名会话",
+    "关闭会话",
+    "结束 shell",
+    "字体变小",
+    "字体变大",
+    "重载 termux.properties",
+    "切换常亮锁",
 )
 
-/** 十一项快捷动作。点中即执行并关闭。 */
+/**
+ * 十一项快捷动作。点中即执行并关闭。
+ *
+ * 每一行直接用 Miuix [BasicComponent]，**外面不再套 Card**：
+ * 对话框本体的 [OverlayDialog] 已经是一层卡片，再给每项套一张卡就是
+ * 「卡片套卡片」—— 侧栏当初删掉外层 Card 是同一个理由（层级噪音 + 多两层内边距）。
+ */
 @Composable
 internal fun TerminalQuickActionsDialog(
     show: Boolean,
@@ -67,23 +80,17 @@ internal fun TerminalQuickActionsDialog(
     ) {
         // 原对话框没有按钮区，只有一个可选列表 —— 动作本身就带关闭语义。
         // `DialogShell` 要求一个 actions 槽，给空的就是"没有按钮"。
-        DialogShell(title = "Terminal", actions = {}) {
+        DialogShell(title = "终端操作", actions = {}) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 QuickActions.forEachIndexed { index, label ->
-                    Card(
+                    BasicComponent(
+                        title = label,
                         onClick = {
                             onAction(index)
                             onDismiss()
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        cornerRadius = ZhiRadius.inner,
-                        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                    ) {
-                        BasicComponent(
-                            title = label,
-                            insideMargin = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                        )
-                    }
+                        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    )
                 }
             }
         }
@@ -113,21 +120,21 @@ internal fun TerminalRenameDialog(
         insideMargin = DialogWideInsideMargin,
     ) {
         DialogShell(
-            title = "Rename session",
+            title = "重命名会话",
             footer = {
                 ZhiTextField(
                     value = draft,
                     onValueChange = { draft = it },
-                    label = "Session name",
+                    label = "会话名",
                     useLabelAsPlaceholder = true,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
             },
             actions = {
-                SecondaryButton(text = "Cancel", onClick = onDismiss)
+                SecondaryButton(text = "取消", onClick = onDismiss)
                 PrimaryButton(
-                    text = "Rename",
+                    text = "重命名",
                     onClick = { onConfirm(draft) },
                     modifier = Modifier.padding(start = 8.dp),
                 )

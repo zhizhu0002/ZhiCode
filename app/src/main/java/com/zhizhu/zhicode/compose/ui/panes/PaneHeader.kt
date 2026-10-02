@@ -5,6 +5,7 @@ import com.zhizhu.zhicode.compose.theme.ZhiSpace
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -34,6 +35,14 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * （工具行就是 25dp），并且图标比中文两字标签更省横向空间。
  *
  * [onAction] 为空时**不显示按钮**：可点却什么都不发生比没有按钮更糟。
+ *
+ * ## 为什么还有一个 [actions] 槽
+ *
+ * 终端面板原来在这条头**下面**又叠了一条自己手写的工具栏（42dp，装着 ☰ / ⌨ / ⋮），
+ * 于是切到终端时顶部有两行标题，而文件、变更两个面板只有一行 —— 三个面板的头部
+ * 长得不一样，这正是「每个面板一套头」的代价。收成一个头之后，终端多出来的那两个
+ * 动作必须有地方放，所以这里开一个**多动作**槽位（[actionIcon] 是单动作的老写法，
+ * 保留给文件与变更面板）。行内的顺序仍然是「标题 · 副标题 —— 弹性空白 —— 动作」。
  */
 @Composable
 fun PaneHeader(
@@ -43,6 +52,11 @@ fun PaneHeader(
     actionDescription: String? = null,
     onAction: (() -> Unit)? = null,
     subtitle: String? = null,
+    /**
+     * 行尾的多个动作。与 [actionIcon] 互斥使用（同时给会并排显示两个）。
+     * 接收 `RowScope` 是为了让调用方能自己排间距。
+     */
+    actions: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
     Column(modifier = modifier.fillMaxWidth()) {
@@ -66,6 +80,13 @@ fun PaneHeader(
             }
             // 把动作按钮推到行尾
             Row(modifier = Modifier.weight(1f)) {}
+
+            if (actions != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = actions,
+                )
+            }
 
             if (actionIcon != null && onAction != null) {
                 ZhiIconButton(

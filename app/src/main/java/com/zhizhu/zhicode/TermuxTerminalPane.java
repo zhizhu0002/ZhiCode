@@ -106,7 +106,7 @@ public final class TermuxTerminalPane extends FrameLayout
     private static final String SHELL_NAME = "bash";
     private static final String SESSION_NAME_PREFIX = "bash ";
     private static final int SCROLLBACK_LINES = 5000;
-    private static final String TERMINAL_TITLE_FALLBACK = "Terminal";
+    private static final String TERMINAL_TITLE_FALLBACK = "终端";
     private static final String PROPERTIES_FILE = "/.termux/termux.properties";
     private static final String WAKELOCK_SUFFIX = ":terminal";
 
@@ -114,10 +114,10 @@ public final class TermuxTerminalPane extends FrameLayout
     private static final String RUNTIME_NOTICE =
         "内置 Termux 环境尚未就绪。\n请先在侧栏「准备内置 Termux 环境」里初始化，完成后这里就是可输入的真实终端。";
     /** PTY 失败界面的固定文字。Compose 侧按 [State.failureDetail] 是否存在决定要不要显示。 */
-    public static final String FAILURE_TITLE = "Terminal failed to start";
+    public static final String FAILURE_TITLE = "终端启动失败";
     public static final String FAILURE_FOOTNOTE =
-        "\n\nThe app stayed open so you can repair the runtime instead of crashing.";
-    private static final String FAILURE_UNKNOWN = "Unknown PTY error";
+        "\n\n应用没有退出，你可以先修好运行环境再回来，而不是直接崩掉。";
+    private static final String FAILURE_UNKNOWN = "未知的 PTY 错误";
 
     // ------------------------------------------------------------------ 交给 Compose 的快照
 

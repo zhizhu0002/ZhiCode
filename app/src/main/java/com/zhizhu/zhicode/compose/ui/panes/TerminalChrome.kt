@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -43,7 +44,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.TermuxTerminalPane
@@ -136,50 +136,43 @@ internal fun toast(context: Context, message: String?) {
     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
 }
 
-/** 会话标题栏。左 ☰ 开抽屉，右 ⌨ 切键盘、⋮ 弹快捷动作。 */
+/**
+ * 终端面板头部右侧的三个动作：☰ 会话列表、⌨ 切键盘、⋮ 快捷动作。
+ *
+ * <h3>它替换掉了什么</h3>
+ * 原来这里是一个**整条工具栏**（`TerminalToolbar`，硬编码 42dp 高，自带背景色），
+ * 它被画在 [PaneHeader] 的**下面** —— 于是切到终端时顶部有两行标题
+ * （「终端 · 项目名」+「☰ 会话标题 ⌨ ⋮」），而文件、变更两个面板只有一行。
+ * 三个面板的头部形态不一致，且那 42dp 是手写死的（工程里的统一行高是
+ * [com.zhizhu.zhicode.compose.theme.ZhiRow.height]）。
+ *
+ * 现在只留一个 [PaneHeader]：面板标题与副标题（当前会话名）由它统一负责，
+ * 这三个动作走它的 `actions` 槽。行高、分隔线、左右留白因此与另两个面板逐像素同款。
+ */
 @Composable
-internal fun TerminalToolbar(
-    title: String,
+internal fun RowScope.TerminalHeaderActions(
     onMenu: () -> Unit,
     onKeyboard: () -> Unit,
     onMore: () -> Unit,
 ) {
     val palette = chrome()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(42.dp)
-            .background(palette.bar)
-            .padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        ZhiIconButton(
-            icon = ZhiIcons.menu,
-            description = "会话列表",
-            onClick = onMenu,
-            tint = palette.text,
-            compact = 34.dp,
-            iconSize = 18.dp,
-        )
-        Text(
-            text = title,
-            color = palette.text,
-            fontSize = ZhiTextScale.BodySmall,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f).padding(start = 6.dp),
-        )
-        GlyphButton(glyph = "⌨", color = palette.text, onClick = onKeyboard)
-        ZhiIconButton(
-            icon = ZhiIcons.more,
-            description = "更多操作",
-            onClick = onMore,
-            tint = palette.text,
-            compact = 34.dp,
-            iconSize = 18.dp,
-        )
-    }
+    ZhiIconButton(
+        icon = ZhiIcons.menu,
+        description = "会话列表",
+        onClick = onMenu,
+        tint = palette.text,
+        compact = 30.dp,
+        iconSize = 16.dp,
+    )
+    GlyphButton(glyph = "⌨", color = palette.text, onClick = onKeyboard)
+    ZhiIconButton(
+        icon = ZhiIcons.more,
+        description = "更多操作",
+        onClick = onMore,
+        tint = palette.text,
+        compact = 30.dp,
+        iconSize = 16.dp,
+    )
 }
 
 /**
@@ -326,13 +319,13 @@ internal fun BoxScope.TerminalDrawer(
         Surface(color = palette.drawer, modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 12.dp)) {
                 Text(
-                    text = "Termux sessions",
+                    text = "终端会话",
                     color = palette.text,
                     fontSize = ZhiTextScale.Subheading,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.fillMaxWidth().height(44.dp).padding(top = 12.dp),
                 )
-                DrawerAction("＋  New session", palette) { onNewSession() }
+                DrawerAction("＋  新建会话", palette) { onNewSession() }
                 Box(modifier = Modifier.padding(vertical = 7.dp)) {
                     ZhiHorizontalDivider(color = palette.divider)
                 }
@@ -352,14 +345,14 @@ internal fun BoxScope.TerminalDrawer(
                         )
                     }
                 }
-                DrawerAction("⌨  Toggle keyboard", palette) { onToggleKeyboard() }
-                DrawerAction("↻  Reload properties", palette) { onReloadProperties() }
+                DrawerAction("⌨  切换键盘", palette) { onToggleKeyboard() }
+                DrawerAction("↻  重载 termux.properties", palette) { onReloadProperties() }
             }
         }
     }
 }
 
-/** 抽屉里的一行会话：● / ○ + 名字 + running/finished，右侧一个 ×；长按改名。 */
+/** 抽屉里的一行会话：● / ○ + 名字 + 运行中/已结束，右侧一个 ×；长按改名。 */
 @Composable
 private fun SessionRow(
     session: TermuxTerminalPane.SessionInfo,
@@ -378,7 +371,7 @@ private fun SessionRow(
     ) {
         Text(
             text = (if (session.selected) "●  " else "○  ") + session.name +
-                "\n    " + (if (session.running) "running" else "finished"),
+                "\n    " + (if (session.running) "运行中" else "已结束"),
             color = if (session.selected) palette.text else palette.muted,
             fontSize = ZhiTextScale.BodySmall,
             fontWeight = if (session.selected) FontWeight.Bold else FontWeight.Normal,
@@ -468,7 +461,7 @@ internal fun TerminalFailure(detail: String, onRetry: () -> Unit) {
             modifier = Modifier.padding(top = 8.dp),
         )
         TextButton(
-            text = "↻  Retry terminal",
+            text = "↻  重试终端",
             onClick = onRetry,
             modifier = Modifier.padding(top = 16.dp),
         )
