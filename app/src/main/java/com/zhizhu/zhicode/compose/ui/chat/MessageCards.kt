@@ -488,13 +488,34 @@ fun ToolBatch(
                     // 展开态）是按**位置**归属的：工具是边跑边追加的，新工具插进来之后
                     // 位置会挪，于是"打开的菜单"和"展开的输出"会串到另一行上。
                     key(tool.id) {
-                        // 单条工具：**透明的一行**（对齐反编译版 `addToolCard` —— 整行没有任何
-                        // 背景）。有底色的是它下面那口终端井（输出/diff/实时输出），
-                        // 也就是说"框"来自内容本身，而不是来自给每条工具套一张卡。
+                        // 单条工具各自一张卡（Miuix `Card`）。
                         //
-                        // 上一版曾经在这里套了一张 Card；那是对的观感、错的位置：
-                        // 卡片是**围绕整行**画的，于是"标题行 + 一个井"变成"卡里装着一个井"，
-                        // 两层底、两层圆角，而且在回合容器里会显得一屏全是框。
+                        // ## 这里来回改过两次，两次的理由都留着，免得下次又当成"改错了"
+                        //
+                        // 1. 最早每条工具都被套进"整批"那张大卡里 —— 单条 Bash 也顶着
+                        //    「已运行 N 个工具」的假标题。错的是**假标题**，不是壳。
+                        // 2. 后来把壳整个去掉，只留"内容自己那口更黑的井"当框，依据是用户
+                        //    当时那句话：「底色比其他地方要黑的就是我说的预览框」。
+                        // 3. **现在把壳加回来** —— 用户看过实际界面之后要的：「给 tools 加个框，
+                        //    这样也好分辨东西」。理由和当初那条提交说的同一件事：命令行与
+                        //    输出块直接浮在页面上时看不出边界，一屏几条命令会糊成一片。
+                        //
+                        // ⚠️ 这一版**不是**把第 2 步原样撤销：井的 `terminalSurface` 保留
+                        // （它仍然就是用户认过的那个"预览框"），卡在外面**额外**给出本条工具的
+                        // 边界。卡底 `cardSurface`(#2E2E2E) 与井底 `terminalSurface`(#0A0B0C)
+                        // 差两档，是"浅卡里的深井"，不是两块同色的底叠在一起。
+                        //
+                        // 卡**不接管点击**：点击仍在 `ToolRow` 内部那个 `Surface` 上 ——
+                        // 两层都挂 onClick 会互相抢，而且外面那层拿不到"展开这一条"的语义。
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+                            cornerRadius = ZhiRadius.card,
+                            insideMargin = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
+                            colors = CardDefaults.defaultColors(
+                                color = ZhiColors.cardSurface(),
+                                contentColor = scheme.onSurface,
+                            ),
+                        ) {
                         ToolRow(
                             activity = tool,
                             nowMs = runningClock,
@@ -503,6 +524,7 @@ fun ToolBatch(
                             onToolAction = { label -> onToolAction(tool.id, label) },
                             onImageOpen = { viewing = it },
                         )
+                        }
                     }
                 }
                 is ToolGrouping.Segment.Group -> {

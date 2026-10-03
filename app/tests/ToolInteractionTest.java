@@ -238,12 +238,15 @@ public final class ToolInteractionTest {
                 CHAT_AREA + " 必须把**消息 id**（不是整条 ChatItem）交给 ViewModel："
                         + "VM 只需要能在 transcript 里定位目标的键");
 
-        // ---- 1b. 批次必须按"分段"渲染：单条工具是扁平行，成组才用卡片 ----
+        // ---- 1b. 批次必须按"分段"渲染：单条与成组分开处理 ----
         //
         // 这一节钉的是那个观感差异：ZhiCode 曾经把**每个**批次套进一张
-        // 「已运行 N 个工具」卡片，于是单独一条 Bash 也被包进带标题的大卡里；
-        // 而参考实现（IQ Code）里单条工具就是一行（`addToolCard(item, destination)`），
-        // 只有"连续的 read/search 且 ≥2"才折成一张卡片（`addCollapsedToolActivity`）。
+        // 「已运行 N 个工具」卡片，于是单独一条 Bash 也被包进带标题的大卡里 ——
+        // 错的是那顶**假标题**（单条工具哪来的"批"），不是壳。
+        // 分段规则照参考实现（IQ Code）：`addToolCard` 一条一张，
+        // 只有"连续的 read/search 且 ≥2"才折成一组（`addCollapsedToolActivity`）。
+        //
+        // ⚠️ "分段"**不等于**"单条不许有底"：有没有外层卡是另一件事，见下面那条断言。
         require(squash(cards).contains("funToolBatch("),
                 CARDS + " 必须有 ToolBatch：批次按分段渲染");
         require(squash(chatList).contains("ChatKind.TOOL_GROUP->ToolBatch("),
@@ -252,14 +255,33 @@ public final class ToolInteractionTest {
                         + "在界面里另写一套候选集/断开规则，两份迟早不一致");
         require(squash(cards).contains("Segment.Single->"),
                 CARDS + " 必须分别处理 Single 与 Group 两种段");
-        // 单条工具是**透明的一行**（反编译版 `addToolCard` 整行没有任何背景），
-        // 也不许有徽章：有底色的只有它下面那口**终端井**（输出 / diff / 实时输出）。
-        // 曾经在这里套过一张 Card —— 那是"卡里装着一个井"，两层底、两层圆角，
-        // 一屏全是框。用户的原话是「底色比其他地方要黑的就是我说的预览框」：
-        // 框来自**内容**，不是来自给每条工具套壳。
-        require(!squash(singleBranch(cards)).contains("Card("),
-                CARDS + " 的 Single 分支不许出现 Card(：单条工具就是透明一行，"
-                        + "有底色的只有它下面的终端井（见 terminalSurface）");
+        // 单条工具**各自一张卡**。
+        //
+        // 这条断言的方向反转过一次，两次的依据都留在这里 —— 免得下次又当成"改错了"：
+        //
+        // - 曾经是 `!contains("Card(")`，依据是用户当时那句「底色比其他地方要黑的就是
+        //   我说的预览框」：那时要的是"框来自**内容**"（那口 `terminalSurface` 的井）。
+        // - 现在是 `contains("Card(")`，依据是用户**看过实际界面之后**的
+        //   「给 tools 加个框，这样也好分辨东西」：命令行与输出块直接浮在页面上时
+        //   看不出边界，一屏几条命令会糊成一片。
+        //
+        // 两次并不矛盾：井留着（它仍是用户认过的那个"预览框"），卡在外面**额外**
+        // 给出本条工具的边界。所以下面那条 `terminalSurface` 的断言继续有效。
+        require(squash(singleBranch(cards)).contains("Card("),
+                CARDS + " 的 Single 分支必须有 Card(：单条工具各自一张卡 —— "
+                        + "命令行与输出块直接浮在页面上时看不出边界（用户：「好分辨东西」）");
+        require(squash(singleBranch(cards)).contains("color=ZhiColors.cardSurface()"),
+                CARDS + " 的 Single 分支那张卡必须用 cardSurface 当底色："
+                        + "它与井的 terminalSurface 差两档，层次是「浅卡里的深井」；"
+                        + "换成与井同色的底就成了两块底叠着（那正是上一版被否掉的原因）");
+        // 卡只是**底色/圆角/内边距**，不许把点击也接过去：点击属于 `ToolRow` 内部那个
+        // `Surface`（它才带"展开这一条"的语义）。两层都挂 onClick 会互相抢。
+        require(!squash(singleBranch(cards)).contains("onClick=onToggle"),
+                CARDS + " 的 Single 分支那张卡不许挂 onClick：ToolRow 内部的 Surface "
+                        + "已经是点击入口");
+        // 井必须还在 —— 加外层卡不是要把它换掉，那是用户认过的"预览框"本体。
+        // （井本身另有三条断言守着，见本节后面 `terminalSurface()` 那一段，
+        //  所以这里不重复查"字符串在不在"。）
         require(!squash(singleBranch(cards)).contains("Badge("),
                 CARDS + " 的 Single 分支里不许有 Badge：单条工具的卡不冒充整批的汇总");
         require(squash(singleBranch(cards)).contains("key(tool.id){")
