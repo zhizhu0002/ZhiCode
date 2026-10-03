@@ -1,6 +1,14 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.runtime.getValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,9 +46,11 @@ import com.zhizhu.zhicode.compose.model.OpenFile
 import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.BreadcrumbBar
 import top.yukonga.miuix.kmp.basic.BreadcrumbItem
 import top.yukonga.miuix.kmp.basic.Card
@@ -52,6 +62,16 @@ import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
+
+/**
+ * 文件面板此刻画的是三种形态中的哪一种。
+ *
+ * 单独列成枚举、而不是直接拿 `openFile == null` / `draft != null` 拼一个
+ * `AnimatedContent` 的 key：`draft` 是**正在编辑的文本**，把它编进 key 等于
+ * 每敲一个键都换一次 targetState，转场会被不停重放（表现为打字时整块在闪）。
+ * 枚举只表达"是哪一态"，态内变化不再是转场。
+ */
+private enum class FileStage { LIST, VIEW, EDIT }
 
 /**
  * 文件面板，对应原版 renderFiles() / showFileBrowser() / showFileEditor()。
@@ -106,175 +126,232 @@ fun FilesPane(
     Surface(modifier = modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
         Column(modifier = Modifier.fillMaxSize()) {
             FileRootSwitcher(selected = root, onSelect = onSwitchRoot)
-            if (openFile == null) {
-                PaneHeader(
-                    title = "文件",
-                    subtitle = "${entries.size} 项",
-                    // 行尾三个动作：新建文件 / 新建文件夹 / 上一级。
-                    // 用 actions 槽而不是 actionIcon —— 只给一个图标按钮的话
-                    // 「上一级」和「新建」只能二选一。
-                    actions = {
-                        ZhiIconButton(
-                            icon = ZhiIcons.file,
-                            description = "新建文件",
-                            onClick = onNewFile,
-                            iconSize = 16.dp,
-                            compact = 30.dp,
-                        )
-                        ZhiIconButton(
-                            icon = ZhiIcons.directory,
-                            description = "新建文件夹",
-                            onClick = onNewDirectory,
-                            iconSize = 16.dp,
-                            compact = 30.dp,
-                        )
-                        ZhiIconButton(
-                            icon = ZhiIcons.upLevel,
-                            description = "上一级目录",
-                            onClick = onUp,
-                            iconSize = 16.dp,
-                            compact = 30.dp,
-                        )
-                    },
-                )
-                // 路径用 Miuix BreadcrumbBar 展示，点击任一层级都能直接跳转
-                FileBreadcrumbBar(filePath = filePath, onNavigate = onNavigate)
-                nameForm?.let { form ->
-                    FileNameFormCard(
-                        form = form,
-                        onDraftChange = onNameDraftChange,
-                        onSubmit = onSubmitName,
-                        onCancel = onCancelName,
-                    )
-                }
-                deletePrompt?.let { prompt ->
-                    FileDeleteCard(
-                        prompt = prompt,
-                        onConfirm = onConfirmDelete,
-                        onCancel = onCancelDelete,
-                    )
-                }
-                // 共享存储没授权时说清怎么开 —— 否则用户看到的是一个空列表，
-                // 而原因（「所有文件访问权限」）在界面上完全没有痕迹。
-                if (root == FileRoot.SHARED && !sharedStorageGranted) {
-                    Text(
-                        text = "共享存储需要「所有文件访问权限」：系统设置 → 应用 → ZhiCode → 权限 → 文件和媒体 → 允许管理所有文件。",
-                        color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Caption,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 6.dp),
-                    )
-                }
-                // 不做常驻过滤框：Miuix InputField 有 45dp 最小高度，
-                // 常驻会把文件列表挤下去，与"文件 UI 紧凑"的要求冲突。
-                Box(modifier = Modifier.fillMaxSize()) {
-                    val listState = rememberLazyListState()
-                    LazyColumn(
-                        state = listState,
-                        // 左右留白走工程统一的间距令牌 `ZhiSpace.m`（12dp，它的注释写的就是
-                        // "列表左右留白"）。之前这里是 4dp 并注明"文件名要尽可能宽" ——
-                        // 那个取舍换来的是**整列贴着屏幕边**，实测太挤；文件名长一点本来
-                        // 也会被省略号截掉，多这 8dp 并不会更早截断，但观感差别很大。
-                        modifier = Modifier.fillMaxSize().padding(horizontal = ZhiSpace.m),
-                        verticalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
-                    ) {
-                        items(entries, key = { it.path }) { entry ->
-                            FileRow(
-                                entry = entry,
-                                onOpen = { onOpen(entry) },
-                                onRename = { onRename(entry) },
-                                onDelete = { onRequestDelete(entry) },
+            // 三种形态（目录列表 / 只读查看 / 编辑）之间的过渡。
+            //
+            // key 用**小枚举**，绝不把 `draft` 文本或 `openFile` 编进去：
+            // 把 draft 编进去的话每敲一个键 targetState 都变，转场会被重放（等于没在写字）。
+            // 载荷（`openFile`）走 rememberLastNonNull —— 退场那 200ms 里它可能已经变 null，
+            // 直接用会让离场那一屏画成空白。
+            val shownFile = rememberLastNonNull(openFile)
+            val stage = when {
+                openFile == null -> FileStage.LIST
+                draft != null -> FileStage.EDIT
+                else -> FileStage.VIEW
+            }
+            AnimatedContent(
+                targetState = stage,
+                // 进出文件＝进出**一层**，用横向推移；
+                // 只读 ↔ 编辑＝同一层的模式切换，用淡变（横推会显得像换了个文件）。
+                transitionSpec = {
+                    if (targetState == FileStage.LIST || initialState == FileStage.LIST) {
+                        (slideInHorizontally(ZhiMotion.enterSpec) { it / 3 } + fadeIn(ZhiMotion.fadeInSpec))
+                            .togetherWith(
+                                slideOutHorizontally(ZhiMotion.exitSpec) { -it / 3 } +
+                                    fadeOut(ZhiMotion.fadeOutSpec),
                             )
-                        }
-                        // 目录不存在时把原因说出来，而不是让面板空着（"0 项"）
-                        // 让用户以为应用坏了。
-                        if (entries.isEmpty() && emptyNote.isNotEmpty()) {
-                            item {
-                                Text(
-                                    text = emptyNote,
-                                    color = scheme.onSurfaceVariantSummary,
-                                    fontSize = ZhiTextScale.Caption,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
-                                )
-                            }
-                        }
-                        item { Box(modifier = Modifier.padding(bottom = 8.dp)) }
+                    } else {
+                        fadeIn(ZhiMotion.fadeInSpec) togetherWith fadeOut(ZhiMotion.fadeOutSpec)
                     }
-                    // Miuix 滚动条
-                    VerticalScrollBar(
-                        adapter = rememberScrollBarAdapter(listState),
-                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
-                    )
-                }
-            } else {
-                val editing = draft != null
-                PaneHeader(
-                    title = openFile.name,
-                    subtitle = if (editing) "${openFile.language} · 编辑中" else "${openFile.language} · 只读",
-                    actions = {
-                        if (editing) {
-                            ZhiIconButton(
-                                icon = ZhiIcons.done,
-                                description = "保存",
-                                onClick = onSave,
-                                iconSize = 16.dp,
-                                compact = 30.dp,
+                },
+                label = "fileStage",
+            ) { st ->
+                when (st) {
+                    FileStage.LIST -> {
+                        PaneHeader(
+                            title = "文件",
+                            subtitle = "${entries.size} 项",
+                            // 行尾三个动作：新建文件 / 新建文件夹 / 上一级。
+                            // 用 actions 槽而不是 actionIcon —— 只给一个图标按钮的话
+                            // 「上一级」和「新建」只能二选一。
+                            actions = {
+                                ZhiIconButton(
+                                    icon = ZhiIcons.file,
+                                    description = "新建文件",
+                                    onClick = onNewFile,
+                                    iconSize = 16.dp,
+                                    compact = 30.dp,
+                                )
+                                ZhiIconButton(
+                                    icon = ZhiIcons.directory,
+                                    description = "新建文件夹",
+                                    onClick = onNewDirectory,
+                                    iconSize = 16.dp,
+                                    compact = 30.dp,
+                                )
+                                ZhiIconButton(
+                                    icon = ZhiIcons.upLevel,
+                                    description = "上一级目录",
+                                    onClick = onUp,
+                                    iconSize = 16.dp,
+                                    compact = 30.dp,
+                                )
+                            },
+                        )
+                        // 路径用 Miuix BreadcrumbBar 展示，点击任一层级都能直接跳转
+                        FileBreadcrumbBar(filePath = filePath, onNavigate = onNavigate)
+                        nameForm?.let { form ->
+                            FileNameFormCard(
+                                form = form,
+                                onDraftChange = onNameDraftChange,
+                                onSubmit = onSubmitName,
+                                onCancel = onCancelName,
                             )
-                            ZhiIconButton(
-                                icon = ZhiIcons.close,
-                                description = "放弃改动",
-                                onClick = onCancelEdit,
-                                iconSize = 16.dp,
-                                compact = 30.dp,
+                        }
+                        deletePrompt?.let { prompt ->
+                            FileDeleteCard(
+                                prompt = prompt,
+                                onConfirm = onConfirmDelete,
+                                onCancel = onCancelDelete,
+                            )
+                        }
+                        // 共享存储没授权时说清怎么开 —— 否则用户看到的是一个空列表，
+                        // 而原因（「所有文件访问权限」）在界面上完全没有痕迹。
+                        if (root == FileRoot.SHARED && !sharedStorageGranted) {
+                            Text(
+                                text = "共享存储需要「所有文件访问权限」：系统设置 → 应用 → ZhiCode → 权限 → 文件和媒体 → 允许管理所有文件。",
+                                color = scheme.onSurfaceVariantSummary,
+                                fontSize = ZhiTextScale.Caption,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 6.dp),
+                            )
+                        }
+                        // 不做常驻过滤框：Miuix InputField 有 45dp 最小高度，
+                        // 常驻会把文件列表挤下去，与"文件 UI 紧凑"的要求冲突。
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            val listState = rememberLazyListState()
+                            LazyColumn(
+                                state = listState,
+                                // 左右留白走工程统一的间距令牌 `ZhiSpace.m`（12dp，它的注释写的就是
+                                // "列表左右留白"）。之前这里是 4dp 并注明"文件名要尽可能宽" ——
+                                // 那个取舍换来的是**整列贴着屏幕边**，实测太挤；文件名长一点本来
+                                // 也会被省略号截掉，多这 8dp 并不会更早截断，但观感差别很大。
+                                modifier = Modifier.fillMaxSize().padding(horizontal = ZhiSpace.m),
+                                verticalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
+                            ) {
+                                items(entries, key = { it.path }) { entry ->
+                                    FileRow(
+                                        entry = entry,
+                                        onOpen = { onOpen(entry) },
+                                        onRename = { onRename(entry) },
+                                        onDelete = { onRequestDelete(entry) },
+                                        // 删除/重命名之后让行**滑过去**，而不是"啪"地整体上跳一位。
+                                        // `key = it.path` 已给，所以 Compose 认得出是同一行换了位置
+                                        // （重命名会换 path → 那是新 key，属于"新建"，不走这条）。
+                                        modifier = Modifier.animateItem(),
+                                    )
+                                }
+                                // 目录不存在时把原因说出来，而不是让面板空着（"0 项"）
+                                // 让用户以为应用坏了。
+                                if (entries.isEmpty() && emptyNote.isNotEmpty()) {
+                                    item {
+                                        Text(
+                                            text = emptyNote,
+                                            color = scheme.onSurfaceVariantSummary,
+                                            fontSize = ZhiTextScale.Caption,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
+                                        )
+                                    }
+                                }
+                                item { Box(modifier = Modifier.padding(bottom = 8.dp)) }
+                            }
+                            // Miuix 滚动条
+                            VerticalScrollBar(
+                                adapter = rememberScrollBarAdapter(listState),
+                                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                            )
+                        }
+                    }
+
+                    FileStage.VIEW, FileStage.EDIT -> {
+                        // 退场期间 `openFile` 可能已为 null，而这一屏还要画完。
+                        val file = shownFile ?: return@AnimatedContent
+                        // 正在写的文本同理：退出编辑那一瞬间 `draft` 已经是 null，
+                        // 直接读会让退场那 200ms 里的输入框突然变空。
+                        val editText = rememberLastNonNull(draft)
+                        // 编辑与否由**正在渲染的那一态**决定，不看外部 draft：
+                        // 转场时 st 还是旧值而 draft 已经变了，否则看不到"保存/编辑"两个按钮的切换。
+                        val editing = st == FileStage.EDIT
+                        PaneHeader(
+                            title = file.name,
+                            subtitle = if (editing) "${file.language} · 编辑中" else "${file.language} · 只读",
+                            actions = {
+                                if (editing) {
+                                    ZhiIconButton(
+                                        icon = ZhiIcons.done,
+                                        description = "保存",
+                                        onClick = onSave,
+                                        iconSize = 16.dp,
+                                        compact = 30.dp,
+                                    )
+                                    ZhiIconButton(
+                                        icon = ZhiIcons.close,
+                                        description = "放弃改动",
+                                        onClick = onCancelEdit,
+                                        iconSize = 16.dp,
+                                        compact = 30.dp,
+                                    )
+                                } else {
+                                    ZhiIconButton(
+                                        icon = ZhiIcons.edit,
+                                        description = "编辑",
+                                        onClick = onStartEdit,
+                                        iconSize = 16.dp,
+                                        compact = 30.dp,
+                                    )
+                                    ZhiIconButton(
+                                        icon = ZhiIcons.close,
+                                        description = "关闭文件",
+                                        onClick = onCloseFile,
+                                        iconSize = 16.dp,
+                                        compact = 30.dp,
+                                    )
+                                }
+                            },
+                        )
+                        FileBreadcrumbBar(filePath = file.path, onNavigate = onNavigate)
+                        if (editing) {
+                            // 编辑态：整块可滚动的多行输入框。用等宽字体 —— 缩进与列对齐
+                            // 在读代码时是有意义的信息，换了比例字体就没法看了。
+                            ZhiTextField(
+                                value = editText.orEmpty(),
+                                onValueChange = onDraftChange,
+                                modifier = Modifier.fillMaxSize().padding(horizontal = ZhiSpace.m, vertical = 4.dp),
+                                minLines = 12,
+                                textStyle = MiuixTheme.textStyles.main.copy(fontFamily = FontFamily.Monospace),
                             )
                         } else {
-                            ZhiIconButton(
-                                icon = ZhiIcons.edit,
-                                description = "编辑",
-                                onClick = onStartEdit,
-                                iconSize = 16.dp,
-                                compact = 30.dp,
-                            )
-                            ZhiIconButton(
-                                icon = ZhiIcons.close,
-                                description = "关闭文件",
-                                onClick = onCloseFile,
-                                iconSize = 16.dp,
-                                compact = 30.dp,
-                            )
-                        }
-                    },
-                )
-                FileBreadcrumbBar(filePath = openFile.path, onNavigate = onNavigate)
-                if (editing) {
-                    // 编辑态：整块可滚动的多行输入框。用等宽字体 —— 缩进与列对齐
-                    // 在读代码时是有意义的信息，换了比例字体就没法看了。
-                    ZhiTextField(
-                        value = draft,
-                        onValueChange = onDraftChange,
-                        modifier = Modifier.fillMaxSize().padding(horizontal = ZhiSpace.m, vertical = 4.dp),
-                        minLines = 12,
-                        textStyle = MiuixTheme.textStyles.main.copy(fontFamily = FontFamily.Monospace),
-                    )
-                } else {
-                    val lines = remember(openFile.path) { openFile.content.split('\n') }
-                    Surface(modifier = Modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
-                        LazyColumn(modifier = Modifier.fillMaxSize().padding(vertical = 3.dp)) {
-                            items(lines.size) { index ->
-                                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
-                                    Text(
-                                        text = "${index + 1}",
-                                        color = scheme.onSurfaceVariantSummary,
-                                        fontSize = ZhiTextScale.Footnote,
-                                        fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.width(26.dp),
-                                    )
-                                    Text(
-                                        text = lines[index].ifEmpty { " " },
-                                        color = scheme.onSurface,
-                                        fontSize = ZhiTextScale.Footnote,
-                                        fontFamily = FontFamily.Monospace,
-                                    )
+                            val lines = remember(file.path) { file.content.split('\n') }
+                            Surface(modifier = Modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
+                                LazyColumn(modifier = Modifier.fillMaxSize().padding(vertical = 3.dp)) {
+                                    // ⚠️ 这里**不加** `key = { it }`。行号就是下标，下标当 key 看着
+                                    // 像稳定标识、其实是位置别名：换一个文件时「第 400 行」这个 key
+                                    // 还存在，Compose 会把它当同一项而只替内容，位置变化/增删反而
+                                    // 不产生任何动画；而换到短文件时又会凭空冒出一批淡出。
+                                    // 保持默认（按下标）并只挂 animateItem：能拿到的是「行内容变化」
+                                    // 的淡入与尾部增删的过渡，这是这个列表真会出现的变化。
+                                    // 整屏的「换文件」过渡由外层的 AnimatedContent 负责（C-4）。
+                                    items(lines.size) { index ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 6.dp)
+                                                .animateItem(),
+                                        ) {
+                                            Text(
+                                                text = "${index + 1}",
+                                                color = scheme.onSurfaceVariantSummary,
+                                                fontSize = ZhiTextScale.Footnote,
+                                                fontFamily = FontFamily.Monospace,
+                                                modifier = Modifier.width(26.dp),
+                                            )
+                                            Text(
+                                                text = lines[index].ifEmpty { " " },
+                                                color = scheme.onSurface,
+                                                fontSize = ZhiTextScale.Footnote,
+                                                fontFamily = FontFamily.Monospace,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -300,16 +377,33 @@ private fun FileRootSwitcher(selected: FileRoot, onSelect: (FileRoot) -> Unit) {
     ) {
         FileRoot.entries.forEach { root ->
             val active = root == selected
+            // 选中/未选中的底色与文字色都走淡变：选中时底色与文字是**同时**变的，
+            // 只淡其中一个会出现「字已经变了、底还是旧色」的中间态，比不做动画更难看。
+            // 令牌用 [ZhiMotion.colorSpec]（150ms + SinOut），与 ModelPicker 那几个
+            // 选中行同一条曲线。对照 upstream `CardSection.kt:122`：可点的卡用 `Sink`。
+            val segmentColor by animateColorAsState(
+                targetValue = if (active) scheme.primaryContainer else ZhiColors.cardSurface(),
+                animationSpec = ZhiMotion.colorSpec,
+                label = "fileRootSegment",
+            )
+            val segmentContent by animateColorAsState(
+                targetValue = if (active) scheme.onPrimaryContainer else scheme.onSurface,
+                animationSpec = ZhiMotion.colorSpec,
+                label = "fileRootSegmentContent",
+            )
             Card(
                 onClick = { if (!active) onSelect(root) },
                 modifier = Modifier.weight(1f),
                 cornerRadius = ZhiRadius.inner,
                 insideMargin = PaddingValues(vertical = 6.dp),
                 colors = CardDefaults.defaultColors(
-                    color = if (active) scheme.primaryContainer else ZhiColors.cardSurface(),
-                    contentColor = if (active) scheme.onPrimaryContainer else scheme.onSurface,
+                    color = segmentColor,
+                    contentColor = segmentContent,
                 ),
-                pressFeedbackType = PressFeedbackType.None,
+                // Miuix 的默认值是 `PressFeedbackType.None`（这是**超出手册默认**的一项，
+                // 不是改回默认）：它是一个真的按钮，按下去要有下沉反馈。
+                // 对应 upstream 官方示例 `CardSection.kt:122`「可点卡片用 Sink」。
+                pressFeedbackType = PressFeedbackType.Sink,
             ) {
                 Text(
                     text = root.label,
@@ -476,13 +570,16 @@ private fun FileRow(
     onOpen: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
     Card(
         onClick = onOpen,
         // 行距由 LazyColumn 的 `spacedBy` 统一给（原来这里还有一个 `padding(vertical = 1.dp)`，
         // 两个地方都给间距会让以后调行距要改两处，而且那 1dp 几乎等于没有）。
-        modifier = Modifier.fillMaxWidth(),
+        // `modifier` 里是 `animateItem()`，所以它在 fillMaxWidth **之前**：
+        // 尺寸照旧铺满，动画交给 LazyColumn 记账。
+        modifier = modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.inner,
         insideMargin = PaddingValues(start = ZhiSpace.m, end = ZhiSpace.xs, top = 4.dp, bottom = 4.dp),
         colors = CardDefaults.defaultColors(
@@ -496,7 +593,7 @@ private fun FileRow(
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             Icon(
-                imageVector = if (entry.directory) ZhiIcons.directory else ZhiIcons.file,
+                painter = if (entry.directory) ZhiIcons.directory else ZhiIcons.file,
                 contentDescription = null,
                 tint = if (entry.directory) scheme.primary else scheme.onSurfaceVariantSummary,
                 modifier = Modifier.size(15.dp),

@@ -455,6 +455,33 @@ public final class ApiSettingsStore {
      * 而旧槽永远留着没人清理。
      */
     public synchronized void save(SessionConfig config) throws Exception {
+        save(config, false);
+    }
+
+    /**
+     * 与 {@link #save} 完全相同，但**同步落盘**（{@code commit()} 而不是 {@code apply()}）。
+     *
+     * <h2>为什么必须有这一条（用户：「当直接大退软件，这些保存恢复到未修改的样子」）</h2>
+     *
+     * {@code apply()} 只保证**内存**里立刻可见，磁盘写是丢给后台线程的。
+     * 从最近任务里把应用**划掉**时进程被直接杀掉，那时没人等这个后台写，
+     * 于是「改完设置 → 大退 → 重开」看到的就是上一次的值。这不是某个字段漏了保存，
+     * 而是<b>所有</b>设置共用的写入方式本身不可靠 —— 本类此前 14 处写入全是
+     * {@code apply()}、一处 {@code commit()} 都没有。
+     *
+     * <p>只在<b>用户明确改设置</b>这条路径上用它，并且调用方必须在后台线程
+     * （见 {@code WorkspaceViewModel.persistSettingsNow}）：{@code commit()} 会阻塞到
+     * 磁盘写完，压在点击那一帧上就是一次肉眼可见的卡顿。
+     *
+     * <p>{@link #save} 保持 {@code apply()} 不变：它的调用点（{@code configure()}）
+     * 可能在主线程上，而且它写的是"与引擎对齐"的当前状态 —— 用户真正改的那一次
+     * 已经由本方法落盘了。
+     */
+    public synchronized void saveDurable(SessionConfig config) throws Exception {
+        save(config, true);
+    }
+
+    private synchronized void save(SessionConfig config, boolean durable) throws Exception {
         // 先清理再落盘：这一步在写 prefs 之前抛出，磁盘上不会留下半份状态。
         config.customSystemPrompt = sanitizePrompt(config.customSystemPrompt);
 
@@ -483,9 +510,9 @@ public final class ApiSettingsStore {
         }
 
         replaceAt(profiles, updated);
-        persistProfiles(profiles, updated.id);
+        persistProfiles(profiles, updated.id, durable);
         applyProfile(config, updated, apiKeyFor(updated));
-        saveGlobal(config);
+        saveGlobal(config, durable);
     }
 
     // ------------------------------------------------------------ 会话文件记忆
@@ -567,10 +594,12 @@ public final class ApiSettingsStore {
         if (context == null) return;
         Context app = context.getApplicationContext();
         if (app == null) app = context;
+        // commit() 而不是 apply()：主题是"改完就大退"时最容易被丢的那一类
+        // （用户点一下开关就走）。代价是一次几毫秒的磁盘写，调用方在 IO 线程上。
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putString(Key.THEME_MODE, mode == null ? "" : mode.trim())
-                .apply();
+                .commit();
     }
 
     /**
@@ -641,10 +670,11 @@ public final class ApiSettingsStore {
         if (context == null) return;
         Context app = context.getApplicationContext();
         if (app == null) app = context;
+        // 同 setThemeMode：同步落盘，避免"改完大退"丢设置。
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(Key.TERMINAL_CHAR_MODE, enabled)
-                .apply();
+                .commit();
     }
 
     // -------------------------------------------------------------- 搜索服务
@@ -758,13 +788,24 @@ public final class ApiSettingsStore {
     }
 
     private void saveGlobal(SessionConfig config) {
+        saveGlobal(config, false);
+    }
+
+    /**
+     * 写整份全局设置表。{@code durable} 为真时同步落盘。
+     *
+     * <p>这一处是「大退丢设置」的主犯：全部 14 组设置项都在 {@link #SETTINGS} 里，
+     * 而它们只由本方法写出；写成 {@code apply()} 时，划掉应用就会整批丢。
+     */
+    private void saveGlobal(SessionConfig config, boolean durable) {
         SharedPreferences.Editor editor = prefs.edit();
         for (Map.Entry<String, Setting> entry : SETTINGS.entrySet()) {
             writeSetting(editor, entry.getKey(), entry.getValue(), config);
         }
         editor.putLong(Key.AUTO_COMPACT_RATIO, Double.doubleToRawLongBits(config.autoCompactRatio));
         editor.putInt(Key.COMPACTION_VERSION, COMPACTION_LOGIC_VERSION);
-        editor.apply();
+        if (durable) editor.commit();
+        else editor.apply();
     }
 
     /** 按字段当前值的类型决定 prefs 的读法，见 {@link Setting#value}。 */
@@ -864,10 +905,18 @@ public final class ApiSettingsStore {
     }
 
     private void persistProfiles(List<ApiProfile> profiles, String activeId) {
-        prefs.edit()
+        persistProfiles(profiles, activeId, false);
+    }
+
+    /**
+     * 写配置列表。{@code durable} 为真时同步落盘（同 {@link #saveDurable} 的理由）。
+     */
+    private void persistProfiles(List<ApiProfile> profiles, String activeId, boolean durable) {
+        android.content.SharedPreferences.Editor editor = prefs.edit()
                 .putString(Key.PROFILES, profilesJson(profiles))
-                .putString(Key.ACTIVE_PROFILE, activeId)
-                .apply();
+                .putString(Key.ACTIVE_PROFILE, activeId);
+        if (durable) editor.commit();
+        else editor.apply();
     }
 
     private static String profilesJson(List<ApiProfile> profiles) {

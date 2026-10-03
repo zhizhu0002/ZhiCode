@@ -37,14 +37,13 @@ import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSectionLabel
 import com.zhizhu.zhicode.compose.ui.ZhiSegmentedTabs
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.basic.Search
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -119,6 +118,8 @@ fun ModelPickerOverlay(
     onAddApi: () -> Unit,
     onRefreshQuota: () -> Unit,
 ) {
+    // 退场时 `picker` 已经是 null，内容不能跟着空掉（见 rememberLastNonNull）。
+    val shownPicker = rememberLastNonNull(picker)
     OverlayBottomSheet(
         show = picker != null,
         onDismissRequest = onDismiss,
@@ -127,7 +128,7 @@ fun ModelPickerOverlay(
         // ⚠️ `backgroundColor` 尤其不要动：默认的 `background` 就是官方示例里的背板色，
         // 卡片之所以要显式传 `secondaryContainer`，正是为了跟它**拉开**一档。
     ) {
-        val current = picker ?: return@OverlayBottomSheet
+        val current = shownPicker ?: return@OverlayBottomSheet
         ModelPickerBody(
             picker = current,
             onQueryChange = onQueryChange,

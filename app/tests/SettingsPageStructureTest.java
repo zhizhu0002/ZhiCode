@@ -5,7 +5,7 @@ import java.nio.file.Paths;
 
 /**
  * 设置页三件事的守卫：数值项是**可自由输入**的文本框、页面是**自动保存**、
- * 以及 API 配置那一行不带图标。
+ * 以及 API 配置那一行**要带**行首图标块（小米设置观感）。
  *
  * <p>这些都是「改坏了不会编译失败」的事：
  *
@@ -133,13 +133,23 @@ public final class SettingsPageStructureTest {
                         && !has(viewModel, "fun saveSettings("),
                 "设置不能再有第二条写入路径（setSettingsDraft / updateSettingsDraft / saveSettings）");
 
-        // ---- 4. API 配置那一行：不带图标 --------------------------------------
+        // ---- 4. API 配置那一行：入口行，且必须带行首图标块 --------------------
+        //
+        // 这一条**反向改过一次**。原先是「这一行不带图标」，理由是"同屏只有它一个有图标
+        // 会显得像另一种优先级，而且那个图标是自绘的、与同屏 Miuix 图标不是一套"。
+        // 用户要求「借鉴小米自带的设置的图标」之后，整页每一行都有彩色图标块，
+        // 缺一个反而成了唯一的例外 —— 于是这里改成要求它**必须有**。
+        // 反向验证时改回"去掉这一行的图标"必须让这条失败。
         String modelService = between(dialog, "private fun ModelServicePage", "private fun AgentSecurityPage");
         require(has(modelService, "SettingsEntry(title=\"API配置\""),
-                "「API 配置」这一行要用不带图标的 SettingsEntry");
+                "「API 配置」这一行要用 SettingsEntry（带当前值的入口行）");
+        require(has(modelService, "icon=ZhiIcons.link")
+                        && has(modelService, "plate=SettingsPlateColors.blue"),
+                "「API 配置」这一行必须带行首图标块（icon = ZhiIcons.link + plate = …blue）："
+                        + "整页每一行都有图标块，缺一个会成为唯一的例外");
         require(!modelService.contains("SettingsIconEntry"),
-                "这一行不该带行首图标：同屏只有它一个有图标会显得像另一种优先级，"
-                        + "而且那个图标是自绘的，与同屏 Miuix 图标不是一套");
+                "这一行不该用 SettingsIconEntry：那是「扩展」组的入口行组件，"
+                        + "这里要的是把当前模型值当副标题的 SettingsEntry");
         require(!dialog.contains("API 配置记录"),
                 "标题已收成「API 配置」，别再退回带「记录」的长名字");
 

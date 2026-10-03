@@ -160,17 +160,74 @@ public final class LayoutConsistencyTest {
                 "弹窗外边距必须统一走 DialogWideOutsideMargin，不要写字面量 DpSize：\n  "
                         + String.join("\n  ", marginLiteralOffenders));
         // 设置及其二级页（API/MCP/技能/角色卡/记忆）已整页化（SettingsSubPage），
-        // 不再走 OverlayDialog，常量的自然用户随之减少 —— 阈值只保证「剩余弹窗没绕过」。
-        require(tokenUsers >= 5,
+        // 任务清单 / 附件搜索也已迁到 OverlayBottomSheet（sheet 不收 outsideMargin），
+        // 常量的自然用户随之减少 —— 阈值只保证「剩余弹窗没绕过」。
+        require(tokenUsers >= 4,
                 "应当有多个弹窗使用 DialogWideOutsideMargin（现在只有 " + tokenUsers
                         + " 处）——过少说明有人绕过了它");
 
-        // ---- 4. 本测试自身必须被 canonical suite 执行 ------------------------
+        // ---- 4. 输入法弹出时，底部悬浮层必须自己让位 -------------------------
+        //
+        // 真机症状（用户：「打开输入法，但是输入框没弹起来」）：键盘盖住了输入框。
+        //
+        // 根因不是清单少了 adjustResize（那里有），而是 `MainActivity.onCreate` 调了
+        // `enableEdgeToEdge()` = `setDecorFitsSystemWindows(false)`：DecorView 不再消费
+        // 系统窗口 inset，系统那套"把窗口缩小让出键盘"随之失效，IME 的高度只能应用自己接。
+        // 参考实现（反编译版 `installKeyboardMotion()`）同样是自己挂
+        // `setOnApplyWindowInsetsListener` + `WindowInsetsAnimation.Callback` 顶起根布局。
+        //
+        // 这里钉两件事：
+        //   · 悬浮层必须按 IME 让位（否则输入框永远在键盘底下）；
+        //   · **不能**用 `Modifier.imePadding()` 图省事 —— Scaffold 已经在内容容器底部
+        //     让过导航栏，再叠一次 IME 高度会多出"一条导航栏"的空隙。所以要是差值。
+        String chatArea = stripComments(read(root, SRC + "ui/ChatArea.kt"));
+        require(chatArea.contains(".padding(bottom = imeLift)"),
+                "悬浮层（任务卡 + 反馈条 + 输入器）必须按 IME 让位（padding(bottom = imeLift)）："
+                        + "edge-to-edge 之后系统不再替应用缩小窗口，不让位就是输入框被键盘盖住");
+        require(chatArea.contains("WindowInsets.ime.getBottom(this)"),
+                "imeLift 必须由 WindowInsets.ime 算出：凭空给个常量在键盘高度不同的机型上就会错");
+        require(chatArea.contains("WindowInsets.navigationBars.getBottom(this)"),
+                "imeLift 必须减掉导航栏高度：Scaffold 已让过一次，不减就会多出一条空隙");
+        require(!chatArea.contains("imePadding()"),
+                "不要改用 Modifier.imePadding()：它垫的是**整个** IME 高度（含导航栏那段），"
+                        + "与 Scaffold 已让出的导航栏叠加后，输入框会悬空一条缝");
+        // 顺序也要紧：onSizeChanged 在让位**之外**，bottomInset 才会跟着够到键盘上缘，
+        // 被键盘挡住的内容才能滑上来（不然只是输入框抬起来，最后几条消息仍被压住）。
+        int sizeChanged = chatArea.indexOf(".onSizeChanged { floatingHeightPx = it.height }");
+        int lift = chatArea.indexOf(".padding(bottom = imeLift)");
+        require(sizeChanged > 0 && lift > sizeChanged,
+                "onSizeChanged 必须写在 padding(bottom = imeLift) **之前**："
+                        + "它报的是内层量出来的高度，顺序反了 bottomInset 就不含键盘那段");
+
+        // ---- 4b. 画在 Scaffold 之上的浮层，要自己让出系统栏 -------------------
+        //
+        // 真机症状（截图）：侧栏抽屉的第一行「新会话」整个压在状态栏药丸底下，
+        // 既点不到也看不清。
+        //
+        // 根因是**两个默认值刚好都没兜住**：主界面是 edge-to-edge（DecorView 不再消费
+        // 系统窗口 inset），而侧栏是画在 `Scaffold` **之上**的浮层 —— 它不吃 Scaffold
+        // 给内容区的 `padding`，自己也没有任何 inset 修饰符，于是内容从 y=0 开始。
+        // 同一个坑对 IME 也成立（见第 4 节），只是那里另一个浮层已经自己处理过了。
+        //
+        // 这里钉两件事：抽屉必须让出系统栏；而且内边距只能加在**内容**上 ——
+        // 加在面板上会让底色缩进去，抽屉滑入时状态栏那一条会露出后面的工作区。
+        String drawer = stripComments(read(root, SRC + "ui/SideDrawer.kt"));
+        require(drawer.contains("windowInsetsPadding(WindowInsets.systemBars)"),
+                "侧栏抽屉必须让出系统栏（Modifier.windowInsetsPadding(WindowInsets.systemBars)）："
+                        + "它画在 Scaffold 之上、不吃内容区的 padding，第一行会压到状态栏底下");
+        int panelSurface = drawer.indexOf("Surface(");
+        int insetPadding = drawer.indexOf("windowInsetsPadding(WindowInsets.systemBars)");
+        require(panelSurface >= 0 && insetPadding > panelSurface,
+                "系统栏内边距必须加在**面板内容**上，不能加在面板的 Surface 上："
+                        + "面板底色要一直铺到屏幕边缘，否则抽屉滑入时露出后面的工作区");
+
+        // ---- 5. 本测试自身必须被 canonical suite 执行 ------------------------
         String script = read(root, "test-source-no-build.sh");
         require(script.contains("LayoutConsistencyTest \"$PROJECT_ROOT\""),
                 "canonical source suite 必须执行本守卫");
 
         System.out.println("LayoutConsistencyTest PASS"
-                + "（长按触发 · 气泡宽度自适应 · 弹窗宽度三档 · 边距 " + tokenUsers + " 处统一）");
+                + "（长按触发 · 气泡宽度自适应 · 弹窗宽度三档 · 边距 " + tokenUsers
+                + " 处统一 · 输入法让位）");
     }
 }

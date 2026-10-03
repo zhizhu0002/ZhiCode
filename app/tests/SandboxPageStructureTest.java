@@ -201,8 +201,15 @@ public final class SandboxPageStructureTest {
             "缺 overScrollVertical()：滚动手感与二级页不一致（少了越界回弹）");
         require(squashed.contains("VerticalScrollBar(") && squashed.contains("rememberScrollBarAdapter("),
             "长列表要有 Miuix 滚动条，与二级页一致");
-        require(squashed.contains("MiuixIcons.Back"),
-            "返回键要用 Miuix 官方的 Back 图标，不要拿上箭头 rotate 出来");
+        // 返回键必须来自**同一套图标集**（`ZhiIcons.back` = Material Symbols 的
+        // `arrow_back`），且不能是"拿上箭头 rotate 出来的"。
+        //
+        // 这里原先断言 `MiuixIcons.Back`（图标集曾经整集回到 Miuix 那一轮）。
+        // 现在整集统一到 Material Symbols，连顶栏返回键也一起换掉了 ——
+        // 否则一屏 MD3 里会冒出几个 Miuix 字形。重点始终是**别自己造箭头**。
+        require(squashed.contains("ZhiIcons.back"),
+            "返回键必须走 ZhiIcons.back（Material Symbols 的 arrow_back）："
+                + "不要拿上箭头 rotate 出来，也不要在整屏新字形里掺一个旧字形");
         require(!squashed.contains("rotate(-90f)"),
             "手写 rotate(-90f) 假左箭头必须删掉");
         // 顶栏高度只能从 padding 算：大标题的高度是变的，写死会盖住首行。
@@ -264,6 +271,8 @@ public final class SandboxPageStructureTest {
         // 专门用来解释「后端为什么卡住」的工具，被「后端卡住」饿死。
         String boardPath = "app/src/main/java/com/zhizhu/zhicode/sandbox/SandboxBoard.kt";
         String board = squash(stripComments(read(root, boardPath)));
+        // 界面侧的源码：开关的副标题与可用性都在那里（第 9b 节要用）。
+        String screen = squash(stripComments(read(root, PAGE)));
         require(board.contains("privatevaldiagnostics:ExecutorService=Executors.newSingleThreadExecutor()"),
             "诊断必须有自己的第二条线程（diagnostics），不能排在 worker 上");
         require(board.contains("diagnostics.shutdownNow()"),
@@ -354,12 +363,47 @@ public final class SandboxPageStructureTest {
         String errFn = section(stripComments(read(root, boardPath)),
             "private fun showBackendError(", "private fun confirmRootVisibilityChange(");
         require(squash(errFn).contains("setRootSwitch(persistedRoot,false)"),
-            "回读到的真值要写回开关，并且压成不可点（后端不通时点它只会再失败一次）");
+            "回读到的真值要写回开关；第二个参数是**在飞标志**，这里传 false（没有请求在飞）");
         require(squash(errFn).contains("setFloatingLog(persistedLog,false)"),
             "悬浮窗同理");
         // 反向：不许再靠 "把在飞标志清掉" 当兜底 —— 那正是留着假值的原因。
-        require(!squash(errFn).contains("hideRootInteractive=false,"),
+        require(!squash(errFn).contains("hideRootBusy=false,"),
             "不该再直接改 ui 里的在飞标志绕过 setRootSwitch：那不会更新开关的值");
+
+        // ---- 9b. 在飞标志的**极性**不许再写反 -------------------------------
+        //
+        // 真机症状（截图）：两个开关的副标题都停在「正在应用...」，而且点不动 ——
+        // 连一次成功的加载之后也是这样。
+        //
+        // 根因是同一个布尔在两侧被读成了相反的意思：
+        //   · `SandboxBoard` 当它"已就绪" → 成功/超时/失败全传 true，`reload` 传 !inFlight；
+        //   · `ZhiSandboxScreen` 当它"处理中" → true 就显示「正在应用…」并拦点击。
+        // 两边各自自洽，合起来正好相反，于是开关永久钉死。
+        //
+        // 修法是把两侧统一成 `busy`（请求在飞）。这条断言钉的正是**极性**：
+        // 请求发出时 true、结果回来时 false。把任意一处改回去都会让它失败。
+        require(squash(board).contains("setRootSwitch(previous,true)"),
+            "发起 Root 设置请求时必须以 busy = true 显示「正在应用…」并压住点击");
+        require(squash(board).contains("setRootSwitch(effective,false)")
+                        && countOccurrences(squash(board), "setRootSwitch(previous,false)") >= 2,
+            "请求结束（成功 / 失败 / 超时）必须以 busy = false 收尾："
+                    + "沿用旧极性的话，一次成功的加载就会把开关永久钉在「正在应用…」");
+        require(squash(board).contains("setFloatingLog(enabled,true)")
+                        && squash(board).contains("setFloatingLog(effective,false)"),
+            "悬浮窗开关的极性必须与 Root 开关一致：发出 true、结束 false");
+        require(squash(board).contains("hideRoot=hidden,hideRootBusy=busy")
+                        && squash(board).contains("floatingLog=enabled,floatingLogBusy=busy"),
+            "状态字段必须叫 busy（请求在飞），不能叫 interactive —— 名字只差一层否定，"
+                    + "就是它上一轮被两边读反的原因");
+        require(squash(screen).contains("state.hideRootBusy") && squash(screen).contains("state.floatingLogBusy"),
+            "界面侧必须读 busy 判断「正在应用…」，不能再用 interactive");
+        // 可用性不另存字段：后端不通 = 不可点。多存一个字段就多一处可能与它不一致的地方。
+        require(squash(screen).contains("valsettingsEnabled=state.errorDetail==null"),
+            "开关可用性必须由 errorDetail 推出来（后端不通就不可点）："
+                    + "点一个后端已经不在的开关只会再失败一次");
+        require(squash(screen).contains("enabled=settingsEnabled"),
+            "推出来的可用性必须真的传给 SettingsToggle(enabled = …)："
+                    + "只算不用，等于开关还是能点");
 
         // ---- 10. authority 未注册要算「还没好」，不能报配置错误 ---------------
         //

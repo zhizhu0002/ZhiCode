@@ -2,6 +2,13 @@ package com.zhizhu.zhicode.compose.ui.dialogs
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -42,9 +50,11 @@ import com.zhizhu.zhicode.compose.ui.ZhiFloatingActionButton
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiLoadingIndicator
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
+import com.zhizhu.zhicode.compose.ui.settings.SettingsLoadingHint
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
@@ -85,6 +95,22 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *    是 zip 就解包、是文本就进「手动添加」确认。能力覆盖同一件事，却不绑定某个站点
  *    （见 `SkillImport`）。
  * 3. 没有内置技能的概念，所以不做只读项与「Built-in」标签。
+ *
+ * ## 浮层退出动画契约（`show` 由调用方传，浮层必须常驻组合）
+ *
+ * Miuix 的进出场动画**不在浮层组件里**，而是 `layout` 包里那几个 `…ContentLayout` 内部的
+ * `Animatable`（进入 = 遮罩 `tween(300)` + 内容弹簧；退出 = 遮罩 `tween(250)` +
+ * 内容 `tween(260, DecelerateEasing(1.5))`）。它的 `show == false` 分支里有一句
+ * `if (!show && !internalVisible.value) return` —— **先播完退出动画才 return**。
+ *
+ * 所以下面这 6 个浮层都收一个 `show` 参数、内部原样转发给 `OverlayDialog` /
+ * `OverlayBottomSheet`，**调用方不许再写 `if (open) { Floating(...) }`**：
+ * 那样组件一被移除，相关副作用就直接取消，退出这段 `Animatable` 根本没机会跑，
+ * 关门永远是硬切。官方 demo（`DialogSection.kt` / `BottomSheetSection.kt`）
+ * 也一律是 `show = <state>`，从不套 `if`。
+ *
+ * 数据驱动的浮层（`state.createForm` 等）退出期间字段已经变 `null`，所以内容要靠
+ * [rememberLastNonNull] 兜住，否则退场那 260ms 会画成一张空卡。
  */
 @Composable
 fun SkillsOverlay(
@@ -163,24 +189,32 @@ fun SkillsOverlay(
                     // 二级页在 NavDisplay 里与工作区那个 Scaffold 是兄弟，自己这一层没有宿主，
                     // 浮层点了也不会出现 ——「加号点不了」就是这么来的。
                     overlay = {
-                        state.editing?.let { target ->
+                        // 三个浮层都不套 `if`：常驻组合、只翻 `show`，退出动画才跑得起来（见文件头契约）。
+                        // 退出期间状态已经是 null，内容用 rememberLastNonNull 兜住。
+                        val editing = rememberLastNonNull(state.editing)
+                        val fileDraft = rememberLastNonNull(state.fileDraft)
+                        val deleting = rememberLastNonNull(deleteTarget)
+                        editing?.let {
                             SkillEditDialog(
-                                target = target,
+                                show = state.editing != null,
+                                target = it,
                                 onBodyChange = onBodyChange,
                                 onSave = onSave,
                                 onDismiss = onCancelEdit,
                             )
                         }
-                        state.fileDraft?.let { draft ->
+                        fileDraft?.let {
                             SkillFileDialog(
-                                draft = draft,
+                                show = state.fileDraft != null,
+                                draft = it,
                                 onChange = onFileDraftChange,
                                 onConfirm = onSaveFile,
                                 onDismiss = onCancelFile,
                             )
                         }
-                        deleteTarget?.let { file ->
+                        deleting?.let { file ->
                             DeleteFileDialog(
+                                show = deleteTarget != null,
                                 file = file,
                                 onConfirm = {
                                     deleteTarget = null
@@ -212,34 +246,38 @@ fun SkillsOverlay(
                     )
                 },
                 overlay = {
-                    if (showAddSheet) {
-                        AddSkillSheet(
-                            onDismiss = { showAddSheet = false },
-                            onManual = {
-                                showAddSheet = false
-                                onNew()
-                            },
-                            onImport = {
-                                showAddSheet = false
-                                pickSkillFile.launch(arrayOf("text/*", "application/octet-stream", "application/zip"))
-                            },
-                            onUrl = {
-                                showAddSheet = false
-                                onNewUrl()
-                            },
-                        )
-                    }
-                    state.createForm?.let { draft ->
+                    // 同上：常驻组合、只翻 `show`。
+                    val createDraft = rememberLastNonNull(state.createForm)
+                    val urlDraft = rememberLastNonNull(state.urlDraft)
+                    AddSkillSheet(
+                        show = showAddSheet,
+                        onDismiss = { showAddSheet = false },
+                        onManual = {
+                            showAddSheet = false
+                            onNew()
+                        },
+                        onImport = {
+                            showAddSheet = false
+                            pickSkillFile.launch(arrayOf("text/*", "application/octet-stream", "application/zip"))
+                        },
+                        onUrl = {
+                            showAddSheet = false
+                            onNewUrl()
+                        },
+                    )
+                    createDraft?.let {
                         SkillCreateDialog(
-                            draft = draft,
+                            show = state.createForm != null,
+                            draft = it,
                             onChange = onCreateDraftChange,
                             onConfirm = onCreate,
                             onDismiss = onCancelCreate,
                         )
                     }
-                    state.urlDraft?.let { draft ->
+                    urlDraft?.let {
                         SkillUrlDialog(
-                            draft = draft,
+                            show = state.urlDraft != null,
+                            draft = it,
                             onChange = onUrlDraftChange,
                             onConfirm = onUrlImport,
                             onDismiss = onCancelUrl,
@@ -270,6 +308,7 @@ fun SkillsOverlay(
  */
 @Composable
 private fun AddSkillSheet(
+    show: Boolean,
     onDismiss: () -> Unit,
     onManual: () -> Unit,
     onImport: () -> Unit,
@@ -277,7 +316,7 @@ private fun AddSkillSheet(
 ) {
     val scheme = MiuixTheme.colorScheme
     OverlayBottomSheet(
-        show = true,
+        show = show,
         onDismissRequest = onDismiss,
         title = "添加技能",
     ) {
@@ -321,9 +360,9 @@ private fun AddSkillSheet(
 
 /** 行首的小图标（选择表与树里共用），统一尺寸与右侧间距。 */
 @Composable
-private fun RowIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: androidx.compose.ui.graphics.Color) {
+private fun RowIcon(icon: androidx.compose.ui.graphics.painter.Painter, tint: androidx.compose.ui.graphics.Color) {
     Icon(
-        imageVector = icon,
+        painter = icon,
         contentDescription = null,
         tint = tint,
         modifier = Modifier.size(18.dp).padding(end = 2.dp),
@@ -342,6 +381,10 @@ private fun SkillListBody(
     val scheme = MiuixTheme.colorScheme
     Column {
         when {
+            // 载荷还在 IO 上读（见 openSkills）：必须先于「一条都没有」判断，
+            // 否则空态会在读取期间闪一下（连同它那句「从哪开始」）。
+            state.loading -> SettingsLoadingHint()
+
             // 一条都没有时：筛选框只会占地方，直接给一屏空态 + "从哪开始"。
             state.skills.isEmpty() -> SkillEmptyState()
 
@@ -354,7 +397,7 @@ private fun SkillListBody(
                     singleLine = true,
                     leadingIcon = {
                         Icon(
-                            imageVector = ZhiIcons.search,
+                            painter = ZhiIcons.search,
                             contentDescription = null,
                             tint = scheme.onSurfaceVariantSummary,
                             modifier = Modifier.size(18.dp),
@@ -363,37 +406,51 @@ private fun SkillListBody(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                 )
 
-                if (state.visibleSkills.isEmpty()) {
-                    EmptyHint("没有匹配「${state.query}」的技能。")
-                } else {
-                    Text(
-                        text = "${state.visibleSkills.size} 个技能",
-                        color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Footnote,
-                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
-                    )
-                    // 每张技能各一张卡（与参考实现一致）：整组塞在一张卡里时，
-                    // 长长的技能说明会把相邻的两条糊成一块。
-                    state.visibleSkills.forEach { skill ->
-                        SkillRow(
-                            skill = skill,
-                            onOpen = { onOpenDetail(skill) },
-                            onEdit = { onEdit(skill, "SKILL.md") },
-                            onAttach = { onAttach(skill) },
-                            onDelete = { onDelete(skill) },
-                        )
+                // 「筛出 0 条」与「有结果」之间淡变：敲字时结果列表会反复跨过空/非空，
+                // 硬切会像名单在抖。key 只取**布尔**（空/非空），不把 query 编进去 ——
+                // 否则每敲一个字都会重放整段转场。
+                AnimatedContent(
+                    targetState = state.visibleSkills.isEmpty(),
+                    transitionSpec = {
+                        fadeIn(ZhiMotion.fadeInSpec) togetherWith fadeOut(ZhiMotion.fadeOutSpec)
+                    },
+                    label = "skillListEmpty",
+                ) { empty ->
+                    if (empty) {
+                        EmptyHint("没有匹配「${state.query}」的技能。")
+                    } else {
+                        Column {
+                            Text(
+                                text = "${state.visibleSkills.size} 个技能",
+                                color = scheme.onSurfaceVariantSummary,
+                                fontSize = ZhiTextScale.Footnote,
+                                modifier = Modifier.fillMaxWidth()
+                                    .padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
+                            )
+                            // 每张技能各一张卡（与参考实现一致）：整组塞在一张卡里时，
+                            // 长长的技能说明会把相邻的两条糊成一块。
+                            state.visibleSkills.forEach { skill ->
+                                SkillRow(
+                                    skill = skill,
+                                    onOpen = { onOpenDetail(skill) },
+                                    onEdit = { onEdit(skill, "SKILL.md") },
+                                    onAttach = { onAttach(skill) },
+                                    onDelete = { onDelete(skill) },
+                                )
+                            }
+                        }
                     }
                 }
+
+                Text(
+                    text = "技能按需加载：Agent 用 Skill 工具读取，你也可以把它附加到下一条消息。" +
+                        "SKILL.md 是技能本体，同目录的其它文件会跟着一起分发。",
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Footnote,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                )
             }
         }
-
-        Text(
-            text = "技能按需加载：Agent 用 Skill 工具读取，你也可以把它附加到下一条消息。" +
-                "SKILL.md 是技能本体，同目录的其它文件会跟着一起分发。",
-            color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-        )
     }
 }
 
@@ -407,7 +464,7 @@ private fun SkillEmptyState() {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(
-            imageVector = ZhiIcons.skill,
+            painter = ZhiIcons.skill,
             contentDescription = null,
             // 半透明的图标：空态要看得出来"这里什么都没有"，但不能抢过页面标题。
             tint = scheme.onSurfaceVariantSummary.copy(alpha = 0.45f),
@@ -453,7 +510,7 @@ private fun SkillRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    imageVector = ZhiIcons.skill,
+                    painter = ZhiIcons.skill,
                     contentDescription = null,
                     tint = scheme.primary,
                     modifier = Modifier.size(20.dp),
@@ -495,9 +552,10 @@ private fun SkillRow(
             }
         }
 
-        if (menuAt != null) {
-            ZhiAnchoredActionMenu(
-                labels = listOf("编辑 SKILL.md", "附加到下一步任务", "删除"),
+        // 不套 `if`：`open` 是布尔入参，浮层常驻才播得完退出动画（见 ZhiAnchoredActionMenu）。
+        ZhiAnchoredActionMenu(
+            open = menuAt != null,
+            labels = listOf("编辑 SKILL.md", "附加到下一步任务", "删除"),
                 onSelect = { index ->
                     menuAt = null
                     when (index) {
@@ -510,7 +568,6 @@ private fun SkillRow(
                 // 贴行锚定（不用手指坐标）：⋮ 是个小按钮，菜单从它下方长出来最稳。
                 fingerOffset = null,
             )
-        }
     }
 }
 
@@ -550,16 +607,26 @@ private fun SkillDetailBody(
         )
 
         SettingsGroup("文件") {
-            if (detail.tree.isEmpty()) {
-                EmptyHint("这个目录里没有文件。点右下角的 + 新建一个。")
-            } else {
-                SkillTree(
-                    nodes = detail.tree,
-                    depth = 0,
-                    entry = detail.entry,
-                    onEdit = onEdit,
-                    onDeleteFile = onDeleteFile,
-                )
+            // 「目录里一个文件都没有」与「有文件树」之间淡变。
+            // 真会出现：新建技能后再删掉 SKILL.md 之外的文件、或导入一个空目录的 zip。
+            AnimatedContent(
+                targetState = detail.tree.isEmpty(),
+                transitionSpec = {
+                    fadeIn(ZhiMotion.fadeInSpec) togetherWith fadeOut(ZhiMotion.fadeOutSpec)
+                },
+                label = "skillDetailTreeEmpty",
+            ) { empty ->
+                if (empty) {
+                    EmptyHint("这个目录里没有文件。点右下角的 + 新建一个。")
+                } else {
+                    SkillTree(
+                        nodes = detail.tree,
+                        depth = 0,
+                        entry = detail.entry,
+                        onEdit = onEdit,
+                        onDeleteFile = onDeleteFile,
+                    )
+                }
             }
         }
 
@@ -640,13 +707,13 @@ private fun DirNodeRow(
             startAction = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = if (expanded) ZhiIcons.chevronDown else ZhiIcons.expand,
+                        painter = if (expanded) ZhiIcons.collapse else ZhiIcons.expand,
                         contentDescription = null,
                         tint = scheme.onSurfaceVariantSummary,
                         modifier = Modifier.size(16.dp),
                     )
                     Icon(
-                        imageVector = ZhiIcons.directory,
+                        painter = ZhiIcons.directory,
                         contentDescription = null,
                         tint = scheme.primary,
                         modifier = Modifier.size(18.dp).padding(start = 6.dp),
@@ -662,7 +729,15 @@ private fun DirNodeRow(
                 bottom = 8.dp,
             ),
         )
-        if (expanded) content()
+        // 展开/收起走 [AnimatedVisibility]（官方裸默认：淡变 + 竖直展开/收起）。
+        // 之前是裸 `if (expanded) content()` —— 子项在一帧内直接出现/消失，
+        // 目录多的时候像"页面闪了一下"。动画期间的离场内容由 AnimatedVisibility
+        // 自己保留，所以这里**不需要** rememberLastNonNull（content 是 lambda 不是数据）。
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) { content() }
     }
 }
 
@@ -684,7 +759,7 @@ private fun FileNodeRow(
         summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
         startAction = {
             Icon(
-                imageVector = ZhiIcons.file,
+                painter = ZhiIcons.file,
                 contentDescription = null,
                 tint = if (file.primary) scheme.primary else scheme.onSurfaceVariantSummary,
                 modifier = Modifier.size(18.dp),
@@ -745,6 +820,7 @@ private fun countFiles(nodes: List<SkillFileNode>): Int = nodes.sumOf { node ->
  */
 @Composable
 private fun SkillCreateDialog(
+    show: Boolean,
     draft: SkillCreateDraft,
     onChange: ((SkillCreateDraft) -> SkillCreateDraft) -> Unit,
     onConfirm: () -> Unit,
@@ -755,7 +831,7 @@ private fun SkillCreateDialog(
     // 「已解析出 X」只是回显，用次级色就够，不然整屏都在报错。
     val nameBroken = draft.nameMissing || draft.nameInvalid
     OverlayDialog(
-        show = true,
+        show = show,
         onDismissRequest = onDismiss,
         largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
@@ -824,6 +900,7 @@ private fun SkillCreateDialog(
  */
 @Composable
 private fun SkillUrlDialog(
+    show: Boolean,
     draft: SkillUrlDraft,
     onChange: ((SkillUrlDraft) -> SkillUrlDraft) -> Unit,
     onConfirm: () -> Unit,
@@ -831,7 +908,7 @@ private fun SkillUrlDialog(
 ) {
     val scheme = MiuixTheme.colorScheme
     OverlayDialog(
-        show = true,
+        show = show,
         onDismissRequest = onDismiss,
         largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
@@ -916,6 +993,7 @@ private fun ScopeDropdown(scope: SkillScope, onScopeChange: (SkillScope) -> Unit
  */
 @Composable
 private fun SkillEditDialog(
+    show: Boolean,
     target: SkillEditTarget,
     onBodyChange: (String) -> Unit,
     onSave: () -> Unit,
@@ -923,7 +1001,7 @@ private fun SkillEditDialog(
 ) {
     val scheme = MiuixTheme.colorScheme
     OverlayDialog(
-        show = true,
+        show = show,
         onDismissRequest = onDismiss,
         largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
@@ -985,6 +1063,7 @@ private fun SkillEditDialog(
  */
 @Composable
 private fun SkillFileDialog(
+    show: Boolean,
     draft: SkillFileDraft,
     onChange: ((SkillFileDraft) -> SkillFileDraft) -> Unit,
     onConfirm: () -> Unit,
@@ -994,7 +1073,7 @@ private fun SkillFileDialog(
     // 见 ZhiFieldError：没碰过文件名就不飘红。
     var nameTouched by remember(draft) { mutableStateOf(false) }
     OverlayDialog(
-        show = true,
+        show = show,
         onDismissRequest = onDismiss,
         largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
@@ -1053,13 +1132,14 @@ private fun SkillFileDialog(
 /** 删除单个文件前的确认。删文件不可逆，所以要多这一下。 */
 @Composable
 private fun DeleteFileDialog(
+    show: Boolean,
     file: SkillFile,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
     OverlayDialog(
-        show = true,
+        show = show,
         onDismissRequest = onDismiss,
         largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,

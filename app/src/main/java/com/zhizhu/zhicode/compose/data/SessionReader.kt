@@ -80,8 +80,8 @@ internal object SessionReader {
 
         /** 工具 id → 它所在分组卡的下标。用于把结果/进度写回正确的卡。 */
         val toolGroupIndex = mutableMapOf<String, Int>()
-        /** tool_use_id → 增删行数（来自 tool_diff 事件）。 */
-        val toolDiffs = mutableMapOf<String, Triple<String, Int, Int>>()
+        /** tool_use_id → 这次改动的增删行数与 diff 正文（来自 `tool_diff` 事件）。 */
+        val toolDiffs = mutableMapOf<String, ToolDiffInfo>()
 
         for (row in rows(file)) {
             when (row.optString("type", "")) {
@@ -171,8 +171,11 @@ internal object SessionReader {
                                         completed = true,
                                         failed = block.optBoolean("is_error", false),
                                         output = block.optString("content", ""),
-                                        additions = diff?.second ?: tool.additions,
-                                        deletions = diff?.third ?: tool.deletions,
+                                        additions = diff?.additions ?: tool.additions,
+                                        deletions = diff?.deletions ?: tool.deletions,
+                                        // diff 正文与增删行数同源（同一个 `tool_diff` 事件）。
+                                        // 只取行数不取正文，等于恢复历史后那块 diff 预览井是空的。
+                                        diff = diff?.text ?: tool.diff,
                                     )
                                 },
                             )
@@ -204,10 +207,10 @@ internal object SessionReader {
                     val payload = row.optJSONObject("payload") ?: continue
                     val toolId = payload.optString("tool_use_id", "")
                     if (toolId.isNotEmpty()) {
-                        toolDiffs[toolId] = Triple(
-                            payload.optString("tool_name", ""),
-                            payload.optInt("additions", 0),
-                            payload.optInt("deletions", 0),
+                        toolDiffs[toolId] = ToolDiffInfo(
+                            additions = payload.optInt("additions", 0),
+                            deletions = payload.optInt("deletions", 0),
+                            text = payload.optString("diff", ""),
                         )
                     }
                 }
@@ -368,3 +371,18 @@ internal object SessionReader {
         return SimpleDateFormat("yyyy年M月d日", Locale.getDefault()).format(Date(timestamp))
     }
 }
+
+/**
+ * 一条 `tool_diff` 事件的内容。
+ *
+ * ## 为什么不是 `Triple`
+ *
+ * 原来是 `Triple(tool_name, additions, deletions)`：`tool_name` 在这里**没人用**，
+ * 而真正要显示的统一 diff 正文（引擎 `persistToolDiff` 写进去的 `"diff"` 字段）
+ * 没有被读出来 —— 于是从历史会话恢复的写文件类工具，
+ * 展开后只能看到「Wrote N bytes …」那一句自述，看不到改了什么。
+ *
+ * 换成具名字段而不是四元组：diff 正文是**多行大字符串**，
+ * 靠 `.first/.second/.third` 去认它，读的人（和下一个改的人）一定会搞错位置。
+ */
+private class ToolDiffInfo(val additions: Int, val deletions: Int, val text: String)

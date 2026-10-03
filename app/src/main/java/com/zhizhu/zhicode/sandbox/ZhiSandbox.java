@@ -355,8 +355,17 @@ public final class ZhiSandbox {
         return resumedPackage;
     }
 
-    /** 宿主（本应用）Context，供 Guest 侧解析宿主私有目录。 */
-    static Context hostContext() {
+    /**
+     * 宿主（本应用）Context，供 Guest 侧解析宿主私有目录。
+     *
+     * ⚠️ 必须 `public`：`SandboxOverlay` 是宿主自己画的悬浮层，它要读宿主的
+     * `filesDir`（`SandboxConsole` 的 events.log）。拿 guest 的 `getApplicationContext()`
+     * 去读会被引擎重定向到虚拟数据目录，读到的是另一个文件（或读不到）——
+     * 表现就是"日志面板一片空白"，而日志其实一直好好地写在宿主目录里。
+     *
+     * 这个值由 {@link #attach} 记下并整进程共享，是宿主 context 的唯一来源。
+     */
+    public static Context hostContext() {
         return appContext;
     }
 

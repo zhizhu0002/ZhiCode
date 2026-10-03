@@ -1,6 +1,10 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -37,12 +42,14 @@ import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiFloatingActionButton
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSegmentedTabs
 import com.zhizhu.zhicode.compose.ui.ZhiLoadingIndicator
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.TopBarTabRowPadding
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
+import com.zhizhu.zhicode.compose.ui.settings.SettingsLoadingHint
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
@@ -113,6 +120,9 @@ fun McpConfigOverlay(
     var errorDetail by remember { mutableStateOf<Pair<String, String>?>(null) }
     // FAB 拉起的「怎么添加」选择表。
     var showAddSheet by remember { mutableStateOf(false) }
+    // 同 shownForm：退出动画期间这两个字段已经是 null，内容得靠「最后一次非空」兜住。
+    val shownErrorDetail = rememberLastNonNull(errorDetail)
+    val shownImportText = rememberLastNonNull(config.importText)
 
     SettingsPageStack(
         // 路径含最底下那一页：栈要靠整条路径算层级与方向。
@@ -140,29 +150,32 @@ fun McpConfigOverlay(
                     )
                 },
                 overlay = {
-                    if (showAddSheet) {
-                        AddMcpSheet(
-                            onDismiss = { showAddSheet = false },
-                            onManual = {
-                                showAddSheet = false
-                                onNew()
-                            },
-                            onImport = {
-                                showAddSheet = false
-                                onOpenImport()
-                            },
-                        )
-                    }
-                    if (errorDetail != null) {
+                    // 浮层**常驻组合、只翻 `show`**：Miuix 的退出动画在 `*ContentLayout`
+                    // 内部的 `Animatable` 里，组件一被移除就再也没机会播（见 SkillsOverlay 文件头）。
+                    AddMcpSheet(
+                        show = showAddSheet,
+                        onDismiss = { showAddSheet = false },
+                        onManual = {
+                            showAddSheet = false
+                            onNew()
+                        },
+                        onImport = {
+                            showAddSheet = false
+                            onOpenImport()
+                        },
+                    )
+                    shownErrorDetail?.let { detail ->
                         TextDetailDialog(
-                            title = errorDetail!!.first,
-                            body = errorDetail!!.second,
+                            show = errorDetail != null,
+                            title = detail.first,
+                            body = detail.second,
                             onDismiss = { errorDetail = null },
                         )
                     }
-                    if (config.importText != null) {
+                    shownImportText?.let { text ->
                         McpImportDialog(
-                            text = config.importText,
+                            show = config.importText != null,
+                            text = text,
                             error = config.importError,
                             onChange = onImportTextChange,
                             onConfirm = onImportConfirm,
@@ -213,31 +226,45 @@ fun McpConfigOverlay(
                     }
                 },
                 overlay = {
-                    if (errorDetail != null) {
+                    // 错误详情是从列表页拉起来的（见 onShowError），但表单页里也留着同一位客人：
+                    // 它不套 `if`，退出动画才跑得起来。
+                    shownErrorDetail?.let { detail ->
                         TextDetailDialog(
-                            title = errorDetail!!.first,
-                            body = errorDetail!!.second,
+                            show = errorDetail != null,
+                            title = detail.first,
+                            body = detail.second,
                             onDismiss = { errorDetail = null },
                         )
                     }
                 },
             ) {
-                if (tab == 0) {
-                    McpConnectionForm(draft = draft, onChange = onDraftChange)
-                } else {
-                    McpToolsTab(
-                        draft = draft,
-                        // 工具清单来自「测试连接」，按**正在编辑的这个名字**去取。
-                        // 用 draft.name 而不是 originalName：用户改名后看到的应当是
-                        // 新名字对应的结果（改名前那些设置会被 McpStore 一起搬过去）。
-                        status = config.status[draft.name]
-                            ?: draft.originalName?.let { config.status[it] },
-                        testing = config.testing.contains(draft.name),
-                        onTest = { onTest(draft.name) },
-                        onToolOptionsChange = { tool, enabled, approval ->
-                            onToolOptionsChange(draft.name, tool, enabled, approval)
-                        },
-                    )
+                // TAB 内容之间淡变：不包的话切到「工具」是一整块啪地换掉
+                // （TAB 栏本身留在 header 槽位不动，只换它下面这块）。
+                // 与 ModelPickerOverlay 的模型列表同一写法与同一条曲线。
+                AnimatedContent(
+                    targetState = tab,
+                    transitionSpec = {
+                        fadeIn(ZhiMotion.fadeInSpec) togetherWith fadeOut(ZhiMotion.fadeOutSpec)
+                    },
+                    label = "mcpFormTab",
+                ) { tabIndex ->
+                    if (tabIndex == 0) {
+                        McpConnectionForm(draft = draft, onChange = onDraftChange)
+                    } else {
+                        McpToolsTab(
+                            draft = draft,
+                            // 工具清单来自「测试连接」，按**正在编辑的这个名字**去取。
+                            // 用 draft.name 而不是 originalName：用户改名后看到的应当是
+                            // 新名字对应的结果（改名前那些设置会被 McpStore 一起搬过去）。
+                            status = config.status[draft.name]
+                                ?: draft.originalName?.let { config.status[it] },
+                            testing = config.testing.contains(draft.name),
+                            onTest = { onTest(draft.name) },
+                            onToolOptionsChange = { tool, enabled, approval ->
+                                onToolOptionsChange(draft.name, tool, enabled, approval)
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -265,7 +292,10 @@ private fun McpServerList(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
-        if (config.servers.isEmpty()) {
+        if (config.loading) {
+            // 载荷在 IO 上读（见 openMcpConfig）：同 API 页，先于空态判断。
+            SettingsLoadingHint()
+        } else if (config.servers.isEmpty()) {
             McpEmptyState()
         } else {
             config.servers.forEach { server ->
@@ -302,13 +332,14 @@ private fun McpServerList(
  */
 @Composable
 private fun AddMcpSheet(
+    show: Boolean,
     onDismiss: () -> Unit,
     onManual: () -> Unit,
     onImport: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
     OverlayBottomSheet(
-        show = true,
+        show = show,
         onDismissRequest = onDismiss,
         title = "添加 MCP 服务器",
     ) {
@@ -343,9 +374,9 @@ private fun AddMcpSheet(
 
 /** 行首的小图标，统一尺寸。与技能页那张表同一个写法。 */
 @Composable
-private fun RowIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, tint: androidx.compose.ui.graphics.Color) {
+private fun RowIcon(icon: androidx.compose.ui.graphics.painter.Painter, tint: androidx.compose.ui.graphics.Color) {
     Icon(
-        imageVector = icon,
+        painter = icon,
         contentDescription = null,
         tint = tint,
         modifier = Modifier.size(18.dp).padding(end = 2.dp),
@@ -366,7 +397,7 @@ private fun McpEmptyState() {
             // 大图标和刚才点的那一行是同一个符号，才认得出"这是同一个地方"。
             // （早先这里用了 ZhiIcons.runtime，那是一个对勾 —— 空态里一个对勾
             //   读起来像"操作成功"，正好把"这里什么都没有"说反了。）
-            imageVector = ZhiIcons.sandbox,
+            painter = ZhiIcons.sandbox,
             contentDescription = null,
             tint = scheme.onSurfaceVariantSummary.copy(alpha = 0.45f),
             modifier = Modifier.size(56.dp),
@@ -425,7 +456,7 @@ private fun McpServerCard(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = if (server.enabled) ZhiIcons.done else ZhiIcons.close,
+                        painter = if (server.enabled) ZhiIcons.done else ZhiIcons.close,
                         contentDescription = if (server.enabled) "已启用" else "已停用",
                         tint = if (server.enabled) scheme.primary else scheme.error,
                         modifier = Modifier.size(10.dp),
@@ -461,10 +492,11 @@ private fun McpServerCard(
             }
         }
 
-        if (menuAt != null) {
-            ZhiAnchoredActionMenu(
-                labels = listOf(
-                    "测试连接",
+        // 不套 `if`：`open` 是布尔入参，浮层常驻才播得完退出动画（见 ZhiAnchoredActionMenu）。
+        ZhiAnchoredActionMenu(
+            open = menuAt != null,
+            labels = listOf(
+                "测试连接",
                     "编辑",
                     if (server.enabled) "停用" else "启用",
                     "删除",
@@ -481,7 +513,6 @@ private fun McpServerCard(
                 onDismiss = { menuAt = null },
                 fingerOffset = null,
             )
-        }
     }
 }
 
@@ -826,7 +857,7 @@ private fun McpToolRow(
             summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
             startAction = {
                 Icon(
-                    imageVector = if (expanded) ZhiIcons.chevronDown else ZhiIcons.expand,
+                    painter = if (expanded) ZhiIcons.collapse else ZhiIcons.expand,
                     contentDescription = null,
                     tint = scheme.onSurfaceVariantSummary,
                     modifier = Modifier.size(16.dp),
@@ -899,11 +930,11 @@ private fun McpToolRow(
 
 /** 长文本详情（连接错误的全文）。可滚动 + 复制。 */
 @Composable
-private fun TextDetailDialog(title: String, body: String, onDismiss: () -> Unit) {
+private fun TextDetailDialog(show: Boolean, title: String, body: String, onDismiss: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
     val context = androidx.compose.ui.platform.LocalContext.current
     OverlayDialog(
-        show = true,
+        show = show,
         onDismissRequest = onDismiss,
         largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
@@ -950,6 +981,7 @@ private fun TextDetailDialog(title: String, body: String, onDismiss: () -> Unit)
 /** 从 JSON 导入。格式是 Claude Desktop / 多数 MCP 文档里的那一份。 */
 @Composable
 private fun McpImportDialog(
+    show: Boolean,
     text: String,
     error: String?,
     onChange: (String) -> Unit,
@@ -958,7 +990,7 @@ private fun McpImportDialog(
 ) {
     val scheme = MiuixTheme.colorScheme
     OverlayDialog(
-        show = true,
+        show = show,
         onDismissRequest = onDismiss,
         largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,

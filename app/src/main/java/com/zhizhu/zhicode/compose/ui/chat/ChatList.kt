@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -37,6 +38,7 @@ import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
 import com.zhizhu.zhicode.compose.model.TaskState
 import com.zhizhu.zhicode.compose.model.ToolGrouping
+import com.zhizhu.zhicode.compose.model.TurnLayout
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
@@ -169,10 +171,20 @@ fun ChatList(
      * 而这条是"用户按了发送" —— 此刻即使他正在翻历史也要把他带回来。原版
      * `scrollChat()` 也是无条件 `chatAutoFollow = true` + 滚到底。
      *
-     * 令牌为 0（首次组合）时不动作：只观察**变化**。
+     * ⚠️ 判据是"令牌**变了**"，不是"令牌非零"。
+     *
+     * 原先写的是 `if (state.scrollToBottomToken == 0L) return` —— 只挡住了首次组合
+     * （令牌还是 0）那一次。问题是 `LaunchedEffect` 在**每次重新进入组合**时都会重跑：
+     * 切走页签再切回来，面板被重建、这个 effect 重启，而令牌此时早就 > 0，
+     * 于是又滚了一次底 —— 用户刚翻到的位置白翻。用户的原话：
+     * 「切换页面，对话老是回到最低端」。
+     *
+     * 记下已处理过的令牌，只有它真的变化（= 用户按了发送）才滚。
      */
+    var lastScrollToken by remember { mutableStateOf(state.scrollToBottomToken) }
     LaunchedEffect(state.scrollToBottomToken) {
-        if (state.scrollToBottomToken == 0L) return@LaunchedEffect
+        if (state.scrollToBottomToken == lastScrollToken) return@LaunchedEffect
+        lastScrollToken = state.scrollToBottomToken
         val s = currentState
         val leading = if (s.transcript.isEmpty()) 1 else 0
         listState.requestScrollToItem(leading + s.transcript.size)
@@ -243,6 +255,15 @@ fun ChatList(
         }
     }
 
+    // 对话流切成「块」（一轮助手回合一块）。放在 `LazyColumn` **外面**算：
+    // 它的 content lambda 是 `LazyListScope.() -> Unit`，不是 @Composable 上下文，
+    // 在里面调 `remember` 编译不过。
+    val blocks = remember(state.transcript) {
+        TurnLayout.blocks(
+            state.transcript.map { TurnLayout.Entry(it.id, isUser = it.kind == ChatKind.USER) },
+        )
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
@@ -252,7 +273,21 @@ fun ChatList(
             if (state.transcript.isEmpty()) {
                 item { EmptyState() }
             }
-            items(state.transcript, key = { it.id }) { item ->
+            // ---- 按「块」渲染 -------------------------------------------------
+            //
+            // 一块 = 一个 `LazyColumn` item：
+            //  · `USER` 自己一块（容器外）；
+            //  · 其余全部并进**同一个助手回合容器**（反编译版 `beginConversation()`）——
+            //    容器是**透明**的、padding 为 0，只用上下外边距把这一轮与相邻内容拉开，
+            //    所以它不画框、不抢注意力，只是把"这一轮的东西"归到一起。
+            //
+            // 切块规则在 `TurnLayout`（纯逻辑、有单测）：判错不会编译失败，
+            // 只会让间距/包裹关系不对。
+            //
+            // ⚠️ 每个成员仍在**容器内部**各自成一层组合（`key(item.id)`），
+            // 手指追踪与长按菜单也挂在成员自己那一层 —— 于是菜单锚点与以前**完全一致**，
+            // 不需要任何跨层坐标换算（那正是锚偏的常见来源）。
+            items(blocks, key = { it.key }) { block ->
                 // 新消息淡入 + 已有消息位置变化时平滑推移。
                 //
                 // ⚠️ `fadeOutSpec = null` 是刻意的，别加回来。
@@ -260,71 +295,97 @@ fun ChatList(
                 // `newSession()` 把 transcript 一次清空时，那几张还没淡完的卡片
                 // 会和紧接着出现的 `EmptyState()` 叠在一起 —— 表现为卡片与
                 // "想让智蛛做什么？"互相穿透、错位，看起来像渲染 bug。
-                // 删除单条消息时瞬间消失没有观感损失（用户主动触发，预期即时），
-                // 换掉这个交集比留着更划算。
-                // 手指位置追踪：挂在这一项的 Box 上，于是记录到的坐标就是
-                // 「相对这一项」的，与 anchoredMenu 的锚点是同一个坐标系。
-                // 它是**只读观察者**，不会抢走卡片自己的点击/长按与无障碍语义。
-                val finger = rememberFingerTracker()
-                // 长按触发的那一刻把手指位置定格下来。用 state 而不是直接读
-                // finger.offset()：菜单显示期间要一直用它定位，而手指已经抬起了。
-                var fingerOffset by remember { mutableStateOf<DpOffset?>(null) }
+                val memberIds = when (block) {
+                    is TurnLayout.Block.Standalone -> listOf(block.id)
+                    is TurnLayout.Block.Turn -> block.ids
+                }
+                val members = memberIds.mapNotNull { id -> state.transcript.firstOrNull { it.id == id } }
+                if (members.isEmpty()) return@items
                 Box(
                     modifier = Modifier
                         .animateItem(fadeOutSpec = null)
                         .padding(end = 14.dp)
-                        .then(finger.modifier),
+                        // 回合容器：反编译版是 `margins(0, dp(10), 0, dp(14))`。
+                        .then(
+                            if (block is TurnLayout.Block.Turn) {
+                                Modifier.padding(top = 10.dp, bottom = 14.dp)
+                            } else {
+                                Modifier
+                            },
+                        ),
                 ) {
                     // ⚠️ 调试条与消息卡必须放进**同一个 Column** 里，不能并列在 Box 下。
-                    //
-                    // 这个 Box 是用来给 anchoredMenu 定位的（菜单要盖在卡片上），
-                    // 而 Box 的子项是**叠放**而不是竖排 —— 直接并列会让调试条被卡片盖住，
-                    // 表现是"调试条的文字与消息正文糊在一起"。所以：竖排交给 Column，
-                    // 叠放只留给那一个菜单。
+                    // 这个 Box 是给 anchoredMenu 定位的（菜单要盖在卡片上），而 Box 的子项
+                    // 是**叠放**而不是竖排 —— 直接并列会让调试条被卡片盖住。
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // ---- 主体调试模式：就地加料（不改变下面任何卡片的渲染） ----
-                        if (debugMode) {
-                            MessageDebugStrip(item)
+                        members.forEach { item ->
+                            // 手指位置追踪：挂在这一条自己的 Box 上，于是记录到的坐标就是
+                            // 「相对这一条」的，与 anchoredMenu 的锚点是同一个坐标系。
+                            val finger = rememberFingerTracker()
+                            var fingerOffset by remember { mutableStateOf<DpOffset?>(null) }
+                            key(item.id) {
+                                // ⚠️ 每一位成员外面这一层 Box 是**必须**的，不是多余的嵌套：
+                                //
+                                // 1. 它承载手指追踪（`finger.modifier`），记录到的坐标因此是
+                                //    「相对这一条」的；
+                                // 2. `anchoredMenu` 用 `Modifier.absoluteOffset` 定位，而
+                                //    `absoluteOffset` 的坐标是相对**直接父节点**的 ——
+                                //    若把它挂到回合 Column 下面（成为整个回合并列的子项），
+                                //    第 2 条之后的菜单会整体偏掉前面所有成员的高度。
+                                //
+                                // 所以「手指追踪 + 菜单锚点」必须始终贴在**自己那一条**上。
+                                Box(modifier = Modifier.fillMaxWidth().then(finger.modifier)) {
+                                    // ⚠️ 调试条与消息卡必须放进**同一个 Column** 里，不能并列在
+                                    // 上面那个 Box 下：Box 的子项是**叠放**而不是竖排，
+                                    // 直接并列会让调试条被卡片盖住。
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                    // ---- 主体调试模式：就地加料（不改下面任何卡片的渲染） ----
+                                    if (debugMode) {
+                                        MessageDebugStrip(item)
+                                    }
+                                    // 调试模式把细节**默认全展开**：思考面板、工具输出、处理步骤。
+                                    //
+                                    // 做法是"只改这一次渲染的输入"（item.copy(...)），不动 state ——
+                                    // 于是折叠按钮仍然能点（点了会写到 state，而调试模式的强制展开会把它
+                                    // 覆盖回展开 —— 这是刻意的：调试模式就是"全都摊开"的视图，
+                                    // 想看折叠后的样子就把它关掉）。
+                                    val shown = if (debugMode) item.fullyExpanded() else item
+                                    when (shown.kind) {
+                                        ChatKind.USER -> UserBubble(shown) {
+                                            fingerOffset = finger.offset()
+                                            onMessageActions(item)
+                                        }
+                                        ChatKind.ASSISTANT -> AssistantCard(
+                                            item = shown,
+                                            onToggleThinking = { onToggleThinking(item.id) },
+                                            onLongPress = {
+                                                fingerOffset = finger.offset()
+                                                onMessageActions(item)
+                                            },
+                                        )
+                                        ChatKind.TOOL_GROUP -> ToolBatch(
+                                            item = shown,
+                                            // 传**原始** id：折叠动作要写到 state 上，用 shown 的 id 会指向同一条
+                                            // （id 不变），但语义上更清楚的是"动的是哪一条消息"。
+                                            onToggleTool = onToggleTool,
+                                            // 组键由界面从 toolId 推导（见 ToolGrouping），所以这里传的是
+                                            // **哪一组**，而不是"整批的成员列表要收起"。
+                                            onToggleGroup = { groupKey -> onToggleGroup(item.id, groupKey) },
+                                            // `⋯` 是**单个工具**的操作，所以传的是那一行的 id，
+                                            // 而不是整组（以前传整组，于是点单行弹出整组菜单）。
+                                            onToolAction = { toolId, label -> onToolAction(item, toolId, label) },
+                                        )
+                                        ChatKind.ERROR -> ErrorCard(shown)
+                                        ChatKind.INFO -> InfoCard(shown)
+                                    }
+                                    } // Column（调试条 + 消息卡，竖排）
+                                    // 菜单挂在**成员自己的 Box** 里，并用手指位置作偏移 ——
+                                    // 于是它从手指那一点长出来，且坐标空间与手指追踪同源。
+                                    anchoredMenu(item.id, fingerOffset)
+                                } // Box（手指追踪 + 菜单锚点）
+                            }
                         }
-                        // 调试模式把细节**默认全展开**：思考面板、工具输出、处理步骤。
-                        //
-                        // 做法是"只改这一次渲染的输入"（item.copy(...)），不动 state ——
-                        // 于是折叠按钮仍然能点（点了会写到 state，而调试模式的强制展开会把它
-                        // 覆盖回展开 —— 这是刻意的：调试模式就是"全都摊开"的视图，
-                        // 想看折叠后的样子就把它关掉）。
-                        val shown = if (debugMode) item.fullyExpanded() else item
-                        when (shown.kind) {
-                        ChatKind.USER -> UserBubble(shown) {
-                            fingerOffset = finger.offset()
-                            onMessageActions(item)
-                        }
-                        ChatKind.ASSISTANT -> AssistantCard(
-                            item = shown,
-                            onToggleThinking = { onToggleThinking(item.id) },
-                            onLongPress = {
-                                fingerOffset = finger.offset()
-                                onMessageActions(item)
-                            },
-                        )
-                        ChatKind.TOOL_GROUP -> ToolBatch(
-                            item = shown,
-                            // 传**原始** id：折叠动作要写到 state 上，用 shown 的 id 会指向同一条
-                            // （id 不变），但语义上更清楚的是"动的是哪一条消息"。
-                            onToggleTool = onToggleTool,
-                            // 组键由界面从 toolId 推导（见 ToolGrouping），所以这里传的是
-                            // **哪一组**，而不是"整批的成员列表要收起"。
-                            onToggleGroup = { groupKey -> onToggleGroup(item.id, groupKey) },
-                            // `⋯` 是**单个工具**的操作，所以传的是那一行的 id，
-                            // 而不是整组（以前传整组，于是点单行弹出整组菜单）。
-                            onToolAction = { toolId, label -> onToolAction(item, toolId, label) },
-                        )
-                        ChatKind.ERROR -> ErrorCard(shown)
-                        ChatKind.INFO -> InfoCard(shown)
-                    }
-                    } // Column（调试条 + 消息卡）
-                    // 菜单挂在这一项自己的 Box 里，并用手指位置作偏移 ——
-                    // 于是它从**手指那一点**长出来，而不是贴条目边界。
-                    anchoredMenu(item.id, fingerOffset)
+                    } // Column（整个回合：各成员依次竖排）
                 }
             }
             // ---- 主体调试模式：把**完整任务清单**内联进对话流 ----
@@ -501,7 +562,7 @@ private fun InlineTaskList(tasks: List<AgentTask>) {
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = when (task.state) {
+                            painter = when (task.state) {
                                 TaskState.DONE -> ZhiIcons.done
                                 TaskState.RUNNING -> ZhiIcons.pending
                                 TaskState.PENDING -> ZhiIcons.awaiting

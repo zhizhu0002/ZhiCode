@@ -1,7 +1,11 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -68,32 +72,47 @@ fun ChangesPane(
                 onAction = onRefresh,
                 subtitle = if (diff.files.isEmpty()) null else "+${diff.additions}  −${diff.deletions}",
             )
-            if (diff.files.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        // 空白态的文案必须区分「确实没有变更」与「没能读到变更」：
-                        // 原来写死"工作区没有未提交的变更"，于是 git 失败时界面
-                        // 会一口咬定没有变更 —— 明明什么都没查到却给了确定性结论。
-                        text = diff.note.ifEmpty { "工作区没有未提交的变更" },
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.BodySmall,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 28.dp),
-                    )
+            // 「空态 / 列表」之间淡变。原来是 `if (...) { …; return@Surface }` ——
+            // 刷新一次 git 会让整块内容一帧内换掉。
+            // ⚠️ `return@Surface` 不能留：在 AnimatedContent 的 content lambda 里
+            // 它是非局部返回，会跳过 AnimatedContent 自己的收尾（实测会漏帧）。
+            AnimatedContent(
+                targetState = diff.files.isEmpty(),
+                transitionSpec = {
+                    fadeIn(ZhiMotion.fadeInSpec) togetherWith fadeOut(ZhiMotion.fadeOutSpec)
+                },
+                label = "changesEmpty",
+            ) { empty ->
+                if (empty) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            // 空白态的文案必须区分「确实没有变更」与「没能读到变更」：
+                            // 原来写死"工作区没有未提交的变更"，于是 git 失败时界面
+                            // 会一口咬定没有变更 —— 明明什么都没查到却给了确定性结论。
+                            text = diff.note.ifEmpty { "工作区没有未提交的变更" },
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            fontSize = ZhiTextScale.BodySmall,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 28.dp),
+                        )
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
+                        item { DiffStatBar(diff) }
+                        items(diff.files, key = { it.name }) { file ->
+                            DiffFileCard(
+                                file = file,
+                                isDark = isDark,
+                                expanded = expanded[file.name] == true,
+                                onToggle = { expanded[file.name] = expanded[file.name] != true },
+                                // 展开某一项不会增删行，但**切分支/重新算 diff** 会换掉整个文件集：
+                                // 那时剩下的同名行要滑到新位置，而不是瞬移。
+                                modifier = Modifier.animateItem(),
+                            )
+                        }
+                        item { Box(modifier = Modifier.padding(bottom = 10.dp)) }
+                    }
                 }
-                return@Surface
-            }
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
-                item { DiffStatBar(diff) }
-                items(diff.files, key = { it.name }) { file ->
-                    DiffFileCard(
-                        file = file,
-                        isDark = isDark,
-                        expanded = expanded[file.name] == true,
-                        onToggle = { expanded[file.name] = expanded[file.name] != true },
-                    )
-                }
-                item { Box(modifier = Modifier.padding(bottom = 10.dp)) }
             }
         }
     }
@@ -139,11 +158,15 @@ private fun DiffFileCard(
     isDark: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
     Card(
         onClick = onToggle,
-        modifier = Modifier
+        // `modifier`（animateItem）在**最外层**：它管的是这一整张卡片在 LazyColumn
+        // 里的位置变化。`animateContentSize` 在里面，管的是卡片自己展开/收起的高度。
+        // 两个动画叠在一起是故意的 —— 展开时高度在变、同时上下邻居在滑动让位。
+        modifier = modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp)
             .animateContentSize(
@@ -160,7 +183,7 @@ private fun DiffFileCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             // 展开指示用 Miuix 图标，不再用 ⌄ / › 字形
             Icon(
-                imageVector = if (expanded) ZhiIcons.collapse else ZhiIcons.expand,
+                painter = if (expanded) ZhiIcons.collapse else ZhiIcons.expand,
                 contentDescription = if (expanded) "折叠该文件" else "展开该文件",
                 tint = scheme.onSurfaceVariantSummary,
                 modifier = Modifier.size(13.dp),

@@ -6,15 +6,18 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
-import android.graphics.Color;
+import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -46,12 +49,12 @@ final class SandboxOverlay {
 
     /** 位移小于这个值（dp）视为点击而非拖动。 */
     private static final int TAP_SLOP_DP = 10;
-    private static final int CORNER_RADIUS_DP = 18;
+    private static final int CORNER_RADIUS_DP = 16;
     private static final int PANEL_PADDING_DP = 6;
     private static final int PANEL_PADDING_VERTICAL_DP = 4;
-    private static final int BUBBLE_WIDTH_DP = 42;
+    private static final int BUBBLE_WIDTH_DP = 46;
     private static final int ACTION_WIDTH_DP = 48;
-    private static final int HEIGHT_DP = 36;
+    private static final int HEIGHT_DP = 40;
     private static final int START_X_DP = 10;
     private static final int START_Y_DP = 36;
 
@@ -92,7 +95,7 @@ final class SandboxOverlay {
     // ------------------------------------------------------------------ 面板构建
 
     private static View buildPanel(Activity activity, String guestPackage) {
-        SandboxPalette palette = SandboxPalette.resolve(activity);
+        SandboxPalette palette = paletteOf(activity);
 
         LinearLayout panel = new LinearLayout(activity);
         panel.setTag(OVERLAY_TAG);
@@ -103,10 +106,10 @@ final class SandboxOverlay {
         panel.setBackground(rounded(palette.surface, CORNER_RADIUS_DP));
         panel.setElevation(dp(activity, 14));
 
-        TextView bubble = action(activity, "ZhiCode", palette.accent);
-        TextView log = action(activity, "日志", palette.text);
-        TextView back = action(activity, "返回", palette.text);
-        TextView stop = action(activity, "停止", palette.danger);
+        TextView bubble = action(activity, "ZhiCode", palette.accent, palette);
+        TextView log = action(activity, "日志", palette.text, palette);
+        TextView back = action(activity, "返回", palette.text, palette);
+        TextView stop = action(activity, "停止", palette.danger, palette);
 
         panel.addView(bubble, new LinearLayout.LayoutParams(dp(activity, BUBBLE_WIDTH_DP), dp(activity, HEIGHT_DP)));
         panel.addView(log, new LinearLayout.LayoutParams(dp(activity, ACTION_WIDTH_DP), dp(activity, HEIGHT_DP)));
@@ -193,10 +196,24 @@ final class SandboxOverlay {
 
     // ------------------------------------------------------------------ 日志面板
 
+    /**
+     * 日志面板。
+     *
+     * <p><b>三处颜色必须我们自己定，不能留给主题。</b>真机症状（截图）：面板是一片
+     * 纯白，看着像没有内容。根因不是日志空，而是颜色：正文原来写死
+     * {@code Color.WHITE}，而 {@code AlertDialog} 的底色跟着<b>当前 Activity 的主题</b>走
+     * —— 这里是 guest 的 Activity（截图里是浅色的 PHIRA）→ 白底白字。
+     * 日志一直好好地写在宿主的目录里。
+     *
+     * <p>所以：正文色、窗口底色、标题与三个按钮全部显式上色（见 {@link #tintDialog}）。
+     * 少任何一处都会退回“guest 主题说了算”，而 guest 主题是我们控制不了的。
+     */
     private static void showLog(Activity activity) {
+        SandboxPalette palette = paletteOf(activity);
+
         TextView body = new TextView(activity);
         body.setText("正在读取日志…");
-        body.setTextColor(Color.WHITE);
+        body.setTextColor(palette.text);
         body.setTextSize(10);
         body.setTypeface(Typeface.MONOSPACE);
         body.setTextIsSelectable(true);
@@ -215,6 +232,7 @@ final class SandboxOverlay {
                 .setPositiveButton("刷新", null)
                 .create();
         dialog.setOnShowListener(ignored -> {
+            tintDialog(dialog, palette);
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
                 ClipboardManager clipboard =
                         (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
@@ -228,12 +246,47 @@ final class SandboxOverlay {
         loadLog(activity, body);
     }
 
-    /** 日志在后台线程采集（要读文件 + 跑 logcat），回主线程前确认视图还挂着。 */
+    /**
+     * 把对话框的底色、标题与三个按钮改成我们自己的色。
+     *
+     * <p>只在 {@code show()} 之后调（`getButton` 在未 show 时会抛）。
+     */
+    private static void tintDialog(AlertDialog dialog, SandboxPalette palette) {
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(rounded(palette.surface, CORNER_RADIUS_DP));
+        }
+        TextView title = dialog.findViewById(android.R.id.title);
+        if (title != null) {
+            title.setTextColor(palette.text);
+        }
+        int[] which = {AlertDialog.BUTTON_POSITIVE, AlertDialog.BUTTON_NEUTRAL, AlertDialog.BUTTON_NEGATIVE};
+        for (int button : which) {
+            Button view = dialog.getButton(button);
+            if (view != null) {
+                view.setTextColor(palette.accent);
+                // MIUI/HyperOS 的中文界面里按钮从不全大写，默认的 ALL CAPS 只对拉丁字母可见。
+                view.setAllCaps(false);
+            }
+        }
+    }
+
+    /**
+     * 日志在后台线程采集（要读文件 + 跑 logcat），回主线程前确认视图还挂着。
+     *
+     * <p><b>必须从宿主的 context 读。</b>{@code activity} 是 guest 的 Activity，
+     * 它的 {@code filesDir} 可能被引擎重定向到虚拟数据目录，用它去读
+     * {@link SandboxConsole} 会读到另一个文件（或读不到）——
+     * 而 {@link ZhiSandbox#attach} 记下的 {@code appContext} 才是宿主自己的。
+     */
     private static void loadLog(Activity activity, TextView body) {
+        final Context reader;
+        Context host = ZhiSandbox.hostContext();
+        reader = host != null ? host : activity.getApplicationContext();
         new Thread(() -> {
             String text;
             try {
-                text = SandboxConsole.snapshot(activity.getApplicationContext());
+                text = SandboxConsole.snapshot(reader);
             } catch (Throwable error) {
                 text = "读取日志失败: " + error;
             }
@@ -246,13 +299,27 @@ final class SandboxOverlay {
 
     // ------------------------------------------------------------------ 小工具
 
-    private static TextView action(Activity activity, String label, int color) {
+    /**
+     * 调色板。优先用宿主 context：guest 的 Activity 主题是别人应用的，
+     * 颜色不该跟着它走（悬浮窗自己的外观应该始终是 ZhiCode 的 Miuix 主题）。
+     */
+    private static SandboxPalette paletteOf(Activity activity) {
+        Context host = ZhiSandbox.hostContext();
+        return SandboxPalette.resolve(host != null ? host : activity);
+    }
+
+    private static TextView action(Activity activity, String label, int color, SandboxPalette palette) {
         TextView view = new TextView(activity);
         view.setText(label);
         view.setTextColor(color);
         view.setTextSize(11);
         view.setTypeface(Typeface.DEFAULT_BOLD);
         view.setGravity(Gravity.CENTER);
+        // 点下去有反馈：这是 View 树里手搭的“按钮”，没有 Composable 的 press indication，
+        // 不给涟漪的话点起来像没反应（尤其“日志”这种要等一秒的功能）。
+        int ripple = (palette.text & 0x00FFFFFF) | 0x33000000;
+        view.setBackground(new RippleDrawable(ColorStateList.valueOf(ripple), null, null));
+        view.setClickable(true);
         return view;
     }
 

@@ -2,8 +2,9 @@ package com.zhizhu.zhicode.compose.model
 
 import com.termux.app.zhicode.core.FileOps
 
-/** 对话流中的条目类型。对应原 蜘蛛 的 ChatItem 分类。 */
-enum class ChatKind { USER, ASSISTANT, TOOL_GROUP, ERROR, INFO }
+// `ChatKind` 与 `ToolKind` 都在自己的文件里：它们在 `model` 包内，
+// 而本文件还拖着一整套界面状态类 —— 纯逻辑层（ToolGrouping / TurnLayout）只需要那两个
+// 枚举，不该为了它们把这一整份编译进秒级回路。
 
 
 enum class RiskLevel { NORMAL, HIGH }
@@ -20,6 +21,24 @@ data class ToolActivity(
     val additions: Int = 0,
     val deletions: Int = 0,
     val output: String = "",
+    /**
+     * 写文件类工具的**统一 diff**（引擎算好的，仅供界面显示，不发给模型）。
+     *
+     * ## 为什么必须单独存一份，不能从 [output] 里捞
+     *
+     * 引擎的 `Write/Edit/MultiEdit/Delete` 返回的 `content` 是**一句自述**
+     * （`Wrote 505 bytes to /data/.../x.txt`），真正的改动在
+     * `ToolExecutionResult.diff` 里（`tools/UnifiedDiff.create(...)`），
+     * 而 `ZhiCodeEngine.persistToolDiff` 也把它单独写进了 `tool_diff` 事件。
+     *
+     * 界面这边原来只认"输出文本本身长得像 diff"（`ToolText.isFileDiff(output)`）——
+     * 于是**那块更暗的 diff 预览井在真机上从来没出现过**：数据早就送到门口了
+     * （`ZhiEngineController` 一路 `diff = result.diff` 传进来），
+     * 却在这一层被丢掉。参考实现的展开态是「diff 井 + 输出井」两块**都画**
+     * （`addToolCard`：先 `colorDiff(item.diff)` 画在 `TERMINAL_BG` 上，再画 result），
+     * 不是二选一。
+     */
+    val diff: String = "",
     val expanded: Boolean = false,
     val awaitingPermission: Boolean = false,
     val kind: ToolKind = ToolKind.OTHER,
@@ -289,6 +308,16 @@ enum class ChoiceIntent {
 
     /** 会话备注：没有选项，只靠自由输入提交（允许空串表示清除）。 */
     SESSION_NOTE,
+
+    /**
+     * 会话重命名：和 [SESSION_NOTE] 一样没有选项，只靠自由输入提交。
+     *
+     * 单独开一个 intent 而不是复用 [SESSION_NOTE]，是因为两者写盘时
+     * `SessionReader.updateMetadata(file, note, titleOverride)` 的字段正好相反：
+     * 备注只改 note（titleOverride 传空串 = 不覆盖），重命名只改 title（note 原样带回）。
+     * 混用一个 intent 迟早会把标题写成备注。
+     */
+    SESSION_RENAME,
 }
 
 data class DiffFile(

@@ -158,7 +158,41 @@ BuildConfig.APPLICATION_ID 派生。保留它是因为类名与调用点遍布�
 以上均为 Apache-2.0 或其兼容许可。
 
 
-7. 关于本工程自己的代码
+7. Material Symbols 图标（路径数据内联进源码）— Apache-2.0
+----------------------------------------------------------------
+
+来源 : https://github.com/google/material-design-icons
+       symbols/web/<名字>/materialsymbolsrounded/<名字>_fill1_24px.svg
+       （Material Symbols，Rounded 变体，fill1 实心版）
+许可 : Apache License 2.0
+许可原文: THIRD-PARTY-LICENSES/Apache-2.0.txt
+
+这一项与第 6 节不同：**不是依赖，而是把上游数据拷进了本工程的源码**，
+因此必须在此声明（以及按 Apache-2.0 说明我们没有修改这些数据）。
+
+对应文件 :
+  app/src/main/java/com/zhizhu/zhicode/compose/ui/ZhiMaterialIcons.kt
+      51 个字形的 `<path d="...">` 原样内联；每个字形只多了一层视口换算
+      （上游 viewBox 为 `0 -960 960 960`，Compose 视口为 24×24）。
+      **路径数据本身逐字未改**，这一点可以用下面的脚本重新取一遍来做 diff 核对。
+
+  tools/material-symbols-fetch.sh
+      重新取用脚本：按脚本内的「Kotlin 名 → 上游字形名」映射表重新下载并重写
+      ZhiMaterialIcons.kt。任何人（包括 reviewer）都可以重跑它来核对
+      "文件里这份数据还是上游那份"。
+
+  app/tests/MaterialSymbolGeometryTest.java
+      把每个字形的路径走一遍、量出墨迹范围并与基线表比对，
+      用来发现"数字抄错但照样能解析"的情况。
+
+本工程对这两个文件的修改：
+  - ZhiMaterialIcons.kt 是**生成物**（由上面的脚本生成），
+    除视口换算与文件头说明外不含任何自行设计的图形；
+  - 未改动上游的许可与版权声明（上游该目录下没有 NOTICE 文件，
+    按 Apache-2.0 第 4 条在此声明"未修改数据本身"）。
+
+
+8. 关于本工程自己的代码
 ----------------------------------------------------------------
 
 蜘蛛自己的代码（Compose 界面层、宿主层重写部分、新增的诊断与安全边界等）

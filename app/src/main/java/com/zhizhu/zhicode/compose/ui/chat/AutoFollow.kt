@@ -3,9 +3,14 @@ package com.zhizhu.zhicode.compose.ui.chat
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -92,11 +97,44 @@ internal fun rememberAutoFollow(
     forceFollowToken: Long = 0L,
     hysteresis: Dp = 8.dp,
 ): State<Boolean> {
-    val autoFollow = remember(listState) { mutableStateOf(true) }
+    /*
+     * ⚠️ 必须是 `rememberSaveable`，不能是普通 `remember`。
+     *
+     * 切页签（对话 / 终端 / 文件）时，离场的那个面板会被 `AnimatedContent` **销毁**
+     * （面板外面套了 `SaveableStateHolder` 用来保住滚动位置，见 WorkspaceLayouts）。
+     * 普通 `remember` 的值跟着组合一起没了，于是切回来时这个标志又变回 `true` ——
+     * 而下面那个吸底 effect 的 `snapshotFlow` 一订阅就会先发射一次当前值，
+     * 于是**立刻**把列表拽到底部，用户刚翻到的历史位置白翻了。
+     * 用户的原话：「切换页面，对话老是回到最低端」。
+     *
+     * 存的是"用户是否还在跟随最新内容"这件事本身，所以它就该跟着面板状态一起活下来。
+     */
+    val autoFollow = rememberSaveable(
+        listState,
+        saver = Saver<MutableState<Boolean>, Boolean>(
+            save = { it.value },
+            restore = { mutableStateOf(it) },
+        ),
+    ) { mutableStateOf(true) }
     val hysteresisPx = with(LocalDensity.current) { hysteresis.roundToPx() }
 
+    /*
+     * 令牌只对**变化**负责，不对"非零"负责。
+     *
+     * 原来写的是 `if (forceFollowToken > 0L) autoFollow.value = true` ——
+     * `LaunchedEffect(forceFollowToken)` 在**每次重新进入组合**时都会重跑一遍，
+     * 而令牌在发过一次消息之后就一直 > 0，于是切回页签时它又把跟随打开、
+     * 顺手把列表拉到底部（这是"老是回到最低端"的第二个来源）。
+     *
+     * 记下已处理过的令牌，只在**真的变了**（= 用户按了发送）时才恢复跟随。
+     */
+    var lastForceToken by remember { mutableStateOf(forceFollowToken) }
+
     LaunchedEffect(forceFollowToken) {
-        if (forceFollowToken > 0L) autoFollow.value = true
+        if (forceFollowToken != lastForceToken) {
+            lastForceToken = forceFollowToken
+            autoFollow.value = true
+        }
     }
 
     LaunchedEffect(listState, hysteresisPx) {

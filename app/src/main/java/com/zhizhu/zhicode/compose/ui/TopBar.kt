@@ -21,6 +21,7 @@ import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
+import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
@@ -197,7 +198,11 @@ fun ZhiTopBar(
                 WorkspaceTabs(
                     tabs = tabs,
                     selected = state.tab,
-                    onSelect = onSelectTab,
+                    // 见 WorkspaceLayouts 里同名的包装：测量点必须在 selectTab 之前。
+                    onSelect = { tab ->
+                        ZhiFrameTrace.begin("tab:${tab.name}")
+                        onSelectTab(tab)
+                    },
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = TopBarTabRowPadding / 2),
                 )
             }

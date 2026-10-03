@@ -52,6 +52,13 @@ public final class ToolInteractionTest {
             "app/src/main/java/com/zhizhu/zhicode/compose/ui/chat/AutoFollow.kt";
     private static final String MARKDOWN =
             "app/src/main/java/com/zhizhu/zhicode/compose/ui/Markdown.kt";
+    private static final String THEME =
+            "app/src/main/java/com/zhizhu/zhicode/compose/theme/ZhiTheme.kt";
+    private static final String ZHI_ICONS =
+            "app/src/main/java/com/zhizhu/zhicode/compose/ui/ZhiIcons.kt";
+    private static final String ZHI_MATERIAL_ICONS =
+            "app/src/main/java/com/zhizhu/zhicode/compose/ui/ZhiMaterialIcons.kt";
+    private static final String MATERIAL_FETCH_TOOL = "tools/material-symbols-fetch.sh";
     private static final String FAST_SCRIPT = "test-jvm-fast.sh";
 
     private static void require(boolean ok, String message) {
@@ -131,13 +138,21 @@ public final class ToolInteractionTest {
      * 取 `ToolBatch` 里 `Segment.Single ->` 那一段（到 `Segment.Group ->` 为止）。
      *
      * 用来断言"单条工具的画法里不许有卡片" —— 这条只能在那个分支里查，
-     * 整个文件里当然有 `Card(`（组卡片自己要用）。
+     * 整个文件里当然有 `Card(`（输出井自己要用）。
      */
     private static String singleBranch(String cards) {
         int at = cards.indexOf("Segment.Single ->");
         if (at < 0) return "";
         int end = cards.indexOf("Segment.Group ->", at);
         return end < 0 ? cards.substring(at) : cards.substring(at, end);
+    }
+
+    /** 取 [from] 到下一个顶层 `private fun` 之间的片段（找不到终点就吃到末尾）。 */
+    private static String section(String source, String from, String to) {
+        int at = source.indexOf(from);
+        if (at < 0) return "";
+        int end = source.indexOf(to, at + from.length());
+        return end < 0 ? source.substring(at) : source.substring(at, end);
     }
 
     private static int countOccurrences(String text, String needle) {
@@ -166,6 +181,10 @@ public final class ToolInteractionTest {
         String chatNav = stripComments(read(root, CHAT_NAV));
         String autoFollow = stripComments(read(root, AUTO_FOLLOW));
         String markdown = stripComments(read(root, MARKDOWN));
+        String theme = stripComments(read(root, THEME));
+        String models = stripComments(read(root, UI_MODELS));
+        // 快回路脚本要在两处检查（1b/1d 与第 5 节），早读一次。
+        String script0 = read(root, FAST_SCRIPT);
 
         // ---- 1. `⋯` 必须是 Miuix 下拉菜单触发器，且回调必须带 toolId ----
         //
@@ -233,21 +252,19 @@ public final class ToolInteractionTest {
                         + "在界面里另写一套候选集/断开规则，两份迟早不一致");
         require(squash(cards).contains("Segment.Single->"),
                 CARDS + " 必须分别处理 Single 与 Group 两种段");
-        // 单条那一段必须**自己一张卡**（用户要求「给调用工具加个框」），
-        // 但卡里**不许有标题行/子标签/计数徽章** —— 之前那张大卡的问题不在于"有框"，
-        // 而在于框顶上多了一行整批的汇总（「已运行 N 个工具」「修改 1 处代码」），
-        // 挂在单独一条命令上面就是假信息。
-        require(squash(singleBranch(cards)).contains("Card("),
-                CARDS + " 的 Single 分支必须给这一条工具一个 Card（加个框）："
-                        + "没有框时命令行与输出块直接浮在页面上，看不出边界");
+        // 单条工具是**透明的一行**（反编译版 `addToolCard` 整行没有任何背景），
+        // 也不许有徽章：有底色的只有它下面那口**终端井**（输出 / diff / 实时输出）。
+        // 曾经在这里套过一张 Card —— 那是"卡里装着一个井"，两层底、两层圆角，
+        // 一屏全是框。用户的原话是「底色比其他地方要黑的就是我说的预览框」：
+        // 框来自**内容**，不是来自给每条工具套壳。
+        require(!squash(singleBranch(cards)).contains("Card("),
+                CARDS + " 的 Single 分支不许出现 Card(：单条工具就是透明一行，"
+                        + "有底色的只有它下面的终端井（见 terminalSurface）");
         require(!squash(singleBranch(cards)).contains("Badge("),
                 CARDS + " 的 Single 分支里不许有 Badge：单条工具的卡不冒充整批的汇总");
-        require(squash(singleBranch(cards)).contains("SingleMargin"),
-                CARDS + " 的单条卡必须用 SingleMargin（比组卡紧一档的内边距）："
-                        + "两张卡在同一屏里挨着出现时要看得出装的是一条还是一组");
         require(squash(singleBranch(cards)).contains("key(tool.id){")
                         && squash(singleBranch(cards)).contains("ToolRow("),
-                CARDS + " 的 Single 分支必须 key(tool.id) 包住这一条工具（现在中间还夹着 Card）："
+                CARDS + " 的 Single 分支必须 key(tool.id) 包住这一条工具："
                         + "工具是边跑边追加的，按位置归属会让行内状态串到别的行上");
         // 通用计数标题不许回来 —— 它回答"有几个"而不是"在干什么"。
         require(!squash(cards).contains("已运行"),
@@ -280,7 +297,221 @@ public final class ToolInteractionTest {
                         + "写成固定值（例如恒置空集）会编译通过、但点表头永远展不开");
         require(!squash(vm).contains("groupLabel"),
                 VM + " 里不许再有 groupLabel：批次级汇总标签已经没有渲染位置了");
-        require(!squash(uiModels).contains("valgroupLabel:String"),
+        // ---- 1b2. diff 预览井：整条数据链必须接通 ----------------------------
+        //
+        // 真机上的症状：IQ Code 里「修改文件」下面有一块**更暗**的 diff 预览井，
+        // ZhiCode 里从来没有 —— 而引擎其实把它算好了
+        // （`tools/UnifiedDiff.create` → `okWithDiff` → `ZhiEngineController` 一路
+        // `diff = result.diff` 传进来），只是在 ViewModel 那一层被丢掉：
+        // `ToolActivity` 根本没有 diff 字段，渲染侧也就只认"输出文本本身像 diff"，
+        // 而写文件类工具的输出是一句自述（"Wrote 505 bytes to …"）。
+        //
+        // 这条链有四个环节，任何一环掉了，症状都一样（井是空的），
+        // 所以每一环都要单独钉住 —— 只在渲染侧断言会漏掉"数据没送到"。
+        require(squash(models).contains("valdiff:String=\"\""),
+                UI_MODELS + " 的 ToolActivity 必须有 diff 字段（默认空串）："
+                        + "引擎算好的统一 diff 要有地方存，否则界面永远画不出那块井");
+        require(squash(vm).contains("diff=diff,"),
+                VM + " 的 onEngineToolResult 必须把入参 diff 落到工具上（diff = diff）："
+                        + "参数一路传到这里却被丢掉，编译器不会提醒，井就永远是空的");
+        require(squash(reader).contains("optString(\"diff\""),
+                SESSION_READER + " 必须读 tool_diff 事件里的 \"diff\" 正文："
+                        + "只读 additions/deletions 的话，恢复历史会话后井是空的");
+        require(squash(reader).contains("diff=diff?.text?:tool.diff"),
+                SESSION_READER + " 必须把 diff 正文写回工具（diff = diff?.text ?: tool.diff）");
+        String expanded = section(cards, "ToolStatusRegion.EXPANDED ->", "ToolStatusRegion.QUIET");
+        require(!expanded.isEmpty(), CARDS + " 里找不到 EXPANDED 分支");
+        // 两块井都要在：diff 在前（参考实现 `colorDiff(item.diff)` 先画），
+        // 输出在后。写文件类工具的自述（"Wrote N bytes to …"）也有信息，
+        // 用 diff 替掉它是**减信息**。
+        require(expanded.contains("DiffLines("),
+                "EXPANDED 分支必须画 diff 井（DiffLines）：这是「底色更黑的那个预览框」");
+        require(expanded.contains("OutputLines(activity.output)"),
+                "EXPANDED 分支必须保留输出井（OutputLines(activity.output)）："
+                        + "diff 与输出是并列的两块，不是二选一");
+        require(squash(cards).contains("valhasDiff=activity.diff.isNotBlank()"),
+                CARDS + " 必须显式算 hasDiff："
+                        + "只靠 ToolText.isFileDiff(output) 判不出引擎单独给的 diff");
+        require(squash(cards).contains("hasDetails=activity.output.isNotBlank()||hasDiff"),
+                CARDS + " 的 hasDetails 必须把 diff 也算进去："
+                        + "否则只有 diff、没有输出的工具连展开箭头都不显示（内容摸不到）");
+        require(squash(cards).contains("isFileDiff=isFileDiff||hasDiff"),
+                CARDS + " 交给 ToolActions.flags 的判据必须含 diff："
+                        + "否则「复制 diff」在这类工具上不出现");
+
+        // ---- 1b3. 折叠控件必须是箭头，且工具行不再显示箭头 ------------------
+        //
+        // 真机症状（用户：「这个框怪怪的」）：工具行右端的展开箭头渲染成一个小方框。
+        // 根因是那一对指向了 Miuix 的 `ExpandMore` / `ExpandLess`
+        // —— 那两个字形的路径是「左上 L 形框 + 中间圆点 + 右下 L 形框」，**不是箭头**
+        // （见 `miuix-icons/.../extended/ExpandMore.kt` 的 PathNode）。
+        //
+        // 现在整集换成了 Material Symbols，这一对落在 `chevron_right` / `expand_more`
+        // （上游没有 `chevron_down`，向下的箭头就叫 expand_more）。
+        // 这里钉三件事：
+        // 1. expand / collapse 走那两个字形；
+        // 2. 不许再出现 Miuix 的 ExpandMore / ExpandLess；
+        // 3. **工具行与工具组表头不再显示箭头**（用户：「⌃/⌄ 箭头可以去掉，
+        //    因为点击内容可以快速收回或展开」）—— 整行本身就是开关。
+        String icons = stripComments(read(root, ZHI_ICONS));
+        String materialIcons = stripComments(read(root, ZHI_MATERIAL_ICONS));
+        require(squash(icons).contains(
+                        "valexpand:Painter@Composableget()=vector(ZhiMaterialIcons.ChevronRight)"),
+                ZHI_ICONS + " 的 expand 必须是 ChevronRight："
+                        + "Miuix 的 ExpandMore 是「L 形框 + 圆点」，渲染出来就是那个怪框");
+        require(squash(icons).contains(
+                        "valcollapse:Painter@Composableget()=vector(ZhiMaterialIcons.ExpandMore)"),
+                ZHI_ICONS + " 的 collapse 必须是 ExpandMore（上游的向下箭头就叫这个名字，"
+                        + "它本来就是 chevron 的形状，不是 Miuix 那个框）");
+        require(!squash(icons).contains("set.ExpandMore") && !squash(icons).contains("set.ExpandLess"),
+                ZHI_ICONS + " 不得再用 Miuix 的 ExpandMore / ExpandLess："
+                        + "那两个字形不是箭头（用户看到的「怪怪的框」就是它们）");
+        // 工具行 / 组表头里不许再出现任何折叠箭头。
+        String cards2 = stripComments(read(root, CARDS));
+        require(!squash(cards2).contains("chevronUp") && !squash(cards2).contains("chevronDown"),
+                CARDS + " 里不许再有 chevronUp/chevronDown：工具行与组表头的展开/收起"
+                        + "靠整行点击，不再用图标表达（用户明确要求去掉）");
+        // 来源、许可与"怎么重新取一遍"必须写在文件里（查**原文**，注释会被 stripComments 删掉）。
+        // 不写清楚，下一个人不知道这些路径数据是从哪来的，也没法核对抄对没有。
+        String iconsRaw = read(root, ZHI_ICONS);
+        String materialRaw = read(root, ZHI_MATERIAL_ICONS);
+        require(iconsRaw.contains("Material Symbols") && iconsRaw.contains("Apache"),
+                ZHI_ICONS + " 必须写明图标来源（Material Symbols，Apache-2.0）");
+        require(materialRaw.contains("Material Symbols")
+                        && materialRaw.contains("google/material-design-icons")
+                        && materialRaw.contains("Apache")
+                        && materialRaw.contains("rikkahub"),
+                ZHI_MATERIAL_ICONS + " 必须写明**取证过程**：为什么是 Material Symbols"
+                        + "（rikkahub 实际用的 HugeIcons / Lucide 都是线条，与「不是线条」冲突）、"
+                        + "上游是谁、许可是什么。否则后来的人会以为这些路径是随手画的");
+        require(Files.isRegularFile(root.resolve(MATERIAL_FETCH_TOOL)),
+                MATERIAL_FETCH_TOOL + " 必须存在：" + ZHI_MATERIAL_ICONS
+                        + " 里那份路径数据是从上游拷来的，" + MATERIAL_FETCH_TOOL
+                        + " 是唯一能证明「它还是上游那份」的东西（也是换字形的唯一入口）");
+        require(materialRaw.contains("tools/material-symbols-fetch.sh"),
+                ZHI_MATERIAL_ICONS + " 必须指向取用脚本（tools/material-symbols-fetch.sh）："
+                        + "否则没人知道该怎么重新取一遍、也没法核对数据有没有被手改过");
+
+        // ---- 1e. 权限模式 / 推理档必须活过一次启动 --------------------------
+        //
+        // 真机症状（用户：「聊天框那边的权限在退出软件等一系列操作，就会恢复成原来的样子」）。
+        //
+        // 这两项是 `SessionConfig` 的字段、也真的会被 `store.save()` 写盘，
+        // 但界面状态**从来不读回来**，于是形成一个固定回路：
+        //   1. 底排选了「跳过权限」→ 只有 state 变了；
+        //   2. 发送时 configure() 写盘（这一步是对的）；
+        //   3. 重启 → state 又是默认的「每次询问」；
+        //   4. 启动路径里的 syncActiveProfile() → configure() 立刻**落盘**，
+        //      把界面那份默认值写回去，盘上的「跳过权限」被冲掉。
+        //
+        // 所以"读回来"这一步不只是为了显示，它决定盘上的值能不能活过一次启动；
+        // 而它**必须早于任何 configure()**，否则读到的就是刚被冲掉的那份。
+        require(squash(vm).contains("privatesuspendfunrestoreRuntimeChoices()"),
+                VM + " 必须有 restoreRuntimeChoices()："
+                        + "权限模式/推理档存在 SessionConfig 里，但界面从不读回来");
+        require(squash(vm).contains("engineModeToUi(o.permissionMode)")
+                        && squash(vm).contains("engineEffortToUi(o.effort)"),
+                VM + " 的读回必须走 engineModeToUi / engineEffortToUi："
+                        + "盘上存的是引擎字符串（acceptEdits / low），界面枚举自己解析一遍迟早分叉");
+        require(squash(vm).contains("privatefunpersistRuntimeChoice(mode:PermissionMode?=null,effort:EffortLevel?=null)"),
+                VM + " 必须有 persistRuntimeChoice()："
+                        + "只靠发送前那次 configure() 落盘，用户「选完就退出」仍然会丢");
+        require(squash(vm).contains("funsetPermissionMode(mode:PermissionMode){")
+                        && squash(vm).contains("persistRuntimeChoice(mode=mode)"),
+                VM + " setPermissionMode 必须落盘：输入器底排选完的那一次就是它的唯一入口");
+        require(squash(vm).contains("funsetEffort(level:EffortLevel){")
+                        && squash(vm).contains("persistRuntimeChoice(effort=level)"),
+                VM + " setEffort 必须落盘");
+        // 三条改动权限模式的路径必须都落盘，否则"启动时读回"会读出一个过期的值，
+        // 反而把界面打回旧模式 —— 比不读回还糟。
+        require(countOccurrences(squash(vm), "persistRuntimeChoice(") >= 5,
+                VM + " 里 persistRuntimeChoice( 的调用点太少（现在 "
+                        + countOccurrences(squash(vm), "persistRuntimeChoice(") + " 处）："
+                        + "定义 1 处 + setPermissionMode + setEffort + 斜杠 /permissions + "
+                        + "「总是允许」这四路都必须写盘");
+        // 顺序：读回必须排在 syncActiveProfile（它会 configure() 并落盘）之前。
+        int restore = squash(vm).indexOf("restoreRuntimeChoices()");
+        int sync = squash(vm).indexOf("restoreUiSettings()");
+        int profile = squash(vm).indexOf("syncActiveProfile()", sync);
+        require(restore > 0 && sync > 0 && profile > 0 && restore > sync && restore < profile,
+                VM + " 的 restoreRuntimeChoices() 必须排在 restoreUiSettings() 之后、"
+                        + "syncActiveProfile() 之前：syncActiveProfile 会 configure() 并落盘，"
+                        + "读得晚一步就只能读到刚被默认值冲掉的那份");
+
+        // ---- 1c. 预览面板：一口**比页面更暗**的终端井 ------------------------        //
+        // 用户的原话：「底色比其他地方要黑的就是我说的预览框」。
+        // 反编译版的 `TERMINAL_BG` 三套调色板都遵守这条（#0A0B0C / #040914 / #F1EFE8），
+        // 而 ZhiCode 之前用的是 `cardInnerSurface()` —— 深色下取 Miuix 的
+        // `surfaceContainerHighest`，**比卡片亮一档**，方向恰好相反。
+        require(squash(theme).contains("funterminalSurface()"),
+                THEME + " 必须有 terminalSurface()：工具输出/diff/实时预览共用的一口井");
+        // 井必须**比页面更暗**，而且这条要钉住具体的取值（只查"定义了函数"是弱守卫：
+        // 把井改成比页面还亮的颜色同样能编译、同样通过上一条）。
+        require(squash(theme).contains("TerminalDark=Color(0xFF0A0B0C)"),
+                THEME + " 的深色井必须是 #0A0B0C（IQ Code 暖黑调色板的 TERMINAL_BG）："
+                        + "页面是 #242424，井更暗才像\"程序吐出来的原始字节\"");
+        require(squash(theme).contains("TerminalLight=Color(0xFFE7E5DE)"),
+                THEME + " 的浅色井必须是 #E7E5DE：页面是 #EDEDED，方向同样是\"更暗\""
+                        + "（IQ Code 亮色里 #F1EFE8 vs 页面 #F7F6F2 也是更暗）");
+        // 三处必须都用它，而不是各写各的底：
+        for (String call : new String[]{"terminalSurface()"}) {
+            require(countOccurrences(squash(cards), call) >= 3,
+                    CARDS + " 的输出/diff/运行中预览三处都必须画在 terminalSurface() 上"
+                            + "（当前只出现 " + countOccurrences(squash(cards), call) + " 次）");
+        }
+        require(!squash(cards).contains("color=ZhiColors.cardInnerSurface()"),
+                CARDS + " 的工具面板不许再用 cardInnerSurface()："
+                        + "那是\"比卡片亮一档\"的卡片语义，方向与终端井相反");
+        // 运行中的命令类必须是整块井：圆点 + 名称 + 右对齐计时 + 命令行 + 分隔线 + 实时输出。
+        require(squash(cards).contains("funRunningPanel("),
+                CARDS + " 必须把运行中的那块抽成 RunningPanel");
+        String running = section(cards, "private fun RunningPanel(", "\nprivate fun ");
+        require(!running.isEmpty(), CARDS + " 里找不到 RunningPanel");
+        for (String piece : new String[]{
+                "terminalSurface()", "ZhiHorizontalDivider(", "等待程序输出…", ".size(7.dp)",
+        }) {
+            require(running.contains(piece),
+                    "RunningPanel 里缺少 " + piece + "："
+                            + "反编译版的运行块是「圆点 + bash + 计时 → 命令行 → 分隔线 → 实时输出」");
+        }
+        require(squash(cards).contains("ZhiTextScale.Footnote")
+                        || squash(cards).contains("ZhiTextScale.Micro"),
+                CARDS + " 输出面板的字号必须走 ZhiTextScale 的档位（不要写新字面量）");
+
+        // ---- 1d. 助手回合容器：透明，且只由 USER 断开 ------------------------
+        require(squash(chatList).contains("TurnLayout.blocks("),
+                CHAT_LIST + " 必须按 TurnLayout.blocks 分块渲染："
+                        + "「用户发言断开容器、其余归进同一轮」这条规则不能在界面里另写一遍");
+        // ⚠️ 对话流只允许**一套**渲染路径。
+        //
+        // 真机症状：打开会话后快速上滑，"用户消息才显示出来，而且是从下往上飞起来的"。
+        // 原因是旧那套逐条 `items(state.transcript, key = { it.id })` 没删干净，
+        // 与新的按块 `items(blocks)` 同时留着 —— 同一批 id 在同一个 LazyColumn 里
+        // 出现两次（`Block.Standalone` 的 key 就是消息 id），于是：
+        //   · 每条消息被画两遍，滚上去看到的那一份是"副本"；
+        //   · 重复 key 会把项判成"新出现"，于是 `animateItem` 的出现动画
+        //     在快速滚动中反复播放 —— 看起来就是"从下往上飞"。
+        require(!squash(chatList).contains("items(state.transcript"),
+                CHAT_LIST + " 里不许再有逐条渲染的 items(state.transcript)："
+                        + "它与按块渲染并存时，同一批 id 会在一个 LazyColumn 里出现两次");
+        int animates = countOccurrences(squash(chatList), "animateItem(");
+        require(animates == 1,
+                CHAT_LIST + " 里 animateItem( 只该出现 1 次（就是渲染对话的那处 items），"
+                        + "现在有 " + animates + " 次 —— 多出来的那处说明还有第二套渲染路径");
+        require(squash(chatList).contains("isTurnLayout.Block.Turn->"),
+                CHAT_LIST + " 必须分别处理 Standalone 与 Turn");
+        require(squash(chatList).contains("if(blockisTurnLayout.Block.Turn)"),
+                CHAT_LIST + " 的回合间距必须只加在 Turn 上（用户消息在容器外）");
+        // 容器必须**透明**：反编译版的 beginConversation 是 padding 0 + 无背景。
+        require(!squash(chatList).contains("TurnContainer("),
+                CHAT_LIST + " 里不该出现给回合套壳的容器组件："
+                        + "反编译版的回合容器是透明 vbox（padding 0、无背景），"
+                        + "画个框就把\"井\"的唯一性抢走了");
+        require(squash(script0).contains("model/TurnLayout.kt") && squash(script0).contains("TurnLayoutTest"),
+                FAST_SCRIPT + " 必须把 TurnLayout.kt 与 TurnLayoutTest 一起列进快回路");
+        require(squash(script0).contains("model/ChatKind.kt"),
+                FAST_SCRIPT + " 必须把 ChatKind.kt 列进 MAIN_KT_SOURCES："
+                        + "TurnLayout 与 ToolGrouping 都要用它，少了它就编译不过");        require(!squash(uiModels).contains("valgroupLabel:String"),
                 UI_MODELS + " 的 ChatItem 不许再有 groupLabel（死状态）");
         // 调试模式要求"把每一组都摊开"，所以它必须按 ToolGrouping 算出组的 key 集合
         // 塞进 expandedGroups —— 只写 `expandedGroups = emptySet()` 同样能编译，
@@ -436,8 +667,35 @@ public final class ToolInteractionTest {
         require(squash(chatList).contains("rememberAutoFollow(listState,forceFollowToken=state.scrollToBottomToken)"),
                 CHAT_LIST + " 必须把令牌交给 rememberAutoFollow："
                         + "只递增而没人用，等于没做");
-        require(squash(autoFollow).contains("if(forceFollowToken>0L)autoFollow.value=true"),
-                "AutoFollow.kt 必须真的把令牌翻译成「恢复跟随」");
+        require(squash(autoFollow).contains("if(forceFollowToken!=lastForceToken)")
+                        && squash(autoFollow).contains("lastForceToken=forceFollowToken")
+                        && squash(autoFollow).contains("autoFollow.value=true"),
+                "AutoFollow.kt 必须把令牌翻译成「恢复跟随」，"
+                        + "而且判据是令牌**变了**而不是「非零」："
+                        + "LaunchedEffect 每次重新进入组合都会重跑，切回页签时令牌早就 > 0，"
+                        + "按「非零」判会把用户刚翻到的位置又拽回底部");
+
+        // 6a2. 切页签不许把人拽回底部 ----------------------------------------
+        //
+        // 真机症状（用户：「切换页面，对话老是回到最低端」）：对话/终端切走再切回时，
+        // 面板被 `AnimatedContent` 销毁重建，三个"回到底部"的入口会同时重跑：
+        //   1. `autoFollow` 若是普通 `remember`，重建后又变回 true；
+        //   2. 令牌 effect 若只判"非零"，重建时又滚一次；
+        //   3. 吸底 snapshotFlow 的首帧发射 + (1) 的 true 一起，立刻拽到底。
+        // 三条都改掉，缺一条症状依旧。
+        require(squash(autoFollow).contains("rememberSaveable("),
+                "AutoFollow.kt 的 autoFollow 必须用 rememberSaveable："
+                        + "普通 remember 会在面板被销毁重建时重置回 true，切回页签立刻拽到底");
+        require(squash(autoFollow).contains("Saver<MutableState<Boolean>,Boolean>"),
+                "autoFollow 的 rememberSaveable 必须给一个明确的 Saver（存 Boolean 本身）："
+                        + "MutableState 不是 Bundle 能直接存的类型，缺 Saver 会在保存时抛异常");
+        require(squash(chatList).contains("if(state.scrollToBottomToken==lastScrollToken)return@LaunchedEffect"),
+                CHAT_LIST + " 的 scrollToBottomToken effect 必须只对**变化**反应"
+                        + "（记下 lastScrollToken 并比对）："
+                        + "否则切回页签时它重启一次就又滚到底了");
+        require(squash(chatList).contains("varlastScrollTokenbyremember{mutableStateOf(state.scrollToBottomToken)}"),
+                CHAT_LIST + " 必须记住已处理的令牌（lastScrollToken），初始值取当前令牌："
+                        + "首次组合不该误触发滚动");
 
         // 6b. 「重试上一问」必须从被点的那条往前找。
         //

@@ -236,14 +236,14 @@ internal fun TaskStatusIndicator(state: TaskState, size: Dp = 13.dp) {
     val scheme = MiuixTheme.colorScheme
     when (state) {
         TaskState.DONE -> Icon(
-            imageVector = ZhiIcons.done,
+            painter = ZhiIcons.done,
             contentDescription = state.contentDescription(),
             tint = ZhiColors.green(),
             modifier = Modifier.size(size),
         )
         TaskState.RUNNING -> InfiniteProgressIndicator(size = size, color = scheme.primary)
         TaskState.PENDING -> Icon(
-            imageVector = ZhiIcons.pending,
+            painter = ZhiIcons.pending,
             contentDescription = state.contentDescription(),
             tint = scheme.onSurfaceVariantSummary,
             modifier = Modifier.size(size),

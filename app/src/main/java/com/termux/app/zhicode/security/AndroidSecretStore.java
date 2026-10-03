@@ -102,7 +102,8 @@ public final class AndroidSecretStore {
 
     public synchronized void removeApiKey(String profileId, int credentialRevision) {
         String slot = slotOf(profileId, credentialRevision);
-        prefs().edit().remove(slotValueKey(slot)).remove(slotIvKey(slot)).apply();
+        // commit()：密钥是"填完就大退"最典型的一类改动，apply() 的异步写会丢。
+        prefs().edit().remove(slotValueKey(slot)).remove(slotIvKey(slot)).commit();
     }
 
     // ---------------------------------------------------------------- 写入
@@ -112,11 +113,17 @@ public final class AndroidSecretStore {
      *
      * <p>空值的语义是**删除**而不是「存一个空串」：后者会让 {@code getApiKey}
      * 返回空串却仍被判为「已配置」，而界面据此显示一个假的「已设置」。
+     *
+     * <p>⚠️ 这里用 {@code commit()} 而不是 {@code apply()}：密钥是本应用里最典型的
+     * 「填一次、马上大退」的输入（用户配完 API 就把应用划掉）。{@code apply()} 的磁盘写
+     * 是异步的，从最近任务划掉时进程被杀、没人等那个后台写 —— 表现就是
+     * 「明明填了密钥，重开显示未配置」。调用方都在 IO 线程（见
+     * `WorkspaceViewModel.persistSettingsNow` 与 API 配置保存路径）。
      */
     private void write(String valueKey, String ivKey, String value) throws Exception {
         SharedPreferences preferences = prefs();
         if (value == null || value.isEmpty()) {
-            preferences.edit().remove(valueKey).remove(ivKey).apply();
+            preferences.edit().remove(valueKey).remove(ivKey).commit();
             clearError();
             return;
         }
@@ -124,7 +131,7 @@ public final class AndroidSecretStore {
         preferences.edit()
             .putString(valueKey, Base64.encodeToString(encrypted.payload, Base64.NO_WRAP))
             .putString(ivKey, Base64.encodeToString(encrypted.iv, Base64.NO_WRAP))
-            .apply();
+            .commit();
         clearError();
     }
 

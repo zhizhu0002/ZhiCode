@@ -10,8 +10,11 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -32,6 +35,7 @@ import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.chat.AgentProgressCard
 import com.zhizhu.zhicode.compose.ui.chat.ChatList
 import com.zhizhu.zhicode.compose.ui.composer.Composer
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import top.yukonga.miuix.kmp.basic.FloatingToolbar
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -118,6 +122,43 @@ internal fun ChatArea(
             debugTasks = if (state.debugAppMode) state.tasks else emptyList(),
         )
 
+        // 输入法弹出时，悬浮层要往上顶多少。
+        //
+        // ## 为什么不能直接用 `Modifier.imePadding()`
+        //
+        // 键盘是从**屏幕底边**长上来的，它的高度里包含导航栏那一段；而 `AppScaffold`
+        // 已经在内容容器底部让出了导航栏（`padding(bottom = padding.calculateBottomPadding())`，
+        // 来源是 Miuix Scaffold 的 `contentWindowInsets = systemBars ∪ displayCutout`）。
+        // 直接 `imePadding()` 等于垫两次，输入框会停在键盘上方空出**一条导航栏的缝**。
+        //
+        // 所以要的是差值：窗口高 H，键盘顶边 y = H − ime，内容容器底边 y = H − navBar，
+        // 中间要补的空隙 = (H − navBar) − (H − ime) = ime − navBar。
+        // 夹到非负是必须的 —— 键盘收起时 IME 是 0，差值为负，
+        // 负数内边距会把输入框推到屏幕外面去。
+        //
+        // ## ⚠️ 有全屏浮层时**必须不抬**（用户实测报的 bug）
+        //
+        // `WindowInsets.ime` 是**窗口级**的：键盘是谁提起来的它不区分。侧栏抽屉
+        // （窄屏，画在 Scaffold 之上）里有一个「搜索会话」输入框，点它提键盘时
+        // IME 同样变正 —— 于是**后面那个对话输入器会一起抬起来**，从抽屉右边露出来的
+        // 那条缝里就能看见它整个上移了一截（用户原话：
+        // 「为什么在搜索会话打开输入法，后面的聊天发送框会自动抬起」）。
+        //
+        // 这里没有去猜"焦点在谁身上"（Compose 没给可靠的窗口级焦点查询），而是直接
+        // 按**有没有全屏浮层盖住工作区**判断：盖住的时候，这一次 IME 变化与本输入器无关。
+        // 设置页 / UI 调试页 / 环境页里的搜索框是同一类问题，所以一起排除掉。
+        val coveredByFullScreenOverlay = state.sidebarOpen || state.settingsOpen ||
+            state.uiDebugOpen || state.environmentOpen
+        val imeLift = if (coveredByFullScreenOverlay) {
+            0.dp
+        } else {
+            with(LocalDensity.current) {
+                (WindowInsets.ime.getBottom(this) - WindowInsets.navigationBars.getBottom(this))
+                    .coerceAtLeast(0)
+                    .toDp()
+            }
+        }
+
         // 底部悬浮层：任务卡在上、输入器在下，两者都不占布局高度，
         // 所以对话区始终铺满，且它们不随对话滚动。
         // 对应原版把 AgentProgressView + composerHost 放进位于 chatScroll
@@ -128,7 +169,27 @@ internal fun ChatArea(
                 .fillMaxWidth()
                 // 实测自己的高度回报给上面的 bottomInset。
                 // `onSizeChanged` 只在尺寸真的变了时回调，所以正常的打字/滚动不产生额外开销。
-                .onSizeChanged { floatingHeightPx = it.height },
+                //
+                // ⚠️ 它必须在 `padding(bottom = imeLift)` **左边**：onSizeChanged 报的是
+                // 它右侧（内层）量出来的尺寸 —— 让给键盘的那一段算进去之后，
+                // 上面的 bottomInset 才会跟着够到键盘上缘，于是被键盘挡住的内容还能滑上来。
+                // 不然只是输入框抬起来，最后几条消息永远压在键盘后面。
+                .onSizeChanged { floatingHeightPx = it.height }
+                // 输入法弹出时把整块悬浮层（任务卡 + 反馈条 + 输入器）顶到键盘之上。
+                //
+                // ## 为什么必须自己接，而不是指望清单里的 adjustResize
+                //
+                // 清单里确实是 `windowSoftInputMode="adjustResize"`，但 `MainActivity`
+                // 在 `onCreate` 里调了 `enableEdgeToEdge()` —— 它等价于
+                // `setDecorFitsSystemWindows(false)`：DecorView 不再消费系统窗口 inset，
+                // 系统那套"把窗口缩小让出键盘"也随之失效，IME 的高度只能由应用自己接。
+                //
+                // 参考实现（反编译版 `installKeyboardMotion()`，MainActivity.java:1043-1115）
+                // 同样 `setDecorFitsSystemWindows(false)`，然后自己挂
+                // `setOnApplyWindowInsetsListener` + `WindowInsetsAnimation.Callback`，
+                // 把 `getInsets(Type.ime()).bottom` 一路 `applyKeyboardOffset(inset)`
+                // 顶到根布局上 —— 它从来没依赖过 adjustResize。
+                .padding(bottom = imeLift),
         ) {
             AnimatedVisibility(
                 visible = floating,
@@ -278,10 +339,16 @@ internal fun ZhiAnchoredMenuHost(
     anchorId: String,
     fingerOffset: DpOffset?,
 ) {
-    val picker = state.choicePicker ?: return
-    if (!picker.isActionMenu || picker.anchorId != anchorId) return
+    val picker = state.choicePicker
+    // 菜单从手指位置长出来，而退场动画期间 choicePicker 已经是 null —— 不兜住的话，
+    // 面板会在退场那几帧里弹回条目左上角再消失。
+    val shownPicker = rememberLastNonNull(picker) ?: return
+    val open = picker != null && picker.isActionMenu && picker.anchorId == anchorId
+    if (!shownPicker.isActionMenu || shownPicker.anchorId != anchorId) return
     ZhiAnchoredActionMenu(
-        labels = picker.options.map { it.label },
+        // 不套 `if`：退出动画需要浮层常驻组合（见 ZhiAnchoredActionMenu 的说明）。
+        open = open,
+        labels = shownPicker.options.map { it.label },
         onSelect = viewModel::onChoiceSelected,
         onDismiss = viewModel::dismissChoicePicker,
         // 非空时面板从**手指那一点**长出来；为空则退回贴条目锚定。

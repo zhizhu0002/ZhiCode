@@ -32,6 +32,10 @@ import com.zhizhu.zhicode.compose.engine.EngineOverrides
 import com.zhizhu.zhicode.compose.engine.EnginePlanApproval
 import com.zhizhu.zhicode.compose.engine.ZhiEngineController
 import com.zhizhu.zhicode.compose.engine.ToolText
+import com.zhizhu.zhicode.compose.engine.applyEngineOverrides
+import com.zhizhu.zhicode.compose.engine.engineEffortToUi
+import com.zhizhu.zhicode.compose.engine.engineModeToUi
+import com.zhizhu.zhicode.compose.engine.readEngineSettings
 import com.zhizhu.zhicode.compose.engine.toEngineEffort
 import com.zhizhu.zhicode.compose.engine.toEngineMode
 import com.zhizhu.zhicode.compose.engine.toUiPlanApproval
@@ -40,6 +44,7 @@ import com.termux.shared.termux.TermuxConstants
 import com.zhizhu.zhicode.RuntimeInstaller
 import com.zhizhu.zhicode.TermuxTerminalPane
 import com.zhizhu.zhicode.compose.model.AgentTask
+import com.zhizhu.zhicode.compose.model.ApiConfigState
 import com.zhizhu.zhicode.compose.model.ApiProfile
 import com.zhizhu.zhicode.compose.model.ApiProfileDraft
 import com.zhizhu.zhicode.compose.model.Attachment
@@ -57,6 +62,7 @@ import com.zhizhu.zhicode.compose.model.FileEntry
 import com.zhizhu.zhicode.compose.model.FileNameForm
 import com.zhizhu.zhicode.compose.model.FileRoot
 import com.zhizhu.zhicode.compose.model.LiveOutput
+import com.zhizhu.zhicode.compose.model.McpConfigState
 import com.zhizhu.zhicode.compose.model.McpScope
 import com.zhizhu.zhicode.compose.model.McpServer
 import com.zhizhu.zhicode.compose.model.McpServerDraft
@@ -92,6 +98,7 @@ import com.zhizhu.zhicode.compose.data.SearchServiceStore
 import com.zhizhu.zhicode.compose.model.SearchFieldName
 import com.zhizhu.zhicode.compose.model.SearchService
 import com.zhizhu.zhicode.compose.model.SearchServiceDraft
+import com.zhizhu.zhicode.compose.model.SearchServicesState
 import com.zhizhu.zhicode.compose.model.SettingsDraft
 import com.zhizhu.zhicode.compose.model.SlashCommand
 import com.zhizhu.zhicode.compose.model.ThemeMode
@@ -101,6 +108,7 @@ import com.zhizhu.zhicode.compose.model.ToolKind
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.model.WebSearchProvider
+import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import com.zhizhu.zhicode.compose.ui.zhiFormatSize
 import com.termux.app.zhicode.core.FileOps
 import com.termux.app.zhicode.core.PlanApprovalGate
@@ -213,6 +221,14 @@ class WorkspaceViewModel(
      * 否则会出现"想删 A 结果删了当前会话"这类错删。
      */
     private var pendingSessionAction: SessionSummary? = null
+
+    /**
+     * 待执行（去抖中）的设置落盘。
+     *
+     * 见 [scheduleSettingsPersist]：只有自由文本输入才走这条路，
+     * 非空表示"有一次改动还躺在去抖窗口里"。
+     */
+    private var settingsPersistJob: Job? = null
     private var pendingMessageAction: ChatItem? = null
 
     // ⚠️ 这里**没有** `pendingToolAction`：工具菜单由那一行自己渲染（Miuix 下拉菜单），
@@ -442,6 +458,14 @@ class WorkspaceViewModel(
     private fun initSessionState() {
         viewModelScope.launch(Dispatchers.IO) {
             restoreUiSettings()
+            /*
+             * ⚠️ 这一步必须在 `syncActiveProfile()`（它会 `configure()` 并**落盘**）之前。
+             *
+             * 理由见 [restoreRuntimeChoices]：那个 configure 会把界面那份权限模式
+             * 写回 SessionConfig。界面此刻还是默认值，于是"先 configure 再读盘"
+             * 的顺序等于每次启动都把用户的权限设置冲掉。
+             */
+            restoreRuntimeChoices()
             // 顶栏的模型名/密钥状态要反映**真实生效**的配置，
             // 否则用户会看到一个跟实际请求无关的模型名。
             syncActiveProfile()
@@ -476,6 +500,10 @@ class WorkspaceViewModel(
      * 其余设置（权限模式、推理档、上下文窗口、项目目录、联网搜索一整套、自动压缩、
      * 自定义提示词、沙箱全权、Root、保活）都是 [SessionConfig] 的字段，
      * 由引擎侧的持久化表负责，这里不重复。
+     *
+     * ⚠️ 但**每次启动仍要把它们读回界面一次**：引擎存了不等于界面知道，
+     * 而界面不知道就会在下一次 `configure()` 里用自己的默认值把盘上的值冲掉。
+     * 见 [restoreRuntimeChoices]。
      *
      * 密钥从**加密槽**读回，与 API 配置的密钥同一套保护。
      */
@@ -796,14 +824,29 @@ class WorkspaceViewModel(
     fun openSkills() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
+        ZhiFrameTrace.begin("page:skills")
+        // 子页永远坐在设置主页之上（rikkahub 的页面栈）：从侧栏入口进来时
+        // 也把 hub 带起来，否则返回时子页关掉就直接回工作区，层断了。
+        //
+        // ⚠️ 顺序是这个函数的全部要点（详见 openApiConfig 的注释）：**先同步推页**，
+        // 数据随后在 IO 上读。原来 `SkillStore.list()` 直接写在 `_state.update{}` 里，
+        // 而它是 `listFiles()` 加逐目录解析 —— 主线程被它占住，点击那一帧都画不出来，
+        // 用户看到的就是「点了要等一会儿才开始动」。
         _state.update {
-            // 子页永远坐在设置主页之上（rikkahub 的页面栈）：从侧栏入口进来时
-            // 也把 hub 带起来，否则返回时子页关掉就直接回工作区，层断了。
             it.copy(
-                skills = SkillsState(skills = SkillStore.list(it.projectPath)),
+                skills = SkillsState(skills = emptyList(), loading = true),
                 settingsOpen = true,
                 settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
             )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val path = _state.value.projectPath
+            val loaded = runCatching { SkillStore.list(path) }.getOrDefault(emptyList())
+            _state.update { s ->
+                // 读盘期间用户可能已经返回：那时载荷已置空，结果直接丢弃。
+                val current = s.skills ?: return@update s
+                s.copy(skills = current.copy(skills = loaded, loading = false))
+            }
         }
     }
 
@@ -1375,17 +1418,26 @@ class WorkspaceViewModel(
     fun openRoleCards() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
-        val context = getApplication<android.app.Application>()
+        ZhiFrameTrace.begin("page:roleCards")
+        // 同 openSkills：侧栏入口也要把设置主页垫在底下，保证返回层级完整。
+        // 先同步推页、数据后读，理由见 openApiConfig。
         _state.update {
-            // 同 openSkills：侧栏入口也要把设置主页垫在底下，保证返回层级完整。
             it.copy(
-                roleCards = RoleCardsState(
-                    cards = RoleCardStore.list(context),
-                    activeId = RoleCardStore.activeId(context),
-                ),
+                roleCards = RoleCardsState(cards = emptyList(), activeId = "", loading = true),
                 settingsOpen = true,
                 settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
             )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val context = getApplication<android.app.Application>()
+            val cards = runCatching { RoleCardStore.list(context) }.getOrDefault(emptyList())
+            val activeId = runCatching { RoleCardStore.activeId(context) }.getOrDefault("")
+            _state.update { s ->
+                val current = s.roleCards ?: return@update s
+                s.copy(
+                    roleCards = current.copy(cards = cards, activeId = activeId, loading = false),
+                )
+            }
         }
     }
 
@@ -1513,13 +1565,24 @@ class WorkspaceViewModel(
     fun openMemory() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
+        ZhiFrameTrace.begin("page:memory")
         // 同 openSkills：侧栏入口也把设置主页垫在底下。
+        // 先同步推页、数据后读，理由见 openApiConfig。`MemoryStore.list` 要读文件正文
+        // （`readText()`），放在主线程上同样会挡住点击那一帧。
         _state.update {
             it.copy(
-                memory = MemoryState(files = MemoryStore.list(it.projectPath)),
+                memory = MemoryState(files = emptyList(), loading = true),
                 settingsOpen = true,
                 settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
             )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val path = _state.value.projectPath
+            val files = runCatching { MemoryStore.list(path) }.getOrDefault(emptyList())
+            _state.update { s ->
+                val current = s.memory ?: return@update s
+                s.copy(memory = current.copy(files = files, loading = false))
+            }
         }
     }
 
@@ -2121,6 +2184,11 @@ class WorkspaceViewModel(
                                 failed = isError,
                                 exitCode = exitCode,
                                 output = content,
+                                // ⚠️ 这个赋值不能省。引擎的写文件类工具把改动放在
+                                // `result.diff`（工具自述里只有一句 "Wrote N bytes …"），
+                                // 少这一行，界面那块更暗的 diff 预览井就永远不出现 ——
+                                // 参数一路传到这里却被丢掉，编译器不会提醒。
+                                diff = diff,
                                 elapsedMs = maxOf(tool.elapsedMs, 0L),
                                 additions = if (addedLines > 0) addedLines else tool.additions,
                                 deletions = if (deletedLines > 0) deletedLines else tool.deletions,
@@ -2500,7 +2568,13 @@ class WorkspaceViewModel(
             )
         }
         // 切到自动编辑后要立刻下发，否则下一条工具调用还会弹窗。
-        if (alwaysAllow) runCatching { engine.configure(engineOverrides()) }
+        if (alwaysAllow) {
+            runCatching { engine.configure(engineOverrides()) }
+            // 这一次授权**改变了权限模式**（自动编辑），所以要落盘：
+            // 它不再是"仅本次"的语义了。少了这一句，重启后会读回旧模式，
+            // 用户会以为"总是允许"没生效过。
+            persistRuntimeChoice(mode = PermissionMode.ACCEPT_EDITS)
+        }
     }
 
     private fun kindOf(toolName: String): ToolKind = when (toolName) {
@@ -2907,18 +2981,48 @@ class WorkspaceViewModel(
     fun openApiConfig() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
-        viewModelScope.launch(Dispatchers.IO) {
-            val state = ApiConfigStore.read(getApplication())
-            _state.update {
+        ZhiFrameTrace.begin("page:api")
+        // ---- 为什么页面状态必须先翻、数据后读 ----
+        //
+        // 原来的写法是「读完盘再翻页」：
+        //
+        // ```
+        // viewModelScope.launch(Dispatchers.IO) {
+        //     val state = ApiConfigStore.read(getApplication())   // 先等磁盘
+        //     _state.update { it.copy(apiConfig = state, settingsOpen = true) }  // 才推页
+        // }
+        // ```
+        //
+        // 于是「点一下」到「页面开始动」之间隔着整整一次磁盘读 —— 用户的原话是
+        // 「点击某些东西切换页面时，过一段时间才执行」。转场本身不慢，是它**开始得晚**：
+        // 帧循环那几帧没有新状态可组合，只能一直等 IO 回来。
+        //
+        // 现在把顺序倒过来：本函数**同步**把页推上去（同一次点击事件、同一帧），
+        // 载荷先给空 + `loading = true`，真正的读取挪到 IO，读完只回填数据字段、
+        // 绝不碰页面栈。于是点击那一帧就有东西可画。
+        //
+        // 空载荷是安全的：`apiConfig != null` 在本工程里的语义就是「这一页开着」，
+        // 而「一个配置档都没有」本来也是合法状态（子页没有对列表做 `!!`）。
+        _state.update {
+            it.copy(
+                apiConfig = ApiConfigState(profiles = emptyList(), activeId = "", loading = true),
                 // 设置主页垫在子页之下（页面栈），返回才有回退目标。
-                it.copy(
-                    apiConfig = state,
-                    settingsOpen = true,
-                    settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
-                )
+                settingsOpen = true,
+                settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val loaded = runCatching { ApiConfigStore.read(getApplication()) }.getOrNull()
+            _state.update { s ->
+                // 读盘期间用户可能已经返回：那时载荷已置空，结果直接丢弃。
+                val current = s.apiConfig ?: return@update s
+                s.copy(apiConfig = loaded ?: current.copy(loading = false))
             }
-            syncActiveProfile()
-            syncRoleCardFromStore()
+            // 这两个只在读成功后才跑：它们要从刚读到的配置里推导当前档位。
+            if (loaded != null) {
+                syncActiveProfile()
+                syncRoleCardFromStore()
+            }
         }
     }
 
@@ -2933,22 +3037,33 @@ class WorkspaceViewModel(
      */
     fun openSearchServices() {
         hideSidebarForNavigation()
+        ZhiFrameTrace.begin("page:search")
+        // 先同步推页、数据后读 —— 理由见 openApiConfig。原来这里同样把
+        // `SearchServiceStore.read()`（还带上迁移）夹在「读盘」和「翻页」之间。
+        _state.update {
+            it.copy(
+                searchServices = SearchServicesState(loading = true),
+                settingsOpen = true,
+                settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+            )
+        }
         viewModelScope.launch(Dispatchers.IO) {
             // 先把老版「单个 provider」迁成一条服务，否则老用户的配置会在这次打开时
             // 看起来"全都消失了"（列表空、而搜索也回落到免费后端）。
-            SearchServiceStore.migrateLegacyIfNeeded(
-                getApplication(),
-                _state.value.settings.webSearchProvider,
-                _state.value.settings.webSearchSearxngUrl,
-                _state.value.settings.webSearchKeys[_state.value.settings.webSearchProvider].orEmpty(),
-            )
-            val services = SearchServiceStore.read(getApplication())
-            _state.update {
-                it.copy(
-                    searchServices = services,
-                    settingsOpen = true,
-                    settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+            runCatching {
+                SearchServiceStore.migrateLegacyIfNeeded(
+                    getApplication(),
+                    _state.value.settings.webSearchProvider,
+                    _state.value.settings.webSearchSearxngUrl,
+                    _state.value.settings.webSearchKeys[_state.value.settings.webSearchProvider]
+                        .orEmpty(),
                 )
+            }
+            val loaded = runCatching { SearchServiceStore.read(getApplication()) }.getOrNull()
+            _state.update { s ->
+                // 读盘期间用户可能已经返回：载荷已置空，结果丢弃。
+                val current = s.searchServices ?: return@update s
+                s.copy(searchServices = loaded ?: current.copy(loading = false))
             }
         }
     }
@@ -3129,13 +3244,26 @@ class WorkspaceViewModel(
     fun openMcpConfig() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
+        ZhiFrameTrace.begin("page:mcp")
+        // 同 openSkills：hub 垫底，返回回设置主页。
+        //
+        // ⚠️ 这里原来是最糟的一处：`McpStore.read()`（内部 `EngineStore().load()` 读文件）
+        // **直接写在主线程的 `_state.update{}` 里** —— 点击那一帧连绘制机会都没有。
+        // 先同步推页、数据后读，理由见 openApiConfig。
         _state.update {
-            // 同 openApiConfig：hub 垫底，返回回设置主页。
             it.copy(
-                mcpConfig = McpStore.read(),
+                mcpConfig = McpConfigState(servers = emptyList(), filePath = "", loading = true),
                 settingsOpen = true,
                 settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
             )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val loaded = runCatching { McpStore.read() }.getOrNull()
+            _state.update { s ->
+                // 读盘期间用户可能已经返回：载荷已置空，结果丢弃。
+                val current = s.mcpConfig ?: return@update s
+                s.copy(mcpConfig = loaded ?: current.copy(loading = false))
+            }
         }
     }
 
@@ -3398,12 +3526,115 @@ class WorkspaceViewModel(
      * 副作用与旧实现保持一致：写状态 + 在对话里留一句可追溯的记录。
      */
 
+    /**
+     * 把盘上存的**权限模式 / 推理档**读回界面状态。
+     *
+     * ## 为什么必须有这一步（用户：「权限在退出软件后恢复成原来的样子」）
+     *
+     * 这两项确实是 [SessionConfig] 的字段、也确实会被 `store.save()` 写盘 ——
+     * 但**界面状态从来不读回来**。于是形成一个固定回路：
+     *
+     * 1. 用户在输入器底排选了「跳过权限」→ 只有 `state.permissionMode` 变了；
+     * 2. 发送时 `configure(engineOverrides())` 把它写盘（这一步是对的）；
+     * 3. 重启 → `state.permissionMode` 又是默认的「每次询问」；
+     * 4. 启动路径里的 `syncActiveProfile()` → `configure()` 立刻**落盘**，
+     *    把界面那份默认值写回去 —— 盘上刚存的「跳过权限」就这样被冲掉。
+     *
+     * 前一步不做、第 4 步就会反向覆盖，所以这个函数读回来的不只是"显示"，
+     * 它还决定了盘上的值能不能活过一次启动。
+     *
+     * ⚠️ 调用时机：**必须在任何 `configure()` 之前**（见 [initSessionState]）。
+     * 读得晚一步，第 4 步已经把默认值写进盘里了，再读就只能读到刚被冲掉的那份。
+     */
+    private suspend fun restoreRuntimeChoices() = withContext(Dispatchers.IO) {
+        val o = readEngineSettings(ApiSettingsStore(getApplication())) ?: return@withContext
+        val mode = engineModeToUi(o.permissionMode)
+        val effort = engineEffortToUi(o.effort)
+        // 搜索后端只按名字回匹配；匹配不上（比如盘上留着旧版本写下的别名）就保持界面原值，
+        // 不要拿一个猜出来的值覆盖 —— 那与"设置被冲掉"是同一类伤害。
+        val provider = o.webSearchProvider?.let { stored ->
+            WebSearchProvider.entries.firstOrNull { it.name.equals(stored, ignoreCase = true) }
+        }
+        _state.update { s ->
+            s.copy(
+                permissionMode = mode,
+                effort = effort,
+                contextWindow = o.contextWindow ?: s.contextWindow,
+                projectPath = o.projectDirectory?.takeIf { it.isNotBlank() } ?: s.projectPath,
+                settings = s.settings.copy(
+                    visionEnabled = o.visionEnabled ?: s.settings.visionEnabled,
+                    customSystemPrompt = o.customSystemPrompt ?: s.settings.customSystemPrompt,
+                    autoCompact = o.autoCompact ?: s.settings.autoCompact,
+                    autoCompactPercent = o.autoCompactPercent ?: s.settings.autoCompactPercent,
+                    webSearchEnabled = o.webSearchEnabled ?: s.settings.webSearchEnabled,
+                    webSearchProvider = provider ?: s.settings.webSearchProvider,
+                    webSearchMaxResults = o.webSearchMaxResults ?: s.settings.webSearchMaxResults,
+                    webSearchTimeoutSec = o.webTimeoutSec ?: s.settings.webSearchTimeoutSec,
+                    webSearchSearxngUrl = o.webSearchBaseUrl ?: s.settings.webSearchSearxngUrl,
+                    sandboxAgentFullAccess = o.sandboxAgentFullAccess ?: s.settings.sandboxAgentFullAccess,
+                    rootExecutionEnabled = o.rootExecutionEnabled ?: s.settings.rootExecutionEnabled,
+                    forcedKeepAliveEnabled = o.forcedKeepAliveEnabled ?: s.settings.forcedKeepAliveEnabled,
+                ),
+                // 设置页若已经开着（正常不会，这一步在启动路径上），草稿也要跟着对齐，
+                // 否则页面显示的是旧值、点一下又把它写回去。
+                settingsDraft = s.settingsDraft?.let { draft ->
+                    draft.copy(
+                        permissionMode = mode,
+                        effort = effort,
+                        contextWindow = o.contextWindow ?: draft.contextWindow,
+                        projectPath = o.projectDirectory?.takeIf { p -> p.isNotBlank() } ?: draft.projectPath,
+                        customSystemPrompt = o.customSystemPrompt ?: draft.customSystemPrompt,
+                        visionEnabled = o.visionEnabled ?: draft.visionEnabled,
+                        autoCompact = o.autoCompact ?: draft.autoCompact,
+                        autoCompactPercent = o.autoCompactPercent ?: draft.autoCompactPercent,
+                        webSearchEnabled = o.webSearchEnabled ?: draft.webSearchEnabled,
+                        webSearchProvider = provider ?: draft.webSearchProvider,
+                        webSearchMaxResults = o.webSearchMaxResults ?: draft.webSearchMaxResults,
+                        webSearchTimeoutSec = o.webTimeoutSec ?: draft.webSearchTimeoutSec,
+                        webSearchSearxngUrl = o.webSearchBaseUrl ?: draft.webSearchSearxngUrl,
+                        sandboxAgentFullAccess = o.sandboxAgentFullAccess ?: draft.sandboxAgentFullAccess,
+                        rootExecutionEnabled = o.rootExecutionEnabled ?: draft.rootExecutionEnabled,
+                        forcedKeepAliveEnabled = o.forcedKeepAliveEnabled ?: draft.forcedKeepAliveEnabled,
+                    )
+                },
+            )
+        }
+    }
+
+    /**
+     * 把**权限模式 / 推理档**立刻写回磁盘。
+     *
+     * 为什么不能只靠发送前那次 `configure()`：用户完全可能"选完就退出"。
+     * 那一刻盘上还是旧值，下次启动读回来的自然也是旧值 —— 表现与"设置记不住"一样。
+     *
+     * 走 `load()` + 改字段 + `save()` 而不是自己拼一份 `SessionConfig`：
+     * `save()` 会把整张表写下去，凭空构造的对象会把其它字段（含 API 密钥槽）
+     * 一起覆盖成空。
+     *
+     * 失败**不**上报：与 [persistTheme] 同一个约定 —— 这类界面偏好的写入
+     * 不该在输入器旁边弹一条错误，内存里的改动本来就是即时生效的。
+     */
+    private fun persistRuntimeChoice(mode: PermissionMode? = null, effort: EffortLevel? = null) {
+        if (mode == null && effort == null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val store = ApiSettingsStore(getApplication())
+                val config = store.load()
+                mode?.let { config.permissionMode = it.toEngineMode() }
+                effort?.let { config.effort = it.toEngineEffort() }
+                store.save(config)
+            }
+        }
+    }
+
     fun setPermissionMode(mode: PermissionMode) {
         _state.update { it.copy(permissionMode = mode, message = "权限模式：${mode.label}") }
+        persistRuntimeChoice(mode = mode)
     }
 
     fun setEffort(level: EffortLevel) {
         _state.update { it.copy(effort = level, message = "推理强度：${level.label}") }
+        persistRuntimeChoice(effort = level)
     }
 
     /*
@@ -3865,8 +4096,8 @@ class WorkspaceViewModel(
         // 记住操作对象：动作是在**选择器回调**里执行的，那时只能拿到选项文案，
         // 拿不到是哪条会话 —— 不记住就会出现"删掉了当前会话"这种错删。
         pendingSessionAction = session
-        val options = if (session.note.isEmpty()) listOf("编辑备注", "恢复会话", "删除会话")
-        else listOf("编辑备注", "清除备注", "恢复会话", "删除会话")
+        val options = if (session.note.isEmpty()) listOf("重命名", "编辑备注", "恢复会话", "删除会话")
+        else listOf("重命名", "编辑备注", "清除备注", "恢复会话", "删除会话")
         _state.update {
             it.copy(
                 choicePicker = ChoicePickerState(
@@ -3882,6 +4113,9 @@ class WorkspaceViewModel(
 
     /** 打开备注编辑：没有选项，只靠自由输入提交。 */
     private fun editSessionNote(session: SessionSummary) {
+        // 二级弹窗也要记得操作对象：SESSION_ACTION 分派时已经把它清空了，
+        // 不补回去的话 onSubmitFreeForm 拿到 null，「备注未保存」是必现结果。
+        pendingSessionAction = session
         _state.update {
             it.copy(
                 choicePicker = ChoicePickerState(
@@ -3891,6 +4125,23 @@ class WorkspaceViewModel(
                     options = emptyList(),
                     allowFreeForm = true,
                     freeFormHint = if (session.note.isEmpty()) "例如：修好了相册崩溃" else session.note,
+                ),
+            )
+        }
+    }
+
+    /** 打开重命名：同样只靠自由输入提交，输入框预填当前标题。 */
+    private fun editSessionTitle(session: SessionSummary) {
+        pendingSessionAction = session
+        _state.update {
+            it.copy(
+                choicePicker = ChoicePickerState(
+                    title = "重命名会话",
+                    intent = ChoiceIntent.SESSION_RENAME,
+                    prompt = "改一个你认得出的名字；只影响侧栏显示，不改会话文件本身。",
+                    options = emptyList(),
+                    allowFreeForm = true,
+                    freeFormHint = session.title,
                 ),
             )
         }
@@ -3911,6 +4162,20 @@ class WorkspaceViewModel(
                     } else {
                         "备注保存失败"
                     },
+                )
+            }
+        }
+    }
+
+    /** 写入标题覆盖到磁盘，备注原样保留。 */
+    private fun saveSessionTitle(session: SessionSummary, title: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = SessionReader.updateMetadata(File(session.id), session.note, title)
+            val sessions = SessionReader.list(_state.value.projectPath)
+            _state.update {
+                it.copy(
+                    sessions = sessions,
+                    message = if (ok) "标题已更新" else "标题保存失败",
                 )
             }
         }
@@ -3957,8 +4222,14 @@ class WorkspaceViewModel(
             // 输入器上的入口是下拉菜单，走 setPermissionMode / setEffort，不经过这里。
             ChoiceIntent.PERMISSION_MODE -> {
                 val mode = PermissionMode.entries.getOrNull(index)
-                if (mode != null) _state.update {
-                    it.copy(choicePicker = null, permissionMode = mode, message = "权限模式：${mode.label}")
+                if (mode != null) {
+                    _state.update {
+                        it.copy(choicePicker = null, permissionMode = mode, message = "权限模式：${mode.label}")
+                    }
+                    // 斜杠命令这条路与输入器下拉是**同一件事**，落盘也不能只做一边：
+                    // 少写这一处，用户用 `/permissions` 改完之后重启就会被打回旧值
+                    // （启动时会按盘上的值回填界面）。
+                    persistRuntimeChoice(mode = mode)
                 } else _state.update { it.copy(choicePicker = null) }
             }
             ChoiceIntent.EFFORT -> {
@@ -4006,6 +4277,7 @@ class WorkspaceViewModel(
                     // 拿不到操作对象就什么都不做。宁可无反应，也不能猜一条会话删掉。
                     _state.update { it.copy(message = "找不到目标会话，操作已取消") }
                 } else when (option.label) {
+                    "重命名" -> editSessionTitle(target)
                     "删除会话" -> deleteSession(target.id)
                     "恢复会话" -> openSession(target)
                     "编辑备注" -> editSessionNote(target)
@@ -4015,6 +4287,10 @@ class WorkspaceViewModel(
             }
             ChoiceIntent.SESSION_NOTE -> {
                 // 这个分支正常不会走到（备注靠自由输入提交），留作兜底。
+                _state.update { it.copy(choicePicker = null) }
+            }
+            ChoiceIntent.SESSION_RENAME -> {
+                // 同上：重命名也只靠自由输入提交，这里只是穷尽性兜底。
                 _state.update { it.copy(choicePicker = null) }
             }
             ChoiceIntent.QUESTION -> {
@@ -4041,21 +4317,26 @@ class WorkspaceViewModel(
     /**
      * 选择窗口里的「其他回答…」提交：不走选项，直接把这段自由文本当作输入。
      * 在计划模式下它等价于"自定义目标"，会作为提示词发给引擎；
-     * 在会话备注中它是备注正文。
+     * 在会话备注中它是备注正文；在重命名中它是新标题。
      */
     fun onSubmitFreeForm(text: String) {
         val trimmed = text.trim()
         val picker = _state.value.choicePicker
         if (picker == null) return
-        // 备注可以提交空字符串（= 清除），所以不能和"空输入就关闭"混在一起。
-        if (picker.intent == ChoiceIntent.SESSION_NOTE) {
+        // 备注可以提交空字符串（= 清除），所以不能和"空输入就关闭"混在一起；
+        // 重命名反过来：空标题无效，直接提示而不是当作"恢复原名"。
+        if (picker.intent == ChoiceIntent.SESSION_NOTE || picker.intent == ChoiceIntent.SESSION_RENAME) {
+            val rename = picker.intent == ChoiceIntent.SESSION_RENAME
             val target = pendingSessionAction
             pendingSessionAction = null
             _state.update { it.copy(choicePicker = null) }
-            if (target == null) {
-                _state.update { it.copy(message = "找不到目标会话，备注未保存") }
-            } else {
-                saveSessionNote(target, trimmed)
+            when {
+                target == null ->
+                    _state.update { it.copy(message = if (rename) "找不到目标会话，标题未保存" else "找不到目标会话，备注未保存") }
+                rename && trimmed.isEmpty() ->
+                    _state.update { it.copy(message = "标题不能为空") }
+                rename -> saveSessionTitle(target, trimmed)
+                else -> saveSessionNote(target, trimmed)
             }
             return
         }
@@ -4488,7 +4769,21 @@ class WorkspaceViewModel(
         )
     }
 
-    fun closeSettings() = _state.update { it.copy(settingsDraft = null, settingsOpen = false) }
+    /**
+     * 设置落盘的去抖窗口。
+     *
+     * 400ms 是"打完最后一个字到写入"的延迟上限：短到用户察觉不到，
+     * 长到足以把连续输入合并成一次写。取值与 Miuix / Material 的
+     * `debounce` 惯例同档（300~500ms）。
+     */
+    private val SettingsPersistDebounceMs = 400L
+
+    fun closeSettings() {
+        // 关页面前把去抖窗口里那次改动兑现：用户"在提示词里打完字就走"时，
+        // 那一次改动还没到 [SettingsPersistDebounceMs] 就会被丢掉。
+        flushSettings()
+        _state.update { it.copy(settingsDraft = null, settingsOpen = false) }
+    }
 
     /**
      * 打开「UI 调试」整页（**仅 debug 构建**）。
@@ -4596,15 +4891,119 @@ class WorkspaceViewModel(
      * 原始输入直接塞进引擎配置。
      */
     fun applySettingsDraft(draft: SettingsDraft) {
+        val previous = _state.value.settingsDraft
         _state.update { draft.applyTo(it, keepDraft = true) }
-        // 主题与搜索密钥**不在** SessionConfig 里，configure() 那次落盘罩不到它们，
-        // 各自在这里补一次（密钥走加密槽，见 ApiSettingsStore.setWebSearchKey）。
-        persistTheme(draft.themeMode)
-        persistWebSearchKey(draft)
-        // 终端输入类型也不在 SessionConfig 里（终端是独立 Activity，不读会话配置），
-        // 所以单独落盘。
-        runCatching {
-            ApiSettingsStore.setTerminalCharMode(getApplication(), draft.terminalCharMode)
+        // 离散改动（开关 / 下拉 / 步进）立刻落盘；只有**自由文本**才去抖。
+        //
+        // ⚠️ 去抖这一条是必须的，而且是在修一个我自己引入的卡顿：
+        // `SettingsTextField` 的 `onValueChange` 是**逐字符**触发的，而落盘一次要
+        // `load()` 整表 + 序列化配置 JSON + 走密钥库 + 写 prefs。不去抖的话，
+        // 在「自定义头部提示词」里打一句话就是几十次全量落盘 ——
+        // 用户的原话正是「卡顿更加多了」。
+        val typingOnly = previous != null && differsOnlyInFreeText(previous, draft)
+        scheduleSettingsPersist(debounce = typingOnly)
+    }
+
+    /**
+     * 两次草稿是否**只**在自由文本字段上不同。
+     *
+     * 只有这种情况才值得去抖：其余字段都是一次性动作（点开关、选下拉），
+     * 改动即最终值，没有"还在输入中"的中间态，也就没有理由延后落盘。
+     *
+     * 名单要跟着设置页的自由文本输入框走（`SettingsTextField` / `SettingsIntField`
+     * 的那几处）：提示词、项目目录，以及支持 `1.5m` 这种写法的数字框 —— 它们也是文本输入。
+     */
+    private fun differsOnlyInFreeText(a: SettingsDraft, b: SettingsDraft): Boolean =
+        a.copy(
+            customSystemPrompt = b.customSystemPrompt,
+            projectPath = b.projectPath,
+            contextWindow = b.contextWindow,
+            webSearchMaxResults = b.webSearchMaxResults,
+            webSearchTimeoutSec = b.webSearchTimeoutSec,
+            autoCompactPercent = b.autoCompactPercent,
+        ) == b
+
+    /**
+     * 安排一次设置落盘。
+     *
+     * [debounce] 为真时等 [SettingsPersistDebounceMs] 再写（输入中）；为假时立刻写。
+     * 无论哪条路径，最终都走 [persistSettingsNow]，而它是**同步落盘**的。
+     */
+    private fun scheduleSettingsPersist(debounce: Boolean) {
+        settingsPersistJob?.cancel()
+        if (!debounce) {
+            settingsPersistJob = null
+            persistSettingsNow()
+            return
+        }
+        settingsPersistJob = viewModelScope.launch {
+            delay(SettingsPersistDebounceMs)
+            persistSettingsNow()
+        }
+    }
+
+    /**
+     * 立刻兑现去抖窗口里那次设置改动（不等剩下那几百毫秒）。
+     *
+     * 两个调用点，缺一都会让"改完就走"丢改动：
+     * - [closeSettings]：用户关掉设置页；
+     * - `MainActivity.onStop`：应用退到后台（包括「直接大退」前那一下）。
+     *
+     * 没有待兑现的改动时**什么都不做**：`onStop` 每次都会调它，
+     * 不能让它变成一个"每次切后台都全量写盘"的热路径。
+     */
+    fun flushSettings() {
+        if (settingsPersistJob == null) return
+        settingsPersistJob?.cancel()
+        settingsPersistJob = null
+        persistSettingsNow()
+    }
+
+    /**
+     * 把当前生效的设置写回磁盘。
+     *
+     * ## 为什么必须**同步**落盘（`saveDurable`）
+     *
+     * `SharedPreferences.apply()` 只保证内存可见，磁盘写是异步的；从最近任务里
+     * 划掉应用时进程被杀，**没人等那个后台写** —— 这就是
+     * 「直接大退软件，这些保存恢复到未修改的样子」。本类此前 14 处写入全是
+     * `apply()`、一处 `commit()` 都没有，所以补上"调用点"并不够（上一轮就只补了
+     * 调用点，于是设置照丢）。用户设置一律走 `commit()`。
+     *
+     * ## 为什么复用 `engineOverrides()`
+     *
+     * 落盘那份必须与**发送时实际生效**的那份逐字段相同，否则会出现
+     * "界面上是 A、发出去的也是 A、但重启回来变成 B"。两者共用
+     * [applyEngineOverrides] 同一段映射（见其注释），从根上排除漂移。
+     *
+     * ## 三条刻意的约束
+     *
+     * 1. **先 `store.load()` 再改**，不凭空 `SessionConfig()`：`save()` 是整表覆盖，
+     *    凭空构造会把 API 密钥槽这类本函数不管的字段一起清空。
+     * 2. **不调 `engine.configure()`**：那样会顺带创建引擎实例，而这里只想要落盘；
+     *    引擎实例的创建目前是单线程假设（`engine()` 非同步），从 IO 线程碰它有竞争风险。
+     *    下一次发消息时 `configure()` 自会把新值推给引擎。
+     * 3. **在 IO 线程上**：`commit()` 会阻塞到磁盘写完，压在点击那一帧上就是一次卡顿。
+     */
+    private fun persistSettingsNow() {
+        val snapshot = _state.value
+        val overrides = engineOverrides()
+        val draft = SettingsDraft.from(snapshot)
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val store = ApiSettingsStore(getApplication())
+                val config = store.load()
+                applyEngineOverrides(config, overrides)
+                store.saveDurable(config)
+            }
+            // 主题与搜索密钥**不在** SessionConfig 里，configure() 那次落盘罩不到它们，
+            // 各自补一次（密钥走加密槽，见 ApiSettingsStore.setWebSearchKey）。
+            persistTheme(draft.themeMode)
+            persistWebSearchKey(draft)
+            // 终端输入类型也不在 SessionConfig 里（终端是独立 Activity，不读会话配置）。
+            runCatching {
+                ApiSettingsStore.setTerminalCharMode(getApplication(), draft.terminalCharMode)
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,18 +21,18 @@ import com.zhizhu.zhicode.compose.model.ApiProfileDraft
 import com.zhizhu.zhicode.compose.model.ApiProtocol
 import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
+import com.zhizhu.zhicode.compose.ui.settings.SettingsLoadingHint
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Text
@@ -157,7 +158,11 @@ private fun ApiProfileList(
     val scheme = MiuixTheme.colorScheme
     Column {
         SettingsGroup("配置记录") {
-            if (config.profiles.isEmpty()) {
+            // 载荷在 IO 上读（见 openApiConfig）：空列表与「还没配过」长得一样，
+            // 所以读取期间必须插在空态之前显式说明。
+            if (config.loading) {
+                SettingsLoadingHint()
+            } else if (config.profiles.isEmpty()) {
                 // 空列表是正常的初始状态（应用不再自带任何厂商配置），
                 // 但只显示一行"没有数据"会让人以为坏了。写清下一步做什么。
                 // 内边距与 preference 行对齐，避免这行看起来贴边。
@@ -174,11 +179,16 @@ private fun ApiProfileList(
             // 散卡会让整页碎成一堆便签；「当前生效」那条仍靠左侧勾 + 主色标题区分。
             config.profiles.forEach { profile ->
                 val active = profile.id == config.activeId
+                // 「当前生效」那一条是靠主色标题 + 勾来区分的，两处同时变色就得一起淡变，
+                // 否则会看到「勾已经出现了、标题还没变蓝」。
+                val titleColor by animateColorAsState(
+                    targetValue = if (active) scheme.primary else scheme.onBackground,
+                    animationSpec = ZhiMotion.colorSpec,
+                    label = "apiProfileTitle",
+                )
                 BasicComponent(
                     title = profile.name,
-                    titleColor = BasicComponentDefaults.titleColor(
-                        color = if (active) scheme.primary else scheme.onBackground,
-                    ),
+                    titleColor = BasicComponentDefaults.titleColor(color = titleColor),
                     summary = profile.summary,
                     summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
                     // 选中的那条用勾表示"当前生效"，未选中的给一个空位保持左对齐一致。
@@ -187,7 +197,7 @@ private fun ApiProfileList(
                     startAction = {
                         if (active) {
                             Icon(
-                                imageVector = MiuixIcons.Basic.Check,
+                                painter = ZhiIcons.check,
                                 contentDescription = null,
                                 tint = scheme.primary,
                                 modifier = Modifier.size(DropdownDefaults.CheckIconSize),

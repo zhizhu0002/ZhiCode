@@ -7,9 +7,12 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -83,7 +86,17 @@ internal fun ZhiSideDrawer(
                 color = glass.surfaceColor(scheme.surfaceContainer),
                 shape = RoundedCornerShape(topEnd = ZhiRadius.floating, bottomEnd = ZhiRadius.floating),
             ) {
-                content()
+                // ⚠️ 内边距只能加在**内容**上，不能加在面板的 `Surface` 上。
+                //
+                // 主界面是 edge-to-edge（DecorView 不再消费系统窗口 inset），而侧栏是画在
+                // `Scaffold` **之上**的浮层 —— 它不吃 Scaffold 给内容区的 `padding`，
+                // 自己也没有任何 inset 修饰符，于是内容从 y=0 开始，第一行压在状态栏底下。
+                //
+                // 加在 `Surface` 上的话，面板底色会跟着缩进去：抽屉滑入时状态栏那一条
+                // 会露出后面的工作区。所以底色铺满、内容让位。
+                Box(modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars)) {
+                    content()
+                }
             }
         }
     }

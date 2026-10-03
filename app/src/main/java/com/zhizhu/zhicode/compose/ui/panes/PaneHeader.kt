@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -48,7 +49,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 fun PaneHeader(
     title: String,
     modifier: Modifier = Modifier,
-    actionIcon: ImageVector? = null,
+    actionIcon: Painter? = null,
     actionDescription: String? = null,
     onAction: (() -> Unit)? = null,
     subtitle: String? = null,

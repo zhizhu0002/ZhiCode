@@ -25,8 +25,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -35,14 +39,13 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.nav.core.NavController
 import top.yukonga.miuix.kmp.nav.core.NavDisplay
 import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
 import top.yukonga.miuix.kmp.nav.core.NavKey
 import top.yukonga.miuix.kmp.nav.core.navBackStackOf
 import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
+import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
 import top.yukonga.miuix.kmp.nav.transition.NavTransitions
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -85,10 +88,14 @@ internal data class SettingsPageKey(val id: String, val depth: Int) : NavKey
  * 所以现在**逐字复用与外层 `AppScaffold` 相同的参数**：同一个 [NavTransitions.MiuixDefault]、
  * 同一套 [NavDisplayEffects]。内层与外层是同一套组件、同一套数值，手感自然一致。
  *
- * ## 两处与外层**刻意**不同
+ * ## 与外层的关系
  *
- * - **不启用边缘滑动返回**（`entry(swipeDismiss = …)` 不传）：外层页面已经占了边缘
- *   手势，内外两层都开只会在边缘上打架。
+ * - **边缘滑动返回：内层也开了**（`entry(swipeDismiss = swipeBack)`，方向随
+ *   `LocalLayoutDirection`，与外层同一套写法）。之前没开是怕"内外两层在边缘上打架"，
+ *   读了 miuix-nav 的实现（`NavDisplay.kt` 600 行附近的注释）之后确认不会：滑动识别器
+ *   挂在**容器**上，但认领手势前会等所有后代跑完 Main pass —— 三级页上内层识别器先拿到、
+ *   弹三级页；内层在栈底（`enabled = topIndex > 0` 为假）时它不认领，外层才接手弹二级页。
+ *   也就是说"谁弹谁"由"内层还有没有得弹"自然决定，不需要人为分工。
  * - **`BackHandler` 只在 `depth > 0` 时生效**：最外层那一页的返回要交给外层
  *   `NavDisplay`（关掉整个二级页），这里不能抢。
  */
@@ -132,6 +139,12 @@ internal fun SettingsPageStack(
         )
     }
 
+    // 边缘滑动返回：方向随布局方向，写法与外层 AppScaffold 一致（见顶部注释）。
+    val swipeBack = when (LocalLayoutDirection.current) {
+        LayoutDirection.Rtl -> NavSwipeDirection.RightToLeft
+        else -> NavSwipeDirection.LeftToRight
+    }
+
     NavDisplay(
         navController = nav,
         modifier = Modifier.fillMaxSize(),
@@ -144,7 +157,7 @@ internal fun SettingsPageStack(
     ) {
         // 一个 entry 就覆盖全部页面：DSL 是**按 key 的类型**注册的，
         // key 实例本身通过 content 的参数传进来（所以 `when (key.id)` 在调用方那边）。
-        entry<SettingsPageKey> { key -> content(key) }
+        entry<SettingsPageKey>(swipeDismiss = swipeBack) { key -> content(key) }
     }
 }
 
@@ -169,7 +182,7 @@ internal fun <T : Any> rememberLastNonNull(value: T?): T? {
 
 /**
  * 设置的二级整页（API 配置 / MCP / 技能 / 角色卡 / 记忆），与设置主页同款骨架：
- * Miuix 原生 Scaffold + SmallTopAppBar（返回键 = MiuixIcons.Back）+ LazyColumn 滚动。
+ * Miuix 原生 Scaffold + SmallTopAppBar（返回键 = `ZhiIcons.back`）+ LazyColumn 滚动。
  *
  * 以前这些页面是 OverlayDialog 弹窗壳（DialogShell + 底部按钮排），和整页设置
  * 并存时观感割裂 —— 弹窗宽度封顶、滚动高度受限、按钮位置和整页不一致。
@@ -278,7 +291,7 @@ internal fun SettingsSubPage(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
-                            imageVector = MiuixIcons.Back,
+                            painter = ZhiIcons.back,
                             contentDescription = "返回",
                             tint = scheme.onBackground,
                         )
@@ -297,8 +310,13 @@ internal fun SettingsSubPage(
                 if (hideFabOnScrollDown) {
                     AnimatedVisibility(
                         visible = fabVisible,
-                        enter = fadeIn() + scaleIn(),
-                        exit = fadeOut() + scaleOut(),
+                        // 与设置页 FAB 同款进出：淡变 + 缩放。缩放走 [ZhiMotion] 里那两条
+                        // 抄自 Miuix 大屏弹窗的令牌（进入 = `spring(0.9, 438.6)`，
+                        // 退出 = 200ms + `DecelerateEasing(1.5)`），
+                        // 而不是 Compose 自己的 `scaleIn()/scaleOut()` 默认值 ——
+                        // 后者与库内其他缩放的节奏对不上。
+                        enter = fadeIn() + scaleIn(animationSpec = ZhiMotion.scaleEnterSpec),
+                        exit = fadeOut() + scaleOut(animationSpec = ZhiMotion.scaleExitSpec),
                     ) { fab() }
                 } else {
                     fab()

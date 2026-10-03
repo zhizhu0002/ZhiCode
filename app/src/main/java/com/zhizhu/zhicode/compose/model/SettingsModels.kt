@@ -269,6 +269,15 @@ data class SearchServicesState(
     val services: List<SearchService> = emptyList(),
     val activeId: String = "",
     val form: SearchServiceDraft? = null,
+    /**
+     * 载荷还没读完。见 `WorkspaceViewModel.openSearchServices`。
+     *
+     * 页面**先**推入（同步、在这一帧内），数据**后**读（IO 线程）。
+     * 这段时间里 `services` 是空的 —— 而「一个服务都没有」本身是个合法状态，
+     * 页面本来就得能画出来。所以 `loading` 的职责只有一个：别让用户把
+     * 「正在读」误读成「配置丢了」。
+     */
+    val loading: Boolean = false,
 )
 
 /**
@@ -407,6 +416,8 @@ data class ApiConfigState(
     val profiles: List<ApiProfile>,
     val activeId: String,
     val form: ApiProfileDraft? = null,
+    /** 载荷还没读完，见 `WorkspaceViewModel.openApiConfig`。 */
+    val loading: Boolean = false,
 )
 
 /** 模型目录里的一项。[displayName] 可能与 [id] 相同，界面据此决定要不要重复显示。 */
@@ -611,6 +622,8 @@ data class McpConfigState(
     val importText: String? = null,
     /** 导入对话框的错误提示（解析失败时才有）。 */
     val importError: String? = null,
+    /** 载荷还没读完，见 `WorkspaceViewModel.openMcpConfig`。 */
+    val loading: Boolean = false,
 )
 
 /** Skill 的作用域。目录约定必须与引擎 `SkillTool` 一致，见 `SkillStore`。 */
@@ -690,6 +703,8 @@ data class SkillsState(
     val fileDraft: SkillFileDraft? = null,
     /** 「从 URL 导入」表单。 */
     val urlDraft: SkillUrlDraft? = null,
+    /** 载荷还没读完，见 `WorkspaceViewModel.openSkills`。 */
+    val loading: Boolean = false,
 ) {
     /** 按 [query] 过滤后的列表。名称与说明都命中。 */
     val visibleSkills: List<SkillEntry>
@@ -839,6 +854,8 @@ data class RoleCardsState(
     val cards: List<RoleCard>,
     val activeId: String,
     val editor: RoleCardEditor? = null,
+    /** 载荷还没读完，见 `WorkspaceViewModel.openRoleCards`。 */
+    val loading: Boolean = false,
 )
 
 /** 新增 / 编辑角色卡的草稿。[id] 为空表示新增。 */
@@ -874,6 +891,8 @@ data class MemoryFile(
 data class MemoryState(
     val files: List<MemoryFile>,
     val editing: MemoryEditor? = null,
+    /** 载荷还没读完，见 `WorkspaceViewModel.openMemory`。 */
+    val loading: Boolean = false,
 )
 
 /** 正在编辑的记忆文件。新建一个尚不存在的文件时 [exists] 为 false。 */

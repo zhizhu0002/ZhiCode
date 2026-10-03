@@ -272,6 +272,14 @@ run AnchoredMenuStructureTest "$PROJECT_ROOT"
 # ---------- 设置页（数值项是可输入的文本框 · 自动保存 · 唯一写入路径） ----------
 # SettingsPageStructureTest.java
 run SettingsPageStructureTest "$PROJECT_ROOT"
+# ---------- 设置页的行首彩色图标块（小米设置观感） ----------
+# 用户贴了小米「设置」的截图之后要求「借鉴小米自带的设置的图标」：参考物里没有一行是
+# 裸字形，行首一律是「彩色圆角方块 + 白字形」。这一节守的就是那套东西的**每一条**：
+# 每一行都要有这一对参数（漏一行不会编译失败）、只给一半会静默退化成没有图标、
+# 同一页两个相同的(字形,底色)会让人以为共用一条设置、底色与白字形的对比度必须 ≥3:1
+# （小米原色的绿/橙只有 ≈2.0:1，白字形会糊在底上）、底必须是超椭圆而不是普通圆角。
+# SettingsIconPlateTest.java
+run SettingsIconPlateTest "$PROJECT_ROOT"
 # ---------- 二级页转场（多态页必须走页面栈）与技能页安全边界 ----------
 # 用户报过「设置很多地方的动画非常不完整（比如三级窗口）」：根因是多态二级页被
 # when 硬切，而 AppScaffold 的页面栈只反映"这一页开着没有"。
@@ -285,12 +293,31 @@ run McpToolGateStructureTest "$PROJECT_ROOT"
 # ---------- 侧栏导航（点任何一行都要收起侧栏，否则目标被浮层盖住） ----------
 # SidebarNavigationTest.java
 run SidebarNavigationTest "$PROJECT_ROOT"
+# ---------- 侧栏版式（28dp 基线 · 主色不当整行底色 · 选中态三样 · 搜索走 ZhiTextField） ----------
+# 用户贴了侧栏截图：最抢眼的是「新会话」那条满宽蓝条，组标题比行内容深缩进一截，
+# 会话行没有"行"的样子。三样都能编译通过，只有真机上看得出来。
+# SidebarLayoutTest.java
+run SidebarLayoutTest "$PROJECT_ROOT"
 # ---------- 沙箱页（弹窗宿主挂载点 · 骨架同二级页 · 卡片动作分层） ----------
 # 这一页是独立 Activity 里的整页，自己拼骨架，于是拼出过只有真机上点得出来的毛病：
 # 弹窗宿主写在 Scaffold 之外 → 四个框全部不显示且不报错（点了没反应，状态卡在非 null）。
 # SandboxPageStructureTest.java
 run SandboxPageStructureTest "$PROJECT_ROOT"
 # ---------- 写死的几何（长按触发 · 气泡宽度 · 弹窗宽度） ----------
+
+# ---------- 图标集（字形数据 · 语义映射 · 画廊全集） ----------
+# IconSetTest.java
+run IconSetTest "$PROJECT_ROOT"
+# ---------- 每个字形都真的铺在 24 格上（"别扁扁的"的量化形式） ----------
+# 用户对图标的反馈里有一条是「有些图标扁扁的，不好看」。上一轮靠"把自绘的坐标调大"
+# 解决，但那种事没法守住：坐标改了、注释里的数字不改，谁也不知道。
+# 这道守卫在 Java 里实现一个 SVG 路径走查器（M/L/H/V/C/S/Q/T/A/Z、相对命令、
+# 隐式重复、圆弧的两个标志位），把 ZhiMaterialIcons 里每个字形**真实的**墨迹范围
+# 算出来，再断言长边 ≥15、短边 ≥14.4、长短边之比 ≤1.30。
+# 天生细长的形状（折线箭头、横排三点、汉堡三杠）进例外表并写明理由，
+# 而且例外表是**双向**检查的：多余的例外会让测试失败 —— 否则那张表会越放越松。
+# MaterialSymbolGeometryTest.java
+run MaterialSymbolGeometryTest "$PROJECT_ROOT"
 # LayoutConsistencyTest.java
 run LayoutConsistencyTest "$PROJECT_ROOT"
 # ---------- 流式渲染热路径（重解析 · 行内缓存 · 尺寸动画） ----------

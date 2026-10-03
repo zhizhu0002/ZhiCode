@@ -1,5 +1,7 @@
 import java.nio.file.*;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.*;
 
 /**
@@ -98,15 +100,30 @@ public final class DialogScrollNestingTest {
                         + " body 的唯一滚动出口。实际 "
                         + count(shell, "verticalScroll(rememberScrollState())") + " 处。");
 
-        // ---- 2. 除外壳外，弹窗里不得再出现任何 verticalScroll ----
+        // ---- 2. DialogShell 的滚动区里不得再出现任何 verticalScroll ----------
         //
         // 这就是崩溃本体。DialogShell 的 body 已经处在竖向滚动容器内，
         // 任何一层额外的竖向滚动都会拿到无限高度约束。
+        //
+        // 例外：OverlayBottomSheet 的 body **没有**内置滚动 —— 迁到 sheet 的长列表
+        // （任务清单 / 附件搜索）必须自己 verticalScroll（外面是定高列，高度有界）。
+        // 所以这条按**顶层函数**判：函数里用了 DialogShell → 禁；
+        // 只用了 OverlayBottomSheet → 允许；两者都没用却也挂了滚动，同样禁
+        // （多半会被塞进某个滚动容器里，宁可误报，也不放过真闪退）。
         List<String> offenders = new ArrayList<>();
         for (String file : files) {
             if (file.equals(SHELL)) continue;
             String code = stripComments(read(root, file));
-            if (code.contains("verticalScroll")) offenders.add(file);
+            for (String fn : topLevelFunctions(code)) {
+                if (!fn.contains("verticalScroll")) continue;
+                boolean usesShell = fn.contains("DialogShell(");
+                boolean usesSheet = fn.contains("OverlayBottomSheet(");
+                if (usesShell || !usesSheet) {
+                    offenders.add(file + "（"
+                            + (usesShell ? "套在 DialogShell 里" : "不在 OverlayBottomSheet 里")
+                            + "却挂着 verticalScroll）");
+                }
+            }
         }
         require(offenders.isEmpty(),
                 "以下弹窗在 DialogShell 的滚动区里又套了一层 verticalScroll：\n"
@@ -114,7 +131,8 @@ public final class DialogScrollNestingTest {
                         + "      DialogShell 已经把 body 放进竖向滚动容器，嵌套会让内层拿到无限大"
                         + "      高度约束，Compose 抛 IllegalStateException，main 线程首帧即崩、"
                         + "      进程被杀（表现是点开该弹窗直接闪退）。\n"
-                        + "      修法：删掉内层那一层，表单变长由 DialogShell 的外层滚动负责。");
+                        + "      修法：DialogShell 里删掉内层那一层；OverlayBottomSheet 的 body"
+                        + "      没有内置滚动，sheet 里的长列表必须自己滚（外面用定高列兜住）。");
 
         // ---- 3. 弹窗里的 LazyColumn 必须自带高度上限 ----
         //
@@ -143,6 +161,33 @@ public final class DialogScrollNestingTest {
         int line = 1;
         for (int i = 0; i < offset; i++) if (text.charAt(i) == '\n') line++;
         return line;
+    }
+
+    /**
+     * 按**顶层**函数切分源码（弹窗文件里的 composable 都是顶层 fun）。
+     *
+     * <p>边界 = 列 0 的 {@code fun}（连同紧贴其上的列 0 注解行）。顶层 {@code val}
+     * 常量会被并进**上一个**函数片段 —— 对本测试无关紧要：只检查含
+     * {@code verticalScroll} 的片段，常量行里不会出现这个词。
+     */
+    private static List<String> topLevelFunctions(String code) {
+        List<Integer> starts = new ArrayList<>();
+        Matcher m = Pattern.compile("(?m)^(?:private |internal |public )?fun ").matcher(code);
+        while (m.find()) {
+            int at = m.start();
+            while (at > 0) {
+                int lineStart = code.lastIndexOf('\n', at - 2) + 1;
+                if (!code.substring(lineStart, at).trim().startsWith("@")) break;
+                at = lineStart;
+            }
+            starts.add(at);
+        }
+        List<String> parts = new ArrayList<>();
+        for (int i = 0; i < starts.size(); i++) {
+            int end = i + 1 < starts.size() ? starts.get(i + 1) : code.length();
+            parts.add(code.substring(starts.get(i), end));
+        }
+        return parts;
     }
 
     private DialogScrollNestingTest() {

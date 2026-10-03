@@ -27,6 +27,7 @@ import com.termux.app.zhicode.storage.ApiSettingsStore
 import com.termux.app.zhicode.tasks.TaskStore
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.Executors
 
 /**
  * 界面侧覆盖项。
@@ -156,6 +157,23 @@ internal class ZhiEngineController(
 
     private val flushDelta = Runnable { flushPendingText() }
 
+    /**
+     * 引擎**生命周期**调用的串行后台线程。
+     *
+     * `cancel()` / `resetConversation()` 原本在主线程同步调引擎：前者要逐个放掉三个
+     * 询问闩、打断两条线程、通知提供方掐断在读的流，后者还要清空历史 —— 重负载下
+     * 能把主线程卡住几十毫秒，用户侧的感受是"点哪儿都慢半拍"（切会话、新会话、
+     * 停止按钮都在这条路上）。
+     *
+     * 单线程 executor 而不是各开各的协程，是因为这些调用**必须按提交顺序执行**：
+     * 「取消当前回合」后面跟着「载入历史会话」时，乱序会让载入被取消掉。
+     * `sendPrompt` 仍留在调用线程（错误要当场报给发送方，且引擎内部自己有单线程
+     * 队列），排队的取消靠 [generation] 守卫失效 —— 见 [cancel] 的说明。
+     */
+    private val engineOps = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "zhi-engine-ops").apply { isDaemon = true }
+    }
+
     // ------------------------------------------------------------------
     // 生命周期
     // ------------------------------------------------------------------
@@ -177,7 +195,7 @@ internal class ZhiEngineController(
     fun configure(overrides: EngineOverrides): SessionConfig {
         val store = apiStore ?: ApiSettingsStore(appContext).also { apiStore = it }
         val base = runCatching { store.load() }.getOrElse { SessionConfig() }
-        applyOverrides(base, overrides)
+        applyEngineOverrides(base, overrides)
         sessionConfig = base
         engine().configure(base)
         // ⚠️ 这里必须落盘。原先只把值写进内存与引擎，`ApiSettingsStore.save()` 在
@@ -193,31 +211,6 @@ internal class ZhiEngineController(
         return base
     }
 
-    private fun applyOverrides(config: SessionConfig, o: EngineOverrides) {
-        o.permissionMode?.let { config.permissionMode = PermissionModePolicy.normalize(it) }
-        o.effort?.let { if (it.isNotBlank()) config.effort = it }
-        o.model?.let { if (it.isNotBlank()) config.model = it }
-        o.contextWindow?.let { if (it > 0) config.contextWindowTokens = it }
-        o.projectDirectory?.let { if (it.isNotBlank()) config.projectDirectory = it }
-        o.visionEnabled?.let { config.visionEnabled = it }
-        o.customSystemPrompt?.let { config.customSystemPrompt = it }
-        o.autoCompact?.let { config.autoCompact = it }
-        // 界面用的是百分比整数，引擎用的是倍率；在这里换算，别把两种口径泄进引擎。
-        o.autoCompactPercent?.let { config.autoCompactRatio = (it.coerceIn(50, 100)) / 100.0 }
-        o.webSearchEnabled?.let { config.webSearchEnabled = it }
-        o.webSearchProvider?.let { if (it.isNotBlank()) config.webSearchProvider = it }
-        o.webSearchMaxResults?.let { if (it > 0) config.webSearchMaxResults = it }
-        o.webTimeoutSec?.let { if (it > 0) config.webTimeoutMs = it * 1000 }
-        o.webSearchApiKey?.let { if (it.isNotBlank()) config.webSearchApiKey = it }
-        o.webSearchBaseUrl?.let { config.webSearchBaseUrl = it }
-        // 空串也要写：用户在设置里清掉地址/选项之后，引擎侧不该继续用旧值。
-        o.webSearchServiceConfig?.let { config.webSearchServiceConfig = it }
-        o.rootExecutionEnabled?.let { config.rootExecutionEnabled = it }
-        o.sandboxAgentFullAccess?.let { config.sandboxAgentFullAccess = it }
-        o.forcedKeepAliveEnabled?.let { config.forcedKeepAliveEnabled = it }
-        o.roleCard?.let { config.roleCard = it }
-    }
-
     fun isBusy(): Boolean = engine?.isBusy ?: false
 
     /** 当前回合已经开始（用于区分「该排队」还是「该直接发」）。 */
@@ -231,6 +224,9 @@ internal class ZhiEngineController(
      * 所以这里不做二次判断——两处都判会出现"界面拦了但引擎其实允许"这类不一致。
      */
     fun sendPrompt(prompt: String, extraContent: JSONArray? = null) {
+        // 新回合开一代：让排队的旧取消（cancel() 的代际守卫）自行动失效，
+        // 否则"停止 → 立刻再发"时，排在后台队列里的那次取消会杀掉这条新回合。
+        generation++
         if (extraContent == null || extraContent.length() == 0) engine().sendPrompt(prompt)
         else engine().sendPrompt(prompt, extraContent)
     }
@@ -244,6 +240,10 @@ internal class ZhiEngineController(
      *
      * 自增代际：引擎的 `cancel()` 之后仍可能有一两个在途回调，
      * 不丢弃的话会在新一轮对话里插入上一轮的尾巴。
+     *
+     * 主线程只做簿记（代际、缓冲、回调清理）；引擎调用排进 [engineOps]。
+     * 提交时记下代际，执行时若代际已经变了（期间发了新回合），就**跳过**这次取消
+     * —— 否则排在队列里的旧取消会把用户新发出的回合杀掉。
      */
     fun cancel() {
         generation++
@@ -252,7 +252,11 @@ internal class ZhiEngineController(
             flushPosted = false
         }
         main.removeCallbacks(flushDelta)
-        runCatching { engine?.cancel() }
+        val genAtSubmit = generation
+        engineOps.execute {
+            if (generation != genAtSubmit) return@execute
+            runCatching { engine?.cancel() }
+        }
     }
 
     fun resumeConversation(file: File) {
@@ -272,13 +276,20 @@ internal class ZhiEngineController(
             flushPosted = false
         }
         main.removeCallbacks(flushDelta)
-        runCatching { engine?.resetConversation() }
+        // 与 cancel() 同样的代际守卫：排队的重置在执行时若已来了新回合，就让它过去
+        // （引擎自己的 resetConversation() 开头也会再 cancel 一次，语义不会丢）。
+        val genAtSubmit = generation
+        engineOps.execute {
+            if (generation != genAtSubmit) return@execute
+            runCatching { engine?.resetConversation() }
+        }
     }
 
     fun shutdown() {
         generation++
         main.removeCallbacks(flushDelta)
         runCatching { engine?.shutdown() }
+        engineOps.shutdownNow()
     }
 
     // ------------------------------------------------------------------
@@ -731,6 +742,21 @@ internal fun EffortLevel.toEngineEffort(): String = when (this) {
     EffortLevel.AUTO -> "auto"
 }
 
+/**
+ * 引擎推理档 → 界面枚举。
+ *
+ * 与 [engineModeToUi] 成对：启动时要把盘上存的值读回界面状态，
+ * 而盘上存的是**引擎字符串**（`low`/`medium`/…）。
+ *
+ * 认不出来时回落到 [EffortLevel.AUTO]（界面的默认档），
+ * 而不是抛异常 —— 用户手动改过 prefs、或将来引擎加了新档位时，
+ * 正确的反应是"用默认值"，不是崩在启动路径上。
+ */
+internal fun engineEffortToUi(effort: String?): EffortLevel {
+    val key = effort?.trim()?.lowercase().orEmpty()
+    return EffortLevel.entries.firstOrNull { it.toEngineEffort() == key } ?: EffortLevel.AUTO
+}
+
 /** 引擎权限模式 → 界面枚举（引擎回传的可能是 `default`）。 */
 internal fun engineModeToUi(mode: String?): PermissionMode = when (PermissionModePolicy.normalize(mode)) {
     PermissionModePolicy.ACCEPT_EDITS -> PermissionMode.ACCEPT_EDITS
@@ -750,3 +776,84 @@ internal fun EnginePlanApproval.toUiPlanApproval(): PlanApproval = PlanApproval(
     path = path,
     permissionNote = permissionNote,
 )
+
+/**
+ * 把界面侧的覆盖项写进一份 `SessionConfig`。
+ *
+ * ## 为什么它必须是**顶层函数**而不是控制器里的私有方法
+ *
+ * 原来的形态是 `ZhiEngineController` 的私有方法，只有 `configure()` 一条路径会用它。
+ * 于是"设置页改一项 → 落盘"这件事只能靠**顺带**发生（下一次发消息时 `configure()`）。
+ * 用户改完设置直接大退，盘上还是旧值 —— 这就是「自动保存完全没修好」的本体。
+ *
+ * 提取出来之后，落盘路径（`WorkspaceViewModel.persistEngineSettings`）与发送路径
+ * 共用**同一段映射**，两边不会再各自漂移：新增一个设置项只改这一处，
+ * 不会出现"界面上能改、发消息时生效、但重启就丢"的字段。
+ *
+ * ⚠️ 传入的 [config] 必须来自 `ApiSettingsStore.load()`（即盘上那份），
+ * 而不是凭空 `SessionConfig()`：`save()` 会整表覆盖，凭空构造会把 API 密钥槽
+ * 等本函数不管的字段一起清空。
+ */
+internal fun applyEngineOverrides(config: SessionConfig, o: EngineOverrides) {
+    o.permissionMode?.let { config.permissionMode = PermissionModePolicy.normalize(it) }
+    o.effort?.let { if (it.isNotBlank()) config.effort = it }
+    o.model?.let { if (it.isNotBlank()) config.model = it }
+    o.contextWindow?.let { if (it > 0) config.contextWindowTokens = it }
+    o.projectDirectory?.let { if (it.isNotBlank()) config.projectDirectory = it }
+    o.visionEnabled?.let { config.visionEnabled = it }
+    o.customSystemPrompt?.let { config.customSystemPrompt = it }
+    o.autoCompact?.let { config.autoCompact = it }
+    // 界面用的是百分比整数，引擎用的是倍率；在这里换算，别把两种口径泄进引擎。
+    o.autoCompactPercent?.let { config.autoCompactRatio = (it.coerceIn(50, 100)) / 100.0 }
+    o.webSearchEnabled?.let { config.webSearchEnabled = it }
+    o.webSearchProvider?.let { if (it.isNotBlank()) config.webSearchProvider = it }
+    o.webSearchMaxResults?.let { if (it > 0) config.webSearchMaxResults = it }
+    o.webTimeoutSec?.let { if (it > 0) config.webTimeoutMs = it * 1000 }
+    o.webSearchApiKey?.let { if (it.isNotBlank()) config.webSearchApiKey = it }
+    o.webSearchBaseUrl?.let { config.webSearchBaseUrl = it }
+    // 空串也要写：用户在设置里清掉地址/选项之后，引擎侧不该继续用旧值。
+    o.webSearchServiceConfig?.let { config.webSearchServiceConfig = it }
+    o.rootExecutionEnabled?.let { config.rootExecutionEnabled = it }
+    o.sandboxAgentFullAccess?.let { config.sandboxAgentFullAccess = it }
+    o.forcedKeepAliveEnabled?.let { config.forcedKeepAliveEnabled = it }
+    o.roleCard?.let { config.roleCard = it }
+}
+
+/**
+ * 反向：把盘上的 `SessionConfig` 读回界面可编辑的那几项。
+ *
+ * ## 为什么必须有这个方向
+ *
+ * 启动路径是 `restore* → syncActiveProfile() → configure()`，而 `configure()`
+ * 会**落盘**，写下去的却是界面此刻的状态。界面若还是默认值，那一刻盘上刚存的
+ * 用户设置就被默认值冲掉了 —— 这正是「大退后恢复成未修改的样子」的第二个成因
+ * （第一个是改动根本没写盘，见 [applyEngineOverrides]）。
+ *
+ * 所以只读回 `permissionMode`/`effort` 两项是不够的：**凡是被 `configure()`
+ * 反写的字段，都必须在它之前读回来**，否则每启动一次就被冲一次。
+ *
+ * 返回 null 表示盘上那份读不出来（例如首次安装），调用方保持界面原值即可。
+ */
+internal fun readEngineSettings(store: ApiSettingsStore): EngineOverrides? =
+    runCatching { store.load() }.getOrNull()?.let { config ->
+        EngineOverrides(
+            permissionMode = PermissionModePolicy.normalize(config.permissionMode),
+            effort = config.effort,
+            contextWindow = config.contextWindowTokens,
+            projectDirectory = config.projectDirectory,
+            customSystemPrompt = config.customSystemPrompt,
+            visionEnabled = config.visionEnabled,
+            autoCompact = config.autoCompact,
+            autoCompactPercent = (config.autoCompactRatio * 100).toInt().coerceIn(50, 100),
+            webSearchEnabled = config.webSearchEnabled,
+            webSearchProvider = config.webSearchProvider,
+            webSearchMaxResults = config.webSearchMaxResults,
+            webTimeoutSec = config.webTimeoutMs / 1000,
+            webSearchApiKey = config.webSearchApiKey,
+            webSearchBaseUrl = config.webSearchBaseUrl,
+            webSearchServiceConfig = config.webSearchServiceConfig,
+            rootExecutionEnabled = config.rootExecutionEnabled,
+            sandboxAgentFullAccess = config.sandboxAgentFullAccess,
+            forcedKeepAliveEnabled = config.forcedKeepAliveEnabled,
+        )
+    }

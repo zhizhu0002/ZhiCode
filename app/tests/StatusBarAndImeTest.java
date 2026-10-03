@@ -38,6 +38,8 @@ public final class StatusBarAndImeTest {
             "app/src/main/java/com/zhizhu/zhicode/compose/ui/settings/SettingsDialog.kt";
     private static final String VM =
             "app/src/main/java/com/zhizhu/zhicode/compose/state/WorkspaceViewModel.kt";
+    private static final String CHAT_AREA =
+            "app/src/main/java/com/zhizhu/zhicode/compose/ui/ChatArea.kt";
 
     private static String squash(String text) {
         return text.replaceAll("\\s+", "");
@@ -116,5 +118,35 @@ public final class StatusBarAndImeTest {
                         + "只能由用户按自己机型选");
         require(vm.contains("setTerminalCharMode") && vm.contains("getTerminalCharMode"),
                 VM + " 必须落盘并在启动时读回该开关：不落盘就是「设置了重启就丢」");
+
+        // ---- 3. 输入器只在该跟键盘时跟键盘（R5 修的真机 bug）------------------
+        //
+        // 用户原话：「为什么在搜索会话打开输入法，后面的聊天发送框会自动抬起」。
+        //
+        // `WindowInsets.ime` 是**窗口级**的：它不区分键盘是谁提起来的。侧栏抽屉
+        // （窄屏，画在 Scaffold 之上）里的「搜索会话」输入框一提键盘，IME 就变正，
+        // 于是**后面那个对话输入器跟着往上顶**，从抽屉右侧那条缝里能直接看见它
+        // 整个上移了一截。
+        //
+        // 修法不是去猜"焦点在谁身上"（Compose 没给可靠的窗口级焦点查询），
+        // 而是按**有没有全屏浮层盖住工作区**判断。这条守卫钉的就是那几个标志位 ——
+        // 少一个就会出现"设置页里搜一下，背后的输入器动了"这同一类 bug。
+        String chatArea = stripComments(read(root, CHAT_AREA));
+        require(squash(chatArea).contains("valimeLift=if(coveredByFullScreenOverlay)"),
+                CHAT_AREA + " 的 imeLift 必须由 coveredByFullScreenOverlay 门控："
+                        + "WindowInsets.ime 是窗口级的，侧栏搜索框提键盘时它会一起变正，"
+                        + "不门控就会把后面的对话输入器顶起来（用户报的真机 bug）");
+        require(!squash(chatArea).contains("valimeLift=with(LocalDensity.current)"),
+                CHAT_AREA + " 的 imeLift 又变回无条件读 WindowInsets.ime 了（同上）");
+        for (String flag : new String[]{
+                "state.sidebarOpen", "state.settingsOpen", "state.uiDebugOpen", "state.environmentOpen"}) {
+            require(squash(chatArea).contains(squash(flag)),
+                    "coveredByFullScreenOverlay 必须包含 " + flag + "："
+                            + "那几个页面里都有输入框，漏一个就会重演"
+                            + "「打开搜索、后面的输入框自己抬起来」");
+        }
+
+        System.out.println("StatusBarAndImeTest PASS"
+                + "（状态栏可见 · 终端输入法由设置项驱动且默认正常 · 输入器只在该跟键盘时跟键盘）");
     }
 }

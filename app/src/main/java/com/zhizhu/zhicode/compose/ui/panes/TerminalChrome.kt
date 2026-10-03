@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.res.Configuration
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -166,7 +168,7 @@ internal fun RowScope.TerminalHeaderActions(
     )
     GlyphButton(glyph = "⌨", color = palette.text, onClick = onKeyboard)
     ZhiIconButton(
-        icon = ZhiIcons.more,
+        icon = ZhiIcons.moreVert,
         description = "更多操作",
         onClick = onMore,
         tint = palette.text,
@@ -241,6 +243,12 @@ internal fun TerminalExtraKeys(
             ) {
                 keys.forEach { key ->
                     val active = keyIsLatched(state, key.action)
+                    // 修饰键锁定是「按下 → 变亮」，硬切会像闪一下。走令牌的 150ms 淡变。
+                    val keyColor by animateColorAsState(
+                        targetValue = if (active) palette.accent else palette.text,
+                        animationSpec = ZhiMotion.colorSpec,
+                        label = "extraKeyColor",
+                    )
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -253,7 +261,7 @@ internal fun TerminalExtraKeys(
                     ) {
                         Text(
                             text = key.display,
-                            color = if (active) palette.accent else palette.text,
+                            color = keyColor,
                             fontSize = ZhiTextScale.Footnote,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
@@ -361,18 +369,30 @@ private fun SessionRow(
     onClose: () -> Unit,
     onRename: () -> Unit,
 ) {
+    // 选中行是「点一下整行变底 + 文字变亮」，同样走淡变：
+    // 不淡的话切会话时两行会“啪”地交换，而这一行里同时变了底、文字色与圈符。
+    val rowBg by animateColorAsState(
+        targetValue = if (session.selected) palette.selected else Color.Transparent,
+        animationSpec = ZhiMotion.colorSpec,
+        label = "sessionRowBg",
+    )
+    val rowText by animateColorAsState(
+        targetValue = if (session.selected) palette.text else palette.muted,
+        animationSpec = ZhiMotion.colorSpec,
+        label = "sessionRowText",
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(58.dp)
-            .background(if (session.selected) palette.selected else Color.Transparent)
+            .background(rowBg)
             .pointerInput(session.name) { detectTapGestures(onTap = { onSelect() }, onLongPress = { onRename() }) },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = (if (session.selected) "●  " else "○  ") + session.name +
                 "\n    " + (if (session.running) "运行中" else "已结束"),
-            color = if (session.selected) palette.text else palette.muted,
+            color = rowText,
             fontSize = ZhiTextScale.BodySmall,
             fontWeight = if (session.selected) FontWeight.Bold else FontWeight.Normal,
             lineHeight = 17.sp,

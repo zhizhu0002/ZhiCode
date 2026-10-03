@@ -34,6 +34,7 @@ public final class MainThreadIoBoundTest {
     private static final String TOPBAR = "app/src/main/java/com/zhizhu/zhicode/compose/ui/TopBar.kt";
     private static final String SIDEBAR = "app/src/main/java/com/zhizhu/zhicode/compose/ui/Sidebar.kt";
     private static final String TERMINAL = "app/src/main/java/com/zhizhu/zhicode/compose/ui/panes/TerminalPane.kt";
+    private static final String ENGINE = "app/src/main/java/com/zhizhu/zhicode/compose/engine/ZhiEngineController.kt";
 
     private static void require(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
@@ -186,7 +187,38 @@ public final class MainThreadIoBoundTest {
         require(script.contains("MainThreadIoBoundTest \"$PROJECT_ROOT\""),
                 "canonical source suite 必须执行本守卫");
 
+        // ---- 5. 引擎的 cancel/reset 调用必须排在后台串行队列上 ---------------
+        //
+        // 用户症状（「有些地方点击具有滞后性」）：切会话 / 新会话 / 停止都要先在
+        // 主线程上跑一遍 engine.cancel() —— 它要逐个放掉三个询问闩、打断两条线程、
+        // 掐断提供方在读的流，重负载下能把主线程卡住几十毫秒（不崩、不到 ANR，
+        // 只会被当成"这应用有点卡"）。现在主线程只做簿记，引擎调用排进 engineOps。
+        //
+        // ⚠️ 与第 1 节同款**顺序**断言：只判"出现过 engineOps.execute"的话，
+        // 把引擎调用留在 execute 外面（守卫照样变绿）就等于没改。
+        String engine = stripComments(read(root, ENGINE));
+        String cancelFn = functionBody(engine, "fun cancel()");
+        require(!cancelFn.isEmpty(), ENGINE + " 里找不到 cancel()");
+        require(cancelFn.contains("engineOps.execute"),
+                "ZhiEngineController.cancel() 必须把引擎调用排进 engineOps 后台队列："
+                        + "主线程同步调用会把打断线程/掐流的重活压在点击那一帧上");
+        require(cancelFn.indexOf("engineOps.execute") < cancelFn.indexOf("engine?.cancel()"),
+                "cancel() 里 engine?.cancel() 出现在 engineOps.execute **之前** ——"
+                        + "那仍然是主线程同步调用，守卫要的是执行顺序不是字面出现");
+        require(cancelFn.contains("genAtSubmit"),
+                "cancel() 缺少代际守卫（genAtSubmit）：排在队列里的旧取消，"
+                        + "执行时若已来了新回合（sendPrompt 又自增了 generation），必须跳过 —— "
+                        + "否则「停止 → 立刻再发」会把用户新发的回合杀掉");
+
+        String resetFn = functionBody(engine, "fun resetConversation()");
+        require(!resetFn.isEmpty(), ENGINE + " 里找不到 resetConversation()");
+        require(resetFn.contains("engineOps.execute")
+                        && resetFn.indexOf("engineOps.execute") < resetFn.indexOf("engine?.resetConversation()"),
+                "ZhiEngineController.resetConversation() 同样必须走 engineOps"
+                        + "（「新会话」按钮与切会话在同一条点击路径上）");
+
         System.out.println("MainThreadIoBoundTest PASS"
-                + "（技能文件读写都在 IO 线程 · 顶栏/侧栏已收窄 · 终端贴底不再用挂起动画）");
+                + "（技能文件读写都在 IO 线程 · 顶栏/侧栏已收窄 · 终端贴底不再用挂起动画"
+                + " · cancel/reset 的引擎调用已出主线程）");
     }
 }

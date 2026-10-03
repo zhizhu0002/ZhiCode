@@ -1,6 +1,10 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import android.content.Context
 import android.view.View
 import android.view.ViewGroup
@@ -43,6 +47,8 @@ import com.zhizhu.zhicode.compose.model.TerminalLine
 import com.zhizhu.zhicode.compose.model.TerminalTone
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Surface
@@ -203,20 +209,53 @@ private fun RealTerminalPane(
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                        val failure = state.failureDetail
-                        val notice = state.runtimeNotice
-                        when {
-                            failure != null -> TerminalFailure(failure, onRetry = { pane.retryTerminal() })
-                            notice != null -> TerminalRuntimeNotice(notice)
-                            else -> key(viewEpoch) {
-                                AndroidView(
-                                    factory = {
-                                        // 可能还挂在上一轮的容器上（旧 AndroidView 尚未 dispose），先摘干净
-                                        detachFromParent(pane)
-                                        pane
-                                    },
-                                    modifier = Modifier.fillMaxSize(),
+                        // ⚠️ `AnimatedContent` 的 content lambda 读的是**当前**闭包，不是
+                        // 那个 stage 当时的快照：转场期间 `failure` 已经是 null 了，
+                        // 直接用会让离场那一屏画成空文本。所以两个载荷都要过
+                        // 「最后一次非空」（见 rememberLastNonNull 的说明）。
+                        val failure = rememberLastNonNull(state.failureDetail)
+                        val notice = rememberLastNonNull(state.runtimeNotice)
+                        // 三态（真终端 / 失败 / 未就绪须知）之间淡变。原来是裸 `when`：
+                        // 终端就绪或崩掉那一刻整块一帧换掉。
+                        //
+                        // ⚠️ **硬性不变量：组合里最多只允许一个 `AndroidView`。**
+                        //
+                        // `AndroidView` 只出现在 `REAL` 分支，而 `AnimatedContent` 在转场期间
+                        // 同时组合的是 `initialState` 与 `targetState` **两个不同的** stage
+                        // （相等就不会有转场）—— 两者至多一个等于 `REAL`，
+                        // 所以同一个 `pane` 实例永远不会被挂到两个父容器上。
+                        // `factory` 里那句 `detachFromParent(pane)` 就是为这条不变量兜底的
+                        // （见 §28 守卫：把它挪出 `REAL` 分支、或让两个分支都能拿到
+                        // AndroidView，守卫会红）。
+                        AnimatedContent(
+                            targetState = when {
+                                state.failureDetail != null -> TerminalStage.FAILURE
+                                state.runtimeNotice != null -> TerminalStage.NOTICE
+                                else -> TerminalStage.REAL
+                            },
+                            transitionSpec = {
+                                fadeIn(ZhiMotion.fadeInSpec) togetherWith fadeOut(ZhiMotion.fadeOutSpec)
+                            },
+                            label = "terminalStage",
+                        ) { stage ->
+                            when (stage) {
+                                TerminalStage.FAILURE -> TerminalFailure(
+                                    failure.orEmpty(),
+                                    onRetry = { pane.retryTerminal() },
                                 )
+
+                                TerminalStage.NOTICE -> TerminalRuntimeNotice(notice.orEmpty())
+
+                                TerminalStage.REAL -> key(viewEpoch) {
+                                    AndroidView(
+                                        factory = {
+                                            // 可能还挂在上一轮的容器上（旧 AndroidView 尚未 dispose），先摘干净
+                                            detachFromParent(pane)
+                                            pane
+                                        },
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                }
                             }
                         }
                     }
@@ -294,6 +333,18 @@ private fun detachFromParent(view: View) {
     (view.parent as? ViewGroup)?.removeView(view)
 }
 
+/**
+ * 真实终端区域此刻画的是三种东西中的哪一种。
+ *
+ * 单独列成枚举、而不是直接拿 `state.failureDetail` / `runtimeNotice` 当
+ * `AnimatedContent` 的 key：那两个是**字符串**，内容一变（比如失败原因从
+ * 「进程已退出」变成「重试中」）都会被当成"换了一屏"，于是原地重放一次转场。
+ * 枚举只表达"是哪一种"，同一种内部的文案变化不再是转场。
+ *
+ * 顺序即优先级：失败 > 未就绪须知 > 真终端（与原来的 `when` 一致）。
+ */
+private enum class TerminalStage { REAL, FAILURE, NOTICE }
+
 /** 环境未就绪时的只读占位。文案明确说明**为什么**不能输入。 */
 @Composable
 private fun TerminalPlaceholder(
@@ -340,6 +391,10 @@ private fun TerminalPlaceholder(
                         state = listState,
                         modifier = Modifier.fillMaxSize().padding(start = 10.dp, top = 8.dp, bottom = 8.dp),
                     ) {
+                        // 同 FilesPane 的正文列表：**不加** `key = { it }` —— 行号就是下标，
+                        // 拿它当 key 只是位置别名，不是身份（理由见那边的完整注释）。只挂 animateItem。
+                        // 这里本来就没几行，也不会重排，挂上主要是让「清屏 → 重新出 banner」
+                        // 这两步不再瞬移。
                         items(lines.size) { index ->
                             val line = lines[index]
                             Text(
@@ -347,6 +402,7 @@ private fun TerminalPlaceholder(
                                 color = toneColor(line.tone, scheme.onSurface),
                                 fontSize = ZhiTextScale.Caption,
                                 fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.animateItem(),
                             )
                         }
                     }

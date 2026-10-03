@@ -214,7 +214,7 @@ private fun BulletRow(block: MdBlock.Bullet, fontSize: TextUnit, styles: InlineS
         if (block.task != null) {
             // 任务项用勾选框一样的方块，而不是圆点：语义不同（一个是"待办"，一个是"列举"）
             Icon(
-                imageVector = if (block.task) ZhiIcons.done else ZhiIcons.pending,
+                painter = if (block.task) ZhiIcons.done else ZhiIcons.pending,
                 contentDescription = if (block.task) "已完成" else "未完成",
                 tint = if (block.task) ZhiColors.green() else scheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(top = 2.dp).size(fontSize.value.dp + 2.dp),

@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,9 +23,11 @@ import com.zhizhu.zhicode.compose.model.SearchServiceType
 import com.zhizhu.zhicode.compose.model.SearchServicesState
 import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
+import com.zhizhu.zhicode.compose.ui.settings.SettingsLoadingHint
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
@@ -33,8 +36,6 @@ import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -125,7 +126,11 @@ private fun SearchServiceList(
     val scheme = MiuixTheme.colorScheme
     Column {
         SettingsGroup("已添加的服务") {
-            if (state.services.isEmpty()) {
+            // 载荷在 IO 上读（见 openSearchServices）：先于空态判断，
+            // 否则读取期间会先闪一下「还没有添加搜索服务」。
+            if (state.loading) {
+                SettingsLoadingHint()
+            } else if (state.services.isEmpty()) {
                 // 空列表是正常的初始状态（默认走免费的 DuckDuckGo/Bing），
                 // 但只说"没有数据"会让人以为坏了 —— 写清默认行为与下一步。
                 Text(
@@ -139,20 +144,25 @@ private fun SearchServiceList(
             }
             state.services.forEach { service ->
                 val active = service.id == state.activeId
+                // 副标题在选中时会整段换成「使用中 · …」并变主色 —— 这一句受 `active` 控制，
+                // 硬切会像“文字闪了一下”，所以颜色也走淡变。
+                val summaryColor by animateColorAsState(
+                    targetValue = if (active) scheme.primary else scheme.onSurfaceVariantSummary,
+                    animationSpec = ZhiMotion.colorSpec,
+                    label = "searchServiceSummary",
+                )
                 BasicComponent(
                     title = service.name,
                     titleColor = BasicComponentDefaults.titleColor(color = scheme.onBackground),
                     summary = if (active) "使用中 · ${service.subtitle}" else service.subtitle,
-                    summaryColor = BasicComponentDefaults.summaryColor(
-                        color = if (active) scheme.primary else scheme.onSurfaceVariantSummary,
-                    ),
+                    summaryColor = BasicComponentDefaults.summaryColor(color = summaryColor),
                     // 点整行 = 设为当前使用（RikkaHub 就是这个交互）。
                     onClick = { onSelect(service.id) },
                     endActions = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (active) {
                                 Icon(
-                                    imageVector = MiuixIcons.Basic.Check,
+                                    painter = ZhiIcons.check,
                                     contentDescription = "使用中",
                                     tint = scheme.primary,
                                     modifier = Modifier.padding(end = 4.dp),

@@ -4,8 +4,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.darkColorScheme
+import top.yukonga.miuix.kmp.theme.lightColorScheme
 
 /**
  * 当前是否深色主题。
@@ -181,9 +184,108 @@ object ZhiColors {
     fun cardInnerSurface(): Color =
         if (isDark()) MiuixTheme.colorScheme.surfaceContainerHighest else CardInnerLight
 
+    /**
+     * **终端井**：工具输出、diff、运行中的实时输出都画在它上面。
+     *
+     * 判据只有一条（用户原话：「底色比其他地方要黑的就是我说的预览框」）：
+     * **它必须比页面底色更暗**。IQ Code 反编译版（`~/.iqcode/.../MainActivity.java`
+     * 的 `TERMINAL_BG`）三套调色板都遵守这条：
+     *
+     * | 调色板 | 页面 `BG` | 终端井 `TERMINAL_BG` |
+     * | --- | --- | --- |
+     * | 暖黑（默认深色） | `#12110F` | `#0A0B0C` ← 更暗 |
+     * | 霓虹 | `#060D1C` | `#040914` ← 更暗 |
+     * | 亮色 | `#F7F6F2` | `#F1EFE8` ← 更暗 |
+     *
+     * 而不是像 [cardInnerSurface] 那样"深色下比卡片亮一档"（Miuix 的
+     * `surfaceContainerHighest`）—— 那是**卡片**的层级语义，方向恰好相反。
+     * 方向不是配色偏好：井表示"这是程序吐出来的原始字节"，卡片表示"这是应用渲染的内容"。
+     *
+     * 取值按同一关系落到本工程的页面底色上（深 [backdrop] `#242424` / 浅 `#EDEDED`）：
+     * 深色直接用 IQ Code 的 `#0A0B0C`；浅色取 `#E7E5DE` —— 与 IQ Code 亮色里
+     * "比页面低 6/7/10" 的差值同量级。
+     */
+    @Composable
+    fun terminalSurface(): Color = if (isDark()) TerminalDark else TerminalLight
+
+    private val TerminalDark = Color(0xFF0A0B0C)
+    private val TerminalLight = Color(0xFFE7E5DE)
+
     private val DarkBackdrop = Color(0xFF242424)
     private val DarkCard = Color(0xFF2E2E2E)
     private val PanelLight = Color(0xFFEDEDED)
     private val CardLight = Color(0xFFF8F8F8)
     private val CardInnerLight = Color(0xFFF0F0F0)
+}
+
+/**
+ * 给**非 Compose**的界面取色：注入到 guest 里的沙箱控制栏与它的日志面板。
+ *
+ * ## 为什么需要它
+ *
+ * 那两处是纯 `View`（`SandboxOverlay`），不是 Compose 树，所以拿不到
+ * `MiuixTheme.colorScheme`。它原来自己维护了一套配色 —— 读的是 IQ Code 时代的
+ * `ui_theme` 键（`day` / `neon-purple` / `custom` / `classic`），那套键跟现在的应用主题
+ * **毫无关系**，于是那个悬浮窗一直是"IQ Code 的颜色"而不是 Miuix 的。
+ *
+ * 这里把"深浅"（[ZhiThemeMode]）与"Miuix 的语义色"（[darkColorScheme] /
+ * [lightColorScheme]）接起来，返回一串 ARGB，颜色**没有第二份来源**。
+ *
+ * ## 为什么返回 int 而不是 `ColorScheme`
+ *
+ * `androidx.compose.ui.graphics.Color` 是 `@JvmInline value class`，从 Java 侧看到的是
+ * `long`，还得再走名字被 mangle 掉的 `toArgb`。直接给 int 让 Java 调用点一行就能用。
+ *
+ * ## 为什么可以做在 Compose 之外
+ *
+ * [darkColorScheme] / [lightColorScheme] 是**普通函数**（带默认参数的色板构造器），
+ * 不是 `@Composable`；[ZhiThemeMode.stored] / [ZhiThemeMode.systemDark] 同样不依赖组合。
+ * 所以这里不需要任何 Compose 运行时就能求值 —— 这正是 guest 进程里唯一可行的做法。
+ */
+object ZhiOverlayPalette {
+
+    /**
+     * 当前主题下的一组 ARGB。
+     *
+     * 字段是 `@JvmField`：Java 调用点写 `palette.surface` 而不是 `palette.getSurface()`，
+     * 与 `SandboxOverlay` 里那些 `View` 代码的读法一致。
+     */
+    class Snapshot(
+        /** 面板/对话框的底色。 */
+        @JvmField val surface: Int,
+        /** 压在 [surface] 上的主文字色（对比度由 Miuix 的主题保证）。 */
+        @JvmField val onSurface: Int,
+        /** 副文字色（说明、次要信息）。 */
+        @JvmField val muted: Int,
+        /** 强调色（品牌名、可点动作）。 */
+        @JvmField val accent: Int,
+        /** 危险动作色（「停止」）。 */
+        @JvmField val danger: Int,
+        /** 底色是否为浅色。系统栏图标明暗据此决定。 */
+        @JvmField val light: Boolean,
+    )
+
+    /**
+     * 解析当前主题。
+     *
+     * `context` 只用来读用户选的深浅模式；读不到就跟随系统（[ZhiThemeMode.stored] 的语义），
+     * 再读不到就按深色 —— 悬浮窗压在任何 guest 界面上，深色底白字是唯一"在什么背景上都读得清"的选择。
+     */
+    @JvmStatic
+    fun resolve(context: android.content.Context?): Snapshot {
+        val dark = if (context == null) {
+            true
+        } else {
+            ZhiThemeMode.resolve(ZhiThemeMode.stored(context), ZhiThemeMode.systemDark(context))
+        }
+        val scheme = if (dark) darkColorScheme() else lightColorScheme()
+        return Snapshot(
+            surface = scheme.surfaceContainer.toArgb(),
+            onSurface = scheme.onSurfaceContainer.toArgb(),
+            muted = scheme.onSurfaceVariantSummary.toArgb(),
+            accent = scheme.primary.toArgb(),
+            danger = scheme.error.toArgb(),
+            light = !dark,
+        )
+    }
 }

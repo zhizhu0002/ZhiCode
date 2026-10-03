@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose
 
 import android.os.Bundle
+import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -9,6 +10,7 @@ import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModelFactory
 import com.zhizhu.zhicode.compose.theme.ZhiThemeMode
 import com.zhizhu.zhicode.compose.ui.ZhiCodeApp
+import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import com.termux.app.zhicode.tools.AndroidIntentBridge
 
 /**
@@ -43,6 +45,36 @@ class MainActivity : ComponentActivity() {
         setContent { ZhiCodeApp(viewModel) }
     }
 
+    /**
+     * 记录**手指落下**的时刻，用于测真正的「点一下要等多久」。
+     *
+     * ## 为什么非得在这一层记
+     *
+     * `ZhiFrameTrace.begin()` 是在各个 `onClick` 里调的，它测的是
+     * 「onClick 开始 → 第一帧」。但用户感知的延迟里最难受的一段**发生在 onClick 之前**：
+     * 主线程若正在跑一个 458ms 的长帧，这一下触摸就只能排队 —— 系统要等那帧画完
+     * 才会把 `ACTION_DOWN/UP` 派发进来。这段排队时间在 onClick 里根本看不见，
+     * 于是会出现"我的数据在变好、用户手感依旧很差"。
+     *
+     * 在这里取 `System.nanoTime()` 就把它接上了：之后 `begin()` 用这个时刻做起点，
+     * 报出来的就是**手指落下 → 第一帧**，也就是用户真正经历的那段。
+     *
+     * 只在 `ACTION_DOWN` 更新：一次点击的"起点"应该是按下去那一刻。
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> ZhiFrameTrace.markTouchDown()
+            // 抬起时刻才是"用户完成点击"的那一瞬间：onClick 在抬起后才触发，
+            // 所以「抬起 → 页面切完」才是用户说的"点完要等一会儿"。见 markTouchUp。
+            MotionEvent.ACTION_UP -> {
+                ZhiFrameTrace.markTouchUp()
+                ZhiFrameTrace.stamp("up")
+            }
+            else -> Unit
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onResume() {
         super.onResume()
         // 主题可能在别处被改过（设置页 / 顶栏的循环按钮），回到前台时对齐一次。
@@ -60,6 +92,19 @@ class MainActivity : ComponentActivity() {
             if (pending.isError) "继续安装失败" else "安装 APK",
             pending.content,
         )
+    }
+
+    /**
+     * 退到后台时把去抖窗口里那次设置改动兑现。
+     *
+     * 用户「点一下开关 / 打完字就直接划掉应用」是很常见的动作，而去抖窗口
+     * （[com.zhizhu.zhicode.compose.state.WorkspaceViewModel] 的
+     * `SettingsPersistDebounceMs`）还开着时那一次改动就没了。
+     * `onStop` 是"应用不再可见"的最早可靠时机，在这里补一次同步落盘。
+     */
+    override fun onStop() {
+        super.onStop()
+        viewModel.flushSettings()
     }
 
     /**

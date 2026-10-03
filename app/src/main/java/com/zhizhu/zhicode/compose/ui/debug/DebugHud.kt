@@ -147,7 +147,7 @@ private fun CollapsedPill(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                imageVector = ZhiIcons.info,
+                painter = ZhiIcons.info,
                 contentDescription = null,
                 tint = scheme.primary,
                 modifier = Modifier.size(14.dp),
@@ -193,7 +193,7 @@ private fun ExpandedHud(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    imageVector = ZhiIcons.info,
+                    painter = ZhiIcons.info,
                     contentDescription = null,
                     tint = scheme.primary,
                     modifier = Modifier.size(15.dp),
@@ -377,7 +377,7 @@ private fun ToolsBlock(state: WorkspaceUiState) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = when {
+                    painter = when {
                         tool.awaitingPermission -> ZhiIcons.awaiting
                         !tool.completed -> ZhiIcons.pending
                         tool.failed -> ZhiIcons.failed

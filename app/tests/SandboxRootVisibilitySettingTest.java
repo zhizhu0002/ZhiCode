@@ -92,12 +92,16 @@ public final class SandboxRootVisibilitySettingTest {
                 "SettingsToggle 必须是 Miuix SwitchPreference 的薄转发，否则下面那条断言不算数");
         require(dashboard.contains("SettingsToggle(") && dashboard.contains("隐藏 Root"),
                 "the sandbox dashboard must expose a Root hiding switch");
-        // 用 squash 比较：断言的是「回滚语义」（切走时禁用并压住交互，失败时恢复），
+        // 用 squash 比较：断言的是「回滚语义」（切走时复位、失败时恢复），
         // 不该被 setRootSwitch(previous, false) 这类逗号后的空格写法左右。
+        //
+        // ⚠️ 第二个参数的**极性**在第 N 轮修过一次：它现在是 `busy`（请求在飞），
+        // 所以"发起时 true、收尾时 false"。见 SandboxPageStructureTest 第 9b 节 ——
+        // 那里逐条钉住了极性，这里只钉顺序（先回滚、再提示）。
         require(dashboard.contains("所有正在运行的 Guest 将停止")
                         && has(dashboard, "setRootSwitch(previous,false)")
                         && has(dashboard, "setRootSwitch(previous,true)"),
-                "the switch must confirm restart semantics, disable in flight, and restore on failure");
+                "the switch must confirm restart semantics, mark in-flight, and restore on failure");
 
         // ---- 在飞标志必须有超时兜底（用户报「点一次之后再也点不了」）------------
         //
@@ -118,10 +122,10 @@ public final class SandboxRootVisibilitySettingTest {
         // "文本里有 setRootSwitch(previous,true) 与 超时" —— 那两样在失败分支里也有，
         // 把超时分支的回滚删掉测试照样绿（实测如此）。`has` 会压掉空白，
         // 所以相邻两句可以连着比。
-        require(has(dashboard, "setRootSwitch(previous,true)toast(\"Root隐藏设置超时")
-                        && has(dashboard, "setFloatingLog(!enabled,true)toast(\"日志悬浮窗设置超时"),
+        require(has(dashboard, "setRootSwitch(previous,false)toast(\"Root隐藏设置超时")
+                        && has(dashboard, "setFloatingLog(!enabled,false)toast(\"日志悬浮窗设置超时"),
                 "超时后必须先回滚到服务端确认的值、再如实提示，不能假装设置成功"
-                        + "（两个开关都要）");
+                        + "（两个开关都要；收尾一律 busy = false）");
         // 代数计数：超时回调不能去复位**后来那一次**操作的标志（否则互斥失效、两次写入打架）。
         //
         // ⚠️ 两半都要断：**递增**（发起时）与**比较**（超时/完成时）。
