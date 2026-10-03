@@ -108,9 +108,18 @@ public final class MarkdownStreamingTest {
                 "parseMarkdown 必须按**已完结前缀**取 key（split.settled）。"
                         + "写成 remember(source) 会让整篇每秒被重解析 31 次 —— "
                         + "这正是本次优化要消掉的那件事。");
-        require(!md.contains("remember(source)"),
-                MARKDOWN + " 里又出现了 remember(source)："
+        // ⚠️ 这条断言原先写的是「整个文件里不许出现 remember(source)」，
+        //    理由是"那是每个 delta 重解析整篇"。但真正要拦的是**重解析**，
+        //    而不是这个 key 本身：前沿淡入需要一个"每 delta 取样一次"的位置
+        //    （见 §5 的速率自适应），那里 `remember(source)` 只做一次除法，
+        //    完全不碰 parseMarkdown。所以判据收紧到它真正的意图 ——
+        //    **解析**不许按 source 取 key。原来的写法会把正当用法一起拦下。
+        require(!md.contains("remember(source) { parseMarkdown("),
+                MARKDOWN + " 里又出现了 remember(source) { parseMarkdown(…) }："
                         + "那是「每个 delta 重解析整篇」，等于把优化撤销了");
+        require(countOccurrences(mdSquashed, "parseMarkdown(") == 1,
+                "parseMarkdown 只该有一个调用点（按 split.settled 取 key）："
+                        + "多出来的那个会让整篇在流式期间被反复重解析");
         require(md.contains("settledPrefixLength("),
                 MARKDOWN + " 必须实际调用 settledPrefixLength 来算切点");
         require(mdSquashed.contains("if(!streaming)returnMdStreamSplit(source,\"\")"),
@@ -131,8 +140,8 @@ public final class MarkdownStreamingTest {
         String rememberInlineFading = functionBody(md, "private fun rememberInlineFading(");
         require(!rememberInlineFading.isEmpty(),
                 MARKDOWN + " 里找不到 rememberInlineFading（前沿淡入的入口）");
-        require(squash(rememberInlineFading).contains("remember(text,styles,base,fade){"),
-                "rememberInlineFading 必须用 (text, styles, base, fade) 作 key 并缓存："
+        require(squash(rememberInlineFading).contains("remember(text,styles,base,fade,ramp){"),
+                "rememberInlineFading 必须用 (text, styles, base, fade, ramp) 作 key 并缓存："
                         + "它是第二个行内解析入口，不缓存的话同样会每次重组重跑 parseInline");
         // 4 个调用点原本全都是 `text = inline(…)`，现在必须一律走这两个缓存入口。
         // 断言具体的调用形态而不是计数：计数拦不住"只还原其中一个调用点"。
@@ -244,33 +253,38 @@ public final class MarkdownStreamingTest {
 
         // ---- 5. 流式正文的「前沿淡入」---------------------------------------
         //
-        // 用户要的是「淡入那种」。这里钉住实现方式是**空间斜坡**（透明度是位置的函数）
-        // 而不是**定时器逐字揭示** —— 这两者在观感上很像，代价却差一个量级：
+        // 用户要的是「淡入那种」。这一节钉住实现方式是**空间斜坡**（透明度是位置的函数）
+        // 而不是**定时器逐字揭示** —— 这两者观感相近，代价差一个量级：
         //
         //   · 定时器（官方 20ms/字、GetStream 30ms/词）每秒多 20~50 次重组，
         //     而本轮刚把 ChatArea 从 69 次/秒压到 2 次/秒；还会在模型出字快时积压、
         //     越写越追不上（官方自己都得把间隔从 20ms 退化到 32/48ms）；
         //     本质是"文字早到了却压着不放"，等于给用户加延迟。
         //   · 空间斜坡：零额外帧（只在文本变化时重算，而那是流式的固有成本）、
-        //     速率自适应（淡开的时间 = 斜坡宽度 / 到达速率）、恒不落后、零延迟。
+        //     恒不落后、零延迟。
         //
-        // ⚠️ 所以下面**同时**钉两件事：淡入必须接上（否则用户要的效果没做），
-        //    以及**不得**用动画/定时器实现（否则性能代价白付，还可能看不出效果）。
+        // ⚠️⚠️ 这一节第二重要的是**宽度必须按时间给**。第一版把宽度写死成 8 个字，
+        //    用户反馈"完全看不到"。原因不是没生效，是物理：
+        //
+        //        可见时长 = 斜坡宽度 ÷ 到达速率
+        //
+        //    8 个字在 100 字/秒下只有 80ms，而真实流式每个 delta 常一次带进好几个字
+        //    —— 最新那几个字往往同一帧内就来齐了，斜坡瞬间走完。
+        //    所以下面把"自适应"这条钉死，而不只是钉"有淡入"。
         String mdFading = stripComments(md);
 
         // ① 两个落点都要有：切过的长消息淡在尾部；没切的短消息淡在最后一个块上。
         //
         // 缺了后者是**静默失效**：短于 MinSettledChars 的正文整段都在 blocks 里，
-        // split.tail 是空串 —— 只淡尾部的话，短消息一个字都不淡，而且不报任何错。
+        // split.tail 是空串 —— 只淡尾部的话短消息一个字都不淡，而且不报任何错。
         require(squash(mdFading).contains(
                         "fadeTail=streaming&&split.tail.isEmpty()&&index==blocks.lastIndex"),
                 MARKDOWN + " 的 blocks 循环必须给**最后一个块**传 fadeTail，"
                         + "且判据里要有 split.tail.isEmpty()："
                         + "短于 MinSettledChars 的正文不会被切分，只淡尾部的话短消息一个字都不淡"
                         + "（而且不报任何错）");
-        require(squash(mdFading).contains(
-                        "rememberInlineFading(split.tail,inlineStyles,scheme.onSurface,fade=true)"),
-                MARKDOWN + " 的在写尾部必须真的开淡入（fade = true）");
+        require(squash(mdFading).contains("fade=true,ramp=fadeRamp"),
+                MARKDOWN + " 的在写尾部必须真的开淡入（fade = true），并把自适应宽度传进去");
 
         // ② 淡入**不可以**靠动画或定时器实现 —— 这是这一节的性能契约。
         String fadeBody = functionBody(mdFading, "private fun fadeTailOf(");
@@ -287,7 +301,49 @@ public final class MarkdownStreamingTest {
                             + "而本轮刚把逐帧重组消灭掉（见 ChatArea 与 DebugHudStructureTest §33）");
         }
 
-        // ③ 斜坡只作用末尾 TailFadeChars 个字，且**跳过自带语法色的字符**。
+        // ③ 宽度必须**按时间**换算，而不是写死字数（第一版就是这里错的）。
+        //
+        // 这一条与 ④ 是本节的核心：只钉"有淡入"是不够的 —— 第一版确实有淡入，
+        // 用户完全看不到。真正决定"看不看得见"的是"斜坡宽度 ÷ 到达速率"。
+        String rateBody = functionBody(mdFading, "private class TailFadeRate {");
+        require(!rateBody.isEmpty(), MARKDOWN + " 里找不到 TailFadeRate（宽度自适应的估计器）");
+        require(squash(rateBody).contains("charsPerSecond*TailFadeMillis/1000f"),
+                MARKDOWN + " 的斜坡宽度必须由**到达速率 × 目标时长**算出"
+                        + "（charsPerSecond * TailFadeMillis / 1000f）："
+                        + "写死字数会让快模型下的淡入只有几十毫秒，肉眼看不见");
+        require(squash(rateBody).contains(".coerceIn(TailFadeMinChars,TailFadeMaxChars)"),
+                MARKDOWN + " 的斜坡宽度必须夹在 TailFadeMinChars~TailFadeMaxChars："
+                        + "不夹的话极快/极慢的流会给出一像素宽或几屏宽的斜坡");
+        // ⚠️ 同一份文本重复组合时必须原样返回：否则 dLen = 0 → 速率被 EMA 拉向 0
+        //    → 斜坡莫名缩短（而且越重组越短）。
+        require(squash(rateBody).contains("if(length==lastLength)returnwidth"),
+                MARKDOWN + " 的 TailFadeRate 在同一份文本重复组合时必须原样返回"
+                        + "（if (length == lastLength) return width）："
+                        + "否则那次 dLen = 0，速率被 EMA 拉向 0，斜坡会越重组越短");
+        // 变短 = 跨过块边界/开了新的一段，不该重估（否则换段时淡入忽长忽短）。
+        require(squash(rateBody).contains("prevAt==0L||length<prevLength"),
+                MARKDOWN + " 的 TailFadeRate 必须在首帧或**文本变短**时沿用旧宽度："
+                        + "文本变短 = 跨过块边界开了新的一段，重估会让换段时淡入忽长忽短");
+        // EMA：单次突发的 chunk 不该让斜坡瞬间变宽。
+        require(squash(rateBody).contains("charsPerSecond*0.6f+rate*0.4f"),
+                MARKDOWN + " 的 TailFadeRate 必须对速率做 EMA 平滑："
+                        + "一次来 40 个字的突发 chunk 不该让斜坡瞬间变宽");
+        // ⚠️ 估计器只能用**普通字段**，不能用 snapshot state。
+        require(!rateBody.contains("mutableStateOf") && !rateBody.contains("MutableState"),
+                MARKDOWN + " 的 TailFadeRate 不得使用 snapshot state："
+                        + "写 state 会自己触发重组，形成「写 → 重组 → 再写」的回路"
+                        + "（本工程在 FrameTrace 记过这个坑）");
+
+        // ④ 速率必须按**整段正文**估，且只在文本变化时算。
+        //
+        // 按 split.tail 估的话，跨过块边界时 tail 归零重算，速率会被估成负数 → 抖。
+        // 不在 remember(source) 里算的话，就变成每次重组都取样 → 又是逐帧开销。
+        require(squash(mdFading).contains("remember(source){fadeRate.widthFor(source.length,System.nanoTime())}"),
+                MARKDOWN + " 的斜坡宽度必须在 remember(source) 里按**整段正文**的长度算："
+                        + "key 必须是 source（不是 split.tail —— tail 跨块会归零，速率会被估成负数），"
+                        + "且必须包在 remember 里（否则每次重组都取样，又变成逐帧开销）");
+
+        // ⑤ 斜坡只作用末尾 ramp 个字，且**跳过自带语法色的字符**。
         //
         // 跳过这一条是本功能最容易造成的**观感倒退**：不跳的话斜坡的颜色会盖掉
         // 行内「代码」的 primary 色与链接色 —— 末尾那半行里的代码会短暂掉色，
@@ -298,48 +354,57 @@ public final class MarkdownStreamingTest {
         require(squash(fadeBody).contains("it.item.color!=null||it.item.background!=null"),
                 MARKDOWN + " 识别「自带颜色」必须同时看 color 与 background："
                         + "行内高亮只给底色不给前景色，漏掉 background 就会把高亮盖成正文色");
-        require(squash(fadeBody).contains("(length-TailFadeChars).coerceAtLeast(0)untillength"),
-                MARKDOWN + " 的斜坡必须只扫末尾 TailFadeChars 个字："
+        require(squash(fadeBody).contains("(length-ramp).coerceAtLeast(0)untillength"),
+                MARKDOWN + " 的斜坡必须只扫末尾 ramp 个字："
                         + "整段扫的话长正文每 delta 要加几千个 span");
         require(squash(fadeBody).contains("returnif(touched)builder.toAnnotatedString()elsesource"),
                 MARKDOWN + " 在没有可淡的字符时不得返回新对象（整段被语法色占住时省一次拷贝）");
 
-        // ④ 斜坡两端必须正好落在「下限」与「全实」上。
+        // ⑥ 斜坡两端必须正好落在「下限」与「全实」上。
         //
-        // 写成除以 TailFadeChars 的话两端都够不到：末尾那个字不是下限、最前一个也到不了 1
+        // 写成除以 ramp 的话两端都够不到：末尾那个字不是下限、最前一个也到不了 1
         // —— 那样 TailFadeFloor 这个可调参数就失去意义了（改了看不出变化），
         // 而且注释与代码会对不上。这条是自查时真的写出过这个 bug 才加的。
         String fadeAlphaBody = functionBody(mdFading, "private fun fadeAlpha(");
         require(!fadeAlphaBody.isEmpty(), MARKDOWN + " 里找不到 fadeAlpha");
-        require(squash(fadeAlphaBody).contains("(fromEnd-1).toFloat()/(TailFadeChars-1)"),
-                MARKDOWN + " 的 fadeAlpha 分母必须是 TailFadeChars - 1："
-                        + "除以 TailFadeChars 的话末尾那个字够不到 TailFadeFloor、"
+        require(squash(fadeAlphaBody).contains("(fromEnd-1).toFloat()/(ramp-1)"),
+                MARKDOWN + " 的 fadeAlpha 分母必须是 ramp - 1："
+                        + "除以 ramp 的话末尾那个字够不到 TailFadeFloor、"
                         + "最前一个也到不了 1.0（下限就变成了一个不起作用的参数）");
-        require(squash(fadeAlphaBody).contains("if(fromEnd>=TailFadeChars)return1f"),
+        require(squash(fadeAlphaBody).contains("if(fromEnd>=ramp)return1f"),
                 MARKDOWN + " 的 fadeAlpha 超出斜坡必须直接返回 1f："
                         + "否则每 delta 都要为整段正文算一遍透明度");
 
-        // ⑤ 下限不得过低 —— 流式**中途停顿**时（模型在思考）末尾那几个字会停在斜坡上，
-        //    下限就是它们停顿期间的可读性。这是空间斜坡方案唯一的已知代价，
-        //    所以下限这个数是"取舍的结果"，不该被随手调低。
-        require(squash(mdFading).contains("privateconstvalTailFadeFloor=0.52f"),
-                MARKDOWN + " 的 TailFadeFloor 应为 0.52f："
-                        + "流式停顿期间末尾几个字会停在这个透明度上，调低会变得读不清");
+        // ⑦ 「看得见」的三个数：宽度上下限与下限透明度。
+        //
+        // 这三个数不是随手取的，它们是**可见性**与**停顿时可读性**之间的取值结果，
+        // 所以按值钉住 —— 随手调小宽度上限或调低下限透明度，就退回"看不见"那一版。
+        require(squash(mdFading).contains("privateconstvalTailFadeMinChars=12"),
+                MARKDOWN + " TailFadeMinChars 应为 12：太小（比如 8）在快模型下就只有几十毫秒，"
+                        + "肉眼看不出淡入 —— 第一版正是这么错的");
+        require(squash(mdFading).contains("privateconstvalTailFadeMaxChars=28"),
+                MARKDOWN + " TailFadeMaxChars 应为 28（约一行）："
+                        + "斜坡越宽，**停顿**时停在半透明上的那一截越长，再多就像渲染坏了");
+        require(squash(mdFading).contains("privateconstvalTailFadeFloor=0.30f"),
+                MARKDOWN + " TailFadeFloor 应为 0.30f：第一版的 0.52 只有半档变化、"
+                        + "本来就看不出；调得更低又会让停顿期间那几个字读不清");
 
-        // ⑥ 定稿的消息一分钱都不多付：fade 为假时必须原样返回 inline 的结果。
-        require(squash(fadingBody).contains("if(fade)fadeTailOf(annotated,base)elseannotated"),
+        // ⑧ 定稿的消息一分钱都不多付：fade 为假时必须原样返回 inline 的结果。
+        require(squash(fadingBody).contains("if(fade)fadeTailOf(annotated,base,ramp)elseannotated"),
                 MARKDOWN + " 的 rememberInlineFading 必须在 fade 为假时原样返回："
                         + "定稿/历史消息占绝大多数，不该为它们建 span 或拷贝 AnnotatedString");
 
-        // ⑦ 淡入只落在段落上，别顺手摊到其它块类型。
+        // ⑨ 淡入只落在段落上，别顺手摊到其它块类型。
         String paragraph = squash(functionBody(mdFading, "is MdBlock.Paragraph ->"));
         require(!paragraph.isEmpty(), MARKDOWN + " 里找不到 Paragraph 分支");
-        require(paragraph.contains("rememberInlineFading(block.text,inlineStyles,scheme.onSurface,fadeTail)"),
-                MARKDOWN + " 的 Paragraph 必须接上 fadeTail（在写正文最常见、也是唯一常见的形状）");
-        require(!squash(mdFading).contains("rememberInlineFading(block.text,inlineStyles,scheme.onSurface,true)"),
+        require(paragraph.contains("fade=fadeTail,ramp=fadeRamp"),
+                MARKDOWN + " 的 Paragraph 必须接上 fadeTail 与 fadeRamp"
+                        + "（在写正文最常见、也是唯一常见的形状）");
+        require(!squash(mdFading).contains("fade=true,ramp=fadeRamp,},"),
                 MARKDOWN + " 不得把淡入无条件摊到所有块类型上："
                         + "标题/列表/引用/代码块在被写出来的一瞬间本来就是跳着出现的，"
                         + "给它们加前沿淡入看不出差别，只会多付 span 开销");
+
 
         // ---- 6. 本测试自身必须被 canonical suite 执行 ------------------------
         String script = read(root, "test-source-no-build.sh");
