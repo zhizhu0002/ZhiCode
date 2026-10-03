@@ -94,12 +94,23 @@ fun ZhiMarkdown(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        blocks.forEach { block -> MdBlockView(block, bodyFontSize) }
+        // ⚠️ 淡入的落点有两处，缺一不可：
+        //   · 切过（长消息）→ 淡在 `split.tail` 上；
+        //   · 没切（短于 [MinSettledChars]）→ 全部都在 `blocks` 里，
+        //     那就淡在**最后一个块**上，否则短消息一个字都不淡。
+        //   两处互斥（tail 为空时才是"没切"），所以同一时刻只有一个在淡。
+        blocks.forEachIndexed { index, block ->
+            MdBlockView(
+                block = block,
+                fontSize = bodyFontSize,
+                fadeTail = streaming && split.tail.isEmpty() && index == blocks.lastIndex,
+            )
+        }
         // 在写尾部按行内渲染（不是纯文本）：模型正在写的那一段里的 `代码`、**粗体**
         // 照常生效，只有块级语法（标题/列表/围栏）要等它跨过块边界。
         if (split.tail.isNotEmpty()) {
             Text(
-                text = rememberInline(split.tail, inlineStyles),
+                text = rememberInlineFading(split.tail, inlineStyles, scheme.onSurface, fade = true),
                 color = scheme.onSurface,
                 fontSize = bodyFontSize,
                 lineHeight = bodyFontSize * 1.5f,
@@ -135,7 +146,7 @@ private fun splitForStreaming(source: String, streaming: Boolean): MdStreamSplit
 
 /** 递归渲染一个块。引用块内部会有嵌套的块，所以这里必须能自我调用。 */
 @Composable
-private fun MdBlockView(block: MdBlock, fontSize: TextUnit) {
+private fun MdBlockView(block: MdBlock, fontSize: TextUnit, fadeTail: Boolean = false) {
     val scheme = MiuixTheme.colorScheme
     val inlineStyles = rememberInlineStyles(fontSize)
 
@@ -155,7 +166,10 @@ private fun MdBlockView(block: MdBlock, fontSize: TextUnit) {
         )
 
         is MdBlock.Paragraph -> Text(
-            text = rememberInline(block.text, inlineStyles),
+            // 段落是在写正文最常见（也是唯一常见）的形状，所以淡入只在这里落点。
+            // 标题/列表/引用/代码块不淡：它们在被写出来的一瞬间本来就是"跳"着出现的
+            // （块级结构变了），给它们加前沿淡入反而看不出差别，只会多付 span 的开销。
+            text = rememberInlineFading(block.text, inlineStyles, scheme.onSurface, fadeTail),
             color = scheme.onSurface,
             fontSize = fontSize,
             lineHeight = fontSize * 1.5f,
@@ -436,6 +450,102 @@ private fun rememberInlineStyles(fontSize: TextUnit): InlineStyles {
 @Composable
 private fun rememberInline(text: String, styles: InlineStyles): AnnotatedString =
     remember(text, styles) { inline(text, styles) }
+
+/**
+ * 流式正文的「前沿淡入」：**最末尾 [TailFadeChars] 个字按离末尾的距离给一个透明度斜坡**。
+ *
+ * ## 为什么是"空间斜坡"而不是"定时器逐字揭示"
+ *
+ * 常见的打字机做法是起一个定时器（官方 20ms/字、GetStream 30ms/词），每 tick 把
+ * "可见字数" +1。那条路在 Compose 里有三个代价，本工程都实测过：
+ *
+ *  1. **每秒多 20~50 次重组。** 本轮刚把 `ChatArea` 从 69 次/秒压到 2 次/秒
+ *     （见 ChatArea 的说明），定时器等于把这个量在正文节点上再引回来。
+ *  2. **会追不上。** 揭示速率写死的话，模型出字快于它时就积压；正文越长越明显
+ *     —— 官方自己都得按长度把间隔从 20ms 退化到 32/48ms，正是这个病的症状。
+ *  3. **它是"事后补动画"**：文字其实早就到了，只是被压着不放，等于给用户**加延迟**。
+ *
+ * 空间斜坡把这三条一起解决：透明度是**位置**的函数，不是时间的函数。
+ * 于是：
+ *
+ *  · **零额外帧。** 不需要动画、不需要定时器 —— 斜坡只在文本内容变化时重算一次
+ *    （而文本本来就每个 delta 变一次，这是流式的固有成本，不是这里加的）。
+ *  · **速率自适应，恒不落后。** 一个字符从末尾往前"走"出斜坡所花的时间是
+ *    `TailFadeChars / 到达速率`：出字快就淡得快，出字慢就淡得慢。永远没有队列。
+ *  · **不加延迟。** 文字到达即显示，只是末尾那几个还浅着、随后变实。
+ *
+ * ## ⚠️ 它不完美的地方（写在这里免得被当成 bug）
+ *
+ * 流**中途停顿**时（模型在思考），末尾那几个字会停在斜坡上、达不到全不透明 ——
+ * 最末一个字约 0.52，往前迅速变实。这是刻意的取舍：换成定时器方案虽然停顿时会
+ * 淡完，但代价是上面那三条。取值上也做了补偿 —— 斜坡只有 8 个字（约半行）、
+ * 下限给了 0.52（不是 0），所以停顿时的观感是"最后几个字略浅"，仍然读得清。
+ * 流式一结束就不再有斜坡（`streaming` 翻假 → 不再走这条路），所以**定稿后一律全实**。
+ */
+private const val TailFadeChars = 8
+
+/** 斜坡最浅处的透明度。不能太低：停顿期间那几个字要仍然可读（见上面的说明）。 */
+private const val TailFadeFloor = 0.52f
+
+/**
+ * [inline] + 可选的前沿淡入。
+ *
+ * [fade] 为假时**完全等于** [rememberInline]（同一个 key 组合、同一个结果），
+ * 所以定稿消息与历史消息一分钱都不多付。
+ */
+@Composable
+private fun rememberInlineFading(
+    text: String,
+    styles: InlineStyles,
+    base: Color,
+    fade: Boolean,
+): AnnotatedString = remember(text, styles, base, fade) {
+    val annotated = inline(text, styles)
+    if (fade) fadeTailOf(annotated, base) else annotated
+}
+
+/**
+ * 给末尾 [TailFadeChars] 个字叠一层透明度。
+ *
+ * ⚠️ **跳过已经有自己颜色的字符**（`代码` 的 primary 色、链接色、行内高亮的底色）。
+ * 不跳的话，斜坡的颜色会盖掉它们的语法色 —— 末尾那半行里的代码会**短暂掉色**，
+ * 看起来像闪了一下，比不淡还糟。宁可让那几个字不淡，也不要颜色乱跳。
+ */
+private fun fadeTailOf(source: AnnotatedString, base: Color): AnnotatedString {
+    val length = source.text.length
+    if (length == 0) return source
+    // 只挑"自带颜色或底色"的 span：其余的（粗体/斜体）只是字形变化，没有颜色可盖。
+    val colored = source.spanStyles.filter {
+        it.item.color != null || it.item.background != null
+    }
+    val builder = AnnotatedString.Builder(source)
+    var touched = false
+    for (index in (length - TailFadeChars).coerceAtLeast(0) until length) {
+        if (colored.any { index >= it.start && index < it.end }) continue
+        builder.addStyle(SpanStyle(color = base.copy(alpha = fadeAlpha(index, length))), index, index + 1)
+        touched = true
+    }
+    // 整段都被语法色占住时不返回新对象：省一次 AnnotatedString 拷贝。
+    return if (touched) builder.toAnnotatedString() else source
+}
+
+/**
+ * 第 [index] 个字的透明度：离末尾越远越实，超过斜坡宽度就是全实。
+ *
+ * 线性就够 —— 起点和终点之间的跨度只有 8 个字，看不出曲线差别，
+ * 而线性少一次 pow、少一个要调的参数。
+ *
+ * ⚠️ 分母是 `TailFadeChars - 1`（不是 `TailFadeChars`），这样**末尾那个字正好落在
+ * [TailFadeFloor]**、往前第 8 个字正好全实。写成除以 `TailFadeChars` 的话两端都够不到：
+ * 末尾是 0.58 而不是下限、最前一个也到不了 1（那个 bug 会让注释与代码对不上，
+ * 而且"下限"这个可调参数就失去意义了）。
+ */
+private fun fadeAlpha(index: Int, length: Int): Float {
+    val fromEnd = length - index // 末尾那个字是 1
+    if (fromEnd >= TailFadeChars) return 1f
+    val t = (fromEnd - 1).toFloat() / (TailFadeChars - 1)
+    return (TailFadeFloor + (1f - TailFadeFloor) * t).coerceAtMost(1f)
+}
 
 /**
  * [MdSpan] 列表 → [AnnotatedString]。
