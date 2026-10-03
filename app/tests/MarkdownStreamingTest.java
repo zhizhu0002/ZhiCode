@@ -375,19 +375,39 @@ public final class MarkdownStreamingTest {
                 MARKDOWN + " 的 fadeAlpha 超出斜坡必须直接返回 1f："
                         + "否则每 delta 都要为整段正文算一遍透明度");
 
-        // ⑦ 「看得见」的三个数：宽度上下限与下限透明度。
+        // ⑦ 「看得见」的几个数：宽度下限、宽度上限、下限透明度、长间隔阈值。
         //
-        // 这三个数不是随手取的，它们是**可见性**与**停顿时可读性**之间的取值结果，
-        // 所以按值钉住 —— 随手调小宽度上限或调低下限透明度，就退回"看不见"那一版。
+        // 这几个数不是随手取的，它们是**可见性**与**停顿时可读性**之间的取值结果，
+        // 所以按值钉住 —— 随手调小任何一个，都会退回"看不见"那一版。
         require(squash(mdFading).contains("privateconstvalTailFadeMinChars=12"),
                 MARKDOWN + " TailFadeMinChars 应为 12：太小（比如 8）在快模型下就只有几十毫秒，"
                         + "肉眼看不出淡入 —— 第一版正是这么错的");
-        require(squash(mdFading).contains("privateconstvalTailFadeMaxChars=28"),
-                MARKDOWN + " TailFadeMaxChars 应为 28（约一行）："
-                        + "斜坡越宽，**停顿**时停在半透明上的那一截越长，再多就像渲染坏了");
+        // ⚠️⚠️ 上限这一条是本文件里最容易被"好心调小"的一条：直觉会说"斜坡越宽停顿越难看，
+        //    那就压窄一点"，而压窄会**顺带把高到达速率下的时长也压短** ——
+        //    第二版把上限设成 28，用户反馈「输出太快会导致动画不明显」正是这个。
+        //
+        //        可见时长 = 斜坡宽度 ÷ 到达速率
+        //
+        //    120 字保证 TailFadeMillis 一直守到 285 字/秒，覆盖真实模型与调试 provider
+        //    （本工程「调试 · 本地模拟」是 22ms/6 字 ≈ 273 字/秒，必然撞上限）。
+        require(squash(mdFading).contains("privateconstvalTailFadeMaxChars=120"),
+                MARKDOWN + " TailFadeMaxChars 应为 120："
+                        + "它的作用**不是**压短停顿时的半透明那一截（那样做会顺带压短"
+                        + "高到达速率下的时长：40 字/秒→420ms、100 字/秒→280ms、"
+                        + "273 字/秒→103ms，用户报的「输出太快动画不明显」就是这个），"
+                        + "而只是给极端突发兜底。120 字 ≈ 3 行，且 TailFadeMillis 一直守到 285 字/秒");
         require(squash(mdFading).contains("privateconstvalTailFadeFloor=0.30f"),
                 MARKDOWN + " TailFadeFloor 应为 0.30f：第一版的 0.52 只有半档变化、"
                         + "本来就看不出；调得更低又会让停顿期间那几个字读不清");
+        // ⚠️ 与"上限"同源的另一个坑：**模型思考的停顿**会污染速率估计。
+        //    停顿结束后第一个 delta 的间隔里大部分是思考时间，拿它算会得出几字/秒，
+        //    于是斜坡塌到下限、接下来几个 delta 才被 EMA 拉回来 —— 观感就是
+        //    "刚恢复输出那一下，淡入突然变窄又变宽"。这个样本说的不是流式节奏，直接不要。
+        require(squash(rateBody).contains("if(seconds>TailFadeMaxGapSeconds)returnwidth"),
+                MARKDOWN + " 的 TailFadeRate 必须在采样间隔过长时跳过估计"
+                        + "（if (seconds > TailFadeMaxGapSeconds) return width）："
+                        + "模型思考的停顿会被算成「出字很慢」，让斜坡塌到下限，"
+                        + "恢复输出那一下淡入会突然变窄再变宽");
 
         // ⑧ 定稿的消息一分钱都不多付：fade 为假时必须原样返回 inline 的结果。
         require(squash(fadingBody).contains("if(fade)fadeTailOf(annotated,base,ramp)elseannotated"),
