@@ -2,22 +2,18 @@ package com.zhizhu.zhicode.compose.ui.panes
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.runtime.getValue
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,12 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.termux.shared.termux.TermuxConstants
 import com.zhizhu.zhicode.compose.theme.ZhiColors
-import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
 import com.zhizhu.zhicode.compose.model.FileDeletePrompt
 import com.zhizhu.zhicode.compose.model.FileEntry
@@ -51,17 +43,11 @@ import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
-import top.yukonga.miuix.kmp.basic.BreadcrumbBar
-import top.yukonga.miuix.kmp.basic.BreadcrumbItem
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /**
  * 文件面板此刻画的是三种形态中的哪一种。
@@ -248,15 +234,33 @@ fun FilesPane(
                                 verticalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
                             ) {
                                 items(entries, key = { it.path }) { entry ->
-                                    FileRow(
+                                    FileListRow(
                                         entry = entry,
                                         onOpen = { onOpen(entry) },
-                                        onRename = { onRename(entry) },
-                                        onDelete = { onRequestDelete(entry) },
                                         // 删除/重命名之后让行**滑过去**，而不是"啪"地整体上跳一位。
                                         // `key = it.path` 已给，所以 Compose 认得出是同一行换了位置
                                         // （重命名会换 path → 那是新 key，属于"新建"，不走这条）。
                                         modifier = Modifier.animateItem(),
+                                        // 尾部的两个动作：面板是**可读写**的那一屏，所以给它们。
+                                        // 附加选择器用的是同一个 [FileListRow]，尾部换成「＋ 附加」。
+                                        trailing = {
+                                            ZhiIconButton(
+                                                icon = ZhiIcons.edit,
+                                                description = "重命名",
+                                                onClick = { onRename(entry) },
+                                                tint = scheme.onSurfaceVariantSummary,
+                                                iconSize = 14.dp,
+                                                compact = 30.dp,
+                                            )
+                                            ZhiIconButton(
+                                                icon = ZhiIcons.delete,
+                                                description = "删除",
+                                                onClick = { onRequestDelete(entry) },
+                                                tint = ZhiColors.red(),
+                                                iconSize = 14.dp,
+                                                compact = 30.dp,
+                                            )
+                                        },
                                     )
                                 }
                                 // 目录不存在时把原因说出来，而不是让面板空着（"0 项"）
@@ -386,61 +390,6 @@ fun FilesPane(
 }
 
 /**
- * 根切换条。
- *
- * 三个根是三种不同的活儿（项目=代码、HOME=配置、共享存储=用户的文件），
- * 放在标题栏下方一行，而不是藏进菜单里 —— 换根是这一屏最常用的动作之一。
- */
-@Composable
-private fun FileRootSwitcher(selected: FileRoot, onSelect: (FileRoot) -> Unit) {
-    val scheme = MiuixTheme.colorScheme
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
-    ) {
-        FileRoot.entries.forEach { root ->
-            val active = root == selected
-            // 选中/未选中的底色与文字色都走淡变：选中时底色与文字是**同时**变的，
-            // 只淡其中一个会出现「字已经变了、底还是旧色」的中间态，比不做动画更难看。
-            // 令牌用 [ZhiMotion.colorSpec]（150ms + SinOut），与 ModelPicker 那几个
-            // 选中行同一条曲线。对照 upstream `CardSection.kt:122`：可点的卡用 `Sink`。
-            val segmentColor by animateColorAsState(
-                targetValue = if (active) scheme.primaryContainer else ZhiColors.cardSurface(),
-                animationSpec = ZhiMotion.colorSpec,
-                label = "fileRootSegment",
-            )
-            val segmentContent by animateColorAsState(
-                targetValue = if (active) scheme.onPrimaryContainer else scheme.onSurface,
-                animationSpec = ZhiMotion.colorSpec,
-                label = "fileRootSegmentContent",
-            )
-            Card(
-                onClick = { if (!active) onSelect(root) },
-                modifier = Modifier.weight(1f),
-                cornerRadius = ZhiRadius.inner,
-                insideMargin = PaddingValues(vertical = 6.dp),
-                colors = CardDefaults.defaultColors(
-                    color = segmentColor,
-                    contentColor = segmentContent,
-                ),
-                // Miuix 的默认值是 `PressFeedbackType.None`（这是**超出手册默认**的一项，
-                // 不是改回默认）：它是一个真的按钮，按下去要有下沉反馈。
-                // 对应 upstream 官方示例 `CardSection.kt:122`「可点卡片用 Sink」。
-                pressFeedbackType = PressFeedbackType.Sink,
-            ) {
-                Text(
-                    text = root.label,
-                    fontSize = ZhiTextScale.Footnote,
-                    fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-    }
-}
-
-/**
  * 「新建 / 重命名」表单。
  *
  * 错误行用 [ZhiFieldError] 而不是自己写 Text：标题栏下方那一条要和其他表单
@@ -517,148 +466,3 @@ private fun FileDeleteCard(
     }
 }
 
-/** 把绝对路径拆成 Miuix `BreadcrumbBar` 需要的层级列表。 */
-@Composable
-private fun FileBreadcrumbBar(
-    filePath: String,
-    onNavigate: (String) -> Unit,
-) {
-    val items = remember(filePath) { breadcrumbItems(filePath) }
-    if (items.isEmpty()) return
-
-    BreadcrumbBar(
-        items = items,
-        onItemClick = { index -> items.getOrNull(index)?.let { onNavigate(it.path) } },
-        highlightIndex = items.lastIndex,
-        // 面包屑只占一行的引导作用，不需要占满宽度：
-        // 压小 insideMargin，给下面的文件列表让位。
-        modifier = Modifier.padding(horizontal = 6.dp, vertical = 0.dp),
-        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-        // itemMaxWidth 用 Miuix 的默认值 160dp，不覆盖 —— 每一项都是单独的目录名，
-        // 最长的是包名 `com.zhizhu.code`（15 字符，约 146dp），160dp 放得下。
-        // ⚠️ 别改成把好几级拼成一条路径：那一定会被省略号截断，反而什么都看不见。
-    )
-}
-
-/**
- * 生成面包屑层级：**一级目录一个项**，从「软件根目录」开始。
- *
- * `/data/user/0/com.zhizhu.code/files/home/workspace`
- *   → `com.zhizhu.code` `files` `home` `workspace`
- *
- * 为什么砍掉前面的 `/data/user/0`：它在应用沙箱里是 `drwx--x--x`
- * （other 只有 x 没有 r），**列不出来** —— 挂一个点进去只能看到
- * 「无法读取（权限不足）」的层级，纯粹是噪音。首项文字直接用包名，
- * 它确实就是软件根目录，语义也对得上。
- *
- * 路径在应用根**之外**（设置里把项目路径改到了 `/sdcard/...` 等）时，
- * 没有“包名”可以当起点，就逐级展示真实层级；此时首项是 `/`。
- *
- * 每一项的 `path` 都是真实层级，点哪一级就回到哪一级。
- */
-private fun breadcrumbItems(filePath: String): List<BreadcrumbItem> {
-    val normalized = filePath.trimEnd('/').ifEmpty { "/" }
-    val appRoot = TermuxConstants.TERMUX_DATA_DIR_PATH.trimEnd('/')
-
-    val start = if (normalized == appRoot || normalized.startsWith("$appRoot/")) appRoot else "/"
-    val rest = when {
-        normalized == start -> ""
-        start == "/" -> normalized.removePrefix("/")
-        else -> normalized.removePrefix("$start/")
-    }
-
-    val items = mutableListOf(
-        BreadcrumbItem(path = start, text = start.substringAfterLast('/').ifEmpty { "/" }),
-    )
-    var accumulated = if (start == "/") "" else start
-    rest.split('/').filter { it.isNotEmpty() }.forEach { segment ->
-        accumulated += "/$segment"
-        items += BreadcrumbItem(path = accumulated, text = segment)
-    }
-    return items
-}
-
-/**
- * 文件行：此前 vertical = 20dp 导致行高约 60dp，一屏放不下几个文件（V2）。
- * 收到 11dp ≈ 40dp 行高，仍在 Material 触摸目标下限（48dp）附近，密度观感
- * 与 Miuix 设置列表行一致。
- *
- * <p>行尾两个动作（重命名 / 删除）用 [ZhiIconButton] 的 `compact` 压到 30dp ——
- * 与 `PaneHeader` 的做法一致：Miuix `TextButton` 写死 `MinWidth=58dp`/`MinHeight=40dp`，
- * 在这条 40dp 高的行里放不下，图标按钮才是能安全压小的那个。
- */
-@Composable
-private fun FileRow(
-    entry: FileEntry,
-    onOpen: () -> Unit,
-    onRename: () -> Unit,
-    onDelete: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val scheme = MiuixTheme.colorScheme
-    Card(
-        onClick = onOpen,
-        // 行距由 LazyColumn 的 `spacedBy` 统一给（原来这里还有一个 `padding(vertical = 1.dp)`，
-        // 两个地方都给间距会让以后调行距要改两处，而且那 1dp 几乎等于没有）。
-        // `modifier` 里是 `animateItem()`，所以它在 fillMaxWidth **之前**：
-        // 尺寸照旧铺满，动画交给 LazyColumn 记账。
-        modifier = modifier.fillMaxWidth(),
-        cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(start = ZhiSpace.m, end = ZhiSpace.xs, top = 4.dp, bottom = 4.dp),
-        colors = CardDefaults.defaultColors(
-            color = ZhiColors.cardSurface(),
-            contentColor = scheme.onSurface,
-        ),
-        pressFeedbackType = PressFeedbackType.Sink,
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            Icon(
-                painter = if (entry.directory) ZhiIcons.directory else ZhiIcons.file,
-                contentDescription = null,
-                tint = if (entry.directory) scheme.primary else scheme.onSurfaceVariantSummary,
-                modifier = Modifier.size(15.dp),
-            )
-            Text(
-                text = entry.name,
-                fontSize = ZhiTextScale.Caption,
-                fontWeight = if (entry.directory) FontWeight.Medium else FontWeight.Normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            if (!entry.directory) {
-                Text(
-                    text = formatSize(entry.size),
-                    color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Micro,
-                )
-            }
-            ZhiIconButton(
-                icon = ZhiIcons.edit,
-                description = "重命名",
-                onClick = onRename,
-                tint = scheme.onSurfaceVariantSummary,
-                iconSize = 14.dp,
-                compact = 30.dp,
-            )
-            ZhiIconButton(
-                icon = ZhiIcons.delete,
-                description = "删除",
-                onClick = onDelete,
-                tint = ZhiColors.red(),
-                iconSize = 14.dp,
-                compact = 30.dp,
-            )
-        }
-    }
-}
-
-private fun formatSize(bytes: Long): String = when {
-    bytes <= 0L -> "0 B"
-    bytes < 1_000L -> "$bytes B"
-    bytes < 1_000_000L -> String.format(java.util.Locale.US, "%.1f KB", bytes / 1000f)
-    else -> String.format(java.util.Locale.US, "%.1f MB", bytes / 1_000_000f)
-}

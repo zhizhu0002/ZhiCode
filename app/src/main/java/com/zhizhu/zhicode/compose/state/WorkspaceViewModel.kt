@@ -15,7 +15,6 @@ import com.zhizhu.zhicode.compose.data.AttachmentReader
 import com.zhizhu.zhicode.compose.data.Clipboard
 import com.zhizhu.zhicode.compose.data.DebugApiProfile
 import com.zhizhu.zhicode.compose.data.FileBrowser
-import com.zhizhu.zhicode.compose.data.FileSearch
 import com.zhizhu.zhicode.compose.data.GitChanges
 import com.zhizhu.zhicode.compose.data.McpStore
 import com.zhizhu.zhicode.compose.data.MockWorkspaceRepository
@@ -44,6 +43,7 @@ import com.termux.shared.termux.TermuxConstants
 import com.zhizhu.zhicode.RuntimeInstaller
 import com.zhizhu.zhicode.TermuxTerminalPane
 import com.zhizhu.zhicode.compose.model.AgentTask
+import com.zhizhu.zhicode.compose.model.AttachBrowserState
 import com.zhizhu.zhicode.compose.model.ApiConfigState
 import com.zhizhu.zhicode.compose.model.ApiProfile
 import com.zhizhu.zhicode.compose.model.ApiProfileDraft
@@ -3680,39 +3680,113 @@ class WorkspaceViewModel(
         }
     }
 
-    // ---------- 附加项目文件 ----------
+    // ---------- 附加项目文件（浏览器，不是搜索） ----------
 
     /**
      * 打开「附加项目文件」面板。
      *
-     * 立即跑一次空查询：面板一打开就能看到浅层文件清单，而不是一个空框等用户打字。
+     * ## 从**项目根**起，这件事本身就是一次修 bug
+     *
+     * 这里原先调的是 `FileSearch.search(projectPath, "")` —— 一次**递归搜索**。
+     * 而 `projectPath` 在 Termux 环境下就是 HOME，HOME 下有 Termux 的
+     * `storage/{pictures,dcim,downloads,…}` 软链（`FileSearch` 只按名字排除
+     * `build`/`node_modules` 这类构建目录），空查询的深度上限（2）又刚好够到
+     * `storage/pictures/`。于是**面板一打开、用户一个字都没敲**，列出来的是
+     * 一整屏 `storage/pictures/END…` 的设备截图，而不是项目文件。
+     *
+     * 现在改成**浏览一个目录**：一层一层走，永远不递归。那些软链只是
+     * "可以点进去的一个目录"。
      */
     fun openAttachPicker() {
-        _state.update { it.copy(attachPickerOpen = true, attachQuery = "") }
-        refreshAttachHits("")
+        val root = _state.value.projectPath
+        _state.update {
+            it.copy(
+                attachPickerOpen = true,
+                attachBrowser = AttachBrowserState(root = FileRoot.PROJECT, path = root),
+            )
+        }
+        reloadAttachEntries(root)
     }
 
-    fun closeAttachPicker() =
-        _state.update { it.copy(attachPickerOpen = false, attachHits = emptyList()) }
-
-    fun updateAttachQuery(query: String) {
-        _state.update { it.copy(attachQuery = query) }
-        refreshAttachHits(query)
+    fun closeAttachPicker() = _state.update {
+        it.copy(attachPickerOpen = false, attachBrowser = AttachBrowserState())
     }
 
     /**
-     * 在 IO 线程重算搜索结果。
+     * 目录内过滤：**纯内存**，只筛已经列出来的那一层。
      *
-     * ⚠️ 结果是**异步**回来的，所以落回状态前必须确认 [query] 还是当前查询串：
-     * 用户打得快时会有多个搜索在飞，慢的那个回来会把新的结果覆盖掉
-     * （与「错误串台到新会话」是同一类竞态）。面板关掉后也不该再写。
+     * ⚠️ 刻意不做"敲字就重扫磁盘的递归搜索"—— 那正是上面那个 bug 的成因，
+     * 而且每个字符都要遍历目录，在手机上会明显卡顿（这一条原代码也记过）。
      */
-    private fun refreshAttachHits(query: String) {
-        val root = _state.value.projectPath
+    fun updateAttachFilter(filter: String) = _state.update {
+        it.copy(attachBrowser = it.attachBrowser.copy(filter = filter))
+    }
+
+    /** 进入一个目录（面包屑点某一级、或点某一行的目录）。 */
+    fun attachNavigateTo(path: String) {
+        _state.update {
+            it.copy(attachBrowser = it.attachBrowser.copy(path = path, filter = ""))
+        }
+        reloadAttachEntries(path)
+    }
+
+    /**
+     * 上一级。
+     *
+     * 到根就**停住**（回到根，而不是继续往外走）—— 与文件面板 `navigateUp` 同一套规则：
+     * 换根是根切换条的活儿，不是"上一级"的活儿，否则在共享存储里点着点着会走到 `/`，
+     * 而那里什么都列不出来。
+     */
+    fun attachUp() {
+        val browser = _state.value.attachBrowser
+        val root = attachRootPath(browser.root)
+        if (browser.path == root) return
+        val parent = browser.path.substringBeforeLast('/', "")
+        if (parent.isEmpty() || parent.length < root.length) {
+            attachNavigateTo(root)
+            return
+        }
+        attachNavigateTo(parent)
+    }
+
+    /** 切换选择器的根。切过去时回到该根的顶层（同文件面板 `switchFileRoot`）。 */
+    fun attachSwitchRoot(root: FileRoot) {
+        val path = attachRootPath(root)
+        _state.update {
+            it.copy(attachBrowser = AttachBrowserState(root = root, path = path))
+        }
+        reloadAttachEntries(path)
+    }
+
+    /** 某个 [FileRoot] 的顶层路径。与文件面板的 `rootPath()` 同一套对应关系。 */
+    private fun attachRootPath(root: FileRoot): String = when (root) {
+        FileRoot.PROJECT -> _state.value.projectPath
+        FileRoot.HOME -> TermuxConstants.TERMUX_HOME_DIR_PATH
+        FileRoot.SHARED -> StorageLinks.EXTERNAL_ROOT
+    }
+
+    /**
+     * 列出**一层**子项（`FileBrowser.children`，与文件面板同一个数据来源）。
+     *
+     * ⚠️ 结果异步回来，所以落回状态前必须确认回来的是**当前**那个目录：
+     * 用户点得快时会有多次列目录在飞，慢的那个回来会把新的覆盖掉
+     * （与「错误串台到新会话」是同一类竞态）。面板关掉后路径已被清空，也不会写回。
+     */
+    private fun reloadAttachEntries(path: String) {
         viewModelScope.launch {
-            val hits = withContext(Dispatchers.IO) { FileSearch.search(root, query) }
+            val entries = withContext(Dispatchers.IO) { FileBrowser.children(path) }
+            // 空态要说清**为什么**空：与文件面板 reloadFiles 同一套判据，
+            // 否则权限不足看起来和"这个目录是空的"一模一样。
+            val dir = java.io.File(path)
+            val note = when {
+                entries.isNotEmpty() -> ""
+                !dir.isDirectory -> if (dir.exists()) "不是目录：$path" else "目录不存在：$path"
+                dir.list() == null -> "无法读取（权限不足）：$path"
+                else -> ""
+            }
             _state.update { s ->
-                if (s.attachQuery == query && s.attachPickerOpen) s.copy(attachHits = hits) else s
+                if (s.attachBrowser.path != path) return@update s
+                s.copy(attachBrowser = s.attachBrowser.copy(entries = entries, note = note))
             }
         }
     }
@@ -3728,10 +3802,30 @@ class WorkspaceViewModel(
      * 也会被明确拒绝而不是塞一坨乱码进上下文。
      *
      * 附加**不关面板**：参考图的说明就是「可多次附加到下一条消息」。
+     *
+     * ## [relative] 由这里算，不由界面传
+     *
+     * 它只干两件事：**去重**（`detail == relative`）和**界面标签**。
+     * 提示词正文走 [Attachment.textBody]，`<attachment name="…">` 用的是文件名
+     * （见 [buildPromptWithTextAttachments]）—— 所以它不参与提示词格式，只要求唯一。
+     *
+     * 规则：文件在**项目根之下**时给项目相对路径（与旧行为一致、更短更好认），
+     * 否则给绝对路径。后者是需要的 —— 选择器现在能切到 HOME 与共享存储，
+     * 那两个根下面的文件本来就没有"项目相对路径"可言。
+     *
+     * ⚠️ 由 VM 算而不是让界面把 relative 一起传进来：界面不需要知道"项目根在哪"，
+     * 那是这一层的事。旧签名 `attachProjectFile(path, relative)` 把这条知识漏到了界面。
      */
-    fun attachProjectFile(path: String, relative: String) {
+    fun attachProjectFile(path: String) {
         viewModelScope.launch {
             val name = File(path).name
+            val projectRoot = _state.value.projectPath.trimEnd('/')
+            val relative =
+                if (projectRoot.isNotEmpty() && path.startsWith("$projectRoot/")) {
+                    path.removePrefix("$projectRoot/")
+                } else {
+                    path
+                }
             val size = withContext(Dispatchers.IO) { runCatching { File(path).length() }.getOrDefault(0L) }
             val body = withContext(Dispatchers.IO) { FileBrowser.readTextForAttachment(path) }
             if (body == null) {

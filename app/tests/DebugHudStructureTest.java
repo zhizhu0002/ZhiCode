@@ -1,6 +1,7 @@
 import java.nio.file.*;
 import java.util.*;
 import java.util.regex.*;
+import java.util.stream.Stream;
 
 /**
  * 「全局调试浮层」与「Markdown 全语法样例」的守卫。
@@ -103,6 +104,14 @@ public final class DebugHudStructureTest {
 
     /** 文件面板：列表留白与行距（用户反馈过"太紧凑"）。 */
     private static final String FILES_PANE = SRC + "ui/panes/FilesPane.kt";
+
+    /**
+     * 文件浏览的**共用外壳**：根切换条 / 面包屑 / 列表行（§29 ① / §34 要它）。
+     *
+     * 本轮从 `FilesPane.kt` 里抽出来的 —— 因为它现在被两处共用（文件面板 +
+     * 附加项目文件选择器），而"两处必须是同一副样子"这件事只能靠共用同一份实现保证。
+     */
+    private static final String FILE_CHROME = SRC + "ui/panes/FileChrome.kt";
 
     /** 侧栏：会话列表（删除/重排时行要不瞬移，见 §25）。 */
     private static final String SIDEBAR = SRC + "ui/Sidebar.kt";
@@ -1540,25 +1549,31 @@ public final class DebugHudStructureTest {
         // （例如 `color = if (prompt.destructive) { 红 } else { 正常 }` —— 那是一次性的
         //  提示，不是"选中态在两种稳定状态之间来回变"，没有补间的意义）。
         String terminalChrome = stripComments(read(root, TERMINAL_CHROME));
-        // ① FilesPane 的根切换条。
-        String rootSwitcher = bodyOf(filesPane2, "private fun FileRootSwitcher(");
+        // ① FileChrome 的根切换条。
+        //
+        // 根切换条原先私有在 FilesPane.kt 里，本轮**搬到了 FileChrome.kt**
+        // （因为它现在被两处共用：文件面板 + 附加选择器）。要守的东西一个字没变
+        // ——「选中态必须淡变、不许硬切配色」「必须是真的按钮（Sink）」——
+        // 只是它住的地方换了，所以这里跟着换读取目标，而不是把断言删掉。
+        String fileChrome = stripComments(read(root, FILE_CHROME));
+        String rootSwitcher = bodyOf(fileChrome, "internal fun FileRootSwitcher(");
         require(!rootSwitcher.isEmpty(),
-                FILES_PANE + " 找不到 FileRootSwitcher 的正文（签名变了？）");
+                FILE_CHROME + " 找不到 FileRootSwitcher 的正文（签名变了？）");
         require(rootSwitcher.contains("color = segmentColor,")
                         && rootSwitcher.contains("contentColor = segmentContent,"),
-                FILES_PANE + " 的根切换条必须把 animateColorAsState 的结果用在 Card 的 "
+                FILE_CHROME + " 的根切换条必须把 animateColorAsState 的结果用在 Card 的 "
                         + "color / contentColor 上：只声明不用等于没做动画");
         requireAbsentIn(rootSwitcher, "color = if (active)",
-                FILES_PANE + " 的根切换条不得再出现 `color = if (active) …` 的硬切配色");
+                FILE_CHROME + " 的根切换条不得再出现 `color = if (active) …` 的硬切配色");
         requireAbsentIn(rootSwitcher, "contentColor = if (active)",
-                FILES_PANE + " 的根切换条不得再出现 `contentColor = if (active) …` 的硬切配色");
-        // 下沉反馈也必须落在**这一段**里（FileRow 那张卡也是 Sink，整文件查会漏）。
+                FILE_CHROME + " 的根切换条不得再出现 `contentColor = if (active) …` 的硬切配色");
+        // 下沉反馈也必须落在**这一段**里（FileListRow 那张卡也是 Sink，整文件查会漏）。
         requireAbsentIn(rootSwitcher, "pressFeedbackType = PressFeedbackType.None",
-                FILES_PANE + " 的根切换条必须给 pressFeedbackType = PressFeedbackType.Sink，"
+                FILE_CHROME + " 的根切换条必须给 pressFeedbackType = PressFeedbackType.Sink，"
                         + "它是真按钮，按下去要有下沉反馈（Miuix Card 的默认值是 None；"
                         + "对照官方 CardSection.kt:122）");
         requireContains(rootSwitcher, "pressFeedbackType = PressFeedbackType.Sink",
-                FILES_PANE + " 的根切换条缺 pressFeedbackType = Sink");
+                FILE_CHROME + " 的根切换条缺 pressFeedbackType = Sink");
         // ② TerminalChrome：扩展键字色 + 会话行底色/字色。
         requireContains(terminalChrome, "color = keyColor,",
                 TERMINAL_CHROME + " 的扩展键必须把 animateColorAsState 的结果用在字色上");
@@ -1891,6 +1906,161 @@ public final class DebugHudStructureTest {
 
         // ⚠️ 第 32 节到此为止只覆盖"文字成员进入"。下面 33 管的是**同一条链路的性能前提** ——
         // 逐帧重组不解决，上面这些动画再多也看不出来。
+
+        // ---- 34. 附加选择器是**浏览器**，不是递归搜索 -------------------------
+        //
+        // 用户拿截图报的：标题写着「附加项目文件」，列出来的全是 storage/pictures
+        // 里的设备截图。查下来是真错，不是观感问题：
+        //
+        //   · 它做的是 FileSearch.search(projectPath, query) —— **递归**搜索；
+        //   · projectPath 在 Termux 下就是 HOME；
+        //   · HOME 下有 Termux 的 storage/{pictures,dcim,downloads,movies,music,shared}
+        //     软链（本仓环境里六个都在），而 FileSearch 只按**名字**排除
+        //     build / node_modules 这类构建目录 —— storage 不在名单里；
+        //   · 空查询走 SHALLOW_DEPTH = 2，而 storage/ 是第 1 层、storage/pictures/
+        //     是第 2 层 —— 所以**一打开就在搜它们**，用户一个字都不用敲；
+        //   · 而且 BFS 浅层优先：照片在第 3 层、项目源码在第 6~8 层，
+        //     于是**整屏都是照片**，真正的代码排在后面。
+        //
+        // 修法不是「把 storage 加进跳过名单」（那只是补一个洞，下次别的软链照样进来），
+        // 而是把这一屏改成**浏览一个目录**：一层一层走、永远不递归。
+        // 下面每一条都对着上面某个具体事实。
+        String attach = stripComments(read(root, ATTACH_FILE_OVERLAY));
+        String attachState = stripComments(read(root, MODELS));
+
+        // ① 全仓不许再有递归搜索的调用点。
+        //
+        // ⚠️ 这是本节最重要的一条：FileSearch.kt 已删，只要有人把它接回来
+        //    （或者在别处写一个新的递归遍历来喂这个面板），这条就红。
+        //    断言「整仓没有调用点」而不是「那个文件不存在」——
+        //    后者挡不住换个文件名再来一份。
+        int searchCalls = 0;
+        try (Stream<Path> walk = Files.walk(Paths.get(root, "app/src/main"))) {
+            for (Path file : walk.filter(p -> p.toString().endsWith(".kt")).toList()) {
+                String code = stripComments(new String(Files.readAllBytes(file),
+                        java.nio.charset.StandardCharsets.UTF_8));
+                if (code.contains("FileSearch.search(")) {
+                    searchCalls++;
+                    System.out.println("        (仍在递归搜索: " + file + ")");
+                }
+            }
+        }
+        require(searchCalls == 0,
+                "附加选择器不得再走递归搜索（FileSearch.search(…)）："
+                        + "它从 HOME 起递归，会顺着 Termux 的 storage/* 软链爬进设备相册 ——"
+                        + "「附加项目文件」打开后整屏都是截图，正是这个原因。"
+                        + "改成一层一层浏览（FileBrowser.children）。");
+
+        // ② 必须走「列一层」的那个数据来源，且过滤必须作用在**已列出的那一层**上。
+        //
+        // 过滤如果又变成「敲字就重扫磁盘的递归搜索」，上面那个 bug 就原样回来了 ——
+        // 所以这里钉的是"过滤是纯内存的"，不只是"有过滤框"。
+        requireContains(stripComments(read(root, VIEW_MODEL)), "FileBrowser.children(",
+                VIEW_MODEL + " 必须用 FileBrowser.children 列**一层**子项："
+                        + "它是文件面板同一个数据来源，两边列出的东西才会一致");
+        requireContains(attach, "visibleEntries",
+                ATTACH_FILE_OVERLAY + " 必须画 browser.visibleEntries（过滤后的这一层）："
+                        + "直接画 entries 的话过滤框是个摆设");
+        requireContains(attachState, "entries.filter { it.name.contains(needle, ignoreCase = true) }",
+                MODELS + " 的 AttachBrowserState.visibleEntries 必须只过滤**已列出的那一层**"
+                        + "（entries.filter { … }）："
+                        + "改成重新扫盘或递归搜索，就把「打开就灌满相册」那个 bug 放回来了");
+        // ⚠️ 上面那条只管「表达式长什么样」：把 `FileBrowser.children(path).filter { … }`
+        //    写进去照样能匹配上，而那就已经是"每敲一个键重扫一次目录"了。
+        //    （这条缺口是本轮 teeth 试出来的：把过滤换成重扫，守卫仍然绿。）
+        //    所以再加一条**否定**断言：这段过滤里不许出现任何碰文件系统的东西。
+        String visibleBody = bodyOf(attachState, "val visibleEntries");
+        require(!visibleBody.isEmpty(),
+                MODELS + " 找不到 visibleEntries 的正文（改名了？）");
+        for (String banned : new String[]{"FileBrowser", "File(", "listFiles", "walk(", "search("}) {
+            require(!visibleBody.contains(banned),
+                    MODELS + " 的 visibleEntries 里不得出现 " + banned + "："
+                            + "过滤必须是**纯内存**的 —— 敲一个字就重扫目录，"
+                            + "既卡顿（每个字符遍历一遍目录）又是那个相册 bug 的成因");
+        }
+
+        // ③ 点**目录**是进去，点**文件**才是附加。
+        //
+        // 反过来写不会编译失败、界面也照常出，只是用户点一个目录会得到
+        // 「不是文本文件」—— 而他本来想进去看看。
+        requireContains(attach,
+                "onOpen = { if (entry.directory) onNavigate(entry.path) else onPick(entry) }",
+                ATTACH_FILE_OVERLAY + " 必须区分点目录与点文件"
+                        + "（onOpen = { if (entry.directory) onNavigate(entry.path) else onPick(entry) }）："
+                        + "反了的话点目录只会得到「不是文本文件」，而用户本来想进去看看");
+
+        // ④ 必须有「上一级」，而且到根就停。
+        //
+        // 一路走到 / 在应用沙箱里是列不出来的（drwx--x--x），看起来像应用坏了；
+        // 而"换根"是根切换条的活儿，不是上一级的活儿 —— 与文件面板 navigateUp 同一套规则。
+        requireContains(attach, "onClick = onUp",
+                ATTACH_FILE_OVERLAY + " 必须有「上一级目录」按钮");
+        String attachUp = bodyOf(stripComments(read(root, VIEW_MODEL)), "fun attachUp()");
+        require(!attachUp.isEmpty(),
+                VIEW_MODEL + " 找不到 attachUp 的正文（改名了？）");
+        requireContains(attachUp, "if (parent.isEmpty() || parent.length < root.length) {",
+                VIEW_MODEL + " 的 attachUp 到根必须**停住**（回到根）："
+                        + "继续往外走会到 /，那里在应用沙箱里列不出来，看起来像坏了");
+
+        // ⑤ 必须共用文件面板的外壳 —— 这是「换成类似文件板块那种」的字面要求。
+        //
+        // ⚠️ 钉的是「**同一份实现**」而不是「长得像」：各写一份的话，
+        //    改了一边另一边会慢慢漂开，而面包屑层级、行高、图标颜色正是最容易看出差别的地方。
+        requireContains(attach, "FileBreadcrumbBar(",
+                ATTACH_FILE_OVERLAY + " 必须用共用的面包屑 FileBreadcrumbBar（见 FileChrome.kt）："
+                        + "用户要的就是「文件板块那种」，各写一份迟早长歪");
+        requireContains(attach, "FileRootSwitcher(",
+                ATTACH_FILE_OVERLAY + " 必须用共用的根切换条 FileRootSwitcher："
+                        + "项目 / HOME / 共享存储三根与文件面板同一套语义");
+        requireContains(attach, "FileListRow(",
+                ATTACH_FILE_OVERLAY + " 必须用共用的行 FileListRow："
+                        + "两个界面的同一行必须显示同一串字符（含尺寸文案 formatFileSize）");
+        requireContains(fileChrome, "internal fun FileListRow(",
+                FILE_CHROME + " 必须提供共用的 FileListRow");
+        require(!filesPane2.contains("private fun FileBreadcrumbBar(")
+                        && !filesPane2.contains("private fun FileListRow(")
+                        && !filesPane2.contains("private fun FileRootSwitcher("),
+                FILES_PANE + " 不得再各留一份私有的面包屑/行/根切换条："
+                        + "它们已经搬进 FileChrome.kt 供两处共用，留一份私有副本就会开始漂开");
+
+        // ⑥ 换根要回到该根的顶层（不能停在别的根里的路径上）—— 与文件面板同一条规则。
+        String switchRoot = bodyOf(stripComments(read(root, VIEW_MODEL)), "fun attachSwitchRoot(");
+        require(!switchRoot.isEmpty(),
+                VIEW_MODEL + " 找不到 attachSwitchRoot 的正文（改名了？）");
+        requireContains(switchRoot, "AttachBrowserState(root = root, path = path)",
+                VIEW_MODEL + " 的 attachSwitchRoot 换根时必须一起把 path 换到该根的顶层："
+                        + "只换 root 不换 path，会让用户在新根里看到上一棵树的路径");
+
+        // ⑦ 打开面板必须从**项目根**起。
+        //
+        // 这条是①的补刀：即使哪天有人把递归搜索接回来，「从项目根起」也能把爆炸半径
+        // 限制在项目内 —— 用户要的是项目文件，不是整个 HOME。
+        String openPicker = bodyOf(stripComments(read(root, VIEW_MODEL)), "fun openAttachPicker()");
+        require(!openPicker.isEmpty(),
+                VIEW_MODEL + " 找不到 openAttachPicker 的正文（改名了？）");
+        requireContains(openPicker, "AttachBrowserState(root = FileRoot.PROJECT, path = root)",
+                VIEW_MODEL + " 的 openAttachPicker 必须从 FileRoot.PROJECT 起："
+                        + "从 HOME 起正是「打开就灌满相册」的起点");
+
+        // ⑧ 列目录异步回来时必须确认还是当前那个目录。
+        //
+        // 用户点得快时会有多次列目录在飞，慢的那个回来会把新的覆盖掉
+        // （与「错误串台到新会话」是同一类竞态）。
+        String reloadAttach = bodyOf(stripComments(read(root, VIEW_MODEL)),
+                "private fun reloadAttachEntries(");
+        require(!reloadAttach.isEmpty(),
+                VIEW_MODEL + " 找不到 reloadAttachEntries 的正文（改名了？）");
+        requireContains(reloadAttach, "if (s.attachBrowser.path != path) return@update s",
+                VIEW_MODEL + " 的 reloadAttachEntries 落回状态前必须确认还是当前目录："
+                        + "用户点得快时会有多次列目录在飞，慢的那个回来会把新的覆盖掉");
+
+        // ⑨ 空态必须区分「过滤没命中」「读不出来」「真的是空」。
+        //
+        // 权限不足（共享存储没给「所有文件访问权限」）时说成「这个目录是空的」是**撒谎**，
+        // 用户会以为目录坏了 —— 文件面板的 fileNote 就是为这件事存在的，这里同源同义。
+        requireContains(attach, "note.isNotEmpty() -> note",
+                ATTACH_FILE_OVERLAY + " 的空态必须把「读不出来」的原因（note）如实显示："
+                        + "共享存储没给「所有文件访问权限」时说成「这个目录是空的」是撒谎");
 
         // ---- 33. 悬浮层的底部留白与 IME 抬起（性能契约）------------------------
         //

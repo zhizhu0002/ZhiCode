@@ -66,10 +66,12 @@ internal fun ZhiOverlayHost(
     )
     AttachFileOverlay(
         open = state.attachPickerOpen,
-        query = state.attachQuery,
-        hits = state.attachHits,
-        onQueryChange = viewModel::updateAttachQuery,
-        onPick = { hit -> viewModel.attachProjectFile(hit.path, hit.relative) },
+        browser = state.attachBrowser,
+        onFilterChange = viewModel::updateAttachFilter,
+        onNavigate = viewModel::attachNavigateTo,
+        onUp = viewModel::attachUp,
+        onSwitchRoot = viewModel::attachSwitchRoot,
+        onPick = { entry -> viewModel.attachProjectFile(entry.path) },
         onDismiss = viewModel::closeAttachPicker,
     )
     TaskListOverlay(

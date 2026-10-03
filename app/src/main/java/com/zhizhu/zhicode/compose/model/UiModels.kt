@@ -439,20 +439,61 @@ data class FileDeletePrompt(
 }
 
 /**
- * 「附加项目文件」的一条搜索结果。
+ * 「附加项目文件」选择器的状态：**它在浏览哪一个目录**。
  *
- * 放在 model 包而不是作为 `FileSearch` 的内部类：它出现在公开的
- * [WorkspaceUiState.attachHits] 里，而 `FileSearch` 是 `internal` 工具对象
- * （与 `FileBrowser` 一样）—— Kotlin 不允许公开类型暴露 internal 类型参数。
- * 这也与 [FileEntry] / [OpenFile] 的位置保持一致。
+ * ## 为什么不是一份搜索结果
+ *
+ * 这里原先存的是 `attachHits: List<FileHit>` —— 一坨**递归搜索**出来的扁平结果。
+ * 实测它有个很难看的失效：搜索从 HOME 起递归，而 HOME 下有 Termux 的
+ * `storage/{pictures,dcim,downloads,…}` 软链（`FileSearch` 只按**名字**排除
+ * `build`/`node_modules` 这类构建目录，`storage` 不在名单里），空查询的深度上限（2）
+ * 又刚好够到 `storage/pictures/`。于是**面板一打开**、用户一个字都还没敲，
+ * 列表里就灌满了 `storage/pictures/END…` 的截图 —— 标题写着「附加项目文件」，
+ * 内容却是设备相册；而且 BFS 浅层优先，照片在第 3 层、项目源码在第 6~8 层，
+ * 所以它们还排在真正的代码前面。
+ *
+ * 改成"浏览一个目录"之后这个问题从根上没有了：**一层一层走，不递归**，
+ * 那六个软链只是"可以点进去的一个目录"。
+ *
+ * ## 三个字段的分工
+ *
+ * - [attachRoot]：[FileRoot] 三选一，与文件面板同一个枚举、同一套语义；
+ * - [attachPath]：当前目录的绝对路径；
+ * - [attachEntries]：**这一层**的子项（`FileBrowser.children` 的结果，
+ *   与文件面板 `fileEntries` 是同一个数据来源）；
+ * - [attachFilter]：只过滤 [attachEntries] 的**文本**，纯内存、不碰磁盘。
+ *
+ * ⚠️ 过滤不做递归搜索是本设计的一部分，不是省事：那正是上面那个 bug 的成因。
  */
-data class FileHit(
-    /** 绝对路径，附加时用它读文件。 */
-    val path: String,
-    /** 相对项目根的路径。界面显示它更短也更容易认。 */
-    val relative: String,
-    val size: Long = 0L,
-)
+data class AttachBrowserState(
+    /** 当前根：项目 / HOME / 共享存储。 */
+    val root: FileRoot = FileRoot.PROJECT,
+    /** 当前目录的绝对路径。 */
+    val path: String = "",
+    /** 当前目录的**一层**子项。 */
+    val entries: List<FileEntry> = emptyList(),
+    /**
+     * 目录内的名字过滤串。
+     *
+     * 只作用于 [entries]（已列出的这一层），不会去扫磁盘 ——
+     * 所以输入框每敲一个键都是纯内存操作，也**不会**顺着软链爬进相册。
+     */
+    val filter: String = "",
+    /**
+     * 目录读不出来时的原因（权限不足 / 不存在）。
+     *
+     * 与文件面板的 `fileNote` 同源同义：区分「真的是空目录」与「列不出来」，
+     * 否则只显示"0 项"，看起来像应用坏了。
+     */
+    val note: String = "",
+) {
+    /** 按 [filter] 过滤后的可见子项。 */
+    val visibleEntries: List<FileEntry> get() {
+        val needle = filter.trim()
+        if (needle.isEmpty()) return entries
+        return entries.filter { it.name.contains(needle, ignoreCase = true) }
+    }
+}
 
 data class TerminalLine(val text: String, val tone: TerminalTone = TerminalTone.NORMAL)
 
@@ -565,14 +606,15 @@ data class WorkspaceUiState(
     /**
      * 非空即「附加项目文件」面板打开（输入器 `+` 的第一项）。
      *
-     * 用 [attachHits] 承载搜索结果而不是在 Composable 里现搜：搜目录是 IO，
-     * 放 recomposition 里会每个字符都卡一下。
+     * 面板里的一切（当前目录、这一层的子项、目录内过滤串）都在 [attachBrowser] 里 ——
+     * 它是一台**浏览器**，不是一份搜索结果（为什么，见 [AttachBrowserState]）。
+     *
+     * ⚠️ 列目录是 IO，所以照样不能在 Composable 里现列：`FileBrowser.children` 由
+     * ViewModel 在 IO 线程跑，结果落进 [attachBrowser]。
      */
     val attachPickerOpen: Boolean = false,
-    /** 附加面板的搜索串。 */
-    val attachQuery: String = "",
-    /** 附加面板当前的搜索结果（已由 ViewModel 在 IO 线程算好）。 */
-    val attachHits: List<FileHit> = emptyList(),
+    /** 选择器的浏览位置与这一层的子项。 */
+    val attachBrowser: AttachBrowserState = AttachBrowserState(),
     /**
      * 最后一次操作反馈（「已切换 API 配置」「保存失败：…」）。
      *

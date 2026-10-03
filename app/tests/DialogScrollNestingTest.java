@@ -134,27 +134,96 @@ public final class DialogScrollNestingTest {
                         + "      修法：DialogShell 里删掉内层那一层；OverlayBottomSheet 的 body"
                         + "      没有内置滚动，sheet 里的长列表必须自己滚（外面用定高列兜住）。");
 
-        // ---- 3. 弹窗里的 LazyColumn 必须自带高度上限 ----
+        // ---- 3. 弹窗里的 LazyColumn 必须**高度有界** ----
         //
-        // 同一个坑的另一半：竖直方向的 LazyColumn 若不给上限，也会得到无限高度约束。
-        // 现有四个都用 heightIn(max = …) 限住了，这条防的是「新加一个忘了限」。
+        // 同一个坑的另一半：竖直方向的 LazyColumn 若拿到无限高度约束，会抛同一条
+        // IllegalStateException。现有四个都用 `heightIn(max = …)` 限住了。
+        //
+        // ⚠️ 这条原先只认 `heightIn`，本轮放宽成「高度有界」的**两种**合法写法 ——
+        //    因为附加文件选择器本轮改成了 sheet 里的定高列 + `weight(1f)`：
+        //
+        //      · `heightIn(max = …)` —— 自带上限；
+        //      · `weight(1f)` —— 也算有界，**前提是同一段组合体里没有竖向滚动容器**。
+        //        `Column` 给带权孩子的约束是"剩余空间"（固定值，不是 Infinity），
+        //        所以只要外层 Column 自己有定高就不会崩；而外层一旦是个竖向
+        //        `verticalScroll`，剩余空间就是无限 —— 那正是崩溃条件本身。
+        //
+        //    所以判据是「heightIn **或** （weight 且同函数内无 verticalScroll）」。
+        //    这不是把守卫改松：真正的约束条件（内层不许拿到无限高）一个字没放低，
+        //    只是多认了一种确实有界的写法。给那条 LazyColumn 硬加一个
+        //    `heightIn(max = …)` 反而是错的 —— 它会把 sheet 列表钉死在一个人为高度上。
         List<String> unbounded = new ArrayList<>();
         for (String file : files) {
             String code = stripComments(read(root, file));
+            List<int[]> ranges = topLevelFunctionRanges(code);
             for (int at = code.indexOf("LazyColumn("); at >= 0; at = code.indexOf("LazyColumn(", at + 1)) {
                 String call = callArgs(code, at + "LazyColumn".length());
-                if (call.isEmpty() || !call.contains("heightIn")) {
+                if (call.isEmpty()) {
+                    unbounded.add(file + "（第 " + lineOf(code, at) + " 行，读不到实参）");
+                    continue;
+                }
+                if (call.contains("heightIn")) continue;
+                // 高度也可以由**直接外层容器**给出（`weight(1f)`）：`Column` 给带权孩子的
+                // 约束是"剩余空间"（固定值），所以外层定高时它是有界的。
+                boolean weighted = call.contains("weight(") || enclosingContainerIsWeighted(code, at);
+                boolean inVerticallyScrollable = false;
+                for (int[] range : ranges) {
+                    if (at >= range[0] && at < range[1]) {
+                        inVerticallyScrollable =
+                                code.substring(range[0], range[1]).contains("verticalScroll");
+                        break;
+                    }
+                }
+                if (!weighted || inVerticallyScrollable) {
                     unbounded.add(file + "（第 " + lineOf(code, at) + " 行）");
                 }
             }
         }
         require(unbounded.isEmpty(),
-                "以下 LazyColumn 没有 heightIn 上限：" + unbounded
-                        + "\n      弹窗正处在竖向滚动容器里，无限高的 LazyColumn 会触发同一条"
-                        + " Infinity maximum height constraints 崩溃。");
+                "以下 LazyColumn 高度无界：" + unbounded
+                        + "\n      无限高的 LazyColumn 会触发"
+                        + " Infinity maximum height constraints 崩溃。"
+                        + "\n      两种合法写法：heightIn(max = …)，或者 weight(1f)"
+                        + "（后者要求同一段组合体里没有竖向滚动容器 —— 有的话剩余空间就是无限）。");
 
         System.out.println("DialogScrollNestingTest: 通过（弹窗 " + files.size()
-                + " 个文件，外壳滚动 1 处，无嵌套滚动，" + "LazyColumn 均有高度上限）");
+                + " 个文件，外壳滚动 1 处，无嵌套滚动，" + "LazyColumn 高度均有限）");
+    }
+
+    /** 每个顶层函数的 `[起点, 终点)` 偏移，用来判断某个调用落在哪一段里。 */
+    private static List<int[]> topLevelFunctionRanges(String code) {
+        List<Integer> starts = new ArrayList<>();
+        Matcher m = Pattern.compile("(?m)^(?:private |internal |public )?fun ").matcher(code);
+        while (m.find()) starts.add(m.start());
+        List<int[]> ranges = new ArrayList<>();
+        for (int i = 0; i < starts.size(); i++) {
+            int end = i + 1 < starts.size() ? starts.get(i + 1) : code.length();
+            ranges.add(new int[]{starts.get(i), end});
+        }
+        return ranges;
+    }
+
+    /**
+     * 直接外层容器（`Box` / `Column` / `Row`）的实参里有没有 `weight(`。
+     *
+     * <p>看外层是必须的：`Modifier.weight(1f)` 是写在**父容器给子项的那个 modifier**
+     * 上的，而不是写在 `LazyColumn` 自己的实参里（例如
+     * {@code Box(Modifier.weight(1f)) { LazyColumn(...) }}）。只看 LazyColumn 的实参
+     * 会把这种确实有界的写法误判成无界。
+     */
+    private static boolean enclosingContainerIsWeighted(String code, int at) {
+        int owner = -1;
+        String name = "";
+        for (String candidate : new String[]{"Box(", "Column(", "Row("}) {
+            int found = code.lastIndexOf(candidate, at);
+            if (found > owner) {
+                owner = found;
+                name = candidate;
+            }
+        }
+        if (owner < 0) return false;
+        String args = callArgs(code, owner + name.length() - 1);
+        return args.contains("weight(");
     }
 
     private static int lineOf(String text, int offset) {
