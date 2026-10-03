@@ -69,11 +69,18 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 现在由 Compose 画，PTY 与 Termux 上游 `TerminalView` 仍留在
  * [TermuxTerminalPane]（它作为 `AndroidView` 被挂在本文件中间那一格）。
  *
- * <h3>配色为什么不直接用 MiuixTheme</h3>
- * 终端壳的配色**刻意**沿用这份界面上原来那一套（见 [chrome]）：深色档与改动前逐字节相同，
- * 浅色档用原作者已经写好但从来没走到过的那张表。直接用 Miuix 主题色会让深色档也跟着变，
- * 而这次是结构重写 —— 外观能不动就不动。
- * 判定深浅用的是 [ZhiColors.isDark]，它读 `LocalZhiDark`，与全应用一致。
+ * <h3>配色</h3>
+ * 终端**外壳**（工具栏 / 会话抽屉 / 扩展键 / 两个占位）的配色全部取自应用主题
+ * （[chrome] 用的是 MiuixTheme + [ZhiColors]），所以外壳本来就跟随深浅色。
+ *
+ * ⚠️ 这里以前写着"刻意沿用原来那一套、直接用 Miuix 主题色会让深色档也跟着变" ——
+ * 那句话说的是改动之前的计划，**与现在的实现已经不符**（[chrome] 早就整张走主题色了）。
+ * 留着它的代价是下一个人会照着它去"恢复旧色表"。
+ *
+ * 真正不适配深浅色的**不是外壳，是终端正文**：ANSI 调色板原先写死深色档，
+ * 所以浅色模式下终端里还是黑底白字。那一处在宿主 [TermuxTerminalPane]
+ * （见它的 `applyTerminalPalette` / `setDarkTheme`），不在本文件。
+ * 判定深浅统一用 [ZhiColors.isDark]，它读 `LocalZhiDark`，与全应用一致。
  */
 
 /** 终端外壳的一套配色。取值来自原 `applyPaletteValues` 的深/浅两档。 */
@@ -439,7 +446,11 @@ private fun DrawerAction(label: String, palette: Chrome, onClick: () -> Unit) {
 internal fun TerminalRuntimeNotice(text: String) {
     val palette = chrome()
     Box(
-        modifier = Modifier.fillMaxSize().background(Color.Black),
+        // ⚠️ 不能写死 Color.Black：浅色模式下终端正文是浅底（见 TermuxTerminalPane
+        // 的浅色档 ANSI 表），占位却铺一块纯黑 —— 切进终端那一下会"闪一块黑"，
+        // 也就是用户报的「终端对深浅色不适配」。
+        // 用面板底色同一个令牌，它既跟随主题、又保证与终端正文底色一致。
+        modifier = Modifier.fillMaxSize().background(ZhiColors.panelSurface()),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -461,7 +472,8 @@ internal fun TerminalRuntimeNotice(text: String) {
 internal fun TerminalFailure(detail: String, onRetry: () -> Unit) {
     val palette = chrome()
     Column(
-        modifier = Modifier.fillMaxSize().background(Color.Black).padding(22.dp),
+        // 同上：不写死黑底，与终端正文/面板底色同源。
+        modifier = Modifier.fillMaxSize().background(ZhiColors.panelSurface()).padding(22.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

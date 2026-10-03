@@ -141,31 +141,88 @@ public final class MarkdownStreamingTest {
         require(assistant.contains("streaming = item.streaming"),
                 "AssistantCard 必须把 item.streaming 传给 ZhiMarkdown —— "
                         + "不传的话 Markdown 层只能整段解析，优化等于没接上");
+        // ---- 4a. 流式期间**也**挂 animateContentSize（用户要的「流式正文平滑增长」）----
+        //
+        // ⚠️ 这一条在本轮**反向改过一次**，两个方向的理由都留在这里。
+        //
+        // 原来钉的是「两边分写」：streaming 时返回裸 Modifier、不带动画。理由是
+        // "正文每 32ms 长高一次，尺寸动画会被反复重新触发，整张卡持续重测量"。
+        // 但那个理由**站不住**：`animateContentSize` 不是"每次变化都重放一遍补间"，
+        // 目标一变它就从**当前动画值**继续跑到新目标 —— 后果只是尺寸略微滞后，
+        // 不是重新触发风暴。而流式正文"每 32ms 多一行"这件事本身，
+        // 不挂动画就是**一帧一跳**的硬跳 —— 用户报的正是「文字是直接没动画」。
+        //
+        // ⚠️ 这是本轮**唯一可能反向影响性能**的一项：代价是流式期间每帧一次测量+布局，
+        // 而那是"想要平滑增长"的必然成本。**回退点就是这一处** ——
+        // 若真机上出现"流式一顿一顿"，把它改回按 item.streaming 分支即可，
+        // 其余几项动画各自独立、不受影响。
+        //
+        // 断言写成"必须直接挂"而不是"必须出现某个字符串"：后者在改回分支写法时
+        // 也可能因为别处恰好有同串而变绿。同时给反向断言，防两种写法并存。
         require(squash(assistant).contains(
-                        "if(item.streaming){Modifier}else{Modifier.animateContentSize("),
-                "AssistantCard 必须**两边分写**：streaming 时返回裸 Modifier（不带动画），"
-                        + "否则内容每 32ms 长高一次会把尺寸动画反复重新触发，"
-                        + "整张卡在整个回复期间持续重测量。");
+                        ".clipToBounds().animateContentSize(animationSpec=ZhiMotion.sizeSpec),"),
+                "AssistantCard 的正文列必须**直接**挂 .animateContentSize(animationSpec = ZhiMotion.sizeSpec)"
+                        + "（流式期间也挂 —— 用户要的「流式正文平滑增长」）。"
+                        + "⚠️ 回退点：若真机上流式变得一顿一顿，就是这一处改回"
+                        + "按 item.streaming 分支；其余动画不受影响");
+        require(!squash(assistant).contains("if(item.streaming){Modifier}else{"),
+                "AssistantCard 不得退回「streaming 时不挂动画」的分支写法："
+                        + "那样流式正文每 32ms 一帧一跳（用户报的「文字是直接没动画」）");
 
+        // ---- 4b. ToolGroupCard：竖向排列 + 收起时内容跟着收 -------------------
+        //
+        // ⚠️ 这一段在本轮被**整段重写**过，因为原来那三条断言守的是一个**没修好的方案**：
+        // 它们的原话里就写着「用户看到的正是『文字没跟着卡片的动画展开/缩回』」——
+        // 也就是用户后来重新报的同一件事。守着一个不成立的方案，比没有断言更糟：
+        // 它会挡住正确的改法。
+        //
+        // 用户这次的报法是「工具卡收回，文字就应该跟着收回」。查下去发现底下有**两层**问题：
+        //
+        //  ① **布局回归**（真正的元凶）：d693dd3 为了去掉卡片底，把根容器从
+        //     `Card(...)` 换成了 `Box(...)`。Miuix 的 `Card` 内部就是 `Column(`，
+        //     它**同时**提供"竖向排列"与"内边距"；换成 `Box` 时只补回了内边距和
+        //     动画挂点，**竖向排列没人补** —— 而 `Box` 是叠放，
+        //     于是「表头 + 副标题 + 展开内容」三个兄弟节点落在同一个原点互相盖住。
+        //     全程没有任何编译错误，表现只是"标题被内容压住、收起后文字对不上"。
+        //     官方那一处是 `linearLayoutVbox3 = vbox()`（竖向 LinearLayout），竖排才是本意。
+        //
+        //  ② **收起时的动画是坏的**：`if (expanded) { … }` 一翻，内容当帧就被移出组合，
+        //     于是只剩外层的框在缩小、里面已经是空的。展开时看着还行（内层按自然高度
+        //     绘制、被外层裁剪逐帧露出来），所以这个 bug 只在**收起**方向出现。
+        //
+        // 修法：根容器改回竖向（`Column`），展开内容交给 `AnimatedVisibility`
+        // 自己驱动高度，外层不再挂 `animateContentSize` —— **高度只能有一个来源**，
+        // 两层各挂一次就是当初那句「文字在卡片里自己飘」。
         String group = functionBody(cards, "fun ToolGroupCard(");
         require(!group.isEmpty(), CARDS + " 里找不到 ToolGroupCard");
-        require(squash(group).contains("if(done){Modifier.animateContentSize("),
-                "ToolGroupCard 必须按「**这一组自己**是否跑完」门控 animateContentSize，"
-                        + "且方向是「跑完才挂」：工具输出每 200ms 冲刷一次，运行期间挂动画"
-                        + "等于让整张组卡持续重测量；反过来写（跑完不挂、跑起来才挂）会让"
-                        + "「点开一个已跑完的工具组」这个最常见的动作恰恰没有卡片动画 —— "
-                        + "用户看到的正是「文字没跟着卡片的动画展开/缩回」。"
-                        + "⚠️ 门控只能取**本组**的完成态（ToolGrouping.isDone），"
-                        + "取整批的 groupCompleted 会让同一批里已读完的那组也一直不挂动画。");
+        // ① 根容器必须竖向。⚠️ 反向断言一起给：只查正向的话，
+        // 把 `Box` 和 `Column` 各写一个（一个死代码）照样绿。
+        require(squash(group).contains("Column(modifier=Modifier.fillMaxWidth().padding(vertical=4.dp)"),
+                "ToolGroupCard 的根容器必须是 Column（竖向排列）：官方那一处是 vbox()，"
+                        + "而 Box 是**叠放** —— 表头/副标题/展开内容会落在同一个原点互相盖住。"
+                        + "⚠️ 别改成 Box：Card→Box 的替换就是这么坏掉的"
+                        + "（Miuix 的 Card 内部就是 Column，它在提供内边距的同时也在提供竖排）");
+        require(!squash(group).contains("Box(modifier=Modifier.fillMaxWidth().padding(vertical=4.dp)"),
+                "ToolGroupCard 的根容器不得是 Box（叠放语义，同上）");
+        // ② 展开/收起由内容自己动。
+        require(squash(group).contains("AnimatedVisibility(visible=expanded,enter=expandVertically("),
+                "ToolGroupCard 的展开内容必须走 AnimatedVisibility(visible = expanded, "
+                        + "enter = expandVertically(...), exit = shrinkVertically(...))："
+                        + "`if (expanded)` 一翻内容当帧就被移出组合，收起时只剩外框在缩小、"
+                        + "里面已经空了 —— 用户报的「工具卡收回，文字没跟着收回」正是这个。"
+                        + "⚠️ 这个 bug 只在**收起**方向出现，展开方向看着是好的");
+        require(squash(group).contains("shrinkVertically(animationSpec=ZhiMotion.sizeSpec,shrinkTowards=Alignment.Top)"),
+                "ToolGroupCard 的收起必须是 shrinkVertically(shrinkTowards = Alignment.Top)："
+                        + "内容长在表头下面，要用默认的 Bottom 会看起来像内容把卡片往上顶");
+        // ③ 高度只能有一个来源。
+        require(!squash(group).contains("if(done){Modifier.animateContentSize("),
+                "ToolGroupCard 不许再按 done 门控外层 animateContentSize："
+                        + "高度现在由 AnimatedVisibility 一处负责；两层各挂一次会让"
+                        + "外框与内层按不同曲线走，看起来就是「文字在卡片里自己飘」");
+        require(!squash(group).contains("Modifier.animateContentSize(animationSpec=ZhiMotion.sizeSpec)"),
+                "ToolGroupCard 外层不得再挂 animateContentSize（同上：高度只能有一个来源）");
         require(!squash(group).contains("if(expanded){Column(modifier=Modifier.animateContentSize("),
-                "ToolGroupCard 的展开列表不许再挂自己的 animateContentSize："
-                        + "两层各挂一次，外框按动画高度走、内层按自己的曲线滑动，"
-                        + "两者不同步就是「文字在卡片里自己飘」。高度的单一来源是卡片。");
-        require(squash(group).contains(".clipToBounds().then("),
-                "ToolGroupCard 必须在 animateContentSize **外侧** clipToBounds："
-                        + "裁剪层要拿到动画中的高度，内层文字才会被逐帧露出来。"
-                        + "写在里侧（动画在外）裁剪层拿到的是自然高度，一点也裁不到，"
-                        + "文字仍然是瞬间全部出现。");
+                "ToolGroupCard 的展开列表不许再挂自己的 animateContentSize（同上）");
 
         String toolRow = functionBody(cards, "private fun ToolRow(");
         require(!toolRow.isEmpty(), CARDS + " 里找不到 ToolRow");

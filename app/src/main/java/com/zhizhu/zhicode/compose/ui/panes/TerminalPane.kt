@@ -155,6 +155,22 @@ private fun RealTerminalPane(
         pane.setNextSessionWorkingDirectory(workingDirectory)
     }
 
+    // 终端跟随应用主题（用户报过「终端对深浅色不适配」）。
+    //
+    // ⚠️ 方向只能是**界面 → 宿主**：应用主题的唯一权威在 Compose 这边
+    // （`LocalZhiDark`，见 `ZhiColors.isDark`），而宿主是纯 Java 的 `FrameLayout`，
+    // 读不到它。反过来在宿主里读配置会变成最底层依赖界面框架 —— 那正是宿主类注释
+    // 里明确拒绝的做法。
+    //
+    // 用 `LaunchedEffect(isDark)` 而不是 `DisposableEffect`：主题一变就要推一次，
+    // 且不需要 onDispose。主题没变时 `setDarkTheme` 自己会（同值直接返回），
+    // 所以重复组合不会做多余的工作。
+    //
+    // 默认档是深色，所以**深色模式下这条推送是空操作** —— 外观与改动前逐字节相同；
+    // 只有浅色模式会真正换表（色值取自历史上那张没人走到的浅色表）。
+    val isDark = ZhiColors.isDark()
+    LaunchedEffect(isDark) { pane.setDarkTheme(isDark) }
+
     DisposableEffect(pane) {
         pane.onRuntimeReady()
         // ⚠️ 只摘视图，**不关会话**。真正释放是 ViewModel.onCleared() 与重装环境之前。

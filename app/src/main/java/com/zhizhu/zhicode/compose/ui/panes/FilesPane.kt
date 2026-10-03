@@ -155,8 +155,24 @@ fun FilesPane(
                 },
                 label = "fileStage",
             ) { st ->
+                // ⚠️⚠️ 每个分支**必须只吐一个** composable —— 这里是外层那个 `Column(…)`。
+                //
+                // [AnimatedContent] 的容器是**叠放**语义（转场时它必须把新旧两屏放在同一个
+                // 位置才能交叉淡变），它**不是** `Column`。所以一个分支里并列写几个
+                // composable 时，它们会被放到**同一个原点**上互相盖住 ——
+                // 实测表现就是「文件列表和面包屑重叠」。
+                //
+                // 对照本工程另外两处 `AnimatedContent`，它们的分支都只调一个组件：
+                //   · `TerminalPane`：`TerminalStage.FAILURE -> TerminalFailure(...)`；
+                //   · `ChangesPane`：每个分支一个 `Box` 或一个 `LazyColumn`。
+                // 本文件是唯一破例的地方，而原因是这层**原先写的是裸 `when`** ——
+                // 裸 `when` 挂在 `Column` 下时兄弟节点是**竖排**的；换成 `AnimatedContent`
+                // 之后语义变成叠放，于是「表头 + 面包屑 + 列表」三者叠在了一起。
+                // 包一层 `Column` 就把竖排语义找回来了，且不必把这一大坨参数拆成新函数。
+                //
+                // （测试里把这次重构标为「C-6 最容易改崩」，这就是它崩掉的那一处。）
                 when (st) {
-                    FileStage.LIST -> {
+                    FileStage.LIST -> Column(modifier = Modifier.fillMaxSize()) {
                         PaneHeader(
                             title = "文件",
                             subtitle = "${entries.size} 项",
@@ -216,7 +232,11 @@ fun FilesPane(
                         }
                         // 不做常驻过滤框：Miuix InputField 有 45dp 最小高度，
                         // 常驻会把文件列表挤下去，与"文件 UI 紧凑"的要求冲突。
-                        Box(modifier = Modifier.fillMaxSize()) {
+                        // `weight(1f)` 而不是 `fillMaxSize()`：这里是 `Column` 的孩子，
+                        // 要的是**剩余**高度（表头与面包屑已经占掉一部分）。`fillMaxSize()`
+                        // 依赖「Column 会替后面的孩子扣掉已用高度」这条隐式行为，写 weight
+                        // 是显式的，也与 `TerminalPane` 里那一处保持同一写法。
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                             val listState = rememberLazyListState()
                             LazyColumn(
                                 state = listState,
@@ -262,7 +282,9 @@ fun FilesPane(
                         }
                     }
 
-                    FileStage.VIEW, FileStage.EDIT -> {
+                    // 同上：这一支也并列了「表头 + 面包屑 + 内容」三块（编辑态是输入框、
+                    // 查看态是行号列表），不包起来同样会叠在一起。
+                    FileStage.VIEW, FileStage.EDIT -> Column(modifier = Modifier.fillMaxSize()) {
                         // 退场期间 `openFile` 可能已为 null，而这一屏还要画完。
                         val file = shownFile ?: return@AnimatedContent
                         // 正在写的文本同理：退出编辑那一瞬间 `draft` 已经是 null，
@@ -315,13 +337,14 @@ fun FilesPane(
                             ZhiTextField(
                                 value = editText.orEmpty(),
                                 onValueChange = onDraftChange,
-                                modifier = Modifier.fillMaxSize().padding(horizontal = ZhiSpace.m, vertical = 4.dp),
+                                modifier = Modifier.weight(1f).fillMaxWidth()
+                                    .padding(horizontal = ZhiSpace.m, vertical = 4.dp),
                                 minLines = 12,
                                 textStyle = MiuixTheme.textStyles.main.copy(fontFamily = FontFamily.Monospace),
                             )
                         } else {
                             val lines = remember(file.path) { file.content.split('\n') }
-                            Surface(modifier = Modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
+                            Surface(modifier = Modifier.weight(1f).fillMaxWidth(), color = ZhiColors.panelSurface()) {
                                 LazyColumn(modifier = Modifier.fillMaxSize().padding(vertical = 3.dp)) {
                                     // ⚠️ 这里**不加** `key = { it }`。行号就是下标，下标当 key 看着
                                     // 像稳定标识、其实是位置别名：换一个文件时「第 400 行」这个 key

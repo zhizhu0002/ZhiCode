@@ -132,16 +132,32 @@ public final class StatusBarAndImeTest {
         // 而是按**有没有全屏浮层盖住工作区**判断。这条守卫钉的就是那几个标志位 ——
         // 少一个就会出现"设置页里搜一下，背后的输入器动了"这同一类 bug。
         String chatArea = stripComments(read(root, CHAT_AREA));
-        require(squash(chatArea).contains("valimeLift=if(coveredByFullScreenOverlay)"),
-                CHAT_AREA + " 的 imeLift 必须由 coveredByFullScreenOverlay 门控："
+        // ⚠️ 门控的**位置**后来挪了：让位量不再在组合期算成一个 `Dp`，而是进
+        //    `offset { }` 的 lambda（布局阶段读，键盘动画期间不重组）。
+        //    门控本身一秒都没放松 —— 它仍然是"这次 IME 变化是不是本输入器引起的"的唯一判据。
+        require(squash(chatArea).contains("vallift=if(liftByFullScreenOverlay)"),
+                CHAT_AREA + " 的 IME 让位量必须由 liftByFullScreenOverlay 门控："
                         + "WindowInsets.ime 是窗口级的，侧栏搜索框提键盘时它会一起变正，"
                         + "不门控就会把后面的对话输入器顶起来（用户报的真机 bug）");
-        require(!squash(chatArea).contains("valimeLift=with(LocalDensity.current)"),
-                CHAT_AREA + " 的 imeLift 又变回无条件读 WindowInsets.ime 了（同上）");
+        require(!squash(chatArea).contains("vallift=(imeInsets.getBottom"),
+                CHAT_AREA + " 的让位量又变回无条件读 WindowInsets.ime 了（同上）");
+        // ⚠️ 光钉「使用处有门控」还不够：把门控**算成常量**（`= false` / `= true`）
+        //    使用处一个字都不用改，守卫照样绿 —— 而"永远不抬"和"永远抬"都是 bug。
+        //    （这条是本轮 teeth 试出来的：只改名不构成有意义回归，但把定义换成常量是。）
+        //    所以这里连**定义**一起钉死：四个标志位必须真的喂给这个门控。
+        //
+        //    用 squash 后的整串比对，代价是格式化它就不认了 —— 这是刻意的：
+        //    这行是唯一的权威判据，动了它就该有人回来重读注释、重跑 teeth。
+        require(squash(chatArea).contains("valliftByFullScreenOverlay="
+                        + "state.sidebarOpen||state.settingsOpen"
+                        + "||state.uiDebugOpen||state.environmentOpen"),
+                CHAT_AREA + " 的 liftByFullScreenOverlay 必须由四个「全屏浮层」标志位算出："
+                        + "把它换成常量（或去掉某一个标志位）就等于关掉了这道门控，"
+                        + "而使用处看起来毫无变化");
         for (String flag : new String[]{
                 "state.sidebarOpen", "state.settingsOpen", "state.uiDebugOpen", "state.environmentOpen"}) {
             require(squash(chatArea).contains(squash(flag)),
-                    "coveredByFullScreenOverlay 必须包含 " + flag + "："
+                    "liftByFullScreenOverlay 必须包含 " + flag + "："
                             + "那几个页面里都有输入框，漏一个就会重演"
                             + "「打开搜索、后面的输入框自己抬起来」");
         }

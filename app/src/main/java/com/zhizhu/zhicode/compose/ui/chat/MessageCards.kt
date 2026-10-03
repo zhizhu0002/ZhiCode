@@ -11,8 +11,10 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -248,20 +250,26 @@ fun AssistantCard(
                 // clip 在 animateContentSize **外侧**：思考面板展开/收起时文字
                 // 按自然高度绘制、被逐帧露出来（详见 ToolGroupCard 的注释）。
                 .clipToBounds()
-                // ⚠️ 流式期间**不挂** animateContentSize。
+                // 尺寸动画**流式期间也挂**（用户要的「流式正文平滑增长」）。
                 //
-                // 正文每 32ms（DELTA_MERGE_MS）长高一次，而尺寸动画每次变化都会被重新
-                // 触发 —— 结果是整张卡在整条回复期间一直在做"测量→布局→动画"，
-                // 而它就在 LazyColumn 的一个 item 里。老设备上这就是"流式一顿一顿"
-                // 最直接的来源。定稿后（streaming = false）再挂上：那时它只动一次，
-                // 用来平滑"思考面板展开/收起"这类真实的一次性尺寸变化。
-                .then(
-                    if (item.streaming) {
-                        Modifier
-                    } else {
-                        Modifier.animateContentSize(animationSpec = ZhiMotion.sizeSpec)
-                    },
-                ),
+                // ## 这里改过，两个方向的理由都要留着
+                //
+                // 原来写的是 `if (item.streaming) Modifier else animateContentSize(...)`，
+                // 理由是：正文每 32ms（DELTA_MERGE_MS）长高一次，会反复触发尺寸动画 →
+                // 整张卡在整条回复期间持续"测量→布局→动画"。
+                //
+                // 但那个理由**站不住**，因为 `animateContentSize` 不是"每次变化都重放一遍
+                // 200ms 的补间"：目标一变它就从**当前动画值**继续跑到新目标。
+                // 真正的后果只是尺寸比内容**略微滞后**（跟得慢一点），而不是
+                // "重新触发风暴"。而流式正文增长的本身就是"内容每 32ms 多一行"，
+                // 不挂动画时那是**一帧一跳**的硬跳，正是用户报的「文字是直接没动画」。
+                //
+                // ⚠️ 这是本轮**唯一可能反向影响性能**的一项：想清楚再动它。
+                // 代价确实是"流式期间每一帧都在做一次测量+布局"，这是**想要平滑增长的
+                // 必然成本**，不是 bug。若真机上真的出现"流式一顿一顿"，回退点就是
+                // 这一处 —— 把它改回按 item.streaming 分支，其余几项动画不受影响
+                // （它们各自独立）。守卫 `MarkdownStreamingTest` 会把回退方向的选择记下来。
+                .animateContentSize(animationSpec = ZhiMotion.sizeSpec),
         ) {
             if (item.thinking.isNotEmpty() || item.processSteps.isNotEmpty()) {
                 ThinkingPanel(item = item, onToggle = onToggleThinking)
@@ -279,10 +287,27 @@ fun AssistantCard(
             )
             if (item.streaming) {
                 // 流式光标呼吸闪烁：之前是一块静止的字符，文本区里唯一「活着」的
-                // 记号却不动。「只有卡片在动」的观感有一半来自这里。
-                // 周期 = 淡入 300ms 去程 + 300ms 回程；alpha 走 draw 层，不重组。
+                // 记号却不动。周期 = 淡入 300ms 去程 + 300ms 回程。
+                //
+                // ⚠️⚠️ 这里**不能**写 `val cursorAlpha by cursor.animateFloat(...)`。
+                //
+                // 那个 `by` 就是 `getValue()` —— 它在**组合期**把动画的当前值读出来，
+                // 而这是个无限动画：值每帧都变 → **整张 AssistantCard 每帧重组一次**。
+                // 本文件那句注释原先写着"alpha 走 draw 层，不重组"，**与事实相反**：
+                // 走 draw 层的只有 `graphicsLayer { alpha = … }` 这个 lambda，
+                // 而喂给它的 `cursorAlpha` 早就把读操作放在了组合里。
+                //
+                // 正确写法：保留 `State<Float>` 本身（**不 `by`**），在 `graphicsLayer`
+                // 的 lambda 里读 `.value` —— `graphicsLayer` 的 lambda 在**绘制阶段**求值，
+                // 于是每帧只让这一层的绘制属性失效，**不触发重组**。
+                //
+                // 这是实测到的真问题：探针记录过 `recompose/s ChatArea=69 ChatList=64`
+                // （60Hz 下就是每帧一次）。参考实现（GetStream 的 `AITypingIndicator`）
+                // 用的是同一套 `rememberInfiniteTransition` + `graphicsLayer{alpha=}`，
+                // 差别在它把指示器放在**独立 item** 里，所以只有那几个点付代价；
+                // 我们放在正文卡里，代价就是整张卡。
                 val cursor = rememberInfiniteTransition(label = "stream-cursor")
-                val cursorAlpha by cursor.animateFloat(
+                val cursorAlpha = cursor.animateFloat(
                     initialValue = 1f,
                     targetValue = 0.15f,
                     animationSpec = infiniteRepeatable(
@@ -297,7 +322,7 @@ fun AssistantCard(
                     fontSize = ZhiTextScale.BodySmall,
                     modifier = Modifier
                         .padding(top = 1.dp)
-                        .graphicsLayer { alpha = cursorAlpha },
+                        .graphicsLayer { alpha = cursorAlpha.value },
                 )
             }
             // 上下文页脚淡入：流式一结束它就出现，之前是瞬间蹦出来的。
@@ -363,12 +388,22 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                         tint = scheme.primary,
                         modifier = Modifier.size(13.dp),
                     )
-                    Text(
-                        text = "思考过程" + (if (item.streaming) " · 进行中" else ""),
-                        color = scheme.primary,
-                        fontSize = ZhiTextScale.Caption,
+                    // 表头文案也是**会变的文字**：流式期间尾部多一个「 · 进行中」。
+                    // 走 Crossfade 淡变，而不是让它硬蹦出来/消失 —— 只有尾缀瞬间跳变
+                    // 时，整块面板看起来像"卡"了一下。做法与工具组标题
+                    // （`Crossfade(targetState = ToolGrouping.label(...))`）同一处口径。
+                    Crossfade(
+                        targetState = "思考过程" + (if (item.streaming) " · 进行中" else ""),
+                        animationSpec = ZhiMotion.fadeOutSpec,
+                        label = "thinking-label",
                         modifier = Modifier.padding(start = 5.dp),
-                    )
+                    ) { label ->
+                        Text(
+                            text = label,
+                            color = scheme.primary,
+                            fontSize = ZhiTextScale.Caption,
+                        )
+                    }
                 }
             }
         // 展开/收起：高度由 AssistantCard 外层的 animateContentSize 平滑过渡，
@@ -595,34 +630,24 @@ private fun ToolGroupCard(
 
     // 折叠组**没有卡片底**（反编译版 `addCollapsedToolActivity`：组头就是"图标 + 粗体标签 +
     // ⌄"，靠成员缩进与 `⎿` 副行体现层级，整块没有任何背景）。
-    // 这里改成 Box 只为了留住两个**功能**要求：动画的高度与裁剪。
-    Box(
+    //
+    // ⚠️⚠️ 根容器必须是**竖向**的，这不是随便挑的：
+    //
+    //   · 官方那一处是 `linearLayoutVbox3 = vbox()` —— 竖向 `LinearLayout`；
+    //   · 本轮之前这里是 `Box(...)`，而 **`Box` 是叠放**：于是「表头 + 副标题 +
+    //     展开内容」三个兄弟节点被放在**同一个原点**上互相盖住。
+    //
+    // 它是怎么从竖向变成叠放的：为了去掉卡片底，把原来的 `Card(...)` 换成了 `Box(...)`。
+    // Miuix 的 `Card` 内部就是 `Column(`（见 Card.kt），它**同时**提供了"竖向排列"与
+    // "内边距"两件事；换成 `Box` 时只补回了内边距和动画的挂点，**竖向排列没人补**，
+    // 而且不会有任何编译错误 —— 表现只是"工具卡的标题被内容压住、收起后文字对不上"。
+    //
+    // 这和文件面板那次「裸 `when` 换成 `AnimatedContent`」是同一类失误：
+    // 换容器时只看了它"多"提供了什么，没看它**顺手**提供了什么。
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            // 展开/收起的高度动画**只有这一处**，而裁剪层必须写在它**外侧**
-            // （clipToBounds 在 animateContentSize 之前）。
-            //
-            // ⚠️ 之前这里写成 `if (item.groupCompleted) 无动画 else 动画` —— 反了。
-            // 于是「点开一个已跑完的工具组」这个最常见的动作恰恰没有卡片动画：
-            // 外框瞬间撑开，内层各自挂着自己的 animateContentSize 单独滑动，用户
-            // 看到的就是「文字没跟着卡片的动画展开/缩回」。门控本意是"运行期间不挂"
-            // （工具输出每 200ms（PROGRESS_FLUSH_MS）长一次会把尺寸动画反复重新
-            // 触发，整张组卡持续重测量），所以跑完之后才该挂上。
-            //
-            // clip 在外的理由：裁剪层拿到的是**动画中的高度**，内层文字按自然高度
-            // 绘制、被逐帧露出来。反过来写（动画在外）裁剪层拿到的是自然高度，
-            // 一点也裁不到，文字仍然是瞬间全部出现。
-            .clipToBounds()
-            .then(
-                // 门控取**这一组自己**是否跑完（不是整批）：一批里可能既有已读完的一组、
-                // 又有还在跑的命令，用整批的状态会让跑完的那组也一直不挂动画。
-                if (done) {
-                    Modifier.animateContentSize(animationSpec = ZhiMotion.sizeSpec)
-                } else {
-                    Modifier
-                },
-            ),
+            .padding(vertical = 4.dp),
     ) {
         // 表头点击走 Miuix Surface(onClick)：不再手写 Modifier.clickable。
         // 传的是"切换"：展开态由 `ChatItem.expandedGroups` 记账，这一层不去推目标状态。
@@ -694,11 +719,27 @@ private fun ToolGroupCard(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = 21.dp, top = 2.dp),
         )
-        if (expanded) {
-            // ⚠️ 这里**不再**挂 animateContentSize。卡片本身已经在动（上面那处），
-            // 两层各挂一次的结果是：外框按动画高度走、内层按自己的动画滑动，
-            // 两者曲线不同步 —— 看起来就是文字在卡片里"自己飘"。高度的单一来源
-            // 是卡片，内层只负责按自然高度绘制、由卡片外层裁剪。
+        // 展开/收起：**内容自己**做高度动画。
+        //
+        // ⚠️ 以前是「外层 animateContentSize + `if (expanded) { Column { … } }`」。
+        // 那条写法**展开时看着还行**（内层按自然高度绘制、被外层裁剪逐帧露出来），
+        // 但**收起时是坏的**：`if` 一翻，内容当帧就被移出组合，于是只剩外层的框在
+        // 缩小、里面已经是空的 —— 用户报的就是「工具卡收回，文字就应该跟着收回」。
+        // 根因是"谁在动"不一致：框在动，内容不动。
+        //
+        // 现在内容自己就是动画的驱动者，展开与收起都由它负责，高度只有一个来源。
+        // ⚠️ 所以外层**不能**再挂 animateContentSize（本轮已撤掉）：
+        // 两层各挂一次会让外框按一条曲线、内层按另一条曲线走，
+        // 看起来就是"文字在卡片里自己飘"——本文件里记过这个坑。
+        //
+        // `expandFrom` / `shrinkTowards = Alignment.Top`：内容长在表头**下面**，
+        // 所以从顶边露出、朝顶边收回。用默认的 `Bottom` 会从底边往上长，
+        // 看起来像内容在把卡片往上"顶"。
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(animationSpec = ZhiMotion.sizeSpec, expandFrom = Alignment.Top),
+            exit = shrinkVertically(animationSpec = ZhiMotion.sizeSpec, shrinkTowards = Alignment.Top),
+        ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 members.forEach { tool ->
                     key(tool.id) {

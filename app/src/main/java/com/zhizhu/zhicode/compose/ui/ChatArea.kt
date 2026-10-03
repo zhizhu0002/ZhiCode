@@ -14,20 +14,27 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
@@ -35,6 +42,7 @@ import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.chat.AgentProgressCard
 import com.zhizhu.zhicode.compose.ui.chat.ChatList
 import com.zhizhu.zhicode.compose.ui.composer.Composer
+import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import top.yukonga.miuix.kmp.basic.FloatingToolbar
@@ -61,6 +69,7 @@ internal fun ChatArea(
     //
     // 注意 `workingStatus` 因此不再有专门的展示位（它是"正在思考…/正在执行 X…"这类
     // 进行时文案）。当前是否在跑由输入器右侧的停止键表达。
+    ZhiFrameTrace.countRecompose("ChatArea")
     val floating = state.tasks.isNotEmpty()
 
     // 对话区**不加框**（改过两次，别再加回来）。
@@ -73,7 +82,7 @@ internal fun ChatArea(
     // ⚠️ 不要顺手把 6dp 留白搬到下面的 Box 上：那个留白原本只为了让线不贴边，
     // 线没了留白就没意义了（`ChatFramePadding` 已一并删掉）。
     Box(modifier = modifier.fillMaxSize()) {
-        // 底部悬浮层（任务卡 + 输入器）的真实高度，用来给对话列表留白。
+        // 底部悬浮层（任务卡 + 输入器）的高度，用来给对话列表留白。
         //
         // ⚠️ 以前这里是**两个写死的常量**（输入器 92dp + 任务卡 140dp）。写死的代价是
         // 它永远不会跟着内容变：输入器多长一行、挂了附件条、开了调试模式的 Markdown
@@ -85,10 +94,62 @@ internal fun ChatArea(
         // 它的高度不受 bottomInset 影响，所以量一次就稳定。
         //
         // 初始值给一个够用的下限（首帧还没量到），避免第一帧底部贴太紧。
-        var floatingHeightPx by remember { mutableStateOf(0) }
+        //
+        // ## ⚠️⚠️ 高度必须分成**两段**，这是实测出来的性能问题，别合回去
+        //
+        //   · **内容高度** = 任务卡 + 反馈条 + 输入器自己的高度。只有它们真的变高/变矮才变。
+        //   · **IME 抬起量** = 键盘从屏幕底边长上来的那一段。**键盘动画期间它每帧都变。**
+        //
+        // 以前两段是**合在一起**的：`onSizeChanged` 挂在 `padding(bottom = imeLift)` 左边，
+        // 报出来的高度含 IME。于是键盘一动 → 高度每帧变 → ChatArea 每帧重组 →
+        // `bottomInset` 每帧变 → ChatList（参数里有它）每帧重组。
+        //
+        // 这不是推理，是量到的：探针记录过 `recompose/s ChatArea=69 ChatList=64`
+        // （60Hz 下就是每帧一次），而**同一行的 `Composer` 只有 1** —— 因为 Composer 的
+        // 参数里**没有** bottomInset。`FloatingCard` 更是从未出现在日志里。
+        // 这组数字正好是这个机制的指纹：只有链路上"参数含 bottomInset"的那两级在抖。
+        //
+        // 拆开之后：内容高度走状态（低频），IME 抬起量走**布局阶段**的 lambda
+        // （见下面 `offset {}` 处），键盘动画期间只让布局失效、**不触发重组**。
+        var floatingContentHeightPx by remember { mutableStateOf(0) }
+
+        // IME 抬起量「停稳」之后才落地，专供列表底部留白。
+        //
+        // 为什么列表这份要去抖、而悬浮层的位移不去抖：悬浮层要**贴着键盘动**（那是手感，
+        // 差一帧都能看出来），而列表的底部留白只解决"最后一条别被挡住"，
+        // 键盘动画途中它跟不跟手**完全看不出来**。于是把逐帧的那份只留给布局，
+        // 把列表这份压成低频 —— 重组次数就从"每帧"降到"每次键盘开合一两次"。
+        var settledImeLiftPx by remember { mutableStateOf(0) }
+        val imeInsets = WindowInsets.ime
+        val navigationBars = WindowInsets.navigationBars
         val density = LocalDensity.current
+        // 全屏浮层盖住工作区时，这一次 IME 变化与本输入器无关（见下面 offset 处的说明）。
+        val liftByFullScreenOverlay = state.sidebarOpen || state.settingsOpen ||
+            state.uiDebugOpen || state.environmentOpen
+
+        LaunchedEffect(imeInsets, navigationBars, density, liftByFullScreenOverlay) {
+            // 被全屏浮层盖住时，这一次 IME 变化与工作区无关，留白里的键盘项按原语义归零。
+            if (liftByFullScreenOverlay) {
+                settledImeLiftPx = 0
+                return@LaunchedEffect
+            }
+            snapshotFlow {
+                (imeInsets.getBottom(density) - navigationBars.getBottom(density)).coerceAtLeast(0)
+            }
+                .distinctUntilChanged()
+                // `collectLatest` + `delay` 就是一个只用稳定 API 实现的去抖：
+                // 值还在动的时候，下一个新值会**取消**上一个块里的 delay，于是永远落不了地；
+                // 只有连续 ImeSettleMs 没有新值时才写一次状态。
+                // （不用 `debounce`：它是 `@FlowPreview`，本工程没有开那个 opt-in。）
+                .collectLatest { target ->
+                    delay(ImeSettleMs)
+                    settledImeLiftPx = target
+                }
+        }
+
         val bottomInset = with(density) {
-            (floatingHeightPx.toDp() + FloatingBottomGap).coerceAtLeast(MinFloatingInset)
+            ((floatingContentHeightPx + settledImeLiftPx).toDp() + FloatingBottomGap)
+                .coerceAtLeast(MinFloatingInset)
         }
 
         ChatList(
@@ -145,20 +206,12 @@ internal fun ChatArea(
         // 「为什么在搜索会话打开输入法，后面的聊天发送框会自动抬起」）。
         //
         // 这里没有去猜"焦点在谁身上"（Compose 没给可靠的窗口级焦点查询），而是直接
-        // 按**有没有全屏浮层盖住工作区**判断：盖住的时候，这一次 IME 变化与本输入器无关。
-        // 设置页 / UI 调试页 / 环境页里的搜索框是同一类问题，所以一起排除掉。
-        val coveredByFullScreenOverlay = state.sidebarOpen || state.settingsOpen ||
-            state.uiDebugOpen || state.environmentOpen
-        val imeLift = if (coveredByFullScreenOverlay) {
-            0.dp
-        } else {
-            with(LocalDensity.current) {
-                (WindowInsets.ime.getBottom(this) - WindowInsets.navigationBars.getBottom(this))
-                    .coerceAtLeast(0)
-                    .toDp()
-            }
-        }
-
+        // 看**有没有全屏浮层盖住工作区**：盖住时那一次 IME 变化必然不属于本输入器。
+        // 判断结果是 `liftByFullScreenOverlay`，它同时决定两件事 —— `offset { }` 里
+        // 抬不抬，以及列表留白里算不算键盘那一段（见上面 LaunchedEffect 的首个分支）。
+        //
+        // 这段 IME 抬起量的**计算已上移**，与内容高度放在一起 —— 见那里的说明。
+        //
         // 底部悬浮层：任务卡在上、输入器在下，两者都不占布局高度，
         // 所以对话区始终铺满，且它们不随对话滚动。
         // 对应原版把 AgentProgressView + composerHost 放进位于 chatScroll
@@ -167,18 +220,9 @@ internal fun ChatArea(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                // 实测自己的高度回报给上面的 bottomInset。
-                // `onSizeChanged` 只在尺寸真的变了时回调，所以正常的打字/滚动不产生额外开销。
+                // ## 输入法抬起：为什么是 `offset { }` 而不是 `padding(bottom = …)`
                 //
-                // ⚠️ 它必须在 `padding(bottom = imeLift)` **左边**：onSizeChanged 报的是
-                // 它右侧（内层）量出来的尺寸 —— 让给键盘的那一段算进去之后，
-                // 上面的 bottomInset 才会跟着够到键盘上缘，于是被键盘挡住的内容还能滑上来。
-                // 不然只是输入框抬起来，最后几条消息永远压在键盘后面。
-                .onSizeChanged { floatingHeightPx = it.height }
-                // 输入法弹出时把整块悬浮层（任务卡 + 反馈条 + 输入器）顶到键盘之上。
-                //
-                // ## 为什么必须自己接，而不是指望清单里的 adjustResize
-                //
+                // 先把"必须自己接"这件事说清楚，因为这决定了下面为什么不能用现成机制：
                 // 清单里确实是 `windowSoftInputMode="adjustResize"`，但 `MainActivity`
                 // 在 `onCreate` 里调了 `enableEdgeToEdge()` —— 它等价于
                 // `setDecorFitsSystemWindows(false)`：DecorView 不再消费系统窗口 inset，
@@ -189,7 +233,37 @@ internal fun ChatArea(
                 // `setOnApplyWindowInsetsListener` + `WindowInsetsAnimation.Callback`，
                 // 把 `getInsets(Type.ime()).bottom` 一路 `applyKeyboardOffset(inset)`
                 // 顶到根布局上 —— 它从来没依赖过 adjustResize。
-                .padding(bottom = imeLift),
+                //
+                // 那段高度**每帧都在变**（键盘动画），所以关键不是"接到它"，而是
+                // "接到它而**不重组**"。两条路的差别：
+                //
+                //   · `padding(bottom = imeLift)` —— `imeLift` 是 `Dp`，必须在**组合期**
+                //     算出来才能传进去。于是每帧重组 → 每帧重建 Modifier 链。
+                //   · `offset { IntOffset(0, -lift) }` —— lambda 在**布局阶段**求值。
+                //     在 lambda 里读 inset，每帧只让布局失效（重新摆放这一次），
+                //     组合一次都不跑。
+                //
+                // 视觉等价：`padding` 是把内容从底边内缩，`offset` 是把整块往上摆，
+                // 而这块本来就贴在 BottomCenter，所以往上摆 = 让出键盘那一段。
+                .offset {
+                    // ⚠️ 别把这个读操作挪到组合里（比如 `val lift by remember { … }`），
+                    // 一挪回组合就又变成每帧重组了 —— 那正是这次要修的东西。
+                    val lift = if (liftByFullScreenOverlay) {
+                        0
+                    } else {
+                        (imeInsets.getBottom(this) - navigationBars.getBottom(this))
+                            .coerceAtLeast(0)
+                    }
+                    IntOffset(0, -lift)
+                }
+                // 实测**内容**高度（任务卡 + 反馈条 + 输入器自己）回报给上面的 bottomInset。
+                // `onSizeChanged` 只在尺寸真的变了时回调，所以正常的打字/滚动不产生额外开销。
+                //
+                // ⚠️⚠️ 它在 `offset { }` **右边**，量到的才是内容高度。这个位置是必须的：
+                // 换成 `padding` 时，让给键盘的那段会被算进**节点尺寸**，于是这里报的高度
+                // 含 IME、每帧都变 → 上面的 bottomInset 每帧变 → ChatList 每帧重组。
+                // `offset` 只改摆放、不参与尺寸，所以量出来只剩内容，尺寸稳定。
+                .onSizeChanged { floatingContentHeightPx = it.height },
         ) {
             AnimatedVisibility(
                 visible = floating,
@@ -243,6 +317,19 @@ private val FloatingBottomGap = 8.dp
 private val MinFloatingInset = 72.dp
 
 /**
+ * IME 抬起量「停稳」的判定窗口（毫秒）。
+ *
+ * 列表底部留白用的是一个去抖后的 IME 值：键盘动画期间值一直在变，连续这么长时间
+ * 没有新值才写一次状态。取值理由：
+ * · **不能太长** —— 键盘弹起动画约 200~300ms，等太久会让"最后一条消息滑上来"明显滞后。
+ * · **不能太短** —— 太短就等于没去抖，又退回每帧重组。
+ *
+ * 120ms 落在键盘动画的帧间隔之外（60Hz 一帧 16.7ms，120ms ≈ 7 帧没有新值才算停），
+ * 键盘在动的时候绝不会被判定为停稳。
+ */
+private const val ImeSettleMs = 120L
+
+/**
  * 悬浮的任务与状态卡。
  *
  * 原版 `AgentProgressView` 同时承载任务清单与当前工作状态
@@ -260,6 +347,7 @@ private fun FloatingAgentStatus(
     wide: Boolean,
     glass: Glass,
 ) {
+    ZhiFrameTrace.countRecompose("FloatingCard")
     val scheme = MiuixTheme.colorScheme
     // 外壳走共用的 FloatingBottomShell：内缩/圆角/阴影/模糊与反馈条、输入器同源，
     // 三块在同一列上必须"同框"（形态以之前的发送栏为准，见 Common.kt）。

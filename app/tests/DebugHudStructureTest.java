@@ -139,6 +139,9 @@ public final class DebugHudStructureTest {
     /** 终端外壳：扩展键与会话行的选中态变色（§29）。 */
     private static final String TERMINAL_CHROME = SRC + "ui/panes/TerminalChrome.kt";
 
+    /** 终端宿主（纯 Java 的 FrameLayout）：ANSI 调色板在这里，不在 Compose 侧。 */
+    private static final String TERMINAL_HOST = SRC + "../TermuxTerminalPane.java";
+
     /** 沙箱页：错误/空/列表三态 + 应用卡片的 animateItem（§26/§27）。 */
     private static final String SANDBOX_SCREEN = SRC + "ui/sandbox/ZhiSandboxScreen.kt";
 
@@ -1422,6 +1425,34 @@ public final class DebugHudStructureTest {
                 FILES_PANE + " 必须有 FileStage 枚举（LIST/VIEW/EDIT）："
                         + "把 `openFile == null` / `draft != null` 直接拼成 key 时，"
                         + "draft 一变就换 targetState");
+        // ③' §27 补：`AnimatedContent` 的**每个分支只能吐一个** composable。
+        //
+        // 这条是用户报「文件列表和面包屑重叠」之后补的。根因既不在面包屑也不在列表，
+        // 而在 `AnimatedContent` 的**容器语义**：它是**叠放**（转场时它必须把新旧两屏
+        // 放在同一个位置才能交叉淡变），它**不是** `Column`。
+        // 所以分支里并列写几个 composable 时，「表头 + 面包屑 + 列表」会被放到
+        // **同一个原点**上互相盖住 —— 实测就是这个重叠。
+        //
+        // 为什么以前不重叠：这层**原先是裸 `when`**，挂在 `Column` 下时兄弟节点是竖排的。
+        // C-4 把它换成 `AnimatedContent` 之后，竖排语义变成了叠放 ——
+        // 这正是本项目把那次重构标为「最容易改崩」的那个原因，这里就是它崩掉的地方。
+        //
+        // ⚠️ 断言必须**成对**（正向 + 反向）：只查正向的话，把 `Column(…) {` 换成
+        // 另一个同样单子节点的容器（等于把这一坨参数藏进新函数、却漏传一个形参）
+        // 照样绿；只查反向则完全没守住。两边都写才拦得住回归到裸 `{`。
+        requireContains(filesPane2, "FileStage.LIST -> Column(modifier = Modifier.fillMaxSize()) {",
+                FILES_PANE + " 的 LIST 分支必须**只吐一个** composable（外层那个 `Column`）："
+                        + "AnimatedContent 的容器是叠放语义，分支里并列多个节点会让"
+                        + "「表头 + 面包屑 + 列表」叠在同一个原点 —— 用户报的"
+                        + "「文件列表和面包屑重叠」就是这个");
+        requireContains(filesPane2, "FileStage.VIEW, FileStage.EDIT -> Column(modifier = Modifier.fillMaxSize()) {",
+                FILES_PANE + " 的 VIEW/EDIT 分支同上：它并列的是「表头 + 面包屑 + 内容」，"
+                        + "不包一层 `Column` 同样会叠在一起");
+        requireAbsentIn(filesPane2, "FileStage.LIST -> {",
+                FILES_PANE + " 的 LIST 分支不得回到裸 `{`：那是「裸 when 换成 AnimatedContent」"
+                        + "的回归形态，观感就是列表与面包屑重叠");
+        requireAbsentIn(filesPane2, "FileStage.VIEW, FileStage.EDIT -> {",
+                FILES_PANE + " 的 VIEW/EDIT 分支不得回到裸 `{`（同上）");
         requireContains(sandbox, "items(state.packages, key = { it })",
                 SANDBOX_SCREEN + " 的应用列表必须保留稳定 key（否则 animateItem 没有意义）");
         requireContains(sandbox, "modifier = Modifier.animateItem(),",
@@ -1704,6 +1735,238 @@ public final class DebugHudStructureTest {
         requireContains(summaryBody, "activity.previews.isNotEmpty()",
                 MESSAGE_CARDS + " 的 compactToolSummary 必须先说预览图："
                         + "否则沙箱截图会显示成「28 行 · 点按展开」，用户看不出有图可看");
+
+        // ---- 31. 终端必须跟随应用主题 ------------------------------------------
+        //
+        // 用户报「终端对深浅色不适配」。事实是：ANSI 调色板一直写死深色档，而**浅色档
+        // 那张表历史上写过却从来没走到过** —— 它唯一的入口 applyTheme 没有任何调用方，
+        // 宿主类注释里把这件事记成了"应该单独做"。本轮就是单独做它。
+        //
+        // ⚠️ 这一节的重点不是"浅色档存在"，而是**两档都得在**：
+        //  · 只钉"浅色档接上了" → 把深色档也顺手换成浅色值照样绿，
+        //    而深色是默认档，那等于**所有人**的外观都被改了；
+        //  · 只钉"深色档没变" → 什么都没做也能绿。
+        // 所以下面每对断言都是正向 + 反向一起给。
+        //
+        // 为什么值得单列一节：配色这条链断了**不会有任何编译错误或运行时报错**，
+        // 界面只是安静地回到"深色模式看不出问题、浅色模式一片黑"。
+        String terminalHost = stripComments(read(root, TERMINAL_HOST));
+
+        // ① 必须按主题分档，而不是写死一张表。
+        String applyPalette = bodyOf(terminalHost,
+                "private void applyTerminalPalette(TerminalSession session)");
+        require(!applyPalette.isEmpty(),
+                TERMINAL_HOST + " 找不到 applyTerminalPalette 的正文（签名变了？）");
+        requireContains(applyPalette, "if (!darkTheme) {",
+                TERMINAL_HOST + " 的 applyTerminalPalette 必须按 darkTheme 分深浅两档："
+                        + "只写死一张表的话，浅色模式下终端仍然是黑底白字");
+        // ② 浅色档必须**背景与前景成对**给。只改背景不改前景 = 浅底上留白字，等于看不见。
+        requireContains(applyPalette,
+                "colors[TextStyle.COLOR_INDEX_BACKGROUND] = Color.rgb(246, 248, 252);",
+                TERMINAL_HOST + " 的浅色档必须给出背景色（旧表里的 BG 246,248,252）");
+        requireContains(applyPalette,
+                "colors[TextStyle.COLOR_INDEX_FOREGROUND] = Color.rgb(29, 36, 51);",
+                TERMINAL_HOST + " 的浅色档必须同时给出前景色（TEXT 29,36,51）："
+                        + "只改背景会让文字变成浅底上的浅字，等于什么都看不见");
+        // ③ 深色档不许变 —— 改浅色档时顺手"调整"一下深色档，浅色下看不出来，
+        //    而深色是默认档，外观就被悄悄改动了。
+        requireContains(applyPalette,
+                "colors[TextStyle.COLOR_INDEX_BACKGROUND] = Color.rgb(0, 0, 0);",
+                TERMINAL_HOST + " 的深色档背景必须仍是纯黑：改浅色档时不得顺手动深色档，"
+                        + "深色是默认档，动了等于改了所有用户的外观");
+        // ④ 空档期（还没有会话 / 会话已退出）的底色不得写死。
+        require(!terminalHost.contains("setBackgroundColor(Color.BLACK)"),
+                TERMINAL_HOST + " 不得再写死 setBackgroundColor(Color.BLACK)："
+                        + "浅色档下没有会话时会闪出一块纯黑 —— 那正是「深浅色不适配」的一处");
+        // ⑤ 必须有推送入口。
+        require(terminalHost.contains("public void setDarkTheme(boolean dark)"),
+                TERMINAL_HOST + " 必须有 public void setDarkTheme(boolean dark)："
+                        + "应用主题的唯一权威在 Compose 那边（LocalZhiDark），"
+                        + "宿主是纯 Java 的 FrameLayout，读不到它");
+        // ⑥ 光是"有这个入口"没用 —— 浅色表当年就是死在"没人调"上。界面侧必须真的推。
+        requireContains(terminalPane, "LaunchedEffect(isDark) { pane.setDarkTheme(isDark) }",
+                TERMINAL_PANE + " 必须在 isDark 变化时调用 pane.setDarkTheme(isDark)："
+                        + "宿主加了 setDarkTheme 却没人调用，等于浅色档仍然走不到 ——"
+                        + "历史上那张浅色表走不到，原因正是它的入口 applyTheme 没有调用方");
+        // ⑦ 外壳的两个占位不得再写死黑底（它们也铺满整个面板）。
+        require(!terminalChrome.contains("background(Color.Black)"),
+                TERMINAL_CHROME + " 的占位不得再写死 Color.Black 底色（同上："
+                        + "浅色模式下会从浅底里闪出一块纯黑）");
+
+        // ---- 32. 对话流的文字动画（表头淡变 / 新成员一次性进入）------------------
+        //
+        // 用户的原话：「对话流的动画还不是很完善（尤其是思考和正文还有工具卡），
+        // 文字是直接没动画」。这一节钉住本轮补上的两处。
+        String cardsForMotion = stripComments(read(root, MESSAGE_CARDS));
+
+        // ① 思考面板的表头文案必须过 Crossfade。
+        //
+        // 表头是「思考过程」+ 流式期间多一个「 · 进行中」。不淡变的话，尾缀会在
+        // 流式开始/结束那两下硬蹦出来/消失 —— 整块面板看着像"卡"了一下。
+        // 做法与工具组标题同一口径（「Crossfade(targetState = ToolGrouping.label(...))」）。
+        String thinkingPanel = bodyOf(cardsForMotion, "private fun ThinkingPanel(");
+        require(!thinkingPanel.isEmpty(),
+                MESSAGE_CARDS + " 找不到 ThinkingPanel 的正文（签名变了？）");
+        requireContains(thinkingPanel, "label = \"thinking-label\",",
+                MESSAGE_CARDS + " 的 ThinkingPanel 表头文案必须过 Crossfade（label = "
+                        + "\"thinking-label\"）：不加的话「 · 进行中」这个尾缀是硬蹦的");
+        // ⚠️ 反向：只查正向的话，Crossfade 声明留着、使用处退回裸 Text 照样绿
+        //    —— 本仓 §29 记过这个失败模式。
+        require(!thinkingPanel.contains("text = \"思考过程\" + (if (item.streaming)"),
+                MESSAGE_CARDS + " 的 ThinkingPanel 表头不得退回裸 Text："
+                        + "那样尾缀又是硬切（Crossfade 声明留着也没用）");
+
+        // ② 新成员的一次性进入动画。
+        //
+        // 为什么需要：一轮助手回合是**一个** LazyColumn item，回合内部追加的工具卡/正文
+        // 不产生新 item，item 级的 animateItem 根本不会触发 —— 文字就是"蹦"出来的。
+        String chatListForMotion = stripComments(read(root, CHAT_LIST));
+        requireContains(chatListForMotion, "private val MemberEnterRise = 8.dp",
+                CHAT_LIST + " 必须有 MemberEnterRise 常量（新成员上移的距离）");
+        String animatedMember = bodyOf(chatListForMotion, "private fun AnimatedMember(");
+        require(!animatedMember.isEmpty(),
+                CHAT_LIST + " 找不到 AnimatedMember（签名变了？）");
+        // ⚠️⚠️ 这一节最重要的一条：**历史消息不能在滚动中补播动画**。
+        //
+        // LazyColumn 会回收组合，往上滚到旧消息时那一条是"重新进入组合"的。
+        // 若判据写成"刚进入组合就播"，历史消息会在滚动里不停闪 —— 比没有动画糟得多。
+        // 所以：可见性判据必须来自 「seenIds」（首次组合时已把当时的 transcript 全部登记），
+        // 而不是"它进来了"。
+        requireContains(chatListForMotion, "animate = remember(item.id) {",
+                CHAT_LIST + " 的成员进入动画必须以「这个 id 以前没见过」为判据"
+                        + "（animate = remember(item.id) { … }）："
+                        + "写成「刚进入组合就播」会让往上滚到的历史消息不停闪");
+        // 判据的来源要单独钉一次：上一条只看 `animate = remember(item.id) {`，
+        // 把里面换成任何别的条件（比如"刚进组合"）它照样绿。
+        requireContains(chatListForMotion, "val fresh = seenIds.add(item.id)",
+                CHAT_LIST + " 的进入判据必须取自 seenIds.add(...) 的返回值："
+                        + "换成别的来源就把「历史消息补播动画」那个失败模式放回来了");
+        requireContains(chatListForMotion, "val seenIds = remember(state.activeSessionId) {",
+                CHAT_LIST + " 必须有 seenIds，且以 activeSessionId 为 key："
+                        + "换会话时重新快照一次，否则新会话里的消息会集体播一次淡入");
+        // ⚠️ 播种的**实现位置**后来挪了：集合改放文件级、播种收进 `seenIdsFor`，
+        //    因为 `remember` 的寿命只到本层组合被丢弃为止 —— 组合一旦重建，
+        //    「用当前 transcript 再播种一次」会把**刚刚新到的那条**也登记成已见过，
+        //    于是它的动画静默消失（详情见 ChatList 里的长注释）。
+        //    所以这里改钉两处：调用点传入了当时快照，且播种发生在"按会话只做一次"的门内。
+        requireContains(chatListForMotion, "seenIdsFor(state.activeSessionId, state.transcript)",
+                CHAT_LIST + " 的 seenIds 初次组合必须把**当时的 transcript 快照**交给播种函数："
+                        + "它们是历史，不该补播动画");
+        String seenIdsForBody = bodyOf(chatListForMotion, "private fun seenIdsFor(");
+        require(!seenIdsForBody.isEmpty(),
+                CHAT_LIST + " 找不到 seenIdsFor 的正文（改名了？）");
+        requireContains(seenIdsForBody, "seenMessageIds.addAll(transcript.map { it.id })",
+                CHAT_LIST + " 的 seenIdsFor 必须把**当时的 transcript 全部**登记为已见过："
+                        + "它们是历史，不该补播动画");
+        requireContains(seenIdsForBody, "if (seenSeededSession != sessionId) {",
+                CHAT_LIST + " 的 seenIdsFor 播种必须**按会话只做一次**："
+                        + "组合重建时又播种一次，会把刚新到的那条也标成已见过，动画就没了");
+        // 反向：不得无条件播（这是最容易写出的错误版本）。
+        require(!chatListForMotion.contains("AnimatedMember(animate = true)"),
+                CHAT_LIST + " 不得无条件播进入动画（历史消息会在滚动中不停闪）");
+        // 历史那条路必须零开销：不建 layer。
+        requireContains(animatedMember, "if (!animate) {",
+                CHAT_LIST + " 的 AnimatedMember 必须在 animate 为假时原样输出内容："
+                        + "历史消息占绝大多数，给每条都常驻一个 graphicsLayer 是白付开销");
+        requireContains(animatedMember, "Modifier.graphicsLayer {",
+                CHAT_LIST + " 的 AnimatedMember 必须用 graphicsLayer 做淡入+位移");
+
+        // ③ 进度必须**在绘制期读**。
+        //
+        // 这不是风格问题。写成 `val p = progress.value` 再 `graphicsLayer { alpha = p }`，
+        // 那个 `by`/`=` 就是组合期读：动画的**每一帧**都让本组件重组一次，
+        // 而本组件是消息列表的成员包装，重组就把 `content()` 整条（含 Markdown 正文）
+        // 重新求值。外面同时还有逐帧的列表布局在跑 —— 两边叠起来就是用户报的
+        // 「没有动画，只看到卡」。
+        //
+        // ⚠️ 只钉正向不够：`Modifier.graphicsLayer {` 留着、lambda 里改成读一个
+        //    组合期算好的局部变量，照样绿 —— 而那正是要拦的写法。所以正反一起给。
+        require(!animatedMember.contains("val p = progress.value"),
+                CHAT_LIST + " 的 AnimatedMember 不得在组合期读进度"
+                        + "（`val p = progress.value` 会让动画每帧重组整条消息，"
+                        + "正文一起重建 → 动画被淹没）：读数必须放进 graphicsLayer 的 lambda");
+        requireContains(animatedMember, "val v = progress.value",
+                CHAT_LIST + " 的 AnimatedMember 必须在 graphicsLayer 的 lambda 里读进度"
+                        + "（`val v = progress.value` 写在 lambda 内 = 绘制期读，动画期间不重组）");
+
+        // ⚠️ 第 32 节到此为止只覆盖"文字成员进入"。下面 33 管的是**同一条链路的性能前提** ——
+        // 逐帧重组不解决，上面这些动画再多也看不出来。
+
+        // ---- 33. 悬浮层的底部留白与 IME 抬起（性能契约）------------------------
+        //
+        // 用户报「操作 5、6、7 都没有动画」，而这三条的共同前提是**列表不在每帧重组**。
+        // 实测（真机 zhi-frame.log，逐秒聚合的 recompose 计数）：
+        //
+        //     recompose/s ChatArea=69 ChatList=64     ← 60Hz 下就是每帧一次
+        //     recompose/s Composer=1 ChatList=1 ChatArea=1
+        //
+        // 关键在**同一行的 Composer 只有 1**：Composer 是 ChatArea 的子级、参数里
+        // **没有** bottomInset，所以它被跳过了；而 ChatList 的参数里有 bottomInset，
+        // 于是跟着抖。这组数字就是这个机制的指纹，不是巧合。
+        //
+        // 成因（两处，都在这一节钉住）：
+        //   ① `onSizeChanged` 挂在 `padding(bottom = imeLift)` **左边** → 报出来的高度
+        //      含 IME → 键盘动画期间每帧变 → ChatArea 每帧重组 → bottomInset 每帧变
+        //      → ChatList 每帧重组。
+        //   ② `imeLift` 本身是组合期算出来的 `Dp` → 同样是每帧重组。
+        //
+        // 这一节的断言都是「正反成对」的：只钉"新写法在"，把旧写法改回去还能绿是没用的。
+        String chatAreaForPerf = stripComments(read(root, CHAT_AREA));
+
+        // ① 高度必须分成两段，且列表那份只认"停稳"的 IME 值。
+        requireContains(chatAreaForPerf, "var floatingContentHeightPx by remember { mutableStateOf(0) }",
+                CHAT_AREA + " 必须把悬浮层高度存成**内容**高度（floatingContentHeightPx）："
+                        + "存成含 IME 的合并高度，键盘一动它就每帧变");
+        requireContains(chatAreaForPerf, "var settledImeLiftPx by remember { mutableStateOf(0) }",
+                CHAT_AREA + " 必须有「停稳」的 IME 抬起量（settledImeLiftPx）专门喂给列表留白");
+        requireContains(chatAreaForPerf, "private const val ImeSettleMs = 120L",
+                CHAT_AREA + " 必须有 ImeSettleMs 常量（去抖窗口）："
+                        + "没有它就只能把逐帧的 IME 值直接塞进 bottomInset");
+        // ② 那份 IME 值必须经 snapshotFlow + 去抖，而不是组合期读。
+        requireContains(chatAreaForPerf, "delay(ImeSettleMs)",
+                CHAT_AREA + " 的 IME 去抖必须真的等 ImeSettleMs（collectLatest + delay）："
+                        + "只声明常量不用，等于没去抖");
+        require(!chatAreaForPerf.contains("val imeLift = if ("),
+                CHAT_AREA + " 不得再在组合期算出 imeLift 这个 Dp："
+                        + "组合期读 WindowInsets.ime = 键盘动画每帧重组整棵 ChatArea");
+        require(!chatAreaForPerf.contains("padding(bottom = imeLift)"),
+                CHAT_AREA + " 不得再用 padding(bottom = imeLift)："
+                        + "padding 会把它算进节点尺寸，于是 onSizeChanged 报的高度又含 IME");
+        // ③ 抬起必须走布局阶段的 lambda。
+        requireContains(chatAreaForPerf, ".offset {",
+                CHAT_AREA + " 的 IME 抬起必须走 Modifier.offset { }（lambda 在布局阶段求值）："
+                        + "这样键盘动画每帧只让布局失效，组合一次都不跑");
+        requireContains(chatAreaForPerf, "imeInsets.getBottom(this)",
+                CHAT_AREA + " 必须在 offset 的 lambda 里读 insets（imeInsets.getBottom(this)）："
+                        + "挪到组合里就又变成每帧重组了");
+        // ④ 量高度的那一处必须在 offset **右边**，且报的是内容高度。
+        requireContains(chatAreaForPerf, ".onSizeChanged { floatingContentHeightPx = it.height },",
+                CHAT_AREA + " 的 onSizeChanged 必须在 offset { } **右边**并回报内容高度："
+                        + "放到左边量到的是含 IME 的合并高度（这就是每帧重组的源头）");
+        // ⑤ 全屏浮层那条老语义不许丢：盖住时既不抬、留白也不算键盘。
+        requireContains(chatAreaForPerf, "if (liftByFullScreenOverlay) {",
+                CHAT_AREA + " 必须保留「全屏浮层盖住时不抬」的语义"
+                        + "（否则侧栏里的搜索框一提键盘，后面的对话输入器会跟着抬起来 ——"
+                        + "这是用户实测报过的 bug）");
+        requireContains(chatAreaForPerf, "settledImeLiftPx = 0",
+                CHAT_AREA + " 在浮层盖住时还得把 settledImeLiftPx 归零："
+                        + "只让位移不抬、留白却仍算着键盘那一段，列表底部会白留一截");
+
+        // ⑥ 流式光标的呼吸闪烁同理：alpha 必须在绘制期读。
+        //
+        // 这个无限动画原先写成 `val cursorAlpha by cursor.animateFloat(…)` 再
+        // `graphicsLayer { alpha = cursorAlpha }` —— 而 `by` 就是 `getValue()`，
+        // 它在**组合期**把当前值读出来，于是整张 AssistantCard 每帧重组一次
+        // （正文 Markdown 一起重建）。注释当年还写着"走 draw 层，不重组"，与事实相反。
+        String assistantCard = bodyOf(cardsForMotion, "fun AssistantCard(");
+        require(!assistantCard.isEmpty(),
+                MESSAGE_CARDS + " 找不到 AssistantCard 的正文（签名变了？）");
+        require(!assistantCard.contains("val cursorAlpha by"),
+                MESSAGE_CARDS + " 的流式光标不得写成 `val cursorAlpha by cursor.animateFloat(…)`："
+                        + "那个 `by` 是组合期读，会让整张卡片每帧重组");
+        requireContains(assistantCard, "alpha = cursorAlpha.value",
+                MESSAGE_CARDS + " 的流式光标必须在 graphicsLayer 的 lambda 里读 alpha"
+                        + "（`alpha = cursorAlpha.value` = 绘制期读，动画期间不重组）");
     }
 
     /** 子串出现次数。 */

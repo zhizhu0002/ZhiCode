@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,8 +26,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -46,8 +50,11 @@ import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
+import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import com.zhizhu.zhicode.compose.ui.rememberFingerTracker
+import top.yukonga.miuix.kmp.anim.SinOutEasing
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -142,6 +149,7 @@ fun ChatList(
      */
     debugTasks: List<AgentTask> = emptyList(),
 ) {
+    ZhiFrameTrace.countRecompose("ChatList")
     val listState = rememberLazyListState()
     val currentState by rememberUpdatedState(state)
 
@@ -246,13 +254,35 @@ fun ChatList(
     // 输入法弹出/收起时把对话吸回底部：键盘顶起视口后列表可视高度骤变，
     // 原先贴底的内容被顶出屏幕；用户此刻的意图几乎总是"接着输入"，所以这里
     // 无条件回底（不改 autoFollow，避免键盘收起时把正在看历史的人拽走）。
-    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
-    LaunchedEffect(imeBottom) {
-        if (imeBottom > 0) {
-            val s = currentState
-            val leading = if (s.transcript.isEmpty()) 1 else 0
-            listState.requestScrollToItem(leading + s.transcript.size)
-        }
+    //
+    // ⚠️ 这里**不能在组合期读 inset**，必须走 `snapshotFlow`。
+    //
+    // 原先写的是 `val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)`
+    // 再 `LaunchedEffect(imeBottom)`。问题是 `WindowInsets.ime` 在**键盘动画的整个
+    // 过程中每帧都在变**，而组合期读 = 每帧都让这一层（连同整个列表）重组一次。
+    //
+    // 三个触发点全都落在这条路径上：输入器随键盘升降、悬浮任务卡与它同列跟着动、
+    // 以及**发送消息时键盘收起**（所以"发个你好、回复也会闪"）。用户报的
+    // 「对话流狂闪」正是这条路径：每帧重组 → 每帧重新布局列表 →
+    // 相邻两帧的内容在"重排前 / 重排后"之间来回，看起来就是整片在闪。
+    //
+    // 放进 `snapshotFlow` 之后，读取发生在协程里、**不进组合**，所以 inset 每帧变
+    // 一次也不重组；而"要先读一次当前值"这件事由 flow 的首次发射承担，
+    // 与原先那次组合期读**语义等价**。
+    //
+    // `distinctUntilChanged` 不是省事：键盘动画里 inset 会连着好几帧同值，
+    // 去掉重复可以少发几次滚动请求（滚动是幂等的，但没必要发）。
+    val imeInsets = WindowInsets.ime
+    val imeDensity = LocalDensity.current
+    LaunchedEffect(imeInsets, imeDensity) {
+        snapshotFlow { imeInsets.getBottom(imeDensity) }
+            .distinctUntilChanged()
+            .collect { imeBottom ->
+                if (imeBottom <= 0) return@collect
+                val s = currentState
+                val leading = if (s.transcript.isEmpty()) 1 else 0
+                listState.requestScrollToItem(leading + s.transcript.size)
+            }
     }
 
     // 对话流切成「块」（一轮助手回合一块）。放在 `LazyColumn` **外面**算：
@@ -262,6 +292,41 @@ fun ChatList(
         TurnLayout.blocks(
             state.transcript.map { TurnLayout.Entry(it.id, isUser = it.kind == ChatKind.USER) },
         )
+    }
+
+    // 「已经见过」的消息 id —— 用来判断某个成员是**本次新出现的**还是历史。
+    //
+    // ## 为什么需要它
+    //
+    // 一轮助手回合是**一个** `LazyColumn` item（见 TurnLayout），所以 item 级的
+    // `animateItem` 只在整块位置变化时触发；**回合内部**新追加的工具卡/正文
+    // 不产生新 item，于是没有任何进入动画 —— 观感就是文字"蹦"出来的。
+    // 用户要的「新消息整条淡入/上移」缺的正是这一层。
+    //
+    // ## 为什么不能无条件播
+    //
+    // `LazyColumn` 会**回收组合**：往上滚到历史消息时，那一条是**重新进入组合**的。
+    // 无条件播进入动画，历史消息就会在滚动中不停闪 —— 那比"没有动画"糟得多。
+    // 所以判据必须是"这个 id 以前没见过"，而不是"它刚进入组合"。
+    //
+    // 集合本身放在**文件级**（见 `seenMessageIds`），**不能**放在这里的 `remember` 里 ——
+    // 这一点是本轮踩过的坑，写下来免得下一个人又挪回去：
+    //
+    //   原来写的是 `remember(activeSessionId) { HashSet().apply { addAll(transcript) } }`。
+    //   问题在于这个 `remember` 的寿命**只到本层组合被丢弃为止**。一旦 ChatList 这层
+    //   组合被重建（工作区宿主重进组合、面板被重新挂载…），这个块会**再跑一次**，
+    //   而 `addAll(当前的 transcript)` 会把**刚刚新到的那条消息也登记成"已见过"** ——
+    //   于是它的 `add` 返回 false，`animate` 为假，**动画静默消失**：
+    //   代码看着没错、编译通过、也不报错，只是不播。
+    //
+    // 所以：集合放文件级，并且**按会话只播种一次**（`seenSeededSession` 判重）。
+    // 重建组合时 `seenIdsFor` 只会把已有集合还回来，不再重新登记。
+    //
+    // ⚠️ `add` 的返回值就是"以前没见过"，所以下面用 `remember(item.id) { seenIds.add(id) }`
+    // 一次搞定"判断 + 登记"。它在组合期有副作用，但幂等、只做一次集合插入 ——
+    // 换成 `LaunchedEffect` 就晚了：那一帧的 `isNew` 必须**同步**拿到。
+    val seenIds = remember(state.activeSessionId) {
+        seenIdsFor(state.activeSessionId, state.transcript)
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -334,6 +399,16 @@ fun ChatList(
                                 //    第 2 条之后的菜单会整体偏掉前面所有成员的高度。
                                 //
                                 // 所以「手指追踪 + 菜单锚点」必须始终贴在**自己那一条**上。
+                                // 本次新出现的成员播一次「淡入 + 轻微上移」；历史成员原样直出。
+                                AnimatedMember(
+                                    animate = remember(item.id) {
+                                        val fresh = seenIds.add(item.id)
+                                        // 探针：新消息应当 fresh=true。全是 false 就说明
+                                        // 判据又退回"按组合生命周期算新的"了。
+                                        ZhiFrameTrace.note("seen/item " + item.id + " fresh=" + fresh)
+                                        fresh
+                                    },
+                                ) {
                                 Box(modifier = Modifier.fillMaxWidth().then(finger.modifier)) {
                                     // ⚠️ 调试条与消息卡必须放进**同一个 Column** 里，不能并列在
                                     // 上面那个 Box 下：Box 的子项是**叠放**而不是竖排，
@@ -383,6 +458,7 @@ fun ChatList(
                                     // 于是它从手指那一点长出来，且坐标空间与手指追踪同源。
                                     anchoredMenu(item.id, fingerOffset)
                                 } // Box（手指追踪 + 菜单锚点）
+                                } // AnimatedMember（一次性进入动画）
                             }
                         }
                     } // Column（整个回合：各成员依次竖排）
@@ -600,5 +676,145 @@ private fun InlineTaskList(tasks: List<AgentTask>) {
                 }
             }
         }
+    }
+}
+
+/**
+ * 「已经见过」的消息 id —— 判断某个成员是**本次新出现**的还是历史。
+ *
+ * ## 为什么是文件级，而不是 `ChatList` 里的 `remember`
+ *
+ * 见调用点的说明：`remember` 只活到那层组合被丢弃为止，而重建组合时它会拿**当前的**
+ * transcript 重新播种，把刚到的消息也算成"历史" —— 动画就这么静默消失了。
+ * 放在文件级之后，集合的寿命等于进程，重建组合不会误登记。
+ *
+ * ## 代价（写清楚，别当成没想过）
+ *
+ *  · 只增不减，随一次会话的消息数增长。一条消息一个字符串，量级可忽略；
+ *    换会话时不会清空，但 id 是唯一的，误判不会发生。
+ *  · 只读主线程（组合期），所以不需要加锁。
+ */
+private val seenMessageIds = HashSet<String>()
+
+/** 上一次播种 [seenMessageIds] 的会话 id；`null` = 还没有播种过。 */
+private var seenSeededSession: String? = null
+
+/**
+ * 取「已经见过」的集合，必要时先播种。
+ *
+ * 播种 = 把**当时的** transcript 全部登记为已见过（它们是历史，不该补播动画）。
+ * ⚠️ 只在会话**变了**的时候播种；同一个会话下反复调用只会把已有集合还回来 ——
+ * 这一点正是上面那个 bug 的修复点。
+ */
+private fun seenIdsFor(
+    sessionId: String?,
+    transcript: List<ChatItem>,
+): MutableSet<String> {
+    if (seenSeededSession != sessionId) {
+        seenSeededSession = sessionId
+        seenMessageIds.addAll(transcript.map { it.id })
+        // 探针：正常一次会话只会看到一行。若这里反复刷，说明会话 id 在抖动
+        // （那会让每条消息都被当成"新的"而集体淡入，是另一种病）。
+        ZhiFrameTrace.note("seen/seed session=" + sessionId + " n=" + transcript.size)
+    }
+    return seenMessageIds
+}
+
+/**
+ * 新成员进入时上移的距离。
+ *
+ * 取 8dp：够看出"它是从下面滑上来的"，又不会让整块内容看起来在跳。
+ * 位移与淡入用同一条 [ZhiMotion.FADE_IN_MILLIS]（300ms + SinOut）——
+ * 与 Miuix 的 `PopupDimEnter` 同一个量纲，跟全应用的"出现"节奏一致。
+ */
+private val MemberEnterRise = 8.dp
+
+/**
+ * 一条成员（消息 / 工具卡）的**一次性**进入动画：淡入 + 轻微上移。
+ *
+ * ## 为什么是"一次性"而不是普通的 AnimatedVisibility
+ *
+ * [animate] 传的是"**本次新出现**"，由调用点的 `seenIds` 决定（见那里的说明）。
+ * 一旦为 true 就不再翻转 —— 而 [animate] 为 false 时本组件直接原样输出内容，
+ * **连 layer 都不建**。于是：
+ *
+ *  · 历史消息（含滚动回来重新进入组合的）走零开销的那条路；
+ *  · 只有真正新到的那一条才付一次动画与一个 graphicsLayer。
+ *
+ * 这也是为什么不写成 `AnimatedVisibility`：那个组件管的是"出现/消失"，
+ * 而这里要的是"新出现的补一段位移"，两者语义不同。
+ *
+ * ## 为什么动画跑完就把 layer 摘掉
+ *
+ * `graphicsLayer` 会让这一条**各自单独成层**；消息列表里每条都常驻一层是没必要的
+ * 开销（外面还套着模糊的捕获层），所以只在动画期间挂着，进度到 1 之后返回裸
+ * `Modifier`。摘掉 modifier 节点不会重建内容，也不会丢掉子级的 `remember`。
+ *
+ * ## ⚠️⚠️ 进度必须在**绘制期**读，不能在组合期读
+ *
+ * 先看写错会怎样 —— 这是本工程真实踩过的坑，和 `AssistantCard` 里那个流式光标
+ * 是**同一个错**（见 MessageCards.kt 的说明）。错误写法是：
+ *
+ *     val p = progress.value              // ← 组合期读
+ *     ...
+ *     Modifier.graphicsLayer { alpha = p }   // 值早就被读死了，这里读的只是局部变量
+ *
+ * `progress.value` 在组合里被读 → 这个动画的**每一帧**都让本组件重组一次。
+ * 本组件是消息列表的**成员包装**，它重组就会把 `content()` 整条重新求值 ——
+ * 也就是说，为了让一条消息淡入，整条消息（含 Markdown 正文）每帧重建。
+ * 外面还有逐帧的列表布局在跑，两边叠起来就是"动画看不出来、只看到卡"。
+ *
+ * 正确写法是把读数放进 `graphicsLayer` 的 lambda：
+ *
+ *     Modifier.graphicsLayer {
+ *         val v = progress.value          // ← 绘制期读，只让这一层重绘
+ *         alpha = v
+ *         translationY = (1f - v) * rise
+ *     }
+ *
+ * `graphicsLayer { }` 的 lambda 在**绘制阶段**求值，读到的状态只登记在绘制作用域上，
+ * 所以整个动画期间**组合一次都不跑**（只有放进/结束各一次）。
+ *
+ * ## 那 `done` 这个标志是干什么的
+ *
+ * 上面说"进度到 1 就摘 layer"，而摘不摘是**组合期**的决定。如果写成
+ * `if (progress.value >= 1f) Modifier else …`，为了做这个判断又得在组合里读一次 ——
+ * 等于把刚省下来的开销又请回来。所以改用一次性翻牌：动画 `animateTo` 返回之后
+ * 才把 `done` 置真，**整个动画期间组合只跑首尾两次**。
+ */
+@Composable
+private fun AnimatedMember(
+    animate: Boolean,
+    content: @Composable () -> Unit,
+) {
+    if (!animate) {
+        content()
+        return
+    }
+    val progress = remember { Animatable(0f) }
+    // 动画结束才翻的一次性标志：避免为了判断"要不要摘 layer"而在组合期读进度。
+    var done by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        progress.animateTo(
+            1f,
+            animationSpec = tween(ZhiMotion.FADE_IN_MILLIS, easing = SinOutEasing),
+        )
+        done = true
+    }
+    // 位移量在组合期换算（density 几乎不会变）；进度只在绘制期的 lambda 里读。
+    val rise = with(LocalDensity.current) { MemberEnterRise.toPx() }
+    Box(
+        modifier = if (done) {
+            Modifier
+        } else {
+            Modifier.graphicsLayer {
+                // ⚠️ 这一行是整个组件性能的关键：绘制期读，动画期间不触发重组。
+                val v = progress.value
+                alpha = v
+                translationY = (1f - v) * rise
+            }
+        },
+    ) {
+        content()
     }
 }

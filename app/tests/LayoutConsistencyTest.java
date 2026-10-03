@@ -181,23 +181,37 @@ public final class LayoutConsistencyTest {
         //   · **不能**用 `Modifier.imePadding()` 图省事 —— Scaffold 已经在内容容器底部
         //     让过导航栏，再叠一次 IME 高度会多出"一条导航栏"的空隙。所以要是差值。
         String chatArea = stripComments(read(root, SRC + "ui/ChatArea.kt"));
-        require(chatArea.contains(".padding(bottom = imeLift)"),
-                "悬浮层（任务卡 + 反馈条 + 输入器）必须按 IME 让位（padding(bottom = imeLift)）："
-                        + "edge-to-edge 之后系统不再替应用缩小窗口，不让位就是输入框被键盘盖住");
-        require(chatArea.contains("WindowInsets.ime.getBottom(this)"),
-                "imeLift 必须由 WindowInsets.ime 算出：凭空给个常量在键盘高度不同的机型上就会错");
-        require(chatArea.contains("WindowInsets.navigationBars.getBottom(this)"),
-                "imeLift 必须减掉导航栏高度：Scaffold 已让过一次，不减就会多出一条空隙");
+        // ⚠️ 让位的**形式**后来从 `padding(bottom = imeLift)` 换成了 `offset { IntOffset(0, -lift) }`，
+        //    但"必须让位"没变，而且换成 offset 是**必须**的、不是风格选择：
+        //    `padding` 会把让给键盘的那一段算进**本节点的尺寸**，于是下面那个
+        //    `onSizeChanged` 报出来的高度含 IME；而 IME 在键盘动画期间**每帧都变**，
+        //    顺着 `bottomInset` 一路把 ChatList 也拖成每帧重组（实测 ChatArea=69/s）。
+        //    探针数字见 DebugHudStructureTest §33。
+        require(chatArea.contains(".offset {") && chatArea.contains("IntOffset(0, -lift)"),
+                "悬浮层（任务卡 + 反馈条 + 输入器）必须按 IME 让位（offset { IntOffset(0, -lift) }）："
+                        + "edge-to-edge 之后系统不再替应用缩小窗口，不让位就是输入框被键盘盖住。"
+                        + "且只能用 offset：用 padding 会让这段高度进节点尺寸，"
+                        + "把 bottomInset 变成逐帧变化");
+        require(chatArea.contains("imeInsets.getBottom(this)"),
+                "让位量必须由 WindowInsets.ime 算出：凭空给个常量在键盘高度不同的机型上就会错");
+        require(chatArea.contains("navigationBars.getBottom(this)"),
+                "让位量必须减掉导航栏高度：Scaffold 已让过一次，不减就会多出一条空隙");
         require(!chatArea.contains("imePadding()"),
                 "不要改用 Modifier.imePadding()：它垫的是**整个** IME 高度（含导航栏那段），"
                         + "与 Scaffold 已让出的导航栏叠加后，输入框会悬空一条缝");
-        // 顺序也要紧：onSizeChanged 在让位**之外**，bottomInset 才会跟着够到键盘上缘，
-        // 被键盘挡住的内容才能滑上来（不然只是输入框抬起来，最后几条消息仍被压住）。
-        int sizeChanged = chatArea.indexOf(".onSizeChanged { floatingHeightPx = it.height }");
-        int lift = chatArea.indexOf(".padding(bottom = imeLift)");
-        require(sizeChanged > 0 && lift > sizeChanged,
-                "onSizeChanged 必须写在 padding(bottom = imeLift) **之前**："
-                        + "它报的是内层量出来的高度，顺序反了 bottomInset 就不含键盘那段");
+        // 顺序仍然要紧，但含义反过来了：onSizeChanged 必须在让位**之外**（offset 的右边），
+        // 量到的是**内容高度**；让位量自己走偏移、不参与尺寸，所以尺寸是稳的。
+        int sizeChanged = chatArea.indexOf(".onSizeChanged { floatingContentHeightPx = it.height }");
+        int lift = chatArea.indexOf(".offset {");
+        require(sizeChanged > 0 && lift > 0 && sizeChanged > lift,
+                "onSizeChanged 必须写在 offset { } **右边**并回报**内容**高度："
+                        + "放到左边量到的是含 IME 的合并高度 —— 那正是每帧重组的源头");
+        // 列表要留白的键盘高度不再来自 onSizeChanged（它只剩内容高度了），
+        // 而是那份"停稳"的 IME 值。少了它，被键盘挡住的内容滑不上来（原始 bug 回归）。
+        require(chatArea.contains("((floatingContentHeightPx + settledImeLiftPx).toDp()"),
+                "bottomInset 必须同时含内容高度与**停稳后**的 IME 高度："
+                        + "少了 settledImeLiftPx，被键盘挡住的内容就滑不上来（原始 bug 回归）；"
+                        + "直接塞逐帧的 IME 值，则又是每帧重组");
 
         // ---- 4b. 画在 Scaffold 之上的浮层，要自己让出系统栏 -------------------
         //
