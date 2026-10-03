@@ -104,6 +104,7 @@ fun ZhiTopBar(
     // textureBlur 挂在**包裹 Box** 上并混入一层 surface(0.8) 做磨砂底色，
     // TopAppBar 自身底色取透明 —— 之前把 surface(0.72) 直接叠在 blur 修饰符上，
     // 半透明底色把模糊结果盖死，肉眼等于没有 blur。
+    ZhiFrameTrace.countRecompose("TopBar")
     val blurActive = glass.supported
     Box(
         modifier = modifier.then(

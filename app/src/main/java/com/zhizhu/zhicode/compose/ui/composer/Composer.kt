@@ -58,6 +58,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
 import com.zhizhu.zhicode.compose.ui.ZhiTextDropdownChip
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -108,6 +109,7 @@ fun Composer(
     debugMode: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    ZhiFrameTrace.countRecompose("Composer")
     val scheme = MiuixTheme.colorScheme
     Column(
         modifier = modifier

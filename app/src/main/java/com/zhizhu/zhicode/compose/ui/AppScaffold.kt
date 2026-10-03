@@ -136,8 +136,37 @@ private fun ZhiCodeScreen(
     // （blackbox/data/user/0/<包名>/files/zhi-frame.log）。
     val traceContext = LocalContext.current
     LaunchedEffect(viewModel) {
-        ZhiFrameTrace.bindLogFile(java.io.File(traceContext.filesDir, "zhi-frame.log"))
+        // 主落点：filesDir（沙箱里宿主机可直接读，路径见上面注释）。
+        ZhiFrameTrace.bindLogFile(
+            java.io.File(traceContext.filesDir, "zhi-frame.log"),
+            // 第二落点：`Android/media/<包名>/`。
+            //
+            // 真机上 filesDir 读不到（release 包不是 debuggable、`Android/data` 也不给列），
+            // 而 `Android/media/<包名>/` 既是本应用无权限可写、又能被文件管理器直接打开。
+            // 目录可能还没建好，所以这里只做一次 mkdirs，失败就只留主落点。
+            shared = traceContext.getExternalMediaDirs()?.firstOrNull()?.let { dir ->
+                runCatching {
+                    dir.mkdirs()
+                    java.io.File(dir, "zhi-frame.log")
+                }.getOrNull()
+            },
+        )
         ZhiFrameTrace.sink = { line -> viewModel.reportExternalEvent("帧耗时", line) }
+    }
+
+    // 每秒汇总一次重组计数（仅 debug 构建真的执行；release 里 `ZhiFrameTrace.enabled` 为假）。
+    //
+    // 这条通道是给「狂闪」那类问题用的：帧耗时探针**测不出来**它 ——
+    // 实测页签转场 avg=9.6ms max=25.0ms janks=0，logcat 里一条 Skipped frames 都没有。
+    // 因为那不是"单帧慢"，而是**每帧都在重建界面**；帧耗时区分不了这两种病，重组次数可以。
+    //
+    // 输出形如 `ZhiFrame: recompose/s ChatList=60 ChatArea=60 Composer=1`：
+    // =60 就是每帧一次（60Hz）—— 那就是要找的元凶；=1 是正常的一次。
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000L)
+            ZhiFrameTrace.flushRecomposeCounts()
+        }
     }
 
     // 各整页在退出动画期间的「最后内容」缓存（见下方 settingsUi / apiUi 的说明）。

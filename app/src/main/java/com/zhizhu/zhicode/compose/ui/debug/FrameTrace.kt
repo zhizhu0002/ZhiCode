@@ -94,14 +94,38 @@ internal object ZhiFrameTrace {
      */
     private var logFile: java.io.File? = null
 
+    /**
+     * 共享存储上的第二份日志：`Android/media/<包名>/zhi-frame.log`。
+     *
+     * ## 为什么真机上需要它
+     *
+     * [logFile] 在 `filesDir`（`/data/data/<包名>/files/`）里，真机上**普通方式读不到**：
+     * 它不是 debuggable 的 release 包，`run-as` 用不了；而 `Android/data/<包名>/` 从
+     * Android 11 起连文件管理器都不给列。
+     *
+     * `Android/media/<包名>/` 是唯一既能被本应用无权限写入、又能被文件管理器/终端直接读到
+     * 的位置（对应 `Context.getExternalMediaDirs()`）。真机排查时把日志丢在这里，
+     * 拉日志不需要 root、不需要 adb。
+     */
+    private var sharedLogFile: java.io.File? = null
+
     private val logWriter = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "zhi-frame-log").apply { isDaemon = true }
     }
 
-    /** 绑定落盘文件并清空旧内容。由 `AppScaffold` 在启动时调用一次。 */
-    fun bindLogFile(file: java.io.File) {
+    /**
+     * 绑定落盘文件并清空旧内容。由 `AppScaffold` 在启动时调用一次。
+     *
+     * @param shared 可选的第二落点（共享存储，见 [sharedLogFile]）。两个文件内容逐行相同，
+     *   写失败（目录不存在、被占用）不影响主落点。
+     */
+    fun bindLogFile(file: java.io.File, shared: java.io.File? = null) {
         logFile = file
-        logWriter.execute { runCatching { file.writeText("") } }
+        sharedLogFile = shared
+        logWriter.execute {
+            runCatching { file.writeText("") }
+            shared?.let { runCatching { it.writeText("") } }
+        }
     }
 
     /**
@@ -133,9 +157,67 @@ internal object ZhiFrameTrace {
         writeToFile(message)
     }
 
+    /**
+     * 组合体里的**重组计数**（仅 debug）。
+     *
+     * ## 为什么必须单独量这个
+     *
+     * 用户报「任务栏弹起收回 / 对话输出时对话流狂闪」。上面那套帧耗时探针**测不出来**：
+     * 页签切换实测 `frames=40 span=383.5ms avg=9.6ms max=25.0ms janks=0`，
+     * logcat 里连一条 `Choreographer: Skipped N frames` 都没有。
+     *
+     * 说明它不是"单帧太慢"，而是**每帧都在重复做一件本来只该做一次的事**：
+     * 帧本身很快，但界面每帧都在重建，看起来就是闪。这两种病的处方完全相反
+     * （一个要减单帧开销，一个要掐掉逐帧的重建源），而帧耗时**区分不了**它们。
+     * 重组**次数**可以：`=60` 左右就是每帧一次，`=1` 就是正常的一次。
+     *
+     * ## 用法
+     *
+     * 在可疑的组合体里调一次 [countRecompose]（比如 `ChatList` 的函数体首行）。
+     * 它只往一个 HashMap 里 +1，**不写任何 state** —— 所以不会形成
+     * "写 → 重组 → 再写"的无限回路（[note] 的说明里记过这个坑，踩过一次）。
+     *
+     * 每秒由 [flushRecomposeCounts] 汇总成一行 `recompose/s ...`；没有计数时一行都不写。
+     */
+    private val recomposeCounts = java.util.HashMap<String, Int>()
+
+    /** 给 [key] 记一次重组。从组合体里调，必须便宜且无副作用。 */
+    fun countRecompose(key: String) {
+        if (!enabled) return
+        synchronized(recomposeCounts) {
+            recomposeCounts[key] = (recomposeCounts[key] ?: 0) + 1
+        }
+    }
+
+    /**
+     * 把这一秒的重组计数写成一行日志并清零。
+     *
+     * 由 `AppScaffold` 里的一个每秒循环驱动（见那里的说明）。
+     * 按次数降序，最大的排在最前面 —— 要找的"每帧都在重组"的那一层就在第一个。
+     */
+    fun flushRecomposeCounts() {
+        if (!enabled) return
+        val snapshot: Map<String, Int> = synchronized(recomposeCounts) {
+            if (recomposeCounts.isEmpty()) return
+            val copy = java.util.HashMap(recomposeCounts)
+            recomposeCounts.clear()
+            copy
+        }
+        val builder = StringBuilder("recompose/s")
+        for (entry in snapshot.entries.sortedByDescending { it.value }) {
+            builder.append(' ').append(entry.key).append('=').append(entry.value)
+        }
+        note(builder.toString())
+    }
+
     private fun writeToFile(line: String) {
-        val file = logFile ?: return
-        logWriter.execute { runCatching { file.appendText(line + "\n") } }
+        val file = logFile
+        val shared = sharedLogFile
+        if (file == null && shared == null) return
+        logWriter.execute {
+            file?.let { runCatching { it.appendText(line + "\n") } }
+            shared?.let { runCatching { it.appendText(line + "\n") } }
+        }
     }
 
     private fun emit(line: String) {
