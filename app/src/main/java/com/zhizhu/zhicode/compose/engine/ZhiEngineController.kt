@@ -3,6 +3,7 @@ package com.zhizhu.zhicode.compose.engine
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.EffortLevel
 import com.zhizhu.zhicode.compose.model.McpServerStatus
@@ -23,6 +24,7 @@ import com.termux.app.zhicode.model.SessionConfig
 import com.termux.app.zhicode.model.ToolCall
 import com.termux.app.zhicode.model.ToolExecutionResult
 import com.zhizhu.zhicode.compose.model.PlanApproval
+import com.zhizhu.zhicode.compose.model.readChatImageBlocks
 import com.termux.app.zhicode.storage.ApiSettingsStore
 import com.termux.app.zhicode.tasks.TaskStore
 import org.json.JSONObject
@@ -103,6 +105,17 @@ interface EngineEvents {
         addedLines: Int,
         deletedLines: Int,
         command: String,
+        /**
+         * 工具带回来的**富内容预览**（`ToolExecutionResult.additionalContent`）。
+         *
+         * 目前只有一个来源：`Sandbox` 工具的 `screenshot` 会把沙箱截图以
+         * `{type:image, source:{type:base64,…}}` 的形式挂在这里。
+         *
+         * 这个参数**曾经不存在**，而引擎一直在把 additionalContent 发给模型
+         * （`ZhiCodeEngine` 里放进 toolResults 当 user 消息）—— 于是截图是
+         * 「模型看得到、用户看不到」。发布前它必须在签名里，否则又会被某一层丢掉。
+         */
+        previews: List<ChatImage>,
     )
     fun onEngineToolBatchCompleted(toolIds: List<String>)
     fun onEnginePermissionRequest(requestId: String, tool: String, summary: String, highRisk: Boolean)
@@ -574,6 +587,10 @@ internal class ZhiEngineController(
                 addedLines = result.addedLines,
                 deletedLines = result.deletedLines,
                 command = call.input?.optString("command", "") ?: "",
+                // 解析与解码是**分开**的：这里只把 base64 字符串搬进 UI 模型，
+                // 真正的 BitmapFactory 解码在界面上跑 Dispatchers.Default
+                // （见 ZhiImage.rememberDecodeState），所以这一步在主线程上是廉价的。
+                previews = result.additionalContent()?.let { readChatImageBlocks(it) } ?: emptyList(),
             )
         }
     }

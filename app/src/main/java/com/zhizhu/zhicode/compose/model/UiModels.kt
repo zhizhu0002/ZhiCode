@@ -39,6 +39,34 @@ data class ToolActivity(
      * 不是二选一。
      */
     val diff: String = "",
+    /**
+     * 工具带回来的**富内容预览**（`ToolExecutionResult.additionalContent`）。
+     *
+     * ## 与 [diff] 是并列关系，不是替代
+     *
+     * 两者都从 `ToolExecutionResult` 来、都不是从 [output] 里捞的，而且**可以同时存在**：
+     * 展开态是「图片 → diff 井 → 输出井」三块都画（见 `MessageCards` 的 EXPANDED 分支）。
+     *
+     * ## 数据从哪来
+     *
+     * 目前只有 `Sandbox` 工具的 `screenshot` 会产出：沙箱把截图存到自己的私有目录后，
+     * 读回字节、base64 编码，包成 `{type:image, source:{type:base64, media_type, data}, name}`
+     * 塞进 `additionalContent`（`ZhiSandboxTool.screenshotResult`）。
+     *
+     * ## 曾经漏在哪
+     *
+     * 引擎一直把它当作 user 消息的一部分发给模型（`ZhiCodeEngine` 的
+     * `additionalToolContent`），**但界面这一层从来没有接过** —— 于是"沙箱截的图
+     * 模型看得到、用户看不到"。`UiCanvasTool` 里那句注释"包装成界面能直接消费的
+     * 附加内容块"当时是**不成立的**。现在这条链是：工具产出 → 引擎透传 →
+     * `ZhiEngineController` 用 `readChatImageBlocks` 解析 → 这里 → 工具卡渲染。
+     *
+     * ## 为什么只存 base64 字符串而不解码
+     *
+     * 与用户消息里的图同一个理由（见 [ChatImage]）：解码要几十毫秒且可能 OOM，
+     * 必须交给界面层在 `Dispatchers.Default` 上做；这一层只做搬运。
+     */
+    val previews: List<ChatImage> = emptyList(),
     val expanded: Boolean = false,
     val awaitingPermission: Boolean = false,
     val kind: ToolKind = ToolKind.OTHER,

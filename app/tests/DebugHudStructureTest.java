@@ -58,8 +58,23 @@ public final class DebugHudStructureTest {
     /** 会话读取：把 JSONL 里的 image 块读回界面模型。 */
     private static final String SESSION_READER = SRC + "data/SessionReader.kt";
 
+    /**
+     * 内容块 → 图片的解析。
+     *
+     * 它**曾经住在 `SessionReader` 里**，后来搬到 `model`：同一个块结构有两个来源
+     * （会话文件的用户消息、以及工具结果的 `additionalContent`），而后者要由 `engine`
+     * 调用，`engine` 的既有依赖方向是只依赖 `model`、从不 import `data`。
+     */
+    private static final String CHAT_IMAGE_BLOCKS = SRC + "model/ChatImageBlocks.kt";
+
+    /** 引擎事件接口与控制器：工具结果回界面的唯一通道。 */
+    private static final String ENGINE_CONTROLLER = SRC + "engine/ZhiEngineController.kt";
+
     /** 用户气泡与助手卡片。图片行的接入点在 `UserBubble`。 */
     private static final String MESSAGE_CARDS = SRC + "ui/chat/MessageCards.kt";
+
+    /** 界面模型。工具卡的预览图字段（`ToolActivity.previews`）在这里（§30）。 */
+    private static final String UI_MODELS = SRC + "model/UiModels.kt";
 
     /** 模型选择面板。事故见 §19：搜索串误当成"要用的模型名"。 */
     private static final String MODEL_PICKER = SRC + "ui/dialogs/ModelPickerOverlay.kt";
@@ -196,6 +211,33 @@ public final class DebugHudStructureTest {
             }
         }
         return code.substring(at);
+    }
+
+    /**
+     * 从 `needle` 起取到**行尾**。
+     *
+     * <p>用于没有花括号的单行声明/赋值（例如 `val hasDetails = …`）——
+     * {@link #bodyOf} 对这类文本会一路找到后面某个函数的 `{`，取出一块与断言无关的东西，
+     * 于是断言看着在守、守的其实是别处（本仓踩过这个坑，见 §29 的注释）。
+     */
+    private static String lineAt(String code, String needle) {
+        int at = code.indexOf(needle);
+        if (at < 0) return "";
+        int end = code.indexOf('\n', at);
+        return end < 0 ? code.substring(at) : code.substring(at, end);
+    }
+
+    /**
+     * 从 `needle` 起取到**下一个 `fun `**（用于接口里没有方法体的签名）。
+     *
+     * <p>同样是绕开 {@link #bodyOf} 在"没有 `{}` 的声明"上的失效：接口方法后面紧跟着
+     * 的合法 `{` 属于别的函数。
+     */
+    private static String signatureAt(String code, String needle) {
+        int at = code.indexOf(needle);
+        if (at < 0) return "";
+        int end = code.indexOf("fun ", at + needle.length());
+        return end < 0 ? code.substring(at) : code.substring(at, end);
     }
 
     /**
@@ -653,8 +695,14 @@ public final class DebugHudStructureTest {
                 "图片行必须接 item.images（而不是从别处找数据）");
 
         String sessionReader = stripComments(read(root, SESSION_READER));
-        requireContains(sessionReader, "fun readImages(",
-                SESSION_READER + " 必须能从会话行里读回 image 块");
+        // 解析器本身住在 `model/ChatImageBlocks.kt`（见那里的说明），
+        // 这里分两半守：**解析在 model、调用在 SessionReader**。
+        String chatImageBlocks = stripComments(read(root, CHAT_IMAGE_BLOCKS));
+        requireContains(chatImageBlocks, "fun readChatImageBlocks(",
+                CHAT_IMAGE_BLOCKS + " 必须能从内容块数组里读回 image 块");
+        requireContains(sessionReader, "readChatImageBlocks(content)",
+                SESSION_READER + " 读历史时必须调用共享的那份解析（不许自己再写一遍："
+                        + "两份实现迟早不一致，而失败模式是「图没出来」，没有报错");
         requireContains(sessionReader, "images.isNotEmpty()",
                 "出气泡的判据必须包含 images：只发图不写字的消息没有 text 块，"
                         + "按 text.isNotBlank() 判断会把整条消息丢掉（用户翻历史会发现图连带消息都没了）");
@@ -1536,6 +1584,126 @@ public final class DebugHudStructureTest {
                         + "        tween(FADE_OUT_MILLIS, easing = SinOutEasing)",
                 ANIMATIONS + " 的 colorSpec 必须仍是 `tween(150, SinOutEasing)`"
                         + "（这是 Miuix 弹窗淡出那条曲线，8 处选中态都引用它）");
+
+        // ---- 30. 工具卡的富内容预览（`additionalContent`）必须真的到界面 --------
+        //
+        // 这条链**每一环都可能被悄悄掐断，而全程不会有任何编译错误或运行时报错**：
+        //
+        //   工具产出 additionalContent
+        //     → 引擎（本来只发给模型！界面拿不到）
+        //       → EngineEvents.onEngineToolResult 的**签名**
+        //         → 控制器转发
+        //           → ToolActivity.previews
+        //             → MessageCards 渲染
+        //
+        // 原来的事实链是：`ZhiSandboxTool` 一直在产出 `{type:image, base64…}`，
+        // `ZhiCodeEngine` 一直在把它当 user 消息发给模型，而**界面这一层从头到尾
+        // 没有接过** —— 于是"沙箱截的图，模型看得到、用户看不到"。
+        // `UiCanvasTool` 里那句注释「包装成界面能直接消费的附加内容块」当时并不成立。
+        //
+        // 所以这里逐环点名，而不是查"文件里出现过 additionalContent"：
+        // 后者在中间任何一环被删掉之后**照样绿**（上游还在产出、下游还在渲染，
+        // 只是没人接）。teeth 会逐个改坏来确认每条断言都不是空的。
+        String engineController = stripComments(read(root, ENGINE_CONTROLLER));
+        String uiModels = stripComments(read(root, UI_MODELS));
+        String vmForPreviews = stripComments(read(root, VIEW_MODEL));
+        String cardsForPreviews = stripComments(read(root, MESSAGE_CARDS));
+
+        // ① 签名里必须有这个参数。少了它，控制器传什么都编译不过 —— 这是最外层的一道。
+        //
+        // ⚠️ 用 signatureAt 而**不是** bodyOf：`EngineEvents` 里这是一句**没有方法体的接口声明**，
+        // bodyOf 会一路找到后面别的函数的 `{`，取出一块与断言无关的文本 —— 那样即使
+        // 参数被删掉，断言也可能因为"附近某处恰好有这串字"而变绿。
+        String resultEvent = signatureAt(engineController, "fun onEngineToolResult(");
+        require(!resultEvent.isEmpty(),
+                ENGINE_CONTROLLER + " 找不到 onEngineToolResult 的签名（缩进/名字变了？）");
+        requireContains(resultEvent, "previews: List<ChatImage>,",
+                ENGINE_CONTROLLER + " 的 EngineEvents.onEngineToolResult 必须有 previews 参数："
+                        + "它曾经不存在，于是工具带回来的富内容在这一层被丢掉，"
+                        + "而引擎照样把它发给模型");
+
+        // ② 控制器必须真的把 additionalContent 交给解析器，而不是只声明一个没人用的参数。
+        requireContains(engineController, "readChatImageBlocks(",
+                ENGINE_CONTROLLER + " 必须调用 readChatImageBlocks 解析 additionalContent");
+        requireContains(engineController, "result.additionalContent()",
+                ENGINE_CONTROLLER + " 必须从 result.additionalContent() 取数据 —— "
+                        + "参数声明了却不转发是最容易发生的退化");
+
+        // ③ 界面模型要有落点。
+        requireContains(uiModels, "val previews: List<ChatImage> = emptyList(),",
+                UI_MODELS + " 的 ToolActivity 必须有 previews 字段");
+        requireContains(vmForPreviews, "previews = previews,",
+                VIEW_MODEL + " 的 onEngineToolResult 必须把 previews 存进 ToolActivity —— "
+                        + "同 `diff` 那一处：漏了这行，截图停在这一层，编译器不会提醒");
+
+        // ④ 渲染：必须在 EXPANDED 里真的画出来，而且**必须复用** ZhiImageRow。
+        String expandedBlock = bodyOf(cardsForPreviews, "ToolStatusRegion.EXPANDED ->");
+        require(!expandedBlock.isEmpty(),
+                MESSAGE_CARDS + " 找不到 EXPANDED 分支（缩进变了？）");
+        requireContains(expandedBlock, "activity.previews.isNotEmpty()",
+                MESSAGE_CARDS + " 的展开态必须判 activity.previews（不判就等于没画）");
+        requireContains(expandedBlock, "ZhiImageRow(",
+                MESSAGE_CARDS + " 的展开态必须复用 ZhiImageRow 画预览图："
+                        + "横向可滑、同高、长宽比夹取与解码缓存都在那个组件里，"
+                        + "自己拼一行图会重复实现并漏掉\"同一轴不能再套滚动\"那条约束");
+        requireContains(expandedBlock, "images = activity.previews",
+                MESSAGE_CARDS + " 的 ZhiImageRow 必须接 activity.previews（而不是从别处找数据）");
+        // 点了要有反应：`onOpen` 必须接到那个回调上，否则图能看、点不开。
+        requireContains(expandedBlock, "onOpen = onImageOpen,",
+                MESSAGE_CARDS + " 展开态的 ZhiImageRow 必须把 onOpen 接到 onImageOpen —— "
+                        + "否则缩略图画得出来、点下去没反应（全屏查看进不去）");
+
+        // ⑤ 回调必须从 ToolBatch 一路透传到行里。
+        //
+        // 断在 ToolGroupCard 那一层的后果是**分组的工具丢预览、单条的还在** ——
+        // 表现出来像"有时有图有时没有"，最难排查的一种。
+        String toolGroupCardBlock = bodyOf(cardsForPreviews, "private fun ToolGroupCard(");
+        require(!toolGroupCardBlock.isEmpty(),
+                MESSAGE_CARDS + " 找不到 ToolGroupCard（缩进变了？）");
+        requireContains(toolGroupCardBlock, "onImageOpen = onImageOpen,",
+                MESSAGE_CARDS + " 的 ToolGroupCard 必须把 onImageOpen 透传给行 —— "
+                        + "漏了它，折叠组里的工具就没有预览，而单条工具还有");
+
+        // ⑥ 点开要能全屏 —— 宿主在 ToolBatch 内部（本地 UI 状态，照 UserBubble 的约定）。
+        String toolBatchBlock = bodyOf(cardsForPreviews, "fun ToolBatch(");
+        require(!toolBatchBlock.isEmpty(),
+                MESSAGE_CARDS + " 找不到 ToolBatch（缩进变了？）");
+        requireContains(toolBatchBlock, "ZhiImageViewer(image = viewing",
+                MESSAGE_CARDS + " 的 ToolBatch 必须挂 ZhiImageViewer —— "
+                        + "否则预览图点了没反应");
+        requireContains(toolBatchBlock, "onImageOpen = { viewing = it }",
+                MESSAGE_CARDS + " 必须把 onImageOpen 接到本地 viewing 状态上");
+
+        // ⑦ 两个判据必须带上 previews。
+        //
+        // 这是本功能最容易留下的**静默吞图**：`toolStatusRegion` 判 QUIET 的条件若只写
+        // `output.isBlank()`，一个"只有截图、自述为空"的工具展开之后什么都不画
+        // （QUIET 分支是 `-> Unit`）；沙箱截图目前恰好总带一段 JSON 自述所以碰不到，
+        // 但那是巧合不是保证。
+        String regionBody = bodyOf(cardsForPreviews, "private fun toolStatusRegion(");
+        require(!regionBody.isEmpty(),
+                MESSAGE_CARDS + " 找不到 toolStatusRegion（缩进变了？）");
+        requireContains(regionBody, "activity.previews.isEmpty()",
+                MESSAGE_CARDS + " 的 toolStatusRegion 判 QUIET 时必须一并看 previews："
+                        + "只判 output 的话，只有截图没有自述的工具展开后是空白的");
+        require(!regionBody.contains("activity.output.isBlank() -> ToolStatusRegion.QUIET"),
+                MESSAGE_CARDS + " 的 toolStatusRegion 不得退回「只判 output」的写法（同上）");
+        // ⚠️ 同理用 lineAt：`val hasDetails = …` 是一句没有花括号的赋值，
+        // bodyOf 会跑到后面某个函数里去。
+        String hasDetailsLine = lineAt(cardsForPreviews, "val hasDetails =");
+        require(!hasDetailsLine.isEmpty(),
+                MESSAGE_CARDS + " 找不到 val hasDetails（改名了？）");
+        requireContains(hasDetailsLine, "activity.previews.isNotEmpty()",
+                MESSAGE_CARDS + " 的 hasDetails 必须包含 previews："
+                        + "否则只有预览的工具连展开入口都没有");
+
+        // ⑧ 折叠态摘要要说"图"，不能显示成"N 行"（那是自述 JSON 的行数）。
+        String summaryBody = bodyOf(cardsForPreviews, "private fun compactToolSummary(");
+        require(!summaryBody.isEmpty(),
+                MESSAGE_CARDS + " 找不到 compactToolSummary（缩进变了？）");
+        requireContains(summaryBody, "activity.previews.isNotEmpty()",
+                MESSAGE_CARDS + " 的 compactToolSummary 必须先说预览图："
+                        + "否则沙箱截图会显示成「28 行 · 点按展开」，用户看不出有图可看");
     }
 
     /** 子串出现次数。 */

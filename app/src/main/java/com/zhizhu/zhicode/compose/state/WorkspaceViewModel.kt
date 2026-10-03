@@ -2167,6 +2167,7 @@ class WorkspaceViewModel(
         addedLines: Int,
         deletedLines: Int,
         command: String,
+        previews: List<ChatImage>,
     ) {
         val live = liveTools.remove(id)
         progressBuffers.remove(id)
@@ -2189,6 +2190,9 @@ class WorkspaceViewModel(
                                 // 少这一行，界面那块更暗的 diff 预览井就永远不出现 ——
                                 // 参数一路传到这里却被丢掉，编译器不会提醒。
                                 diff = diff,
+                                // 同 `diff`：漏了这行，沙箱截图就停在这一层，工具卡里什么都不显示
+                                // （模型那边照样看得到图），且**编译器不会提醒**。
+                                previews = previews,
                                 elapsedMs = maxOf(tool.elapsedMs, 0L),
                                 additions = if (addedLines > 0) addedLines else tool.additions,
                                 deletions = if (deletedLines > 0) deletedLines else tool.deletions,

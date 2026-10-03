@@ -470,6 +470,13 @@ fun ToolBatch(
      */
     val runningClock = rememberRunningClock(item.tools.any { !it.completed })
 
+    // 放大查看的当前图。
+    //
+    // 与 `UserBubble` 同一条约定（那里写着「它是一个纯本地 UI 状态（点了哪张图），
+    // 提升上去只会让上层多一个字段」）：宿主放在**工具卡自己**里，而不是提到
+    // ChatList / AppScaffold。工具卡的预览图只有点开才有意义，没有任何跨项共享的需求。
+    var viewing by remember { mutableStateOf<ChatImage?>(null) }
+
     // 段与段之间的间隔：单条卡与组卡各自带垂直留白，所以这里不再额外加 padding
     // （两边都加会让"两条命令之间"的缝比"命令与它的输出之间"还宽）。
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -494,6 +501,7 @@ fun ToolBatch(
                             onToggle = { onToggleTool(tool.id) },
                             // 传**这一行**的 id：菜单内容与动作都按它算。
                             onToolAction = { label -> onToolAction(tool.id, label) },
+                            onImageOpen = { viewing = it },
                         )
                     }
                 }
@@ -510,12 +518,18 @@ fun ToolBatch(
                             nowMs = runningClock,
                             onToggleTool = onToggleTool,
                             onRowAction = onToolAction,
+                            onImageOpen = { viewing = it },
                         )
                     }
                 }
             }
         }
     }
+
+    // 放大查看：与 `UserBubble` 同一形态（全屏黑底 + `ContentScale.Fit` + 右上 ×），
+    // 也同一条约定 —— 浮层挂在 `Column` **之外**，不参与列表项的宽高测量。
+    // 没有预览时 `show = false`，它不画任何东西，所以这一行是零成本。
+    ZhiImageViewer(image = viewing, onDismiss = { viewing = null })
 }
 
 /** 界面模型 → 分组判据。字段一一对应，于是两边不会各判一次"算不算候选"。 */
@@ -542,6 +556,8 @@ private fun ToolGroupCard(
     onToggleTool: (String) -> Unit,
     /** 传给每一行的回调（**带 toolId**，见 [ToolBatch] 的说明）。 */
     onRowAction: (String, String) -> Unit,
+    /** 某一行里的预览图被点开（需要全屏查看）。宿主在 [ToolBatch]。 */
+    onImageOpen: (ChatImage) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
     // 这张卡片只需要"这一组"自己的判据，所以在这里重建一份 Segment.Group —
@@ -669,6 +685,7 @@ private fun ToolGroupCard(
                             nowMs = nowMs,
                             onToggle = { onToggleTool(tool.id) },
                             onToolAction = { label -> onRowAction(tool.id, label) },
+                            onImageOpen = onImageOpen,
                         )
                     }
                 }
@@ -697,13 +714,18 @@ private fun ToolRow(
     onToggle: () -> Unit,
     /** 这一行的菜单里选中了一项（参数是菜单文案）。 */
     onToolAction: (String) -> Unit,
+    /** 展开态里的预览图被点开。 */
+    onImageOpen: (ChatImage) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
     val isCommand = activity.kind == ToolKind.COMMAND
     // 引擎单独算好的统一 diff（写文件类工具才有）。它是**另一块井**，
     // 和 output 并列显示，不是二选一 —— 见下面 EXPANDED 分支。
     val hasDiff = activity.diff.isNotBlank()
-    val hasDetails = activity.output.isNotBlank() || hasDiff
+    // 预览也算"有详情"：一个只带截图、自述为空的工具同样应该能展开看那张图。
+    // 少了 `previews` 这一项，它会落在 `toolStatusRegion` 的 QUIET 分支上，
+    // 展开之后什么都不画 —— 图被静默吞掉，而且不会编译失败。
+    val hasDetails = activity.output.isNotBlank() || hasDiff || activity.previews.isNotEmpty()
     val showChevron = activity.completed && hasDetails
 
     /*
@@ -929,6 +951,24 @@ private fun ToolRow(
                 // 左右不留给外层：着色条要顶到井两边（像 diff 该有的样子），
                 // 所以 insideMargin 只给上下；横向留白由每一行自己出（见 DiffLines）。
                 ToolStatusRegion.EXPANDED -> Column(modifier = Modifier.fillMaxWidth()) {
+                    // 富内容预览**排在最前**：本分支的顺序是「图片 → diff 井 → 输出井」。
+                    //
+                    // 为什么图在最前：沙箱截图是"发生了什么"最直接的证据，diff 与输出是细节。
+                    // 参考实现的展开态同样是先给最直观的那块（`addToolCard` 里 diff 井在
+                    // result 井之上）。
+                    //
+                    // 复用 `ZhiImageRow`（横向可滑 + 同高）而不是自己拼一行图：一串截图
+                    // 要能左右翻着比对，而它的可用宽度、长宽比夹取、跨项解码缓存都已经处理好了
+                    // （含"同一轴不能再套一层滚动"那条约束）。
+                    //
+                    // 缩进对齐 diff 井的 `start = 23.dp` —— 三块井的左缘在同一条竖线上。
+                    if (activity.previews.isNotEmpty()) {
+                        ZhiImageRow(
+                            images = activity.previews,
+                            onOpen = onImageOpen,
+                            modifier = Modifier.padding(start = 23.dp),
+                        )
+                    }
                     val diffText = if (hasDiff) activity.diff else if (isFileDiff) activity.output else ""
                     if (diffText.isNotBlank()) {
                         Card(
@@ -1242,7 +1282,10 @@ private enum class ToolStatusRegion { RUNNING, COLLAPSED, EXPANDED, QUIET }
 
 private fun toolStatusRegion(activity: ToolActivity): ToolStatusRegion = when {
     !activity.completed -> ToolStatusRegion.RUNNING
-    activity.output.isBlank() -> ToolStatusRegion.QUIET
+    // ⚠️ 判据必须带上 `previews`。只判 output 的话，一个"只有截图、自述为空"的工具会
+    // 落进 QUIET，而 QUIET 分支是 `-> Unit`（什么都不画）—— 于是预览被静默吞掉。
+    // 沙箱截图目前总是带一段 JSON 自述所以碰不到，但那是**巧合**不是保证。
+    activity.output.isBlank() && activity.previews.isEmpty() -> ToolStatusRegion.QUIET
     activity.expanded -> ToolStatusRegion.EXPANDED
     else -> ToolStatusRegion.COLLAPSED
 }
@@ -1256,6 +1299,13 @@ private fun toolStatusRegion(activity: ToolActivity): ToolStatusRegion = when {
  * - 其他工具：单行且够短就直接显示，否则 `N 行 · 点按展开`
  */
 private fun compactToolSummary(activity: ToolActivity): String {
+    // 预览图**优先**说。沙箱截图那类工具的自述是一大段 JSON，若走到下面的行数分支
+    // 会显示成"28 行 · 点按展开" —— 用户完全看不出这里有一张截图可看，
+    // 而这恰恰是它最该被发现的地方。所以它排在行数与退出码之前。
+    if (activity.previews.isNotEmpty()) {
+        return "${activity.previews.size} 张图 · 点按展开"
+    }
+
     val changed = activity.additions + activity.deletions
     if (changed > 0) return "$changed 行已修改 · 点按展开"
 

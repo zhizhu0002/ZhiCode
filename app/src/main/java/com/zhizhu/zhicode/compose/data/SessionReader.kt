@@ -2,15 +2,14 @@ package com.zhizhu.zhicode.compose.data
 
 import com.zhizhu.zhicode.compose.engine.ToolText
 import com.zhizhu.zhicode.compose.model.AgentTask
-import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
 import com.zhizhu.zhicode.compose.model.SessionSummary
 import com.zhizhu.zhicode.compose.model.TaskState
 import com.zhizhu.zhicode.compose.model.ToolActivity
 import com.zhizhu.zhicode.compose.model.ToolKind
+import com.zhizhu.zhicode.compose.model.readChatImageBlocks
 import com.termux.app.zhicode.storage.SessionStore
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
@@ -182,7 +181,7 @@ internal object SessionReader {
                         }
                         // 图片：引擎把用户发的图作为 image 块写在同一条 user 消息里
                         // （见 ZhiCodeEngine.buildUserContent），这里读回来挂到气泡上。
-                        val images = readImages(content)
+                        val images = readChatImageBlocks(content)
                         // 工具结果行**不算发言**。只有"有内容且来源不是内部"才是用户说的。
                         //
                         // ⚠️ 判据必须包含 images：只发图、不写字的消息没有 text 块，
@@ -275,40 +274,12 @@ internal object SessionReader {
     fun updateMetadata(file: File, note: String, titleOverride: String): Boolean =
         runCatching { SessionStore.updateSessionMetadata(file, note, titleOverride); true }.getOrDefault(false)
 
-    /**
-     * 从一条消息的 content 数组里取出图片块。
-     *
-     * 结构由引擎写入（`ZhiCodeEngine.buildUserContent` + `buildImageBlocks`）：
-     * `{"type":"image","source":{"type":"base64","media_type":…,"data":…},"name":…}`。
-     *
-     * 做成**接收 JSONArray 的顶层函数**而不是内联在 `transcript()` 里，是为了能用
-     * 真实的 org.json 直接单测 —— 这段逻辑的失败模式（少读一张图、把非 base64 的
-     * 当图）在界面上都只表现为"图没出来"，光看界面分不清是哪一种。
-     *
-     * 任何一块读不出来就**跳过那一块**，不影响同一条消息的其它图：一条坏数据
-     * 不该让整张对话历史里的图都消失。
-     */
-    internal fun readImages(content: JSONArray): List<ChatImage> {
-        val images = mutableListOf<ChatImage>()
-        for (i in 0 until content.length()) {
-            val block = content.optJSONObject(i) ?: continue
-            if (block.optString("type", "") != "image") continue
-            val source = block.optJSONObject("source") ?: continue
-            // 只认 base64：引擎目前只写这一种；将来若支持 url，那要联网加载，
-            // 与"离线也要能显示历史图片"这个前提冲突，得有单独的决定。
-            if (source.optString("type", "") != "base64") continue
-            val data = source.optString("data", "")
-            if (data.isEmpty()) continue
-            images.add(
-                ChatImage(
-                    data = data,
-                    mimeType = source.optString("media_type", "image/png"),
-                    name = block.optString("name", "").ifBlank { "图片" },
-                ),
-            )
-        }
-        return images
-    }
+    // 读图片块的那个函数**不在这里** —— 它被搬到 `model/ChatImageBlocks.kt` 了。
+    //
+    // 原因：同一个块结构有两个互不相关的来源（会话文件里的用户消息、以及工具结果里的
+    // `additionalContent`），而后者要由 `engine` 包调用，`engine` 的既有依赖方向是
+    // **只依赖 `model`**、从不 import `data`。留在 `data` 里会让引擎反向依赖数据层。
+    // 现在两边共用 `readChatImageBlocks`，也共用它的单测。
 
     // ------------------------------------------------------------------
 
