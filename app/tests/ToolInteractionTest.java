@@ -744,6 +744,14 @@ public final class ToolInteractionTest {
         require(squash(markdown).contains("\"已复制\"") && squash(markdown).contains("CopyFeedbackMs"),
                 MARKDOWN + " 复制后必须给出「已复制」反馈并在约 520ms 后复原"
                         + "（对齐参考实现 MarkdownRenderer.postDelayed(..., 520)）");
+        // 表头左侧**不许留空**。留空之后它仍然是「24dp 胶囊 + 4dp 下边距」的一条表头，
+        // 结构完全正确、编译与其它锚点全过，只是看起来像"代码块顶部多出一大块空"。
+        // 官方在语言缺失时填的是字面量 text：
+        //   `lowerCase = (str == null || str.trim().isEmpty()) ? "text" : ...`
+        // 而这个空行会出现在**绝大多数**代码块上（工具输出与不带语言的围栏都走这一支）。
+        require(squash(markdown).contains("text=block.lang.ifBlank{\"text\"}"),
+                MARKDOWN + " 代码块的表头语言不能留空：官方用 text 占位，留空就是白给一行空白"
+                        + "（用户原话「为什么这个 card 顶部有这么多空」）");
 
         // ---- 5. 秒级回路 ----
         String script = read(root, FAST_SCRIPT);

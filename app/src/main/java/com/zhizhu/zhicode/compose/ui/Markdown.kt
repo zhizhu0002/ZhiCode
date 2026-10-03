@@ -277,8 +277,24 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
                     modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // ⚠️ 语言为空时显示 `text`，**不能留空**。
+                    //
+                    // 依据是官方实现（反编译 `MarkdownRenderer.codeBlock()`）：
+                    //   `String lowerCase = (str == null || str.trim().isEmpty())
+                    //                        ? "text" : str.trim().toLowerCase(Locale.US);`
+                    //   `textView.setText(lowerCase);`   ← 永远不会是空串
+                    //
+                    // 留空的后果是这一行变成「左边一片空白 + 右边一个复制按钮」。
+                    // 它在结构上仍是表头（高度 24dp 胶囊 + 4dp 下边距），但**看起来就是
+                    // 代码块顶部多出一大块空**——用户就是这么报的：
+                    // 「为什么这个 card 顶部有这么多空」。
+                    // 多数工具输出与不带语言的围栏都走这一支（`bash`/`json` 这类标记是少数），
+                    // 所以这个空行出现在绝大多数代码块上。
+                    //
+                    // 另外，`copy`/`copied` 也是官方那两个字面量（上面 520ms 的复原节奏
+                    // 同样取自那里），语言占位沿用官方的 `text` 而不是自造词。
                     Text(
-                        text = block.lang,
+                        text = block.lang.ifBlank { "text" },
                         color = scheme.onSurfaceVariantSummary,
                         fontSize = ZhiTextScale.Micro,
                         fontFamily = FontFamily.Monospace,
