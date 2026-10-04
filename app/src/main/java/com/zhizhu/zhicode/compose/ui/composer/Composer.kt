@@ -86,7 +86,6 @@ fun Composer(
     onRemoveAttachment: (Attachment) -> Unit,
     // ---- `+` 菜单的动作 ----
     onAttachFile: () -> Unit,
-    onOpenFilesTab: () -> Unit,
     onPickImage: () -> Unit,
     /**
      * 走**系统文件管理器**（SAF）挑文件附加，可多选。
@@ -300,7 +299,6 @@ fun Composer(
                 // ⚠️ `photoIcon` 用的是 `ZhiIcons.image`（照片），**不是**
                 // `ZhiIcons.floatingBall`（悬浮球）—— 那是两件事，见 ZhiIcons 里的说明。
                 val attachFileIcon = ZhiIcons.file
-                val filesIcon = ZhiIcons.files
                 val photoIcon = ZhiIcons.image
                 // 「从系统文件管理器选」用**打开的文件夹**（`directory`）：
                 // 它是"去别处挑一份文件"，与上面那条 `file`（一个文档，指项目内的）
@@ -323,8 +321,8 @@ fun Composer(
                      * 所以这个 `remember` 是真的会命中。
                      */
                     items = remember(
-                        attachFileIcon, filesIcon, photoIcon, systemFileIcon,
-                        onAttachFile, onOpenFilesTab, onPickImage, onPickSystemFiles,
+                        attachFileIcon, photoIcon, systemFileIcon,
+                        onAttachFile, onPickImage, onPickSystemFiles,
                     ) {
                         listOf(
                             ZhiMenuItem(
@@ -338,12 +336,6 @@ fun Composer(
                                 summary = "从系统里挑，可多选",
                                 icon = systemFileIcon,
                                 onClick = onPickSystemFiles,
-                            ),
-                            ZhiMenuItem(
-                                text = "打开文件工作区",
-                                summary = "浏览与查看",
-                                icon = filesIcon,
-                                onClick = onOpenFilesTab,
                             ),
                             ZhiMenuItem(
                                 text = "上传照片",

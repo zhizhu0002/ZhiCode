@@ -111,7 +111,6 @@ import androidx.compose.ui.unit.dp
  * | [Refresh] | `refresh` | `symbols/web/refresh/materialsymbolsrounded/refresh_fill1_24px.svg` |
  * | [Info] | `info` | `symbols/web/info/materialsymbolsrounded/info_fill1_24px.svg` |
  * | [InkEraser] | `ink_eraser` | `symbols/web/ink_eraser/materialsymbolsrounded/ink_eraser_fill1_24px.svg` |
- * | [ArrowUpward] | `arrow_upward` | `symbols/web/arrow_upward/materialsymbolsrounded/arrow_upward_fill1_24px.svg` |
  * | [ArrowBack] | `arrow_back` | `symbols/web/arrow_back/materialsymbolsrounded/arrow_back_fill1_24px.svg` |
  * | [MoreHoriz] | `more_horiz` | `symbols/web/more_horiz/materialsymbolsrounded/more_horiz_fill1_24px.svg` |
  * | [MoreVert] | `more_vert` | `symbols/web/more_vert/materialsymbolsrounded/more_vert_fill1_24px.svg` |
@@ -216,9 +215,6 @@ internal object ZhiMaterialIcons {
 
     /** 上游 `InkEraser`（materialsymbolsrounded / fill1）。 */
     val InkEraser: ImageVector by lazy { material("InkEraser", "M690-240h150q17 0 28.5 11.5T880-200q0 17-11.5 28.5T840-160H610l80-80Zm-483 80q-8 0-15.5-3t-13.5-9l-73-73q-23-23-23.5-57t22.5-58l440-456q23-24 56.5-24t56.5 23l199 199q23 23 23 57t-23 57L532-172q-6 6-13.5 9t-15.5 3H207Z") }
-
-    /** 上游 `ArrowUpward`（materialsymbolsrounded / fill1）。 */
-    val ArrowUpward: ImageVector by lazy { material("ArrowUpward", "M440-647 244-451q-12 12-28 11.5T188-452q-11-12-11.5-28t11.5-28l264-264q6-6 13-8.5t15-2.5q8 0 15 2.5t13 8.5l264 264q11 11 11 27.5T772-452q-12 12-28.5 12T715-452L520-647v447q0 17-11.5 28.5T480-160q-17 0-28.5-11.5T440-200v-447Z") }
 
     /** 上游 `ArrowBack`（materialsymbolsrounded / fill1）。 */
     val ArrowBack: ImageVector by lazy { material("ArrowBack", "m313-440 196 196q12 12 11.5 28T508-188q-12 11-28 11.5T452-188L188-452q-6-6-8.5-13t-2.5-15q0-8 2.5-15t8.5-13l264-264q11-11 27.5-11t28.5 11q12 12 12 28.5T508-715L313-520h447q17 0 28.5 11.5T800-480q0 17-11.5 28.5T760-440H313Z") }

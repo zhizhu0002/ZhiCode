@@ -52,7 +52,6 @@ fun EnvironmentOverlay(
     OverlayDialog(
         show = open,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,

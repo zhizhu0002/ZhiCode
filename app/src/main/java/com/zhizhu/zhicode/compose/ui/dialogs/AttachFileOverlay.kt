@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.AttachBrowserState
 import com.zhizhu.zhicode.compose.model.FileEntry
@@ -55,8 +56,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 列表那边的 `weight(1f)` 默认 `fill = true`，会把 Column 一直撑到上限，
  * 等于什么都没改。必须同时写 `weight(1f, fill = false)`（见列表那一行的注释）。
  */
-private val AttachSheetHeightCap = 480.dp
-private val AttachSheetHeightFloor = 280.dp
+private val AttachSheetHeightCap = 560.dp
+private val AttachSheetHeightFloor = 320.dp
 
 /**
  * 「附加项目文件」面板。输入器 `+` 的第一项。
@@ -123,7 +124,11 @@ fun AttachFileOverlay(
         show = open,
         onDismissRequest = onDismiss,
         title = "附加项目文件",
-        // 其余参数一律用 Miuix 默认值（同 ModelPickerOverlay：backgroundColor 别动）。
+        sheetMaxWidth = 720.dp,
+        // 官方默认 insideMargin 为左右各 24dp；与共用文件行自身边距叠加后可读宽度过窄。
+        // 由内容行自行控制留白，sheet 外壳不再额外吃掉可用宽度。
+        outsideMargin = DpSize(0.dp, 0.dp),
+        insideMargin = DpSize(0.dp, 0.dp),
     ) {
         // 原来这里有一句 `if (!open) return@OverlayBottomSheet`：它会在关窗那一瞬间
         // 把内容全拆掉，退场那 250~260ms 只是一张空壳在滑下去。
@@ -154,7 +159,7 @@ fun AttachFileOverlay(
                 onNavigate = onNavigate,
                 trailing = {
                     ZhiIconButton(
-                        icon = ZhiIcons.upLevel,
+                        icon = ZhiIcons.back,
                         description = "上一级目录",
                         onClick = onUp,
                         iconSize = 16.dp,

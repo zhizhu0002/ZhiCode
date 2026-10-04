@@ -270,8 +270,6 @@ public final class IconSetTest {
                 {"refresh", "ZhiMaterialIcons.Refresh", "刷新"},
                 {"info", "ZhiMaterialIcons.Info", "信息"},
                 {"clear", "ZhiMaterialIcons.InkEraser", "清屏是橡皮擦；三条横杠只是「列表」"},
-                {"upLevel", "ZhiMaterialIcons.ArrowUpward",
-                        "上一级是上箭头；不靠别的字形旋转 -90° 假装"},
                 {"back", "ZhiMaterialIcons.ArrowBack", "返回是左箭头，同样不靠旋转"},
                 {"more", "ZhiMaterialIcons.MoreHoriz", "更多操作是**横排**三点"},
                 {"moreVert", "ZhiMaterialIcons.MoreVert", "竖向排布处的更多是竖排三点"},

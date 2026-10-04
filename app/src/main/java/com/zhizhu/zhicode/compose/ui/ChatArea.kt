@@ -36,7 +36,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import com.zhizhu.zhicode.compose.model.AgentTask
-import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.chat.AgentProgressCard
@@ -156,6 +155,7 @@ internal fun ChatArea(
         // 键盘动画途中它跟不跟手**完全看不出来**。于是把逐帧的那份只留给布局，
         // 把列表这份压成低频 —— 重组次数就从"每帧"降到"每次键盘开合一两次"。
         var settledImeLiftPx by remember { mutableStateOf(0) }
+        var imeFollowToken by remember { mutableStateOf(0) }
         val imeInsets = WindowInsets.ime
         val navigationBars = WindowInsets.navigationBars
         val density = LocalDensity.current
@@ -179,7 +179,9 @@ internal fun ChatArea(
                 // （不用 `debounce`：它是 `@FlowPreview`，本工程没有开那个 opt-in。）
                 .collectLatest { target ->
                     delay(ImeSettleMs)
+                    val wasOpen = settledImeLiftPx > 0
                     settledImeLiftPx = target
+                    if (!wasOpen && target > 0) imeFollowToken++
                 }
         }
 
@@ -210,8 +212,9 @@ internal fun ChatArea(
             // 顶部留白：S1 重构后顶栏在 topBar 槽位已由 Scaffold padding 处理，
             // 对话列表不再需要让出头部高度，可从 Scaffold padding 顶部起排。
             bottomInset = bottomInset,
+            imeFollowToken = imeFollowToken,
             // 首条消息落在顶栏（含 Tab 行）下缘；列表全高，滚动时消息从顶栏 blur 下穿过
-            topInset = TopBarInsetWithTabs,
+            topInset = TopBarInsetCompact,
             // 主体调试模式：在真实消息上就地显示类型/长度/工具计数 + Markdown 源码开关；
             // 并把每条消息的细节默认全展开、任务清单内联进对话流（见 ChatList 的同名参数）
             debugMode = state.debugAppMode,
@@ -444,7 +447,6 @@ private fun ComposerHost(
         onRemoveAttachment = { viewModel.removeAttachment(it.id) },
         // `+` 菜单的四个动作
         onAttachFile = viewModel::openAttachPicker,
-        onOpenFilesTab = { viewModel.selectTab(WorkspaceTab.FILES) },
         // `GetMultipleContents` 收 `String`（一个 MIME），`OpenMultipleDocuments`
         // 收 `Array<String>` —— 所以一个取单个元素、一个传整份数组，不是笔误。
         onPickImage = { pickImage.launch(ImageMimeTypes.single()) },

@@ -51,6 +51,7 @@ import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -354,28 +355,28 @@ private fun NetworkPage(
                 insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             )
 
-            SettingsIntField(
+            SliderPreference(
                 title = "默认搜索结果数（1-50）",
-                value = draft.webSearchMaxResults,
-                min = WEB_RESULTS_MIN,
-                max = WEB_RESULTS_MAX,
-                parse = { it.trim().toIntOrNull() },
-                onValueChange = { onChange(draft.copy(webSearchMaxResults = it)) },
+                value = draft.webSearchMaxResults.toFloat(),
+                onValueChange = { onChange(draft.copy(webSearchMaxResults = it.toInt())) },
+                valueRange = WEB_RESULTS_MIN.toFloat()..WEB_RESULTS_MAX.toFloat(),
+                steps = WEB_RESULTS_MAX - WEB_RESULTS_MIN - 1,
+                valueText = "${draft.webSearchMaxResults} 条",
                 summary = "服务未单独指定条数时用它",
-                icon = ZhiIcons.listCount,
-                plate = SettingsPlateColors.blue,
+                startAction = { SettingsIconPlate(icon = ZhiIcons.listCount, color = SettingsPlateColors.blue) },
+                insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             )
 
-            SettingsIntField(
+            SliderPreference(
                 title = "联网超时（秒）",
-                value = draft.webSearchTimeoutSec,
-                min = WEB_TIMEOUT_MIN_SEC,
-                max = WEB_TIMEOUT_MAX_SEC,
-                parse = { it.trim().toIntOrNull() },
-                onValueChange = { onChange(draft.copy(webSearchTimeoutSec = it)) },
+                value = draft.webSearchTimeoutSec.toFloat(),
+                onValueChange = { onChange(draft.copy(webSearchTimeoutSec = it.toInt())) },
+                valueRange = WEB_TIMEOUT_MIN_SEC.toFloat()..WEB_TIMEOUT_MAX_SEC.toFloat(),
+                steps = WEB_TIMEOUT_MAX_SEC - WEB_TIMEOUT_MIN_SEC - 1,
+                valueText = "${draft.webSearchTimeoutSec} 秒",
                 summary = "支持 ${WEB_TIMEOUT_MIN_SEC}-${WEB_TIMEOUT_MAX_SEC} 秒",
-                icon = ZhiIcons.timeout,
-                plate = SettingsPlateColors.blue,
+                startAction = { SettingsIconPlate(icon = ZhiIcons.timeout, color = SettingsPlateColors.blue) },
+                insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             )
         }
     }
@@ -413,17 +414,16 @@ private fun ContextProjectPage(draft: SettingsDraft, onChange: (SettingsDraft) -
         enter = fadeIn() + expandVertically(),
         exit = fadeOut() + shrinkVertically(),
     ) {
-        SettingsIntField(
+        SliderPreference(
             title = "自动压缩上限（50-100%，安全缓冲优先）",
-            value = draft.autoCompactPercent,
-            min = COMPACT_PERCENT_MIN,
-            max = COMPACT_PERCENT_MAX,
-            parse = { it.trim().toIntOrNull() },
-            onValueChange = { onChange(draft.copy(autoCompactPercent = it)) },
-            // 与「上下文压缩」同一个绿灯色，但换成滑杆字形：同一件事的两个量
-            // （开关 + 阈值）用同一个(字形,底色)会让人以为它们是一条设置。
-            icon = ZhiIcons.tune,
-            plate = SettingsPlateColors.green,
+            value = draft.autoCompactPercent.toFloat(),
+            onValueChange = { onChange(draft.copy(autoCompactPercent = it.toInt())) },
+            valueRange = COMPACT_PERCENT_MIN.toFloat()..COMPACT_PERCENT_MAX.toFloat(),
+            steps = COMPACT_PERCENT_MAX - COMPACT_PERCENT_MIN - 1,
+            valueText = "${draft.autoCompactPercent}%",
+            summary = "达到上下文窗口的 ${draft.autoCompactPercent}% 时触发压缩",
+            startAction = { SettingsIconPlate(icon = ZhiIcons.tune, color = SettingsPlateColors.green) },
+            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
         )
     }
 

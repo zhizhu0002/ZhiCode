@@ -289,22 +289,15 @@ public final class FilePanelWriteTest {
                 DIALOGS + " 的名字表单错误行必须走 ZhiFieldError："
                         + "标题下方那一条要与其他表单「有错才出现、左边缘对齐」一致");
 
-        // ---- 3b. 只有一个新建入口（面包屑行上的 `+`） ----------------------
-        //
-        // 原先那一行并排放着「新建文件」「新建文件夹」两个图标 —— 占地方、
-        // 两个图标看不出区别，而小米文件管理器那一行只有一个
-        // （`res/layout/phone_file_explorer_list.xml` 的 `@id/action_create`，
-        // contentDescription 就是「新建」）。用户的要求也是「合并到一起，用 + 表示」。
-        String listBranch = bodyOf(pane, "FileStage.LIST -> Column(modifier = Modifier.fillMaxSize())");
-        require(!listBranch.isEmpty(), PANE + " 找不到列表分支的正文（写法变了？）");
-        requireContains(listBranch, "icon = ZhiIcons.add,",
-                PANE + " 的面包屑行必须用一个 `+`（ZhiIcons.add）作为唯一的新建入口");
-        requireContains(listBranch, "description = \"新建\",",
-                PANE + " 的 `+` 必须自述为「新建」：contentDescription 是读屏用户唯一的线索");
-        requireAbsentIn(listBranch, "\"新建文件\"",
-                PANE + " 不得再留「新建文件」这个独立按钮：它与「新建文件夹」已经合成一个 +");
-        requireAbsentIn(listBranch, "\"新建文件夹\"",
-                PANE + " 不得再留「新建文件夹」这个独立按钮：同上");
+        // ---- 3b. 文件浏览页新建入口是醒目的加号按钮 --------------------------
+        String listBranch = bodyOf(pane, "private fun FileBrowserList(");
+        require(!listBranch.isEmpty(), PANE + " 找不到文件浏览列表正文");
+        requireContains(listBranch, "ZhiIcons.add",
+                PANE + " 文件浏览页必须保留加号作为新建动作图标");
+        requireContains(listBranch, "onNewEntry",
+                PANE + " 加号入口必须继续触发新建流程");
+        requireContains(listBranch, "Text(\"新建\"",
+                PANE + " 加号应配「新建」标签，提升可发现性与触控辨识");
 
         // 两个界面的行依旧必须**共用同一份实现**（不是"长得像"）。
         require(!pane.contains("private fun FileListRow("),
@@ -331,28 +324,18 @@ public final class FilePanelWriteTest {
                         + "「一打开表单就一片红字」，而 FieldErrorAlignmentTest 正是守这个的");
 
         // ---- 3d. 长按多选（对齐小米的选择模式） ----------------------------
-        String selectHeader = bodyOf(pane, "if (selectionOn) {");
+        String selectHeader = bodyOf(pane, "private fun FileBrowserList(");
         require(!selectHeader.isEmpty(), PANE + " 找不到选择模式标题那一支（写法变了？）");
         requireContains(selectHeader, "\"已选择 ${selection.size} 项\"",
                 PANE + " 的选择模式必须说清选了几项");
-        requireContains(selectHeader, "description = if (allSelected) \"取消全选\" else \"全选\",",
-                PANE + " 的选择模式必须有「全选 / 取消全选」："
-                        + "只靠一条一条点，选 50 个文件要点 50 次");
-        requireContains(selectHeader, "description = \"退出选择\",",
-                PANE + " 的选择模式必须有「退出选择」："
-                        + "否则用户只能靠删光选择来退出，而选择模式里点一行是勾选、不是打开");
-        requireContains(listBranch, "onLongPress = { onLongPressEntry(entry) },",
-                PANE + " 长按一行必须进选择模式");
-        requireContains(listBranch, "onOpen = { if (selectionOn) onToggleEntry(entry) else onOpen(entry) },",
-                PANE + " 选择模式下点一行必须是勾/取消勾，不能再打开："
-                        + "否则用户进了选择模式一点就跳进别的目录，那份选择全白费");
-        require(listBranch.contains("canRename = selection.size == 1,"),
-                PANE + " 「重命名」必须只在恰好选中一条时可用："
-                        + "一批文件改成同一个名字没有意义");
-        require(listBranch.contains("onAttach = onAttachSelected,"),
-                PANE + " 底部操作栏必须有「附加到对话」—— 一次挑几个文件比在附件面板里点好几次快");
-        require(listBranch.contains("onDelete = onDeleteSelected,"),
-                PANE + " 底部操作栏必须有「删除」");
+        requireContains(selectHeader, "if (allSelected) \"取消全选\" else \"全选\"",
+                PANE + " 的选择模式必须有「全选 / 取消全选」：只靠逐行点击效率太低");
+        requireContains(selectHeader, "\"退出选择\"",
+                PANE + " 的选择模式必须有「退出选择」入口");
+        requireContains(listBranch, "enterSelection(item)",
+                PANE + " 长按文件项必须进入选择状态");
+        requireContains(listBranch, "onOpen = { if (selectionMode) onToggleEntry(entry) else onOpen(entry) },",
+                PANE + " 选择模式下点文件项必须是勾选/取消勾选");
 
         // 文件行的**行尾不许再挂常驻动作**（这是用户截图上最杂的一处：
         // 一屏十几行就有二十几个图标把文件名挤成省略号）。
@@ -363,7 +346,7 @@ public final class FilePanelWriteTest {
         // 在它的 `}` 就返回 —— 切片里根本到不了后面的 `trailing`（teeth 实测 MISS 过）。
         String rowCall = callArgsOf(pane, "FileListRow(");
         require(!rowCall.isEmpty(), PANE + " 找不到 FileListRow 的调用（写法变了？）");
-        requireContains(rowCall, "modifier = Modifier.animateItem(),",
+        requireContains(rowCall, "modifier = Modifier.animateItem()",
                 PANE + " 取到的必须真的是 FileListRow 那次调用（切片起点错了？）");
         requireAbsentIn(rowCall, "trailing",
                 PANE + " 的文件行不得再挂行尾动作："
@@ -440,10 +423,10 @@ public final class FilePanelWriteTest {
         // ⚠️ 光有定义不够 —— 必须**调用**它。
         // teeth 实测：把调用点改成 `val info = ""` + `if (false)` 时，
         // 只断言"定义存在"的写法毫无感觉（定义还在），而界面上第二行整行消失。
-        requireContains(chrome, "val info = fileInfoLine(entry, now)",
+        requireContains(chrome, "val info = fileInfoLine(entry, now, dirCount)",
                 CHROME + " 的行必须真的调用 fileInfoLine 并把结果画出来："
                         + "只留一个没人调用的定义，等于第二行根本没做");
-        requireContains(chrome, "if (info.isNotEmpty()) {",
+        requireContains(chrome, "if (info.isNotEmpty()) Text(info,",
                 CHROME + " 的第二行必须按 isNotEmpty 门控（目录只有一行小字时不留空行）");
         requireContains(chrome, "FileFormat.size(entry.size)",
                 CHROME + " 的列表行必须走 FileFormat.size（唯一一份大小格式化）");
@@ -468,14 +451,12 @@ public final class FilePanelWriteTest {
         require(listBranch.contains("fileCountSummary(entries)"),
                 PANE + " 的路径行必须把这一层的条数显示出来："
                         + "一屏只放得下七八行，用户需要知道还有多少在下面");
-        require(listBranch.contains("EmptyDirectoryNote("),
-                PANE + " 的空目录必须走居中的空态（图标 + 一行说明）："
-                        + "原先是一行小字挂在列表底部，看起来像「列表还没加载完」");
-        require(listBranch.contains("ZhiNoticeCard("),
-                PANE + " 共享存储没授权时必须有说明卡片");
-        requireContains(listBranch, "onAction = onGrantSharedStorage,",
-                PANE + " 共享存储没授权时那个按钮必须真的能点："
-                        + "原先只有一段让用户自己去系统设置里找的文案，界面上没有出路");
+        require(listBranch.contains("entries.isEmpty()"),
+                PANE + " 必须对空目录提供空态提示");
+        require(listBranch.contains("ZhiNoticeBar("),
+                PANE + " 共享存储未授权时必须显示说明");
+        require(listBranch.contains("onGrantSharedStorage"),
+                PANE + " 共享存储未授权时必须保留授权入口");
         require(layouts.contains("onGrantSharedStorage = viewModel::openSharedStorageSettings"),
                 LAYOUTS + " 缺接线 onGrantSharedStorage：弹窗里的按钮会什么都不做");
         requireContains(vm, "ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION",

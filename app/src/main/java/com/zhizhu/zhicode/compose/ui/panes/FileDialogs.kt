@@ -20,6 +20,7 @@ import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -64,9 +65,14 @@ internal fun NewEntryDialog(
     onSubmit: (directory: Boolean) -> Unit,
     onCancel: () -> Unit,
 ) {
+    // 官方示例让 OverlayDialog 自己管理进退场；这里只保留最后一份表单数据，
+    // 避免 ViewModel 清空 form 后，官方中央动画的退场帧变成空壳。
+    val shownForm = rememberLastNonNull(form)
     OverlayDialog(
         show = form != null,
         onDismissRequest = onCancel,
+        // 与 Miuix 官方 `CenteredOverlayDialogDemo` 一致：手机也明确采用中央
+        // scale/fade + folmeSpring 动画，而不是默认的小屏底部上滑动画。
         largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
         outsideMargin = DialogWideOutsideMargin,
@@ -74,7 +80,7 @@ internal fun NewEntryDialog(
     ) {
         // 退场动画期间 form 已经是 null，而这一屏还要画完 —— 直接用它会在
         // 那几帧里把标题和输入框变成空的（表现为"弹窗先空掉再消失"）。
-        val shown = form ?: return@OverlayDialog
+        val shown = shownForm ?: return@OverlayDialog
         DialogShell(
             title = shown.title,
             actions = {
@@ -109,15 +115,20 @@ internal fun RenameEntryDialog(
     onSubmit: () -> Unit,
     onCancel: () -> Unit,
 ) {
+    // 与 Miuix `CenteredOverlayDialogDemo` 一样，show 只控制官方动画；内容在
+    // 退场完成前不能跟着外部状态一起变空。
+    val shownForm = rememberLastNonNull(form)
     OverlayDialog(
         show = form != null,
         onDismissRequest = onCancel,
+        // 与 Miuix 官方 `CenteredOverlayDialogDemo` 一致：手机也明确采用中央
+        // scale/fade + folmeSpring 动画，而不是默认的小屏底部上滑动画。
         largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
-        val shown = form ?: return@OverlayDialog
+        val shown = shownForm ?: return@OverlayDialog
         DialogShell(
             title = shown.title,
             actions = {
@@ -175,15 +186,19 @@ internal fun DeleteConfirmDialog(
     onCancel: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
+    // 删除确认也让官方 OverlayDialog 自己完成退场，内容缓存只负责保持最后一帧。
+    val shownPrompt = rememberLastNonNull(prompt)
     OverlayDialog(
         show = prompt != null,
         onDismissRequest = onCancel,
+        // 与 Miuix 官方 `CenteredOverlayDialogDemo` 一致：手机也明确采用中央
+        // scale/fade + folmeSpring 动画，而不是默认的小屏底部上滑动画。
         largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
-        val shown = prompt ?: return@OverlayDialog
+        val shown = shownPrompt ?: return@OverlayDialog
         DialogShell(
             title = "删除",
             actions = {

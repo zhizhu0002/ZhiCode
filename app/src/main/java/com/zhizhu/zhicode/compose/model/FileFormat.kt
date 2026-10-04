@@ -67,6 +67,16 @@ object FileFormat {
         }
     }
 
+    fun date(millis: Long, now: Long, zone: TimeZone = TimeZone.getDefault()): String {
+        if (millis <= 0L) return ""
+        val then = Calendar.getInstance(zone).apply { timeInMillis = millis }
+        val today = Calendar.getInstance(zone).apply { timeInMillis = now }
+        return format(millis, if (then.get(Calendar.YEAR) == today.get(Calendar.YEAR)) "MM/dd" else "yyyy/MM/dd", zone)
+    }
+
+    fun dateFull(millis: Long, now: Long, zone: TimeZone = TimeZone.getDefault()): String =
+        if (millis <= 0L) "" else format(millis, "yyyy/MM/dd", zone)
+
     private fun sameDay(a: Calendar, b: Calendar): Boolean =
         a.get(Calendar.YEAR) == b.get(Calendar.YEAR) &&
             a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)

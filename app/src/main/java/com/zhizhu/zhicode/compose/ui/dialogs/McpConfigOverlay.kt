@@ -936,7 +936,6 @@ private fun TextDetailDialog(show: Boolean, title: String, body: String, onDismi
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
     ) {
         DialogShell(
@@ -992,7 +991,6 @@ private fun McpImportDialog(
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
     ) {
         DialogShell(

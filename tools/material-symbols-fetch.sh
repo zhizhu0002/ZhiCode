@@ -22,7 +22,6 @@ BASE="https://raw.githubusercontent.com/google/material-design-icons/master/symb
 # 故意分开列出以免以后有人以为写错了：
 #   ExpandMore  -> expand_more    （上游没有 chevron_down；向下的箭头就是 expand_more）
 #   InkEraser   -> ink_eraser     （清屏的橡皮擦）
-#   ArrowUpward -> arrow_upward   （上游就叫 upward，不是 up）
 #   ArrowBack   -> arrow_back
 #   DriveFileMove -> drive_file_move （移动文件/目录；与 FolderOpen 分开，两者在同一屏会出现）
 GLYPHS="Menu:menu
@@ -50,7 +49,6 @@ Edit:edit
 Refresh:refresh
 Info:info
 InkEraser:ink_eraser
-ArrowUpward:arrow_upward
 ArrowBack:arrow_back
 MoreHoriz:more_horiz
 MoreVert:more_vert

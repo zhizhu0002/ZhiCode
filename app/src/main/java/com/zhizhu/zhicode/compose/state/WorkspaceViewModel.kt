@@ -4717,7 +4717,13 @@ class WorkspaceViewModel(
     // ---------- 工作区 ----------
 
     fun selectTab(tab: WorkspaceTab) {
-        _state.update { it.copy(tab = tab) }
+        _state.update {
+            it.copy(
+                tab = tab,
+                fileSelection = if (tab == WorkspaceTab.FILES) it.fileSelection else emptySet(),
+                fileSelectionMode = if (tab == WorkspaceTab.FILES) it.fileSelectionMode else false,
+            )
+        }
     }
 
     fun cycleThemeMode() {
@@ -5287,7 +5293,7 @@ class WorkspaceViewModel(
         // ⚠️ 同时清掉选择：`fileSelection` 存的是**路径**，跨目录之后那些路径
         // 指向的是另一个目录里的东西。留着的话，在 A 目录选中的文件会在 B 目录里
         // 被"删除/附加" —— 而那是另外一批文件。
-        _state.update { it.copy(filePath = path, openFile = null, fileSelection = emptySet()) }
+        _state.update { it.copy(filePath = path, openFile = null, fileSelection = emptySet(), fileSelectionMode = false) }
         viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
     }
 
@@ -5342,6 +5348,7 @@ class WorkspaceViewModel(
                 fileDeletePrompt = null,
                 // 同 navigateTo：跨根之后旧路径完全没有意义。
                 fileSelection = emptySet(),
+                fileSelectionMode = false,
                 // ⚠️ 必须清空：不清的话，换根那次淡变的**进场**那一屏画的还是上一个根的文件
                 // （列表要等 reloadFiles 从 IO 回来才换），于是动画看起来像"闪了一下旧内容"。
                 // 清掉之后进场是干净的，本地列目录是毫秒级，用户看不到中间态。
@@ -5529,6 +5536,7 @@ class WorkspaceViewModel(
                     fileDraft = if (s.openFile?.path in removed) null else s.fileDraft,
                     // 选中的东西被删掉之后选择模式自然结束（空集合＝不在选择模式）。
                     fileSelection = s.fileSelection - removed,
+                    fileSelectionMode = false,
                     message = if (targets.size == 1) "已删除 ${targets[0].name}" else "已删除 ${targets.size} 项",
                 )
             }
@@ -5547,9 +5555,19 @@ class WorkspaceViewModel(
      * 都是勾/取消勾，不会突然又"进入一次"）。
      */
     fun longPressFileEntry(entry: FileEntry) {
+        _state.update { state ->
+            val selection = if (state.fileSelectionMode && entry.path in state.fileSelection) {
+                state.fileSelection - entry.path
+            } else {
+                state.fileSelection + entry.path
+            }
+            state.copy(fileSelectionMode = true, fileSelection = selection)
+        }
+    }
+
+    fun setFileSelection(paths: Set<String>) {
         _state.update { s ->
-            val selection = if (s.fileSelection.isEmpty()) setOf(entry.path) else s.fileSelection
-            s.copy(fileSelection = if (selection.contains(entry.path)) selection - entry.path else selection + entry.path)
+            if (!s.fileSelectionMode) s else s.copy(fileSelection = paths.intersect(s.fileEntries.map { it.path }.toSet()))
         }
     }
 
@@ -5569,9 +5587,9 @@ class WorkspaceViewModel(
     }
 
     /** 选择模式是否开着。 */
-    private fun selectionOn(): Boolean = _state.value.fileSelection.isNotEmpty()
+    private fun selectionOn(): Boolean = _state.value.fileSelectionMode
 
-    fun clearFileSelection() = _state.update { it.copy(fileSelection = emptySet()) }
+    fun clearFileSelection() = _state.update { it.copy(fileSelection = emptySet(), fileSelectionMode = false) }
 
     /**
      * 「全选」/「取消全选」。
@@ -5592,6 +5610,63 @@ class WorkspaceViewModel(
     private fun selectedEntries(): List<FileEntry> {
         val selection = _state.value.fileSelection
         return _state.value.fileEntries.filter { it.path in selection }
+    }
+
+    /** 将选中项暂存为复制任务；切换目录后使用「粘贴」放入目标目录。 */
+    fun copySelectedEntries() = stageSelectedEntries(move = false)
+
+    /** 将选中项暂存为移动任务；源文件只在目标副本成功后删除。 */
+    fun moveSelectedEntries() = stageSelectedEntries(move = true)
+
+    private fun stageSelectedEntries(move: Boolean) {
+        val paths = selectedEntries().map { it.path }
+        if (paths.isEmpty()) return
+        _state.update {
+            it.copy(
+                fileClipboard = paths,
+                fileClipboardMove = move,
+                fileSelection = emptySet(),
+                fileSelectionMode = false,
+                message = if (move) "已选择 ${paths.size} 项移动，请打开目标目录后粘贴"
+                else "已选择 ${paths.size} 项复制，请打开目标目录后粘贴",
+                messageIsError = false,
+            )
+        }
+    }
+
+    /** 把暂存的文件粘贴到当前目录；目标冲突逐项保留原文件并反馈。 */
+    fun pasteFilesIntoCurrentDirectory() {
+        val snapshot = _state.value
+        val paths = snapshot.fileClipboard
+        if (paths.isEmpty()) return
+        val destination = File(snapshot.filePath)
+        viewModelScope.launch(Dispatchers.IO) {
+            val failures = mutableListOf<String>()
+            val movedPaths = mutableSetOf<String>()
+            var completed = 0
+            paths.forEach { path ->
+                val source = File(path)
+                val error = if (snapshot.fileClipboardMove) FileOps.move(source, destination)
+                else FileOps.copy(source, destination)
+                if (error == null) {
+                    completed++
+                    if (snapshot.fileClipboardMove) movedPaths += path
+                } else failures += "${source.name}：$error"
+            }
+            reloadFiles()
+            _state.update { current ->
+                val remainingMovePaths = current.fileClipboard.filterNot { it in movedPaths }
+                val allSucceeded = failures.isEmpty()
+                current.copy(
+                    fileClipboard = if (snapshot.fileClipboardMove) remainingMovePaths else current.fileClipboard,
+                    fileClipboardMove = if (snapshot.fileClipboardMove && remainingMovePaths.isEmpty()) false else current.fileClipboardMove,
+                    message = if (allSucceeded) {
+                        if (snapshot.fileClipboardMove) "已移动 $completed 项" else "已复制 $completed 项"
+                    } else "已完成 $completed 项，${failures.size} 项失败：${failures.joinToString("；")}",
+                    messageIsError = failures.isNotEmpty(),
+                )
+            }
+        }
     }
 
     /** 重命名选中的那一条（只在**恰好选中一条**时可用）。 */

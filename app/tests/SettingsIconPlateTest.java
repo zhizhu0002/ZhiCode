@@ -53,6 +53,7 @@ public final class SettingsIconPlateTest {
             "SettingsChoice",
             "SettingsToggle",
             "SettingsIntField",
+            "SliderPreference",
             "SettingsTextField",
             "SettingsNumber",
             "SettingsEntry",
@@ -282,7 +283,7 @@ public final class SettingsIconPlateTest {
         // 只在调用点写 `icon = ...` 而组件内部丢掉它，是这套参数最容易出的错：
         // 编译通过、页面照旧（没有图标），断言全绿。
         for (String name : ROW_CALLS) {
-            if (name.equals("BasicComponent") || name.equals("SettingsIconEntry")) continue;
+            if (name.equals("BasicComponent") || name.equals("SettingsIconEntry") || name.equals("SliderPreference")) continue;
             require(rows.contains("internal fun " + name + "("),
                     ROWS + " 里找不到 `internal fun " + name + "(`");
         }

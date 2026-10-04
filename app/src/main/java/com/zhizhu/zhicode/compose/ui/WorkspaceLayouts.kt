@@ -290,10 +290,10 @@ internal fun CompactWorkspace(
     // ⚠️ 若哪天帧数据退化（avg 明显高于官方 8.3~15.4ms，或 max 回到数百 ms），
     // 第一件该做的就是把动效换回瞬时：动画只有在**跑得动**的时候才是加分项。
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxSize(),
             // 不接受横滑切页 —— 这一条与上面「唯一真源」是**同一个决定**。
             //
             // 实测过的症状：在对话页左右滑，能滑动，但**切不过去**。原因是组合里那段同步
@@ -342,7 +342,7 @@ internal fun CompactWorkspace(
                         isDark = isDark,
                         glass = glass,
                         tabOverride = tabs[page],
-                        modifier = Modifier.fillMaxSize().padding(top = TopBarInsetWithTabs),
+                        modifier = Modifier.fillMaxSize().padding(top = TopBarInsetCompact),
                     )
                 }
             },
@@ -436,8 +436,8 @@ private fun topBarWindowInset(): Dp =
         WindowInsets.systemBars.only(WindowInsetsSides.Top).getTop(this).toDp()
     }
 
-internal val TopBarInsetWithTabs: Dp
-    @Composable get() = 52.dp + WorkspaceTabRowHeight + TopBarTabRowPadding + topBarWindowInset()
+internal val TopBarInsetCompact: Dp
+    @Composable get() = TopBarInset + WorkspaceTabRowHeight + 1.dp + topBarWindowInset()
 
 @Composable
 private fun PaneHost(
@@ -492,6 +492,12 @@ private fun PaneHost(
             sharedStorageGranted = state.sharedStorageGranted,
             onGrantSharedStorage = viewModel::openSharedStorageSettings,
             // 长按多选。
+            active = state.tab == WorkspaceTab.FILES,
+            selectionMode = state.fileSelectionMode,
+            fileClipboardCount = state.fileClipboard.size,
+            fileClipboardMove = state.fileClipboardMove,
+            onPasteFiles = viewModel::pasteFilesIntoCurrentDirectory,
+            onSetSelection = viewModel::setFileSelection,
             selection = state.fileSelection,
             onLongPressEntry = viewModel::longPressFileEntry,
             onToggleEntry = viewModel::toggleFileSelection,

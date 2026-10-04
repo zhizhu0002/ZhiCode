@@ -262,6 +262,75 @@ public class FileOpsTest {
         assertEquals("不存在的目标算 0 条", 0, FileOps.countForDelete(new File(dir, "nope")));
     }
 
+    // ---- 复制与移动 -----------------------------------------------------
+
+    @Test
+    public void copyRecursivelyPreservesContentsAndDoesNotRemoveSource() throws Exception {
+        File sourceParent = tmp.newFolder("copy-source");
+        File source = new File(sourceParent, "tree");
+        File nested = new File(source, "nested");
+        assertTrue(nested.mkdirs());
+        FileOps.write(new File(source, "a.txt"), "甲");
+        FileOps.write(new File(nested, "b.txt"), "乙");
+        File destination = tmp.newFolder("copy-destination");
+
+        assertNull(FileOps.copy(source, destination));
+        assertEquals("甲", read(new File(destination, "tree/a.txt")));
+        assertEquals("乙", read(new File(destination, "tree/nested/b.txt")));
+        assertTrue("复制不能删除源目录", source.isDirectory());
+    }
+
+    @Test
+    public void copyRefusesExistingTargetAndDirectoryIntoItself() throws Exception {
+        File parent = tmp.newFolder("copy-boundary");
+        File source = new File(parent, "source");
+        assertTrue(source.mkdir());
+        FileOps.write(new File(source, "a.txt"), "source");
+        File existing = new File(parent, "existing");
+        assertTrue(existing.mkdir());
+        FileOps.write(new File(existing, "source"), "keep");
+
+        assertNotNull("不能覆盖目标", FileOps.copy(source, existing));
+        assertEquals("keep", read(new File(existing, "source")));
+        assertNotNull("不能将目录复制到自身", FileOps.copy(source, parent));
+        assertTrue(source.isDirectory());
+    }
+
+    @Test
+    public void copyRejectsSymlinksWithoutFollowingThem() throws Exception {
+        File outside = tmp.newFolder("copy-outside");
+        File keep = new File(outside, "keep.txt");
+        FileOps.write(keep, "keep");
+        File parent = tmp.newFolder("copy-link");
+        File source = new File(parent, "source");
+        assertTrue(source.mkdir());
+        Files.createSymbolicLink(new File(source, "link").toPath(), outside.toPath());
+        File destination = tmp.newFolder("copy-link-destination");
+
+        assertNotNull(FileOps.copy(source, destination));
+        assertFalse("失败的部分复制必须清理", new File(destination, "source").exists());
+        assertEquals("keep", read(keep));
+    }
+
+    @Test
+    public void moveCopiesThenRemovesSourceAndRefusesOverwrite() throws Exception {
+        File sourceParent = tmp.newFolder("move-source");
+        File source = new File(sourceParent, "a.txt");
+        FileOps.write(source, "move me");
+        File destination = tmp.newFolder("move-destination");
+
+        assertNull(FileOps.move(source, destination));
+        assertFalse(source.exists());
+        assertEquals("move me", read(new File(destination, "a.txt")));
+
+        File occupied = new File(sourceParent, "occupied.txt");
+        FileOps.write(occupied, "original");
+        FileOps.write(new File(destination, "occupied.txt"), "target");
+        assertNotNull(FileOps.move(occupied, destination));
+        assertEquals("original", read(occupied));
+        assertEquals("target", read(new File(destination, "occupied.txt")));
+    }
+
     // ---- 保存 -----------------------------------------------------------
 
     @Test

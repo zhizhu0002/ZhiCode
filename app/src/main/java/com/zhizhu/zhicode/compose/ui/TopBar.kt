@@ -188,24 +188,16 @@ fun ZhiTopBar(
             }
         },
         bottomContent = {
-            // 服务中时是 Miuix 不确定进度条；空闲且无 Tab 时退化成极淡分隔线
-            if (state.composerBusy) {
-                ZhiIndeterminateBar()
-            } else if (tabs == null) {
-                ZhiHorizontalDivider(color = scheme.dividerLine)
-            }
-            // 工作区 Tab 归顺到头部：与标题同一块玻璃（官方 bottomContent 槽位）
-            if (tabs != null) {
-                WorkspaceTabs(
-                    tabs = tabs,
-                    selected = state.tab,
-                    // 见 WorkspaceLayouts 里同名的包装：测量点必须在 selectTab 之前。
-                    onSelect = { tab ->
-                        ZhiFrameTrace.begin("tab:${tab.name}")
-                        onSelectTab(tab)
-                    },
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = TopBarTabRowPadding / 2),
-                )
+            Column {
+                if (tabs != null) {
+                    WorkspaceTabs(
+                        tabs = tabs,
+                        selected = state.tab,
+                        onSelect = onSelectTab,
+                    )
+                }
+                // 服务中时是 Miuix 不确定进度条；空闲时以分隔线结束顶栏（与可选标签行一起）。
+                if (state.composerBusy) ZhiIndeterminateBar() else ZhiHorizontalDivider(color = scheme.dividerLine)
             }
         },
     )

@@ -1084,7 +1084,6 @@ private fun RadiusAndIconSection() {
         "refresh" to ZhiIcons.refresh,
         "info" to ZhiIcons.info,
         "clear" to ZhiIcons.clear,
-        "upLevel" to ZhiIcons.upLevel,
         "back" to ZhiIcons.back,
         "more" to ZhiIcons.more,
         "moreVert" to ZhiIcons.moreVert,
@@ -2495,7 +2494,6 @@ private fun ComposerSection(state: WorkspaceUiState, viewModel: WorkspaceViewMod
             onPickSlash = {},
             onRemoveAttachment = { viewModel.removeAttachment(it.id) },
             onAttachFile = viewModel::openAttachPicker,
-            onOpenFilesTab = {},
             onPickImage = {},
             // 调试页只是组件预览：起系统的 SAF 选择器会把这个页面顶掉，
             // 而预览的目的正是"看着它长什么样"。

@@ -45,7 +45,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * | 设置项类型 | 采用的 Miuix 组件 |
  * |---|---|
  * | 枚举 / 选项选择 | [OverlayDropdownPreference] |
- * | 数值输入 | [BasicComponent] + `bottomAction` 里的 [TextField]（见 [SettingsIntField]） |
+ * | 数值滑杆 | [SliderPreference]（有固定整数范围的设置项） |
+ * | 自由数值输入 | [BasicComponent] + `bottomAction` 里的 [TextField]（见 [SettingsIntField]） |
  * | 纯数字滚轮 | [OverlaySpinnerPreference]（设置页已不用，只剩调试页的组件陈列） |
  * | 布尔开关 | [SwitchPreference] |
  * | 入口（跳走做别的事） | [ArrowPreference] |
@@ -174,10 +175,8 @@ internal fun SettingsNumber(
 /**
  * 数值型设置项（自由输入）。
  *
- * 以前这类行走 [OverlaySpinnerPreference]（滚轮挑一个候选值）。问题在候选是**枚举出来的**：
- * 上下文窗口只有 128k/200k/1m/1.5m 四个值，联网超时只能按 5 秒步长跳 —— 用户想要
- * 别的值就只能改代码。而这些数本来就是文本可表达的（`128k` / `1.5m`），
- * 所以改用与「项目目录」同一套壳：标题 + 说明 + 底下一个输入框。
+ * 用于没有适合滑杆固定范围、需要自由输入的数值项（例如上下文窗口）。有限整数范围
+ * 且适合连续逐值调整的选项应优先使用 Miuix [SliderPreference]，不要在这里造输入框。
  *
  * ## 输入过程中**绝不回写**文本框
  *

@@ -138,6 +138,94 @@ public final class FileOps {
         return target.delete() ? null : "删除失败（可能没有权限）";
     }
 
+    /**
+     * 将文件或目录复制到目标目录，目标使用原名且绝不覆盖。返回 null 表示成功。
+     * 符号链接（包括目录树中的链接）一律拒绝，避免复制时越过用户可见的路径边界。
+     */
+    public static String copy(File source, File destinationDirectory) {
+        if (source == null || !exists(source)) return "文件不存在";
+        if (destinationDirectory == null || !destinationDirectory.isDirectory()) return "目标目录不存在";
+        if (!destinationDirectory.canWrite()) return "目标目录不可写";
+        String linkError = validateCopyTree(source);
+        if (linkError != null) return linkError;
+
+        File destination = new File(destinationDirectory, source.getName());
+        if (exists(destination)) return "目标已存在：「" + source.getName() + "」";
+        if (source.isDirectory() && isInside(source, destination)) return "不能把目录复制到自身或其子目录";
+        if (sameFile(source, destination)) return "源文件与目标相同";
+
+        boolean created = source.isDirectory() ? destination.mkdir() : createEmptyFile(destination);
+        if (!created) return "创建目标失败：「" + source.getName() + "」";
+        String error = source.isDirectory()
+                ? copyChildren(source, destination)
+                : copyFileContents(source, destination);
+        if (error != null) {
+            String cleanupError = deleteRecursive(destination);
+            return cleanupError == null ? error : error + "；清理未完成的目标失败：" + cleanupError;
+        }
+        return null;
+    }
+
+    /** 跨目录移动。复制完整成功后才删除源；若源删除失败，会保留副本并明确报告。 */
+    public static String move(File source, File destinationDirectory) {
+        if (source == null || !exists(source)) return "文件不存在";
+        if (destinationDirectory == null || !destinationDirectory.isDirectory()) return "目标目录不存在";
+        File destination = new File(destinationDirectory, source.getName());
+        if (sameFile(source, destination)) return "源文件与目标相同";
+        String error = copy(source, destinationDirectory);
+        if (error != null) return error;
+        error = delete(source);
+        if (error != null) return "已复制到目标目录，但源文件删除失败：" + error;
+        return null;
+    }
+
+    private static String validateCopyTree(File source) {
+        if (isSymlink(source)) return "不支持复制符号链接";
+        if (!source.isDirectory()) return source.isFile() && source.canRead() ? null : "源文件不可读";
+        File[] children = source.listFiles();
+        if (children == null) return "无法读取目录：「" + source.getName() + "」";
+        for (File child : children) {
+            String error = validateCopyTree(child);
+            if (error != null) return error;
+        }
+        return null;
+    }
+
+    private static String copyChildren(File source, File destination) {
+        File[] children = source.listFiles();
+        if (children == null) return "无法读取目录：「" + source.getName() + "」";
+        for (File child : children) {
+            if (isSymlink(child)) return "不支持复制符号链接";
+            File target = new File(destination, child.getName());
+            boolean created = child.isDirectory() ? target.mkdir() : createEmptyFile(target);
+            if (!created) return "创建目标失败：「" + child.getName() + "」";
+            String error = child.isDirectory() ? copyChildren(child, target) : copyFileContents(child, target);
+            if (error != null) return error;
+        }
+        return null;
+    }
+
+    private static String copyFileContents(File source, File destination) {
+        try (java.io.FileInputStream in = new java.io.FileInputStream(source);
+             FileOutputStream out = new FileOutputStream(destination)) {
+            byte[] buffer = new byte[32 * 1024];
+            int count;
+            while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
+            out.getFD().sync();
+            return null;
+        } catch (IOException e) {
+            return "复制失败：「" + source.getName() + "」：" + describe(e);
+        }
+    }
+
+    private static boolean sameFile(File first, File second) {
+        try {
+            return first.getCanonicalFile().equals(second.getCanonicalFile());
+        } catch (IOException e) {
+            return first.getAbsoluteFile().equals(second.getAbsoluteFile());
+        }
+    }
+
     /** 保存文本。返回 null 表示成功。 */
     public static String write(File target, String text) {
         if (target == null) return "文件不存在";

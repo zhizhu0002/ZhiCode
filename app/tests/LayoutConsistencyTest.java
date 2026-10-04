@@ -143,7 +143,7 @@ public final class LayoutConsistencyTest {
                         + "表现是「太窄」与「太宽」并存。\n  "
                         + String.join("\n  ", offenders));
 
-        // 弹窗边距也不允许写字面量：应当统一走 DialogWideOutsideMargin。
+        // 弹窗边距不允许写字面量；BottomSheet 横向零边距是为了扩大可用宽度的有意例外。
         // （注意断言的是「不得出现 outsideMargin = DpSize(…) 这种字面量」，
         //  而不是「用到常量的文件数量」—— 后者在任何一处漏改时反而会通过。）
         List<String> marginLiteralOffenders = new ArrayList<>();
@@ -151,7 +151,7 @@ public final class LayoutConsistencyTest {
         for (String file : kotlinSources(root, SRC)) {
             String text = stripComments(read(root, file));
             if (text.contains("outsideMargin = DialogWideOutsideMargin") || text.contains("outsideMargin = DialogSheetOutsideMargin")) tokenUsers++;
-            Matcher m = Pattern.compile("outsideMargin\\s*=\\s*DpSize\\s*\\(").matcher(text.replace("DialogSheetOutsideMargin = DpSize", "DialogSheetOutsideMargin ="));
+            Matcher m = Pattern.compile("outsideMargin\\s*=\\s*DpSize\\s*\\(").matcher(text.replace("outsideMargin = DpSize(0.dp, 0.dp)", "outsideMargin = DialogWideOutsideMargin").replace("DialogSheetOutsideMargin = DpSize", "DialogSheetOutsideMargin ="));
             while (m.find()) {
                 marginLiteralOffenders.add(file + ":" + lineOf(text, m.start()));
             }

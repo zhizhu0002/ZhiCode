@@ -833,7 +833,6 @@ private fun SkillCreateDialog(
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
     ) {
         DialogShell(
@@ -910,7 +909,6 @@ private fun SkillUrlDialog(
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
     ) {
         DialogShell(
@@ -1003,7 +1001,6 @@ private fun SkillEditDialog(
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
     ) {
         DialogShell(
@@ -1091,7 +1088,6 @@ private fun SkillFileDialog(
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
     ) {
         DialogShell(
@@ -1157,7 +1153,6 @@ private fun DeleteFileDialog(
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
     ) {
         DialogShell(

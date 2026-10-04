@@ -635,6 +635,10 @@ data class WorkspaceUiState(
      * 留着的话，在 A 目录选中的东西会在 B 目录里被"删除"，而那是另一批文件。
      */
     val fileSelection: Set<String> = emptySet(),
+    val fileSelectionMode: Boolean = false,
+    /** 小米式文件操作暂存区：路径列表 + 是否在粘贴成功后删除源。 */
+    val fileClipboard: List<String> = emptyList(),
+    val fileClipboardMove: Boolean = false,
     /** 共享存储当前是否给过「所有文件访问权限」。界面据此提示怎么开。 */
     val sharedStorageGranted: Boolean = false,
     /**

@@ -72,12 +72,24 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
  * 也无法参与主窗口的 `LayerBackdrop` 背景采样 —— 弹窗背后的模糊会做不出来。
  * 两者参数集完全一致，换过来无需改调用方形状。
  *
- * ## 居中
+ * ## 位置与动画都交给 Miuix
  *
- * 位置由 `largeScreen` 决定：true → `Alignment.Center`（居中），
- * false → `Alignment.BottomCenter`（贴底）。默认值由 `DialogDefaults.isLargeScreen`
- * 按窗口宽度是否 ≥ 600dp 推断，手机上是 false 会贴底，
- * 所以这里**显式传 `largeScreen = true`** 让窗口居中。
+ * ⚠️ `largeScreen` 只在确实需要官方中央形态的调用点显式传入；它会同时决定
+ * DialogContentLayout 的定位与动画，调用点不再额外叠加 AnimatedVisibility。
+ *
+ * ```
+ * if (isLargeScreen) {                // true：大屏规格
+ *     scale = 0.8f + 0.2f * progress   //   0.8→1 缩放
+ *     alpha = progress
+ *     // 进场 folmeSpring(damping = 0.9, response = 0.3)
+ * } else {                            // false：手机规格
+ *     translationY = (1 - progress) * 屏高   // 从下往上滑入
+ *     // 进场 spring(dampingRatio = 0.88, stiffness = 450)
+ * }
+ * ```
+ *
+ * 文件面板需要中央形态时，直接按官方 `CenteredOverlayDialogDemo` 传
+ * `largeScreen = true`；其它长内容/列表型弹窗不强制中央，继续使用 Miuix 的自动规格。
  *
  * ## 手写降到最低
  *
@@ -119,7 +131,6 @@ fun PermissionOverlay(
     OverlayDialog(
         show = request != null,
         onDismissRequest = onDeny,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
@@ -224,7 +235,6 @@ fun PlanApprovalOverlay(
     OverlayDialog(
         show = plan != null,
         onDismissRequest = onRevise,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
@@ -321,7 +331,6 @@ fun ChoicePickerOverlay(
     OverlayDialog(
         show = picker != null,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,

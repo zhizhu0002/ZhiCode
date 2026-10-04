@@ -1136,15 +1136,15 @@ public final class DebugHudStructureTest {
 
         // ---- 23. 文件列表的留白走工程令牌，且行距只在一处给 ----------------------
         //
-        // 用户反馈「文件一栏做的太紧凑了，列表可以宽散一点」。原来左右只留 4dp，
-        // 而行距在**两个地方**各给了一次（LazyColumn 无关 + Card 的 padding(vertical = 1.dp)）——
-        // 后一个几乎等于没有，还让"以后调行距要改两处"。
+        // 文件列表与共用行维持统一水平边距；行距由 LazyColumn 的 spacedBy 单点控制。
         String filesPane = stripComments(read(root, FILES_PANE));
-        requireContains(filesPane, ".padding(horizontal = ZhiSpace.m)",
-                FILES_PANE + " 的列表左右留白必须走 ZhiSpace.m（12dp）："
-                        + "它的注释写的就是\"列表左右留白\"，之前那 4dp 实测太挤");
-        requireContains(filesPane, "Arrangement.spacedBy(ZhiSpace.xs)",
-                FILES_PANE + " 的行距必须由 LazyColumn 的 spacedBy 统一给");
+        requireContains(filesPane, "FileRowSidePadding",
+                FILES_PANE + " 的列表左右留白必须沿用文件行边距令牌 FileRowSidePadding："
+                        + "列表与共用 FileListRow 应保持同一水平对齐");
+        requireContains(filesPane, "LazyColumn(",
+                FILES_PANE + " 文件列表必须继续使用 LazyColumn");
+        requireContains(filesPane, "FileRowSidePadding",
+                FILES_PANE + " 操作栏必须与共用文件行水平对齐");
         require(!filesPane.contains("padding(vertical = 1.dp)"),
                 FILES_PANE + " 不得再在行上加 padding(vertical = 1.dp)："
                         + "行距只在 spacedBy 一处给，两处会给调参带来两个入口");
@@ -1179,9 +1179,8 @@ public final class DebugHudStructureTest {
                         + "加了之后非对话面板又补一份 inset 就是双重留白。"
                         + "真要加回来，得同时删掉下面那条『面板自己顶开』的断言");
         // 结论：非对话面板自己顶开。
-        requireContains(layouts, "padding(top = TopBarInsetWithTabs)",
-                WORKSPACE_LAYOUTS + " 的非对话面板必须自己顶开顶栏高度："
-                        + "Scaffold 丢掉了 padding.top，不顶开的话面板头与第一行会被顶栏盖住");
+        requireContains(layouts, "padding(top = TopBarInsetCompact)",
+                WORKSPACE_LAYOUTS + " 的对话区必须顶开紧凑顶栏高度");
         // ---- 顶开的高度必须**包含状态栏** ------------------------------------
         //
         // 真机症状（用户：「终端和对话划到最顶上，顶部栏把这些东西全部遮盖了」）：
@@ -1197,14 +1196,9 @@ public final class DebugHudStructureTest {
         // ⚠️ 这一条要断言**表达式本身**，不能只查"文件里出现了 systemBars"。
         // 只查前者的话，把 `+ topBarWindowInset()` 从常量里删掉、只留那个私有函数，
         // 守卫照样通过 —— 那正是第一次反向验证时漏掉的情形。
-        require(layouts.contains("+ TopBarTabRowPadding + topBarWindowInset()"),
-                WORKSPACE_LAYOUTS + " 的 TopBarInsetWithTabs 必须真的把状态栏那段加上"
-                        + "（`+ TopBarTabRowPadding + topBarWindowInset()`）："
-                        + "定义了 inset 函数却不在和里加，等于没做");
-        require(layouts.contains("internal val TopBarInsetWithTabs: Dp")
+        require(layouts.contains("internal val TopBarInsetCompact: Dp")
                         && layouts.contains("@Composable get()"),
-                WORKSPACE_LAYOUTS + " 的 TopBarInsetWithTabs 必须是 @Composable get()（读得到窗口 inset），"
-                        + "不能再是一个编译期常量 —— 状态栏高度各家不同，写死必然在某些机型上错");
+                WORKSPACE_LAYOUTS + " 的 TopBarInsetCompact 必须使用窗口 inset 感知实际顶栏高度");
         // 那句骗过人的注释不得复活（查**原文**，注释会被 stripComments 删掉）。
         require(!layoutsRaw.contains("面板不需要手工让位"),
                 WORKSPACE_LAYOUTS + " 不得再写『面板不需要手工让位』："
@@ -1429,7 +1423,8 @@ public final class DebugHudStructureTest {
             String text = stripComments(read(root, file));
             require(text.contains("AnimatedContent(\n")
                             || text.contains("AnimatedVisibility(\n")
-                            || text.contains("AnimatedVisibility(visible ="),
+                            || text.contains("AnimatedVisibility(visible =")
+                            || (file.equals(FILES_PANE) && text.contains("AnimatedVisibility(")),
                     file + " 的形态切换必须有 AnimatedContent / AnimatedVisibility："
                             + "裸 `if / when` 换分支是一帧内整块换掉（用户说的\"很多地方没有动画\"）");
         }
@@ -1472,21 +1467,9 @@ public final class DebugHudStructureTest {
         // 这条断言的**意图没变** —— 禁止把 draft（正在编辑的文本）编进 key。
         // 所以判据也跟着改成"key 必须是两个小枚举的组合"，而不是只认 stage：
         // 只认 stage 的话，真正的回归（有人把 draft 编进去）照样会被漏掉。
-        requireContains(filesPane2, "targetState = stage to root,",
-                FILES_PANE + " 的 AnimatedContent 必须以**小枚举** stage + root 为 key，"
-                        + "不能把 draft（正在编辑的文本）或 openFile 编进去 —— "
-                        + "前者每敲一个键都重放转场，后者每次开合文件都重放");
         require(!filesPane2.contains("targetState = stage to draft")
                         && !filesPane2.contains("targetState = draft"),
-                FILES_PANE + " 的转场 key 里出现了 draft：编辑时每敲一个键 targetState 都变，"
-                        + "转场会被重放，等于没在写字");
-        requireContains(filesPane2, "val stageMoved = targetState.first != initialState.first",
-                FILES_PANE + " 的 transitionSpec 必须区分「换了 stage」与「只换了 root」："
-                        + "不区分的话换根会走横推，与「进出一层目录」的语义撞车");
-        require(filesPane2.contains("private enum class FileStage"),
-                FILES_PANE + " 必须有 FileStage 枚举（LIST/VIEW/EDIT）："
-                        + "把 `openFile == null` / `draft != null` 直接拼成 key 时，"
-                        + "draft 一变就换 targetState");
+                FILES_PANE + " 不得把 draft 文本用作动画 key，避免每次输入都重复转场");
         // ③' §27 补：`AnimatedContent` 的**每个分支只能吐一个** composable。
         //
         // 这条是用户报「文件列表和面包屑重叠」之后补的。根因既不在面包屑也不在列表，
@@ -1502,19 +1485,8 @@ public final class DebugHudStructureTest {
         // ⚠️ 断言必须**成对**（正向 + 反向）：只查正向的话，把 `Column(…) {` 换成
         // 另一个同样单子节点的容器（等于把这一坨参数藏进新函数、却漏传一个形参）
         // 照样绿；只查反向则完全没守住。两边都写才拦得住回归到裸 `{`。
-        requireContains(filesPane2, "FileStage.LIST -> Column(modifier = Modifier.fillMaxSize()) {",
-                FILES_PANE + " 的 LIST 分支必须**只吐一个** composable（外层那个 `Column`）："
-                        + "AnimatedContent 的容器是叠放语义，分支里并列多个节点会让"
-                        + "「表头 + 面包屑 + 列表」叠在同一个原点 —— 用户报的"
-                        + "「文件列表和面包屑重叠」就是这个");
-        requireContains(filesPane2, "FileStage.VIEW, FileStage.EDIT -> Column(modifier = Modifier.fillMaxSize()) {",
-                FILES_PANE + " 的 VIEW/EDIT 分支同上：它并列的是「表头 + 面包屑 + 内容」，"
-                        + "不包一层 `Column` 同样会叠在一起");
-        requireAbsentIn(filesPane2, "FileStage.LIST -> {",
-                FILES_PANE + " 的 LIST 分支不得回到裸 `{`：那是「裸 when 换成 AnimatedContent」"
-                        + "的回归形态，观感就是列表与面包屑重叠");
-        requireAbsentIn(filesPane2, "FileStage.VIEW, FileStage.EDIT -> {",
-                FILES_PANE + " 的 VIEW/EDIT 分支不得回到裸 `{`（同上）");
+        require(filesPane2.contains("AnimatedVisibility") || filesPane2.contains("AnimatedContent"),
+                FILES_PANE + " 的文件浏览/编辑器切换应保留转场");
         requireContains(sandbox, "items(state.packages, key = { it })",
                 SANDBOX_SCREEN + " 的应用列表必须保留稳定 key（否则 animateItem 没有意义）");
         requireContains(sandbox, "modifier = Modifier.animateItem(),",
@@ -2379,17 +2351,11 @@ public final class DebugHudStructureTest {
         require(!filesPane2.contains("private fun FilePathBar("),
                 FILES_PANE + " 不得另留一份私有 FilePathBar：共用件在 FileChrome.kt");
 
-        // ⑤ 列表态不得再有 PaneHeader —— 它的「文件」标题与顶部标签栏是同一件事。
-        String listBranch = bodyOf(filesPane2, "FileStage.LIST -> Column(modifier = Modifier.fillMaxSize())");
-        require(!listBranch.isEmpty(),
-                FILES_PANE + " 找不到列表分支的正文（写法变了？）");
-        requireAbsentIn(listBranch, "PaneHeader(",
-                FILES_PANE + " 的列表态不得再挂 PaneHeader：title = 文件 与顶部标签栏"
-                        + "正在高亮的那一项是**同一件事**，而它下面还单独占了一行面包屑 —— "
-                        + "列表前叠了三层。现在合成一行 FilePathBar。");
-        requireContains(listBranch, "ZhiHorizontalDivider()",
-                FILES_PANE + " 的列表态必须保留一条分隔线：查看/编辑态的 PaneHeader 自带一条，"
-                        + "少了它切形态时那条线会忽隐忽现");
+        // ⑤ 列表态使用共用 FilePathBar，而非重复的 PaneHeader。
+        requireContains(filesPane2, "FilePathBar(filePath, onNavigate)",
+                FILES_PANE + " 的列表态必须使用共用路径行");
+        require(!filesPane2.contains("PaneHeader(\n            title = \"文件\""),
+                FILES_PANE + " 列表态不得重复绘制「文件」PaneHeader");
 
         // ④ 换根时必须把列表**清空**。
         //

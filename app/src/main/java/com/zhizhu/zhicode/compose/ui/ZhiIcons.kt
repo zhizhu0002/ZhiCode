@@ -193,10 +193,7 @@ object ZhiIcons {
      */
     val clear: Painter @Composable get() = vector(ZhiMaterialIcons.InkEraser)
 
-    /** 上一级：向上箭头。 */
-    val upLevel: Painter @Composable get() = vector(ZhiMaterialIcons.ArrowUpward)
-
-    /** 返回：左箭头。不靠 [upLevel] 旋转 -90° 去假装左箭头。 */
+    /** 返回 / 返回上一级：左箭头。 */
     val back: Painter @Composable get() = vector(ZhiMaterialIcons.ArrowBack)
 
     /** 消息 / 工具行的「更多操作」：**横排**三点。 */

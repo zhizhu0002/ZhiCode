@@ -172,7 +172,6 @@ fun ZhiSandboxScreen(
         topBar = {
             // 与设置二级页（SettingsSubPage）同款：Miuix TopAppBar + 大标题随滚动折叠 +
             // 官方的 Back 图标。这里原本是 SmallTopAppBar（固定小标题）配
-            // `ZhiIcons.upLevel` 手动 `rotate(-90f)` 假装左箭头 —— 同一个应用里两套头部。
             //
             // 现在返回图标取自**同一套图标集**（`ZhiIcons.back` = AOSP `ic_arrow_back`），
             // 于是沙箱页与设置二级页的返回键形状一致，也不再需要任何旋转。
@@ -555,7 +554,6 @@ private fun SandboxDialogHost(
     OverlayDialog(
         show = dialog != null,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,

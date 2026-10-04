@@ -303,6 +303,23 @@ private fun ZhiCodeScreen(
         entry<AppKey.Workspace> {
         Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
+            floatingToolbar = {
+                com.zhizhu.zhicode.compose.ui.panes.FileSelectionToolbar(
+                    visible = !wide && (state.fileSelectionMode || state.fileSelection.isNotEmpty()) && state.openFile == null,
+                    entries = state.fileEntries,
+                    selection = state.fileSelection,
+                    onAttach = viewModel::attachSelectedEntries,
+                    onRename = viewModel::renameSelectedEntry,
+                    onDelete = viewModel::deleteSelectedEntries,
+                    onCopy = viewModel::copySelectedEntries,
+                    onMove = viewModel::moveSelectedEntries,
+                    clipboardCount = state.fileClipboard.size,
+                    clipboardMove = state.fileClipboardMove,
+                    onPaste = viewModel::pasteFilesIntoCurrentDirectory,
+                    onSelectAll = viewModel::toggleSelectAllFiles,
+                    onDismiss = viewModel::clearFileSelection,
+                )
+            },
             topBar = {
                 if (wide) {
                     // 宽屏：侧栏常驻，顶栏只覆盖右侧内容区 —— 由 WorkspaceLayouts
@@ -324,7 +341,6 @@ private fun ZhiCodeScreen(
                         tabs = WorkspaceTab.entries,
                         onSelectTab = { tab ->
                             ZhiFrameTrace.begin("tab:${tab.name}")
-                            ZhiFrameTrace.stamp("onClick")
                             viewModel.selectTab(tab)
                         },
                     )
@@ -338,7 +354,7 @@ private fun ZhiCodeScreen(
             // 任何从 y=0 开始画、又不自己顶开的面板，头部都会被顶栏盖住。
             // 所以每个面板必须二选一 ——
             //   · 对话面板：用 ChatList 的 topInset（**滚动内边距**，它要能滚过顶栏）；
-            //   · 其余面板：用 `TopBarInsetWithTabs` 的 **padding** 顶开
+            //   · 其余面板：用 `TopBarInsetCompact` 的 **padding** 顶开
             //     （见 WorkspaceLayouts 里 PaneHost 那个分支）。
             // **新加面板时最容易漏的就是这一步**（文件面板就这么被盖过一次，
             // 当时这里有一句指向并不存在的常量的注释，照它做就漏了）。
@@ -382,7 +398,7 @@ private fun ZhiCodeScreen(
                         viewModel = viewModel,
                         glass = glassMain,
                         // 让出顶栏（含 Tab 行）的高度，否则药丸会被模糊顶栏压住。
-                        topInset = TopBarInsetWithTabs,
+                        topInset = TopBarInsetCompact,
                     )
                 }
             }

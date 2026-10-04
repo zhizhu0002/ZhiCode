@@ -55,6 +55,7 @@ MAIN_KT_SOURCES=(
     app/src/main/java/com/zhizhu/zhicode/compose/model/ErrorSummary.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/ChatNavigation.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/FileFormat.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/model/FileRangeSelection.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/ChatKind.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/ToolGrouping.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/TurnLayout.kt
@@ -76,6 +77,7 @@ DEFAULT_TESTS=(
     com.zhizhu.zhicode.compose.model.ErrorSummaryTest
     com.zhizhu.zhicode.compose.model.ChatNavigationTest
     com.zhizhu.zhicode.compose.model.FileFormatTest
+    com.zhizhu.zhicode.compose.model.FileRangeSelectionTest
     com.zhizhu.zhicode.compose.model.ToolGroupingTest
     com.zhizhu.zhicode.compose.model.TurnLayoutTest
 )

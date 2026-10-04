@@ -3,10 +3,8 @@ package com.zhizhu.zhicode.compose.ui.chat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -26,7 +24,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
+import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -83,6 +82,11 @@ private data class ContentStamp(
 )
 
 /** 对话流，对应原版 renderChat() + addTranscriptWindow()。 */
+private fun requestScrollToBottom(listState: androidx.compose.foundation.lazy.LazyListState) {
+    val total = listState.layoutInfo.totalItemsCount
+    if (total > 0) listState.requestScrollToItem(total - 1)
+}
+
 @Composable
 fun ChatList(
     state: WorkspaceUiState,
@@ -120,6 +124,8 @@ fun ChatList(
      * 用它把内容顶到卡片上方，保证被遮住的对话仍能滑出来看到。
      */
     bottomInset: Dp = 0.dp,
+    /** ChatArea 在 IME 稳定后递增的像素 token；只在键盘真正打开并完成布局后触发一次吸底。 */
+    imeFollowToken: Int = 0,
     /** 顶部预留高度：顶栏改成悬浮层后，内容要能滚到它下面。 */
     topInset: Dp = 0.dp,
     /**
@@ -170,7 +176,8 @@ fun ChatList(
      * ⚠️ `isScrollInProgress` 在这里只反映用户拖动 / 惯性滚动：我们用的是
      * `requestScrollToItem`，它不走挂起滚动、也不占滚动互斥锁，不会把它置真。
      */
-    val autoFollow by rememberAutoFollow(listState, forceFollowToken = state.scrollToBottomToken)
+    // 长驻 effect 读取 State 的最新值，不能冻结首次组合时的 Boolean。
+    val autoFollowState = rememberAutoFollow(listState, forceFollowToken = state.scrollToBottomToken)
 
     /*
      * 发消息 → 立刻滚到底（并恢复跟随）。
@@ -193,9 +200,7 @@ fun ChatList(
     LaunchedEffect(state.scrollToBottomToken) {
         if (state.scrollToBottomToken == lastScrollToken) return@LaunchedEffect
         lastScrollToken = state.scrollToBottomToken
-        val s = currentState
-        val leading = if (s.transcript.isEmpty()) 1 else 0
-        listState.requestScrollToItem(leading + s.transcript.size)
+        requestScrollToBottom(listState)
     }
 
     /*
@@ -228,7 +233,13 @@ fun ChatList(
      * 日志输出时不用 `animateScrollToItem`：内容连续增长时每一步都起动画
      * 会互相打断，反而更抖。
      */
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState, imeFollowToken) {
+        if (imeFollowToken > 0) {
+            snapshotFlow { listState.layoutInfo.totalItemsCount to listState.layoutInfo.viewportEndOffset }
+                .first { (count, viewport) -> count > 0 && viewport > 0 }
+            withFrameNanos { }
+            listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
+        }
         snapshotFlow {
             val s = currentState
             val last = s.transcript.lastOrNull()
@@ -241,13 +252,12 @@ fun ChatList(
                 status = s.workingStatus,
             )
         }.collect { stamp ->
-            // 空态时它会占一项（索引 0）；末尾还有一项固定高度的占位 Box
-            val leading = if (stamp.size == 0) 1 else 0
-            val tailIndex = leading + stamp.size
+            // LazyColumn 实际画的是 blocks，不能由 transcript.size 推算索引；
+            // 多条消息合并为一个回合时，真实尾项只由 totalItemsCount 决定。
             val switched = stamp.session != lastSessionId
             lastSessionId = stamp.session
-            if (tailIndex <= 0) return@collect
-            if (switched || autoFollow) listState.requestScrollToItem(tailIndex)
+            if (listState.layoutInfo.totalItemsCount <= 0) return@collect
+            if (switched || autoFollowState.value) requestScrollToBottom(listState)
         }
     }
 
@@ -272,19 +282,6 @@ fun ChatList(
     //
     // `distinctUntilChanged` 不是省事：键盘动画里 inset 会连着好几帧同值，
     // 去掉重复可以少发几次滚动请求（滚动是幂等的，但没必要发）。
-    val imeInsets = WindowInsets.ime
-    val imeDensity = LocalDensity.current
-    LaunchedEffect(imeInsets, imeDensity) {
-        snapshotFlow { imeInsets.getBottom(imeDensity) }
-            .distinctUntilChanged()
-            .collect { imeBottom ->
-                if (imeBottom <= 0) return@collect
-                val s = currentState
-                val leading = if (s.transcript.isEmpty()) 1 else 0
-                listState.requestScrollToItem(leading + s.transcript.size)
-            }
-    }
-
     // 对话流切成「块」（一轮助手回合一块）。放在 `LazyColumn` **外面**算：
     // 它的 content lambda 是 `LazyListScope.() -> Unit`，不是 @Composable 上下文，
     // 在里面调 `remember` 编译不过。
