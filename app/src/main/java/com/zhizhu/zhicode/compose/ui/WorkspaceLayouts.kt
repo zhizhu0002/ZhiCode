@@ -312,7 +312,7 @@ internal fun CompactWorkspace(
                         modifier = Modifier.fillMaxSize(),
                         glass = glass,
                     )
-                    // ⚠️ 这三个面板（变更 / 终端 / 文件）必须**自己顶开顶栏高度**。
+                    // ⚠️ 这两个面板（终端 / 文件）必须**自己顶开顶栏高度**。
                     //
                     // 规则：Scaffold 的 content lambda **有意丢掉了 `padding.top`**
                     // （为了让顶栏 blur 有内容可采样），所以内容实际从 y=0 铺满 ——

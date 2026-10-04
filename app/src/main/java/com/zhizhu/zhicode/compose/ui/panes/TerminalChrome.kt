@@ -151,7 +151,7 @@ internal fun toast(context: Context, message: String?) {
  * <h3>它替换掉了什么</h3>
  * 原来这里是一个**整条工具栏**（`TerminalToolbar`，硬编码 42dp 高，自带背景色），
  * 它被画在 [PaneHeader] 的**下面** —— 于是切到终端时顶部有两行标题
- * （「终端 · 项目名」+「☰ 会话标题 ⌨ ⋮」），而文件、变更两个面板只有一行。
+ * （「终端 · 项目名」+「☰ 会话标题 ⌨ ⋮」），而文件面板只有一行。
  * 三个面板的头部形态不一致，且那 42dp 是手写死的（工程里的统一行高是
  * [com.zhizhu.zhicode.compose.theme.ZhiRow.height]）。
  *

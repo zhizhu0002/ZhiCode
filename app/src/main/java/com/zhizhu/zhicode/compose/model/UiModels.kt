@@ -348,30 +348,6 @@ enum class ChoiceIntent {
     SESSION_RENAME,
 }
 
-data class DiffFile(
-    val name: String,
-    val additions: Int,
-    val deletions: Int,
-    val diff: String,
-)
-
-data class DiffState(
-    val files: List<DiffFile> = emptyList(),
-    val loading: Boolean = false,
-    /**
-     * 空列表时要显示的说明。
-     *
-     * 为什么需要这个字段：变更面板的空白态原来写死「工作区没有未提交的变更」，
-     * 但 git **失败**时（运行时未安装 / 不是 git 仓库 / 目录不存在）列表同样是空的。
-     * 那样界面会一口咬定"没有变更" —— 明明什么都没查到，却给出了确定性结论。
-     * 所以把原因带上来，空白态显示真实原因。
-     */
-    val note: String = "",
-) {
-    val additions: Int get() = files.sumOf { it.additions }
-    val deletions: Int get() = files.sumOf { it.deletions }
-}
-
 data class FileEntry(
     val name: String,
     val path: String,
@@ -577,14 +553,13 @@ data class WorkspaceUiState(
     val planApproval: PlanApproval? = null,
     val choicePicker: ChoicePickerState? = null,
     val attachments: List<Attachment> = emptyList(),
-    val diff: DiffState = DiffState(),
     val terminalLines: List<TerminalLine> = emptyList(),
     val filePath: String = "",
     val fileEntries: List<FileEntry> = emptyList(),
     /**
      * 文件列表为空时要显示的说明。
      *
-     * 与 [DiffState.note] 同一个道理：目录**不存在**与目录**真的为空**
+     * 与 [AttachBrowserState.note] 同一个道理：目录**不存在**与目录**真的为空**
      * 在界面上都是"0 项"，但前者是故障、后者是正常。不区分的话，
      * 用户看到一个空的文件面板只会以为应用坏了。
      */
@@ -743,8 +718,6 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/web", "联网搜索设置；也可直接输入 /web 搜索词"),
     SlashCommand("/terminal", "打开内置 Termux 终端"),
     SlashCommand("/sandbox", "打开 ZhiCode 沙箱；Agent 可安装、运行和调试虚拟 APK"),
-    SlashCommand("/diff", "打开 Claude Code 风格代码修改 Diff"),
-    SlashCommand("/changes", "打开 Git 变更与 Diff"),
     SlashCommand("/files", "打开项目文件与代码编辑器"),
     SlashCommand("/doctor", "检查 Termux 运行环境"),
     SlashCommand("/repair", "修复中断的 apt/dpkg 状态"),

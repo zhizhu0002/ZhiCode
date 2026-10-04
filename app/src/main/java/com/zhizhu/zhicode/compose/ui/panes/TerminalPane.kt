@@ -207,7 +207,7 @@ private fun RealTerminalPane(
         Column(modifier = Modifier.fillMaxSize()) {
             // 只留一条头。这里原来还画的是 `PaneHeader("终端", projectName)`，紧接着
             // 下面 RealTerminalPane 又画一条自己的工具栏（☰ / 会话名 / ⌨ / ⋮）——
-            // 于是终端比文件、变更两个面板多一行标题。现在三块面板同构：
+            // 于是终端比文件面板多一行标题。现在两块面板同构：
             // 标题 + 副标题（当前会话名，没会话时退回项目名）+ 行尾动作。
             PaneHeader(
                 title = "终端",

@@ -64,8 +64,6 @@ import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconDropdownMenu
 import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
-import com.zhizhu.zhicode.compose.ui.panes.DiffLines
-import com.zhizhu.zhicode.compose.ui.panes.OutputLines
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiImageRow
@@ -1058,7 +1056,7 @@ private fun ToolRow(
                             ),
                         ) {
                             // OutputLines 与 DiffLines 共用同一套「最多渲染 300 行 + 点按显示全部」
-                            // 的上限（见 ChangesPane.kt 的 MaxRenderedLines）：展开的输出最多
+                            // 的上限（见 ui/chat/ToolOutputText.kt 的 MaxRenderedLines）：展开的输出最多
                             // 40 000 字符，整段当一个 Text 放在单个 LazyColumn item 里，
                             // 那个 item 会比视口还高，懒加载复用彻底失效。
                             OutputLines(activity.output)

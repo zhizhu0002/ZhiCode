@@ -15,7 +15,6 @@ import com.zhizhu.zhicode.compose.data.AttachmentReader
 import com.zhizhu.zhicode.compose.data.Clipboard
 import com.zhizhu.zhicode.compose.data.DebugApiProfile
 import com.zhizhu.zhicode.compose.data.FileBrowser
-import com.zhizhu.zhicode.compose.data.GitChanges
 import com.zhizhu.zhicode.compose.data.McpStore
 import com.zhizhu.zhicode.compose.data.MockWorkspaceRepository
 import com.zhizhu.zhicode.compose.data.ModelCatalogStore
@@ -55,7 +54,6 @@ import com.zhizhu.zhicode.compose.model.ChatNavigation
 import com.zhizhu.zhicode.compose.model.ChoiceIntent
 import com.zhizhu.zhicode.compose.model.ChoiceOption
 import com.zhizhu.zhicode.compose.model.ChoicePickerState
-import com.zhizhu.zhicode.compose.model.DiffState
 import com.zhizhu.zhicode.compose.model.EffortLevel
 import com.zhizhu.zhicode.compose.model.FileDeletePrompt
 import com.zhizhu.zhicode.compose.model.FileEntry
@@ -286,8 +284,6 @@ class WorkspaceViewModel(
             contextTokens = 0,
             contextWindow = 200_000,
             deviceStatus = clockLabel(),
-            // 变更面板首屏为空；git 是要真实执行命令的，等用户点「刷新」再读。
-            diff = DiffState(),
             terminalLines = repo.terminalBanner(WorkspacePaths.defaultProject()),
             // 文件面板走真实文件系统。只列**一层**（不递归）：内置 Termux 环境装好后
             // home 下可能有几千个文件，递归会拖慢启动。
@@ -2209,8 +2205,6 @@ class WorkspaceViewModel(
         }
         appendProcessStep("工具完成：$name")
 
-        // 编辑类工具可能改动工作区，顺手刷新变更面板。
-        if (live != null && kindOf(name) == ToolKind.EDIT) refreshDiff()
     }
 
     override fun onEngineToolBatchCompleted(toolIds: List<String>) {
@@ -2616,8 +2610,6 @@ class WorkspaceViewModel(
         when (command) {
             "/clear", "/new" -> newSession()
             "/terminal" -> selectTab(WorkspaceTab.TERMINAL)
-            // 「变更」Tab 已移除：/diff 走普通消息输出 diff 文本
-            "/changes", "/diff" -> {}
             "/files" -> selectTab(WorkspaceTab.FILES)
             "/plan" -> enterPlanMode(arg)
             "/permissions" -> showPermissionPicker()
@@ -2844,7 +2836,7 @@ class WorkspaceViewModel(
                 append("API 配置：").append(s.profileName)
                 append(if (s.apiKeyConfigured) "（已配置密钥）" else "（未配置密钥）").append('\n')
                 // 只显示项目名：完整路径在沙箱里是 /data/user/0/<宿主>/blackbox/...
-                // 内部虚拟化路径，又长又吓人且用户无法据此操作（与 GitChanges 空态同理）。
+                // 内部虚拟化路径，又长又吓人且用户无法据此操作（与附加选择器读不到目录时的空态同理）。
                 append("项目：").append(s.projectPath.trimEnd('/').substringAfterLast('/')).append('\n')
                 append("上下文：").append(formatTokens(s.contextTokens))
                 append(" / ").append(formatTokens(s.contextWindow))
@@ -4636,43 +4628,6 @@ class WorkspaceViewModel(
 
     fun selectTab(tab: WorkspaceTab) {
         _state.update { it.copy(tab = tab) }
-        // 进入「变更」页时才去读 git。切换 Tab 是明确的用户动作，
-        // 每次切过去读一次是合理的；若挂在回合结束自动读，大仓库会明显拖慢对话。
-        // 「变更」Tab 已移除
-    }
-
-    /**
-     * 重新拉一次变更列表（变更面板的「刷新」）。
-     *
-     * 对应原版 `refreshChanges()`（重跑 `git status --short` + `git diff`）。
-     * 这里数据来自 [repo]，所以"刷新"等价于重新读一次。
-     */
-    /**
-     * 刷新 git 变更。
-     *
-     * 三条 git 命令（rev-parse / status / diff）+ 未跟踪文件的补丁，必须放 IO 线程，
-     * 而且这是**唯一**会去读 git 的入口 —— 不在回合结束时自动跑：
-     * 一个大仓库的 `git diff` 可能几秒，挂在每个回合结尾会让对话明显变卡。
-     */
-    fun refreshDiff() {
-        val path = _state.value.projectPath
-        _state.update { it.copy(diff = it.diff.copy(loading = true)) }
-        viewModelScope.launch(Dispatchers.IO) {
-            val result = runCatching { GitChanges.read(getApplication(), path) }
-                .getOrElse { error ->
-                    DiffState(note = "读取 git 变更失败：" + (error.message ?: "未知原因"))
-                }
-            _state.update {
-                it.copy(
-                    diff = result,
-                    message = when {
-                        result.note.isNotEmpty() -> result.note
-                        result.files.isEmpty() -> "工作区没有未提交的变更"
-                        else -> "已刷新变更列表（${result.files.size} 个文件）"
-                    },
-                )
-            }
-        }
     }
 
     fun cycleThemeMode() {
@@ -4803,7 +4758,7 @@ class WorkspaceViewModel(
             )
         }
         // home 目录是随运行环境一起出现的，所以工作区只能在这之后创建。
-        // 不创建的话：变更面板永远显示"项目目录不存在"，
+        // 不创建的话：文件面板永远显示"目录不存在"，
         // 终端的工作目录会回退到 home，会话也会落在一个不存在的项目键下。
         ensureWorkspace()
     }

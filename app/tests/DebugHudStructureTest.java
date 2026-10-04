@@ -116,8 +116,6 @@ public final class DebugHudStructureTest {
     /** 侧栏：会话列表（删除/重排时行要不瞬移，见 §25）。 */
     private static final String SIDEBAR = SRC + "ui/Sidebar.kt";
 
-    /** 变更面板：diff 文件列表（同上）。 */
-    private static final String CHANGES_PANE = SRC + "ui/panes/ChangesPane.kt";
 
     /** 斜杠命令面板：打字时命令集收窄，落选的行要滑走（同上）。 */
     private static final String SLASH_PALETTE = SRC + "ui/composer/SlashPalette.kt";
@@ -1198,7 +1196,6 @@ public final class DebugHudStructureTest {
         // 发送键会在动画开始那一瞬间跳位，比现在更硬。官方那处
         // （`SuperSearchBar.kt:257`）是**覆盖式**的 trailingIcon，不挤动邻居，不通用。
         String sidebar = stripComments(read(root, SIDEBAR));
-        String changesPane = stripComments(read(root, CHANGES_PANE));
         String slashPalette = stripComments(read(root, SLASH_PALETTE));
         // `composer` 复用本方法前面（§… 处）已经读好的那一份：同一个
         // `stripComments(read(root, COMPOSER))`，不必再读一遍盘。
@@ -1210,9 +1207,6 @@ public final class DebugHudStructureTest {
         requireContains(filesPane, "modifier = Modifier.animateItem()",
                 FILES_PANE + " 的文件列表行必须挂 animateItem()：删一个文件后"
                         + "下面所有行会整体上跳一位");
-        requireContains(changesPane, "modifier = Modifier.animateItem()",
-                CHANGES_PANE + " 的 diff 文件列表行必须挂 animateItem()："
-                        + "重新算 diff 换掉文件集时，同名行应当滑到新位置而不是瞬移");
         requireContains(slashPalette, "Modifier.animateItem()",
                 SLASH_PALETTE + " 的命令行必须挂 animateItem()：打字时命令集一直在收窄，"
                         + "命中的行要滑上去、落选的行淡出，而不是每行原地闪一下");
@@ -1345,7 +1339,6 @@ public final class DebugHudStructureTest {
         // 所以要用 `AnimatedContent` 或 `AnimatedVisibility` 显式给过渡。
         // 共同点同样是"删掉不会编译失败、界面也不坏，只是硬切一下"。
         String workspaceLayouts = stripComments(read(root, WORKSPACE_LAYOUTS));
-        String changesPane2 = stripComments(read(root, CHANGES_PANE));
         String filesPane2 = stripComments(read(root, FILES_PANE));
         String terminalPane = stripComments(read(root, TERMINAL_PANE));
         String sandbox = stripComments(read(root, SANDBOX_SCREEN));
@@ -1383,7 +1376,7 @@ public final class DebugHudStructureTest {
         // ⚠️ 判据带 `targetState`/`visible`：只查 "AnimatedContent(" 会被
         // `if (false) AnimatedContent(` 这种（关掉但保留）骗过 —— teeth 实测过。
         String[] needsTransition = {
-                CHANGES_PANE, FILES_PANE, TERMINAL_PANE, SKILLS_OVERLAY, SETTINGS_DIALOG,
+                FILES_PANE, TERMINAL_PANE, SKILLS_OVERLAY, SETTINGS_DIALOG,
         };
         for (String file : needsTransition) {
             String text = stripComments(read(root, file));

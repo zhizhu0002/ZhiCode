@@ -19,7 +19,7 @@ import java.util.List;
  * 代价只是改动统计不如精确时细。
  *
  * <h3>输出上限</h3>
- * {@value #MAX_DISPLAY_CHARS} 字符后截断。变更列表是给人扫一眼的，
+ * {@value #MAX_DISPLAY_CHARS} 字符后截断。它只在工具卡里展开显示、给人扫一眼，
  * 超过这个长度的 diff 没有人会读，但它会一直留在内存里并进入会话文件。
  */
 final class UnifiedDiff {

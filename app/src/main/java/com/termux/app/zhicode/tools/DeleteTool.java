@@ -19,7 +19,7 @@ import java.io.File;
  *       否则 {@code /data/…/home/..} 之类的写法能绕过字符串比较。</li>
  *   <li><b>非空目录必须显式递归。</b>模型有时会把「删掉这个目录」当成删掉它下面
  *       某一个文件。要求 {@code recursive=true} 强迫它把意图说出来。</li>
- *   <li><b>删除前留 diff。</b>只有 ≤5 MiB 的普通文件才留（再大的内容进变更列表
+ *   <li><b>删除前留 diff。</b>只有 ≤5 MiB 的普通文件才留（再大的内容进界面显示的 diff
  *       只会把界面压垮），但只要有，用户就还有一份「刚才删的是什么」。</li>
  * </ol>
  *
@@ -93,7 +93,7 @@ final class DeleteTool implements ZhiTool {
         return "Directory is not empty; set recursive=true explicitly.";
     }
 
-    /** 删除前的内容快照，用于变更列表；文件太大就没有。 */
+    /** 删除前的内容快照，用于界面显示删除前后的 diff；文件太大就没有。 */
     private static UnifiedDiff.Result deletionDiff(String requested, File target) throws Exception {
         boolean worthRecording = target.isFile() && target.length() <= MAX_DIFF_BYTES;
         return worthRecording

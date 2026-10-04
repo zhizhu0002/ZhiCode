@@ -148,9 +148,10 @@ fun FilesPane(
                 // composable 时，它们会被放到**同一个原点**上互相盖住 ——
                 // 实测表现就是「文件列表和面包屑重叠」。
                 //
-                // 对照本工程另外两处 `AnimatedContent`，它们的分支都只调一个组件：
-                //   · `TerminalPane`：`TerminalStage.FAILURE -> TerminalFailure(...)`；
-                //   · `ChangesPane`：每个分支一个 `Box` 或一个 `LazyColumn`。
+                // 对照本工程另一处 `AnimatedContent`，它的分支只调一个组件：
+                //   · `TerminalPane`：`TerminalStage.FAILURE -> TerminalFailure(...)`。
+                // （原先这里还举了 `ChangesPane` 当第二个例子 —— 那个「变更」面板
+                //   已经删掉了，例子跟着撤掉，免得指向一个不存在的文件。）
                 // 本文件是唯一破例的地方，而原因是这层**原先写的是裸 `when`** ——
                 // 裸 `when` 挂在 `Column` 下时兄弟节点是**竖排**的；换成 `AnimatedContent`
                 // 之后语义变成叠放，于是「表头 + 面包屑 + 列表」三者叠在了一起。

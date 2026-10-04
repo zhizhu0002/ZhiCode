@@ -6,7 +6,7 @@ import com.zhizhu.zhicode.compose.model.TerminalLine
  * 尚未真实化的数据来源。
  *
  * 现状：会话历史（[SessionReader]）、文件面板（[FileBrowser]）、
- * git 变更（[GitChanges]）、项目路径（[WorkspacePaths]）、
+ * 项目路径（[WorkspacePaths]）、
  * 对话引擎（`engine/ZhiEngineController`）全部已接真实实现。
  *
  * 只剩最后一项 [terminalBanner]：内置环境**未就绪**时终端页显示的只读占位文案。
