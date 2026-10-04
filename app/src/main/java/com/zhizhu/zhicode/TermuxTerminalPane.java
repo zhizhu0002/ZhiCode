@@ -78,9 +78,11 @@ import java.util.regex.Pattern;
  *       早 attach 会在 `onSizeChanged` 里立刻算行列并加载 {@code libtermux.so}，
  *       那时本视图还没被插进父容器，任何 JNI 错误都会从 `onSizeChanged` 逃出去
  *       **杀掉整个 Activity**（这个崩溃真实发生过）。</li>
- *   <li>{@link #applyTerminalPalette} 的深色档色值表逐字节不变。浅色档那张表
- *       是历史上写下的但走不到（原先唯一的入口 {@code applyTheme} 没有任何调用方），
- *       本类**不**把它接上：终端跟随主题要单独定，现在接上等于在重写里夹带外观变更。</li>
+ *   <li>{@link #applyTerminalPalette} 的**深色档**色值表逐字节不变（见该方法的说明）。
+ *       浅色档那张表在本轮**接上了** —— 用户报「终端对深浅色不适配」。它原本是
+ *       历史上写下却走不到的（唯一的入口 {@code applyTheme} 没有任何调用方），
+ *       这次由界面侧按应用主题推到 {@link #setDarkTheme}。色值仍取那张旧表、未自造，
+ *       所以**深色模式的外观与之前完全一致**，变的只有浅色模式。</li>
  * </ol>
  */
 public final class TermuxTerminalPane extends FrameLayout
@@ -222,12 +224,23 @@ public final class TermuxTerminalPane extends FrameLayout
 
     private String nextSessionWorkingDirectory = TermuxConstants.TERMUX_HOME_DIR_PATH;
 
+    /**
+     * 终端是否走深色档。默认 {@code true} = 与接上浅色档之前的行为逐字节相同。
+     *
+     * <p>由界面侧在应用主题变化时经 {@link #setDarkTheme} 推过来：应用主题的唯一权威在
+     * Compose 那边（{@code LocalZhiDark}），而本类是纯 Java 的 {@code FrameLayout}，
+     * 读不到它 —— 方向只能是界面 → 宿主，不能反过来（见类注释）。
+     */
+    private boolean darkTheme = true;
+
     public TermuxTerminalPane(Context context, RuntimeInstaller runtime) {
         super(context);
         this.runtime = runtime;
         // 上游 TerminalView 自己会按模拟器的背景色绘制，这里的底色只在
-        // 「还没有会话 / 会话已退出」的空档里露出来，取 ANSI 调色板的 0 号色（黑）。
-        setBackgroundColor(Color.BLACK);
+        // 「还没有会话 / 会话已退出」的空档里露出来，取 ANSI 调色板的 0 号色。
+        // ⚠️ 不能写死 Color.BLACK：浅色档的 0 号色是 246,248,252，写死的话空档期
+        // 会从浅色底里突然闪出一块纯黑 —— 那正是「深浅色不适配」的一处。
+        setBackgroundColor(paletteBackground());
 
         if (runtime.isInstalled()) {
             newSession();
@@ -929,13 +942,46 @@ public final class TermuxTerminalPane extends FrameLayout
     /**
      * 把 ANSI 调色板写进模拟器。
      *
-     * <p>只走深色档：浅色档那张表是历史上写下的，但唯一入口 `applyTheme` 没有任何调用方，
-     * 也就是说**终端从来没有跟随过应用主题**。本类保持这个行为不变 ——
-     * 让终端跟随主题是一次可见的外观变更，应该单独做，不该夹在结构重写里。
+     * <p><b>深浅两档都在，按 {@link #darkTheme} 二选一。</b>
+     *
+     * <p><b>深色档与接上浅色档之前逐字节相同</b>（前景 {@code 238,238,238} / 背景纯黑 /
+     * 光标白），所以深色模式下的外观没有任何变化。
+     *
+     * <p>浅色档不是新调的色：它就是这份代码**历史上写过**的那张表（旧版
+     * {@code applyTerminalPalette} 的 {@code if (lightTheme)} 分支），只是当时唯一的入口
+     * {@code applyTheme} 没有任何调用方，于是从来没走到过。现在由界面侧按应用主题经
+     * {@link #setDarkTheme} 接上。语义与深色档一致：{@code 0..7} 常规色、{@code 8..15}
+     * 亮色；{@code 7} 与 {@code 15} 两格在浅色档里都取前景深色 —— 它们语义上是"最亮的白"，
+     * 而浅底上必须反过来用深字，否则什么都看不见。
      */
     private void applyTerminalPalette(TerminalSession session) {
         if (session == null || session.getEmulator() == null) return;
         int[] colors = session.getEmulator().mColors.mCurrentColors;
+        if (!darkTheme) {
+            // 浅色档：色值逐字取自旧表的浅色分支
+            // （BG/TEXT/MUTED/ACCENT 来自 applyPaletteValues(false, true)，
+            //  其余 12 个是该分支里写死的字面量）。没有做任何"顺手调整"。
+            colors[0] = Color.rgb(246, 248, 252);   // BG
+            colors[1] = Color.rgb(185, 28, 28);
+            colors[2] = Color.rgb(22, 115, 76);
+            colors[3] = Color.rgb(161, 98, 7);
+            colors[4] = Color.rgb(29, 78, 216);
+            colors[5] = Color.rgb(126, 34, 206);
+            colors[6] = Color.rgb(8, 126, 153);
+            colors[7] = Color.rgb(29, 36, 51);      // TEXT
+            colors[8] = Color.rgb(99, 112, 132);    // MUTED
+            colors[9] = Color.rgb(180, 35, 46);
+            colors[10] = Color.rgb(22, 115, 76);
+            colors[11] = Color.rgb(161, 98, 7);
+            colors[12] = Color.rgb(29, 78, 216);
+            colors[13] = Color.rgb(126, 34, 206);
+            colors[14] = Color.rgb(8, 126, 153);
+            colors[15] = Color.rgb(29, 36, 51);     // TEXT
+            colors[TextStyle.COLOR_INDEX_FOREGROUND] = Color.rgb(29, 36, 51);    // TEXT
+            colors[TextStyle.COLOR_INDEX_BACKGROUND] = Color.rgb(246, 248, 252); // BG
+            colors[TextStyle.COLOR_INDEX_CURSOR] = Color.rgb(83, 91, 214);       // ACCENT
+            return;
+        }
         colors[0] = Color.rgb(0, 0, 0);
         colors[1] = Color.rgb(205, 0, 0);
         colors[2] = Color.rgb(0, 205, 0);
@@ -955,6 +1001,38 @@ public final class TermuxTerminalPane extends FrameLayout
         colors[TextStyle.COLOR_INDEX_FOREGROUND] = Color.rgb(238, 238, 238);
         colors[TextStyle.COLOR_INDEX_BACKGROUND] = Color.rgb(0, 0, 0);
         colors[TextStyle.COLOR_INDEX_CURSOR] = Color.WHITE;
+    }
+
+    /** 当前主题下的终端底色（没有会话 / 会话已退出时露出来的那一层）。 */
+    private int paletteBackground() {
+        return darkTheme ? Color.rgb(0, 0, 0) : Color.rgb(246, 248, 252);
+    }
+
+    /**
+     * 让终端跟随应用主题。由界面侧在 {@code isDark} 变化时调用。
+     *
+     * <p>为什么是界面推给宿主、而不是宿主自己读配置：应用主题的唯一权威在 Compose 那边
+     * （{@code LocalZhiDark}），而本类是纯 Java 的 {@code FrameLayout}，读不到它 ——
+     * 类注释里"最底层不该反向依赖界面框架"说的就是这件事。方向只能是界面 → 宿主。
+     *
+     * <p>三件事缺一不可：
+     * <ol>
+     *   <li>换自己的底色（空档期露出的那一层，原先写死纯黑）；</li>
+     *   <li>把新调色板写进**所有**会话的模拟器 —— 只写当前那个的话，切到别的会话
+     *       会看到旧配色；</li>
+     *   <li>让 TerminalView 重画：改模拟器的色值**不会**自己触发 invalidate，
+     *       少了这一步要等下一次输出才变色。</li>
+     * </ol>
+     */
+    public void setDarkTheme(boolean dark) {
+        if (darkTheme == dark) return;
+        darkTheme = dark;
+        setBackgroundColor(paletteBackground());
+        for (TerminalSession session : sessions) applyTerminalPalette(session);
+        if (terminalView != null) {
+            terminalView.onScreenUpdated();
+            terminalView.invalidate();
+        }
     }
 
     // ------------------------------------------------------------------ TerminalSessionClient

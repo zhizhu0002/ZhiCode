@@ -3,10 +3,8 @@ package com.zhizhu.zhicode.compose.ui.chat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -15,16 +13,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +40,8 @@ import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
 import com.zhizhu.zhicode.compose.model.TaskState
+import com.zhizhu.zhicode.compose.model.ToolGrouping
+import com.zhizhu.zhicode.compose.model.TurnLayout
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
@@ -43,8 +49,11 @@ import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
+import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import com.zhizhu.zhicode.compose.ui.rememberFingerTracker
+import top.yukonga.miuix.kmp.anim.SinOutEasing
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -73,13 +82,34 @@ private data class ContentStamp(
 )
 
 /** 对话流，对应原版 renderChat() + addTranscriptWindow()。 */
+private fun requestScrollToBottom(listState: androidx.compose.foundation.lazy.LazyListState) {
+    val total = listState.layoutInfo.totalItemsCount
+    if (total > 0) listState.requestScrollToItem(total - 1)
+}
+
 @Composable
 fun ChatList(
     state: WorkspaceUiState,
     onToggleTool: (String) -> Unit,
-    onToggleGroup: (String, Boolean) -> Unit,
+    /**
+     * 展开/收起**一个折叠组**。第二个参数是那一组的 groupKey（首成员 toolId）。
+     *
+     * 以前传的是"目标状态 + 整批的成员列表"，因为展开态记在成员的 `expanded` 上；
+     * 现在分组由界面按 `ToolGrouping` 推导、展开态记在 `ChatItem.expandedGroups` 上，
+     * 所以这一层只需要说清"哪一组"。
+     */
+    onToggleGroup: (String, String) -> Unit,
     onToggleThinking: (String) -> Unit,
     onMessageActions: (ChatItem) -> Unit,
+    /**
+     * 某一行的 `⋯` 菜单里选中了一项。参数：**哪一组**、**哪一行**、菜单文案。
+     *
+     * 与 [onMessageActions] 分开：后者只知道"哪一组"，做不了"展开这一条"这类动作。
+     *
+     * 菜单本身由那一行自己画（Miuix 下拉菜单），这里只转发"选中了什么" —— 所以
+     * 不需要手指位置，也不需要把菜单状态放进 ViewModel。
+     */
+    onToolAction: (ChatItem, String, String) -> Unit,
     /**
      * 长按动作菜单的宿主插槽。在**每一项自己的布局里**调用，菜单就会贴那一项弹出
      * （见 `ZhiAnchoredActionMenu`）。
@@ -94,6 +124,8 @@ fun ChatList(
      * 用它把内容顶到卡片上方，保证被遮住的对话仍能滑出来看到。
      */
     bottomInset: Dp = 0.dp,
+    /** ChatArea 在 IME 稳定后递增的像素 token；只在键盘真正打开并完成布局后触发一次吸底。 */
+    imeFollowToken: Int = 0,
     /** 顶部预留高度：顶栏改成悬浮层后，内容要能滚到它下面。 */
     topInset: Dp = 0.dp,
     /**
@@ -123,6 +155,7 @@ fun ChatList(
      */
     debugTasks: List<AgentTask> = emptyList(),
 ) {
+    ZhiFrameTrace.countRecompose("ChatList")
     val listState = rememberLazyListState()
     val currentState by rememberUpdatedState(state)
 
@@ -143,7 +176,32 @@ fun ChatList(
      * ⚠️ `isScrollInProgress` 在这里只反映用户拖动 / 惯性滚动：我们用的是
      * `requestScrollToItem`，它不走挂起滚动、也不占滚动互斥锁，不会把它置真。
      */
-    val autoFollow by rememberAutoFollow(listState)
+    // 长驻 effect 读取 State 的最新值，不能冻结首次组合时的 Boolean。
+    val autoFollowState = rememberAutoFollow(listState, forceFollowToken = state.scrollToBottomToken)
+
+    /*
+     * 发消息 → 立刻滚到底（并恢复跟随）。
+     *
+     * 与下面的吸底 effect 分开，因为触发条件完全不同：吸底是"内容变了且用户在跟随"，
+     * 而这条是"用户按了发送" —— 此刻即使他正在翻历史也要把他带回来。原版
+     * `scrollChat()` 也是无条件 `chatAutoFollow = true` + 滚到底。
+     *
+     * ⚠️ 判据是"令牌**变了**"，不是"令牌非零"。
+     *
+     * 原先写的是 `if (state.scrollToBottomToken == 0L) return` —— 只挡住了首次组合
+     * （令牌还是 0）那一次。问题是 `LaunchedEffect` 在**每次重新进入组合**时都会重跑：
+     * 切走页签再切回来，面板被重建、这个 effect 重启，而令牌此时早就 > 0，
+     * 于是又滚了一次底 —— 用户刚翻到的位置白翻。用户的原话：
+     * 「切换页面，对话老是回到最低端」。
+     *
+     * 记下已处理过的令牌，只有它真的变化（= 用户按了发送）才滚。
+     */
+    var lastScrollToken by remember { mutableStateOf(state.scrollToBottomToken) }
+    LaunchedEffect(state.scrollToBottomToken) {
+        if (state.scrollToBottomToken == lastScrollToken) return@LaunchedEffect
+        lastScrollToken = state.scrollToBottomToken
+        requestScrollToBottom(listState)
+    }
 
     /*
      * 上一次已处理的会话 id。
@@ -175,7 +233,13 @@ fun ChatList(
      * 日志输出时不用 `animateScrollToItem`：内容连续增长时每一步都起动画
      * 会互相打断，反而更抖。
      */
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState, imeFollowToken) {
+        if (imeFollowToken > 0) {
+            snapshotFlow { listState.layoutInfo.totalItemsCount to listState.layoutInfo.viewportEndOffset }
+                .first { (count, viewport) -> count > 0 && viewport > 0 }
+            withFrameNanos { }
+            listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
+        }
         snapshotFlow {
             val s = currentState
             val last = s.transcript.lastOrNull()
@@ -188,26 +252,78 @@ fun ChatList(
                 status = s.workingStatus,
             )
         }.collect { stamp ->
-            // 空态时它会占一项（索引 0）；末尾还有一项固定高度的占位 Box
-            val leading = if (stamp.size == 0) 1 else 0
-            val tailIndex = leading + stamp.size
+            // LazyColumn 实际画的是 blocks，不能由 transcript.size 推算索引；
+            // 多条消息合并为一个回合时，真实尾项只由 totalItemsCount 决定。
             val switched = stamp.session != lastSessionId
             lastSessionId = stamp.session
-            if (tailIndex <= 0) return@collect
-            if (switched || autoFollow) listState.requestScrollToItem(tailIndex)
+            if (listState.layoutInfo.totalItemsCount <= 0) return@collect
+            if (switched || autoFollowState.value) requestScrollToBottom(listState)
         }
     }
 
     // 输入法弹出/收起时把对话吸回底部：键盘顶起视口后列表可视高度骤变，
     // 原先贴底的内容被顶出屏幕；用户此刻的意图几乎总是"接着输入"，所以这里
     // 无条件回底（不改 autoFollow，避免键盘收起时把正在看历史的人拽走）。
-    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
-    LaunchedEffect(imeBottom) {
-        if (imeBottom > 0) {
-            val s = currentState
-            val leading = if (s.transcript.isEmpty()) 1 else 0
-            listState.requestScrollToItem(leading + s.transcript.size)
-        }
+    //
+    // ⚠️ 这里**不能在组合期读 inset**，必须走 `snapshotFlow`。
+    //
+    // 原先写的是 `val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)`
+    // 再 `LaunchedEffect(imeBottom)`。问题是 `WindowInsets.ime` 在**键盘动画的整个
+    // 过程中每帧都在变**，而组合期读 = 每帧都让这一层（连同整个列表）重组一次。
+    //
+    // 三个触发点全都落在这条路径上：输入器随键盘升降、悬浮任务卡与它同列跟着动、
+    // 以及**发送消息时键盘收起**（所以"发个你好、回复也会闪"）。用户报的
+    // 「对话流狂闪」正是这条路径：每帧重组 → 每帧重新布局列表 →
+    // 相邻两帧的内容在"重排前 / 重排后"之间来回，看起来就是整片在闪。
+    //
+    // 放进 `snapshotFlow` 之后，读取发生在协程里、**不进组合**，所以 inset 每帧变
+    // 一次也不重组；而"要先读一次当前值"这件事由 flow 的首次发射承担，
+    // 与原先那次组合期读**语义等价**。
+    //
+    // `distinctUntilChanged` 不是省事：键盘动画里 inset 会连着好几帧同值，
+    // 去掉重复可以少发几次滚动请求（滚动是幂等的，但没必要发）。
+    // 对话流切成「块」（一轮助手回合一块）。放在 `LazyColumn` **外面**算：
+    // 它的 content lambda 是 `LazyListScope.() -> Unit`，不是 @Composable 上下文，
+    // 在里面调 `remember` 编译不过。
+    val blocks = remember(state.transcript) {
+        TurnLayout.blocks(
+            state.transcript.map { TurnLayout.Entry(it.id, isUser = it.kind == ChatKind.USER) },
+        )
+    }
+
+    // 「已经见过」的消息 id —— 用来判断某个成员是**本次新出现的**还是历史。
+    //
+    // ## 为什么需要它
+    //
+    // 一轮助手回合是**一个** `LazyColumn` item（见 TurnLayout），所以 item 级的
+    // `animateItem` 只在整块位置变化时触发；**回合内部**新追加的工具卡/正文
+    // 不产生新 item，于是没有任何进入动画 —— 观感就是文字"蹦"出来的。
+    // 用户要的「新消息整条淡入/上移」缺的正是这一层。
+    //
+    // ## 为什么不能无条件播
+    //
+    // `LazyColumn` 会**回收组合**：往上滚到历史消息时，那一条是**重新进入组合**的。
+    // 无条件播进入动画，历史消息就会在滚动中不停闪 —— 那比"没有动画"糟得多。
+    // 所以判据必须是"这个 id 以前没见过"，而不是"它刚进入组合"。
+    //
+    // 集合本身放在**文件级**（见 `seenMessageIds`），**不能**放在这里的 `remember` 里 ——
+    // 这一点是本轮踩过的坑，写下来免得下一个人又挪回去：
+    //
+    //   原来写的是 `remember(activeSessionId) { HashSet().apply { addAll(transcript) } }`。
+    //   问题在于这个 `remember` 的寿命**只到本层组合被丢弃为止**。一旦 ChatList 这层
+    //   组合被重建（工作区宿主重进组合、面板被重新挂载…），这个块会**再跑一次**，
+    //   而 `addAll(当前的 transcript)` 会把**刚刚新到的那条消息也登记成"已见过"** ——
+    //   于是它的 `add` 返回 false，`animate` 为假，**动画静默消失**：
+    //   代码看着没错、编译通过、也不报错，只是不播。
+    //
+    // 所以：集合放文件级，并且**按会话只播种一次**（`seenSeededSession` 判重）。
+    // 重建组合时 `seenIdsFor` 只会把已有集合还回来，不再重新登记。
+    //
+    // ⚠️ `add` 的返回值就是"以前没见过"，所以下面用 `remember(item.id) { seenIds.add(id) }`
+    // 一次搞定"判断 + 登记"。它在组合期有副作用，但幂等、只做一次集合插入 ——
+    // 换成 `LaunchedEffect` 就晚了：那一帧的 `isNew` 必须**同步**拿到。
+    val seenIds = remember(state.activeSessionId) {
+        seenIdsFor(state.activeSessionId, state.transcript)
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -219,7 +335,21 @@ fun ChatList(
             if (state.transcript.isEmpty()) {
                 item { EmptyState() }
             }
-            items(state.transcript, key = { it.id }) { item ->
+            // ---- 按「块」渲染 -------------------------------------------------
+            //
+            // 一块 = 一个 `LazyColumn` item：
+            //  · `USER` 自己一块（容器外）；
+            //  · 其余全部并进**同一个助手回合容器**（反编译版 `beginConversation()`）——
+            //    容器是**透明**的、padding 为 0，只用上下外边距把这一轮与相邻内容拉开，
+            //    所以它不画框、不抢注意力，只是把"这一轮的东西"归到一起。
+            //
+            // 切块规则在 `TurnLayout`（纯逻辑、有单测）：判错不会编译失败，
+            // 只会让间距/包裹关系不对。
+            //
+            // ⚠️ 每个成员仍在**容器内部**各自成一层组合（`key(item.id)`），
+            // 手指追踪与长按菜单也挂在成员自己那一层 —— 于是菜单锚点与以前**完全一致**，
+            // 不需要任何跨层坐标换算（那正是锚偏的常见来源）。
+            items(blocks, key = { it.key }) { block ->
                 // 新消息淡入 + 已有消息位置变化时平滑推移。
                 //
                 // ⚠️ `fadeOutSpec = null` 是刻意的，别加回来。
@@ -227,70 +357,108 @@ fun ChatList(
                 // `newSession()` 把 transcript 一次清空时，那几张还没淡完的卡片
                 // 会和紧接着出现的 `EmptyState()` 叠在一起 —— 表现为卡片与
                 // "想让智蛛做什么？"互相穿透、错位，看起来像渲染 bug。
-                // 删除单条消息时瞬间消失没有观感损失（用户主动触发，预期即时），
-                // 换掉这个交集比留着更划算。
-                // 手指位置追踪：挂在这一项的 Box 上，于是记录到的坐标就是
-                // 「相对这一项」的，与 anchoredMenu 的锚点是同一个坐标系。
-                // 它是**只读观察者**，不会抢走卡片自己的点击/长按与无障碍语义。
-                val finger = rememberFingerTracker()
-                // 长按触发的那一刻把手指位置定格下来。用 state 而不是直接读
-                // finger.offset()：菜单显示期间要一直用它定位，而手指已经抬起了。
-                var fingerOffset by remember { mutableStateOf<DpOffset?>(null) }
+                val memberIds = when (block) {
+                    is TurnLayout.Block.Standalone -> listOf(block.id)
+                    is TurnLayout.Block.Turn -> block.ids
+                }
+                val members = memberIds.mapNotNull { id -> state.transcript.firstOrNull { it.id == id } }
+                if (members.isEmpty()) return@items
                 Box(
                     modifier = Modifier
                         .animateItem(fadeOutSpec = null)
                         .padding(end = 14.dp)
-                        .then(finger.modifier),
+                        // 回合容器：反编译版是 `margins(0, dp(10), 0, dp(14))`。
+                        .then(
+                            if (block is TurnLayout.Block.Turn) {
+                                Modifier.padding(top = 10.dp, bottom = 14.dp)
+                            } else {
+                                Modifier
+                            },
+                        ),
                 ) {
                     // ⚠️ 调试条与消息卡必须放进**同一个 Column** 里，不能并列在 Box 下。
-                    //
-                    // 这个 Box 是用来给 anchoredMenu 定位的（菜单要盖在卡片上），
-                    // 而 Box 的子项是**叠放**而不是竖排 —— 直接并列会让调试条被卡片盖住，
-                    // 表现是"调试条的文字与消息正文糊在一起"。所以：竖排交给 Column，
-                    // 叠放只留给那一个菜单。
+                    // 这个 Box 是给 anchoredMenu 定位的（菜单要盖在卡片上），而 Box 的子项
+                    // 是**叠放**而不是竖排 —— 直接并列会让调试条被卡片盖住。
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // ---- 主体调试模式：就地加料（不改变下面任何卡片的渲染） ----
-                        if (debugMode) {
-                            MessageDebugStrip(item)
+                        members.forEach { item ->
+                            // 手指位置追踪：挂在这一条自己的 Box 上，于是记录到的坐标就是
+                            // 「相对这一条」的，与 anchoredMenu 的锚点是同一个坐标系。
+                            val finger = rememberFingerTracker()
+                            var fingerOffset by remember { mutableStateOf<DpOffset?>(null) }
+                            key(item.id) {
+                                // ⚠️ 每一位成员外面这一层 Box 是**必须**的，不是多余的嵌套：
+                                //
+                                // 1. 它承载手指追踪（`finger.modifier`），记录到的坐标因此是
+                                //    「相对这一条」的；
+                                // 2. `anchoredMenu` 用 `Modifier.absoluteOffset` 定位，而
+                                //    `absoluteOffset` 的坐标是相对**直接父节点**的 ——
+                                //    若把它挂到回合 Column 下面（成为整个回合并列的子项），
+                                //    第 2 条之后的菜单会整体偏掉前面所有成员的高度。
+                                //
+                                // 所以「手指追踪 + 菜单锚点」必须始终贴在**自己那一条**上。
+                                // 本次新出现的成员播一次「淡入 + 轻微上移」；历史成员原样直出。
+                                AnimatedMember(
+                                    animate = remember(item.id) {
+                                        val fresh = seenIds.add(item.id)
+                                        // 探针：新消息应当 fresh=true。全是 false 就说明
+                                        // 判据又退回"按组合生命周期算新的"了。
+                                        ZhiFrameTrace.note("seen/item " + item.id + " fresh=" + fresh)
+                                        fresh
+                                    },
+                                ) {
+                                Box(modifier = Modifier.fillMaxWidth().then(finger.modifier)) {
+                                    // ⚠️ 调试条与消息卡必须放进**同一个 Column** 里，不能并列在
+                                    // 上面那个 Box 下：Box 的子项是**叠放**而不是竖排，
+                                    // 直接并列会让调试条被卡片盖住。
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                    // ---- 主体调试模式：就地加料（不改下面任何卡片的渲染） ----
+                                    if (debugMode) {
+                                        MessageDebugStrip(item)
+                                    }
+                                    // 调试模式把细节**默认全展开**：思考面板、工具输出、处理步骤。
+                                    //
+                                    // 做法是"只改这一次渲染的输入"（item.copy(...)），不动 state ——
+                                    // 于是折叠按钮仍然能点（点了会写到 state，而调试模式的强制展开会把它
+                                    // 覆盖回展开 —— 这是刻意的：调试模式就是"全都摊开"的视图，
+                                    // 想看折叠后的样子就把它关掉）。
+                                    val shown = if (debugMode) item.fullyExpanded() else item
+                                    when (shown.kind) {
+                                        ChatKind.USER -> UserBubble(shown) {
+                                            fingerOffset = finger.offset()
+                                            onMessageActions(item)
+                                        }
+                                        ChatKind.ASSISTANT -> AssistantCard(
+                                            item = shown,
+                                            onToggleThinking = { onToggleThinking(item.id) },
+                                            onLongPress = {
+                                                fingerOffset = finger.offset()
+                                                onMessageActions(item)
+                                            },
+                                        )
+                                        ChatKind.TOOL_GROUP -> ToolBatch(
+                                            item = shown,
+                                            // 传**原始** id：折叠动作要写到 state 上，用 shown 的 id 会指向同一条
+                                            // （id 不变），但语义上更清楚的是"动的是哪一条消息"。
+                                            onToggleTool = onToggleTool,
+                                            // 组键由界面从 toolId 推导（见 ToolGrouping），所以这里传的是
+                                            // **哪一组**，而不是"整批的成员列表要收起"。
+                                            onToggleGroup = { groupKey -> onToggleGroup(item.id, groupKey) },
+                                            // `⋯` 是**单个工具**的操作，所以传的是那一行的 id，
+                                            // 而不是整组（以前传整组，于是点单行弹出整组菜单）。
+                                            onToolAction = { toolId, label -> onToolAction(item, toolId, label) },
+                                        )
+                                        ChatKind.ERROR -> ErrorCard(shown)
+                                        ChatKind.INFO -> InfoCard(shown)
+                                    }
+                                    } // Column（调试条 + 消息卡，竖排）
+                                    // 菜单挂在**成员自己的 Box** 里，并用手指位置作偏移 ——
+                                    // 于是它从手指那一点长出来，且坐标空间与手指追踪同源。
+                                    anchoredMenu(item.id, fingerOffset)
+                                } // Box（手指追踪 + 菜单锚点）
+                                } // AnimatedMember（一次性进入动画）
+                            }
                         }
-                        // 调试模式把细节**默认全展开**：思考面板、工具输出、处理步骤。
-                        //
-                        // 做法是"只改这一次渲染的输入"（item.copy(...)），不动 state ——
-                        // 于是折叠按钮仍然能点（点了会写到 state，而调试模式的强制展开会把它
-                        // 覆盖回展开 —— 这是刻意的：调试模式就是"全都摊开"的视图，
-                        // 想看折叠后的样子就把它关掉）。
-                        val shown = if (debugMode) item.fullyExpanded() else item
-                        when (shown.kind) {
-                        ChatKind.USER -> UserBubble(shown) {
-                            fingerOffset = finger.offset()
-                            onMessageActions(item)
-                        }
-                        ChatKind.ASSISTANT -> AssistantCard(
-                            item = shown,
-                            onToggleThinking = { onToggleThinking(item.id) },
-                            onLongPress = {
-                                fingerOffset = finger.offset()
-                                onMessageActions(item)
-                            },
-                        )
-                        ChatKind.TOOL_GROUP -> ToolGroupCard(
-                            item = shown,
-                            // 传**原始** id：折叠动作要写到 state 上，用 shown 的 id 会指向同一条
-                            // （id 不变），但语义上更清楚的是"动的是哪一条消息"。
-                            onToggleTool = onToggleTool,
-                            onToggleGroup = { expanded -> onToggleGroup(item.id, expanded) },
-                            onActions = {
-                                fingerOffset = finger.offset()
-                                onMessageActions(item)
-                            },
-                        )
-                        ChatKind.ERROR -> ErrorCard(shown)
-                        ChatKind.INFO -> InfoCard(shown)
-                    }
-                    } // Column（调试条 + 消息卡）
-                    // 菜单挂在这一项自己的 Box 里，并用手指位置作偏移 ——
-                    // 于是它从**手指那一点**长出来，而不是贴条目边界。
-                    anchoredMenu(item.id, fingerOffset)
+                    } // Column（整个回合：各成员依次竖排）
                 }
             }
             // ---- 主体调试模式：把**完整任务清单**内联进对话流 ----
@@ -413,6 +581,15 @@ private fun ChatItem.fullyExpanded(): ChatItem = when (kind) {
     ChatKind.ASSISTANT -> copy(thinkingExpanded = true, streaming = streaming)
     ChatKind.TOOL_GROUP -> copy(
         groupCompleted = true,
+        // 折叠组默认收起，调试模式要把**每一组**都摊开 —— 展开态记在
+        // `expandedGroups` 上，所以这里按键集合给全（而不是像以前那样
+        // 把每个成员的 `expanded` 置真：那个标志位管的是"这条工具的输出展开"，
+        // 两件事不共用）。
+        expandedGroups = ToolGrouping
+            .group(tools.map { ToolGrouping.Entry(it.id, it.toolName) })
+            .filterIsInstance<ToolGrouping.Segment.Group>()
+            .map { it.key }
+            .toSet(),
         // 只有"已完成且有输出"的工具才有可展开的内容 —— 与卡片自身的判断保持一致，
         // 否则运行中/等待授权的行会被强行展开，露出一片空白。
         tools = tools.map { tool ->
@@ -458,7 +635,7 @@ private fun InlineTaskList(tasks: List<AgentTask>) {
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = when (task.state) {
+                            painter = when (task.state) {
                                 TaskState.DONE -> ZhiIcons.done
                                 TaskState.RUNNING -> ZhiIcons.pending
                                 TaskState.PENDING -> ZhiIcons.awaiting
@@ -496,5 +673,145 @@ private fun InlineTaskList(tasks: List<AgentTask>) {
                 }
             }
         }
+    }
+}
+
+/**
+ * 「已经见过」的消息 id —— 判断某个成员是**本次新出现**的还是历史。
+ *
+ * ## 为什么是文件级，而不是 `ChatList` 里的 `remember`
+ *
+ * 见调用点的说明：`remember` 只活到那层组合被丢弃为止，而重建组合时它会拿**当前的**
+ * transcript 重新播种，把刚到的消息也算成"历史" —— 动画就这么静默消失了。
+ * 放在文件级之后，集合的寿命等于进程，重建组合不会误登记。
+ *
+ * ## 代价（写清楚，别当成没想过）
+ *
+ *  · 只增不减，随一次会话的消息数增长。一条消息一个字符串，量级可忽略；
+ *    换会话时不会清空，但 id 是唯一的，误判不会发生。
+ *  · 只读主线程（组合期），所以不需要加锁。
+ */
+private val seenMessageIds = HashSet<String>()
+
+/** 上一次播种 [seenMessageIds] 的会话 id；`null` = 还没有播种过。 */
+private var seenSeededSession: String? = null
+
+/**
+ * 取「已经见过」的集合，必要时先播种。
+ *
+ * 播种 = 把**当时的** transcript 全部登记为已见过（它们是历史，不该补播动画）。
+ * ⚠️ 只在会话**变了**的时候播种；同一个会话下反复调用只会把已有集合还回来 ——
+ * 这一点正是上面那个 bug 的修复点。
+ */
+private fun seenIdsFor(
+    sessionId: String?,
+    transcript: List<ChatItem>,
+): MutableSet<String> {
+    if (seenSeededSession != sessionId) {
+        seenSeededSession = sessionId
+        seenMessageIds.addAll(transcript.map { it.id })
+        // 探针：正常一次会话只会看到一行。若这里反复刷，说明会话 id 在抖动
+        // （那会让每条消息都被当成"新的"而集体淡入，是另一种病）。
+        ZhiFrameTrace.note("seen/seed session=" + sessionId + " n=" + transcript.size)
+    }
+    return seenMessageIds
+}
+
+/**
+ * 新成员进入时上移的距离。
+ *
+ * 取 8dp：够看出"它是从下面滑上来的"，又不会让整块内容看起来在跳。
+ * 位移与淡入用同一条 [ZhiMotion.FADE_IN_MILLIS]（300ms + SinOut）——
+ * 与 Miuix 的 `PopupDimEnter` 同一个量纲，跟全应用的"出现"节奏一致。
+ */
+private val MemberEnterRise = 8.dp
+
+/**
+ * 一条成员（消息 / 工具卡）的**一次性**进入动画：淡入 + 轻微上移。
+ *
+ * ## 为什么是"一次性"而不是普通的 AnimatedVisibility
+ *
+ * [animate] 传的是"**本次新出现**"，由调用点的 `seenIds` 决定（见那里的说明）。
+ * 一旦为 true 就不再翻转 —— 而 [animate] 为 false 时本组件直接原样输出内容，
+ * **连 layer 都不建**。于是：
+ *
+ *  · 历史消息（含滚动回来重新进入组合的）走零开销的那条路；
+ *  · 只有真正新到的那一条才付一次动画与一个 graphicsLayer。
+ *
+ * 这也是为什么不写成 `AnimatedVisibility`：那个组件管的是"出现/消失"，
+ * 而这里要的是"新出现的补一段位移"，两者语义不同。
+ *
+ * ## 为什么动画跑完就把 layer 摘掉
+ *
+ * `graphicsLayer` 会让这一条**各自单独成层**；消息列表里每条都常驻一层是没必要的
+ * 开销（外面还套着模糊的捕获层），所以只在动画期间挂着，进度到 1 之后返回裸
+ * `Modifier`。摘掉 modifier 节点不会重建内容，也不会丢掉子级的 `remember`。
+ *
+ * ## ⚠️⚠️ 进度必须在**绘制期**读，不能在组合期读
+ *
+ * 先看写错会怎样 —— 这是本工程真实踩过的坑，和 `AssistantCard` 里那个流式光标
+ * 是**同一个错**（见 MessageCards.kt 的说明）。错误写法是：
+ *
+ *     val p = progress.value              // ← 组合期读
+ *     ...
+ *     Modifier.graphicsLayer { alpha = p }   // 值早就被读死了，这里读的只是局部变量
+ *
+ * `progress.value` 在组合里被读 → 这个动画的**每一帧**都让本组件重组一次。
+ * 本组件是消息列表的**成员包装**，它重组就会把 `content()` 整条重新求值 ——
+ * 也就是说，为了让一条消息淡入，整条消息（含 Markdown 正文）每帧重建。
+ * 外面还有逐帧的列表布局在跑，两边叠起来就是"动画看不出来、只看到卡"。
+ *
+ * 正确写法是把读数放进 `graphicsLayer` 的 lambda：
+ *
+ *     Modifier.graphicsLayer {
+ *         val v = progress.value          // ← 绘制期读，只让这一层重绘
+ *         alpha = v
+ *         translationY = (1f - v) * rise
+ *     }
+ *
+ * `graphicsLayer { }` 的 lambda 在**绘制阶段**求值，读到的状态只登记在绘制作用域上，
+ * 所以整个动画期间**组合一次都不跑**（只有放进/结束各一次）。
+ *
+ * ## 那 `done` 这个标志是干什么的
+ *
+ * 上面说"进度到 1 就摘 layer"，而摘不摘是**组合期**的决定。如果写成
+ * `if (progress.value >= 1f) Modifier else …`，为了做这个判断又得在组合里读一次 ——
+ * 等于把刚省下来的开销又请回来。所以改用一次性翻牌：动画 `animateTo` 返回之后
+ * 才把 `done` 置真，**整个动画期间组合只跑首尾两次**。
+ */
+@Composable
+private fun AnimatedMember(
+    animate: Boolean,
+    content: @Composable () -> Unit,
+) {
+    if (!animate) {
+        content()
+        return
+    }
+    val progress = remember { Animatable(0f) }
+    // 动画结束才翻的一次性标志：避免为了判断"要不要摘 layer"而在组合期读进度。
+    var done by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        progress.animateTo(
+            1f,
+            animationSpec = tween(ZhiMotion.FADE_IN_MILLIS, easing = SinOutEasing),
+        )
+        done = true
+    }
+    // 位移量在组合期换算（density 几乎不会变）；进度只在绘制期的 lambda 里读。
+    val rise = with(LocalDensity.current) { MemberEnterRise.toPx() }
+    Box(
+        modifier = if (done) {
+            Modifier
+        } else {
+            Modifier.graphicsLayer {
+                // ⚠️ 这一行是整个组件性能的关键：绘制期读，动画期间不触发重组。
+                val v = progress.value
+                alpha = v
+                translationY = (1f - v) * rise
+            }
+        },
+    ) {
+        content()
     }
 }

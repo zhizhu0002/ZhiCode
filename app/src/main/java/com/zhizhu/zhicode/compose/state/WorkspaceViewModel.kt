@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zhizhu.zhicode.compose.data.ApiConfigStore
@@ -14,8 +15,6 @@ import com.zhizhu.zhicode.compose.data.AttachmentReader
 import com.zhizhu.zhicode.compose.data.Clipboard
 import com.zhizhu.zhicode.compose.data.DebugApiProfile
 import com.zhizhu.zhicode.compose.data.FileBrowser
-import com.zhizhu.zhicode.compose.data.FileSearch
-import com.zhizhu.zhicode.compose.data.GitChanges
 import com.zhizhu.zhicode.compose.data.McpStore
 import com.zhizhu.zhicode.compose.data.MockWorkspaceRepository
 import com.zhizhu.zhicode.compose.data.ModelCatalogStore
@@ -31,6 +30,10 @@ import com.zhizhu.zhicode.compose.engine.EngineOverrides
 import com.zhizhu.zhicode.compose.engine.EnginePlanApproval
 import com.zhizhu.zhicode.compose.engine.ZhiEngineController
 import com.zhizhu.zhicode.compose.engine.ToolText
+import com.zhizhu.zhicode.compose.engine.applyEngineOverrides
+import com.zhizhu.zhicode.compose.engine.engineEffortToUi
+import com.zhizhu.zhicode.compose.engine.engineModeToUi
+import com.zhizhu.zhicode.compose.engine.readEngineSettings
 import com.zhizhu.zhicode.compose.engine.toEngineEffort
 import com.zhizhu.zhicode.compose.engine.toEngineMode
 import com.zhizhu.zhicode.compose.engine.toUiPlanApproval
@@ -39,21 +42,25 @@ import com.termux.shared.termux.TermuxConstants
 import com.zhizhu.zhicode.RuntimeInstaller
 import com.zhizhu.zhicode.TermuxTerminalPane
 import com.zhizhu.zhicode.compose.model.AgentTask
+import com.zhizhu.zhicode.compose.model.AttachBrowserState
+import com.zhizhu.zhicode.compose.model.ApiConfigState
 import com.zhizhu.zhicode.compose.model.ApiProfile
 import com.zhizhu.zhicode.compose.model.ApiProfileDraft
 import com.zhizhu.zhicode.compose.model.Attachment
 import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
+import com.zhizhu.zhicode.compose.model.ChatNavigation
 import com.zhizhu.zhicode.compose.model.ChoiceIntent
 import com.zhizhu.zhicode.compose.model.ChoiceOption
 import com.zhizhu.zhicode.compose.model.ChoicePickerState
-import com.zhizhu.zhicode.compose.model.DiffState
 import com.zhizhu.zhicode.compose.model.EffortLevel
 import com.zhizhu.zhicode.compose.model.FileDeletePrompt
 import com.zhizhu.zhicode.compose.model.FileEntry
 import com.zhizhu.zhicode.compose.model.FileNameForm
 import com.zhizhu.zhicode.compose.model.FileRoot
+import com.zhizhu.zhicode.compose.model.LiveOutput
+import com.zhizhu.zhicode.compose.model.McpConfigState
 import com.zhizhu.zhicode.compose.model.McpScope
 import com.zhizhu.zhicode.compose.model.McpServer
 import com.zhizhu.zhicode.compose.model.McpServerDraft
@@ -89,15 +96,18 @@ import com.zhizhu.zhicode.compose.data.SearchServiceStore
 import com.zhizhu.zhicode.compose.model.SearchFieldName
 import com.zhizhu.zhicode.compose.model.SearchService
 import com.zhizhu.zhicode.compose.model.SearchServiceDraft
+import com.zhizhu.zhicode.compose.model.SearchServicesState
+import com.zhizhu.zhicode.compose.model.FileFormat
 import com.zhizhu.zhicode.compose.model.SettingsDraft
 import com.zhizhu.zhicode.compose.model.SlashCommand
 import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.model.ToolActivity
+import com.zhizhu.zhicode.compose.model.ToolActions
 import com.zhizhu.zhicode.compose.model.ToolKind
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.model.WebSearchProvider
-import com.zhizhu.zhicode.compose.ui.zhiFormatSize
+import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import com.termux.app.zhicode.core.FileOps
 import com.termux.app.zhicode.core.PlanApprovalGate
 import com.termux.app.zhicode.core.StorageLinks
@@ -160,8 +170,12 @@ class WorkspaceViewModel(
      *
      * `onToolProgress` 的粒度是"每次进程写出一点"，Bash 跑一条 `apt install` 能到几千次。
      * 每次都改 StateFlow 会把界面拖垮，所以按 [PROGRESS_FLUSH_MS] 合并后再落盘。
+     *
+     * 值类型是 [LiveOutput.Buffer] 而不是 `StringBuilder`：除了文本，它还要记住
+     * stdout / stderr 各自的字符数，以及**上一块来自哪个流** —— 后者决定要不要插
+     * `[stdout]` / `[stderr]` 标记行（只在切换时插一次，见 [LiveOutput.append]）。
      */
-    private val progressBuffers = mutableMapOf<String, StringBuilder>()
+    private val progressBuffers = mutableMapOf<String, LiveOutput.Buffer>()
     private val progressLastFlush = mutableMapOf<String, Long>()
 
     /** 正在等待用户回执的权限请求 id。 */
@@ -205,7 +219,19 @@ class WorkspaceViewModel(
      * 否则会出现"想删 A 结果删了当前会话"这类错删。
      */
     private var pendingSessionAction: SessionSummary? = null
+
+    /**
+     * 待执行（去抖中）的设置落盘。
+     *
+     * 见 [scheduleSettingsPersist]：只有自由文本输入才走这条路，
+     * 非空表示"有一次改动还躺在去抖窗口里"。
+     */
+    private var settingsPersistJob: Job? = null
     private var pendingMessageAction: ChatItem? = null
+
+    // ⚠️ 这里**没有** `pendingToolAction`：工具菜单由那一行自己渲染（Miuix 下拉菜单），
+    // 目标（组 id + 行 id）与文案一起从界面传进来，不需要在选择器回调里回头找目标。
+    // 它曾经存在是因为菜单要经过 `choicePicker` 中转 —— 那条路已经删掉了。
 
     private var modelCatalogJob: Job? = null
 
@@ -258,8 +284,6 @@ class WorkspaceViewModel(
             contextTokens = 0,
             contextWindow = 200_000,
             deviceStatus = clockLabel(),
-            // 变更面板首屏为空；git 是要真实执行命令的，等用户点「刷新」再读。
-            diff = DiffState(),
             terminalLines = repo.terminalBanner(WorkspacePaths.defaultProject()),
             // 文件面板走真实文件系统。只列**一层**（不递归）：内置 Termux 环境装好后
             // home 下可能有几千个文件，递归会拖慢启动。
@@ -430,6 +454,14 @@ class WorkspaceViewModel(
     private fun initSessionState() {
         viewModelScope.launch(Dispatchers.IO) {
             restoreUiSettings()
+            /*
+             * ⚠️ 这一步必须在 `syncActiveProfile()`（它会 `configure()` 并**落盘**）之前。
+             *
+             * 理由见 [restoreRuntimeChoices]：那个 configure 会把界面那份权限模式
+             * 写回 SessionConfig。界面此刻还是默认值，于是"先 configure 再读盘"
+             * 的顺序等于每次启动都把用户的权限设置冲掉。
+             */
+            restoreRuntimeChoices()
             // 顶栏的模型名/密钥状态要反映**真实生效**的配置，
             // 否则用户会看到一个跟实际请求无关的模型名。
             syncActiveProfile()
@@ -437,6 +469,20 @@ class WorkspaceViewModel(
             // 共享存储的授权状态要**实测**：文件面板切到「共享存储」时，
             // 没授权只会看到"0 项"，而原因（没给「所有文件访问权限」）必须说出来。
             refreshSharedStoragePermission()
+            /*
+             * `~/storage` 的六个链接**在每次启动的路径上**补一次。
+             *
+             * 幂等且只增不删（见 StorageLinks.setup），所以重复调用没有副作用；
+             * 而它是"老环境缺这一块"的唯一补救途径 —— 之前只在手动点「修复」时才跑，
+             * 结果是早先装好的环境永远没有 ~/storage，用户看到的是 `cd ~/storage/shared`
+             * 失败，看不出是"这个版本才加的"。
+             *
+             * 门控在 isInstalled()：环境还没装出来时 HOME 可能都还不存在，
+             * 这时候建链接没有意义（安装流程自己会建）。
+             */
+            if (runCatching { installer.isInstalled() }.getOrDefault(false)) {
+                installer.setupStorageLinks()
+            }
             ensureWorkspace()
             val sessions = SessionReader.list(_state.value.projectPath)
             _state.update { it.copy(sessions = sessions) }
@@ -450,6 +496,10 @@ class WorkspaceViewModel(
      * 其余设置（权限模式、推理档、上下文窗口、项目目录、联网搜索一整套、自动压缩、
      * 自定义提示词、沙箱全权、Root、保活）都是 [SessionConfig] 的字段，
      * 由引擎侧的持久化表负责，这里不重复。
+     *
+     * ⚠️ 但**每次启动仍要把它们读回界面一次**：引擎存了不等于界面知道，
+     * 而界面不知道就会在下一次 `configure()` 里用自己的默认值把盘上的值冲掉。
+     * 见 [restoreRuntimeChoices]。
      *
      * 密钥从**加密槽**读回，与 API 配置的密钥同一套保护。
      */
@@ -770,14 +820,29 @@ class WorkspaceViewModel(
     fun openSkills() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
+        ZhiFrameTrace.begin("page:skills")
+        // 子页永远坐在设置主页之上（rikkahub 的页面栈）：从侧栏入口进来时
+        // 也把 hub 带起来，否则返回时子页关掉就直接回工作区，层断了。
+        //
+        // ⚠️ 顺序是这个函数的全部要点（详见 openApiConfig 的注释）：**先同步推页**，
+        // 数据随后在 IO 上读。原来 `SkillStore.list()` 直接写在 `_state.update{}` 里，
+        // 而它是 `listFiles()` 加逐目录解析 —— 主线程被它占住，点击那一帧都画不出来，
+        // 用户看到的就是「点了要等一会儿才开始动」。
         _state.update {
-            // 子页永远坐在设置主页之上（rikkahub 的页面栈）：从侧栏入口进来时
-            // 也把 hub 带起来，否则返回时子页关掉就直接回工作区，层断了。
             it.copy(
-                skills = SkillsState(skills = SkillStore.list(it.projectPath)),
+                skills = SkillsState(skills = emptyList(), loading = true),
                 settingsOpen = true,
                 settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
             )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val path = _state.value.projectPath
+            val loaded = runCatching { SkillStore.list(path) }.getOrDefault(emptyList())
+            _state.update { s ->
+                // 读盘期间用户可能已经返回：那时载荷已置空，结果直接丢弃。
+                val current = s.skills ?: return@update s
+                s.copy(skills = current.copy(skills = loaded, loading = false))
+            }
         }
     }
 
@@ -1349,17 +1414,26 @@ class WorkspaceViewModel(
     fun openRoleCards() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
-        val context = getApplication<android.app.Application>()
+        ZhiFrameTrace.begin("page:roleCards")
+        // 同 openSkills：侧栏入口也要把设置主页垫在底下，保证返回层级完整。
+        // 先同步推页、数据后读，理由见 openApiConfig。
         _state.update {
-            // 同 openSkills：侧栏入口也要把设置主页垫在底下，保证返回层级完整。
             it.copy(
-                roleCards = RoleCardsState(
-                    cards = RoleCardStore.list(context),
-                    activeId = RoleCardStore.activeId(context),
-                ),
+                roleCards = RoleCardsState(cards = emptyList(), activeId = "", loading = true),
                 settingsOpen = true,
                 settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
             )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val context = getApplication<android.app.Application>()
+            val cards = runCatching { RoleCardStore.list(context) }.getOrDefault(emptyList())
+            val activeId = runCatching { RoleCardStore.activeId(context) }.getOrDefault("")
+            _state.update { s ->
+                val current = s.roleCards ?: return@update s
+                s.copy(
+                    roleCards = current.copy(cards = cards, activeId = activeId, loading = false),
+                )
+            }
         }
     }
 
@@ -1487,13 +1561,24 @@ class WorkspaceViewModel(
     fun openMemory() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
+        ZhiFrameTrace.begin("page:memory")
         // 同 openSkills：侧栏入口也把设置主页垫在底下。
+        // 先同步推页、数据后读，理由见 openApiConfig。`MemoryStore.list` 要读文件正文
+        // （`readText()`），放在主线程上同样会挡住点击那一帧。
         _state.update {
             it.copy(
-                memory = MemoryState(files = MemoryStore.list(it.projectPath)),
+                memory = MemoryState(files = emptyList(), loading = true),
                 settingsOpen = true,
                 settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
             )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val path = _state.value.projectPath
+            val files = runCatching { MemoryStore.list(path) }.getOrDefault(emptyList())
+            _state.update { s ->
+                val current = s.memory ?: return@update s
+                s.copy(memory = current.copy(files = files, loading = false))
+            }
         }
     }
 
@@ -1659,6 +1744,8 @@ class WorkspaceViewModel(
                     pendingInputs = queue,
                     workingStatus = queuedStatus(queue.size),
                     message = queuedNote,
+                    // 发出去就必须看得见：用户可能正在翻历史，而此刻的意图很明确。
+                    scrollToBottomToken = s.scrollToBottomToken + 1,
                 )
             }
             // 真正的排队交给引擎：它会在「当前工具执行完 / 当前模型回复结束」这个
@@ -1699,6 +1786,8 @@ class WorkspaceViewModel(
                 composerBusy = true,
                 workingStatus = "正在思考…",
                 busySessionIds = it.busySessionIds + it.activeSessionId,
+                // 发送即恢复吸底：用户可能正在翻历史，气泡不能落在屏幕外。
+                scrollToBottomToken = it.scrollToBottomToken + 1,
             )
         }
         startTurn(buildPromptWithTextAttachments(text), imageBlocks)
@@ -1944,7 +2033,6 @@ class WorkspaceViewModel(
                 transcript = s.transcript + ChatItem(
                     id = groupId,
                     kind = ChatKind.TOOL_GROUP,
-                    groupLabel = "",
                     tools = emptyList(),
                 ),
             )
@@ -1980,6 +2068,21 @@ class WorkspaceViewModel(
             additions = added,
             deletions = deleted,
             kind = kindOf(name),
+            // 记下起点：引擎的 elapsedMs 只在有输出时被推过来，跑很久不吐字的命令
+            // 标签会冻在最后一次进度的值上。有了起点，界面侧的定时刷新才能续走
+            // （见 ToolActions.displayElapsedMs）。
+            //
+            // ⚠️ 用 `elapsedRealtime`（单调时钟，含休眠）而**不是** `currentTimeMillis`：
+            // 后者会被系统对时/NTP/用户改时间拨动 —— 那种情况下秒表会突然跳一大步
+            // 甚至变成负数。参考实现用的就是 `SystemClock.elapsedRealtime()`。
+            startedAtMs = SystemClock.elapsedRealtime(),
+            // 原始命令行（未截断）：折叠态用 summary，展开态要看完整的那一份。
+            command = command,
+            // 折叠组副行要显示的路径/模式。规则与 `summary` **不同**（见 ToolText.activityHint），
+            // 所以在这里按参考实现的 `toolActivityHint` 算好存下来。
+            hint = ToolText.activityHint(name, input),
+            // `ReadMany` 读了几个文件 —— 组表头要按实际条数计入"读取 N 个文件"。
+            readRequests = ToolText.readRequestCount(name, input),
         )
         liveTools[id] = LiveTool(groupId, name, command)
 
@@ -1991,7 +2094,10 @@ class WorkspaceViewModel(
                     if (item.id != groupId) item
                     else {
                         val tools = item.tools + activity
-                        item.copy(tools = tools, groupLabel = groupLabel(tools))
+                        // ⚠️ 这里**不再**算一个批次级的汇总标签：一个批次里的工具会按
+                        // 连续 read/search 被切成若干段（见 `ToolGrouping`），每段自己
+                        // 带标题，批次级那个标签没有渲染位置了。
+                        item.copy(tools = tools)
                     }
                 },
                 workingStatus = "正在执行 $name…",
@@ -2002,24 +2108,44 @@ class WorkspaceViewModel(
 
     override fun onEngineToolProgress(id: String, chunk: String, stderr: Boolean, elapsedMs: Long) {
         if (liveTools[id] == null) return
-        val buffer = progressBuffers.getOrPut(id) { StringBuilder() }
-        if (stderr) buffer.append("[stderr]\n")
-        buffer.append(chunk)
-        // 单条工具的实时输出上限，超出丢头部（原版 liveOutput 是 40000）。
-        if (buffer.length > LIVE_OUTPUT_LIMIT) buffer.delete(0, buffer.length - LIVE_OUTPUT_LIMIT)
+        // 累积**每一块**（不按 flush 间隔丢块）：缓冲要完整，只有"推给 StateFlow"
+        // 这件事才做合并。
+        //
+        // ⚠️ `LiveOutput.append` 里有两件以前在这里做错的事：
+        //  1. `[stderr]` 标记原来**每个** stderr chunk 都插一次，连续报错的命令会把
+        //     输出刷成一片 `[stderr]`；现在只在 stdout/stderr 切换时插一次。
+        //  2. 换行没有归一化，PTY 的 `\r\n` 会在界面上留下看不见的回车。
+        val buffer = LiveOutput.append(
+            previous = progressBuffers[id] ?: LiveOutput.Buffer(),
+            chunk = chunk,
+            stderr = stderr,
+            keep = LIVE_OUTPUT_LIMIT,
+        )
+        progressBuffers[id] = buffer
 
         val now = System.currentTimeMillis()
         val last = progressLastFlush[id] ?: 0L
         if (now - last < PROGRESS_FLUSH_MS) return
         progressLastFlush[id] = now
-        val text = buffer.toString()
+        val text = buffer.text
         _state.update { s ->
             s.copy(
                 transcript = s.transcript.map { item ->
                     if (item.kind != ChatKind.TOOL_GROUP) item
                     else item.copy(
                         tools = item.tools.map {
-                            if (it.id == id) it.copy(output = text, elapsedMs = maxOf(it.elapsedMs, elapsedMs)) else it
+                            if (it.id == id) {
+                                it.copy(
+                                    output = text,
+                                    // 运行标签要显示"错误输出有多少"，所以两个计数
+                                    // 要跟着文本一起落进 state。
+                                    stdoutChars = buffer.stdoutChars,
+                                    stderrChars = buffer.stderrChars,
+                                    elapsedMs = maxOf(it.elapsedMs, elapsedMs),
+                                )
+                            } else {
+                                it
+                            }
                         },
                     )
                 },
@@ -2037,6 +2163,7 @@ class WorkspaceViewModel(
         addedLines: Int,
         deletedLines: Int,
         command: String,
+        previews: List<ChatImage>,
     ) {
         val live = liveTools.remove(id)
         progressBuffers.remove(id)
@@ -2054,6 +2181,14 @@ class WorkspaceViewModel(
                                 failed = isError,
                                 exitCode = exitCode,
                                 output = content,
+                                // ⚠️ 这个赋值不能省。引擎的写文件类工具把改动放在
+                                // `result.diff`（工具自述里只有一句 "Wrote N bytes …"），
+                                // 少这一行，界面那块更暗的 diff 预览井就永远不出现 ——
+                                // 参数一路传到这里却被丢掉，编译器不会提醒。
+                                diff = diff,
+                                // 同 `diff`：漏了这行，沙箱截图就停在这一层，工具卡里什么都不显示
+                                // （模型那边照样看得到图），且**编译器不会提醒**。
+                                previews = previews,
                                 elapsedMs = maxOf(tool.elapsedMs, 0L),
                                 additions = if (addedLines > 0) addedLines else tool.additions,
                                 deletions = if (deletedLines > 0) deletedLines else tool.deletions,
@@ -2070,8 +2205,6 @@ class WorkspaceViewModel(
         }
         appendProcessStep("工具完成：$name")
 
-        // 编辑类工具可能改动工作区，顺手刷新变更面板。
-        if (live != null && kindOf(name) == ToolKind.EDIT) refreshDiff()
     }
 
     override fun onEngineToolBatchCompleted(toolIds: List<String>) {
@@ -2433,7 +2566,13 @@ class WorkspaceViewModel(
             )
         }
         // 切到自动编辑后要立刻下发，否则下一条工具调用还会弹窗。
-        if (alwaysAllow) runCatching { engine.configure(engineOverrides()) }
+        if (alwaysAllow) {
+            runCatching { engine.configure(engineOverrides()) }
+            // 这一次授权**改变了权限模式**（自动编辑），所以要落盘：
+            // 它不再是"仅本次"的语义了。少了这一句，重启后会读回旧模式，
+            // 用户会以为"总是允许"没生效过。
+            persistRuntimeChoice(mode = PermissionMode.ACCEPT_EDITS)
+        }
     }
 
     private fun kindOf(toolName: String): ToolKind = when (toolName) {
@@ -2442,20 +2581,6 @@ class WorkspaceViewModel(
         "Edit", "MultiEdit", "Write", "Move", "Delete", "Mkdir", "Copy" -> ToolKind.EDIT
         "Bash", "Root", "BashTool" -> ToolKind.COMMAND
         else -> ToolKind.OTHER
-    }
-
-    private fun groupLabel(tools: List<ToolActivity>): String {
-        val parts = mutableListOf<String>()
-        val searches = tools.count { it.kind == ToolKind.SEARCH }
-        val reads = tools.count { it.kind == ToolKind.READ }
-        val edits = tools.count { it.kind == ToolKind.EDIT }
-        val commands = tools.count { it.kind == ToolKind.COMMAND }
-        if (searches > 0) parts += "搜索 $searches 个模式"
-        if (reads > 0) parts += "读取 $reads 个文件"
-        if (edits > 0) parts += "修改 $edits 处代码"
-        if (commands > 0) parts += "执行 $commands 条命令"
-        if (parts.isEmpty()) parts += "调用 ${tools.size} 个工具"
-        return parts.joinToString("、")
     }
 
     private fun subtitleFor(tool: String): String = when (tool) {
@@ -2485,8 +2610,6 @@ class WorkspaceViewModel(
         when (command) {
             "/clear", "/new" -> newSession()
             "/terminal" -> selectTab(WorkspaceTab.TERMINAL)
-            // 「变更」Tab 已移除：/diff 走普通消息输出 diff 文本
-            "/changes", "/diff" -> {}
             "/files" -> selectTab(WorkspaceTab.FILES)
             "/plan" -> enterPlanMode(arg)
             "/permissions" -> showPermissionPicker()
@@ -2594,20 +2717,39 @@ class WorkspaceViewModel(
     }
 
     /**
-     * 「重试上一问」：把最近一条用户消息重新发一次。
+     * 「重试上一问」：把**被点那条消息之前**最近的一条用户消息重新发一次。
      *
      * 注意重发**不会**撤回上一轮的结果，所以它会作为新一轮追加在对话末尾
      * （与原版行为一致：原版也是重发，而不是回滚历史）。
+     *
+     * ## 为什么必须从"被点的那条"往前找
+     *
+     * 以前这里取的是整条对话的**最后一条**用户消息。于是用户翻到很早以前的一轮回复、
+     * 对它点「重试上一问」时，重发的却是**最新**那个问题 —— 点 A 发了 B，
+     * 而界面上看不出任何异常。参考实现同样是 `for (i = index - 1; i >= 0; i--)`，
+     * 从被点的那条往前找。
+     *
+     * @param from 被点的那条消息。为空时退回"最后一条用户消息"（正常不会发生）。
      */
-    private fun retryLastUserPrompt() {
-        val lastUser = _state.value.transcript.lastOrNull {
-            it.kind == ChatKind.USER && it.body.isNotBlank()
-        }
-        if (lastUser == null) {
-            _state.update { it.copy(message = "没有可重试的问题", messageIsError = true) }
+    private fun retryLastUserPrompt(from: ChatItem?) {
+        // 定位逻辑在纯逻辑层（`ChatNavigation.previousUserPrompt`，有单测）：
+        // 这里只负责把对话流翻译成它需要的最小输入。
+        val transcript = _state.value.transcript
+        val previous = ChatNavigation.previousUserPrompt(
+            entries = transcript.map { item ->
+                ChatNavigation.Entry(
+                    id = item.id,
+                    isUser = item.kind == ChatKind.USER,
+                    body = item.body,
+                )
+            },
+            anchorId = from?.id,
+        )
+        if (previous == null) {
+            _state.update { it.copy(message = "这条消息之前没有可重试的问题", messageIsError = true) }
             return
         }
-        _state.update { it.copy(composerText = lastUser.body) }
+        _state.update { it.copy(composerText = previous) }
         send()
     }
 
@@ -2694,7 +2836,7 @@ class WorkspaceViewModel(
                 append("API 配置：").append(s.profileName)
                 append(if (s.apiKeyConfigured) "（已配置密钥）" else "（未配置密钥）").append('\n')
                 // 只显示项目名：完整路径在沙箱里是 /data/user/0/<宿主>/blackbox/...
-                // 内部虚拟化路径，又长又吓人且用户无法据此操作（与 GitChanges 空态同理）。
+                // 内部虚拟化路径，又长又吓人且用户无法据此操作（与附加选择器读不到目录时的空态同理）。
                 append("项目：").append(s.projectPath.trimEnd('/').substringAfterLast('/')).append('\n')
                 append("上下文：").append(formatTokens(s.contextTokens))
                 append(" / ").append(formatTokens(s.contextWindow))
@@ -2835,18 +2977,48 @@ class WorkspaceViewModel(
     fun openApiConfig() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
-        viewModelScope.launch(Dispatchers.IO) {
-            val state = ApiConfigStore.read(getApplication())
-            _state.update {
+        ZhiFrameTrace.begin("page:api")
+        // ---- 为什么页面状态必须先翻、数据后读 ----
+        //
+        // 原来的写法是「读完盘再翻页」：
+        //
+        // ```
+        // viewModelScope.launch(Dispatchers.IO) {
+        //     val state = ApiConfigStore.read(getApplication())   // 先等磁盘
+        //     _state.update { it.copy(apiConfig = state, settingsOpen = true) }  // 才推页
+        // }
+        // ```
+        //
+        // 于是「点一下」到「页面开始动」之间隔着整整一次磁盘读 —— 用户的原话是
+        // 「点击某些东西切换页面时，过一段时间才执行」。转场本身不慢，是它**开始得晚**：
+        // 帧循环那几帧没有新状态可组合，只能一直等 IO 回来。
+        //
+        // 现在把顺序倒过来：本函数**同步**把页推上去（同一次点击事件、同一帧），
+        // 载荷先给空 + `loading = true`，真正的读取挪到 IO，读完只回填数据字段、
+        // 绝不碰页面栈。于是点击那一帧就有东西可画。
+        //
+        // 空载荷是安全的：`apiConfig != null` 在本工程里的语义就是「这一页开着」，
+        // 而「一个配置档都没有」本来也是合法状态（子页没有对列表做 `!!`）。
+        _state.update {
+            it.copy(
+                apiConfig = ApiConfigState(profiles = emptyList(), activeId = "", loading = true),
                 // 设置主页垫在子页之下（页面栈），返回才有回退目标。
-                it.copy(
-                    apiConfig = state,
-                    settingsOpen = true,
-                    settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
-                )
+                settingsOpen = true,
+                settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val loaded = runCatching { ApiConfigStore.read(getApplication()) }.getOrNull()
+            _state.update { s ->
+                // 读盘期间用户可能已经返回：那时载荷已置空，结果直接丢弃。
+                val current = s.apiConfig ?: return@update s
+                s.copy(apiConfig = loaded ?: current.copy(loading = false))
             }
-            syncActiveProfile()
-            syncRoleCardFromStore()
+            // 这两个只在读成功后才跑：它们要从刚读到的配置里推导当前档位。
+            if (loaded != null) {
+                syncActiveProfile()
+                syncRoleCardFromStore()
+            }
         }
     }
 
@@ -2861,22 +3033,33 @@ class WorkspaceViewModel(
      */
     fun openSearchServices() {
         hideSidebarForNavigation()
+        ZhiFrameTrace.begin("page:search")
+        // 先同步推页、数据后读 —— 理由见 openApiConfig。原来这里同样把
+        // `SearchServiceStore.read()`（还带上迁移）夹在「读盘」和「翻页」之间。
+        _state.update {
+            it.copy(
+                searchServices = SearchServicesState(loading = true),
+                settingsOpen = true,
+                settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+            )
+        }
         viewModelScope.launch(Dispatchers.IO) {
             // 先把老版「单个 provider」迁成一条服务，否则老用户的配置会在这次打开时
             // 看起来"全都消失了"（列表空、而搜索也回落到免费后端）。
-            SearchServiceStore.migrateLegacyIfNeeded(
-                getApplication(),
-                _state.value.settings.webSearchProvider,
-                _state.value.settings.webSearchSearxngUrl,
-                _state.value.settings.webSearchKeys[_state.value.settings.webSearchProvider].orEmpty(),
-            )
-            val services = SearchServiceStore.read(getApplication())
-            _state.update {
-                it.copy(
-                    searchServices = services,
-                    settingsOpen = true,
-                    settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+            runCatching {
+                SearchServiceStore.migrateLegacyIfNeeded(
+                    getApplication(),
+                    _state.value.settings.webSearchProvider,
+                    _state.value.settings.webSearchSearxngUrl,
+                    _state.value.settings.webSearchKeys[_state.value.settings.webSearchProvider]
+                        .orEmpty(),
                 )
+            }
+            val loaded = runCatching { SearchServiceStore.read(getApplication()) }.getOrNull()
+            _state.update { s ->
+                // 读盘期间用户可能已经返回：载荷已置空，结果丢弃。
+                val current = s.searchServices ?: return@update s
+                s.copy(searchServices = loaded ?: current.copy(loading = false))
             }
         }
     }
@@ -3057,13 +3240,26 @@ class WorkspaceViewModel(
     fun openMcpConfig() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
+        ZhiFrameTrace.begin("page:mcp")
+        // 同 openSkills：hub 垫底，返回回设置主页。
+        //
+        // ⚠️ 这里原来是最糟的一处：`McpStore.read()`（内部 `EngineStore().load()` 读文件）
+        // **直接写在主线程的 `_state.update{}` 里** —— 点击那一帧连绘制机会都没有。
+        // 先同步推页、数据后读，理由见 openApiConfig。
         _state.update {
-            // 同 openApiConfig：hub 垫底，返回回设置主页。
             it.copy(
-                mcpConfig = McpStore.read(),
+                mcpConfig = McpConfigState(servers = emptyList(), filePath = "", loading = true),
                 settingsOpen = true,
                 settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
             )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val loaded = runCatching { McpStore.read() }.getOrNull()
+            _state.update { s ->
+                // 读盘期间用户可能已经返回：载荷已置空，结果丢弃。
+                val current = s.mcpConfig ?: return@update s
+                s.copy(mcpConfig = loaded ?: current.copy(loading = false))
+            }
         }
     }
 
@@ -3326,12 +3522,115 @@ class WorkspaceViewModel(
      * 副作用与旧实现保持一致：写状态 + 在对话里留一句可追溯的记录。
      */
 
+    /**
+     * 把盘上存的**权限模式 / 推理档**读回界面状态。
+     *
+     * ## 为什么必须有这一步（用户：「权限在退出软件后恢复成原来的样子」）
+     *
+     * 这两项确实是 [SessionConfig] 的字段、也确实会被 `store.save()` 写盘 ——
+     * 但**界面状态从来不读回来**。于是形成一个固定回路：
+     *
+     * 1. 用户在输入器底排选了「跳过权限」→ 只有 `state.permissionMode` 变了；
+     * 2. 发送时 `configure(engineOverrides())` 把它写盘（这一步是对的）；
+     * 3. 重启 → `state.permissionMode` 又是默认的「每次询问」；
+     * 4. 启动路径里的 `syncActiveProfile()` → `configure()` 立刻**落盘**，
+     *    把界面那份默认值写回去 —— 盘上刚存的「跳过权限」就这样被冲掉。
+     *
+     * 前一步不做、第 4 步就会反向覆盖，所以这个函数读回来的不只是"显示"，
+     * 它还决定了盘上的值能不能活过一次启动。
+     *
+     * ⚠️ 调用时机：**必须在任何 `configure()` 之前**（见 [initSessionState]）。
+     * 读得晚一步，第 4 步已经把默认值写进盘里了，再读就只能读到刚被冲掉的那份。
+     */
+    private suspend fun restoreRuntimeChoices() = withContext(Dispatchers.IO) {
+        val o = readEngineSettings(ApiSettingsStore(getApplication())) ?: return@withContext
+        val mode = engineModeToUi(o.permissionMode)
+        val effort = engineEffortToUi(o.effort)
+        // 搜索后端只按名字回匹配；匹配不上（比如盘上留着旧版本写下的别名）就保持界面原值，
+        // 不要拿一个猜出来的值覆盖 —— 那与"设置被冲掉"是同一类伤害。
+        val provider = o.webSearchProvider?.let { stored ->
+            WebSearchProvider.entries.firstOrNull { it.name.equals(stored, ignoreCase = true) }
+        }
+        _state.update { s ->
+            s.copy(
+                permissionMode = mode,
+                effort = effort,
+                contextWindow = o.contextWindow ?: s.contextWindow,
+                projectPath = o.projectDirectory?.takeIf { it.isNotBlank() } ?: s.projectPath,
+                settings = s.settings.copy(
+                    visionEnabled = o.visionEnabled ?: s.settings.visionEnabled,
+                    customSystemPrompt = o.customSystemPrompt ?: s.settings.customSystemPrompt,
+                    autoCompact = o.autoCompact ?: s.settings.autoCompact,
+                    autoCompactPercent = o.autoCompactPercent ?: s.settings.autoCompactPercent,
+                    webSearchEnabled = o.webSearchEnabled ?: s.settings.webSearchEnabled,
+                    webSearchProvider = provider ?: s.settings.webSearchProvider,
+                    webSearchMaxResults = o.webSearchMaxResults ?: s.settings.webSearchMaxResults,
+                    webSearchTimeoutSec = o.webTimeoutSec ?: s.settings.webSearchTimeoutSec,
+                    webSearchSearxngUrl = o.webSearchBaseUrl ?: s.settings.webSearchSearxngUrl,
+                    sandboxAgentFullAccess = o.sandboxAgentFullAccess ?: s.settings.sandboxAgentFullAccess,
+                    rootExecutionEnabled = o.rootExecutionEnabled ?: s.settings.rootExecutionEnabled,
+                    forcedKeepAliveEnabled = o.forcedKeepAliveEnabled ?: s.settings.forcedKeepAliveEnabled,
+                ),
+                // 设置页若已经开着（正常不会，这一步在启动路径上），草稿也要跟着对齐，
+                // 否则页面显示的是旧值、点一下又把它写回去。
+                settingsDraft = s.settingsDraft?.let { draft ->
+                    draft.copy(
+                        permissionMode = mode,
+                        effort = effort,
+                        contextWindow = o.contextWindow ?: draft.contextWindow,
+                        projectPath = o.projectDirectory?.takeIf { p -> p.isNotBlank() } ?: draft.projectPath,
+                        customSystemPrompt = o.customSystemPrompt ?: draft.customSystemPrompt,
+                        visionEnabled = o.visionEnabled ?: draft.visionEnabled,
+                        autoCompact = o.autoCompact ?: draft.autoCompact,
+                        autoCompactPercent = o.autoCompactPercent ?: draft.autoCompactPercent,
+                        webSearchEnabled = o.webSearchEnabled ?: draft.webSearchEnabled,
+                        webSearchProvider = provider ?: draft.webSearchProvider,
+                        webSearchMaxResults = o.webSearchMaxResults ?: draft.webSearchMaxResults,
+                        webSearchTimeoutSec = o.webTimeoutSec ?: draft.webSearchTimeoutSec,
+                        webSearchSearxngUrl = o.webSearchBaseUrl ?: draft.webSearchSearxngUrl,
+                        sandboxAgentFullAccess = o.sandboxAgentFullAccess ?: draft.sandboxAgentFullAccess,
+                        rootExecutionEnabled = o.rootExecutionEnabled ?: draft.rootExecutionEnabled,
+                        forcedKeepAliveEnabled = o.forcedKeepAliveEnabled ?: draft.forcedKeepAliveEnabled,
+                    )
+                },
+            )
+        }
+    }
+
+    /**
+     * 把**权限模式 / 推理档**立刻写回磁盘。
+     *
+     * 为什么不能只靠发送前那次 `configure()`：用户完全可能"选完就退出"。
+     * 那一刻盘上还是旧值，下次启动读回来的自然也是旧值 —— 表现与"设置记不住"一样。
+     *
+     * 走 `load()` + 改字段 + `save()` 而不是自己拼一份 `SessionConfig`：
+     * `save()` 会把整张表写下去，凭空构造的对象会把其它字段（含 API 密钥槽）
+     * 一起覆盖成空。
+     *
+     * 失败**不**上报：与 [persistTheme] 同一个约定 —— 这类界面偏好的写入
+     * 不该在输入器旁边弹一条错误，内存里的改动本来就是即时生效的。
+     */
+    private fun persistRuntimeChoice(mode: PermissionMode? = null, effort: EffortLevel? = null) {
+        if (mode == null && effort == null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val store = ApiSettingsStore(getApplication())
+                val config = store.load()
+                mode?.let { config.permissionMode = it.toEngineMode() }
+                effort?.let { config.effort = it.toEngineEffort() }
+                store.save(config)
+            }
+        }
+    }
+
     fun setPermissionMode(mode: PermissionMode) {
         _state.update { it.copy(permissionMode = mode, message = "权限模式：${mode.label}") }
+        persistRuntimeChoice(mode = mode)
     }
 
     fun setEffort(level: EffortLevel) {
         _state.update { it.copy(effort = level, message = "推理强度：${level.label}") }
+        persistRuntimeChoice(effort = level)
     }
 
     /*
@@ -3373,39 +3672,112 @@ class WorkspaceViewModel(
         }
     }
 
-    // ---------- 附加项目文件 ----------
+    // ---------- 附加项目文件（浏览器，不是搜索） ----------
 
     /**
      * 打开「附加项目文件」面板。
      *
-     * 立即跑一次空查询：面板一打开就能看到浅层文件清单，而不是一个空框等用户打字。
+     * ## 从**项目根**起，这件事本身就是一次修 bug
+     *
+     * 这里原先调的是 `FileSearch.search(projectPath, "")` —— 一次**递归搜索**。
+     * 而 `projectPath` 在 Termux 环境下就是 HOME，HOME 下有 Termux 的
+     * `storage/{pictures,dcim,downloads,…}` 软链（`FileSearch` 只按名字排除
+     * `build`/`node_modules` 这类构建目录），空查询的深度上限（2）又刚好够到
+     * `storage/pictures/`。于是**面板一打开、用户一个字都没敲**，列出来的是
+     * 一整屏 `storage/pictures/END…` 的设备截图，而不是项目文件。
+     *
+     * 现在改成**浏览一个目录**：一层一层走，永远不递归。那些软链只是
+     * "可以点进去的一个目录"。
      */
     fun openAttachPicker() {
-        _state.update { it.copy(attachPickerOpen = true, attachQuery = "") }
-        refreshAttachHits("")
+        val root = _state.value.projectPath
+        _state.update {
+            it.copy(
+                attachPickerOpen = true,
+                attachBrowser = AttachBrowserState(root = FileRoot.HOME, path = root),
+            )
+        }
+        reloadAttachEntries(root)
     }
 
-    fun closeAttachPicker() =
-        _state.update { it.copy(attachPickerOpen = false, attachHits = emptyList()) }
-
-    fun updateAttachQuery(query: String) {
-        _state.update { it.copy(attachQuery = query) }
-        refreshAttachHits(query)
+    fun closeAttachPicker() = _state.update {
+        it.copy(attachPickerOpen = false, attachBrowser = AttachBrowserState())
     }
 
     /**
-     * 在 IO 线程重算搜索结果。
+     * 目录内过滤：**纯内存**，只筛已经列出来的那一层。
      *
-     * ⚠️ 结果是**异步**回来的，所以落回状态前必须确认 [query] 还是当前查询串：
-     * 用户打得快时会有多个搜索在飞，慢的那个回来会把新的结果覆盖掉
-     * （与「错误串台到新会话」是同一类竞态）。面板关掉后也不该再写。
+     * ⚠️ 刻意不做"敲字就重扫磁盘的递归搜索"—— 那正是上面那个 bug 的成因，
+     * 而且每个字符都要遍历目录，在手机上会明显卡顿（这一条原代码也记过）。
      */
-    private fun refreshAttachHits(query: String) {
-        val root = _state.value.projectPath
+    fun updateAttachFilter(filter: String) = _state.update {
+        it.copy(attachBrowser = it.attachBrowser.copy(filter = filter))
+    }
+
+    /** 进入一个目录（面包屑点某一级、或点某一行的目录）。 */
+    fun attachNavigateTo(path: String) {
+        _state.update {
+            it.copy(attachBrowser = it.attachBrowser.copy(path = path, filter = ""))
+        }
+        reloadAttachEntries(path)
+    }
+
+    /**
+     * 上一级。
+     *
+     * 到根就**停住**（回到根，而不是继续往外走）—— 与文件面板 `navigateUp` 同一套规则：
+     * 换根是根切换条的活儿，不是"上一级"的活儿，否则在共享存储里点着点着会走到 `/`，
+     * 而那里什么都列不出来。
+     */
+    fun attachUp() {
+        val browser = _state.value.attachBrowser
+        val root = attachRootPath(browser.root)
+        if (browser.path == root) return
+        val parent = browser.path.substringBeforeLast('/', "")
+        if (parent.isEmpty() || parent.length < root.length) {
+            attachNavigateTo(root)
+            return
+        }
+        attachNavigateTo(parent)
+    }
+
+    /** 切换选择器的根。切过去时回到该根的顶层（同文件面板 `switchFileRoot`）。 */
+    fun attachSwitchRoot(root: FileRoot) {
+        val path = attachRootPath(root)
+        _state.update {
+            it.copy(attachBrowser = AttachBrowserState(root = root, path = path))
+        }
+        reloadAttachEntries(path)
+    }
+
+    /** 某个 [FileRoot] 的顶层路径。与文件面板的 `rootPath()` 同一套对应关系。 */
+    private fun attachRootPath(root: FileRoot): String = when (root) {
+        FileRoot.HOME -> TermuxConstants.TERMUX_HOME_DIR_PATH
+        FileRoot.SHARED -> StorageLinks.EXTERNAL_ROOT
+    }
+
+    /**
+     * 列出**一层**子项（`FileBrowser.children`，与文件面板同一个数据来源）。
+     *
+     * ⚠️ 结果异步回来，所以落回状态前必须确认回来的是**当前**那个目录：
+     * 用户点得快时会有多次列目录在飞，慢的那个回来会把新的覆盖掉
+     * （与「错误串台到新会话」是同一类竞态）。面板关掉后路径已被清空，也不会写回。
+     */
+    private fun reloadAttachEntries(path: String) {
         viewModelScope.launch {
-            val hits = withContext(Dispatchers.IO) { FileSearch.search(root, query) }
+            val entries = withContext(Dispatchers.IO) { FileBrowser.children(path) }
+            // 空态要说清**为什么**空：与文件面板 reloadFiles 同一套判据，
+            // 否则权限不足看起来和"这个目录是空的"一模一样。
+            val dir = java.io.File(path)
+            val note = when {
+                entries.isNotEmpty() -> ""
+                !dir.isDirectory -> if (dir.exists()) "不是目录：$path" else "目录不存在：$path"
+                dir.list() == null -> "无法读取（权限不足）：$path"
+                else -> ""
+            }
             _state.update { s ->
-                if (s.attachQuery == query && s.attachPickerOpen) s.copy(attachHits = hits) else s
+                if (s.attachBrowser.path != path) return@update s
+                s.copy(attachBrowser = s.attachBrowser.copy(entries = entries, note = note))
             }
         }
     }
@@ -3421,33 +3793,144 @@ class WorkspaceViewModel(
      * 也会被明确拒绝而不是塞一坨乱码进上下文。
      *
      * 附加**不关面板**：参考图的说明就是「可多次附加到下一条消息」。
+     *
+     * ## [relative] 由这里算，不由界面传
+     *
+     * 它只干两件事：**去重**（`detail == relative`）和**界面标签**。
+     * 提示词正文走 [Attachment.textBody]，`<attachment name="…">` 用的是文件名
+     * （见 [buildPromptWithTextAttachments]）—— 所以它不参与提示词格式，只要求唯一。
+     *
+     * 规则：文件在**项目根之下**时给项目相对路径（与旧行为一致、更短更好认），
+     * 否则给绝对路径。后者是需要的 —— 选择器现在能切到 HOME 与共享存储，
+     * 那两个根下面的文件本来就没有"项目相对路径"可言。
+     *
+     * ⚠️ 由 VM 算而不是让界面把 relative 一起传进来：界面不需要知道"项目根在哪"，
+     * 那是这一层的事。旧签名 `attachProjectFile(path, relative)` 把这条知识漏到了界面。
      */
-    fun attachProjectFile(path: String, relative: String) {
+    fun attachProjectFile(path: String) {
         viewModelScope.launch {
             val name = File(path).name
-            val size = withContext(Dispatchers.IO) { runCatching { File(path).length() }.getOrDefault(0L) }
-            val body = withContext(Dispatchers.IO) { FileBrowser.readTextForAttachment(path) }
-            if (body == null) {
+            if (!attachPath(path, name)) {
                 _state.update { it.copy(message = "附加失败：$name 不是文本文件或读不了", messageIsError = true) }
+            }
+        }
+    }
+
+    /**
+     * 真正把一条文本附件放进状态。返回 false 表示这个文件不该/不能附加。
+     *
+     * <p>抽出来是因为现在有**三个**入口：附件面板点一行、选择模式批量附加、
+     * 系统文件管理器（SAF）挑文件。三处各写一遍的话，"截断到 256 KB、
+     * 二进制要拒绝、同一路径去重"这几条迟早只有一处生效。
+     *
+     * <p>[label] 单独传而不是从路径推：SAF 那条路上的路径是个 content URI，
+     * 它的末段是文档 id（一串数字），显示给用户毫无意义 —— 那种情况下要传
+     * 显示名。文件系统那条路上两者相同。
+     */
+    private suspend fun attachPath(path: String, label: String, detail: String? = null): Boolean {
+        val body = withContext(Dispatchers.IO) { FileBrowser.readTextForAttachment(path) } ?: return false
+        val size = withContext(Dispatchers.IO) { runCatching { File(path).length() }.getOrDefault(0L) }
+        // 见 attachProjectFile 的 KDoc：项目根之下的给相对路径，否则给绝对路径。
+        // SAF 那条路没有文件系统路径可算，由调用方直接把 detail 给进来。
+        val key = detail ?: run {
+            val projectRoot = _state.value.projectPath.trimEnd('/')
+            if (projectRoot.isNotEmpty() && path.startsWith("$projectRoot/")) path.removePrefix("$projectRoot/") else path
+        }
+        _state.update { s ->
+            // 同一路径只留一条（用 key 去重，它在项目内唯一）：
+            // 连着点两次应该还是那一份，而不是叠两份进提示词。
+            val kept = s.attachments.filterNot { it.detail == key }
+            s.copy(
+                attachments = kept + Attachment(
+                    id = nextId("file"),
+                    label = label,
+                    detail = key,
+                    isImage = false,
+                    textBody = body,
+                ),
+                message = "已附加：$key（${FileFormat.size(size)}）",
+                messageIsError = false,
+            )
+        }
+        return true
+    }
+
+    /**
+     * 系统文件管理器（SAF）挑来的文件直接附加。
+     *
+     * <h3>为什么不复制进项目目录</h3>
+     *
+     * 附件在引擎那边**本来就是内联文本**（见 [Attachment.textBody] 与
+     * `buildPromptWithTextAttachments`）：发送时内容被包进 `<attached_context>`，
+     * 不是把路径交给模型去读。所以"把文件复制到项目里"这一步对功能没有任何贡献，
+     * 只会往用户的工程里丢一份副本（而用户挑的多半是项目外的文档）。
+     *
+     * 于是**不需要任何存储权限**：SAF 给的是一次性的读授权，我们当场读、
+     * 读完就进内存。这也是为什么这条入口能work —— 直接去扫 `/sdcard` 反而要
+     * 「所有文件访问权限」。
+     *
+     * <p>⚠️ 不取 `takePersistableUriPermission`：授权只为"立刻读一次"服务，
+     * 读完内容就进了内存，不需要跨进程重启保留（与 SkillsOverlay 导入文件同一判断）。
+     */
+    fun attachDocument(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val context = getApplication<android.app.Application>()
+            val label = withContext(Dispatchers.IO) { documentDisplayName(context, uri) } ?: "文件"
+            // 先拿到**字节**（而不是直接解成字符串）：长度要报给用户，
+            // 而 `String.toByteArray()` 再算一遍是重新编码一次 —— 对 UTF-8 通常相等，
+            // 但没必要绕这一圈，而且非 UTF-8 的输入会让数字对不上。
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        // 与 FileBrowser 同一套上限：256 KB 截断 + NUL 判定二进制。
+                        // 各写一份的话，"附加一个 500 MB 的视频"迟早会把内存吃光。
+                        readBounded(input, DocumentAttachLimit)
+                    }
+                }.getOrNull()
+            }
+            if (bytes == null || (bytes.isNotEmpty() && bytes.any { it == 0.toByte() })) {
+                _state.update { it.copy(message = "附加失败：$label 不是文本文件或读不了", messageIsError = true) }
                 return@launch
             }
-            val id = nextId("file")
+            val body = String(bytes, Charsets.UTF_8)
             _state.update { s ->
-                // 同一路径只留一条（用相对路径去重，它在项目内唯一）：
-                // 连着点两次应该还是那一份，而不是叠两份进提示词。
-                val kept = s.attachments.filterNot { it.detail == relative }
+                val kept = s.attachments.filterNot { it.detail == uri.toString() }
                 s.copy(
                     attachments = kept + Attachment(
-                        id = id,
-                        label = name,
-                        detail = relative,
+                        id = nextId("doc"),
+                        label = label,
+                        detail = uri.toString(),
                         isImage = false,
                         textBody = body,
                     ),
-                    message = "已附加：$relative（${zhiFormatSize(size)}）",
+                    message = "已附加：$label（${FileFormat.size(bytes.size.toLong())}）",
+                    messageIsError = false,
                 )
             }
         }
+    }
+
+    /** SAF 文档的显示名。取不到就返回 null，由调用方给个兜底标签。 */
+    private fun documentDisplayName(context: android.content.Context, uri: android.net.Uri): String? =
+        runCatching {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+            }
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    /** 读满上限就停（与 `FileBrowser` 的 256 KB 同一口径）。 */
+    private fun readBounded(input: java.io.InputStream, limit: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream(minOf(limit, 64 * 1024))
+        val buffer = ByteArray(64 * 1024)
+        var remaining = limit
+        while (remaining > 0) {
+            val read = input.read(buffer, 0, minOf(buffer.size, remaining))
+            if (read <= 0) break
+            out.write(buffer, 0, read)
+            remaining -= read
+        }
+        return out.toByteArray()
     }
 
     /**
@@ -3538,6 +4021,20 @@ class WorkspaceViewModel(
         _state.update { s -> s.copy(modelPicker = s.modelPicker?.copy(query = text)) }
     }
 
+    /**
+     * 重新拉一次模型目录（面板里额度卡片的「刷新」走这里）。
+     *
+     * 面板没开时直接返回：没有面板可更新，发出去的请求就只是白跑一趟。
+     * 拉取本身复用 [fetchModelCatalog]，它已经把 loading 态与失败态都处理好了。
+     */
+    fun refreshModelCatalog() {
+        if (_state.value.modelPicker == null) return
+        _state.update { s ->
+            s.copy(modelPicker = s.modelPicker?.copy(loading = true, status = "正在刷新模型与额度…"))
+        }
+        fetchModelCatalog()
+    }
+
     private fun fetchModelCatalog() {
         modelCatalogJob?.cancel()
         modelCatalogJob = viewModelScope.launch {
@@ -3552,13 +4049,23 @@ class WorkspaceViewModel(
                             loading = false,
                             status = ModelCatalogStore.friendlyError(result.exceptionOrNull()),
                             models = emptyList(),
+                            // 列表没拿到，额度卡片也一并清掉：留着上一次的数字
+                            // 会让人以为那是当前的（它可能已经是刷新前的旧值）。
+                            quota = emptyList(),
+                            quotaError = "",
+                            modelsNote = "",
                         )
                     } else {
                         picker.copy(
                             loading = false,
-                            status = if (fetched.isEmpty()) "API 未返回可用模型，可手动输入"
-                            else "已获取 ${fetched.size} 个模型",
-                            models = fetched,
+                            status = if (fetched.models.isEmpty()) "API 未返回可用模型，可手动输入"
+                            else "已获取 ${fetched.models.size} 个模型",
+                            models = fetched.models,
+                            quota = fetched.quota,
+                            // 额度失败**不**让整次读取失败（见 ModelCatalogStore.Catalog）：
+                            // 模型列表照旧可用，原因只写在额度卡片里。
+                            quotaError = fetched.quotaError,
+                            modelsNote = fetched.note,
                         )
                     },
                 )
@@ -3622,7 +4129,14 @@ class WorkspaceViewModel(
         val options = when (item.kind) {
             ChatKind.USER -> listOf("复制", "再次发送", "编辑后发送")
             ChatKind.ASSISTANT, ChatKind.ERROR -> listOf("复制", "重试上一问")
-            else -> listOf("复制", if (item.groupCompleted) "已全部完成" else "执行中")
+            // 工具组这一层只留"复制整组概要"。
+            //
+            // 这里曾经给第二项是 `if (item.groupCompleted) "已全部完成" else "执行中"` —— 那是
+            // **状态文字冒充菜单项**：点下去什么都不发生，而用户会以为坏了。
+            // 单个工具该有的动作（复制命令/输出/diff、展开这一条）走那一行自己的
+            // `⋯` 菜单（Miuix 下拉菜单 → [applyToolAction]），只有那一行知道
+            // 用户点的是哪一条。
+            else -> listOf("复制概要")
         }
         // 与 showSessionActions 同理：动作在**选择器回调**里执行，那时拿到的只有选项文案，
         // 不记住来源就会"复制了别的消息"。
@@ -3638,6 +4152,77 @@ class WorkspaceViewModel(
                 )
             )
         }
+    }
+
+    /**
+     * 对话流里**单个工具**的 `⋯` 菜单里选中了一项 —— 执行它。
+     *
+     * ## 为什么这里只有"执行"，没有"弹菜单"
+     *
+     * 菜单由**那一行自己**渲染（Miuix 下拉菜单，与输入器底排同一个组件，
+     * 见 `ui/chat/MessageCards.kt` 的 `ToolRow`）。所以这一层不需要
+     * `choicePicker` 中转、也不需要"记住用户点的是哪一条"——
+     * 目标（组 id + 行 id）与文案一起从界面传进来，一进来就能执行。
+     *
+     * 之前这里是 `showToolActions(item, toolId)`：先把菜单塞进 `choicePicker`，
+     * 再由界面按 `anchorId` 认领。而 `ChoiceIntent.TOOL_ACTION` 不在
+     * `ChoicePickerState.isActionMenu` 的名单里，于是它退化成**屏幕中央的对话框** ——
+     * 一个只作用于某一行的动作，弹窗却出现在屏幕正中。
+     *
+     * ## 菜单内容仍然只由纯逻辑层决定
+     *
+     * 选项来自 [ToolActions.options]（表驱动、有单测），界面按同一份判据渲染。
+     * 这一层负责**分派**：文案 → 动作。文案是 [ToolActions] 里的常量，
+     * 所以两边不会各写一份。
+     *
+     * @param itemId 工具组那一条消息的 id（工具存在它下面）
+     * @param toolId 那一行工具的 id
+     * @param label  菜单文案（[ToolActions] 的常量）
+     */
+    fun applyToolAction(itemId: String, toolId: String, label: String) {
+        val target = _state.value.transcript.firstOrNull { it.id == itemId }
+        if (target == null) {
+            _state.update { it.copy(message = "找不到目标工具，操作已取消") }
+            return
+        }
+        val tool = target.tools.firstOrNull { it.id == toolId } ?: run {
+            _state.update { it.copy(message = "找不到这个工具，操作已取消") }
+            return
+        }
+
+        if (ToolActions.isToggle(label)) {
+            setToolExpanded(target.id, toolId, ToolActions.toggledTo(label))
+            return
+        }
+
+        when (ToolActions.copySource(label)) {
+            ToolActions.CopySource.COMMAND -> copyText(tool.summary, "工具命令")
+            ToolActions.CopySource.OUTPUT -> copyText(tool.output, "工具输出")
+            ToolActions.CopySource.LIVE_OUTPUT ->
+                // 运行中的实时输出就是 `output` 此刻的内容（进度回调持续写进去的）。
+                copyText(tool.output, "工具实时输出")
+            // diff 是输出里的一段：整份输出已经是 diff 文本，单独给"复制 Diff"
+            // 是为了让用户不必先展开、也不必在长文本里自己挑。
+            ToolActions.CopySource.DIFF -> copyText(tool.output, "工具 Diff")
+            ToolActions.CopySource.INPUT -> copyText(toolActionInput(target, toolId), "工具参数")
+            null -> _state.update { it.copy(message = "不支持的操作：$label") }
+        }
+    }
+
+    /**
+     * "复制参数"要复制的东西。
+     *
+     * 用界面上已经算好的 `summary`（命令类）或工具的展示名 —— 而不是再回到引擎的
+     * 原始入参去取：那个入参在本层已经没有保存（只有渲染需要的字段被留下来），
+     * 为了一个"复制"回头再加一份原始 JSON 的保留，代价大于收益。
+     */
+    private fun toolActionInput(item: ChatItem, toolId: String): String {
+        val tool = item.tools.firstOrNull { it.id == toolId }
+        if (tool == null) return ""
+        return listOfNotNull(
+            tool.displayName.takeIf { it.isNotBlank() },
+            tool.summary.takeIf { it.isNotBlank() },
+        ).joinToString(" · ")
     }
 
     // ---------- 剪贴板 ----------
@@ -3691,8 +4276,8 @@ class WorkspaceViewModel(
         // 记住操作对象：动作是在**选择器回调**里执行的，那时只能拿到选项文案，
         // 拿不到是哪条会话 —— 不记住就会出现"删掉了当前会话"这种错删。
         pendingSessionAction = session
-        val options = if (session.note.isEmpty()) listOf("编辑备注", "恢复会话", "删除会话")
-        else listOf("编辑备注", "清除备注", "恢复会话", "删除会话")
+        val options = if (session.note.isEmpty()) listOf("重命名", "编辑备注", "恢复会话", "删除会话")
+        else listOf("重命名", "编辑备注", "清除备注", "恢复会话", "删除会话")
         _state.update {
             it.copy(
                 choicePicker = ChoicePickerState(
@@ -3708,6 +4293,9 @@ class WorkspaceViewModel(
 
     /** 打开备注编辑：没有选项，只靠自由输入提交。 */
     private fun editSessionNote(session: SessionSummary) {
+        // 二级弹窗也要记得操作对象：SESSION_ACTION 分派时已经把它清空了，
+        // 不补回去的话 onSubmitFreeForm 拿到 null，「备注未保存」是必现结果。
+        pendingSessionAction = session
         _state.update {
             it.copy(
                 choicePicker = ChoicePickerState(
@@ -3717,6 +4305,23 @@ class WorkspaceViewModel(
                     options = emptyList(),
                     allowFreeForm = true,
                     freeFormHint = if (session.note.isEmpty()) "例如：修好了相册崩溃" else session.note,
+                ),
+            )
+        }
+    }
+
+    /** 打开重命名：同样只靠自由输入提交，输入框预填当前标题。 */
+    private fun editSessionTitle(session: SessionSummary) {
+        pendingSessionAction = session
+        _state.update {
+            it.copy(
+                choicePicker = ChoicePickerState(
+                    title = "重命名会话",
+                    intent = ChoiceIntent.SESSION_RENAME,
+                    prompt = "改一个你认得出的名字；只影响侧栏显示，不改会话文件本身。",
+                    options = emptyList(),
+                    allowFreeForm = true,
+                    freeFormHint = session.title,
                 ),
             )
         }
@@ -3737,6 +4342,20 @@ class WorkspaceViewModel(
                     } else {
                         "备注保存失败"
                     },
+                )
+            }
+        }
+    }
+
+    /** 写入标题覆盖到磁盘，备注原样保留。 */
+    private fun saveSessionTitle(session: SessionSummary, title: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = SessionReader.updateMetadata(File(session.id), session.note, title)
+            val sessions = SessionReader.list(_state.value.projectPath)
+            _state.update {
+                it.copy(
+                    sessions = sessions,
+                    message = if (ok) "标题已更新" else "标题保存失败",
                 )
             }
         }
@@ -3783,8 +4402,14 @@ class WorkspaceViewModel(
             // 输入器上的入口是下拉菜单，走 setPermissionMode / setEffort，不经过这里。
             ChoiceIntent.PERMISSION_MODE -> {
                 val mode = PermissionMode.entries.getOrNull(index)
-                if (mode != null) _state.update {
-                    it.copy(choicePicker = null, permissionMode = mode, message = "权限模式：${mode.label}")
+                if (mode != null) {
+                    _state.update {
+                        it.copy(choicePicker = null, permissionMode = mode, message = "权限模式：${mode.label}")
+                    }
+                    // 斜杠命令这条路与输入器下拉是**同一件事**，落盘也不能只做一边：
+                    // 少写这一处，用户用 `/permissions` 改完之后重启就会被打回旧值
+                    // （启动时会按盘上的值回填界面）。
+                    persistRuntimeChoice(mode = mode)
                 } else _state.update { it.copy(choicePicker = null) }
             }
             ChoiceIntent.EFFORT -> {
@@ -3803,6 +4428,10 @@ class WorkspaceViewModel(
                     // 拿不到来源就不猜：宁可无反应，也不能复制到别的消息。
                     _state.update { it.copy(message = "找不到目标消息，操作已取消") }
                 } else when (option.label) {
+                    // 「复制概要」而不是「复制」：工具组没有正文，复制的是各工具的
+                    // 展示名与摘要。用动词说清"复制的是什么"比一个笼统的"复制"好 ——
+                    // 用户点下去才知道拿到的是概要而不是某一条的完整输出。
+                    "复制概要" -> copyMessage(target)
                     "复制" -> copyMessage(target)
                     "再次发送" -> {
                         // 复用用户消息的原文重发；工具组这类没有正文的目标不支持。
@@ -3813,12 +4442,13 @@ class WorkspaceViewModel(
                         }
                     }
                     "编辑后发送" -> _state.update { it.copy(composerText = target.body, message = "已放回输入框，可编辑后发送") }
-                    "重试上一问" -> retryLastUserPrompt()
-                    // 这两种是状态展示项，点了不做任何事。
-                    "已全部完成", "执行中" -> Unit
+                    "重试上一问" -> retryLastUserPrompt(target)
                     else -> _state.update { it.copy(message = "不支持的操作：${option.label}") }
                 }
             }
+            // 单个工具的动作**不经过这里**：那一行的 `⋯` 是 Miuix 下拉菜单，
+            // 选中的文案直接走 applyToolAction(itemId, toolId, label)，
+            // 不存在"弹菜单 → 回调里回头找目标"这一段。
             ChoiceIntent.SESSION_ACTION -> {
                 val target = pendingSessionAction
                 pendingSessionAction = null
@@ -3827,6 +4457,7 @@ class WorkspaceViewModel(
                     // 拿不到操作对象就什么都不做。宁可无反应，也不能猜一条会话删掉。
                     _state.update { it.copy(message = "找不到目标会话，操作已取消") }
                 } else when (option.label) {
+                    "重命名" -> editSessionTitle(target)
                     "删除会话" -> deleteSession(target.id)
                     "恢复会话" -> openSession(target)
                     "编辑备注" -> editSessionNote(target)
@@ -3836,6 +4467,10 @@ class WorkspaceViewModel(
             }
             ChoiceIntent.SESSION_NOTE -> {
                 // 这个分支正常不会走到（备注靠自由输入提交），留作兜底。
+                _state.update { it.copy(choicePicker = null) }
+            }
+            ChoiceIntent.SESSION_RENAME -> {
+                // 同上：重命名也只靠自由输入提交，这里只是穷尽性兜底。
                 _state.update { it.copy(choicePicker = null) }
             }
             ChoiceIntent.QUESTION -> {
@@ -3862,21 +4497,26 @@ class WorkspaceViewModel(
     /**
      * 选择窗口里的「其他回答…」提交：不走选项，直接把这段自由文本当作输入。
      * 在计划模式下它等价于"自定义目标"，会作为提示词发给引擎；
-     * 在会话备注中它是备注正文。
+     * 在会话备注中它是备注正文；在重命名中它是新标题。
      */
     fun onSubmitFreeForm(text: String) {
         val trimmed = text.trim()
         val picker = _state.value.choicePicker
         if (picker == null) return
-        // 备注可以提交空字符串（= 清除），所以不能和"空输入就关闭"混在一起。
-        if (picker.intent == ChoiceIntent.SESSION_NOTE) {
+        // 备注可以提交空字符串（= 清除），所以不能和"空输入就关闭"混在一起；
+        // 重命名反过来：空标题无效，直接提示而不是当作"恢复原名"。
+        if (picker.intent == ChoiceIntent.SESSION_NOTE || picker.intent == ChoiceIntent.SESSION_RENAME) {
+            val rename = picker.intent == ChoiceIntent.SESSION_RENAME
             val target = pendingSessionAction
             pendingSessionAction = null
             _state.update { it.copy(choicePicker = null) }
-            if (target == null) {
-                _state.update { it.copy(message = "找不到目标会话，备注未保存") }
-            } else {
-                saveSessionNote(target, trimmed)
+            when {
+                target == null ->
+                    _state.update { it.copy(message = if (rename) "找不到目标会话，标题未保存" else "找不到目标会话，备注未保存") }
+                rename && trimmed.isEmpty() ->
+                    _state.update { it.copy(message = "标题不能为空") }
+                rename -> saveSessionTitle(target, trimmed)
+                else -> saveSessionNote(target, trimmed)
             }
             return
         }
@@ -4077,43 +4717,12 @@ class WorkspaceViewModel(
     // ---------- 工作区 ----------
 
     fun selectTab(tab: WorkspaceTab) {
-        _state.update { it.copy(tab = tab) }
-        // 进入「变更」页时才去读 git。切换 Tab 是明确的用户动作，
-        // 每次切过去读一次是合理的；若挂在回合结束自动读，大仓库会明显拖慢对话。
-        // 「变更」Tab 已移除
-    }
-
-    /**
-     * 重新拉一次变更列表（变更面板的「刷新」）。
-     *
-     * 对应原版 `refreshChanges()`（重跑 `git status --short` + `git diff`）。
-     * 这里数据来自 [repo]，所以"刷新"等价于重新读一次。
-     */
-    /**
-     * 刷新 git 变更。
-     *
-     * 三条 git 命令（rev-parse / status / diff）+ 未跟踪文件的补丁，必须放 IO 线程，
-     * 而且这是**唯一**会去读 git 的入口 —— 不在回合结束时自动跑：
-     * 一个大仓库的 `git diff` 可能几秒，挂在每个回合结尾会让对话明显变卡。
-     */
-    fun refreshDiff() {
-        val path = _state.value.projectPath
-        _state.update { it.copy(diff = it.diff.copy(loading = true)) }
-        viewModelScope.launch(Dispatchers.IO) {
-            val result = runCatching { GitChanges.read(getApplication(), path) }
-                .getOrElse { error ->
-                    DiffState(note = "读取 git 变更失败：" + (error.message ?: "未知原因"))
-                }
-            _state.update {
-                it.copy(
-                    diff = result,
-                    message = when {
-                        result.note.isNotEmpty() -> result.note
-                        result.files.isEmpty() -> "工作区没有未提交的变更"
-                        else -> "已刷新变更列表（${result.files.size} 个文件）"
-                    },
-                )
-            }
+        _state.update {
+            it.copy(
+                tab = tab,
+                fileSelection = if (tab == WorkspaceTab.FILES) it.fileSelection else emptySet(),
+                fileSelectionMode = if (tab == WorkspaceTab.FILES) it.fileSelectionMode else false,
+            )
         }
     }
 
@@ -4245,7 +4854,7 @@ class WorkspaceViewModel(
             )
         }
         // home 目录是随运行环境一起出现的，所以工作区只能在这之后创建。
-        // 不创建的话：变更面板永远显示"项目目录不存在"，
+        // 不创建的话：文件面板永远显示"目录不存在"，
         // 终端的工作目录会回退到 home，会话也会落在一个不存在的项目键下。
         ensureWorkspace()
     }
@@ -4309,7 +4918,21 @@ class WorkspaceViewModel(
         )
     }
 
-    fun closeSettings() = _state.update { it.copy(settingsDraft = null, settingsOpen = false) }
+    /**
+     * 设置落盘的去抖窗口。
+     *
+     * 400ms 是"打完最后一个字到写入"的延迟上限：短到用户察觉不到，
+     * 长到足以把连续输入合并成一次写。取值与 Miuix / Material 的
+     * `debounce` 惯例同档（300~500ms）。
+     */
+    private val SettingsPersistDebounceMs = 400L
+
+    fun closeSettings() {
+        // 关页面前把去抖窗口里那次改动兑现：用户"在提示词里打完字就走"时，
+        // 那一次改动还没到 [SettingsPersistDebounceMs] 就会被丢掉。
+        flushSettings()
+        _state.update { it.copy(settingsDraft = null, settingsOpen = false) }
+    }
 
     /**
      * 打开「UI 调试」整页（**仅 debug 构建**）。
@@ -4417,15 +5040,119 @@ class WorkspaceViewModel(
      * 原始输入直接塞进引擎配置。
      */
     fun applySettingsDraft(draft: SettingsDraft) {
+        val previous = _state.value.settingsDraft
         _state.update { draft.applyTo(it, keepDraft = true) }
-        // 主题与搜索密钥**不在** SessionConfig 里，configure() 那次落盘罩不到它们，
-        // 各自在这里补一次（密钥走加密槽，见 ApiSettingsStore.setWebSearchKey）。
-        persistTheme(draft.themeMode)
-        persistWebSearchKey(draft)
-        // 终端输入类型也不在 SessionConfig 里（终端是独立 Activity，不读会话配置），
-        // 所以单独落盘。
-        runCatching {
-            ApiSettingsStore.setTerminalCharMode(getApplication(), draft.terminalCharMode)
+        // 离散改动（开关 / 下拉 / 步进）立刻落盘；只有**自由文本**才去抖。
+        //
+        // ⚠️ 去抖这一条是必须的，而且是在修一个我自己引入的卡顿：
+        // `SettingsTextField` 的 `onValueChange` 是**逐字符**触发的，而落盘一次要
+        // `load()` 整表 + 序列化配置 JSON + 走密钥库 + 写 prefs。不去抖的话，
+        // 在「自定义头部提示词」里打一句话就是几十次全量落盘 ——
+        // 用户的原话正是「卡顿更加多了」。
+        val typingOnly = previous != null && differsOnlyInFreeText(previous, draft)
+        scheduleSettingsPersist(debounce = typingOnly)
+    }
+
+    /**
+     * 两次草稿是否**只**在自由文本字段上不同。
+     *
+     * 只有这种情况才值得去抖：其余字段都是一次性动作（点开关、选下拉），
+     * 改动即最终值，没有"还在输入中"的中间态，也就没有理由延后落盘。
+     *
+     * 名单要跟着设置页的自由文本输入框走（`SettingsTextField` / `SettingsIntField`
+     * 的那几处）：提示词、项目目录，以及支持 `1.5m` 这种写法的数字框 —— 它们也是文本输入。
+     */
+    private fun differsOnlyInFreeText(a: SettingsDraft, b: SettingsDraft): Boolean =
+        a.copy(
+            customSystemPrompt = b.customSystemPrompt,
+            projectPath = b.projectPath,
+            contextWindow = b.contextWindow,
+            webSearchMaxResults = b.webSearchMaxResults,
+            webSearchTimeoutSec = b.webSearchTimeoutSec,
+            autoCompactPercent = b.autoCompactPercent,
+        ) == b
+
+    /**
+     * 安排一次设置落盘。
+     *
+     * [debounce] 为真时等 [SettingsPersistDebounceMs] 再写（输入中）；为假时立刻写。
+     * 无论哪条路径，最终都走 [persistSettingsNow]，而它是**同步落盘**的。
+     */
+    private fun scheduleSettingsPersist(debounce: Boolean) {
+        settingsPersistJob?.cancel()
+        if (!debounce) {
+            settingsPersistJob = null
+            persistSettingsNow()
+            return
+        }
+        settingsPersistJob = viewModelScope.launch {
+            delay(SettingsPersistDebounceMs)
+            persistSettingsNow()
+        }
+    }
+
+    /**
+     * 立刻兑现去抖窗口里那次设置改动（不等剩下那几百毫秒）。
+     *
+     * 两个调用点，缺一都会让"改完就走"丢改动：
+     * - [closeSettings]：用户关掉设置页；
+     * - `MainActivity.onStop`：应用退到后台（包括「直接大退」前那一下）。
+     *
+     * 没有待兑现的改动时**什么都不做**：`onStop` 每次都会调它，
+     * 不能让它变成一个"每次切后台都全量写盘"的热路径。
+     */
+    fun flushSettings() {
+        if (settingsPersistJob == null) return
+        settingsPersistJob?.cancel()
+        settingsPersistJob = null
+        persistSettingsNow()
+    }
+
+    /**
+     * 把当前生效的设置写回磁盘。
+     *
+     * ## 为什么必须**同步**落盘（`saveDurable`）
+     *
+     * `SharedPreferences.apply()` 只保证内存可见，磁盘写是异步的；从最近任务里
+     * 划掉应用时进程被杀，**没人等那个后台写** —— 这就是
+     * 「直接大退软件，这些保存恢复到未修改的样子」。本类此前 14 处写入全是
+     * `apply()`、一处 `commit()` 都没有，所以补上"调用点"并不够（上一轮就只补了
+     * 调用点，于是设置照丢）。用户设置一律走 `commit()`。
+     *
+     * ## 为什么复用 `engineOverrides()`
+     *
+     * 落盘那份必须与**发送时实际生效**的那份逐字段相同，否则会出现
+     * "界面上是 A、发出去的也是 A、但重启回来变成 B"。两者共用
+     * [applyEngineOverrides] 同一段映射（见其注释），从根上排除漂移。
+     *
+     * ## 三条刻意的约束
+     *
+     * 1. **先 `store.load()` 再改**，不凭空 `SessionConfig()`：`save()` 是整表覆盖，
+     *    凭空构造会把 API 密钥槽这类本函数不管的字段一起清空。
+     * 2. **不调 `engine.configure()`**：那样会顺带创建引擎实例，而这里只想要落盘；
+     *    引擎实例的创建目前是单线程假设（`engine()` 非同步），从 IO 线程碰它有竞争风险。
+     *    下一次发消息时 `configure()` 自会把新值推给引擎。
+     * 3. **在 IO 线程上**：`commit()` 会阻塞到磁盘写完，压在点击那一帧上就是一次卡顿。
+     */
+    private fun persistSettingsNow() {
+        val snapshot = _state.value
+        val overrides = engineOverrides()
+        val draft = SettingsDraft.from(snapshot)
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val store = ApiSettingsStore(getApplication())
+                val config = store.load()
+                applyEngineOverrides(config, overrides)
+                store.saveDurable(config)
+            }
+            // 主题与搜索密钥**不在** SessionConfig 里，configure() 那次落盘罩不到它们，
+            // 各自补一次（密钥走加密槽，见 ApiSettingsStore.setWebSearchKey）。
+            persistTheme(draft.themeMode)
+            persistWebSearchKey(draft)
+            // 终端输入类型也不在 SessionConfig 里（终端是独立 Activity，不读会话配置）。
+            runCatching {
+                ApiSettingsStore.setTerminalCharMode(getApplication(), draft.terminalCharMode)
+            }
         }
     }
 
@@ -4486,17 +5213,53 @@ class WorkspaceViewModel(
     }
 
     /**
-     * 批量设置工具组里各成员的展开状态。
+     * 把某一条工具的展开状态设成**指定值**（不是取反）。
      *
-     * [collapseIds] 是**要收起的成员 id 集合**：集合内的成员收起，其余展开。
-     * 因此"全部展开"传空集，"全部收起"传全部成员 id。
+     * 工具菜单里给的是"展开输出 / 折叠输出"这种**目标状态**的文案，所以必须能直接设值：
+     * 用取反的话，用户点"展开输出"时如果状态在这期间已经变了（比如刚跑完自动展开），
+     * 就会得到与文案相反的结果。
+     *
+     * 按 `(itemId, toolId)` 定位而不是只按 toolId：调用方手上就有这两个值，
+     * 而只按 toolId 遍历时，同一 id 若出现在多条条目里会一起被改。
      */
-    fun toggleGroupExpanded(id: String, collapseIds: Set<String>) {
+    private fun setToolExpanded(itemId: String, toolId: String, expanded: Boolean) {
         _state.update { s ->
             s.copy(
                 transcript = s.transcript.map { item ->
-                    if (item.id != id || item.kind != ChatKind.TOOL_GROUP) item
-                    else item.copy(tools = item.tools.map { it.copy(expanded = it.id !in collapseIds) })
+                    if (item.id != itemId || item.kind != ChatKind.TOOL_GROUP) item
+                    else item.copy(
+                        tools = item.tools.map { if (it.id == toolId) it.copy(expanded = expanded) else it },
+                    )
+                },
+            )
+        }
+    }
+
+    /**
+     * 展开/收起一个**折叠组**。
+     *
+     * @param id       工具批次那一条消息的 id
+     * @param groupKey 组键 = 组内首成员的 toolId（见 [ToolGrouping.Segment.Group.key]）
+     *
+     * 记的是 [ChatItem.expandedGroups] 这份集合，而**不是**把组里每个成员的
+     * `expanded` 置真/置假 —— 成员的 `expanded` 是"这条工具的输出展开"，
+     * 两件事共用一个标志位时，点开一条工具的输出会连带把整组摊开。
+     *
+     * 组键由界面按 toolId 推导后传进来，所以这一层不需要知道"哪几条属于哪一组"。
+     */
+    fun toggleGroupExpanded(id: String, groupKey: String) {
+        if (groupKey.isEmpty()) return
+        _state.update { s ->
+            s.copy(
+                transcript = s.transcript.map { item ->
+                    if (item.id != id || item.kind != ChatKind.TOOL_GROUP) {
+                        item
+                    } else {
+                        val open = item.expandedGroups
+                        item.copy(
+                            expandedGroups = if (groupKey in open) open - groupKey else open + groupKey,
+                        )
+                    }
                 },
             )
         }
@@ -4526,7 +5289,11 @@ class WorkspaceViewModel(
 
     fun navigateTo(path: String) {
         // 列目录要读盘，放 IO 线程：大目录（例如 node_modules）在主线程列会卡住界面。
-        _state.update { it.copy(filePath = path, openFile = null) }
+        //
+        // ⚠️ 同时清掉选择：`fileSelection` 存的是**路径**，跨目录之后那些路径
+        // 指向的是另一个目录里的东西。留着的话，在 A 目录选中的文件会在 B 目录里
+        // 被"删除/附加" —— 而那是另外一批文件。
+        _state.update { it.copy(filePath = path, openFile = null, fileSelection = emptySet(), fileSelectionMode = false) }
         viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
     }
 
@@ -4562,7 +5329,6 @@ class WorkspaceViewModel(
      * 都走不到（面包屑点不出去，「上一级」也会被弹回来）。
      */
     private fun rootPath(): String = when (_state.value.fileRoot) {
-        FileRoot.PROJECT -> _state.value.projectPath
         FileRoot.HOME -> TermuxConstants.TERMUX_HOME_DIR_PATH
         FileRoot.SHARED -> StorageLinks.EXTERNAL_ROOT
     }
@@ -4573,7 +5339,6 @@ class WorkspaceViewModel(
             it.copy(
                 fileRoot = root,
                 filePath = when (root) {
-                    FileRoot.PROJECT -> it.projectPath
                     FileRoot.HOME -> TermuxConstants.TERMUX_HOME_DIR_PATH
                     FileRoot.SHARED -> StorageLinks.EXTERNAL_ROOT
                 },
@@ -4581,6 +5346,14 @@ class WorkspaceViewModel(
                 fileDraft = null,
                 fileNameForm = null,
                 fileDeletePrompt = null,
+                // 同 navigateTo：跨根之后旧路径完全没有意义。
+                fileSelection = emptySet(),
+                fileSelectionMode = false,
+                // ⚠️ 必须清空：不清的话，换根那次淡变的**进场**那一屏画的还是上一个根的文件
+                // （列表要等 reloadFiles 从 IO 回来才换），于是动画看起来像"闪了一下旧内容"。
+                // 清掉之后进场是干净的，本地列目录是毫秒级，用户看不到中间态。
+                fileEntries = emptyList(),
+                fileNote = "",
             )
         }
         viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
@@ -4649,18 +5422,20 @@ class WorkspaceViewModel(
 
     // ---------- 文件：新建 / 重命名 / 删除 ----------
 
-    /** 打开「新建文件」表单。[directory] 为真时建目录。 */
-    fun newFileForm(directory: Boolean) {
-        val path = _state.value.filePath
-        val base = if (directory) "新建文件夹" else "新建文件.txt"
-        _state.update {
-            it.copy(
-                fileNameForm = FileNameForm(
-                    title = if (directory) "新建文件夹" else "新建文件",
-                    draft = FileOps.suggestName(File(path), base),
-                ),
-            )
-        }
+    /**
+     * 打开「新建」表单。
+     *
+     * <p>**没有 `directory` 参数**：建文件还是建文件夹是弹窗上两个按钮的选择，
+     * 只有点下去那一刻才知道。原先这里按扩展名猜（`name.contains('.')`）——
+     * 那是"两个入口各建一种"时代的产物，而它会把 `Makefile`、`LICENSE`、
+     * `.gitignore` 这类**没有扩展名的文件**建成目录，用户点完「文件」得到一个文件夹。
+     *
+     * <p>名字框**留空**（占位符提示"名称"）。原先预填 `新建文件.txt` / `新建文件夹`，
+     * 现在两种可能并存，预填哪一个都会让另一个按钮建出用户没想要的名字
+     * （点「文件夹」得到一个叫 `新建文件.txt` 的文件夹）。
+     */
+    fun newFileForm() {
+        _state.update { it.copy(fileNameForm = FileNameForm(title = "新建", draft = "")) }
     }
 
     /** 打开「重命名」表单。 */
@@ -4671,7 +5446,9 @@ class WorkspaceViewModel(
     }
 
     fun updateFileNameDraft(text: String) = _state.update { s ->
-        s.copy(fileNameForm = s.fileNameForm?.copy(draft = text))
+        // 改名字就把上一次的失败原因清掉：不清的话"已经存在"会一直挂在那里，
+        // 用户明明已经换成另一个名字了，看到的还是上一个错。
+        s.copy(fileNameForm = s.fileNameForm?.copy(draft = text, failure = null))
     }
 
     fun cancelFileNameForm() = _state.update { it.copy(fileNameForm = null) }
@@ -4679,26 +5456,34 @@ class WorkspaceViewModel(
     /**
      * 提交「新建 / 重命名」。
      *
-     * 新建之后**立刻打开它**（文件）或**走进去**（目录）—— 「新建了个文件然后还要自己找出来」
+     * <p>[directory] 来自弹窗上被点的那一个按钮（重命名时无意义，走 target 那一支）。
+     *
+     * <p>新建之后**立刻打开它**（文件）或**走进去**（目录）—— 「新建了个文件然后还要自己找出来」
      * 是一步没必要的操作。重命名则刷新列表即可（当前内容还开着，路径没变）。
+     *
+     * <p>失败**回填进表单**（`failure`）而不是写 `message`：`MessageBar` 是 `ChatArea`
+     * 的孩子，在文件页上提交失败时界面上什么都看不见（弹窗还会照常关掉，
+     * 看起来像"建成功了但列表里没有"）。
      */
-    fun submitFileNameForm() {
+    fun submitFileNameForm(directory: Boolean = false) {
         val form = _state.value.fileNameForm ?: return
         val dir = File(_state.value.filePath)
         viewModelScope.launch(Dispatchers.IO) {
             val name = form.draft
             val error = if (form.target != null) {
                 FileOps.rename(File(form.target.path), name)
+            } else if (directory) {
+                FileOps.createDirectory(dir, name)
             } else {
-                // 用扩展名猜是文件还是目录：表单里带 `.` 的当文件建。
-                if (name.contains('.')) FileOps.createFile(dir, name)
-                else FileOps.createDirectory(dir, name)
+                FileOps.createFile(dir, name)
             }
             if (error != null) {
-                _state.update { it.copy(message = error) }
+                _state.update { s ->
+                    s.copy(fileNameForm = s.fileNameForm?.copy(failure = error))
+                }
                 return@launch
             }
-            _state.update { it.copy(fileNameForm = null) }
+            _state.update { it.copy(fileNameForm = null, message = if (form.target != null) "已重命名为 $name" else "已新建 $name") }
             val created = File(dir, name)
             if (form.target == null && created.isDirectory) {
                 navigateTo(created.absolutePath)
@@ -4708,15 +5493,21 @@ class WorkspaceViewModel(
                     val opened = FileBrowser.read(created.absolutePath)
                     _state.update { it.copy(openFile = opened) }
                 }
-                _state.update { it.copy(message = if (form.target != null) "已重命名为 $name" else "已新建 $name") }
             }
         }
     }
 
-    /** 打开删除确认（带"会一起消失多少条"）。 */
+    /** 打开单条删除确认（带"会一起消失多少条"）。 */
     fun requestDelete(entry: FileEntry) {
-        _state.update {
-            it.copy(fileDeletePrompt = FileDeletePrompt(entry = entry, count = FileOps.countForDelete(File(entry.path))))
+        openDeletePrompt(listOf(entry))
+    }
+
+    private fun openDeletePrompt(entries: List<FileEntry>) {
+        if (entries.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            // 数条数要递归读盘（`countForDelete`），放 IO 线程。
+            val count = entries.sumOf { FileOps.countForDelete(File(it.path)) }
+            _state.update { it.copy(fileDeletePrompt = FileDeletePrompt(entries = entries, count = count)) }
         }
     }
 
@@ -4724,20 +5515,29 @@ class WorkspaceViewModel(
 
     fun confirmDelete() {
         val prompt = _state.value.fileDeletePrompt ?: return
+        val targets = prompt.entries
         viewModelScope.launch(Dispatchers.IO) {
-            val error = FileOps.delete(File(prompt.entry.path))
-            if (error != null) {
-                _state.update { it.copy(message = error, fileDeletePrompt = null) }
+            var failed: String? = null
+            targets.forEach { entry ->
+                val error = FileOps.delete(File(entry.path))
+                if (error != null && failed == null) failed = error
+            }
+            if (failed != null) {
+                _state.update { it.copy(fileDeletePrompt = null, message = failed, messageIsError = true) }
                 return@launch
             }
+            val removed = targets.map { it.path }.toSet()
             _state.update { s ->
                 s.copy(
                     fileDeletePrompt = null,
                     // 删掉的正是当前打开的文件时要把它关掉，否则面板会一直显示
                     // 一个已经不存在的文件的正文 —— 再点保存就会把它**建回来**。
-                    openFile = if (s.openFile?.path == prompt.entry.path) null else s.openFile,
-                    fileDraft = if (s.openFile?.path == prompt.entry.path) null else s.fileDraft,
-                    message = "已删除 ${prompt.entry.name}",
+                    openFile = if (s.openFile?.path in removed) null else s.openFile,
+                    fileDraft = if (s.openFile?.path in removed) null else s.fileDraft,
+                    // 选中的东西被删掉之后选择模式自然结束（空集合＝不在选择模式）。
+                    fileSelection = s.fileSelection - removed,
+                    fileSelectionMode = false,
+                    message = if (targets.size == 1) "已删除 ${targets[0].name}" else "已删除 ${targets.size} 项",
                 )
             }
             reloadFiles()
@@ -4745,6 +5545,206 @@ class WorkspaceViewModel(
     }
 
     fun closeFile() = _state.update { it.copy(openFile = null, fileDraft = null) }
+
+    // ---------- 文件：选择模式（长按多选） ----------
+
+    /**
+     * 长按一行：**进入选择模式并选中它**。
+     *
+     * <p>已经在选择模式里时长按＝切换这一条（与小米一致：选择模式下长按和点击
+     * 都是勾/取消勾，不会突然又"进入一次"）。
+     */
+    fun longPressFileEntry(entry: FileEntry) {
+        _state.update { state ->
+            val selection = if (state.fileSelectionMode && entry.path in state.fileSelection) {
+                state.fileSelection - entry.path
+            } else {
+                state.fileSelection + entry.path
+            }
+            state.copy(fileSelectionMode = true, fileSelection = selection)
+        }
+    }
+
+    fun setFileSelection(paths: Set<String>) {
+        _state.update { s ->
+            if (!s.fileSelectionMode) s else s.copy(fileSelection = paths.intersect(s.fileEntries.map { it.path }.toSet()))
+        }
+    }
+
+    /**
+     * 点一行。
+     *
+     * <p>选择模式下是"勾/取消勾"，而不是打开 —— 这一条与长按共用同一份切换逻辑，
+     * 分成两套的话迟早出现"长按进去了、一点又跳出去"。
+     */
+    fun toggleFileSelection(entry: FileEntry) {
+        _state.update { s ->
+            s.copy(
+                fileSelection = if (s.fileSelection.contains(entry.path)) s.fileSelection - entry.path
+                else s.fileSelection + entry.path,
+            )
+        }
+    }
+
+    /** 选择模式是否开着。 */
+    private fun selectionOn(): Boolean = _state.value.fileSelectionMode
+
+    fun clearFileSelection() = _state.update { it.copy(fileSelection = emptySet(), fileSelectionMode = false) }
+
+    /**
+     * 「全选」/「取消全选」。
+     *
+     * <p>判据是"当前这一层的**全部**条目是否都选中了"，而不是另存一个布尔：
+     * 另存的话，用户全选之后又手动取消一条，按钮还写着「取消全选」，
+     * 点下去却什么都不会变（或者更糟 —— 变成"选全部"）。
+     */
+    fun toggleSelectAllFiles() {
+        val all = _state.value.fileEntries.map { it.path }.toSet()
+        _state.update { s ->
+            val allSelected = all.isNotEmpty() && s.fileSelection.containsAll(all)
+            s.copy(fileSelection = if (allSelected) emptySet() else all)
+        }
+    }
+
+    /** 选择模式下选中的那些条目（按当前列表里的条目还原）。 */
+    private fun selectedEntries(): List<FileEntry> {
+        val selection = _state.value.fileSelection
+        return _state.value.fileEntries.filter { it.path in selection }
+    }
+
+    /** 将选中项暂存为复制任务；切换目录后使用「粘贴」放入目标目录。 */
+    fun copySelectedEntries() = stageSelectedEntries(move = false)
+
+    /** 将选中项暂存为移动任务；源文件只在目标副本成功后删除。 */
+    fun moveSelectedEntries() = stageSelectedEntries(move = true)
+
+    private fun stageSelectedEntries(move: Boolean) {
+        val paths = selectedEntries().map { it.path }
+        if (paths.isEmpty()) return
+        _state.update {
+            it.copy(
+                fileClipboard = paths,
+                fileClipboardMove = move,
+                fileSelection = emptySet(),
+                fileSelectionMode = false,
+                message = if (move) "已选择 ${paths.size} 项移动，请打开目标目录后粘贴"
+                else "已选择 ${paths.size} 项复制，请打开目标目录后粘贴",
+                messageIsError = false,
+            )
+        }
+    }
+
+    /** 把暂存的文件粘贴到当前目录；目标冲突逐项保留原文件并反馈。 */
+    fun pasteFilesIntoCurrentDirectory() {
+        val snapshot = _state.value
+        val paths = snapshot.fileClipboard
+        if (paths.isEmpty()) return
+        val destination = File(snapshot.filePath)
+        viewModelScope.launch(Dispatchers.IO) {
+            val failures = mutableListOf<String>()
+            val movedPaths = mutableSetOf<String>()
+            var completed = 0
+            paths.forEach { path ->
+                val source = File(path)
+                val error = if (snapshot.fileClipboardMove) FileOps.move(source, destination)
+                else FileOps.copy(source, destination)
+                if (error == null) {
+                    completed++
+                    if (snapshot.fileClipboardMove) movedPaths += path
+                } else failures += "${source.name}：$error"
+            }
+            reloadFiles()
+            _state.update { current ->
+                val remainingMovePaths = current.fileClipboard.filterNot { it in movedPaths }
+                val allSucceeded = failures.isEmpty()
+                current.copy(
+                    fileClipboard = if (snapshot.fileClipboardMove) remainingMovePaths else current.fileClipboard,
+                    fileClipboardMove = if (snapshot.fileClipboardMove && remainingMovePaths.isEmpty()) false else current.fileClipboardMove,
+                    message = if (allSucceeded) {
+                        if (snapshot.fileClipboardMove) "已移动 $completed 项" else "已复制 $completed 项"
+                    } else "已完成 $completed 项，${failures.size} 项失败：${failures.joinToString("；")}",
+                    messageIsError = failures.isNotEmpty(),
+                )
+            }
+        }
+    }
+
+    /** 重命名选中的那一条（只在**恰好选中一条**时可用）。 */
+    fun renameSelectedEntry() {
+        val entry = selectedEntries().singleOrNull() ?: return
+        clearFileSelection()
+        renameForm(entry)
+    }
+
+    /** 删除选中的那些（走同一个确认弹窗，代价按条累加）。 */
+    fun deleteSelectedEntries() {
+        val entries = selectedEntries()
+        if (entries.isEmpty()) return
+        openDeletePrompt(entries)
+    }
+
+    /**
+     * 把选中的文件附加到下一条消息。
+     *
+     * <p>这是选择模式里最有用的一个动作：一次挑好几个文件丢进输入器，
+     * 比在附件面板里一个一个点快得多（那个面板一次只能附加一个）。
+     *
+     * <p>读文本可能有失败（二进制、太大），失败的**逐条说清**、成功的照样进去，
+     * 而不是整批失败 —— 用户挑了五个文件，其中一个是图片，不该整批白干。
+     */
+    fun attachSelectedEntries() {
+        val entries = selectedEntries().filterNot { it.directory }
+        if (entries.isEmpty()) return
+        clearFileSelection()
+        viewModelScope.launch(Dispatchers.IO) {
+            var attached = 0
+            val refused = mutableListOf<String>()
+            entries.forEach { entry ->
+                if (attachPath(entry.path, entry.name)) attached++ else refused += entry.name
+            }
+            // 附加完切到对话页：附件是给「下一条消息」的，留在文件页看不到它们，
+            // 用户会以为没生效。
+            _state.update {
+                it.copy(
+                    message = if (refused.isEmpty()) "已附加 $attached 个文件"
+                    else "已附加 $attached 个，${refused.size} 个读不了（${refused.joinToString("、")}）",
+                    messageIsError = refused.isNotEmpty(),
+                    tab = if (attached > 0) WorkspaceTab.CHAT else it.tab,
+                )
+            }
+        }
+    }
+
+    /** 进入选择模式时用：共享存储没授权时给一个真能点的入口。 */
+    fun openSharedStorageSettings() {
+        val context = getApplication<android.app.Application>()
+        val pkg = context.packageName
+        val launched = runCatching {
+            val intent = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    android.net.Uri.parse("package:$pkg"),
+                )
+            } else {
+                // API 30 以下没有「所有文件访问权限」这一页，退到应用详情页。
+                android.content.Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.parse("package:$pkg"),
+                )
+            }
+            context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+        launched.onFailure { error ->
+            // ViewModel 手里只有 Application 上下文，必须带 NEW_TASK（见 openSandbox）。
+            // 有些 ROM 把这两个页面也裁掉了 —— 失败就如实说，不静默吞掉。
+            _state.update {
+                it.copy(
+                    message = "打不开系统设置页：${error.javaClass.simpleName}。请手动到「设置 → 应用 → ZhiCode → 权限 → 文件和媒体 → 允许管理所有文件」",
+                    messageIsError = true,
+                )
+            }
+        }
+    }
 
     // ---------- 操作反馈 ----------
     //
@@ -4779,6 +5779,16 @@ class WorkspaceViewModel(
         private fun trimZero(value: Float): String =
             if (value >= 100f || value % 1f == 0f) String.format(Locale.US, "%.0f", value)
             else String.format(Locale.US, "%.1f", value)
+
+        /**
+         * SAF 文档附加的字节上限。
+         *
+         * 与 `FileBrowser.MAX_PREVIEW_BYTES` **同一个数**：附件在引擎那边是内联文本，
+         * 它进的是模型上下文，256 KB 已经很大了。这里写死常量而不是把
+         * `FileBrowser` 的那个 private 常量公开，是因为两者服务的不是同一个上限来源
+         * —— 但 256 KB 这个数必须一致，改一个另一个也要改（guard 里钉着）。
+         */
+        private const val DocumentAttachLimit = 256 * 1024
 
         /** 思考预览保留的尾部字符数（原版 `liveThinking` 上限 1200）。 */
         private const val THINKING_LIMIT = 1200

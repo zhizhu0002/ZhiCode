@@ -1,15 +1,18 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -37,8 +41,10 @@ import com.zhizhu.zhicode.compose.model.RiskLevel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Badge
@@ -55,6 +61,7 @@ import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
+import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 
 /**
@@ -65,12 +72,24 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
  * 也无法参与主窗口的 `LayerBackdrop` 背景采样 —— 弹窗背后的模糊会做不出来。
  * 两者参数集完全一致，换过来无需改调用方形状。
  *
- * ## 居中
+ * ## 位置与动画都交给 Miuix
  *
- * 位置由 `largeScreen` 决定：true → `Alignment.Center`（居中），
- * false → `Alignment.BottomCenter`（贴底）。默认值由 `DialogDefaults.isLargeScreen`
- * 按窗口宽度是否 ≥ 600dp 推断，手机上是 false 会贴底，
- * 所以这里**显式传 `largeScreen = true`** 让窗口居中。
+ * ⚠️ `largeScreen` 只在确实需要官方中央形态的调用点显式传入；它会同时决定
+ * DialogContentLayout 的定位与动画，调用点不再额外叠加 AnimatedVisibility。
+ *
+ * ```
+ * if (isLargeScreen) {                // true：大屏规格
+ *     scale = 0.8f + 0.2f * progress   //   0.8→1 缩放
+ *     alpha = progress
+ *     // 进场 folmeSpring(damping = 0.9, response = 0.3)
+ * } else {                            // false：手机规格
+ *     translationY = (1 - progress) * 屏高   // 从下往上滑入
+ *     // 进场 spring(dampingRatio = 0.88, stiffness = 450)
+ * }
+ * ```
+ *
+ * 文件面板需要中央形态时，直接按官方 `CenteredOverlayDialogDemo` 传
+ * `largeScreen = true`；其它长内容/列表型弹窗不强制中央，继续使用 Miuix 的自动规格。
  *
  * ## 手写降到最低
  *
@@ -103,17 +122,20 @@ fun PermissionOverlay(
     onDeny: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    var alwaysAllow by remember(request) { mutableStateOf(false) }
+    // 退场那 250~260ms 里 `request` 已经是 null，内容不能跟着空掉（否则看起来是
+    // 弹窗先缩成一张空壳再淡出）—— 见 rememberLastNonNull。
+    val shownRequest = rememberLastNonNull(request)
+    // 也按 shownRequest 记：按 request 记的话，关闭那一刻「始终允许」会自己弹回去。
+    var alwaysAllow by remember(shownRequest) { mutableStateOf(false) }
 
     OverlayDialog(
         show = request != null,
         onDismissRequest = onDeny,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
-        if (request == null) return@OverlayDialog
+        val req = shownRequest ?: return@OverlayDialog
         DialogShell(
             title = "工具授权",
             groupBody = true,
@@ -128,22 +150,22 @@ fun PermissionOverlay(
         ) {
             // 工具名 + 说明 + 风险徽标：一个 Miuix BasicComponent 搞定，不再手拼 Row/Column
             BasicComponent(
-                title = request.tool,
+                title = req.tool,
                 titleColor = BasicComponentDefaults.titleColor(color = scheme.onBackground),
-                summary = request.subtitle,
+                summary = req.subtitle,
                 summaryColor = BasicComponentDefaults.summaryColor(
                     color = scheme.onSurfaceVariantSummary,
                 ),
                 startAction = {
                     Icon(
-                        imageVector = ZhiIcons.tool(request.tool),
+                        painter = ZhiIcons.tool(req.tool),
                         contentDescription = null,
                         tint = scheme.primary,
                         modifier = Modifier.size(20.dp),
                     )
                 },
                 endActions = {
-                    if (request.riskLevel == RiskLevel.HIGH) {
+                    if (req.riskLevel == RiskLevel.HIGH) {
                         // Miuix Badge：容器/文字色走主题，浅色模式自动变浅红底 + 暗红字。
                         // 之前是手写 Surface + Box + Text，且用固定红叠 18% alpha，
                         // 叠在任何底色上都会变成"另一种红"，也不随主题。
@@ -172,7 +194,7 @@ fun PermissionOverlay(
                 ),
             ) {
                 Text(
-                    text = request.detail,
+                    text = req.detail,
                     fontSize = ZhiTextScale.Caption,
                     fontFamily = FontFamily.Monospace,
                     textAlign = TextAlign.Start,
@@ -206,24 +228,25 @@ fun PlanApprovalOverlay(
     onReviseWithFeedback: (String) -> Unit = { onRevise() },
 ) {
     val scheme = MiuixTheme.colorScheme
-    var feedback by remember(plan) { mutableStateOf("") }
+    // 同 PermissionOverlay：退场时 `plan` 已经是 null，内容得靠「最后一次非空」兜住。
+    val shownPlan = rememberLastNonNull(plan)
+    var feedback by remember(shownPlan) { mutableStateOf("") }
 
     OverlayDialog(
         show = plan != null,
         onDismissRequest = onRevise,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
-        if (plan == null) return@OverlayDialog
+        val p = shownPlan ?: return@OverlayDialog
         DialogShell(
-            title = "${plan.title} · revision ${plan.revision}",
+            title = "${p.title} · revision ${p.revision}",
             // 计划文件路径是固定说明，放在底板外面
-            prompt = if (plan.path.isEmpty()) null else {
+            prompt = if (p.path.isEmpty()) null else {
                 {
                     Text(
-                        text = plan.path,
+                        text = p.path,
                         color = scheme.onSurfaceVariantSummary,
                         fontSize = ZhiTextScale.Footnote,
                         fontFamily = FontFamily.Monospace,
@@ -247,9 +270,9 @@ fun PlanApprovalOverlay(
                     maxLines = 3,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (plan.permissionNote.isNotEmpty()) {
+                if (p.permissionNote.isNotEmpty()) {
                     Text(
-                        text = plan.permissionNote,
+                        text = p.permissionNote,
                         color = ZhiColors.amber(),
                         fontSize = ZhiTextScale.Footnote,
                         textAlign = TextAlign.Start,
@@ -270,7 +293,7 @@ fun PlanApprovalOverlay(
             },
         ) {
             Box(modifier = Modifier.fillMaxWidth()) {
-                ZhiMarkdown(source = plan.body)
+                ZhiMarkdown(source = p.body)
             }
         }
     }
@@ -286,19 +309,21 @@ fun ChoicePickerOverlay(
     onSubmitFreeForm: (String) -> Unit = { onDismiss() },
 ) {
     val scheme = MiuixTheme.colorScheme
-    var freeForm by remember(picker) { mutableStateOf("") }
+    // 同 PermissionOverlay：退场时 `picker` 已经是 null。
+    val shownPicker = rememberLastNonNull(picker)
+    var freeForm by remember(shownPicker) { mutableStateOf("") }
     // 选项点击只改这个**本地**选中态，不回调 ViewModel。
     // 之前点击直接调 onSelect()，ViewModel 会立刻提交并把 choicePicker 置空，
     // 于是窗口一点就关、根本没机会按「提交」，也没法改主意。
-    var localSelected by remember(picker) { mutableStateOf(-1) }
+    var localSelected by remember(shownPicker) { mutableStateOf(-1) }
     // 多选（引擎提问可能带 multiSelect）走这一份本地集合。
-    var localMulti by remember(picker) { mutableStateOf(emptySet<Int>()) }
-    val multi = picker?.multiSelect == true
+    var localMulti by remember(shownPicker) { mutableStateOf(emptySet<Int>()) }
+    val multi = shownPicker?.multiSelect == true
     val selectedIndices: Set<Int> = if (multi) {
         if (localMulti.isNotEmpty()) localMulti
-        else picker?.options?.indices?.filter { picker.options[it].checked }?.toSet() ?: emptySet()
+        else shownPicker?.options?.indices?.filter { shownPicker.options[it].checked }?.toSet() ?: emptySet()
     } else {
-        val single = if (localSelected >= 0) localSelected else picker?.options?.indexOfFirst { it.checked } ?: -1
+        val single = if (localSelected >= 0) localSelected else shownPicker?.options?.indexOfFirst { it.checked } ?: -1
         if (single >= 0) setOf(single) else emptySet()
     }
     val usingFreeForm = freeForm.isNotBlank()
@@ -306,18 +331,17 @@ fun ChoicePickerOverlay(
     OverlayDialog(
         show = picker != null,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
-        if (picker == null) return@OverlayDialog
+        val p = shownPicker ?: return@OverlayDialog
         DialogShell(
-            title = picker.title,
-            prompt = if (picker.prompt.isEmpty()) null else {
+            title = p.title,
+            prompt = if (p.prompt.isEmpty()) null else {
                 {
                     Text(
-                        text = picker.prompt,
+                        text = p.prompt,
                         color = scheme.onBackground,
                         fontSize = ZhiTextScale.Subheading,
                         fontWeight = FontWeight.Bold,
@@ -329,12 +353,12 @@ fun ChoicePickerOverlay(
             },
             groupBody = true,
             // 自由文本输入框不随选项列表滚动，固定在底板下方
-            footer = if (!picker.allowFreeForm) null else {
+            footer = if (!p.allowFreeForm) null else {
                 {
                     ZhiTextField(
                         value = freeForm,
                         onValueChange = { freeForm = it },
-                        label = picker.freeFormHint,
+                        label = p.freeFormHint,
                         useLabelAsPlaceholder = true,
                         minLines = 1,
                         maxLines = 3,
@@ -343,12 +367,12 @@ fun ChoicePickerOverlay(
                 }
             },
             actions = {
-                SecondaryButton(text = picker.cancelLabel, onClick = onDismiss)
+                SecondaryButton(text = p.cancelLabel, onClick = onDismiss)
                 // 提交按钮是**唯一**的提交入口；没选任何项也没填自由文本时置灰，
                 // 让"还不能提交"这件事可见，而不是点了没反应。
                 // 文案来自 [ChoicePickerState.submitLabel]：多问题的提问流程中途是「下一步」。
                 PrimaryButton(
-                    text = picker.submitLabel,
+                    text = p.submitLabel,
                     enabled = usingFreeForm || selectedIndices.isNotEmpty(),
                     onClick = {
                         if (usingFreeForm) onSubmitFreeForm(freeForm)
@@ -358,8 +382,20 @@ fun ChoicePickerOverlay(
                 )
             },
         ) {
-            picker.options.forEachIndexed { index, option ->
+            p.options.forEachIndexed { index, option ->
                 val checked = index in selectedIndices && !usingFreeForm
+                // 选中态是「整张卡底色 + 标题色」同时变，两处都走 150ms 淡变：
+                // 只淡底或只淡字会出现「字已经变蓝、底还是灰的」中间态（同 ModelPicker 的推导）。
+                val cardColor by animateColorAsState(
+                    targetValue = if (checked) scheme.surfaceContainerHighest else scheme.surfaceContainerHigh,
+                    animationSpec = ZhiMotion.colorSpec,
+                    label = "choiceRowCard",
+                )
+                val titleColor by animateColorAsState(
+                    targetValue = if (checked) scheme.primary else scheme.onBackground,
+                    animationSpec = ZhiMotion.colorSpec,
+                    label = "choiceRowTitle",
+                )
                 // 每项 = Card 包一个 Miuix BasicComponent：
                 // 标题/说明/选中控件的排版完全交给 Miuix
                 Card(
@@ -367,7 +403,7 @@ fun ChoicePickerOverlay(
                     cornerRadius = ZhiRadius.card,
                     insideMargin = PaddingValues(0.dp),
                     colors = CardDefaults.defaultColors(
-                        color = if (checked) scheme.surfaceContainerHighest else scheme.surfaceContainerHigh,
+                        color = cardColor,
                         contentColor = scheme.onBackground,
                     ),
                     pressFeedbackType = PressFeedbackType.None,
@@ -382,9 +418,7 @@ fun ChoicePickerOverlay(
                     }
                     BasicComponent(
                         title = option.label,
-                        titleColor = BasicComponentDefaults.titleColor(
-                            color = if (checked) scheme.primary else scheme.onBackground,
-                        ),
+                        titleColor = BasicComponentDefaults.titleColor(color = titleColor),
                         summary = option.detail.ifEmpty { null },
                         summaryColor = BasicComponentDefaults.summaryColor(
                             color = scheme.onSurfaceVariantSummary,
@@ -425,6 +459,11 @@ fun ChoicePickerOverlay(
 
 // ---------------------------------------------------------------- 任务清单
 
+/** 任务清单 sheet 的定高参数（含义与取值理由见 ModelPickerOverlay 的同名常量）。 */
+private const val TaskSheetHeightFraction = 0.55f
+private val TaskSheetHeightCap = 520.dp
+private val TaskSheetHeightFloor = 300.dp
+
 /**
  * 任务详情窗口：**全部** Agent 任务，点悬浮任务卡打开。
  *
@@ -433,7 +472,16 @@ fun ChoicePickerOverlay(
  * 交给 `ZhiMarkdown` 渲染（标题 / 粗体 / 行内代码 / 列表 / 代码块）。
  *
  * 文本可自由选择：整块内容包在 [SelectionContainer] 里，长按即可选中复制。
- * 容器用 [OverlayDialog]：它画在主窗口里，能参与 `ZhiCodeScreen` 的模态背景模糊。
+ *
+ * ## 为什么是底部 Sheet 而不是居中弹窗
+ *
+ * 原来是居中 [OverlayDialog]：内容是一份**可变长**的清单，弹窗只有 fade+spring
+ * 进出，长清单在竖屏下又早早就触发滚动（可用高度比 sheet 小）。
+ * 底部 sheet 自带上滑进场、下拉 / 点背板关闭，且与任务卡、模型、技能这些
+ * "长列表面板"同一形态（完整理由见 `ModelPickerOverlay` 顶部注释）。
+ *
+ * 标题由 [OverlayBottomSheet] 自己渲染，**不再**套 `DialogShell`：那会出两行标题，
+ * 且它的 `weight(1f)` 依赖有界高度，与 sheet"高度由内容决定"的语义对不上。
  */
 @Composable
 fun TaskListOverlay(
@@ -443,49 +491,39 @@ fun TaskListOverlay(
 ) {
     val scheme = MiuixTheme.colorScheme
 
-    OverlayDialog(
+    OverlayBottomSheet(
         show = open,
-
-
         onDismissRequest = onDismiss,
-        largeScreen = true,
-        maxWidth = ZhiDialogWidth.Regular,
-        outsideMargin = DialogWideOutsideMargin,
-        insideMargin = DialogWideInsideMargin,
+        title = "任务清单",
+        // 其余参数一律用 Miuix 默认值（同 ModelPickerOverlay：backgroundColor 别动）。
     ) {
-        if (!open) return@OverlayDialog
-        DialogShell(
-            title = "任务清单",
-            // 任务清单内容多，让中间区撑满剩余高度（DialogShell 内部已自带滚动）
-            fillBody = true,
-            titleAction = {
-                IconButton(
-                    onClick = onDismiss,
-                    minHeight = 32.dp,
-                    minWidth = 32.dp,
-                    cornerRadius = ZhiRadius.floating,
-                ) {
-                    Icon(
-                        imageVector = ZhiIcons.close,
-                        contentDescription = "关闭任务清单",
-                        tint = scheme.onSurfaceVariantSummary,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
-            },
-            actions = {
-                PrimaryButton(text = "完成", onClick = onDismiss)
-            },
-        ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                val done = tasks.count { it.state == TaskState.DONE }
-                Text(
-                    text = "$done / ${tasks.size} 已完成",
-                    color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Caption,
-                    modifier = Modifier.padding(bottom = 10.dp),
-                )
+        // 「最后一位客人」常驻：`open` 翻成 false 时内容不能空掉，否则退场先缩成空壳。
+        // `tasks` 是非空列表，关面板时 ViewModel 不清它，直接去掉原来那句早退即可。
+        // 定高：任务从 1 条涨到 10 条时面板高度不跳；高度算的是**内容区**，
+        // sheet 的标题行与内边距由组件自己叠加（ModelPickerBody 同款写法）。
+        // ⚠️ 窗口高度取 LocalWindowInfo，不能取 BoxWithConstraints 的 maxHeight
+        // （sheet 量内容时给的约束不是屏幕高度，见 ModelPickerBody 的实测注释）。
+        val windowHeight = LocalWindowInfo.current.containerDpSize.height
+        val sheetHeight = (windowHeight * TaskSheetHeightFraction)
+            .coerceAtMost(TaskSheetHeightCap)
+            .coerceAtLeast(TaskSheetHeightFloor)
+        Column(modifier = Modifier.fillMaxWidth().height(sheetHeight)) {
+            val done = tasks.count { it.state == TaskState.DONE }
+            Text(
+                text = "$done / ${tasks.size} 已完成",
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = ZhiTextScale.Caption,
+                modifier = Modifier.padding(bottom = 10.dp),
+            )
 
+            // 清单区吃掉余量并内部滚动（`DialogShell` 中间区同款写法）：
+            // 定高列里不 weight 的话，长清单会把「完成」按钮顶出屏幕。
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+            ) {
                 // 整块内容可选中：长按选中、拖动扩展选区
                 SelectionContainer {
                     Column(modifier = Modifier.fillMaxWidth()) {
@@ -518,6 +556,12 @@ fun TaskListOverlay(
                     }
                 }
             }
+
+            PrimaryButton(
+                text = "完成",
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            )
         }
     }
 }

@@ -126,8 +126,11 @@ public class ApiCatalogParseTest {
         assertEquals(ApiProtocol.ANTHROPIC, ApiProtocol.fromWire("anthropic"));
         assertEquals(ApiProtocol.OPENAI_CHAT, ApiProtocol.fromWire("openai-chat"));
         assertEquals(ApiProtocol.OPENAI_RESPONSES, ApiProtocol.fromWire("openai-responses"));
-        // 两个历史别名与主名同义：报文格式完全一致，所以不是两个枚举值。
-        assertEquals(ApiProtocol.OPENAI_RESPONSES, ApiProtocol.fromWire("codex-responses"));
+        // codex-responses **不是**别名：它有自己的端点、UA、四个关联头与请求体字段，
+        // 而且模型目录要单独排除。曾经按别名处理，后果是 UI 里选不到 Codex、
+        // 引擎里那条已实现的路径永远点不亮（见 ApiProtocol 的类注释）。
+        assertEquals(ApiProtocol.CODEX_RESPONSES, ApiProtocol.fromWire("codex-responses"));
+        // openai-compatible 仍是真别名：报文与 openai-chat 完全一致。
         assertEquals(ApiProtocol.OPENAI_CHAT, ApiProtocol.fromWire("openai-compatible"));
     }
 
@@ -137,6 +140,7 @@ public class ApiCatalogParseTest {
         assertEquals("anthropic", ApiProtocol.ANTHROPIC.wireName());
         assertEquals("openai-chat", ApiProtocol.OPENAI_CHAT.wireName());
         assertEquals("openai-responses", ApiProtocol.OPENAI_RESPONSES.wireName());
+        assertEquals("codex-responses", ApiProtocol.CODEX_RESPONSES.wireName());
     }
 
     @Test

@@ -172,9 +172,13 @@ public final class AnthropicMessagesProvider implements ModelProvider {
     /**
      * 读一个 {@code data:} 事件并交给解码器。
      *
+     * <p>包内可见（而不是 {@code private}）：{@link ZcodeProvider} 说的是同一个协议，
+     * 直接复用它与本类的 {@link StreamDecoder}，而不是把这套分帧逻辑再写一遍。
+     * 那两处（多行 {@code data:} 的分帧、终止标记判定）正是这个协议最容易写错的地方。
+     *
      * @return 是否应继续读；{@code false} 表示流已结束或解码器要求停止
      */
-    private static boolean readEvent(BufferedReader reader, StreamDecoder decoder) throws Exception {
+    static boolean readEvent(BufferedReader reader, StreamDecoder decoder) throws Exception {
         String eventName = null;
         String line;
         while ((line = reader.readLine()) != null) {

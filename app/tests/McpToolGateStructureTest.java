@@ -225,9 +225,15 @@ public final class McpToolGateStructureTest {
                         && has(overlay, "onSelect = { tab = it }") && has(overlay, "matchWidth = true"),
             "两个 TAB 必须用 ZhiSegmentedTabs 切换，且整宽等分 —— "
                 + "与工作区顶栏那一条是同一个组件（用户不必学第二套切换控件）");
-        require(has(overlay, "if (tab == 0)") && has(overlay, "McpConnectionForm(")
+        // 两个 TAB 的内容仍是各自独立成组件、按 tab 下标渲染，但**外面包了一层
+        // AnimatedContent**：不然切 TAB 是一整块"啪"地换掉。
+        // ⚠️ targetState 只能是 tab 下标 —— 把 draft（正在编辑的表单）编进去的话，
+        // 每敲一个键 targetState 都变，转场会被不停重放（表现为打字时整块在闪）。
+        require(has(overlay, "AnimatedContent(") && has(overlay, "targetState = tab,")
+                        && has(overlay, "if (tabIndex == 0)") && has(overlay, "McpConnectionForm(")
                         && has(overlay, "McpToolsTab("),
-            "两个 TAB 的内容必须各自独立成组件，按 tab 下标渲染");
+            "两个 TAB 的内容必须各自独立成组件，按 tab 下标渲染，并包在 AnimatedContent 里做淡变"
+                + "（key 只能是 tab 下标，不能把表单内容编进去）");
 
         // TAB 栏必须走**固定** header 槽位，不能混进滚动内容里：
         // 切到「工具」往下滚几屏之后还得能切回「基本设置」。

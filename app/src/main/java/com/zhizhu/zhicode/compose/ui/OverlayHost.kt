@@ -66,10 +66,12 @@ internal fun ZhiOverlayHost(
     )
     AttachFileOverlay(
         open = state.attachPickerOpen,
-        query = state.attachQuery,
-        hits = state.attachHits,
-        onQueryChange = viewModel::updateAttachQuery,
-        onPick = { hit -> viewModel.attachProjectFile(hit.path, hit.relative) },
+        browser = state.attachBrowser,
+        onFilterChange = viewModel::updateAttachFilter,
+        onNavigate = viewModel::attachNavigateTo,
+        onUp = viewModel::attachUp,
+        onSwitchRoot = viewModel::attachSwitchRoot,
+        onPick = { entry -> viewModel.attachProjectFile(entry.path) },
         onDismiss = viewModel::closeAttachPicker,
     )
     TaskListOverlay(
@@ -100,6 +102,8 @@ internal fun ZhiOverlayHost(
         onSelectProfile = viewModel::selectModelPickerProfile,
         // 主按钮：选择在点击那一刻已经存好，这里只是应用手动输入的名字并收起面板
         onUse = viewModel::applySelectedModel,
+        // 额度卡片的「刷新」：重拉模型与额度（参考图的额度卡片也带这个按钮）
+        onRefreshQuota = viewModel::refreshModelCatalog,
         onAddApi = {
             viewModel.closeModelPicker()
             // 先打开配置页、再进空白表单：tab 栏已经承担了"切到已有配置"，

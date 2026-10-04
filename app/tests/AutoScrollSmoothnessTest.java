@@ -57,7 +57,8 @@ public final class AutoScrollSmoothnessTest {
         String sqFollow = squash(follow);
 
         // ---- 1. 判定只有一处实现 -----------------------------------------
-        require(squash(chat).contains("valautoFollowbyrememberAutoFollow(listState)"),
+        require(squash(chat).contains("valautoFollowState=rememberAutoFollow(listState") ||
+                        squash(chat).contains("valautoFollowbyrememberAutoFollow(listState"),
                 CHAT_LIST + " 的 autoFollow 必须取自 rememberAutoFollow："
                         + "在页面里就地算一份的话，滞回/到过底部这些判据会被漏掉，"
                         + "而这是静默的 —— 只表现为「滚动不顺」");

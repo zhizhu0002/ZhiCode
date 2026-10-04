@@ -2,6 +2,7 @@ package com.zhizhu.zhicode.compose.ui
 
 import com.zhizhu.zhicode.compose.ui.debug.UiDebugPage
 import com.zhizhu.zhicode.compose.ui.debug.ZhiDebugHud
+import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.McpConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.SearchServicesOverlay
@@ -102,6 +103,17 @@ fun ZhiCodeApp(viewModel: WorkspaceViewModel = rememberWorkspaceViewModel()) {
         // Button→button、BasicComponent→headline1/body2、SmallTitle→subtitle），
         // 逐个传 fontSize 够不到它们。字阶与依据见 theme/ZhiTextStyles.kt。
         MiuixTheme(colors = appColors, textStyles = zhiTextStyles()) {
+            // 这里**不再**挂常开的帧泵。
+            //
+            // 原来这里是 `ZhiFrameTraceHost()`，内部是
+            // `while (true) { withFrameNanos { ... } }` —— 等于**每一帧都主动申请一帧**，
+            // 应用永不休眠。实测空闲 14 秒、完全不碰屏幕时仍是：
+            //   idle frames=300 avg=8.3ms (=120.0fps)  ← 持续满帧
+            // 后果不是"多画几帧"，而是主线程永远被占着：任何触摸到达时都得等当前帧
+            // 画完，于是"点设置、点模型、点页签全都滞后"，与点哪里无关。
+            //
+            // 现在改成按需：只有 `ZhiFrameTrace.begin()` 之后才要帧（见那里的说明），
+            // 测量结束就自然停下，空闲时一帧都不申请。
             ZhiCodeScreen(state = state, viewModel = viewModel, isDark = isDark)
         }
     }
@@ -115,6 +127,47 @@ private fun ZhiCodeScreen(
 ) {
     val configuration = LocalConfiguration.current
     val wide = configuration.screenWidthDp >= 600
+
+    // 帧耗时测量的出口：结果以一条 INFO 消息落在对话流里（仅 debug 构建会触发）。
+    // 之所以不只用 logcat：沙箱 guest 的日志不进宿主 logcat，而截图是唯一可靠的观察通道。
+    //
+    // 另外落一份到 filesDir 下的纯文本：排查「页签高亮与面板内容对不上」这类问题时
+    // 对话面板本身就看不见，写进对话流的那些行也读不到。宿主机上可以直接读这个文件
+    // （blackbox/data/user/0/<包名>/files/zhi-frame.log）。
+    val traceContext = LocalContext.current
+    LaunchedEffect(viewModel) {
+        // 主落点：filesDir（沙箱里宿主机可直接读，路径见上面注释）。
+        ZhiFrameTrace.bindLogFile(
+            java.io.File(traceContext.filesDir, "zhi-frame.log"),
+            // 第二落点：`Android/media/<包名>/`。
+            //
+            // 真机上 filesDir 读不到（release 包不是 debuggable、`Android/data` 也不给列），
+            // 而 `Android/media/<包名>/` 既是本应用无权限可写、又能被文件管理器直接打开。
+            // 目录可能还没建好，所以这里只做一次 mkdirs，失败就只留主落点。
+            shared = traceContext.getExternalMediaDirs()?.firstOrNull()?.let { dir ->
+                runCatching {
+                    dir.mkdirs()
+                    java.io.File(dir, "zhi-frame.log")
+                }.getOrNull()
+            },
+        )
+        ZhiFrameTrace.sink = { line -> viewModel.reportExternalEvent("帧耗时", line) }
+    }
+
+    // 每秒汇总一次重组计数（仅 debug 构建真的执行；release 里 `ZhiFrameTrace.enabled` 为假）。
+    //
+    // 这条通道是给「狂闪」那类问题用的：帧耗时探针**测不出来**它 ——
+    // 实测页签转场 avg=9.6ms max=25.0ms janks=0，logcat 里一条 Skipped frames 都没有。
+    // 因为那不是"单帧慢"，而是**每帧都在重建界面**；帧耗时区分不了这两种病，重组次数可以。
+    //
+    // 输出形如 `ZhiFrame: recompose/s ChatList=60 ChatArea=60 Composer=1`：
+    // =60 就是每帧一次（60Hz）—— 那就是要找的元凶；=1 是正常的一次。
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000L)
+            ZhiFrameTrace.flushRecomposeCounts()
+        }
+    }
 
     // 各整页在退出动画期间的「最后内容」缓存（见下方 settingsUi / apiUi 的说明）。
     var lastSettingsDraft by remember { mutableStateOf<SettingsDraft?>(null) }
@@ -250,6 +303,23 @@ private fun ZhiCodeScreen(
         entry<AppKey.Workspace> {
         Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
+            floatingToolbar = {
+                com.zhizhu.zhicode.compose.ui.panes.FileSelectionToolbar(
+                    visible = !wide && (state.fileSelectionMode || state.fileSelection.isNotEmpty()) && state.openFile == null,
+                    entries = state.fileEntries,
+                    selection = state.fileSelection,
+                    onAttach = viewModel::attachSelectedEntries,
+                    onRename = viewModel::renameSelectedEntry,
+                    onDelete = viewModel::deleteSelectedEntries,
+                    onCopy = viewModel::copySelectedEntries,
+                    onMove = viewModel::moveSelectedEntries,
+                    clipboardCount = state.fileClipboard.size,
+                    clipboardMove = state.fileClipboardMove,
+                    onPaste = viewModel::pasteFilesIntoCurrentDirectory,
+                    onSelectAll = viewModel::toggleSelectAllFiles,
+                    onDismiss = viewModel::clearFileSelection,
+                )
+            },
             topBar = {
                 if (wide) {
                     // 宽屏：侧栏常驻，顶栏只覆盖右侧内容区 —— 由 WorkspaceLayouts
@@ -264,9 +334,15 @@ private fun ZhiCodeScreen(
                             viewModel.onComposerChange("/usage")
                             viewModel.send()
                         },
-                        onSettings = viewModel::openSettings,
+                        onSettings = {
+                            ZhiFrameTrace.begin("settings:open")
+                            viewModel.openSettings()
+                        },
                         tabs = WorkspaceTab.entries,
-                        onSelectTab = viewModel::selectTab,
+                        onSelectTab = { tab ->
+                            ZhiFrameTrace.begin("tab:${tab.name}")
+                            viewModel.selectTab(tab)
+                        },
                     )
                 }
             },
@@ -278,7 +354,7 @@ private fun ZhiCodeScreen(
             // 任何从 y=0 开始画、又不自己顶开的面板，头部都会被顶栏盖住。
             // 所以每个面板必须二选一 ——
             //   · 对话面板：用 ChatList 的 topInset（**滚动内边距**，它要能滚过顶栏）；
-            //   · 其余面板：用 `TopBarInsetWithTabs` 的 **padding** 顶开
+            //   · 其余面板：用 `TopBarInsetCompact` 的 **padding** 顶开
             //     （见 WorkspaceLayouts 里 PaneHost 那个分支）。
             // **新加面板时最容易漏的就是这一步**（文件面板就这么被盖过一次，
             // 当时这里有一句指向并不存在的常量的注释，照它做就漏了）。
@@ -322,7 +398,7 @@ private fun ZhiCodeScreen(
                         viewModel = viewModel,
                         glass = glassMain,
                         // 让出顶栏（含 Tab 行）的高度，否则药丸会被模糊顶栏压住。
-                        topInset = TopBarInsetWithTabs,
+                        topInset = TopBarInsetCompact,
                     )
                 }
             }
@@ -333,7 +409,10 @@ private fun ZhiCodeScreen(
             ZhiSideDrawer(
                 open = state.sidebarOpen,
                 onClose = viewModel::closeSidebar,
-                width = (configuration.screenWidthDp * 0.82f).dp.coerceAtMost(320.dp),
+                // 宽度上限 300dp：抽屉是"导航"，不是工作区 —— 铺到 320dp/82% 时
+                // 它一打开就把后面的对话流整个盖住，用户反馈「侧栏有点太宽泛了」。
+                // 比例 0.76 兜住小屏：360dp 的机器上是 274dp，不至于挤掉 24dp 图标。
+                width = (configuration.screenWidthDp * 0.76f).dp.coerceAtMost(300.dp),
                 glass = glassMain,
             ) {
                 ZhiSidebarHost(

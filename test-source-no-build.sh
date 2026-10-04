@@ -232,6 +232,25 @@ run NoBundledThirdPartyEndpointTest "$PROJECT_ROOT"
 # 那在上层只表现为「回复不完整」或「工具调用丢参数」，很难定位。
 # ApiWireContractTest.java
 run ApiWireContractTest "$PROJECT_ROOT"
+# ---------- Codex Responses 在协议下拉里真的能选到 ----------
+# 这是一个**已经实现、却谁也点不到**的功能：引擎侧那条 Codex 分支（/responses 端点、
+# codex_cli_rs 的 UA、四个关联头、store:false、不发 max_output_tokens）早就写完并有
+# 单测，但协议被当成 openai-responses 的别名，UI 只能产出 openai-responses ——
+# 用户在下拉里看不到 Codex，于是那条路径永远走不到。ApiWireContractTest 检查的是
+# 「实现文件里有没有那几个头」，抓不到「用户能不能选到」。
+# CodexProtocolTest.java
+run CodexProtocolTest "$PROJECT_ROOT"
+# ---------- ZCode：接通了，而且没把别人的身份嵌进来 ----------
+# 两类退化，第二类更要紧：①引擎侧写了 provider、UI 里却选不到（Codex 就是这么漏的）；
+# ②把网关地址或那组身份头硬编码进请求路径 —— 后果不是报错，而是「请求发到哪」
+# 对用户不透明、对方一改所有人一起断、并且替用户向第三方宣称了一个客户端身份。
+# 所以这里专门断言那些取值**不在** provider 与纯逻辑层里，只允许出现在界面的
+# 可粘贴提示中（用户看得见、能改）。另外钉住它复用 Anthropic 的 SSE 分帧而不是重写。
+# ZcodeProtocolTest.java
+run ZcodeProtocolTest "$PROJECT_ROOT"
+
+# ToolInteractionTest.java
+run ToolInteractionTest "$PROJECT_ROOT"
 
 # ---------- 终端面板的行为契约 ----------
 # 终端外壳改用 Compose 重写（批 F 2/6）。它是全工程唯一一块「重写后无法用单测
@@ -253,6 +272,14 @@ run AnchoredMenuStructureTest "$PROJECT_ROOT"
 # ---------- 设置页（数值项是可输入的文本框 · 自动保存 · 唯一写入路径） ----------
 # SettingsPageStructureTest.java
 run SettingsPageStructureTest "$PROJECT_ROOT"
+# ---------- 设置页的行首彩色图标块（小米设置观感） ----------
+# 用户贴了小米「设置」的截图之后要求「借鉴小米自带的设置的图标」：参考物里没有一行是
+# 裸字形，行首一律是「彩色圆角方块 + 白字形」。这一节守的就是那套东西的**每一条**：
+# 每一行都要有这一对参数（漏一行不会编译失败）、只给一半会静默退化成没有图标、
+# 同一页两个相同的(字形,底色)会让人以为共用一条设置、底色与白字形的对比度必须 ≥3:1
+# （小米原色的绿/橙只有 ≈2.0:1，白字形会糊在底上）、底必须是超椭圆而不是普通圆角。
+# SettingsIconPlateTest.java
+run SettingsIconPlateTest "$PROJECT_ROOT"
 # ---------- 二级页转场（多态页必须走页面栈）与技能页安全边界 ----------
 # 用户报过「设置很多地方的动画非常不完整（比如三级窗口）」：根因是多态二级页被
 # when 硬切，而 AppScaffold 的页面栈只反映"这一页开着没有"。
@@ -266,12 +293,31 @@ run McpToolGateStructureTest "$PROJECT_ROOT"
 # ---------- 侧栏导航（点任何一行都要收起侧栏，否则目标被浮层盖住） ----------
 # SidebarNavigationTest.java
 run SidebarNavigationTest "$PROJECT_ROOT"
+# ---------- 侧栏版式（28dp 基线 · 主色不当整行底色 · 选中态三样 · 搜索走 ZhiTextField） ----------
+# 用户贴了侧栏截图：最抢眼的是「新会话」那条满宽蓝条，组标题比行内容深缩进一截，
+# 会话行没有"行"的样子。三样都能编译通过，只有真机上看得出来。
+# SidebarLayoutTest.java
+run SidebarLayoutTest "$PROJECT_ROOT"
 # ---------- 沙箱页（弹窗宿主挂载点 · 骨架同二级页 · 卡片动作分层） ----------
 # 这一页是独立 Activity 里的整页，自己拼骨架，于是拼出过只有真机上点得出来的毛病：
 # 弹窗宿主写在 Scaffold 之外 → 四个框全部不显示且不报错（点了没反应，状态卡在非 null）。
 # SandboxPageStructureTest.java
 run SandboxPageStructureTest "$PROJECT_ROOT"
 # ---------- 写死的几何（长按触发 · 气泡宽度 · 弹窗宽度） ----------
+
+# ---------- 图标集（字形数据 · 语义映射 · 画廊全集） ----------
+# IconSetTest.java
+run IconSetTest "$PROJECT_ROOT"
+# ---------- 每个字形都真的铺在 24 格上（"别扁扁的"的量化形式） ----------
+# 用户对图标的反馈里有一条是「有些图标扁扁的，不好看」。上一轮靠"把自绘的坐标调大"
+# 解决，但那种事没法守住：坐标改了、注释里的数字不改，谁也不知道。
+# 这道守卫在 Java 里实现一个 SVG 路径走查器（M/L/H/V/C/S/Q/T/A/Z、相对命令、
+# 隐式重复、圆弧的两个标志位），把 ZhiMaterialIcons 里每个字形**真实的**墨迹范围
+# 算出来，再断言长边 ≥15、短边 ≥14.4、长短边之比 ≤1.30。
+# 天生细长的形状（折线箭头、横排三点、汉堡三杠）进例外表并写明理由，
+# 而且例外表是**双向**检查的：多余的例外会让测试失败 —— 否则那张表会越放越松。
+# MaterialSymbolGeometryTest.java
+run MaterialSymbolGeometryTest "$PROJECT_ROOT"
 # LayoutConsistencyTest.java
 run LayoutConsistencyTest "$PROJECT_ROOT"
 # ---------- 流式渲染热路径（重解析 · 行内缓存 · 尺寸动画） ----------
@@ -385,6 +431,22 @@ run StorageAccessTest "$PROJECT_ROOT"
 # 二进制预览也能进编辑态（保存回去就把文件写坏）。
 # FilePanelWriteTest.java
 run FilePanelWriteTest "$PROJECT_ROOT"
+# ---------- 本地挂载：文件管理器访问 HOME ----------
+# 机制是把 HOME 发布成 DocumentsProvider（SAF），**不搬目录** —— 共享存储整片
+# noexec，搬过去 ./gradlew 就不能直跑了。守六种「编译过、跑得起来、只有文件管理器
+# 里少一项或某一项打不开」的退化，其中最重要的是越界：只比较字符串的话
+# storage/shared 那条链接就能读写到 HOME 之外，而且没人会发现。
+# LocalMountTest.java
+run LocalMountTest "$PROJECT_ROOT"
+# ---------- provider 的失败必须能被看见 ----------
+# SAF 的失败在两端都是静音的：框架把 provider 的异常吞成 null，文件管理器只剩一句
+# 通用文案（真机上就是 Failed to create directory: 1），而真机取 logcat 要 adb/root
+# —— 两样都没有。于是"能看见原因"只能由代码保证，而删掉一句日志不影响任何功能、
+# 不报任何错。这一条钉住：每个入口都过 traced、createDocument 记下调用方参数、
+# 日志自身不许把 provider 弄坏、诊断页必须真调用（不是写死"可用"）、自检自己收尾，
+# 以及启动路径必须补建 ~/storage（这个 bug 真发生过）。
+# ProviderDiagnosticsTest.java
+run ProviderDiagnosticsTest "$PROJECT_ROOT"
 # ---------- UI 调试页的入口门控与"真的铺开组件" ----------
 # 这一页只在 debug 构建可见；它一旦被搬进发布包、或退化成静态贴图、
 # 或自己写死字号与颜色，都不会编译失败 —— 只会在没人注意的时候失去意义。

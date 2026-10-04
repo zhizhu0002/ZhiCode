@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,17 +21,17 @@ import com.zhizhu.zhicode.compose.model.RoleCardEditor
 import com.zhizhu.zhicode.compose.model.RoleCardsState
 import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
+import com.zhizhu.zhicode.compose.ui.settings.SettingsLoadingHint
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Text
@@ -127,7 +128,11 @@ private fun RoleCardList(
         // 与设置主页同形态：一张分组卡里若干行，每行不再各套一张卡。
         // （整页模式下不限高，滚动交给外层 SettingsSubPage。）
         SettingsGroup("角色卡") {
-            if (state.cards.isEmpty()) {
+            if (state.loading) {
+                // 载荷还在 IO 上读（见 openRoleCards）：「暂时为空」与「本来就没有」
+                // 都是空列表，不区分就会把「正在读」误报成「还没建过」。
+                SettingsLoadingHint()
+            } else if (state.cards.isEmpty()) {
                 Text(
                     text = "还没有角色卡。点「新建」写一段人设指令（例如固定的回答风格、必须遵守的" +
                         "工作流程），保存后会立即启用。",
@@ -138,11 +143,15 @@ private fun RoleCardList(
             } else {
                 state.cards.forEach { card ->
                     val active = card.id == state.activeId
+                    // 同 API 配置列表：标题主色与左侧勾是同时变的。
+                    val titleColor by animateColorAsState(
+                        targetValue = if (active) scheme.primary else scheme.onBackground,
+                        animationSpec = ZhiMotion.colorSpec,
+                        label = "roleCardTitle",
+                    )
                     BasicComponent(
                         title = card.name,
-                        titleColor = BasicComponentDefaults.titleColor(
-                            color = if (active) scheme.primary else scheme.onBackground,
-                        ),
+                        titleColor = BasicComponentDefaults.titleColor(color = titleColor),
                         summary = card.summary,
                         summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
                         startAction = {
@@ -150,7 +159,7 @@ private fun RoleCardList(
                             // 选中标记用 Check 图标而非 Checkbox，理由见 Dialogs.kt 同一处。
                             if (active) {
                                 Icon(
-                                    imageVector = MiuixIcons.Basic.Check,
+                                    painter = ZhiIcons.check,
                                     contentDescription = null,
                                     tint = scheme.primary,
                                     modifier = Modifier.size(DropdownDefaults.CheckIconSize),

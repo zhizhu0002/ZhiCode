@@ -1,71 +1,86 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.termux.shared.termux.TermuxConstants
-import com.zhizhu.zhicode.compose.theme.ZhiColors
-import com.zhizhu.zhicode.compose.theme.ZhiRadius
-import com.zhizhu.zhicode.compose.theme.ZhiSpace
 import com.zhizhu.zhicode.compose.model.FileDeletePrompt
 import com.zhizhu.zhicode.compose.model.FileEntry
 import com.zhizhu.zhicode.compose.model.FileNameForm
 import com.zhizhu.zhicode.compose.model.FileRoot
 import com.zhizhu.zhicode.compose.model.OpenFile
-import com.zhizhu.zhicode.compose.ui.ZhiFieldError
+import com.zhizhu.zhicode.compose.model.fileRangeSelection
+import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMaterialIcons
+import com.zhizhu.zhicode.compose.ui.ZhiNoticeBar
+import com.zhizhu.zhicode.compose.ui.ZhiNoticeTone
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
-import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
-import top.yukonga.miuix.kmp.basic.BreadcrumbBar
-import top.yukonga.miuix.kmp.basic.BreadcrumbItem
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.DropdownEntry
+import top.yukonga.miuix.kmp.basic.DropdownItem
+import top.yukonga.miuix.kmp.basic.FloatingToolbar
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.VerticalScrollBar
-import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
+import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
-/**
- * 文件面板，对应原版 renderFiles() / showFileBrowser() / showFileEditor()。
- *
- * <h3>从「只读查看」改成可读写</h3>
- *
- * 这一屏原先是「只读浏览 + 只读查看，不做写入」，而且根被钉死在项目目录上
- * （`rootPath() = projectPath`）—— 于是 HOME 与共享存储都走不到，
- * 「上一级」也会被弹回项目顶部。用户要的「挂载 home 目录（需要可读写）」
- * 在应用内的对应物就是这一屏：**能改**、而且**能去三个根**。
- *
- * 写操作全部走 `FileOps`（纯 Java、有 26 条单测）：名字校验、原子保存、
- * 删除不跟符号链接。这里只负责把它的结果如实画出来。
- */
 @Composable
 fun FilesPane(
     filePath: String,
@@ -76,208 +91,324 @@ fun FilesPane(
     onNavigate: (String) -> Unit,
     onCloseFile: () -> Unit,
     modifier: Modifier = Modifier,
-    /**
-     * 列表为空时的说明（目录不存在等）。
-     * 默认空串 = 目录真的为空，此时不显示任何提示。
-     */
     emptyNote: String = "",
-    // ---- 可读写相关（都来自 FileOps 封装好的操作） ----
-    root: FileRoot = FileRoot.PROJECT,
+    root: FileRoot = FileRoot.HOME,
     onSwitchRoot: (FileRoot) -> Unit = {},
     draft: String? = null,
     onStartEdit: () -> Unit = {},
-    onDraftChange: (String) -> Unit = { _ -> },
+    onDraftChange: (String) -> Unit = {},
     onSave: () -> Unit = {},
     onCancelEdit: () -> Unit = {},
     nameForm: FileNameForm? = null,
-    onNewFile: () -> Unit = {},
-    onNewDirectory: () -> Unit = {},
+    onNewEntry: () -> Unit = {},
     onRename: (FileEntry) -> Unit = {},
-    onRequestDelete: (FileEntry) -> Unit = {},
-    onNameDraftChange: (String) -> Unit = { _ -> },
-    onSubmitName: () -> Unit = {},
+    onNameDraftChange: (String) -> Unit = {},
+    onSubmitName: (Boolean) -> Unit = {},
     onCancelName: () -> Unit = {},
     deletePrompt: FileDeletePrompt? = null,
     onConfirmDelete: () -> Unit = {},
     onCancelDelete: () -> Unit = {},
     sharedStorageGranted: Boolean = true,
+    onGrantSharedStorage: () -> Unit = {},
+    selection: Set<String> = emptySet(),
+    selectionMode: Boolean = false,
+    fileClipboardCount: Int = 0,
+    fileClipboardMove: Boolean = false,
+    onPasteFiles: () -> Unit = {},
+    onLongPressEntry: (FileEntry) -> Unit = {},
+    onToggleEntry: (FileEntry) -> Unit = {},
+    onSetSelection: (Set<String>) -> Unit = {},
+    onToggleSelectAll: () -> Unit = {},
+    onClearSelection: () -> Unit = {},
+    onRenameSelected: () -> Unit = {},
+    onDeleteSelected: () -> Unit = {},
+    onAttachSelected: () -> Unit = {},
+    active: Boolean = true,
 ) {
-    val scheme = MiuixTheme.colorScheme
-    Surface(modifier = modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            FileRootSwitcher(selected = root, onSelect = onSwitchRoot)
+    val effectiveSelectionMode = selectionMode || selection.isNotEmpty()
+    BackHandler(active && effectiveSelectionMode, onClearSelection)
+    Surface(modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
+        Column(Modifier.fillMaxSize()) {
+            FileRootSwitcher(root, onSwitchRoot)
             if (openFile == null) {
-                PaneHeader(
-                    title = "文件",
-                    subtitle = "${entries.size} 项",
-                    // 行尾三个动作：新建文件 / 新建文件夹 / 上一级。
-                    // 用 actions 槽而不是 actionIcon —— 只给一个图标按钮的话
-                    // 「上一级」和「新建」只能二选一。
-                    actions = {
-                        ZhiIconButton(
-                            icon = ZhiIcons.file,
-                            description = "新建文件",
-                            onClick = onNewFile,
-                            iconSize = 16.dp,
-                            compact = 30.dp,
-                        )
-                        ZhiIconButton(
-                            icon = ZhiIcons.directory,
-                            description = "新建文件夹",
-                            onClick = onNewDirectory,
-                            iconSize = 16.dp,
-                            compact = 30.dp,
-                        )
-                        ZhiIconButton(
-                            icon = ZhiIcons.upLevel,
-                            description = "上一级目录",
-                            onClick = onUp,
-                            iconSize = 16.dp,
-                            compact = 30.dp,
-                        )
-                    },
+                FileBrowserList(
+                    filePath, entries, root, emptyNote, sharedStorageGranted, onGrantSharedStorage,
+                    selection, effectiveSelectionMode, fileClipboardCount, fileClipboardMove, onPasteFiles, onOpen, onUp, onNavigate, onNewEntry,
+                    onLongPressEntry, onToggleEntry, onSetSelection, onToggleSelectAll, onClearSelection,
                 )
-                // 路径用 Miuix BreadcrumbBar 展示，点击任一层级都能直接跳转
-                FileBreadcrumbBar(filePath = filePath, onNavigate = onNavigate)
-                nameForm?.let { form ->
-                    FileNameFormCard(
-                        form = form,
-                        onDraftChange = onNameDraftChange,
-                        onSubmit = onSubmitName,
-                        onCancel = onCancelName,
-                    )
-                }
-                deletePrompt?.let { prompt ->
-                    FileDeleteCard(
-                        prompt = prompt,
-                        onConfirm = onConfirmDelete,
-                        onCancel = onCancelDelete,
-                    )
-                }
-                // 共享存储没授权时说清怎么开 —— 否则用户看到的是一个空列表，
-                // 而原因（「所有文件访问权限」）在界面上完全没有痕迹。
-                if (root == FileRoot.SHARED && !sharedStorageGranted) {
-                    Text(
-                        text = "共享存储需要「所有文件访问权限」：系统设置 → 应用 → ZhiCode → 权限 → 文件和媒体 → 允许管理所有文件。",
-                        color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Caption,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 6.dp),
-                    )
-                }
-                // 不做常驻过滤框：Miuix InputField 有 45dp 最小高度，
-                // 常驻会把文件列表挤下去，与"文件 UI 紧凑"的要求冲突。
-                Box(modifier = Modifier.fillMaxSize()) {
-                    val listState = rememberLazyListState()
-                    LazyColumn(
-                        state = listState,
-                        // 左右留白走工程统一的间距令牌 `ZhiSpace.m`（12dp，它的注释写的就是
-                        // "列表左右留白"）。之前这里是 4dp 并注明"文件名要尽可能宽" ——
-                        // 那个取舍换来的是**整列贴着屏幕边**，实测太挤；文件名长一点本来
-                        // 也会被省略号截掉，多这 8dp 并不会更早截断，但观感差别很大。
-                        modifier = Modifier.fillMaxSize().padding(horizontal = ZhiSpace.m),
-                        verticalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
-                    ) {
-                        items(entries, key = { it.path }) { entry ->
-                            FileRow(
-                                entry = entry,
-                                onOpen = { onOpen(entry) },
-                                onRename = { onRename(entry) },
-                                onDelete = { onRequestDelete(entry) },
-                            )
-                        }
-                        // 目录不存在时把原因说出来，而不是让面板空着（"0 项"）
-                        // 让用户以为应用坏了。
-                        if (entries.isEmpty() && emptyNote.isNotEmpty()) {
-                            item {
-                                Text(
-                                    text = emptyNote,
-                                    color = scheme.onSurfaceVariantSummary,
-                                    fontSize = ZhiTextScale.Caption,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
-                                )
-                            }
-                        }
-                        item { Box(modifier = Modifier.padding(bottom = 8.dp)) }
-                    }
-                    // Miuix 滚动条
-                    VerticalScrollBar(
-                        adapter = rememberScrollBarAdapter(listState),
-                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
-                    )
-                }
             } else {
-                val editing = draft != null
-                PaneHeader(
-                    title = openFile.name,
-                    subtitle = if (editing) "${openFile.language} · 编辑中" else "${openFile.language} · 只读",
-                    actions = {
-                        if (editing) {
-                            ZhiIconButton(
-                                icon = ZhiIcons.done,
-                                description = "保存",
-                                onClick = onSave,
-                                iconSize = 16.dp,
-                                compact = 30.dp,
-                            )
-                            ZhiIconButton(
-                                icon = ZhiIcons.close,
-                                description = "放弃改动",
-                                onClick = onCancelEdit,
-                                iconSize = 16.dp,
-                                compact = 30.dp,
-                            )
-                        } else {
-                            ZhiIconButton(
-                                icon = ZhiIcons.edit,
-                                description = "编辑",
-                                onClick = onStartEdit,
-                                iconSize = 16.dp,
-                                compact = 30.dp,
-                            )
-                            ZhiIconButton(
-                                icon = ZhiIcons.close,
-                                description = "关闭文件",
-                                onClick = onCloseFile,
-                                iconSize = 16.dp,
-                                compact = 30.dp,
-                            )
-                        }
-                    },
-                )
-                FileBreadcrumbBar(filePath = openFile.path, onNavigate = onNavigate)
-                if (editing) {
-                    // 编辑态：整块可滚动的多行输入框。用等宽字体 —— 缩进与列对齐
-                    // 在读代码时是有意义的信息，换了比例字体就没法看了。
-                    ZhiTextField(
-                        value = draft,
-                        onValueChange = onDraftChange,
-                        modifier = Modifier.fillMaxSize().padding(horizontal = ZhiSpace.m, vertical = 4.dp),
-                        minLines = 12,
-                        textStyle = MiuixTheme.textStyles.main.copy(fontFamily = FontFamily.Monospace),
-                    )
-                } else {
-                    val lines = remember(openFile.path) { openFile.content.split('\n') }
-                    Surface(modifier = Modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
-                        LazyColumn(modifier = Modifier.fillMaxSize().padding(vertical = 3.dp)) {
-                            items(lines.size) { index ->
-                                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
-                                    Text(
-                                        text = "${index + 1}",
-                                        color = scheme.onSurfaceVariantSummary,
-                                        fontSize = ZhiTextScale.Footnote,
-                                        fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.width(26.dp),
-                                    )
-                                    Text(
-                                        text = lines[index].ifEmpty { " " },
-                                        color = scheme.onSurface,
-                                        fontSize = ZhiTextScale.Footnote,
-                                        fontFamily = FontFamily.Monospace,
-                                    )
+                FileEditor(openFile, draft, onDraftChange, onStartEdit, onSave, onCancelEdit, onCloseFile, onNavigate)
+            }
+        }
+    }
+    NewEntryDialog(nameForm?.takeIf { it.target == null }, onNameDraftChange, onSubmitName, onCancelName)
+    RenameEntryDialog(nameForm?.takeIf { it.target != null }, onNameDraftChange, { onSubmitName(false) }, onCancelName)
+    DeleteConfirmDialog(deletePrompt, onConfirmDelete, onCancelDelete)
+}
+
+@Composable
+private fun FileBrowserList(
+    filePath: String, entries: List<FileEntry>, root: FileRoot, emptyNote: String,
+    sharedStorageGranted: Boolean, onGrantSharedStorage: () -> Unit,
+    selection: Set<String>, selectionMode: Boolean,
+    fileClipboardCount: Int, fileClipboardMove: Boolean, onPasteFiles: () -> Unit,
+    onOpen: (FileEntry) -> Unit, onUp: () -> Unit, onNavigate: (String) -> Unit, onNewEntry: () -> Unit,
+    onLongPressEntry: (FileEntry) -> Unit, onToggleEntry: (FileEntry) -> Unit,
+    onSetSelection: (Set<String>) -> Unit, onToggleSelectAll: () -> Unit, onClearSelection: () -> Unit,
+) {
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val currentEntries by rememberUpdatedState(entries)
+    val currentSelection by rememberUpdatedState(selection)
+    val currentMode by rememberUpdatedState(selectionMode)
+    val setSelection by rememberUpdatedState(onSetSelection)
+    val enterSelection by rememberUpdatedState(onLongPressEntry)
+    val allSelected = entries.isNotEmpty() && entries.all { it.path in selection }
+
+    Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = FileRowSidePadding), verticalAlignment = Alignment.CenterVertically) {
+        if (selectionMode) {
+            ZhiIconButton(ZhiIcons.close, "退出选择", onClearSelection, compact = 40.dp)
+            Text("已选择 ${selection.size} 项", fontSize = ZhiTextScale.Body, modifier = Modifier.weight(1f))
+            ZhiIconButton(ZhiIcons.listCount, if (allSelected) "取消全选" else "全选", onToggleSelectAll, compact = 40.dp)
+        } else {
+            Text(fileCountSummary(entries), fontSize = ZhiTextScale.Footnote, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
+            if (fileClipboardCount > 0) ZhiIconButton(ZhiIcons.directory, if (fileClipboardMove) "粘贴移动的 $fileClipboardCount 项" else "粘贴复制的 $fileClipboardCount 项", onPasteFiles, compact = 40.dp)
+            Button(
+                onClick = onNewEntry,
+                minWidth = 68.dp,
+                minHeight = 40.dp,
+                cornerRadius = ButtonDefaults.CornerRadius,
+                insideMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                colors = ButtonDefaults.buttonColors(color = MiuixTheme.colorScheme.primary, contentColor = MiuixTheme.colorScheme.onPrimary),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(ZhiIcons.add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("新建", fontSize = ZhiTextScale.Caption)
+                }
+            }
+            ZhiIconButton(ZhiIcons.back, "上一级目录", onUp, compact = 40.dp)
+        }
+    }
+    FilePathBar(filePath, onNavigate)
+    if (root == FileRoot.SHARED && !sharedStorageGranted) {
+        ZhiNoticeBar(
+            text = "共享存储需要「所有文件访问权限」",
+            modifier = Modifier.padding(horizontal = 28.dp),
+            tone = ZhiNoticeTone.WARN,
+            content = { TextButton("去授权", onGrantSharedStorage) },
+        )
+    }
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            contentPadding = PaddingValues(bottom = if (selectionMode) 96.dp else 16.dp),
+            modifier = Modifier.fillMaxSize().pointerInput(filePath) {
+                fun indexAt(y: Float): Int = listState.layoutInfo.visibleItemsInfo.firstOrNull { y >= it.offset && y < it.offset + it.size }?.index ?: -1
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    val anchor = indexAt(down.position.y)
+                    val item = currentEntries.getOrNull(anchor) ?: return@awaitEachGesture
+                    val base = currentSelection.toSet()
+                    val selecting = item.path !in base
+                    val endX = size.width - FileRowSidePadding.toPx()
+                    val hotspot = currentMode && down.position.x in (endX - 26.dp.toPx())..endX
+                    var pointer = down.position
+                    var scrolling: Job? = null
+                    var dragging = false
+                    try {
+                        if (!hotspot) {
+                            val cancelled = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (change == null || !change.pressed || (change.position - down.position).getDistance() > viewConfiguration.touchSlop) return@withTimeoutOrNull true
                                 }
                             }
+                            if (cancelled != null) return@awaitEachGesture
+                            enterSelection(item)
                         }
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) { if (dragging || !hotspot) change.consume(); break }
+                            pointer = change.position
+                            if (!dragging && (pointer - down.position).getDistance() <= viewConfiguration.touchSlop) continue
+                            change.consume()
+                            if (!dragging) {
+                                dragging = true
+                                scrolling = scope.launch {
+                                    val edge = 48.dp.toPx()
+                                    while (true) {
+                                        val height = listState.layoutInfo.viewportEndOffset.toFloat()
+                                        val delta = when {
+                                            pointer.y < edge -> -((edge - pointer.y) / edge).coerceIn(0f, 1f) * 12.dp.toPx()
+                                            pointer.y > height - edge -> ((pointer.y - height + edge) / edge).coerceIn(0f, 1f) * 12.dp.toPx()
+                                            else -> 0f
+                                        }
+                                        if (delta != 0f) {
+                                            listState.scrollBy(delta)
+                                            val visible = listState.layoutInfo.visibleItemsInfo
+                                            val end = indexAt(pointer.y).takeIf { it >= 0 } ?: (if (delta < 0f) visible.firstOrNull()?.index else visible.lastOrNull()?.index)
+                                            if (end != null) setSelection(fileRangeSelection(currentEntries.map { it.path }, anchor, end, base, selecting))
+                                        }
+                                        delay(16)
+                                    }
+                                }
+                            }
+                            val end = indexAt(pointer.y)
+                            if (end >= 0) setSelection(fileRangeSelection(currentEntries.map { it.path }, anchor, end, base, selecting))
+                        }
+                    } finally { scrolling?.cancel() }
+                }
+            },
+        ) {
+            itemsIndexed(entries, key = { _, entry -> entry.path }) { _, entry ->
+                FileListRow(entry = entry, onOpen = { if (selectionMode) onToggleEntry(entry) else onOpen(entry) }, selected = entry.path in selection, selectionMode = selectionMode, modifier = Modifier.animateItem())
+            }
+        }
+        if (entries.isEmpty()) Text(emptyNote.ifEmpty { "这个目录是空的" }, modifier = Modifier.align(Alignment.Center), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+    }
+}
+
+@Composable
+internal fun FileSelectionToolbar(
+    visible: Boolean, entries: List<FileEntry>, selection: Set<String>,
+    onAttach: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit,
+    onCopy: () -> Unit, onMove: () -> Unit, clipboardCount: Int, clipboardMove: Boolean, onPaste: () -> Unit,
+    onSelectAll: () -> Unit, onDismiss: () -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    var details by remember { mutableStateOf<List<FileEntry>?>(null) }
+    val allSelected = entries.isNotEmpty() && entries.all { it.path in selection }
+    val more = DropdownEntry(items = listOf(
+        DropdownItem("复制", enabled = selection.isNotEmpty(), onClick = onCopy),
+        DropdownItem("移动", enabled = selection.isNotEmpty(), onClick = onMove),
+        DropdownItem(if (clipboardCount == 0) "粘贴" else if (clipboardMove) "粘贴移动项（$clipboardCount）" else "粘贴副本（$clipboardCount）", enabled = clipboardCount > 0, onClick = onPaste),
+        DropdownItem(if (allSelected) "取消全选" else "全选", onClick = onSelectAll),
+        DropdownItem("复制路径", onClick = { clipboard.setText(AnnotatedString(selection.sorted().joinToString("\n"))) }),
+        DropdownItem("详情", onClick = { details = entries.filter { it.path in selection } }),
+        DropdownItem("退出选择", onClick = onDismiss),
+    ))
+    AnimatedVisibility(visible, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+        FloatingToolbar {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                FileToolbarAction(ZhiMaterialIcons.Add, "附加", onAttach, selection.isNotEmpty())
+                FileToolbarAction(ZhiMaterialIcons.Edit, "重命名", onRename, selection.size == 1)
+                FileToolbarAction(ZhiMaterialIcons.Delete, "删除", onDelete, selection.isNotEmpty())
+                OverlayIconDropdownMenu(more, minHeight = 48.dp, minWidth = 48.dp) { Icon(ZhiMaterialIcons.MoreHoriz, "更多", modifier = Modifier.size(24.dp), tint = MiuixTheme.colorScheme.onSurfaceContainer) }
+            }
+        }
+    }
+    OverlayDialog(show = details != null && visible, onDismissRequest = { details = null }) {
+        val shown = rememberLastNonNull(details)
+        DialogShell("详情", actions = { PrimaryButton("确定", { details = null }) }) { Text(shown.orEmpty().joinToString("\n") { it.path }) }
+    }
+}
+
+@Composable
+private fun FileToolbarAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit, enabled: Boolean) {
+    Button(onClick = onClick, enabled = enabled, minWidth = 72.dp, minHeight = 64.dp, cornerRadius = ButtonDefaults.CornerRadius, insideMargin = PaddingValues(horizontal = 10.dp, vertical = 7.dp), colors = ButtonDefaults.buttonColors(color = MiuixTheme.colorScheme.surfaceContainerHigh, contentColor = MiuixTheme.colorScheme.onSurfaceContainer)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Icon(imageVector = icon, contentDescription = label, modifier = Modifier.size(21.dp))
+            Text(label, fontSize = ZhiTextScale.Caption, modifier = Modifier.padding(top = 3.dp))
+        }
+    }
+}
+
+private data class LogRow(val index: Int, val raw: String, val time: String, val body: String, val status: String?)
+
+private fun isLogFile(file: OpenFile): Boolean = file.name.endsWith(".log", ignoreCase = true) || file.name.contains("log", ignoreCase = true)
+
+private fun parseLogRows(content: String): List<LogRow> = content.split('\n').mapIndexed { index, raw ->
+    val match = Regex("^(\\d{2}-\\d{2}[^ ]*\\s+[^ ]+)\\s+(.*)$").find(raw)
+    val time = match?.groupValues?.getOrNull(1).orEmpty()
+    val body = match?.groupValues?.getOrNull(2) ?: raw
+    val status = when {
+        Regex("\\b(ok|success|done)\\b", RegexOption.IGNORE_CASE).containsMatchIn(body) -> "ok"
+        Regex("\\b(fail|error|exception)\\b", RegexOption.IGNORE_CASE).containsMatchIn(body) -> "fail"
+        else -> null
+    }
+    LogRow(index, raw, time, body, status)
+}
+
+@Composable
+private fun FileEditor(file: OpenFile, draft: String?, onDraftChange: (String) -> Unit, onStartEdit: () -> Unit, onSave: () -> Unit, onCancelEdit: () -> Unit, onCloseFile: () -> Unit, onNavigate: (String) -> Unit) {
+    val editing = draft != null
+    val scheme = MiuixTheme.colorScheme
+    var logLine by remember(file.path) { mutableStateOf<LogRow?>(null) }
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).padding(end = 10.dp)) {
+                    Text(file.name, color = scheme.onBackground, fontSize = ZhiTextScale.Subheading, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(if (editing) "${file.language.ifBlank { "文本" }} · 编辑中" else "${file.language.ifBlank { "文本" }} · ${if (isLogFile(file)) "日志预览" else "只读预览"}", color = scheme.onSurfaceVariantSummary, fontSize = ZhiTextScale.Caption)
+                }
+                if (editing) {
+                    TextButton("放弃", onCancelEdit, minWidth = 54.dp, insideMargin = PaddingValues(horizontal = 8.dp, vertical = 8.dp))
+                    Button(onClick = onSave, minWidth = 76.dp, minHeight = 40.dp, colors = ButtonDefaults.buttonColorsPrimary(), insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) { Text("保存", fontSize = ZhiTextScale.Caption) }
+                } else {
+                    ZhiIconButton(ZhiIcons.close, "关闭文件", onCloseFile, compact = 40.dp)
+                    Button(onClick = onStartEdit, minWidth = 72.dp, minHeight = 40.dp, insideMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp)) { Text("编辑", fontSize = ZhiTextScale.Caption) }
+                }
+            }
+        }
+        FilePathBar(file.path, onNavigate)
+        if (editing) FileEditSurface(draft.orEmpty(), onDraftChange, Modifier.weight(1f))
+        else if (isLogFile(file)) LogPreviewSurface(file.content, onLineEdit = { logLine = it }, modifier = Modifier.weight(1f))
+        else FilePreviewSurface(file.content, Modifier.weight(1f))
+    }
+    if (logLine != null) SingleLogLineEditor(logLine!!, onDismiss = { logLine = null }, onApply = { updated ->
+        val rows = file.content.split('\n').toMutableList()
+        rows[updated.index] = updated.raw
+        onDraftChange(rows.joinToString("\n"))
+        logLine = null
+    })
+}
+
+@Composable
+private fun FileEditorSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Surface(modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), shape = RoundedCornerShape(20.dp), color = MiuixTheme.colorScheme.surfaceContainer) { content() }
+}
+
+@Composable
+private fun FilePreviewSurface(content: String, modifier: Modifier = Modifier) {
+    val lines = remember(content) { content.split('\n') }
+    FileEditorSurface(modifier) {
+        LazyColumn(Modifier.fillMaxSize().padding(vertical = 10.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
+            itemsIndexed(lines) { index, line -> CodeLine(index + 1, line) }
+        }
+    }
+}
+
+@Composable
+private fun FileEditSurface(content: String, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
+    FileEditorSurface(modifier) {
+        ZhiTextField(value = content, onValueChange = onChange, modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 12.dp), minLines = 16, textStyle = MiuixTheme.textStyles.main.copy(fontFamily = FontFamily.Monospace), label = "编辑正文", useLabelAsPlaceholder = false)
+    }
+}
+
+@Composable
+private fun CodeLine(number: Int, text: String) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 3.dp), verticalAlignment = Alignment.Top) {
+        Text(number.toString(), color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = ZhiTextScale.Footnote, fontFamily = FontFamily.Monospace, modifier = Modifier.width(42.dp))
+        SelectionContainer(Modifier.weight(1f)) { Text(text.ifEmpty { " " }, color = MiuixTheme.colorScheme.onSurface, fontSize = ZhiTextScale.Caption, fontFamily = FontFamily.Monospace, modifier = Modifier.fillMaxWidth()) }
+    }
+}
+
+@Composable
+private fun LogPreviewSurface(content: String, onLineEdit: (LogRow) -> Unit, modifier: Modifier = Modifier) {
+    val rows = remember(content) { parseLogRows(content) }
+    FileEditorSurface(modifier) {
+        LazyColumn(Modifier.fillMaxSize().padding(vertical = 8.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
+            itemsIndexed(rows, key = { _, row -> row.index }) { _, row ->
+                Surface(onClick = { onLineEdit(row) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp), shape = RoundedCornerShape(12.dp), color = MiuixTheme.colorScheme.surfaceContainerHigh) {
+                    Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.Top) {
+                        Text((row.index + 1).toString(), color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = ZhiTextScale.Footnote, fontFamily = FontFamily.Monospace, modifier = Modifier.width(34.dp))
+                        Column(Modifier.weight(1f)) {
+                            if (row.time.isNotBlank()) Text(row.time, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = ZhiTextScale.Micro, fontFamily = FontFamily.Monospace)
+                            SelectionContainer { Text(row.body, color = MiuixTheme.colorScheme.onSurface, fontSize = ZhiTextScale.Caption, fontFamily = FontFamily.Monospace) }
+                        }
+                        if (row.status != null) Text(row.status, color = if (row.status == "ok") MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.error, fontSize = ZhiTextScale.Micro, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp))
                     }
                 }
             }
@@ -285,260 +416,16 @@ fun FilesPane(
     }
 }
 
-/**
- * 根切换条。
- *
- * 三个根是三种不同的活儿（项目=代码、HOME=配置、共享存储=用户的文件），
- * 放在标题栏下方一行，而不是藏进菜单里 —— 换根是这一屏最常用的动作之一。
- */
 @Composable
-private fun FileRootSwitcher(selected: FileRoot, onSelect: (FileRoot) -> Unit) {
-    val scheme = MiuixTheme.colorScheme
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
-    ) {
-        FileRoot.entries.forEach { root ->
-            val active = root == selected
-            Card(
-                onClick = { if (!active) onSelect(root) },
-                modifier = Modifier.weight(1f),
-                cornerRadius = ZhiRadius.inner,
-                insideMargin = PaddingValues(vertical = 6.dp),
-                colors = CardDefaults.defaultColors(
-                    color = if (active) scheme.primaryContainer else ZhiColors.cardSurface(),
-                    contentColor = if (active) scheme.onPrimaryContainer else scheme.onSurface,
-                ),
-                pressFeedbackType = PressFeedbackType.None,
-            ) {
-                Text(
-                    text = root.label,
-                    fontSize = ZhiTextScale.Footnote,
-                    fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+private fun SingleLogLineEditor(row: LogRow, onDismiss: () -> Unit, onApply: (LogRow) -> Unit) {
+    var value by remember(row.index, row.raw) { mutableStateOf(row.raw) }
+    OverlayBottomSheet(show = true, title = "编辑第 ${row.index + 1} 行", onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+            ZhiTextField(value = value, onValueChange = { value = it }, modifier = Modifier.fillMaxWidth(), minLines = 3, label = "日志内容", useLabelAsPlaceholder = false)
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton("取消", onDismiss)
+                Button(onClick = { onApply(row.copy(raw = value)) }, colors = ButtonDefaults.buttonColorsPrimary()) { Text("应用") }
             }
         }
     }
-}
-
-/**
- * 「新建 / 重命名」表单。
- *
- * 错误行用 [ZhiFieldError] 而不是自己写 Text：标题栏下方那一条要和其他表单
- * 「左边缘对齐、只在有错时才出现」的规则一致（见 `FieldErrorAlignmentTest`）。
- */
-@Composable
-private fun FileNameFormCard(
-    form: FileNameForm,
-    onDraftChange: (String) -> Unit,
-    onSubmit: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 4.dp)) {
-        Text(
-            text = form.title,
-            color = MiuixTheme.colorScheme.onSurface,
-            fontSize = ZhiTextScale.Caption,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(start = 12.dp, bottom = 4.dp),
-        )
-        ZhiTextField(
-            value = form.draft,
-            onValueChange = onDraftChange,
-            singleLine = true,
-            label = if (form.target == null) "名字" else "新名字",
-        )
-        ZhiFieldError(form.error)
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
-        ) {
-            SecondaryButton(text = "取消", onClick = onCancel, modifier = Modifier.weight(1f))
-            PrimaryButton(
-                text = "确定",
-                onClick = onSubmit,
-                enabled = form.saveable,
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
-}
-
-/**
- * 删除确认。
- *
- * 逐字说清代价：删一个目录会带走里面的全部内容，而「确定删除 sub 吗？」
- * 等于没告诉用户这件事。条数来自 `FileOps.countForDelete`。
- */
-@Composable
-private fun FileDeleteCard(
-    prompt: FileDeletePrompt,
-    onConfirm: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    val scheme = MiuixTheme.colorScheme
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 4.dp)) {
-        Text(
-            text = if (prompt.destructive) {
-                "删除「${prompt.entry.name}」？\n其中的 ${prompt.count - 1} 项内容会一起消失，无法撤销。"
-            } else {
-                "删除「${prompt.entry.name}」？无法撤销。"
-            },
-            color = if (prompt.destructive) ZhiColors.red() else scheme.onSurface,
-            fontSize = ZhiTextScale.Caption,
-            modifier = Modifier.padding(start = 12.dp, bottom = 4.dp),
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
-        ) {
-            SecondaryButton(text = "取消", onClick = onCancel, modifier = Modifier.weight(1f))
-            PrimaryButton(text = "删除", onClick = onConfirm, modifier = Modifier.weight(1f))
-        }
-    }
-}
-
-/** 把绝对路径拆成 Miuix `BreadcrumbBar` 需要的层级列表。 */
-@Composable
-private fun FileBreadcrumbBar(
-    filePath: String,
-    onNavigate: (String) -> Unit,
-) {
-    val items = remember(filePath) { breadcrumbItems(filePath) }
-    if (items.isEmpty()) return
-
-    BreadcrumbBar(
-        items = items,
-        onItemClick = { index -> items.getOrNull(index)?.let { onNavigate(it.path) } },
-        highlightIndex = items.lastIndex,
-        // 面包屑只占一行的引导作用，不需要占满宽度：
-        // 压小 insideMargin，给下面的文件列表让位。
-        modifier = Modifier.padding(horizontal = 6.dp, vertical = 0.dp),
-        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-        // itemMaxWidth 用 Miuix 的默认值 160dp，不覆盖 —— 每一项都是单独的目录名，
-        // 最长的是包名 `com.zhizhu.code`（15 字符，约 146dp），160dp 放得下。
-        // ⚠️ 别改成把好几级拼成一条路径：那一定会被省略号截断，反而什么都看不见。
-    )
-}
-
-/**
- * 生成面包屑层级：**一级目录一个项**，从「软件根目录」开始。
- *
- * `/data/user/0/com.zhizhu.code/files/home/workspace`
- *   → `com.zhizhu.code` `files` `home` `workspace`
- *
- * 为什么砍掉前面的 `/data/user/0`：它在应用沙箱里是 `drwx--x--x`
- * （other 只有 x 没有 r），**列不出来** —— 挂一个点进去只能看到
- * 「无法读取（权限不足）」的层级，纯粹是噪音。首项文字直接用包名，
- * 它确实就是软件根目录，语义也对得上。
- *
- * 路径在应用根**之外**（设置里把项目路径改到了 `/sdcard/...` 等）时，
- * 没有“包名”可以当起点，就逐级展示真实层级；此时首项是 `/`。
- *
- * 每一项的 `path` 都是真实层级，点哪一级就回到哪一级。
- */
-private fun breadcrumbItems(filePath: String): List<BreadcrumbItem> {
-    val normalized = filePath.trimEnd('/').ifEmpty { "/" }
-    val appRoot = TermuxConstants.TERMUX_DATA_DIR_PATH.trimEnd('/')
-
-    val start = if (normalized == appRoot || normalized.startsWith("$appRoot/")) appRoot else "/"
-    val rest = when {
-        normalized == start -> ""
-        start == "/" -> normalized.removePrefix("/")
-        else -> normalized.removePrefix("$start/")
-    }
-
-    val items = mutableListOf(
-        BreadcrumbItem(path = start, text = start.substringAfterLast('/').ifEmpty { "/" }),
-    )
-    var accumulated = if (start == "/") "" else start
-    rest.split('/').filter { it.isNotEmpty() }.forEach { segment ->
-        accumulated += "/$segment"
-        items += BreadcrumbItem(path = accumulated, text = segment)
-    }
-    return items
-}
-
-/**
- * 文件行：此前 vertical = 20dp 导致行高约 60dp，一屏放不下几个文件（V2）。
- * 收到 11dp ≈ 40dp 行高，仍在 Material 触摸目标下限（48dp）附近，密度观感
- * 与 Miuix 设置列表行一致。
- *
- * <p>行尾两个动作（重命名 / 删除）用 [ZhiIconButton] 的 `compact` 压到 30dp ——
- * 与 `PaneHeader` 的做法一致：Miuix `TextButton` 写死 `MinWidth=58dp`/`MinHeight=40dp`，
- * 在这条 40dp 高的行里放不下，图标按钮才是能安全压小的那个。
- */
-@Composable
-private fun FileRow(
-    entry: FileEntry,
-    onOpen: () -> Unit,
-    onRename: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    val scheme = MiuixTheme.colorScheme
-    Card(
-        onClick = onOpen,
-        // 行距由 LazyColumn 的 `spacedBy` 统一给（原来这里还有一个 `padding(vertical = 1.dp)`，
-        // 两个地方都给间距会让以后调行距要改两处，而且那 1dp 几乎等于没有）。
-        modifier = Modifier.fillMaxWidth(),
-        cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(start = ZhiSpace.m, end = ZhiSpace.xs, top = 4.dp, bottom = 4.dp),
-        colors = CardDefaults.defaultColors(
-            color = ZhiColors.cardSurface(),
-            contentColor = scheme.onSurface,
-        ),
-        pressFeedbackType = PressFeedbackType.Sink,
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            Icon(
-                imageVector = if (entry.directory) ZhiIcons.directory else ZhiIcons.file,
-                contentDescription = null,
-                tint = if (entry.directory) scheme.primary else scheme.onSurfaceVariantSummary,
-                modifier = Modifier.size(15.dp),
-            )
-            Text(
-                text = entry.name,
-                fontSize = ZhiTextScale.Caption,
-                fontWeight = if (entry.directory) FontWeight.Medium else FontWeight.Normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            if (!entry.directory) {
-                Text(
-                    text = formatSize(entry.size),
-                    color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Micro,
-                )
-            }
-            ZhiIconButton(
-                icon = ZhiIcons.edit,
-                description = "重命名",
-                onClick = onRename,
-                tint = scheme.onSurfaceVariantSummary,
-                iconSize = 14.dp,
-                compact = 30.dp,
-            )
-            ZhiIconButton(
-                icon = ZhiIcons.delete,
-                description = "删除",
-                onClick = onDelete,
-                tint = ZhiColors.red(),
-                iconSize = 14.dp,
-                compact = 30.dp,
-            )
-        }
-    }
-}
-
-private fun formatSize(bytes: Long): String = when {
-    bytes <= 0L -> "0 B"
-    bytes < 1_000L -> "$bytes B"
-    bytes < 1_000_000L -> String.format(java.util.Locale.US, "%.1f KB", bytes / 1000f)
-    else -> String.format(java.util.Locale.US, "%.1f MB", bytes / 1_000_000f)
 }

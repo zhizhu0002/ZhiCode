@@ -2,6 +2,11 @@
 
 package com.zhizhu.zhicode.compose.ui.settings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Column
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
@@ -20,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.COMPACT_PERCENT_MAX
@@ -40,13 +46,12 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -75,6 +80,23 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * `WindowDialog` 创建**独立 Android Window**，`Scaffold` 提供的 `popupHost` 不会被它继承，
  * 于是 `Overlay*` 系列（本页所有选择器）在里面不可靠，而且主窗口的 `LayerBackdrop`
  * 也采不到它的背景。`OverlayDialog` 参数集与它一致，是 drop-in 替换。
+ *
+ * ## 每一行的行首都是一块彩色图标
+ *
+ * 用户看过小米「设置」的截图之后明确要求：
+ *
+ * > 那就借鉴小米自带的设置的图标
+ *
+ * 参考物里没有一行是裸字形的 —— 行首一律是**彩色圆角方块 + 白色字形**。所以本页每一行
+ * 都带一对 `icon` + `plate`（底色与几何见 `SettingsIconPlate.kt`）。
+ *
+ * 两条容易走偏的地方，`SettingsIconPlateTest` 都逐行数着：
+ *
+ * - **不能只给一半**。只给 `icon` 就退回改版前的单色裸字形（那就是用户说的"扁扁的"），
+ *   只给 `plate` 就是一块空色块；两者都只在调用点成对出现才有意义。
+ * - **不能有两行一模一样**。同一页里出现两个相同的（字形, 底色）会让人以为它们共用一条设置，
+ *   所以 `推理强度`（滑杆/紫）与 `自动压缩上限`（滑杆/绿）同字形不同底色，
+ *   `上下文压缩`（缩放/绿）与 `自动压缩上限`（滑杆/绿）同底色不同字形。
  */
 @Composable
 fun SettingsDialog(
@@ -85,7 +107,7 @@ fun SettingsDialog(
 ) {
     // 整页设置，骨架全部用 Miuix 原生组件，照官方 example 的 SettingsPage 模式：
     // Scaffold + SmallTopAppBar(MiuixScrollBehavior) + LazyColumn(overScroll+nestedScroll)。
-    // 返回键 = MiuixIcons.Back + 原生 IconButton。顶栏**没有动作按钮**：改动即时生效，
+    // 返回键 = ZhiIcons.back + 原生 IconButton。顶栏**没有动作按钮**：改动即时生效，
     // 没有需要用户再确认一次的东西（见文件顶部「没有保存按钮」一节）。
     if (draft == null) return
 
@@ -103,10 +125,11 @@ fun SettingsDialog(
                 scrollBehavior = topAppBarScrollBehavior,
                 color = scheme.surface,
                 navigationIcon = {
-                    // 官方 BackNavigationIcon 同款：原生 IconButton + MiuixIcons.Back
+                    // 官方 BackNavigationIcon 同款：原生 IconButton + 左箭头。
+                    // 字形走 ZhiIcons（Material Symbols），与整页其余图标同源。
                     top.yukonga.miuix.kmp.basic.IconButton(onClick = onDismiss) {
                         Icon(
-                            imageVector = MiuixIcons.Back,
+                            painter = ZhiIcons.back,
                             contentDescription = "返回",
                             tint = scheme.onBackground,
                         )
@@ -127,9 +150,23 @@ fun SettingsDialog(
                     bottom = padding.calculateBottomPadding() + 16.dp,
                 ),
             ) {
-                item(key = "settingsBody") {
-                    AllSettingsPages(draft, onChange, onNavigate)
+                // ---- 每个分组各自一个 item，而不是全部塞进一个 item ----
+                //
+                // 原来这里是单个 `item(key = "settingsBody") { AllSettingsPages(...) }`。
+                // `LazyColumn` 的懒加载单位是 **item**，只有一个 item 就等于没有懒加载：
+                // 整页（5 组、几百个设置行）在首次组合时被一次建完。
+                // 实测「点设置」首帧 **max=266.6ms**、avg 17.5ms、卡 2 次。
+                //
+                // 拆开之后只组合可见的那部分，首帧成本随**屏幕高度**增长而不是整页长度。
+                // 各分组的状态都是组内局部的（`SettingsGroup` 只画一张卡），
+                // 所以拆 item 不会打断任何 remember/动画。
+                item(key = "general") { SettingsGroup("通用") { GeneralPage(draft, onChange, onNavigate) } }
+                item(key = "modelService") {
+                    SettingsGroup("模型与服务") { ModelServicePage(draft, onChange, onNavigate) }
                 }
+                item(key = "context") { SettingsGroup("上下文与项目") { ContextProjectPage(draft, onChange) } }
+                item(key = "agent") { SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) } }
+                item(key = "extensions") { SettingsGroup("扩展") { ExtensionsPage(onNavigate) } }
             }
             // Miuix 原生滚动条
             VerticalScrollBar(
@@ -151,24 +188,6 @@ private fun themeLabel(mode: ThemeMode): String = when (mode) {
     ThemeMode.DARK -> "夜间模式"
 }
 
-@Composable
-private fun AllSettingsPages(
-    draft: SettingsDraft,
-    onChange: (SettingsDraft) -> Unit,
-    onNavigate: (String) -> Unit,
-) {
-    // rikkahub 式 hub：主页主要是「导航行（图标+标题+副标题+箭头）」，
-    // 少数高频即时项（主题模式）内联；细节全部下放到二级页与原分组。
-    // 顺序按使用频率：模型最先，扩展收尾。
-    // rikkahub 的分组顺序：通用最先（主题/联网这类看一眼就走的），模型服务其次，
-    // 扩展收尾。组名也从功能视角改成 rikkahub 的叫法。
-    SettingsGroup("通用") { GeneralPage(draft, onChange, onNavigate) }
-    SettingsGroup("模型与服务") { ModelServicePage(draft, onChange, onNavigate) }
-    SettingsGroup("上下文与项目") { ContextProjectPage(draft, onChange) }
-    SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) }
-    SettingsGroup("扩展") { ExtensionsPage(onNavigate) }
-}
-
 /** 通用组：主题模式 + 联网搜索（rikkahub 的 generalSettings / search 合并）。 */
 @Composable
 private fun GeneralPage(
@@ -181,6 +200,9 @@ private fun GeneralPage(
         options = ThemeMode.entries.map(::themeLabel),
         selectedIndex = ThemeMode.entries.indexOf(draft.themeMode),
         onSelect = { onChange(draft.copy(themeMode = ThemeMode.entries[it])) },
+        // 与顶栏那个明暗按钮同一个字形（半明半暗的圆）。
+        icon = ZhiIcons.theme,
+        plate = SettingsPlateColors.orange,
         // 不写「右上角 ☼/☾ 可快速切换」——顶栏早就没有这个快捷键了，
         // 指向不存在入口的说明比没有说明更糟。
     )
@@ -196,12 +218,15 @@ private fun ModelServicePage(
     // rikkahub hub 的「当前值行」：标题 + 当前值当副标题 + 行尾箭头，
     // 细节进二级页。原先这里用 SettingsEntry 且写了一句「密钥不会回填」的长说明，
     // 该说明在二级页里已有，这里按 hub 惯例收成一行当前值。
-    // 不带行首图标：这一屏只有它一个入口有图标，会显得像另一种优先级；
-    // 而且那个图标是自绘的文件夹，与同屏 Miuix 图标不是一套。
+    //
+    // 这一行**曾经特意不带行首图标**（理由："同屏只有它一个有图标会显得像另一种优先级"）。
+    // 那条理由现在不成立了：整页每一行都有图标块，缺一个反而成了唯一的例外。
     SettingsEntry(
         title = "API 配置",
         valueText = "${draft.profileName} · ${draft.modelLabel}",
         onClick = { onNavigate("apiProfiles") },
+        icon = ZhiIcons.link,
+        plate = SettingsPlateColors.blue,
     )
 
     SettingsChoice(
@@ -210,6 +235,9 @@ private fun ModelServicePage(
         selectedIndex = if (draft.visionEnabled) 0 else 1,
         onSelect = { onChange(draft.copy(visionEnabled = it == 0)) },
         summary = "模型不支持 vision 时请关闭",
+        // 与输入器里"图片附件"同一个照片字形。
+        icon = ZhiIcons.image,
+        plate = SettingsPlateColors.purple,
     )
 
     SettingsChoice(
@@ -217,6 +245,8 @@ private fun ModelServicePage(
         options = EffortLevel.entries.map { it.label },
         selectedIndex = EffortLevel.entries.indexOf(draft.effort),
         onSelect = { onChange(draft.copy(effort = EffortLevel.entries[it])) },
+        icon = ZhiIcons.tune,
+        plate = SettingsPlateColors.purple,
     )
 
     SettingsChoice(
@@ -225,6 +255,8 @@ private fun ModelServicePage(
         selectedIndex = PermissionMode.entries.indexOf(draft.permissionMode),
         onSelect = { onChange(draft.copy(permissionMode = PermissionMode.entries[it])) },
         summary = draft.permissionMode.detail,
+        icon = ZhiIcons.lock,
+        plate = SettingsPlateColors.blue,
     )
 }
 
@@ -236,6 +268,9 @@ private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) ->
         onCheckedChange = { onChange(draft.copy(sandboxAgentFullAccess = it)) },
         summary = "允许容器内安装、UI 操作与 Frida；不含真机 host 与 Root",
         warn = true,
+        // 与侧栏「沙箱」同一个箱子字形：同一个东西在两处必须是同一个图标。
+        icon = ZhiIcons.sandbox,
+        plate = SettingsPlateColors.purple,
     )
 
     SettingsToggle(
@@ -244,6 +279,9 @@ private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) ->
         onCheckedChange = { onChange(draft.copy(rootExecutionEnabled = it)) },
         summary = "高风险：需要 Magisk/KernelSU 授权；普通模式仍逐次确认",
         warn = true,
+        // 终端字形：这一项开通的正是"在终端里以 root 身份跑命令"。
+        icon = ZhiIcons.terminal,
+        plate = SettingsPlateColors.red,
     )
 
     SettingsToggle(
@@ -251,6 +289,10 @@ private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) ->
         checked = draft.forcedKeepAliveEnabled,
         onCheckedChange = { onChange(draft.copy(forcedKeepAliveEnabled = it)) },
         summary = "开启前台服务 + WakeLock；Root 时还会强制系统后台策略。",
+        // 循环箭头 = 心跳/保活。不借 `refresh` 作"刷新"，两者本来就是同一个字形，
+        // 区别在语义：这里是"一直活着"，不是"重新拉一次"。
+        icon = ZhiIcons.refresh,
+        plate = SettingsPlateColors.green,
     )
 
     // 输入法：两种输入类型各有代价，只能让用户按自己机型选（默认关 = 正常输入法）。
@@ -260,6 +302,8 @@ private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) ->
         onCheckedChange = { onChange(draft.copy(terminalCharMode = it)) },
         summary = "若终端里调出的不是你常用的输入法（而是安全/密码键盘），保持关闭；" +
             "若个别机型在终端里切换输入法后状态残留，再开启。",
+        icon = ZhiIcons.keyboard,
+        plate = SettingsPlateColors.gray,
     )
 }
 
@@ -274,15 +318,29 @@ private fun NetworkPage(
         title = "联网搜索",
         checked = draft.webSearchEnabled,
         onCheckedChange = { onChange(draft.copy(webSearchEnabled = it)) },
+        icon = ZhiIcons.search,
+        plate = SettingsPlateColors.blue,
     )
 
     // 关闭联网搜索时后续配置全部折叠（官方 SettingsPage 的 AnimatedVisibility 模式）
-    androidx.compose.animation.AnimatedVisibility(visible = draft.webSearchEnabled) {
+    //
+    // 官方示例那里写的是**裸默认**（`AnimatedVisibility(visible = …)`），视觉上等价：
+    // `expandIn` / `shrinkOut` 的默认展开方向就是竖直从下往上揭开，宽度本来就满。
+    // 这里显式写出来只是让「展开是竖直长出来」这件事在源码里读得到，
+    // 与 `Composer` 里那两处（斜杠面板、附件条）用同一组。
+    AnimatedVisibility(
+        visible = draft.webSearchEnabled,
+        enter = fadeIn() + expandVertically(),
+        exit = fadeOut() + shrinkVertically(),
+    ) {
         Column {
             // 搜索服务已改成**独立整页**（RikkaHub 形态：多服务列表 + 每服务专属选项）。
             // 这里只留入口 —— 原先是一排「类型下拉 + 一个 Key 框 + 实例地址框」，
             // 只能配一个服务，而这一页要能配多个、每个还有自己的 depth/topic/语言。
             // 入口行与 API 配置记录同一个形态（都是"配置对象列表"）。
+            //
+            // 这一行是裸 `BasicComponent`（不要行尾箭头），所以图标块直接挂在 `startAction`
+            // 上，没走 `SettingsEntry`。
             BasicComponent(
                 title = "搜索服务",
                 titleColor = BasicComponentDefaults.titleColor(color = scheme.onBackground),
@@ -290,28 +348,35 @@ private fun NetworkPage(
                 summaryColor = BasicComponentDefaults.summaryColor(
                     color = scheme.onSurfaceVariantSummary,
                 ),
+                startAction = {
+                    SettingsIconPlate(icon = ZhiIcons.cloud, color = SettingsPlateColors.blue)
+                },
                 onClick = { onNavigate("searchServices") },
                 insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             )
 
-            SettingsIntField(
+            SliderPreference(
                 title = "默认搜索结果数（1-50）",
-                value = draft.webSearchMaxResults,
-                min = WEB_RESULTS_MIN,
-                max = WEB_RESULTS_MAX,
-                parse = { it.trim().toIntOrNull() },
-                onValueChange = { onChange(draft.copy(webSearchMaxResults = it)) },
+                value = draft.webSearchMaxResults.toFloat(),
+                onValueChange = { onChange(draft.copy(webSearchMaxResults = it.toInt())) },
+                valueRange = WEB_RESULTS_MIN.toFloat()..WEB_RESULTS_MAX.toFloat(),
+                steps = WEB_RESULTS_MAX - WEB_RESULTS_MIN - 1,
+                valueText = "${draft.webSearchMaxResults} 条",
                 summary = "服务未单独指定条数时用它",
+                startAction = { SettingsIconPlate(icon = ZhiIcons.listCount, color = SettingsPlateColors.blue) },
+                insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             )
 
-            SettingsIntField(
+            SliderPreference(
                 title = "联网超时（秒）",
-                value = draft.webSearchTimeoutSec,
-                min = WEB_TIMEOUT_MIN_SEC,
-                max = WEB_TIMEOUT_MAX_SEC,
-                parse = { it.trim().toIntOrNull() },
-                onValueChange = { onChange(draft.copy(webSearchTimeoutSec = it)) },
+                value = draft.webSearchTimeoutSec.toFloat(),
+                onValueChange = { onChange(draft.copy(webSearchTimeoutSec = it.toInt())) },
+                valueRange = WEB_TIMEOUT_MIN_SEC.toFloat()..WEB_TIMEOUT_MAX_SEC.toFloat(),
+                steps = WEB_TIMEOUT_MAX_SEC - WEB_TIMEOUT_MIN_SEC - 1,
+                valueText = "${draft.webSearchTimeoutSec} 秒",
                 summary = "支持 ${WEB_TIMEOUT_MIN_SEC}-${WEB_TIMEOUT_MAX_SEC} 秒",
+                startAction = { SettingsIconPlate(icon = ZhiIcons.timeout, color = SettingsPlateColors.blue) },
+                insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             )
         }
     }
@@ -331,22 +396,34 @@ private fun ContextProjectPage(draft: SettingsDraft, onChange: (SettingsDraft) -
         format = ::formatTokenCountShort,
         onValueChange = { onChange(draft.copy(contextWindow = it)) },
         summary = "支持 128k / 1.5m 写法",
+        // 上下文 = 对话历史，"气泡"是它最直接的样子。
+        icon = ZhiIcons.chat,
+        plate = SettingsPlateColors.green,
     )
 
     SettingsToggle(
         title = "上下文压缩",
         checked = draft.autoCompact,
         onCheckedChange = { onChange(draft.copy(autoCompact = it)) },
+        icon = ZhiIcons.compress,
+        plate = SettingsPlateColors.green,
     )
 
-    androidx.compose.animation.AnimatedVisibility(visible = draft.autoCompact) {
-        SettingsIntField(
+    AnimatedVisibility(
+        visible = draft.autoCompact,
+        enter = fadeIn() + expandVertically(),
+        exit = fadeOut() + shrinkVertically(),
+    ) {
+        SliderPreference(
             title = "自动压缩上限（50-100%，安全缓冲优先）",
-            value = draft.autoCompactPercent,
-            min = COMPACT_PERCENT_MIN,
-            max = COMPACT_PERCENT_MAX,
-            parse = { it.trim().toIntOrNull() },
-            onValueChange = { onChange(draft.copy(autoCompactPercent = it)) },
+            value = draft.autoCompactPercent.toFloat(),
+            onValueChange = { onChange(draft.copy(autoCompactPercent = it.toInt())) },
+            valueRange = COMPACT_PERCENT_MIN.toFloat()..COMPACT_PERCENT_MAX.toFloat(),
+            steps = COMPACT_PERCENT_MAX - COMPACT_PERCENT_MIN - 1,
+            valueText = "${draft.autoCompactPercent}%",
+            summary = "达到上下文窗口的 ${draft.autoCompactPercent}% 时触发压缩",
+            startAction = { SettingsIconPlate(icon = ZhiIcons.tune, color = SettingsPlateColors.green) },
+            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
         )
     }
 
@@ -376,6 +453,8 @@ private fun CustomSystemPromptField(draft: SettingsDraft, onChange: (SettingsDra
             if (draft.customSystemPrompt.isBlank()) "" else "当前 ${draft.customSystemPrompt.length} 字。",
         singleLine = false,
         minLines = 5,
+        icon = ZhiIcons.edit,
+        plate = SettingsPlateColors.orange,
     )
 }
 
@@ -393,6 +472,8 @@ private fun ProjectPathField(draft: SettingsDraft, onChange: (SettingsDraft) -> 
             onChange(draft.copy(projectPath = it.trim()))
         },
         summary = "与上下文历史一一绑定，保存后可恢复该项目记录",
+        icon = ZhiIcons.directory,
+        plate = SettingsPlateColors.blue,
     )
 }
 
@@ -420,19 +501,22 @@ private fun ExtensionsPage(onNavigate: (String) -> Unit) {
     SettingsIconEntry(
         title = "Model Context Protocol（MCP）",
         summary = "MCP 服务器配置",
-        icon = ZhiIcons.sandbox,
+        icon = ZhiIcons.mindMap,
+        plate = SettingsPlateColors.purple,
         onClick = { onNavigate("mcp") },
     )
     SettingsIconEntry(
         title = "Skill 管理器",
         summary = "项目级与用户级技能模板",
         icon = ZhiIcons.skill,
+        plate = SettingsPlateColors.purple,
         onClick = { onNavigate("skills") },
     )
     SettingsIconEntry(
         title = "自定义角色卡",
         summary = "可切换的多份人设指令",
         icon = ZhiIcons.roleCard,
+        plate = SettingsPlateColors.green,
         onClick = { onNavigate("roleCards") },
     )
     // 「关于」行已删：onClick 是空的，点了没反应——rikkahub 的 About 页有
@@ -440,7 +524,8 @@ private fun ExtensionsPage(onNavigate: (String) -> Unit) {
     SettingsIconEntry(
         title = "记忆文件 · ZhiCode.md",
         summary = "项目级与用户级说明文件",
-        icon = ZhiIcons.edit,
+        icon = ZhiIcons.file,
+        plate = SettingsPlateColors.orange,
         onClick = { onNavigate("memory") },
     )
 
@@ -450,31 +535,32 @@ private fun ExtensionsPage(onNavigate: (String) -> Unit) {
         SettingsIconEntry(
             title = "UI 调试",
             summary = "铺开全部组件与状态（仅 debug 构建）",
-            icon = ZhiIcons.floatingBall,
+            icon = ZhiIcons.layers,
+            plate = SettingsPlateColors.gray,
             onClick = { onNavigate("uiDebug") },
         )
     }
 }
 
-/** rikkahub 式导航行：图标 + 标题 + 副标题 + 箭头（Miuix ArrowPreference）。 */
+/**
+ * 设置页的入口行：图标块 + 标题 + 副标题 + 箭头（Miuix [ArrowPreference]）。
+ *
+ * `plate` **不能省**：这一行原先是一个裸的单色字形（`tint = scheme.onBackground`），
+ * 在一屏彩色图标块中间会显得像"少了底色"。两者必须在调用点成对出现，
+ * 由 `SettingsIconPlateTest` 逐行数。
+ */
 @Composable
 private fun SettingsIconEntry(
     title: String,
     summary: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: androidx.compose.ui.graphics.painter.Painter,
+    plate: Color,
     onClick: () -> Unit,
 ) {
-    val scheme = MiuixTheme.colorScheme
     ArrowPreference(
         title = title,
         summary = summary,
-        startAction = {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = scheme.onBackground,
-            )
-        },
+        startAction = { SettingsIconPlate(icon = icon, color = plate) },
         onClick = onClick,
     )
 }

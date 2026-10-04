@@ -26,6 +26,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
@@ -55,8 +56,6 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -94,18 +93,22 @@ enum class SandboxStatusTone { NORMAL, SUCCESS, DANGER }
 /**
  * 界面状态。**只读快照**：每次变化由 `SandboxBoard` 整份替换。
  *
- * `*_interactive` 是那两个开关的「处理中」互斥位：请求在飞的时候必须压住交互，
+ * `*Busy` 是那两个开关的「请求在飞」位：请求在飞的时候必须压住交互，
  * 否则用户连点会让界面显示的状态和服务端最终生效的值不一致。回滚的语义
  * （失败回到原值）由 `SandboxBoard` 负责，这里只表达"能不能点"。
+ *
+ * ⚠️ 名字曾经叫 `*Interactive`，且生产者把它读成"已就绪"、消费者读成"处理中"，
+ * 极性正好相反 —— 一次成功的加载就能把开关永久钉在「正在应用…」且点不动。
+ * 现在两边只有一个含义：**true = 请求在飞**。
  */
 data class SandboxBoardUiState(
     val status: String = "",
     val statusTone: SandboxStatusTone = SandboxStatusTone.NORMAL,
     val packages: List<String> = emptyList(),
     val hideRoot: Boolean = true,
-    val hideRootInteractive: Boolean = false,
+    val hideRootBusy: Boolean = false,
     val floatingLog: Boolean = true,
-    val floatingLogInteractive: Boolean = false,
+    val floatingLogBusy: Boolean = false,
     /** 后端不可用时内联展示的完整原因（含最后启动阶段）；正常时为 null。 */
     val errorDetail: String? = null,
     val dialog: SandboxDialog? = null,
@@ -169,7 +172,9 @@ fun ZhiSandboxScreen(
         topBar = {
             // 与设置二级页（SettingsSubPage）同款：Miuix TopAppBar + 大标题随滚动折叠 +
             // 官方的 Back 图标。这里原本是 SmallTopAppBar（固定小标题）配
-            // `ZhiIcons.upLevel` 手动 `rotate(-90f)` 假装左箭头 —— 同一个应用里两套头部。
+            //
+            // 现在返回图标取自**同一套图标集**（`ZhiIcons.back` = AOSP `ic_arrow_back`），
+            // 于是沙箱页与设置二级页的返回键形状一致，也不再需要任何旋转。
             TopAppBar(
                 title = "ZhiCode 沙箱",
                 scrollBehavior = topAppBarScrollBehavior,
@@ -177,7 +182,7 @@ fun ZhiSandboxScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
-                            imageVector = MiuixIcons.Back,
+                            painter = ZhiIcons.back,
                             contentDescription = "返回",
                             tint = scheme.onBackground,
                         )
@@ -210,34 +215,40 @@ fun ZhiSandboxScreen(
                 // 两个开关放同一张分组卡，与设置页的「分组卡片」逐像素同款：
                 // 组标题走 SmallTitle、行本体走 SwitchPreference（都是 Miuix 的组件）。
                 // 原来是自己搭 Card + SwitchPreference，没有组标题、内边距也不一样。
+                // 开关可用性由 errorDetail 推出来：后端不通就不可点。
+                // 不另存字段 —— 多存一个字段就多一处可能与它不一致的地方。
+                val settingsEnabled = state.errorDetail == null
                 item {
                     // horizontalPadding = 0：这个 LazyColumn 上已经挂了整页的 12dp 内边距，
                     // 分组再各加一次会变成 24dp。
                     SettingsGroup("沙箱行为", horizontalPadding = 0.dp) {
                         SettingsToggle(
                             title = "隐藏 Root",
-                            summary = if (state.hideRootInteractive) {
-                                "正在应用…"
-                            } else {
-                                "Guest 看不到常见 Root 路径与管理包"
-                            },
+                            summary = switchSummary(
+                                busy = state.hideRootBusy,
+                                enabled = settingsEnabled,
+                                description = "Guest 看不到常见 Root 路径与管理包",
+                            ),
                             checked = state.hideRoot,
+                            enabled = settingsEnabled,
                             onCheckedChange = { wanted ->
-                                // 处理中直接丢弃点击：连点会让界面值与服务端值错位
-                                if (state.hideRootInteractive) return@SettingsToggle
+                                // 请求在飞时直接丢弃点击：连点会让界面值与服务端值错位。
+                                // （不可点时由 Miuix 自己拦住，不需要在这里再判一次。）
+                                if (state.hideRootBusy) return@SettingsToggle
                                 onToggleHideRoot(wanted)
                             },
                         )
                         SettingsToggle(
                             title = "日志悬浮窗",
-                            summary = if (state.floatingLogInteractive) {
-                                "正在应用…"
-                            } else {
-                                "在 Guest 界面上叠一层日志与返回控制栏"
-                            },
+                            summary = switchSummary(
+                                busy = state.floatingLogBusy,
+                                enabled = settingsEnabled,
+                                description = "在 Guest 界面上叠一层日志与返回控制栏",
+                            ),
                             checked = state.floatingLog,
+                            enabled = settingsEnabled,
                             onCheckedChange = { wanted ->
-                                if (state.floatingLogInteractive) return@SettingsToggle
+                                if (state.floatingLogBusy) return@SettingsToggle
                                 onToggleFloatingLog(wanted)
                             },
                         )
@@ -262,10 +273,27 @@ fun ZhiSandboxScreen(
                     }
                 }
 
+                // 三种尾部状态（错误详情 / 空态 / 安装列表）之间的过渡**交给 LazyColumn 自己**，
+                // 不用 `AnimatedContent` 把整块包起来。
+                //
+                // 为什么不用 AnimatedContent（照抄计划里的写法会踩到两件事）：
+                // 1. 它必须包在 LazyColumn **外面**，于是分支一换整页重建 ——
+                //    安装 / 卸载一个包时用户正停在列表中部，会被弹回顶部；
+                // 2. 顶栏折叠的 `padding.calculateTopPadding()` 与
+                //    `nestedScroll` 都挂在这个 LazyColumn 上，包一层会让那两处错位。
+                //
+                // 改成给三个分支各自的 item 加 `animateItem()` 并给**稳定的 key**：
+                // 分支切换时旧项淡出、新项淡入，观感与 AnimatedContent 的淡变一致，
+                // 而滚动位置、惰性、顶栏联动全部原样保留。
+                // （三个 key 互不相同，所以旧分支一定是"消失"而不是"复用成新内容"。）
                 if (state.errorDetail != null) {
-                    item { ErrorDetail(state.errorDetail) }
+                    item(key = "sandboxError") {
+                        ErrorDetail(state.errorDetail, modifier = Modifier.animateItem())
+                    }
                 } else if (state.packages.isEmpty()) {
-                    item { EmptyState() }
+                    item(key = "sandboxEmpty") {
+                        EmptyState(modifier = Modifier.animateItem())
+                    }
                 } else {
                     items(state.packages, key = { it }) { pkg ->
                         AppCard(
@@ -276,6 +304,9 @@ fun ZhiSandboxScreen(
                             onUninstall = onUninstall,
                             onProcesses = onProcesses,
                             onFrida = onFrida,
+                            // 安装 / 卸载后列表重排时让卡片**滑过去**而不是瞬移。
+                            // 上一轮漏了这里：这个 items 本来就给了 key，只是没挂动效。
+                            modifier = Modifier.animateItem(),
                         )
                     }
                 }
@@ -313,13 +344,33 @@ fun ZhiSandboxScreen(
     }
 }
 
-/** 状态行：后端状态、重试进度、错误原因都落在这里。 */
+/**
+ * 开关的副标题。
+ *
+ * 三档的优先级是 **在飞 > 不可用 > 说明**：正在应用的时候“为什么点不动”不重要，
+ * 重要的是告诉用户已经收到了；后端不通的时候则要明确说清楚显示的是**保存值**，
+ * 否则用户会以为那里的值就是服务端正在用的值。
+ */
+@Composable
+private fun switchSummary(busy: Boolean, enabled: Boolean, description: String): String = when {
+    busy -> "正在应用…"
+    !enabled -> "后端不可用，显示的是已保存的值"
+    else -> description
+}
+
+/**
+ * 状态行：后端状态、重试进度、错误原因都落在这里。
+ *
+ * ⚠️ SUCCESS 不能落回 `scheme.primary`。那是 Miuix 的**默认蓝**（品牌色），
+ * 在这里只因为它是主题里第一个抓得到的颜色。它不是语义色：只要用户换主题/
+ * 换深浅，这一行就不再读作“成功”了。成功有现成的语义色 `ZhiColors.green()`。
+ */
 @Composable
 private fun StatusLine(status: String, tone: SandboxStatusTone) {
     val scheme = MiuixTheme.colorScheme
     val color = when (tone) {
         SandboxStatusTone.NORMAL -> scheme.onSurfaceVariantSummary
-        SandboxStatusTone.SUCCESS -> scheme.primary
+        SandboxStatusTone.SUCCESS -> ZhiColors.green()
         SandboxStatusTone.DANGER -> scheme.error
     }
     if (status.isEmpty()) return
@@ -348,8 +399,11 @@ private fun StatusLine(status: String, tone: SandboxStatusTone) {
  * `SelectionContainer` 保留：后端错误常常需要整段复制去搜。
  */
 @Composable
-private fun ErrorDetail(detail: String) {
-    SelectionContainer {
+private fun ErrorDetail(detail: String, modifier: Modifier = Modifier) {
+    // `animateItem()`（由调用方传进来）必须落在**这一项的根节点**上。
+    // 这里的根是 SelectionContainer（不是里面那个 ZhiNoticeBar）——
+    // 挂在里层的话动画动的是 bar 在 SelectionContainer 里的位置，而那个位置从来不变。
+    SelectionContainer(modifier = modifier) {
         ZhiNoticeBar(
             text = detail,
             tone = ZhiNoticeTone.ERROR,
@@ -360,10 +414,11 @@ private fun ErrorDetail(detail: String) {
 
 /** 空态。原来是一句裸文本 + 固定 120dp 高，飘在一大片空白里；现在给一个真正的容器。 */
 @Composable
-private fun EmptyState() {
+private fun EmptyState(modifier: Modifier = Modifier) {
     val scheme = MiuixTheme.colorScheme
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        // `animateItem()` 在**最外层**：它管的是这一项在 LazyColumn 里的进出。
+        modifier = modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.card,
         insideMargin = PaddingValues(horizontal = ZhiSpace.l, vertical = 22.dp),
         colors = CardDefaults.defaultColors(
@@ -413,13 +468,16 @@ private fun AppCard(
     onUninstall: (String) -> Unit,
     onProcesses: (String) -> Unit,
     onFrida: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
     // 溢出菜单的锚点。按下标分发，顺序与下面 labels 一一对应。
     var menuOpen by remember(packageName) { mutableStateOf(false) }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        // `modifier`（animateItem）必须挂在**最外层**：它管的是这张卡在 LazyColumn
+        // 里的位置动画，挂在里面那层的话 Compose 移的是另一层，卡会瞬移。
+        modifier = modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.card,
         insideMargin = PaddingValues(0.dp),
     ) {
@@ -430,7 +488,7 @@ private fun AppCard(
                 titleColor = BasicComponentDefaults.titleColor(color = scheme.onBackground),
                 startAction = {
                     Icon(
-                        imageVector = ZhiIcons.sandbox,
+                        painter = ZhiIcons.sandbox,
                         contentDescription = null,
                         tint = scheme.onSurfaceVariantSummary,
                         modifier = Modifier.size(18.dp),
@@ -454,22 +512,22 @@ private fun AppCard(
                 Action("清数据", Modifier.weight(1f)) { onClearData(packageName) }
             }
 
-            if (menuOpen) {
-                ZhiAnchoredActionMenu(
-                    // 顺序即下标，与下面的分发一一对应，别重排。
-                    labels = listOf("进程 / SO 基址", "Frida", "卸载"),
-                    onSelect = { index ->
-                        menuOpen = false
-                        when (index) {
-                            0 -> onProcesses(packageName)
-                            1 -> onFrida(packageName)
-                            else -> onUninstall(packageName)
-                        }
-                    },
-                    onDismiss = { menuOpen = false },
-                    fingerOffset = null,
-                )
-            }
+            // 不套 `if`：`open` 是布尔入参，浮层常驻才播得完退出动画（见 ZhiAnchoredActionMenu）。
+            ZhiAnchoredActionMenu(
+                open = menuOpen,
+                // 顺序即下标，与下面的分发一一对应，别重排。
+                labels = listOf("进程 / SO 基址", "Frida", "卸载"),
+                onSelect = { index ->
+                    menuOpen = false
+                    when (index) {
+                        0 -> onProcesses(packageName)
+                        1 -> onFrida(packageName)
+                        else -> onUninstall(packageName)
+                    }
+                },
+                onDismiss = { menuOpen = false },
+                fingerOffset = null,
+            )
         }
     }
 }
@@ -496,7 +554,6 @@ private fun SandboxDialogHost(
     OverlayDialog(
         show = dialog != null,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,

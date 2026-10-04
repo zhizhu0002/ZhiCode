@@ -58,6 +58,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
 import com.zhizhu.zhicode.compose.ui.ZhiTextDropdownChip
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
@@ -83,10 +84,18 @@ fun Composer(
     onStop: () -> Unit,
     onPickSlash: (SlashCommand) -> Unit,
     onRemoveAttachment: (Attachment) -> Unit,
-    // ---- `+` 菜单的三个动作（原来只有一个 onAttach 直接弹相册）----
+    // ---- `+` 菜单的动作 ----
     onAttachFile: () -> Unit,
-    onOpenFilesTab: () -> Unit,
     onPickImage: () -> Unit,
+    /**
+     * 走**系统文件管理器**（SAF）挑文件附加，可多选。
+     *
+     * <p>与 [onAttachFile] 的分工：那个是**项目目录内**的浏览器（快，但只覆盖项目里
+     * 的东西），这个是系统范围（能挑到下载目录、别的 App 的文档），代价是每次都要
+     * 经过系统那个选择器。两条路都留着 —— 只留系统那条的话"附加一个项目里的文件"
+     * 要翻半个手机去找。
+     */
+    onPickSystemFiles: () -> Unit,
     /**
      * 取某个待发附件的图片（输入器里的缩略图）。
      *
@@ -108,6 +117,7 @@ fun Composer(
     debugMode: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    ZhiFrameTrace.countRecompose("Composer")
     val scheme = MiuixTheme.colorScheme
     Column(
         modifier = modifier
@@ -118,17 +128,24 @@ fun Composer(
             .padding(top = 4.dp, bottom = 10.dp),
     ) {
 
-        // 斜杠面板展开/收起走动画
+        // 斜杠面板展开/收起走动画。
+        //
+        // ⚠️ 用**官方裸默认**（`fadeIn() + expandVertically()`），不传 animationSpec。
+        // 出处：Miuix example 的 `AppContent.kt:529` 与 `component/SwitchSection.kt:80`
+        // —— 官方所有"整块展开/收起"都是这一行，一个字都不多。
+        //
+        // 这里原先传的是 `ZhiMotion.sizeSpec`（`tween(200, DecelerateEasing(1.5))`）。
+        // 那套数字本身抄自 Miuix，但它抄的是**弹窗位移退出**那条曲线，而"展开"在
+        // Miuix 里走的是 spring —— 拿退出曲线做展开，就是用户在"很多地方该有动画的
+        // 没有/很割裂"里感受到的那种不一致。展开/收起这一类比"时长精确相等"更重要的是
+        // **与官方同一族曲线**，所以这里整体交还给官方默认。
+        //
+        // `expandFrom` 也一并去掉：`Alignment.Bottom` 正是 `expandVertically()` 的默认值，
+        // 写出来是重复。（面板位于输入框上方，从底边长出来是它该有的方向。）
         AnimatedVisibility(
             visible = state.slashQuery != null && state.slashMatches.isNotEmpty(),
-            enter = expandVertically(
-                animationSpec = ZhiMotion.sizeSpec,
-                expandFrom = Alignment.Bottom,
-            ) + fadeIn(ZhiMotion.fadeInSpec),
-            exit = shrinkVertically(
-                animationSpec = ZhiMotion.sizeSpec,
-                shrinkTowards = Alignment.Bottom,
-            ) + fadeOut(ZhiMotion.fadeOutSpec),
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
         ) {
             SlashPalette(matches = state.slashMatches, onPick = onPickSlash)
         }
@@ -145,11 +162,13 @@ fun Composer(
                     )
                     .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 5.dp),
             ) {
-            // 附件条随附件增减平滑展开/收起
+            // 附件条随附件增减平滑展开/收起。
+            // 同样交还给官方裸默认（出处见上面斜杠面板那一处的说明）：附件条和斜杠面板
+            // 是上下相邻的两块，曲线不一致的话，先展开的那块和后展开的那块会各走各的节奏。
             AnimatedVisibility(
                 visible = state.attachments.isNotEmpty(),
-                enter = expandVertically(ZhiMotion.sizeSpec) + fadeIn(ZhiMotion.fadeInSpec),
-                exit = shrinkVertically(ZhiMotion.sizeSpec) + fadeOut(ZhiMotion.fadeOutSpec),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically(),
             ) {
                 // 横向可滚动，而不是 `take(4)`：
                 //
@@ -268,6 +287,24 @@ fun Composer(
                 // 就能把面板撑到约 256dp —— 在这台 411dp 宽的设备上是 62%。
                 // 面板本身没有宽度参数可调（`OverlayIconDropdownMenu` 的
                 // `minWidth` 是给触发按钮的），所以**缩短文案是唯一不偏离库默认的收窄办法**。
+                // ⚠️ 三个图标必须在这里（组合上下文里）先取出来。
+                //
+                // 图标改成 `Painter` 之后，取值本身是 `@Composable` 的
+                // （`rememberVectorPainter` 要 `remember` 住结果），而下面
+                // `remember { }` 的 lambda 不是组合上下文，在里面取会直接编译不过
+                // （`@Composable invocations can only happen from the context of
+                // a @Composable function`）。取出来当 key 的一部分传进去，
+                // 图标变了才重建列表。
+                //
+                // ⚠️ `photoIcon` 用的是 `ZhiIcons.image`（照片），**不是**
+                // `ZhiIcons.floatingBall`（悬浮球）—— 那是两件事，见 ZhiIcons 里的说明。
+                val attachFileIcon = ZhiIcons.file
+                val photoIcon = ZhiIcons.image
+                // 「从系统文件管理器选」用**打开的文件夹**（`directory`）：
+                // 它是"去别处挑一份文件"，与上面那条 `file`（一个文档，指项目内的）
+                // 和 `files`（合口的文件夹，指我们自己的文件面板）都是不同的字形，
+                // 三者在同一张菜单里并排出现，必须一眼分得开。
+                val systemFileIcon = ZhiIcons.directory
                 ZhiIconDropdownMenu(
                     /*
                      * ⚠️ 这份 `listOf` 必须 `remember`。
@@ -278,36 +315,39 @@ fun Composer(
                      * 那份缓存就永远命中不了，等于没做。输入器随 `state.composerText`
                      * 每敲一个字重组一次，账单按字符数付。
                      *
-                     * key 取四个回调：菜单的文案/图标是常量，唯一会变的就是动作本身。
-                     * 它们在 `ChatArea` 里是方法引用与不捕获变量的 lambda，
-                     * Compose 的 lambda 记忆化让它们跨重组保持同一实例，
+                     * key 取三个图标加三个回调：菜单的文案是常量，唯一会变的就是
+                     * 图标实例与动作本身。回调在 `ChatArea` 里是方法引用与不捕获变量的
+                     * lambda，Compose 的 lambda 记忆化让它们跨重组保持同一实例，
                      * 所以这个 `remember` 是真的会命中。
                      */
-                    items = remember(onAttachFile, onOpenFilesTab, onPickImage) {
+                    items = remember(
+                        attachFileIcon, photoIcon, systemFileIcon,
+                        onAttachFile, onPickImage, onPickSystemFiles,
+                    ) {
                         listOf(
                             ZhiMenuItem(
                                 text = "附加项目文件",
-                                summary = "搜索并附加",
-                                icon = ZhiIcons.file,
+                                summary = "浏览项目目录",
+                                icon = attachFileIcon,
                                 onClick = onAttachFile,
                             ),
                             ZhiMenuItem(
-                                text = "打开文件工作区",
-                                summary = "浏览与查看",
-                                icon = ZhiIcons.files,
-                                onClick = onOpenFilesTab,
+                                text = "文件管理器",
+                                summary = "从系统里挑，可多选",
+                                icon = systemFileIcon,
+                                onClick = onPickSystemFiles,
                             ),
                             ZhiMenuItem(
                                 text = "上传照片",
                                 summary = "作为视觉输入",
-                                icon = ZhiIcons.floatingBall,
+                                icon = photoIcon,
                                 onClick = onPickImage,
                             ),
                         )
                     },
                 ) {
                     Icon(
-                        imageVector = ZhiIcons.attach,
+                        painter = ZhiIcons.attach,
                         contentDescription = "添加附件",
                         tint = scheme.onBackgroundVariant,
                         modifier = Modifier.size(18.dp),
@@ -439,7 +479,7 @@ private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                imageVector = if (attachment.isImage) ZhiIcons.floatingBall else ZhiIcons.file,
+                painter = if (attachment.isImage) ZhiIcons.image else ZhiIcons.file,
                 contentDescription = null,
                 tint = scheme.primary,
                 modifier = Modifier.size(13.dp),

@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,24 +21,66 @@ import com.zhizhu.zhicode.compose.model.ApiProfileDraft
 import com.zhizhu.zhicode.compose.model.ApiProtocol
 import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
+import com.zhizhu.zhicode.compose.ui.settings.SettingsLoadingHint
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
+
+/** ZCode 的网关地址。**只用于「填入默认值」这个动作**，见下面的说明。 */
+private const val ZCODE_GATEWAY = "https://zcode.z.ai/api/v1/zcode-plan"
+
+/**
+ * 预填的额外请求头。
+ *
+ * **只有版本号是这里该有的东西**。其余的头（`User-Agent`、`X-Title`、`X-Platform`、
+ * `X-Os-Category`、`X-Release-Channel`、`X-Client-Language`、`X-Client-Timezone`、
+ * `HTTP-Referer`、`X-Device-Mid`）现在由 `ZcodeWire` 按官方客户端的取值**在运行时**
+ * 生成 —— 写进这里只会把它们冻在填入那一刻（语言、时区、系统版本、设备标识都会变），
+ * 而且多一份会与代码里那份不一致的副本。
+ *
+ * 版本号留在明面上是因为它**会过期**：ZCode 发了新版，这个数字要跟着改，
+ * 而它是"这个协议在跟谁说话"的一部分。它同时决定额度查询串里的 `app_version`
+ * 与默认 `User-Agent`（两处必须说同一个版本）。
+ */
+private const val ZCODE_HEADERS_JSON = """{"X-ZCode-App-Version":"3.14.3"}"""
+
+/**
+ * ZCode 的说明与可粘贴取值。
+ *
+ * ## 为什么给出具体取值，以及为什么用「填入」而不是内置
+ *
+ * 那个网关要求请求带一组来源头才受理，取值由它自己的客户端决定（现在那份客户端是
+ * 开源的，取值有据可查）。让用户自己猜是不现实的（名字、格式、大小写都得对），
+ * 所以这里给成可用的文本。但**它是提示与预填，不是常量**：按下「填入 ZCode 默认值」
+ * 之后值就落进用户自己的配置里，之后请求只读那份配置。
+ *
+ * 这与本仓库「不预置任何厂商地址」的策略有一处**刻意的张力**，取舍写在下面：
+ * 不给这个地址，这个协议对用户就是不可用的（他得从别处找）；给了，它就变成"用户看见并
+ * 主动应用的一份配置"。选了可用，同时把它留在明面上 —— 而不是藏在请求路径里。
+ */
+private val ZCODE_HEADERS_HINT = """
+    网关地址：$ZCODE_GATEWAY
+
+    其余请求头由应用在运行时按官方客户端的取值生成（版本、来源、语言、时区、设备标识），
+    上面只预填了**版本号** —— 它连着额度查询的 app_version，ZCode 发新版时改这里。
+    任何一条都可以在这里覆盖，例如：
+
+    {"X-ZCode-App-Version":"3.14.3","User-Agent":"ZCode/3.14.3"}
+""".trimIndent()
 
 /**
  * API 配置窗口：列表页与编辑表单**共用一个弹窗**。
@@ -115,7 +158,11 @@ private fun ApiProfileList(
     val scheme = MiuixTheme.colorScheme
     Column {
         SettingsGroup("配置记录") {
-            if (config.profiles.isEmpty()) {
+            // 载荷在 IO 上读（见 openApiConfig）：空列表与「还没配过」长得一样，
+            // 所以读取期间必须插在空态之前显式说明。
+            if (config.loading) {
+                SettingsLoadingHint()
+            } else if (config.profiles.isEmpty()) {
                 // 空列表是正常的初始状态（应用不再自带任何厂商配置），
                 // 但只显示一行"没有数据"会让人以为坏了。写清下一步做什么。
                 // 内边距与 preference 行对齐，避免这行看起来贴边。
@@ -132,11 +179,16 @@ private fun ApiProfileList(
             // 散卡会让整页碎成一堆便签；「当前生效」那条仍靠左侧勾 + 主色标题区分。
             config.profiles.forEach { profile ->
                 val active = profile.id == config.activeId
+                // 「当前生效」那一条是靠主色标题 + 勾来区分的，两处同时变色就得一起淡变，
+                // 否则会看到「勾已经出现了、标题还没变蓝」。
+                val titleColor by animateColorAsState(
+                    targetValue = if (active) scheme.primary else scheme.onBackground,
+                    animationSpec = ZhiMotion.colorSpec,
+                    label = "apiProfileTitle",
+                )
                 BasicComponent(
                     title = profile.name,
-                    titleColor = BasicComponentDefaults.titleColor(
-                        color = if (active) scheme.primary else scheme.onBackground,
-                    ),
+                    titleColor = BasicComponentDefaults.titleColor(color = titleColor),
                     summary = profile.summary,
                     summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
                     // 选中的那条用勾表示"当前生效"，未选中的给一个空位保持左对齐一致。
@@ -145,7 +197,7 @@ private fun ApiProfileList(
                     startAction = {
                         if (active) {
                             Icon(
-                                imageVector = MiuixIcons.Basic.Check,
+                                painter = ZhiIcons.check,
                                 contentDescription = null,
                                 tint = scheme.primary,
                                 modifier = Modifier.size(DropdownDefaults.CheckIconSize),
@@ -261,6 +313,27 @@ private fun ApiProfileForm(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             )
 
+            /*
+             * ZCode 的「填入默认值」。
+             *
+             * 参考实现把网关地址与身份头内置在代码里、界面上写「无需填写，直连 ZCode 网关」。
+             * 我们改成一键填入，差别是**值落在用户的配置里**而不是藏在代码里的常量：
+             * 于是「请求发到哪、以谁的身份」在配置页看得见、改得动、排得动障。
+             *
+             * 一按同时填两样（网关 + 额外请求头）：它们是配套的，只填一样必然连不上，
+             * 而分开两次填会让人以为步骤没做完。
+             */
+            if (draft.protocol == ApiProtocol.ZCODE) {
+                BasicComponent(
+                    title = "填入 ZCode 默认值",
+                    summary = "一次填好网关地址与额外请求头（可再自行修改）",
+                    onClick = {
+                        baseUrlTouched = true
+                        onChange { it.copy(baseUrl = ZCODE_GATEWAY, extraHeaders = ZCODE_HEADERS_JSON) }
+                    },
+                )
+            }
+
             SwitchPreference(
                 title = "允许明文 HTTP",
                 summary = if (allowCleartext) "当前地址走 http（不加密）" else "仅使用 https",
@@ -273,11 +346,45 @@ private fun ApiProfileForm(
             ZhiTextField(
                 value = draft.apiKey,
                 onValueChange = { value -> onChange { it.copy(apiKey = value) } },
-                label = if (draft.isEditing) "API Key（留空 = 沿用原密钥）" else "API Key",
+                // ZCode 的密钥就是它的授权码；别的协议叫 API Key。同一件事在两边
+                // 用不同的名字，用户会以为还要另找一个"授权码"填在别处。
+                label = when {
+                    draft.isEditing -> "留空 = 沿用原密钥"
+                    draft.protocol == ApiProtocol.ZCODE -> "填写 ZCode 授权码"
+                    else -> "API Key"
+                },
                 useLabelAsPlaceholder = true,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             )
+        }
+
+        /*
+         * 额外请求头：**只在 ZCode 协议下出现**。
+         *
+         * 那个网关要求带一组特定的身份头才受理，而那是它自己客户端的标识 ——
+         * 我们不内置（内置等于替用户宣称一个身份，且对方一改所有人都一起断）。
+         * 所以做成用户填，并把需要填的内容**直接写在提示里**：可见、可改、可排查。
+         *
+         * 对别的协议不显示这个框：它在那里只会让人以为"是不是还差一项没填"。
+         */
+        if (draft.protocol == ApiProtocol.ZCODE) {
+            SettingsGroup("额外请求头（ZCode）") {
+                ZhiTextField(
+                    value = draft.extraHeaders,
+                    onValueChange = { value -> onChange { it.copy(extraHeaders = value) } },
+                    label = "JSON 对象，留空则不加",
+                    useLabelAsPlaceholder = true,
+                    singleLine = false,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+                Text(
+                    text = ZCODE_HEADERS_HINT,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Footnote,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
         }
 
         SettingsGroup("模型") {

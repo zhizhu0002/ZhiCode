@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
@@ -389,6 +390,8 @@ private val PendingImageSize = 56.dp
  */
 @Composable
 internal fun ZhiImageViewer(image: ChatImage?, onDismiss: () -> Unit) {
+    // 退场时 `image` 已经是 null，内容不能跟着空掉（见 rememberLastNonNull）。
+    val shownImage = rememberLastNonNull(image)
     OverlayDialog(
         show = image != null,
         onDismissRequest = onDismiss,
@@ -405,7 +408,7 @@ internal fun ZhiImageViewer(image: ChatImage?, onDismiss: () -> Unit) {
         // 内容顶到状态栏下面才是"全屏"，× 按钮单独避让即可。
         defaultWindowInsetsPadding = false,
     ) {
-        val shown = image ?: return@OverlayDialog
+        val shown = shownImage ?: return@OverlayDialog
         // 放大查看不做降采样上限（按 2048 解），但仍是 Fit：长截图在屏幕上
         // 本来就只能看到缩略形态，硬裁会把内容藏起来。
         val state = rememberDecodeState(shown, 2048, 2048)

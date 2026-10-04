@@ -10,8 +10,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,10 +31,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,17 +47,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.os.SystemClock
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.engine.ToolText
+import com.zhizhu.zhicode.compose.model.ToolActions
 import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.ChatItem
+import com.zhizhu.zhicode.compose.model.ErrorSummary
 import com.zhizhu.zhicode.compose.model.ToolActivity
+import com.zhizhu.zhicode.compose.model.ToolGrouping
+import com.zhizhu.zhicode.compose.model.LiveOutput
 import com.zhizhu.zhicode.compose.model.ToolKind
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
-import com.zhizhu.zhicode.compose.ui.panes.DiffLines
-import com.zhizhu.zhicode.compose.ui.panes.OutputLines
+import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
+import com.zhizhu.zhicode.compose.ui.ZhiIconDropdownMenu
+import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiImageRow
@@ -88,7 +100,14 @@ private val MessageMargin = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
  * 而不是一个气泡。改成上限之后，短消息收成合适宽度、长消息仍然封顶。
  */
 private val BubbleMaxWidthFraction = 0.86f
-private val GroupMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+/**
+ * 折叠组表头的内边距。
+ *
+ * 反编译版 `addCollapsedToolActivity` 的组头是 `setPadding(dp(7), dp(3), dp(4), dp(3))`，
+ * 而且**整块没有任何背景** —— 它就是"图标 + 粗体标签 + ⌄"一行，层级靠成员缩进
+ * 与 `⎿` 副行体现。这里取同量级。
+ */
+private val GroupMargin = PaddingValues(start = 7.dp, top = 3.dp, end = 4.dp, bottom = 3.dp)
 private val RowMargin = PaddingValues(horizontal = 9.dp, vertical = 7.dp)
 
 /** 空态，对应原版 addEmptyState()。 */
@@ -229,20 +248,26 @@ fun AssistantCard(
                 // clip 在 animateContentSize **外侧**：思考面板展开/收起时文字
                 // 按自然高度绘制、被逐帧露出来（详见 ToolGroupCard 的注释）。
                 .clipToBounds()
-                // ⚠️ 流式期间**不挂** animateContentSize。
+                // 尺寸动画**流式期间也挂**（用户要的「流式正文平滑增长」）。
                 //
-                // 正文每 32ms（DELTA_MERGE_MS）长高一次，而尺寸动画每次变化都会被重新
-                // 触发 —— 结果是整张卡在整条回复期间一直在做"测量→布局→动画"，
-                // 而它就在 LazyColumn 的一个 item 里。老设备上这就是"流式一顿一顿"
-                // 最直接的来源。定稿后（streaming = false）再挂上：那时它只动一次，
-                // 用来平滑"思考面板展开/收起"这类真实的一次性尺寸变化。
-                .then(
-                    if (item.streaming) {
-                        Modifier
-                    } else {
-                        Modifier.animateContentSize(animationSpec = ZhiMotion.sizeSpec)
-                    },
-                ),
+                // ## 这里改过，两个方向的理由都要留着
+                //
+                // 原来写的是 `if (item.streaming) Modifier else animateContentSize(...)`，
+                // 理由是：正文每 32ms（DELTA_MERGE_MS）长高一次，会反复触发尺寸动画 →
+                // 整张卡在整条回复期间持续"测量→布局→动画"。
+                //
+                // 但那个理由**站不住**，因为 `animateContentSize` 不是"每次变化都重放一遍
+                // 200ms 的补间"：目标一变它就从**当前动画值**继续跑到新目标。
+                // 真正的后果只是尺寸比内容**略微滞后**（跟得慢一点），而不是
+                // "重新触发风暴"。而流式正文增长的本身就是"内容每 32ms 多一行"，
+                // 不挂动画时那是**一帧一跳**的硬跳，正是用户报的「文字是直接没动画」。
+                //
+                // ⚠️ 这是本轮**唯一可能反向影响性能**的一项：想清楚再动它。
+                // 代价确实是"流式期间每一帧都在做一次测量+布局"，这是**想要平滑增长的
+                // 必然成本**，不是 bug。若真机上真的出现"流式一顿一顿"，回退点就是
+                // 这一处 —— 把它改回按 item.streaming 分支，其余几项动画不受影响
+                // （它们各自独立）。守卫 `MarkdownStreamingTest` 会把回退方向的选择记下来。
+                .animateContentSize(animationSpec = ZhiMotion.sizeSpec),
         ) {
             if (item.thinking.isNotEmpty() || item.processSteps.isNotEmpty()) {
                 ThinkingPanel(item = item, onToggle = onToggleThinking)
@@ -260,10 +285,27 @@ fun AssistantCard(
             )
             if (item.streaming) {
                 // 流式光标呼吸闪烁：之前是一块静止的字符，文本区里唯一「活着」的
-                // 记号却不动。「只有卡片在动」的观感有一半来自这里。
-                // 周期 = 淡入 300ms 去程 + 300ms 回程；alpha 走 draw 层，不重组。
+                // 记号却不动。周期 = 淡入 300ms 去程 + 300ms 回程。
+                //
+                // ⚠️⚠️ 这里**不能**写 `val cursorAlpha by cursor.animateFloat(...)`。
+                //
+                // 那个 `by` 就是 `getValue()` —— 它在**组合期**把动画的当前值读出来，
+                // 而这是个无限动画：值每帧都变 → **整张 AssistantCard 每帧重组一次**。
+                // 本文件那句注释原先写着"alpha 走 draw 层，不重组"，**与事实相反**：
+                // 走 draw 层的只有 `graphicsLayer { alpha = … }` 这个 lambda，
+                // 而喂给它的 `cursorAlpha` 早就把读操作放在了组合里。
+                //
+                // 正确写法：保留 `State<Float>` 本身（**不 `by`**），在 `graphicsLayer`
+                // 的 lambda 里读 `.value` —— `graphicsLayer` 的 lambda 在**绘制阶段**求值，
+                // 于是每帧只让这一层的绘制属性失效，**不触发重组**。
+                //
+                // 这是实测到的真问题：探针记录过 `recompose/s ChatArea=69 ChatList=64`
+                // （60Hz 下就是每帧一次）。参考实现（GetStream 的 `AITypingIndicator`）
+                // 用的是同一套 `rememberInfiniteTransition` + `graphicsLayer{alpha=}`，
+                // 差别在它把指示器放在**独立 item** 里，所以只有那几个点付代价；
+                // 我们放在正文卡里，代价就是整张卡。
                 val cursor = rememberInfiniteTransition(label = "stream-cursor")
-                val cursorAlpha by cursor.animateFloat(
+                val cursorAlpha = cursor.animateFloat(
                     initialValue = 1f,
                     targetValue = 0.15f,
                     animationSpec = infiniteRepeatable(
@@ -278,7 +320,7 @@ fun AssistantCard(
                     fontSize = ZhiTextScale.BodySmall,
                     modifier = Modifier
                         .padding(top = 1.dp)
-                        .graphicsLayer { alpha = cursorAlpha },
+                        .graphicsLayer { alpha = cursorAlpha.value },
                 )
             }
             // 上下文页脚淡入：流式一结束它就出现，之前是瞬间蹦出来的。
@@ -339,17 +381,27 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        imageVector = if (item.thinkingExpanded) ZhiIcons.collapse else ZhiIcons.expand,
+                        painter = if (item.thinkingExpanded) ZhiIcons.collapse else ZhiIcons.expand,
                         contentDescription = if (item.thinkingExpanded) "折叠思考过程" else "展开思考过程",
                         tint = scheme.primary,
                         modifier = Modifier.size(13.dp),
                     )
-                    Text(
-                        text = "思考过程" + (if (item.streaming) " · 进行中" else ""),
-                        color = scheme.primary,
-                        fontSize = ZhiTextScale.Caption,
+                    // 表头文案也是**会变的文字**：流式期间尾部多一个「 · 进行中」。
+                    // 走 Crossfade 淡变，而不是让它硬蹦出来/消失 —— 只有尾缀瞬间跳变
+                    // 时，整块面板看起来像"卡"了一下。做法与工具组标题
+                    // （`Crossfade(targetState = ToolGrouping.label(...))`）同一处口径。
+                    Crossfade(
+                        targetState = "思考过程" + (if (item.streaming) " · 进行中" else ""),
+                        animationSpec = ZhiMotion.fadeOutSpec,
+                        label = "thinking-label",
                         modifier = Modifier.padding(start = 5.dp),
-                    )
+                    ) { label ->
+                        Text(
+                            text = label,
+                            color = scheme.primary,
+                            fontSize = ZhiTextScale.Caption,
+                        )
+                    }
                 }
             }
         // 展开/收起：高度由 AssistantCard 外层的 animateContentSize 平滑过渡，
@@ -395,118 +447,308 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
     }
 }
 
-/** 折叠工具组卡片，对应原版 addCollapsedToolActivity() + collapsedActivityLabel()。 */
+/**
+ * 一个**工具批次**在对话流里的样子。
+ *
+ * ## 一个批次不是一张卡片
+ *
+ * 之前这里是"每个批次套一张「已运行 N 个工具」卡片"，于是单独一条 `Bash` 也被包进
+ * 一张**带标题、带子标签、带计数徽章**的大卡里 —— 那三点是与参考实现不一致的地方
+ * （IQ Code 的组标题直接说干了什么，而且只有"连续的 read/search 且 ≥2"才有组）。
+ *
+ * 现在的分工：
+ * - 一个批次先按 [ToolGrouping] 切成若干段；
+ * - **单条工具**各自一张卡（视觉上仍是一个框），但**没有标题行、没有子标签、没有徽章**
+ *   —— 卡片只负责"这一条工具自成一块"，不冒充整批的汇总；
+ * - **连续的 read/search 且 ≥2** → 折成一张卡，标题是
+ *   「正在搜索 2 个模式、读取 3 个文件」这种**说明干了什么**的话。
+ */
 @Composable
-fun ToolGroupCard(
+fun ToolBatch(
     item: ChatItem,
     onToggleTool: (String) -> Unit,
-    /** 参数是**目标状态**：true 表示点下去后应展开，false 表示应收起。 */
-    onToggleGroup: (Boolean) -> Unit,
-    onActions: () -> Unit,
+    /** 参数是**那一组**的 groupKey（首成员 toolId）。 */
+    onToggleGroup: (String) -> Unit,
+    /**
+     * 某一行的 `⋯` 菜单里**选中了一项**。两个参数：那一行的 toolId + 菜单文案。
+     *
+     * 这里以前是 `onActions: () -> Unit`，来自整组那一层 —— 于是点单个工具的 `⋯`
+     * 弹出的是整组菜单，而且回调里根本不知道用户点的是哪一行。
+     * 单个工具的动作（复制命令 / 复制输出 / 展开这一条）都作用在某一行上，
+     * 所以行号必须传出去。
+     *
+     * 菜单**本身**由这一行自己画（Miuix 下拉菜单，见 [ToolRow]），这里只负责
+     * 把"选中了哪一行的哪一项"交给上层去执行。
+     */
+    onToolAction: (String, String) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    val anyExpanded = item.tools.any { it.expanded }
-    val completed = item.tools.count { it.completed }
-    val failed = item.tools.count { it.failed }
+    val segments = remember(item.tools) {
+        ToolGrouping.group(item.tools.map { it.toGroupingEntry() })
+    }
 
-    Card(
+    /*
+     * 运行中的秒表。
+     *
+     * `elapsedMs` 是跟着输出块推过来的（引擎按 chunk 回调进度），所以一个跑很久
+     * 都不吐字的命令，标签会冻在最后一次进度的值上，看起来像卡死。
+     * 这里按 500ms 续走一次（与参考实现的 `scheduleToolElapsedTicker` 同频），
+     * 取「起点至今」与「引擎推送值」的**较大者**（见 `ToolActions.displayElapsedMs`，
+     * 规则本身在纯逻辑层、有单测）。
+     *
+     * 整个批次共用同一个 `nowMs` 而不是每行各起一个 ticker：一次重组足够，而且同屏里
+     * 各行的秒数不会因为 ticker 相位不同而看起来错开。
+     *
+     * **没有运行中的工具时 ticker 不排队** —— 否则一个后台死循环会一直持有重组。
+     */
+    val runningClock = rememberRunningClock(item.tools.any { !it.completed })
+
+    // 放大查看的当前图。
+    //
+    // 与 `UserBubble` 同一条约定（那里写着「它是一个纯本地 UI 状态（点了哪张图），
+    // 提升上去只会让上层多一个字段」）：宿主放在**工具卡自己**里，而不是提到
+    // ChatList / AppScaffold。工具卡的预览图只有点开才有意义，没有任何跨项共享的需求。
+    var viewing by remember { mutableStateOf<ChatImage?>(null) }
+
+    // 段与段之间的间隔：单条卡与组卡各自带垂直留白，所以这里不再额外加 padding
+    // （两边都加会让"两条命令之间"的缝比"命令与它的输出之间"还宽）。
+    Column(modifier = Modifier.fillMaxWidth()) {
+        segments.forEach { segment ->
+            when (segment) {
+                is ToolGrouping.Segment.Single -> {
+                    val tool = item.tools.firstOrNull { it.id == segment.entry.toolId } ?: return@forEach
+                    // ⚠️ 每一行都要 `key`，否则行内的 `remember`（展开态、下拉菜单的
+                    // 展开态）是按**位置**归属的：工具是边跑边追加的，新工具插进来之后
+                    // 位置会挪，于是"打开的菜单"和"展开的输出"会串到另一行上。
+                    key(tool.id) {
+                        // 单条工具各自一张卡（Miuix `Card`）。
+                        //
+                        // ## 这里来回改过两次，两次的理由都留着，免得下次又当成"改错了"
+                        //
+                        // 1. 最早每条工具都被套进"整批"那张大卡里 —— 单条 Bash 也顶着
+                        //    「已运行 N 个工具」的假标题。错的是**假标题**，不是壳。
+                        // 2. 后来把壳整个去掉，只留"内容自己那口更黑的井"当框，依据是用户
+                        //    当时那句话：「底色比其他地方要黑的就是我说的预览框」。
+                        // 3. **现在把壳加回来** —— 用户看过实际界面之后要的：「给 tools 加个框，
+                        //    这样也好分辨东西」。理由和当初那条提交说的同一件事：命令行与
+                        //    输出块直接浮在页面上时看不出边界，一屏几条命令会糊成一片。
+                        //
+                        // ⚠️ 这一版**不是**把第 2 步原样撤销：井的 `terminalSurface` 保留
+                        // （它仍然就是用户认过的那个"预览框"），卡在外面**额外**给出本条工具的
+                        // 边界。卡底 `cardSurface`(#2E2E2E) 与井底 `terminalSurface`(#0A0B0C)
+                        // 差两档，是"浅卡里的深井"，不是两块同色的底叠在一起。
+                        //
+                        // 卡**不接管点击**：点击仍在 `ToolRow` 内部那个 `Surface` 上 ——
+                        // 两层都挂 onClick 会互相抢，而且外面那层拿不到"展开这一条"的语义。
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+                            cornerRadius = ZhiRadius.card,
+                            insideMargin = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
+                            colors = CardDefaults.defaultColors(
+                                color = ZhiColors.cardSurface(),
+                                contentColor = scheme.onSurface,
+                            ),
+                        ) {
+                        ToolRow(
+                            activity = tool,
+                            nowMs = runningClock,
+                            onToggle = { onToggleTool(tool.id) },
+                            // 传**这一行**的 id：菜单内容与动作都按它算。
+                            onToolAction = { label -> onToolAction(tool.id, label) },
+                            onImageOpen = { viewing = it },
+                        )
+                        }
+                    }
+                }
+                is ToolGrouping.Segment.Group -> {
+                    val members = segment.members.mapNotNull { member ->
+                        item.tools.firstOrNull { it.id == member.toolId }
+                    }
+                    if (members.isEmpty()) return@forEach
+                    key(segment.key) {
+                        ToolGroupCard(
+                            members = members,
+                            expanded = segment.key in item.expandedGroups,
+                            onToggle = { onToggleGroup(segment.key) },
+                            nowMs = runningClock,
+                            onToggleTool = onToggleTool,
+                            onRowAction = onToolAction,
+                            onImageOpen = { viewing = it },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // 放大查看：与 `UserBubble` 同一形态（全屏黑底 + `ContentScale.Fit` + 右上 ×），
+    // 也同一条约定 —— 浮层挂在 `Column` **之外**，不参与列表项的宽高测量。
+    // 没有预览时 `show = false`，它不画任何东西，所以这一行是零成本。
+    ZhiImageViewer(image = viewing, onDismiss = { viewing = null })
+}
+
+/** 界面模型 → 分组判据。字段一一对应，于是两边不会各判一次"算不算候选"。 */
+private fun ToolActivity.toGroupingEntry(): ToolGrouping.Entry = ToolGrouping.Entry(
+    toolId = id,
+    name = toolName,
+    hint = hint,
+    readRequests = readRequests,
+    completed = completed,
+    failed = failed,
+)
+
+/**
+ * 折叠组卡片，对应原版 `addCollapsedToolActivity()` + `collapsedActivityLabel()`。
+ *
+ * 只由 [ToolBatch] 在"连续的 read/search 且 ≥2"时调用 —— 单条工具绝不走这里。
+ */
+@Composable
+private fun ToolGroupCard(
+    members: List<ToolActivity>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    nowMs: Long,
+    onToggleTool: (String) -> Unit,
+    /** 传给每一行的回调（**带 toolId**，见 [ToolBatch] 的说明）。 */
+    onRowAction: (String, String) -> Unit,
+    /** 某一行里的预览图被点开（需要全屏查看）。宿主在 [ToolBatch]。 */
+    onImageOpen: (ChatImage) -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    // 这张卡片只需要"这一组"自己的判据，所以在这里重建一份 Segment.Group —
+    // 判据仍然出自 ToolGrouping，不在这里另写一套计数。
+    val group = remember(members) {
+        ToolGrouping.Segment.Group(
+            key = members.first().id,
+            members = members.map { it.toGroupingEntry() },
+        )
+    }
+    val done = ToolGrouping.isDone(group)
+    val failed = ToolGrouping.hasFailure(group)
+
+    // 折叠组**没有卡片底**（反编译版 `addCollapsedToolActivity`：组头就是"图标 + 粗体标签 +
+    // ⌄"，靠成员缩进与 `⎿` 副行体现层级，整块没有任何背景）。
+    //
+    // ⚠️⚠️ 根容器必须是**竖向**的，这不是随便挑的：
+    //
+    //   · 官方那一处是 `linearLayoutVbox3 = vbox()` —— 竖向 `LinearLayout`；
+    //   · 本轮之前这里是 `Box(...)`，而 **`Box` 是叠放**：于是「表头 + 副标题 +
+    //     展开内容」三个兄弟节点被放在**同一个原点**上互相盖住。
+    //
+    // 它是怎么从竖向变成叠放的：为了去掉卡片底，把原来的 `Card(...)` 换成了 `Box(...)`。
+    // Miuix 的 `Card` 内部就是 `Column(`（见 Card.kt），它**同时**提供了"竖向排列"与
+    // "内边距"两件事；换成 `Box` 时只补回了内边距和动画的挂点，**竖向排列没人补**，
+    // 而且不会有任何编译错误 —— 表现只是"工具卡的标题被内容压住、收起后文字对不上"。
+    //
+    // 这和文件面板那次「裸 `when` 换成 `AnimatedContent`」是同一类失误：
+    // 换容器时只看了它"多"提供了什么，没看它**顺手**提供了什么。
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            // 展开/收起的高度动画**只有这一处**，而裁剪层必须写在它**外侧**
-            // （clipToBounds 在 animateContentSize 之前）。
-            //
-            // ⚠️ 之前这里写成 `if (item.groupCompleted) 无动画 else 动画` —— 反了。
-            // 于是「点开一个已跑完的工具组」这个最常见的动作恰恰没有卡片动画：
-            // 外框瞬间撑开，内层各自挂着自己的 animateContentSize 单独滑动，用户
-            // 看到的就是「文字没跟着卡片的动画展开/缩回」。门控本意是"运行期间不挂"
-            // （工具输出每 200ms（PROGRESS_FLUSH_MS）长一次会把尺寸动画反复重新
-            // 触发，整张组卡持续重测量），所以跑完之后才该挂上。
-            //
-            // clip 在外的理由：裁剪层拿到的是**动画中的高度**，内层文字按自然高度
-            // 绘制、被逐帧露出来。反过来写（动画在外）裁剪层拿到的是自然高度，
-            // 一点也裁不到，文字仍然是瞬间全部出现。
-            .clipToBounds()
-            .then(
-                if (item.groupCompleted) {
-                    Modifier.animateContentSize(animationSpec = ZhiMotion.sizeSpec)
-                } else {
-                    Modifier
-                },
-            ),
-        cornerRadius = ZhiRadius.card,
-        insideMargin = GroupMargin,
-        colors = CardDefaults.defaultColors(
-            color = ZhiColors.cardSurface(),
-            contentColor = scheme.onSurface,
-        ),
+            .padding(vertical = 4.dp),
     ) {
         // 表头点击走 Miuix Surface(onClick)：不再手写 Modifier.clickable。
-        // 传目标状态：已展开时点一下应收起（此前误传 anyExpanded，导致展开后收不回）
+        // 传的是"切换"：展开态由 `ChatItem.expandedGroups` 记账，这一层不去推目标状态。
         Surface(
-            onClick = { onToggleGroup(!anyExpanded) },
+            onClick = onToggle,
             modifier = Modifier.fillMaxWidth(),
             color = Color.Transparent,
             contentColor = scheme.onSurface,
         ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            // 反编译版组头：`setPadding(dp(7), dp(3), dp(4), dp(3))`
+            modifier = Modifier.fillMaxWidth().padding(GroupMargin),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // 行首是**状态字形**，与单条工具行同一个口径：有失败 → 红，跑完 → 绿，
+            // 否则强调色（参考实现：`failed>0 ? RED : (done ? GREEN : ACCENT)`）。
+            //
+            // 这里原来显示的是「正在运行工具 / 已运行 N 个工具」加一个计数徽章 ——
+            // 那是**计数**，回答了"有几个"，却没回答"在干什么"。参考实现的组标题
+            // 直接说干了什么（「正在搜索 2 个模式、读取 3 个文件」），计数也就在里面了。
             Icon(
-                imageVector = if (anyExpanded) ZhiIcons.collapse else ZhiIcons.expand,
-                contentDescription = if (anyExpanded) "折叠工具列表" else "展开工具列表",
-                tint = scheme.onSurfaceVariantSummary,
-                modifier = Modifier.size(14.dp),
+                painter = when {
+                    failed -> ZhiIcons.failed
+                    done -> ZhiIcons.done
+                    else -> ZhiIcons.pending
+                },
+                contentDescription = null,
+                tint = when {
+                    failed -> ZhiColors.red()
+                    done -> ZhiColors.green()
+                    else -> scheme.primary
+                },
+                modifier = Modifier.size(13.dp),
             )
-            // 「正在运行工具 → 已运行 N 个工具」：文字淡变，不再瞬间跳字。
-            // Crossfade 只管 alpha，宽度/高度交给外层布局自然过渡。
+            // 组标题同样是**会变的文字**（「正在读取 2 个文件」→「已读取 2 个文件」，
+            // 计数与失败数也在涨），所以走 Crossfade 淡变 —— 只让卡片高度动、
+            // 文字瞬间跳变正是被点名过的观感问题。
             Crossfade(
-                targetState = item.groupCompleted && failed == 0,
+                targetState = ToolGrouping.label(group, batchDone = done),
                 animationSpec = ZhiMotion.fadeOutSpec,
                 label = "group-label",
-                modifier = Modifier.padding(start = 5.dp),
-            ) { done ->
+                modifier = Modifier.padding(start = 6.dp).weight(1f),
+            ) { text ->
                 Text(
-                    text = if (done) "已运行 ${item.tools.size} 个工具" else "正在运行工具",
+                    text = text,
                     color = scheme.onSurface,
                     fontSize = ZhiTextScale.BodySmall,
                     fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Box(modifier = Modifier.weight(1f))
-            // 计数用 Miuix Badge：失败时换成红色容器
-            Badge(
-                containerColor = if (failed > 0) ZhiColors.red() else scheme.surfaceContainerHighest,
-                contentColor = if (failed > 0) scheme.onPrimary else scheme.onSurfaceVariantSummary,
-            ) {
-                Text(
-                    text = "$completed/${item.tools.size}" + if (failed > 0) " · $failed 失败" else "",
-                    fontSize = ZhiTextScale.Footnote,
-                )
-            }
+            // ⚠️ 这里**没有**折叠箭头，是刻意的（用户：「⌃/⌄ 箭头可以去掉，
+            // 因为点击内容可以快速收回或展开」）。
+            //
+            // 整行表头本身就是 `Surface(onClick = onToggle)` —— 点哪儿都能展开/收起。
+            // 再挂一个箭头等于用图标重复同一件事，而且它紧挨 `⋯`，
+            // 两个小图形在右端互相挤（参考实现那一行也只到 `⋯` 为止）。
+            //
+            // 需要"方向指示"的地方（思考过程、MCP、技能列表）仍走
+            // `ZhiIcons.expand` / `ZhiIcons.collapse`，那一对没有被删。
         }
         } // Surface(onClick) 表头
-        if (item.groupLabel.isNotEmpty()) {
-            Text(
-                text = item.groupLabel,
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Caption,
-                modifier = Modifier.padding(start = 18.dp, top = 2.dp),
-            )
-        }
-        if (anyExpanded) {
-            // ⚠️ 这里**不再**挂 animateContentSize。卡片本身已经在动（上面那处），
-            // 两层各挂一次的结果是：外框按动画高度走、内层按自己的动画滑动，
-            // 两者曲线不同步 —— 看起来就是文字在卡片里"自己飘"。高度的单一来源
-            // 是卡片，内层只负责按自然高度绘制、由卡片外层裁剪。
+        Text(
+            text = ToolGrouping.subtitle(group, expanded = expanded, batchDone = done),
+            color = if (failed) ZhiColors.red() else scheme.onSurfaceVariantSummary,
+            fontSize = ZhiTextScale.Caption,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 21.dp, top = 2.dp),
+        )
+        // 展开/收起：**内容自己**做高度动画。
+        //
+        // ⚠️ 以前是「外层 animateContentSize + `if (expanded) { Column { … } }`」。
+        // 那条写法**展开时看着还行**（内层按自然高度绘制、被外层裁剪逐帧露出来），
+        // 但**收起时是坏的**：`if` 一翻，内容当帧就被移出组合，于是只剩外层的框在
+        // 缩小、里面已经是空的 —— 用户报的就是「工具卡收回，文字就应该跟着收回」。
+        // 根因是"谁在动"不一致：框在动，内容不动。
+        //
+        // 现在内容自己就是动画的驱动者，展开与收起都由它负责，高度只有一个来源。
+        // ⚠️ 所以外层**不能**再挂 animateContentSize（本轮已撤掉）：
+        // 两层各挂一次会让外框按一条曲线、内层按另一条曲线走，
+        // 看起来就是"文字在卡片里自己飘"——本文件里记过这个坑。
+        //
+        // `expandFrom` / `shrinkTowards = Alignment.Top`：内容长在表头**下面**，
+        // 所以从顶边露出、朝顶边收回。用默认的 `Bottom` 会从底边往上长，
+        // 看起来像内容在把卡片往上"顶"。
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(animationSpec = ZhiMotion.sizeSpec, expandFrom = Alignment.Top),
+            exit = shrinkVertically(animationSpec = ZhiMotion.sizeSpec, shrinkTowards = Alignment.Top),
+        ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                item.tools.forEach { tool ->
-                    ToolRow(
-                        activity = tool,
-                        onToggle = { onToggleTool(tool.id) },
-                        onActions = onActions,
-                    )
+                members.forEach { tool ->
+                    key(tool.id) {
+                        ToolRow(
+                            activity = tool,
+                            nowMs = nowMs,
+                            onToggle = { onToggleTool(tool.id) },
+                            onToolAction = { label -> onRowAction(tool.id, label) },
+                            onImageOpen = onImageOpen,
+                        )
+                    }
                 }
             }
         }
@@ -521,19 +763,30 @@ fun ToolGroupCard(
  * - 行首是**状态字形**：`✓`(完成) / `×`(失败) / `●`(运行中) / `○`(等待授权)；
  * - 名称 11.5sp 粗体；摘要 10.5sp 等宽、单行省略、`weight(1f)`；
  * - `+N` / `−N` 是**纯文字着色**（9.5sp 等宽），不套底色胶囊；
- * - 右端 `⋯` 打开操作菜单，`⌄` / `⌃` 折叠展开（仅完成且有详情时出现）；
+ * - 右端 `⋯` 打开操作菜单（**Miuix 下拉菜单**，与输入器底排同一组件），
+ *   `⌄` / `⌃` 折叠展开（仅完成且有详情时出现）；
  * - Bash 的命令**不放标题行**（原版注释：否则命令会出现两次），改为独立下一行；
  * - 折叠态只显示 `⎿ 摘要`（等宽、缩进 23dp），展开态才渲染全量输出。
  */
 @Composable
 private fun ToolRow(
     activity: ToolActivity,
+    nowMs: Long,
     onToggle: () -> Unit,
-    onActions: () -> Unit,
+    /** 这一行的菜单里选中了一项（参数是菜单文案）。 */
+    onToolAction: (String) -> Unit,
+    /** 展开态里的预览图被点开。 */
+    onImageOpen: (ChatImage) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
     val isCommand = activity.kind == ToolKind.COMMAND
-    val hasDetails = activity.output.isNotBlank()
+    // 引擎单独算好的统一 diff（写文件类工具才有）。它是**另一块井**，
+    // 和 output 并列显示，不是二选一 —— 见下面 EXPANDED 分支。
+    val hasDiff = activity.diff.isNotBlank()
+    // 预览也算"有详情"：一个只带截图、自述为空的工具同样应该能展开看那张图。
+    // 少了 `previews` 这一项，它会落在 `toolStatusRegion` 的 QUIET 分支上，
+    // 展开之后什么都不画 —— 图被静默吞掉，而且不会编译失败。
+    val hasDetails = activity.output.isNotBlank() || hasDiff || activity.previews.isNotEmpty()
     val showChevron = activity.completed && hasDetails
 
     /*
@@ -550,6 +803,10 @@ private fun ToolRow(
     val isFileDiff = remember(activity.toolName, activity.output) {
         activity.isFileDiff()
     }
+    // 命令行的折叠/展开两副面孔：展开时看**原始**命令，折叠时才用被截短的摘要。
+    // 恢复出来的历史工具没有 `command`（旧记录里没存），那时退回摘要 —— 有总比空着好。
+    val commandLine = if (activity.expanded && activity.command.isNotBlank()) activity.command
+    else activity.summary
     val collapsedSummary = remember(
         activity.kind,
         activity.output,
@@ -560,6 +817,19 @@ private fun ToolRow(
     ) {
         compactToolSummary(activity)
     }
+
+    // 这一行菜单的判据。构造规则只在 `ToolActions.flags` 一处实现（VM 分派动作时用的是
+    // 同一份），所以这里**不算**"有没有 diff"这类结论，只把结论喂进去：
+    // 输出本身是 diff（`ToolText.isFileDiff`）**或**引擎单独给了 diff（`activity.diff`）
+    // —— 两种情况菜单里都该有「复制 diff」，而后者以前是漏的。
+    val menuFlags = ToolActions.flags(
+        kind = activity.kind,
+        summary = activity.summary,
+        output = activity.output,
+        isFileDiff = isFileDiff || hasDiff,
+        completed = activity.completed,
+        expanded = activity.expanded,
+    )
 
     // 整行点击：Miuix Surface(onClick)（color = Transparent 不填色，仅取按压反馈）
     Surface(
@@ -618,38 +888,82 @@ private fun ToolRow(
             if (activity.additions > 0) DiffCount("+${activity.additions}", ZhiColors.green())
             if (activity.deletions > 0) DiffCount("−${activity.deletions}", ZhiColors.red())
 
-            // ⋯ 与 ⌄/⌃ 都转发到 Miuix IconButton（compact 覆盖其 40dp 最小尺寸）
-            ZhiIconButton(
-                icon = ZhiIcons.more,
-                description = "工具操作",
-                onClick = onActions,
-                tint = scheme.onSurfaceVariantSummary,
-                iconSize = 15.dp,
-                compact = 25.dp,
-            )
+            // ⋯ 的菜单内容只由 `ToolActions` 决定（判据的构造也在那里，界面与 VM 共用）：
+            // 这样"哪个状态该有哪些动作"只有一份实现，界面这边只负责把它渲染出来。
+            //
+            // ⚠️ `items` 必须 `remember`：`ZhiIconDropdownMenu` 内部按 `remember(items, …)`
+            // 缓存整份 `DropdownEntry`，而写在参数位置上的 `map { … }` 每次重组都是新的
+            // List 实例 —— 身份不等，那份缓存永远命不中，等于没做。
+            // key 取旗标与回调：旗标是 data class（按值比较），回调在 ToolGroupCard 里
+            // 捕获的是稳定值，两者跨重组都能命中。
+            val menuItems = remember(menuFlags, onToolAction) {
+                ToolActions.options(menuFlags).map { label ->
+                    ZhiMenuItem(text = label, onClick = { onToolAction(label) })
+                }
+            }
 
-            if (showChevron) {
-                ZhiIconButton(
-                    icon = if (activity.expanded) ZhiIcons.chevronUp else ZhiIcons.chevronDown,
-                    description = if (activity.expanded) "折叠输出" else "展开输出",
-                    onClick = onToggle,
+            // ⋯ 与 ⌄/⌃ 都转发到 Miuix IconButton。
+            //
+            // `⋯` 这一个走 **`ZhiIconDropdownMenu`**（= Miuix `OverlayIconDropdownMenu`），
+            // 与输入器底排的 `+`、权限、推理**同一个组件**：触发按钮自己持有展开态、
+            // 按下时进入 hold-down 态、面板由 Miuix 贴着按钮弹出。
+            //
+            // ⚠️ 以前这里是一个普通 `ZhiIconButton` + VM 里的一份 `choicePicker` 状态，
+            // 于是点它弹出来的是**屏幕中央的对话框**（`ChoiceIntent.TOOL_ACTION` 不在
+            // `isActionMenu` 的名单里，选择器被交给居中的 `ChoicePickerOverlay`）——
+            // 动作明明只作用于这一行，弹窗却出现在屏幕中央，位置与语义对不上。
+            // 现在展开态就在这一行自己的组合里，不需要任何坐标换算，也不会锚偏。
+            ZhiIconDropdownMenu(
+                items = menuItems,
+                minHeight = 25.dp,
+                minWidth = 25.dp,
+                cornerRadius = 12.5.dp,
+                // 透明底：底色是工具组那张 Card，触发按钮不该再画一层
+                backgroundColor = Color.Transparent,
+            ) {
+                Icon(
+                    painter = ZhiIcons.more,
+                    contentDescription = "工具操作",
                     tint = scheme.onSurfaceVariantSummary,
-                    iconSize = 14.dp,
-                    compact = 28.dp,
+                    // 横排 `⋯` 现在由**资源本身**保证（`ic_more_horiz` 就是三点横排）。
+                    //
+                    // 这里曾经写成 `ZhiIcons.more`（Miuix 的 `More`，竖排三点）再
+                    // `rotate(90f)` 假装横排 —— 靠旋转凑形状，而且旁边那个折叠箭头
+                    // 一转就跟着歪。换成 AOSP 的 `more_horiz` 之后旋转整段删掉。
+                    //
+                    // 尺寸 18dp：它是可点的控件，比状态图标（14dp）大一号
+                    // （反编译版是 `iconOnly(R.drawable.ic_more, 18, MUTED_2)`）。
+                    modifier = Modifier.size(18.dp),
                 )
             }
+
+            // ⚠️ 这里**没有**展开/收起箭头（用户：「⌃/⌄ 箭头可以去掉」）。
+            //
+            // 整行都是 `Surface(onClick = onToggle)`，点内容即可展开/收起；
+            // 输出区域自己也有 `点按展开` 的提示行（见下面 COLLAPSED 分支）。
+            // 参考实现的这一行到 `⋯` 为止，右端不再有第二个小图形。
+            //
+            // `showChevron` 仍然有用：它决定**有没有详情可展开**，
+            // 但那个判断现在只用于"输出区是否可点"，不再用来画图标。
         }
 
-        // Bash 命令：等宽、缩进，与图片里「命令在名称下方」一致
-        if (isCommand && activity.summary.isNotEmpty()) {
+        // Bash 命令：等宽、缩进，与图片里「命令在名称下方」一致。
+        //
+        // ⚠️ 展开态必须显示**完整**命令（`activity.command`），折叠态才用 `summary`
+        // （那是 `truncateCommand` + `shorten(190)` 的结果，只保证标题行不撑破）。
+        // 参考实现同样是 `item.expanded ? command : truncateCommand(command)` ——
+        // 一条 `&&` 串起来的多行脚本被截成前两行之后，用户没法核对它到底跑了什么。
+        if (isCommand && commandLine.isNotEmpty()) {
             Text(
-                text = "  " + activity.summary,
-                color = scheme.onSurfaceVariantSummary,
+                text = "  " + commandLine,
+                color = if (activity.expanded) scheme.onSurface else scheme.onSurfaceVariantSummary,
                 fontSize = ZhiTextScale.Footnote,
                 fontFamily = FontFamily.Monospace,
-                maxLines = 2,
+                // 展开时**不限制行数**：完整命令是用户主动要求看的，再截就等于没展开。
+                maxLines = if (activity.expanded) Int.MAX_VALUE else 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 23.dp),
+                // 反编译版：`setPadding(dp(22), 0, dp(4), dp(2))`
+                modifier = Modifier.padding(start = 22.dp),
             )
         }
 
@@ -663,46 +977,90 @@ private fun ToolRow(
             label = "tool-status",
         ) { region ->
             when (region) {
-                ToolStatusRegion.RUNNING -> Text(
-                    text = runningToolLabel(activity),
-                    color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Micro,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(start = 23.dp, top = 2.dp),
-                )
+                // 运行中：**终端井**（对齐反编译版 `addToolCard` 的 `else if (!item.completed)` 分支）。
+                //
+                // 只显示一个"运行中 · 00:12"是不够的 —— 一条跑两分钟都不吐字的命令与
+                // 一条正在刷日志的命令在界面上长得一模一样。所以这里整块做成一口井：
+                //
+                //   命令类（Bash/Root）: ● bash                     实时 00:12 · 标准输出 1.2 KB
+                //                        cd /… && npm run build          ← 命令行
+                //                        ─────────────────────────────   ← 分隔线
+                //                        [实时输出尾部 7 行]
+                //
+                //   其他工具          : 正在执行 00:03…
+                //                        ┌ [输出尾部 5000 字符] ┐
+                //
+                // 与反编译版的差别只有一处：它的首行是"圆点 + `bash` 字面量"，这里用
+                // `activity.displayName`（Root 命令也走同一条路，硬写 `bash` 会说谎）。
+                ToolStatusRegion.RUNNING -> RunningPanel(activity, nowMs, isCommand = isCommand)
                 ToolStatusRegion.COLLAPSED -> Text(
                     text = "  ⎿  " + collapsedSummary,
                     color = if (activity.failed) ZhiColors.red() else scheme.onSurfaceVariantSummary,
                     fontSize = ZhiTextScale.Footnote,
                     fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(start = 23.dp, bottom = 2.dp),
+                    modifier = Modifier.padding(start = 22.dp, bottom = 2.dp),
                 )
-                // 展开：全量输出。
+                // 展开：**两块井**，与参考实现 `addToolCard` 一致 ——
+                // 先 diff（`colorDiff(item.diff)` 画在 `TERMINAL_BG` 上，外距 23,3,0,4），
+                // 再 result（`TERMINAL_BG`，外 padding 22,2,4,4 + 内 8,6,8,6）。
+                // 不是二选一：写文件类工具的自述（"Wrote 505 bytes to …"）本身也有信息
+                // （字节数、目标路径），把它丢掉换成只有 diff 是**减信息**。
                 //
-                // 写文件类工具（Write / Edit / MultiEdit / Delete）的输出是**统一 diff**，
-                // 逐行着色渲染：+绿 / −红 / @@ 用强调色 / 文件头弱化。与「变更」面板共用
-                // `DiffLines`（`ui/panes/ChangesPane.kt`）—— 着色规则只有那一份，
-                // 否则同一份 diff 在对话里与变更面板里会长得不一样。
+                // 井的判据两路：`activity.diff`（引擎单独算的）优先，
+                // 其次才是"输出文本本身长得像 diff"（老记录 / 引擎没给 diff 的情况）。
                 //
-                // 左右不留给外层 Card：着色条要顶到卡片两边（像 diff 该有的样子），
+                // 左右不留给外层：着色条要顶到井两边（像 diff 该有的样子），
                 // 所以 insideMargin 只给上下；横向留白由每一行自己出（见 DiffLines）。
-                ToolStatusRegion.EXPANDED -> Card(
-                    modifier = Modifier.padding(start = 23.dp, top = 5.dp),
-                    cornerRadius = ZhiRadius.inner,
-                    insideMargin = if (isFileDiff) PaddingValues(vertical = 6.dp) else PaddingValues(8.dp),
-                    colors = CardDefaults.defaultColors(
-                        color = ZhiColors.cardInnerSurface(),
-                        contentColor = scheme.onSurfaceVariantSummary,
-                    ),
-                ) {
-                    if (isFileDiff) {
-                        DiffLines(activity.output)
-                    } else {
-                        // OutputLines 与 DiffLines 共用同一套「最多渲染 300 行 + 点按显示全部」
-                        // 的上限（见 ChangesPane.kt 的 MaxRenderedLines）：展开的输出最多
-                        // 40 000 字符，整段当一个 Text 放在单个 LazyColumn item 里，
-                        // 那个 item 会比视口还高，懒加载复用彻底失效。
-                        OutputLines(activity.output)
+                ToolStatusRegion.EXPANDED -> Column(modifier = Modifier.fillMaxWidth()) {
+                    // 富内容预览**排在最前**：本分支的顺序是「图片 → diff 井 → 输出井」。
+                    //
+                    // 为什么图在最前：沙箱截图是"发生了什么"最直接的证据，diff 与输出是细节。
+                    // 参考实现的展开态同样是先给最直观的那块（`addToolCard` 里 diff 井在
+                    // result 井之上）。
+                    //
+                    // 复用 `ZhiImageRow`（横向可滑 + 同高）而不是自己拼一行图：一串截图
+                    // 要能左右翻着比对，而它的可用宽度、长宽比夹取、跨项解码缓存都已经处理好了
+                    // （含"同一轴不能再套一层滚动"那条约束）。
+                    //
+                    // 缩进对齐 diff 井的 `start = 23.dp` —— 三块井的左缘在同一条竖线上。
+                    if (activity.previews.isNotEmpty()) {
+                        ZhiImageRow(
+                            images = activity.previews,
+                            onOpen = onImageOpen,
+                            modifier = Modifier.padding(start = 23.dp),
+                        )
+                    }
+                    val diffText = if (hasDiff) activity.diff else if (isFileDiff) activity.output else ""
+                    if (diffText.isNotBlank()) {
+                        Card(
+                            modifier = Modifier.padding(start = 23.dp, top = 5.dp),
+                            // 反编译版这里用的是 `round(TERMINAL_BG, 10)` —— `ZhiRadius.inner` 正是 10dp
+                            cornerRadius = ZhiRadius.inner,
+                            insideMargin = PaddingValues(vertical = 6.dp),
+                            colors = CardDefaults.defaultColors(
+                                color = ZhiColors.terminalSurface(),
+                                contentColor = scheme.onSurfaceVariantSummary,
+                            ),
+                        ) {
+                            DiffLines(diffText)
+                        }
+                    }
+                    if (activity.output.isNotBlank()) {
+                        Card(
+                            modifier = Modifier.padding(start = 23.dp, top = 5.dp),
+                            cornerRadius = ZhiRadius.inner,
+                            insideMargin = PaddingValues(8.dp),
+                            colors = CardDefaults.defaultColors(
+                                color = ZhiColors.terminalSurface(),
+                                contentColor = scheme.onSurfaceVariantSummary,
+                            ),
+                        ) {
+                            // OutputLines 与 DiffLines 共用同一套「最多渲染 300 行 + 点按显示全部」
+                            // 的上限（见 ui/chat/ToolOutputText.kt 的 MaxRenderedLines）：展开的输出最多
+                            // 40 000 字符，整段当一个 Text 放在单个 LazyColumn item 里，
+                            // 那个 item 会比视口还高，懒加载复用彻底失效。
+                            OutputLines(activity.output)
+                        }
                     }
                 }
                 ToolStatusRegion.QUIET -> Unit
@@ -713,8 +1071,155 @@ private fun ToolRow(
 }
 
 /**
- * 这条工具的输出该不该按 diff 渲染。
+ * 运行中那一块 —— **终端井**。
  *
+ * 对照反编译版 `addToolCard` 的运行分支（`~/.iqcode/.../MainActivity.java`）：
+ *
+ * ```java
+ * // 命令类
+ * LinearLayout panel = vbox();
+ * panel.setPadding(dp(10), dp(7), dp(10), dp(8));
+ * panel.setBackground(round(TERMINAL_BG, 10));
+ * panel.setLayoutParams(margins(dp(23), dp(4), 0, dp(4)));
+ *   ├─ 7×7 圆点（awaitingPermission ? MUTED_2 : ACCENT）
+ *   ├─ "bash" 标签 10.5f 等宽
+ *   ├─ [弹性]
+ *   ├─ runningToolLabel（右对齐、单行）
+ *   ├─ 命令行（未展开 → truncateCommand）
+ *   ├─ dividerHorizontal()
+ *   └─ liveOutputPreview(7000, 7 | 10 行)  或  "等待程序输出…"
+ *
+ * // 非命令类
+ * runningToolLabel（一行）
+ * + 输出尾部 5000 字符，padding(8,6,8,6)、round(TERMINAL_BG, 10)、margins(23,3,0,3)
+ * ```
+ *
+ * 为什么值得做成"一口井"而不只是一行字：这几行是**程序自己的原始输出**，
+ * 与上方"应用渲染出来的说明文字"是两种东西，底色方向（比页面更暗）就是这个区分本身。
+ *
+ * 增量刷新：反编译版只对 `liveOutputView.setText(...)` 做替换、不重建这张卡；
+ * 这边由 Compose 的重组承担（`remember` 的 key 只取真正会变的那两个字段，
+ * 不会因为 `elapsedMs` 每 500ms 变化而白算一遍）。
+ */
+@Composable
+private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean) {
+    val scheme = MiuixTheme.colorScheme
+    val live = remember(activity.kind, activity.output) { liveOutputPreview(activity) }
+    val label = runningToolLabel(activity, nowMs)
+
+    if (!isCommand) {
+        // 非命令类：计时一行 + 井里的输出尾部。它们多数只吐一段文本（读到的片段、
+        // 搜索结果），没有"行"结构，所以按字符取尾部（见 liveOutputPreview）。
+        Column(modifier = Modifier.padding(start = 23.dp, top = 2.dp)) {
+            Text(
+                text = label,
+                color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
+                fontSize = ZhiTextScale.Micro,
+                fontFamily = FontFamily.Monospace,
+            )
+            if (live.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.padding(top = 3.dp, bottom = 3.dp),
+                    cornerRadius = ZhiRadius.inner,
+                    insideMargin = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                    colors = CardDefaults.defaultColors(
+                        color = ZhiColors.terminalSurface(),
+                        contentColor = scheme.onSurfaceVariantSummary,
+                    ),
+                ) {
+                    Text(
+                        text = live,
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = ZhiTextScale.Micro,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 12,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        return
+    }
+
+    Card(
+        // margins(23, 4, 0, 4)
+        modifier = Modifier.padding(start = 23.dp, top = 4.dp, bottom = 4.dp),
+        cornerRadius = ZhiRadius.inner,
+        // padding(10, 7, 10, 8)
+        insideMargin = PaddingValues(start = 10.dp, top = 7.dp, end = 10.dp, bottom = 8.dp),
+        colors = CardDefaults.defaultColors(
+            color = ZhiColors.terminalSurface(),
+            contentColor = scheme.onSurfaceVariantSummary,
+        ),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().height(22.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 7×7 的圆点：运行中是强调色，等授权时变灰（"停住了"）。
+                // 用 Box + background 而不是字符 ●，理由与状态字形一致：字形依赖字体。
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .background(
+                            color = if (activity.awaitingPermission) scheme.onSurfaceVariantSummary else scheme.primary,
+                            shape = RoundedCornerShape(4.dp),
+                        ),
+                )
+                Text(
+                    text = activity.displayName,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Micro,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 7.dp),
+                )
+                Box(modifier = Modifier.weight(1f))
+                Text(
+                    text = if (activity.awaitingPermission) "等待授权…" else label,
+                    color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Micro,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                )
+            }
+            // 命令行：未展开时截断（与完成态同一套 `truncateCommand`），
+            // 这样"跑的是什么"在这块井里也看得见，不必先去点一下 ⌄。
+            if (activity.command.isNotBlank()) {
+                Text(
+                    text = ToolText.truncateCommand(activity.command),
+                    color = scheme.onSurface,
+                    fontSize = ZhiTextScale.Micro,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 1.dp, bottom = 7.dp),
+                )
+            }
+            ZhiHorizontalDivider(modifier = Modifier.fillMaxWidth())
+            val body = if (live.isNotEmpty()) live
+            else if (activity.awaitingPermission) "等待授权…"
+            else "等待程序输出…"
+            Text(
+                text = body,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = ZhiTextScale.Micro,
+                fontFamily = FontFamily.Monospace,
+                // 实时区只按行数控制高度（见 `LiveOutput.preview`）：
+                // 一行很长的编译命令折成三行会把工具行顶得很高，而这几行的
+                // 用途只是"看见它在动"。
+                maxLines = 12,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+    }
+}
+
+/**
+ * 这条工具的输出该不该按 diff 渲染。 *
  * <p>判据在 [ToolText.isFileDiff]（纯函数、有单测）：既要工具是写文件的，
  * **也要**输出真的是 diff —— 写入失败时输出是一行错误文本，
  * 按工具名着色会把那行错误画成 diff 配色，比不着色更误导。
@@ -734,19 +1239,19 @@ private fun ToolStatusGlyph(activity: ToolActivity) {
     Box(modifier = Modifier.width(23.dp), contentAlignment = Alignment.Center) {
         when {
             activity.completed && activity.failed -> Icon(
-                imageVector = ZhiIcons.failed,
+                painter = ZhiIcons.failed,
                 contentDescription = "失败",
                 tint = ZhiColors.red(),
                 modifier = Modifier.size(13.dp),
             )
             activity.completed -> Icon(
-                imageVector = ZhiIcons.done,
+                painter = ZhiIcons.done,
                 contentDescription = "完成",
                 tint = ZhiColors.green(),
                 modifier = Modifier.size(13.dp),
             )
             activity.awaitingPermission -> Icon(
-                imageVector = ZhiIcons.awaiting,
+                painter = ZhiIcons.awaiting,
                 contentDescription = "等待授权",
                 tint = scheme.primary,
                 modifier = Modifier.size(13.dp),
@@ -758,10 +1263,74 @@ private fun ToolStatusGlyph(activity: ToolActivity) {
 }
 
 /** 运行中/等待授权的说明文字，对应原版 `runningToolLabel()`。 */
-private fun runningToolLabel(activity: ToolActivity): String = when {
-    activity.awaitingPermission -> "等待授权…"
-    activity.elapsedMs > 0 -> "运行中 · ${formatElapsed(activity.elapsedMs)}"
-    else -> "运行中…"
+/**
+ * 运行中/等待授权的说明文字，对应原版 `runningToolLabel()`。
+ *
+ * `nowMs` 是界面侧时钟（见 [rememberRunningClock]）。耗时取「起点至今」与「引擎推送值」
+ * 的较大者 —— 引擎那个值只在有输出时更新，光用它会让长时间不吐字的命令看起来卡死。
+ * 取值规则在 [ToolActions.displayElapsedMs]（纯逻辑、有单测）。
+ *
+ * 命令类工具额外报出**输出体量**（`实时 00:12 · 标准输出 12.3 KB · 错误输出 0 B · 进程运行中`）：
+ * 字符数是单调递增的，即使屏幕上那几行没变，这一项也在动 —— 它同时回答了
+ * "到底有没有在产出"和"错误输出是不是在涨"。
+ */
+private fun runningToolLabel(activity: ToolActivity, nowMs: Long): String {
+    if (activity.awaitingPermission) return "等待授权…"
+    val display = ToolActions.displayElapsedMs(activity.elapsedMs, activity.startedAtMs, nowMs)
+    val clock = if (display > 0) ToolText.formatElapsed(display) else ""
+    return when {
+        activity.kind != ToolKind.COMMAND ->
+            if (clock.isEmpty()) "正在执行…" else "正在执行 $clock…"
+        clock.isEmpty() -> "实时 · ${LiveOutput.volume(activity.stdoutChars, activity.stderrChars)} · 进程运行中"
+        else -> "实时 $clock · ${LiveOutput.volume(activity.stdoutChars, activity.stderrChars)} · 进程运行中"
+    }
+}
+
+/**
+ * 运行中要在行内摊出来的实时输出。
+ *
+ * 两种取法对应参考实现的两个函数（`MainActivity.liveOutputPreview` / `liveOutputTail`）：
+ * - **命令类**（Bash / Root）按"最后 7 行、最多 7000 字符"取 —— 命令的输出是**行**结构，
+ *   按行取才看得出跑到哪一步了；
+ * - **其他工具**按"尾部 5000 字符"取 —— 它们多数只吐一段文本（读到的片段、搜索结果），
+ *   没有"行"的概念，硬按行裁会把内容切碎。
+ *
+ * 参考实现在宽屏下按 10 行取。这里固定 7 行：`wide` 要一路从 `ChatArea` 穿过
+ * `ChatList` / `ToolGroupCard` / `ToolRow` 四层，而差别只是横屏多三行 ——
+ * 横向空间的价值在别处，不值得为它铺一条参数通道。
+ *
+ * 裁剪与"省略提示"都在 [LiveOutput]（纯逻辑、有单测）。
+ */
+private fun liveOutputPreview(activity: ToolActivity): String {
+    val text = activity.output
+    if (text.isEmpty()) return ""
+    return if (activity.kind == ToolKind.COMMAND) {
+        LiveOutput.preview(text, maxChars = 7_000, maxLines = 7)
+    } else {
+        LiveOutput.tail(text, maxChars = 5_000)
+    }
+}
+
+/**
+ * 运行中的刷新时钟：每 [periodMs] 返回一个新的「现在」。
+ *
+ * [active] 为 false 时**不排队下一次** —— 参考实现也是这么做的
+ * （`refreshToolElapsed` 只有在仍存在未完成工具时才重新 post），
+ * 否则一个常驻的定时器会一直触发重组。
+ */
+@Composable
+private fun rememberRunningClock(active: Boolean, periodMs: Long = 500L): Long {
+    var now by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(active) {
+        if (!active) return@LaunchedEffect
+        while (true) {
+            delay(periodMs)
+            // 与 `ToolActivity.startedAtMs` 同一个时钟：混用墙上时钟与单调时钟会让
+            // "现在 - 起点"在改过系统时间之后变成一个无意义的差值。
+            now = SystemClock.elapsedRealtime()
+        }
+    }
+    return now
 }
 
 /**
@@ -774,7 +1343,10 @@ private enum class ToolStatusRegion { RUNNING, COLLAPSED, EXPANDED, QUIET }
 
 private fun toolStatusRegion(activity: ToolActivity): ToolStatusRegion = when {
     !activity.completed -> ToolStatusRegion.RUNNING
-    activity.output.isBlank() -> ToolStatusRegion.QUIET
+    // ⚠️ 判据必须带上 `previews`。只判 output 的话，一个"只有截图、自述为空"的工具会
+    // 落进 QUIET，而 QUIET 分支是 `-> Unit`（什么都不画）—— 于是预览被静默吞掉。
+    // 沙箱截图目前总是带一段 JSON 自述所以碰不到，但那是**巧合**不是保证。
+    activity.output.isBlank() && activity.previews.isEmpty() -> ToolStatusRegion.QUIET
     activity.expanded -> ToolStatusRegion.EXPANDED
     else -> ToolStatusRegion.COLLAPSED
 }
@@ -788,6 +1360,13 @@ private fun toolStatusRegion(activity: ToolActivity): ToolStatusRegion = when {
  * - 其他工具：单行且够短就直接显示，否则 `N 行 · 点按展开`
  */
 private fun compactToolSummary(activity: ToolActivity): String {
+    // 预览图**优先**说。沙箱截图那类工具的自述是一大段 JSON，若走到下面的行数分支
+    // 会显示成"28 行 · 点按展开" —— 用户完全看不出这里有一张截图可看，
+    // 而这恰恰是它最该被发现的地方。所以它排在行数与退出码之前。
+    if (activity.previews.isNotEmpty()) {
+        return "${activity.previews.size} 张图 · 点按展开"
+    }
+
     val changed = activity.additions + activity.deletions
     if (changed > 0) return "$changed 行已修改 · 点按展开"
 
@@ -816,7 +1395,7 @@ private fun compactToolSummary(activity: ToolActivity): String {
     if (activity.kind == ToolKind.COMMAND) {
         val failedExit = activity.failed || (activity.exitCode != null && activity.exitCode != 0)
         if (failedExit) {
-            val why = firstUsefulErrorLine(text)
+            val why = ErrorSummary.firstUsefulLine(text)
             val code = activity.exitCode ?: 1
             return buildString {
                 append("退出码 ").append(code)
@@ -829,30 +1408,6 @@ private fun compactToolSummary(activity: ToolActivity): String {
 
     if (lineCount == 1 && hi - lo <= 96) return text.substring(lo, hi)
     return "$lineCount 行 · 点按展开"
-}
-
-/**
- * 取第一条有用的错误行，对应原版 `firstUsefulErrorLine()`。
- *
- * 同样不 `split`、不建中间数组：按下标逐行扫，遇到第一条非空白行就把它
- * **按 `trim()` 的边界**取出来（也就是去掉这行自己的首尾空白）。
- * 每行的空白判据用 `Char.isWhitespace()`，与 Kotlin 的 `String.trim()` 一致。
- */
-private fun firstUsefulErrorLine(text: String): String {
-    var start = 0
-    val n = text.length
-    while (start <= n) {
-        var end = text.indexOf('\n', start)
-        if (end < 0) end = n
-        var lo = start
-        var hi = end
-        while (lo < hi && text[lo].isWhitespace()) lo++
-        while (hi > lo && text[hi - 1].isWhitespace()) hi--
-        if (lo < hi) return text.substring(lo, hi)
-        if (end >= n) break
-        start = end + 1
-    }
-    return ""
 }
 
 /** 行内 diff 计数：原版是**纯文字着色**（9.5sp 等宽），没有底色胶囊。 */
@@ -923,10 +1478,8 @@ fun InfoCard(item: ChatItem) {
 }
 
 
-private fun formatElapsed(millis: Long): String {
-    if (millis <= 0) return "0.0s"
-    val seconds = millis / 1000.0
-    if (seconds < 60) return String.format(java.util.Locale.US, "%.1fs", seconds)
-    val minutes = (seconds / 60).toInt()
-    return "$minutes:${String.format(java.util.Locale.US, "%04.1f", seconds % 60)}"
-}
+// 这里曾经有一个私有的 `formatElapsed`，输出的是 `7.0s` / `1:04.2` —— 现在已经删掉：
+// 参考实现（IQ Code `MainActivity.formatElapsed`）是 `01:04`（分:秒，≥1 小时才带小时位），
+// 而 `ToolText.formatElapsed` 早就是那一份了，只是没人调用它（于是两版截图对不上秒数格式）。
+// 耗时显示统一走 `ToolText.formatElapsed`，不再留第二份实现。
+

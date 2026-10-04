@@ -52,12 +52,13 @@ fun EnvironmentOverlay(
     OverlayDialog(
         show = open,
         onDismissRequest = onDismiss,
-        largeScreen = true,
         maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
-        if (!open) return@OverlayDialog
+        // 原来这里有一句 `if (!open) return@OverlayDialog`：它会在关窗那一瞬间把内容
+        // 全拆掉，退场那 250~260ms 能看到的就只是一张空壳在缩。`report` / `message`
+        // 这些字段关闭时并不清（见 closeEnvironment），直接让它继续画就行。
         DialogShell(
             title = "环境自检",
             fillBody = true,
@@ -69,7 +70,7 @@ fun EnvironmentOverlay(
                     cornerRadius = ZhiRadius.floating,
                 ) {
                     Icon(
-                        imageVector = ZhiIcons.close,
+                        painter = ZhiIcons.close,
                         contentDescription = "关闭环境自检",
                         tint = scheme.onSurfaceVariantSummary,
                         modifier = Modifier.size(16.dp),

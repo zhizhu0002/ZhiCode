@@ -30,19 +30,20 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.ModelOption
 import com.zhizhu.zhicode.compose.model.ModelPickerState
+import com.zhizhu.zhicode.compose.model.QuotaRow
+import com.zhizhu.zhicode.compose.ui.ZhiUsageBar
 import com.zhizhu.zhicode.compose.ui.ZhiLoadingIndicator
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSectionLabel
 import com.zhizhu.zhicode.compose.ui.ZhiSegmentedTabs
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.basic.Search
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -115,7 +116,10 @@ fun ModelPickerOverlay(
     onSelectProfile: (String) -> Unit,
     onUse: (String) -> Unit,
     onAddApi: () -> Unit,
+    onRefreshQuota: () -> Unit,
 ) {
+    // 退场时 `picker` 已经是 null，内容不能跟着空掉（见 rememberLastNonNull）。
+    val shownPicker = rememberLastNonNull(picker)
     OverlayBottomSheet(
         show = picker != null,
         onDismissRequest = onDismiss,
@@ -124,7 +128,7 @@ fun ModelPickerOverlay(
         // ⚠️ `backgroundColor` 尤其不要动：默认的 `background` 就是官方示例里的背板色，
         // 卡片之所以要显式传 `secondaryContainer`，正是为了跟它**拉开**一档。
     ) {
-        val current = picker ?: return@OverlayBottomSheet
+        val current = shownPicker ?: return@OverlayBottomSheet
         ModelPickerBody(
             picker = current,
             onQueryChange = onQueryChange,
@@ -132,6 +136,7 @@ fun ModelPickerOverlay(
             onSelectProfile = onSelectProfile,
             onUse = onUse,
             onAddApi = onAddApi,
+            onRefreshQuota = onRefreshQuota,
         )
     }
 }
@@ -382,6 +387,7 @@ private fun ModelPickerLoaded(
     picker: ModelPickerState,
     listMaxHeight: Dp,
     onPickModel: (String) -> Unit,
+    onRefreshQuota: () -> Unit,
 ) {
     // 列表直接铺 `models`。这里曾经有一层搜索过滤（`visibleModels`），已按用户要求
     // 去掉；去掉之后 `search` / `visibleModels` / `setModelSearch` 就是死代码，
@@ -390,6 +396,19 @@ private fun ModelPickerLoaded(
 
     // 铺满调用方给的那块区域（它是定高列里的 weight 区，所以高度有界）。
     Column(modifier = Modifier.fillMaxSize()) {
+        // 额度卡片在列表**上面**：它是"我现在还剩多少"，比"我能选哪些"更该先看到。
+        //
+        // 读不到额度时卡片**照样要出现**（只是内容换成原因）：额度是个网络请求，
+        // 失败很正常，而"卡片不见了"和"额度是 0"在界面上分不出来 ——
+        // 用户会以为自己没套餐。留着卡片才能看见原因，也才有那个「刷新」可点。
+        if (picker.quota.isNotEmpty() || picker.quotaError.isNotEmpty()) {
+            QuotaCard(
+                quota = picker.quota,
+                error = picker.quotaError,
+                onRefresh = onRefreshQuota,
+                modifier = Modifier.padding(bottom = PickerGroupSpacing),
+            )
+        }
         // 分组标题在卡片**外面**（官方示例就是这样）。
         //
         // ## 为什么这里没有折叠箭头、没有吸顶分组头、没有底部提供方跳转条
@@ -403,7 +422,7 @@ private fun ModelPickerLoaded(
         // 跳转条没有任何目标可跳，吸顶也没有第二种分组要区分。
         // **画一个点了没用的控件比不画更糟** —— 用户会去点它，然后以为应用坏了。
         ZhiSectionLabel(
-            text = "${picker.profileName} · ${picker.models.size} 个模型",
+            text = "${picker.profileName} · ${picker.models.size} 个模型${picker.modelsNote}",
             insideMargin = PickerSectionInsideMargin,
         )
         ModelList(
@@ -418,6 +437,101 @@ private fun ModelPickerLoaded(
     }
 }
 
+/**
+ * 套餐额度卡片（目前只有 ZCode 用得上）。
+ *
+ * ## 为什么数字与倒计时都由状态里带过来
+ *
+ * 这一行显示的是 `剩余 / 总量`、进度条比例、以及「剩 3:12 重置」这样的文案。
+ * 单位换算（万/亿）与倒计时的分档规则属于**协议知识**，只有一处实现
+ * （`ZcodeWire.formatUnits` / `formatCountdown`）。界面若自己再算一遍，
+ * 两处迟早会不一致 —— 而那种不一致表现为"两个地方数字不一样"，最难判哪个对。
+ *
+ * ## 为什么卡片里必须有「刷新」
+ *
+ * 额度是会被消耗的（也可能是别人在别处用掉的）。面板打开时拉一次之后，
+ * 用户看着一个不再变化的数字会以为它坏了。给一个明确的刷新入口，
+ * 比"每次展开都偷偷重拉"更好：后者会让用户在读数字时它突然跳一下。
+ *
+ * 顺带：额度读不到时卡片**不消失**，只是把 [error] 那句原因显示出来 ——
+ * 有那张卡片在，「刷新」才有个可点的地方。
+ */
+@Composable
+private fun QuotaCard(
+    quota: List<QuotaRow>,
+    error: String,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MiuixTheme.colorScheme
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        // 与模型行同一套令牌入口（`defaultColors(color=…)`）：卡片的底色必须显式传，
+        // 否则默认值与 sheet 背板同值，整张卡在背板上看不出来。
+        colors = CardDefaults.defaultColors(color = scheme.secondaryContainer),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "套餐额度",
+                    color = scheme.onBackground,
+                    fontSize = ZhiTextScale.Subheading,
+                    modifier = Modifier.weight(1f),
+                )
+                // 文案是动作而不是状态，所以用 SecondaryButton 而不是可点的文字：
+                // 可点文字在这套面板里没有可辨识的按下反馈。
+                SecondaryButton(text = "刷新", onClick = onRefresh)
+            }
+            if (quota.isEmpty() && error.isNotEmpty()) {
+                // 一行说明而不是一个空卡片：用户要的是"为什么没有数字"。
+                // 原文由协议层/数据层截断过（见 ModelCatalogStore.quotaFailureText）。
+                Text(
+                    text = error,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = ZhiTextScale.Footnote,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                )
+            }
+            quota.forEachIndexed { index, row ->
+                // 第一行与标题之间留一点空隙，行与行之间留得少一些。
+                val top = if (index == 0) 12.dp else 12.dp
+                Column(modifier = Modifier.fillMaxWidth().padding(top = top)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = row.name,
+                            color = scheme.onBackground,
+                            fontSize = ZhiTextScale.Body,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = "${row.remaining} / ${row.total}",
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = ZhiTextScale.Footnote,
+                        )
+                    }
+                    ZhiUsageBar(
+                        fraction = row.fraction,
+                        height = 4.dp,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    Text(
+                        text = row.resetLabel,
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = ZhiTextScale.Footnote,
+                        modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ModelPickerBody(
     picker: ModelPickerState,
@@ -426,6 +540,7 @@ private fun ModelPickerBody(
     onSelectProfile: (String) -> Unit,
     onUse: (String) -> Unit,
     onAddApi: () -> Unit,
+    onRefreshQuota: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
 
@@ -482,6 +597,7 @@ private fun ModelPickerBody(
                     picker = picker,
                     listMaxHeight = listMaxHeight,
                     onPickModel = onPickModel,
+                    onRefreshQuota = onRefreshQuota,
                 )
             }
         }

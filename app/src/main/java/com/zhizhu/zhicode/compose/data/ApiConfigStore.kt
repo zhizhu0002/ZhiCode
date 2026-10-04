@@ -42,6 +42,7 @@ internal object ApiConfigStore {
             it.protocol = draft.protocol.toEngineProtocol()
             it.baseUrl = draft.baseUrl.trim()
             it.defaultModel = draft.model.trim()
+            it.extraHeaders = draft.extraHeaders.trim()
         }
         val replaceKey = !draft.isEditing || draft.apiKey.isNotBlank()
         val saved = store.saveProfile(target, draft.apiKey, replaceKey)
@@ -104,18 +105,27 @@ internal object ApiConfigStore {
         // 密钥**故意不回填**：界面上不该出现已保存的密钥。
         apiKey = "",
         model = defaultModel,
+        extraHeaders = extraHeaders,
     )
 
     /**
      * 协议字符串 ↔ 枚举。
      *
-     * 引擎里还存在 `codex-responses` / `openai-compatible` 这类历史别名
-     * （见 `ModelProviders.forConfig`），映射不回显式选项时归到最接近的一项，
+     * 引擎里还有一个真正的历史别名 `openai-compatible`（自建/第三方网关常用）——
+     * 它与 `openai-chat` 报文完全一致，所以映射不回显式选项时归到最接近的一项，
      * 避免把用户的旧配置显示成"未知"。
+     *
+     * ⚠️ `codex-responses` **不在此列**：它曾经也被当成别名（"报文格式与主名完全
+     * 一致"），但那是错的 —— 端点、UA、四个关联头、请求体字段都不同（见
+     * `OpenAIResponsesProvider` 的类注释）。把它归到 `OPENAI_RESPONSES` 的后果是
+     * 用户**在协议下拉里根本选不到 Codex**，于是引擎里那条已经实现并测过的分支
+     * 永远点不亮。现在是两边各有一个显式取值。
      */
     private fun String.toUiProtocol(): ApiProtocol = when (lowercase()) {
         "anthropic" -> ApiProtocol.ANTHROPIC
         "openai-chat", "openai-compatible" -> ApiProtocol.OPENAI_CHAT
+        "codex-responses" -> ApiProtocol.CODEX_RESPONSES
+        "zcode" -> ApiProtocol.ZCODE
         // 调试配置在发布包里也要能**显示**出来（它可能已经被写进设置）。
         // 认不出来会被回落成 OPENAI_RESPONSES，用户会看到一条"看着正常、
         // 却怎么都调不通"的配置 —— 那不是更糟，而是更难查。
@@ -127,6 +137,10 @@ internal object ApiConfigStore {
         ApiProtocol.OPENAI_RESPONSES -> "openai-responses"
         ApiProtocol.OPENAI_CHAT -> "openai-chat"
         ApiProtocol.ANTHROPIC -> "anthropic"
+        // 必须逐字是引擎的线上名，否则引擎会当作未知协议拒绝（那是一条已经
+        // 实现好的 Codex 分支，写错一个字符就永远走不到）。
+        ApiProtocol.CODEX_RESPONSES -> "codex-responses"
+        ApiProtocol.ZCODE -> "zcode"
         ApiProtocol.DEBUG_SCRIPTED -> "debug-scripted"
     }
 }

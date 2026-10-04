@@ -33,11 +33,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
@@ -78,7 +80,7 @@ import com.zhizhu.zhicode.compose.ui.chat.AssistantCard
 import com.zhizhu.zhicode.compose.ui.chat.EmptyState
 import com.zhizhu.zhicode.compose.ui.chat.ErrorCard
 import com.zhizhu.zhicode.compose.ui.chat.InfoCard
-import com.zhizhu.zhicode.compose.ui.chat.ToolGroupCard
+import com.zhizhu.zhicode.compose.ui.chat.ToolBatch
 import com.zhizhu.zhicode.compose.ui.chat.UserBubble
 import com.zhizhu.zhicode.compose.ui.composer.Composer
 import com.zhizhu.zhicode.compose.ui.rememberFingerTracker
@@ -115,8 +117,6 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
-import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.CheckboxPreference
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
@@ -193,7 +193,7 @@ fun UiDebugPage(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
-                            imageVector = MiuixIcons.Back,
+                            painter = ZhiIcons.back,
                             contentDescription = "返回",
                             tint = scheme.onBackground,
                         )
@@ -414,16 +414,24 @@ private class DebugConversation {
         note("展开/折叠工具输出 · $toolId")
     }
 
-    fun toggleGroup(msgId: String, expanded: Boolean) {
+    /**
+     * 展开/收起一个折叠组（界面上是点组表头）。
+     *
+     * 展开态记在 `expandedGroups` 上，所以这里只改那一个集合 —— 不去动成员的
+     * `expanded`（那个管的是"这条工具的输出展开"）。顺便把整批的工具输出都摊开/收起，
+     * 因为调试页要的是"看清楚每一条"。
+     */
+    fun toggleGroup(msgId: String, groupKey: String) {
         updateMsg(msgId) { item ->
+            val open = groupKey in item.expandedGroups
             item.copy(
-                groupCompleted = expanded,
+                expandedGroups = if (open) item.expandedGroups - groupKey else item.expandedGroups + groupKey,
                 tools = item.tools.map { tool ->
-                    if (tool.completed && tool.output.isNotBlank()) tool.copy(expanded = expanded) else tool
+                    if (tool.completed && tool.output.isNotBlank()) tool.copy(expanded = !open) else tool
                 },
             )
         }
-        note(if (expanded) "展开全部工具输出" else "折叠全部工具输出")
+        note("切换折叠组 · $groupKey")
     }
 
     fun toggleImage(id: String) {
@@ -497,7 +505,6 @@ private class DebugConversation {
                     item = ChatItem(
                         id = id,
                         kind = ChatKind.TOOL_GROUP,
-                        groupLabel = "执行 1 项",
                         tools = listOf(tool),
                     ),
                 ),
@@ -507,7 +514,6 @@ private class DebugConversation {
                 item.copy(
                     tools = item.tools + tool,
                     groupCompleted = false,
-                    groupLabel = "执行 ${item.tools.size + 1} 项",
                 )
             }
         }
@@ -707,7 +713,6 @@ private fun initialSamples(): List<DebugItem> = listOf(
         item = ChatItem(
             id = "dbg-tools-0",
             kind = ChatKind.TOOL_GROUP,
-            groupLabel = "搜索 1 个模式 · 读取 2 个文件 · 编辑 2 个文件 · 执行 2 条命令",
             groupCompleted = false,
             tools = listOf(
                 ToolActivity(
@@ -843,13 +848,12 @@ private fun initialSamples(): List<DebugItem> = listOf(
             contextWindow = 200_000,
         ),
     ),
-    // 全部完成的工具组：标题走「已运行 N 个工具」那条分支，且没有运行中的行。
+    // 全部完成的工具组：组标题走「已读取 N 个文件」那条分支，且没有运行中的行。
     DebugItem.Msg(
         id = "dbg-tools-completed",
         item = ChatItem(
             id = "dbg-tools-completed",
             kind = ChatKind.TOOL_GROUP,
-            groupLabel = "读取 2 个文件 · 其他 1 项",
             groupCompleted = true,
             tools = listOf(
                 ToolActivity(
@@ -888,13 +892,12 @@ private fun initialSamples(): List<DebugItem> = listOf(
             ),
         ),
     ),
-    // 单工具组（组里只有一条）：确认"一个工具"时标题不会写成复数、卡片高度不塌。
+    // 单工具组（组里只有一条）：确认单条**不成组**时不会画出组标题、卡片高度不塌。
     DebugItem.Msg(
         id = "dbg-tools-single",
         item = ChatItem(
             id = "dbg-tools-single",
             kind = ChatKind.TOOL_GROUP,
-            groupLabel = "执行 1 条命令",
             groupCompleted = true,
             tools = listOf(
                 ToolActivity(
@@ -1051,31 +1054,63 @@ private fun RadiusAndIconSection() {
         "inner 10" to ZhiRadius.inner,
         "square 4" to ZhiRadius.square,
     )
+    // 图标**全集**：一屏逐个核对"这个图标是不是这件事该有的样子"。
+    // 换图标集之后这张表就是唯一的人工验收入口 —— 编译器能保证资源存在、
+    // 守卫能保证映射不变，但"好不好看、像不像"只能靠眼睛（见 IconSetTest 的说明）。
     val icons = listOf(
         "menu" to ZhiIcons.menu,
+        "theme" to ZhiIcons.theme,
+        "floatingBall" to ZhiIcons.floatingBall,
         "settings" to ZhiIcons.settings,
+        "chat" to ZhiIcons.chat,
+        "changes" to ZhiIcons.changes,
+        "terminal" to ZhiIcons.terminal,
+        "files" to ZhiIcons.files,
         "newSession" to ZhiIcons.newSession,
+        "projectHistory" to ZhiIcons.projectHistory,
         "projectPath" to ZhiIcons.projectPath,
-        "skill" to ZhiIcons.skill,
         "roleCard" to ZhiIcons.roleCard,
+        "skill" to ZhiIcons.skill,
         "sandbox" to ZhiIcons.sandbox,
         "runtime" to ZhiIcons.runtime,
         "attach" to ZhiIcons.attach,
         "send" to ZhiIcons.send,
         "stop" to ZhiIcons.stop,
+        "arrowRight" to ZhiIcons.arrowRight,
         "close" to ZhiIcons.close,
         "edit" to ZhiIcons.edit,
-        "collapse" to ZhiIcons.collapse,
         "expand" to ZhiIcons.expand,
+        "collapse" to ZhiIcons.collapse,
         "refresh" to ZhiIcons.refresh,
         "info" to ZhiIcons.info,
+        "clear" to ZhiIcons.clear,
+        "back" to ZhiIcons.back,
         "more" to ZhiIcons.more,
-        "chevronDown" to ZhiIcons.chevronDown,
+        "moreVert" to ZhiIcons.moreVert,
+        "search" to ZhiIcons.search,
+        "add" to ZhiIcons.add,
         "done" to ZhiIcons.done,
         "failed" to ZhiIcons.failed,
         "pending" to ZhiIcons.pending,
         "awaiting" to ZhiIcons.awaiting,
+        "directory" to ZhiIcons.directory,
         "file" to ZhiIcons.file,
+        "delete" to ZhiIcons.delete,
+        "image" to ZhiIcons.image,
+        "check" to ZhiIcons.check,
+        // 设置行的行首图标（小米设置观感）。它们单看只是普通字形，
+        // 真正的观感在 `SettingsIconPlate` 那块彩色底上 —— 所以这十张要连同
+        // 设置页一起看，而不是只看这里。
+        "cloud" to ZhiIcons.cloud,
+        "listCount" to ZhiIcons.listCount,
+        "timeout" to ZhiIcons.timeout,
+        "link" to ZhiIcons.link,
+        "tune" to ZhiIcons.tune,
+        "lock" to ZhiIcons.lock,
+        "compress" to ZhiIcons.compress,
+        "keyboard" to ZhiIcons.keyboard,
+        "mindMap" to ZhiIcons.mindMap,
+        "layers" to ZhiIcons.layers,
     )
 
     DebugSection("设计令牌 · 圆角与图标", "圆角取自 ZhiRadius；图标是 ZhiIcons 全集") {
@@ -1108,16 +1143,26 @@ private fun RadiusAndIconSection() {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    row.forEach { (_, icon) ->
+                    row.forEach { (name, icon) ->
                         Column(
                             modifier = Modifier.weight(1f),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Icon(
-                                imageVector = icon,
+                                painter = icon,
                                 contentDescription = null,
                                 tint = scheme.onBackground,
                                 modifier = Modifier.size(18.dp),
+                            )
+                            // 名字必须画出来：这张表的用途就是"逐个核对语义"，
+                            // 只有图形的话看的人得先猜这是哪个键。
+                            Text(
+                                text = name,
+                                color = scheme.onSurfaceVariantSummary,
+                                fontSize = ZhiTextScale.Micro,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 3.dp),
                             )
                         }
                     }
@@ -1312,7 +1357,7 @@ private fun PreferenceSection() {
             summary = "行尾自带 ›，入口型设置项",
             startAction = {
                 Icon(
-                    imageVector = ZhiIcons.projectPath,
+                    painter = ZhiIcons.projectPath,
                     contentDescription = null,
                     tint = scheme.onBackground,
                 )
@@ -1468,7 +1513,7 @@ private fun DebugApiSection(state: WorkspaceUiState, viewModel: WorkspaceViewMod
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = if (isDebugProfile) ZhiIcons.done else ZhiIcons.info,
+                    painter = if (isDebugProfile) ZhiIcons.done else ZhiIcons.info,
                     contentDescription = null,
                     tint = if (isDebugProfile) ZhiColors.green() else scheme.onSurfaceVariantSummary,
                     modifier = Modifier.size(14.dp),
@@ -1941,14 +1986,14 @@ private fun ConversationSection(resetToken: Int) {
                                         feed.note("长按 · 助手回复")
                                     },
                                 )
-                                ChatKind.TOOL_GROUP -> ToolGroupCard(
+                                ChatKind.TOOL_GROUP -> ToolBatch(
                                     item = item,
                                     onToggleTool = { toolId -> feed.toggleTool(item.id, toolId) },
-                                    onToggleGroup = { expanded -> feed.toggleGroup(item.id, expanded) },
-                                    onActions = {
+                                    onToggleGroup = { groupKey -> feed.toggleGroup(item.id, groupKey) },
+                                    onToolAction = { toolId, label ->
                                         fingerOffset = null
                                         menuFor = item.id
-                                        feed.note("点开工具组菜单")
+                                        feed.note("点开工具菜单 · $toolId · $label")
                                     },
                                 )
                                 ChatKind.ERROR -> ErrorCard(item)
@@ -1965,17 +2010,16 @@ private fun ConversationSection(resetToken: Int) {
                             },
                         )
                     }
-                    if (menuFor == entry.id) {
-                        ItemActionMenu(
-                            entry = entry,
-                            fingerOffset = fingerOffset,
-                            onDismiss = { menuFor = null },
-                            onAction = { label ->
-                                menuFor = null
-                                handleItemAction(context, entry, label, feed)
-                            },
-                        )
-                    }
+                    ItemActionMenu(
+                        open = menuFor == entry.id,
+                        entry = entry,
+                        fingerOffset = fingerOffset,
+                        onDismiss = { menuFor = null },
+                        onAction = { label ->
+                            menuFor = null
+                            handleItemAction(context, entry, label, feed)
+                        },
+                    )
                 }
             }
             Text(
@@ -2004,6 +2048,7 @@ private fun ConversationSection(resetToken: Int) {
  */
 @Composable
 private fun ItemActionMenu(
+    open: Boolean,
     entry: DebugItem,
     fingerOffset: DpOffset?,
     onDismiss: () -> Unit,
@@ -2019,6 +2064,7 @@ private fun ItemActionMenu(
         }
     }
     ZhiAnchoredActionMenu(
+        open = open,
         labels = labels,
         onSelect = { index -> onAction(labels[index]) },
         onDismiss = onDismiss,
@@ -2104,7 +2150,7 @@ private fun DebugImageBubble(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
-                        imageVector = ZhiIcons.floatingBall,
+                        painter = ZhiIcons.floatingBall,
                         contentDescription = null,
                         tint = scheme.onSurface,
                         modifier = Modifier.size(28.dp),
@@ -2238,21 +2284,21 @@ private fun MediaSection(resetToken: Int) {
                             menuFor = image.id
                         },
                     )
-                    if (menuFor == image.id) {
-                        ZhiAnchoredActionMenu(
-                            labels = listOf("复制图片信息", "复制文件名"),
-                            onSelect = { index ->
-                                menuFor = null
-                                if (index == 0) {
-                                    copyWithToast(context, "图片信息", image.info(), "已复制图片信息")
-                                } else {
-                                    copyWithToast(context, "图片文件名", image.name, "已复制文件名")
-                                }
-                            },
-                            onDismiss = { menuFor = null },
-                            fingerOffset = fingerOffset,
-                        )
-                    }
+                    // 不套 `if`：`open` 是布尔入参，浮层常驻才播得完退出动画（见 ZhiAnchoredActionMenu）。
+                    ZhiAnchoredActionMenu(
+                        open = menuFor == image.id,
+                        labels = listOf("复制图片信息", "复制文件名"),
+                        onSelect = { index ->
+                            menuFor = null
+                            if (index == 0) {
+                                copyWithToast(context, "图片信息", image.info(), "已复制图片信息")
+                            } else {
+                                copyWithToast(context, "图片文件名", image.name, "已复制文件名")
+                            }
+                        },
+                        onDismiss = { menuFor = null },
+                        fingerOffset = fingerOffset,
+                    )
                 }
             }
             SettingsFootnote(
@@ -2448,8 +2494,10 @@ private fun ComposerSection(state: WorkspaceUiState, viewModel: WorkspaceViewMod
             onPickSlash = {},
             onRemoveAttachment = { viewModel.removeAttachment(it.id) },
             onAttachFile = viewModel::openAttachPicker,
-            onOpenFilesTab = {},
             onPickImage = {},
+            // 调试页只是组件预览：起系统的 SAF 选择器会把这个页面顶掉，
+            // 而预览的目的正是"看着它长什么样"。
+            onPickSystemFiles = {},
             // 调试页的输入器只是组件预览，附件缩略图没有待发数据可画；
             // 这里返回 null 会让芯片回退成「图标 + 文件名」形态（不影响真实输入器）。
             onAttachmentImage = { null },
@@ -2520,7 +2568,7 @@ private fun ChromeSection() {
                     ),
                     content = {
                         Icon(
-                            imageVector = ZhiIcons.attach,
+                            painter = ZhiIcons.attach,
                             contentDescription = "加号菜单",
                             tint = scheme.onSurfaceVariantSummary,
                             modifier = Modifier.size(16.dp),

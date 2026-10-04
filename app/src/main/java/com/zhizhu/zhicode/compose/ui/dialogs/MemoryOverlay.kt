@@ -15,6 +15,7 @@ import com.zhizhu.zhicode.compose.model.MemoryFile
 import com.zhizhu.zhicode.compose.model.MemoryState
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
+import com.zhizhu.zhicode.compose.ui.settings.SettingsLoadingHint
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
@@ -101,7 +102,11 @@ private fun MemoryFileList(
 
         // 与设置主页同形态：一张分组卡里若干行，每行不再各套一张卡。
         SettingsGroup("说明文件") {
-            state.files.forEach { file ->
+            // 载荷在 IO 上读（见 openMemory）：这段窗口里 files 是空的，
+            // 而空列表在这页上不是合法状态（两个作用域恒定存在），所以要显式说明是「在读」。
+            if (state.files.isEmpty()) {
+                SettingsLoadingHint()
+            } else state.files.forEach { file ->
                 BasicComponent(
                     title = file.scope.label,
                     titleColor = BasicComponentDefaults.titleColor(

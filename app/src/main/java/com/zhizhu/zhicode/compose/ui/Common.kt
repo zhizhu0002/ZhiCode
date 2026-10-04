@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -164,7 +165,7 @@ internal fun FloatingBottomShell(
  */
 @Composable
 fun ZhiIconButton(
-    icon: ImageVector,
+    icon: Painter,
     description: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -178,7 +179,7 @@ fun ZhiIconButton(
     val color = if (tint == Color.Unspecified) scheme.onBackgroundVariant else tint
     val content: @Composable () -> Unit = {
         Icon(
-            imageVector = icon,
+            painter = icon,
             contentDescription = description,
             tint = color,
             modifier = Modifier.size(iconSize),
@@ -217,7 +218,7 @@ fun ZhiIconButton(
  */
 @Composable
 fun ZhiFilledIconButton(
-    icon: ImageVector? = null,
+    icon: Painter? = null,
     description: String,
     onClick: () -> Unit,
     containerColor: Color,
@@ -262,7 +263,7 @@ fun ZhiFilledIconButton(
             )
         } else if (icon != null) {
             Icon(
-                imageVector = icon,
+                painter = icon,
                 contentDescription = description,
                 tint = foreground,
                 modifier = Modifier.size(iconSize),
@@ -286,7 +287,7 @@ fun ZhiFloatingActionButton(
     onClick: () -> Unit,
     description: String,
     modifier: Modifier = Modifier,
-    icon: ImageVector = ZhiIcons.attach,
+    icon: Painter = ZhiIcons.attach,
     containerColor: Color = Color.Unspecified,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -296,7 +297,7 @@ fun ZhiFloatingActionButton(
         containerColor = if (containerColor == Color.Unspecified) scheme.primary else containerColor,
     ) {
         Icon(
-            imageVector = icon,
+            painter = icon,
             contentDescription = description,
             tint = scheme.onPrimary,
         )
@@ -568,7 +569,7 @@ data class ZhiMenuItem(
     /** 条目下方的说明文字。 */
     val summary: String? = null,
     /** 条目左侧的图标。传 null 就不显示。 */
-    val icon: ImageVector? = null,
+    val icon: Painter? = null,
     /** 单选场景：当前项会在弹出列表里打勾。 */
     val selected: Boolean = false,
     val onClick: () -> Unit,
@@ -630,7 +631,7 @@ fun ZhiIconDropdownMenu(
                     } else {
                         { m: Modifier ->
                             Icon(
-                                imageVector = icon,
+                                painter = icon,
                                 contentDescription = null,
                                 tint = scheme.primary,
                                 modifier = m,
@@ -711,7 +712,7 @@ fun ZhiTextDropdownChip(
                 modifier = Modifier.weight(1f, fill = false),
             )
             Icon(
-                imageVector = ZhiIcons.chevronDown,
+                painter = ZhiIcons.collapse,
                 contentDescription = null,
                 tint = scheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(start = 2.dp).size(11.dp),
@@ -994,6 +995,18 @@ fun rememberFingerTracker(): FingerTracker {
  * `renderInRootScaffold = true`（与 Miuix 默认一致）：弹层渲染在最外层
  * Scaffold 的弹出宿主里，所以能在整个屏幕范围内定位与绘制，不受局部裁剪影响。
  *
+ * ## `open` 而不是 `if`：退出动画需要浮层常驻
+ *
+ * Miuix 的弹层退出动画在 `ListPopupLayout` 内部（`fractionProgress` / `alphaProgress` /
+ * `dimProgress` 三个 `Animatable`），而那里有一句
+ * `if (!show && !internalVisible.value) return` —— **先播完退出才 return**。
+ * 所以调用方不能写 `if (open) { ZhiAnchoredActionMenu(...) }`：组件一被移除，
+ * 这三个 `Animatable` 随 composition 一起走，退出根本来不及跑，表现是硬切。
+ *
+ * 传 `open = false` 即可：浮层还在 composition 里，自己把退场播完（之后内部
+ * 直接 return，不占开销）。长按那一项的宿主记得用 `rememberLastNonNull` 兜住
+ * 退出期间已经变 `null` 的载荷（见 `ChoicePicker` / `menuAt` 等调用点）。
+ *
  * ## 调用点
  *
  * 只应由"被长按的那一项"调用（见 `ChatList` 的每项 Box 与 `Sidebar` 的 `SessionRow`），
@@ -1001,6 +1014,8 @@ fun rememberFingerTracker(): FingerTracker {
  */
 @Composable
 fun ZhiAnchoredActionMenu(
+    /** 亮着就弹、灭掉就退。**不要**用 `if` 包住整个组件，见上面的说明。 */
+    open: Boolean,
     labels: List<String>,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
@@ -1028,7 +1043,7 @@ fun ZhiAnchoredActionMenu(
     Box(modifier.then(anchorModifier)) {
         OverlayDropdownPopup(
             entries = entries,
-            show = true,
+            show = open,
             onDismiss = onDismiss,
             onDismissFinished = {},
             maxHeight = null,
@@ -1040,20 +1055,16 @@ fun ZhiAnchoredActionMenu(
 }
 
 /**
- * 人类可读的字节数。
+ * 人类可读的字节数 —— **已经搬走了**。
  *
- * 用 1000 进制而不是 1024：这是文件管理器的通行做法（也才与「2.4 MB」这种
- * 系统显示的读数对得上）。
+ * <p>它原先叫 `zhiFormatSize` 住在这里，而 `FileChrome.kt` 里还另有一份
+ * 字节完全相同的 `formatFileSize`（注释写着"三个使用者，没必要各写一份"，
+ * 自己却是重复的那一份）。现在收成唯一一份：[com.zhizhu.zhicode.compose.model.FileFormat.size]。
  *
- * 放在这里是因为它有三处使用者（文件面板、附加面板、附加后的提示），
- * 之前是 `FilesPane` 里的私有函数，没必要各写一份。
+ * <p>搬去 `model/` 而不是留在这里，是因为 ViewModel 也要用它
+ * （`"已附加：x（1.2 KB）"`）—— 反向 import `ui` 是把界面层当工具库。
+ * 顺带它就能被纯 JVM 单测覆盖（`FileFormatTest`，挂在 test-jvm-fast 快路径里）。
  */
-internal fun zhiFormatSize(bytes: Long): String = when {
-    bytes <= 0L -> "0 B"
-    bytes < 1_000L -> "$bytes B"
-    bytes < 1_000_000L -> String.format(java.util.Locale.US, "%.1f KB", bytes / 1000f)
-    else -> String.format(java.util.Locale.US, "%.1f MB", bytes / 1_000_000f)
-}
 
 /** 横向分隔线。转发到 Miuix [HorizontalDivider]（默认 0.75dp 的 HyperOS 细分线）。 */
 @Composable

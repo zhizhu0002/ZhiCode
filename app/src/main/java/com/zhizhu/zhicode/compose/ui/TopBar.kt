@@ -21,6 +21,7 @@ import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
+import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
@@ -103,6 +104,7 @@ fun ZhiTopBar(
     // textureBlur 挂在**包裹 Box** 上并混入一层 surface(0.8) 做磨砂底色，
     // TopAppBar 自身底色取透明 —— 之前把 surface(0.72) 直接叠在 blur 修饰符上，
     // 半透明底色把模糊结果盖死，肉眼等于没有 blur。
+    ZhiFrameTrace.countRecompose("TopBar")
     val blurActive = glass.supported
     Box(
         modifier = modifier.then(
@@ -186,20 +188,16 @@ fun ZhiTopBar(
             }
         },
         bottomContent = {
-            // 服务中时是 Miuix 不确定进度条；空闲且无 Tab 时退化成极淡分隔线
-            if (state.composerBusy) {
-                ZhiIndeterminateBar()
-            } else if (tabs == null) {
-                ZhiHorizontalDivider(color = scheme.dividerLine)
-            }
-            // 工作区 Tab 归顺到头部：与标题同一块玻璃（官方 bottomContent 槽位）
-            if (tabs != null) {
-                WorkspaceTabs(
-                    tabs = tabs,
-                    selected = state.tab,
-                    onSelect = onSelectTab,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = TopBarTabRowPadding / 2),
-                )
+            Column {
+                if (tabs != null) {
+                    WorkspaceTabs(
+                        tabs = tabs,
+                        selected = state.tab,
+                        onSelect = onSelectTab,
+                    )
+                }
+                // 服务中时是 Miuix 不确定进度条；空闲时以分隔线结束顶栏（与可选标签行一起）。
+                if (state.composerBusy) ZhiIndeterminateBar() else ZhiHorizontalDivider(color = scheme.dividerLine)
             }
         },
     )

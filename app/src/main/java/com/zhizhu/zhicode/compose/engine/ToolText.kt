@@ -190,8 +190,19 @@ internal object ToolText {
         return shortenMiddle(value, 72)
     }
 
-    /** 没有进度事件时的 `+/−` 预估。 */
-    fun delta(name: String?, input: JSONObject?): Pair<Int, Int> {
+    /**
+     * `ReadMany` 这一次读了几个文件（其余工具是 0）。
+     *
+     * 参考实现的 `readManyCount`：只数 `paths` 数组的长度。折叠组的表头要把它
+     * **按条数**计入"读取 N 个文件"，算成 1 的话一个读了 20 个文件的组会显示"读取 1 个文件"。
+     */
+    fun readRequestCount(name: String?, input: JSONObject?): Int {
+        if (name == null || input == null) return 0
+        if (!name.equals("ReadMany", ignoreCase = true)) return 0
+        return input.optJSONArray("paths")?.length() ?: 0
+    }
+
+    /** 没有进度事件时的 `+/−` 预估。 */    fun delta(name: String?, input: JSONObject?): Pair<Int, Int> {
         if (name == null || input == null) return 0 to 0
         var adds = 0
         var dels = 0

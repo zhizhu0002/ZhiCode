@@ -210,8 +210,15 @@ class RuntimeInstaller(private val context: Context) {
         File(prefix, "var/lib/apt/lists/partial").mkdirs()
         installAptCompatibility(prefix)
         installDpkgWrapper(prefix)
-        // 存储链接也在这里补：老版本装完的环境没有 ~/storage，而用户不会为了这个
-        // 手动重装一遍（重装要几十秒）。repairIfInstalled 本来就跑在每次启动的路径上。
+        /*
+         * 存储链接这里也补一次（手动点「修复」时顺带）。
+         *
+         * ⚠️ 但**不能只靠这里**。这里曾经写着「repairIfInstalled 本来就跑在每次启动的
+         * 路径上」—— 那是错的：`repairIfInstalled()` 的唯一调用点是用户手动点「修复」
+         * （见 WorkspaceViewModel.repairRuntime）。真机上因此出现过 "老环境永远没有
+         * ~/storage"：文件管理器里 ZhiCode HOME 只列出 projects 和 tmp，而原因看起来
+         * 像是链接没配好。所以启动路径上另有一次幂等调用（WorkspaceViewModel.initSessionState）。
+         */
         setupStorageLinks()
         TermuxShellExecutor.cleanupOrphanedPackageManagers()
     }

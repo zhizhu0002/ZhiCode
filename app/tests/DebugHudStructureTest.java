@@ -1,6 +1,7 @@
 import java.nio.file.*;
 import java.util.*;
 import java.util.regex.*;
+import java.util.stream.Stream;
 
 /**
  * 「全局调试浮层」与「Markdown 全语法样例」的守卫。
@@ -58,8 +59,23 @@ public final class DebugHudStructureTest {
     /** 会话读取：把 JSONL 里的 image 块读回界面模型。 */
     private static final String SESSION_READER = SRC + "data/SessionReader.kt";
 
+    /**
+     * 内容块 → 图片的解析。
+     *
+     * 它**曾经住在 `SessionReader` 里**，后来搬到 `model`：同一个块结构有两个来源
+     * （会话文件的用户消息、以及工具结果的 `additionalContent`），而后者要由 `engine`
+     * 调用，`engine` 的既有依赖方向是只依赖 `model`、从不 import `data`。
+     */
+    private static final String CHAT_IMAGE_BLOCKS = SRC + "model/ChatImageBlocks.kt";
+
+    /** 引擎事件接口与控制器：工具结果回界面的唯一通道。 */
+    private static final String ENGINE_CONTROLLER = SRC + "engine/ZhiEngineController.kt";
+
     /** 用户气泡与助手卡片。图片行的接入点在 `UserBubble`。 */
     private static final String MESSAGE_CARDS = SRC + "ui/chat/MessageCards.kt";
+
+    /** 界面模型。工具卡的预览图字段（`ToolActivity.previews`）在这里（§30）。 */
+    private static final String UI_MODELS = SRC + "model/UiModels.kt";
 
     /** 模型选择面板。事故见 §19：搜索串误当成"要用的模型名"。 */
     private static final String MODEL_PICKER = SRC + "ui/dialogs/ModelPickerOverlay.kt";
@@ -89,8 +105,73 @@ public final class DebugHudStructureTest {
     /** 文件面板：列表留白与行距（用户反馈过"太紧凑"）。 */
     private static final String FILES_PANE = SRC + "ui/panes/FilesPane.kt";
 
+    /**
+     * 文件浏览的**共用外壳**：根切换条 / 面包屑 / 列表行（§29 ① / §34 要它）。
+     *
+     * 本轮从 `FilesPane.kt` 里抽出来的 —— 因为它现在被两处共用（文件面板 +
+     * 附加项目文件选择器），而"两处必须是同一副样子"这件事只能靠共用同一份实现保证。
+     */
+    private static final String FILE_CHROME = SRC + "ui/panes/FileChrome.kt";
+
+    /**
+     * 工具输出的行数上限与渲染（工具卡展开的 diff 与原始输出）。
+     *
+     * ⚠️ 本轮它**搬过家**：原先住在 `ui/panes/ChangesPane.kt` —— 那个文件混着一个
+     * 已经删掉的「变更」面板和这套还活着的工具。两者挤在一起的下场是：
+     * 删面板时差点把活代码一起删掉，而且没人看得清它还活着（文件名、注释、
+     * 测试常量**全都指着"变更面板"**）。所以 §35 也钉住它必须住在 ui/chat 下。
+     */
+    private static final String TOOL_OUTPUT_TEXT = SRC + "ui/chat/ToolOutputText.kt";
+
+    /** 侧栏：会话列表（删除/重排时行要不瞬移，见 §25）。 */
+    private static final String SIDEBAR = SRC + "ui/Sidebar.kt";
+
+
+    /** 斜杠命令面板：打字时命令集收窄，落选的行要滑走（同上）。 */
+    private static final String SLASH_PALETTE = SRC + "ui/composer/SlashPalette.kt";
+
     /** 顶栏。Tab 行已从它移到底部，见 §20。 */
     private static final String TOP_BAR = SRC + "ui/TopBar.kt";
+
+    // ---- §26~§29：动效契约（浮层常驻 / 面板多态 / 终端不变量 / 选中态变色）--------
+
+    /** 技能管理整页：6 个浮层 + 树展开 + 两处空态切换（§26/§27）。 */
+    private static final String SKILLS_OVERLAY = SRC + "ui/dialogs/SkillsOverlay.kt";
+
+    /** MCP 配置整页：4 个浮层 + TAB 内容过渡。 */
+    private static final String MCP_CONFIG_OVERLAY = SRC + "ui/dialogs/McpConfigOverlay.kt";
+
+    /** 二级页基座：`overlay` 槽位与 `rememberLastNonNull` 都住在这里。 */
+    private static final String SETTINGS_SUB_PAGE = SRC + "ui/settings/SettingsSubPage.kt";
+
+    /** 环境自检弹窗（退场期间内容曾被拆空）。 */
+    private static final String ENVIRONMENT_OVERLAY = SRC + "ui/dialogs/EnvironmentOverlay.kt";
+
+    /** 附加项目文件面板（同上）。 */
+    private static final String ATTACH_FILE_OVERLAY = SRC + "ui/dialogs/AttachFileOverlay.kt";
+
+    /** 终端面板：三态多态 + 「组合里至多一个 AndroidView」这条硬不变量（§28）。 */
+    private static final String TERMINAL_PANE = SRC + "ui/panes/TerminalPane.kt";
+
+    /** 终端外壳：扩展键与会话行的选中态变色（§29）。 */
+    private static final String TERMINAL_CHROME = SRC + "ui/panes/TerminalChrome.kt";
+
+    /** 终端宿主（纯 Java 的 FrameLayout）：ANSI 调色板在这里，不在 Compose 侧。 */
+    private static final String TERMINAL_HOST = SRC + "../TermuxTerminalPane.java";
+
+    /** 沙箱页：错误/空/列表三态 + 应用卡片的 animateItem（§26/§27）。 */
+    private static final String SANDBOX_SCREEN = SRC + "ui/sandbox/ZhiSandboxScreen.kt";
+
+    /** API 配置 / 角色卡 / 搜索服务三个列表页：选中行的标题色（§29）。 */
+    private static final String API_CONFIG_OVERLAY = SRC + "ui/dialogs/ApiConfigOverlay.kt";
+    private static final String ROLE_CARDS_OVERLAY = SRC + "ui/dialogs/RoleCardsOverlay.kt";
+    private static final String SEARCH_SERVICES_OVERLAY = SRC + "ui/dialogs/SearchServicesOverlay.kt";
+
+    /** 动效令牌表（§29 要确认 colorSpec 的出处仍写着）。 */
+    private static final String ANIMATIONS = SRC + "ui/Animations.kt";
+
+    /** 设置主页：两处折叠（§27）。 */
+    private static final String SETTINGS_DIALOG = SRC + "ui/settings/SettingsDialog.kt";
 
     /** 工具实现所在目录：脚本里点名的工具名要在这里能找到出处。 */
     private static final String TOOLS_DIR = "app/src/main/java/com/termux/app/zhicode/tools";
@@ -120,6 +201,73 @@ public final class DebugHudStructureTest {
 
     private static void requireContains(String haystack, String needle, String message) {
         require(haystack.contains(needle), message);
+    }
+
+    /**
+     * 取出某个函数/枚举/组合块的**完整正文**（按花括号配对，不是取到文件末尾）。
+     *
+     * <p>为什么必须按块取：`contains("pressFeedbackType = PressFeedbackType.Sink")`
+     * 这种断言在同一个文件里有**第二处合法用法**时会静默失效 ——
+     * §29 的"根切换条要有下沉反馈"就这样漏过一次：把那一处的 `Sink` 改回 `None`，
+     * 断言照样绿，因为 `FileRow` 那张卡也是 `Sink`。
+     * 反向验证（teeth）里改坏 25 处、这一条没被抓住，才发现。
+     *
+     * @param signature 在 `code` 里唯一的那段签名（例如 "private fun FileRootSwitcher("）
+     * @return 从签名起到配对花括号结束的子串；找不到或签名不唯一时返回空串
+     *         （让调用处的断言去报"没有"，而不是猜一个出来）
+     */
+    private static String bodyOf(String code, String signature) {
+        int at = code.indexOf(signature);
+        if (at < 0) return "";
+        if (code.indexOf(signature, at + 1) >= 0) return "";
+        int depth = 0;
+        boolean seen = false;
+        for (int i = at; i < code.length(); i++) {
+            char c = code.charAt(i);
+            if (c == '{') { depth++; seen = true; }
+            else if (c == '}') {
+                depth--;
+                if (seen && depth == 0) return code.substring(at, i + 1);
+            }
+        }
+        return code.substring(at);
+    }
+
+    /**
+     * 从 `needle` 起取到**行尾**。
+     *
+     * <p>用于没有花括号的单行声明/赋值（例如 `val hasDetails = …`）——
+     * {@link #bodyOf} 对这类文本会一路找到后面某个函数的 `{`，取出一块与断言无关的东西，
+     * 于是断言看着在守、守的其实是别处（本仓踩过这个坑，见 §29 的注释）。
+     */
+    private static String lineAt(String code, String needle) {
+        int at = code.indexOf(needle);
+        if (at < 0) return "";
+        int end = code.indexOf('\n', at);
+        return end < 0 ? code.substring(at) : code.substring(at, end);
+    }
+
+    /**
+     * 从 `needle` 起取到**下一个 `fun `**（用于接口里没有方法体的签名）。
+     *
+     * <p>同样是绕开 {@link #bodyOf} 在"没有 `{}` 的声明"上的失效：接口方法后面紧跟着
+     * 的合法 `{` 属于别的函数。
+     */
+    private static String signatureAt(String code, String needle) {
+        int at = code.indexOf(needle);
+        if (at < 0) return "";
+        int end = code.indexOf("fun ", at + needle.length());
+        return end < 0 ? code.substring(at) : code.substring(at, end);
+    }
+
+    /**
+     * 断言某段正文里**不出现**某段文本（{@link #requireContains} 的反面）。
+     *
+     * <p>它守的是"这一处不许再有硬切"。用整文件 `contains` 做不到 ——
+     * 同一个文件里往往还有别的合法用法。
+     */
+    private static void requireAbsentIn(String body, String banned, String message) {
+        require(!body.contains(banned), message);
     }
 
     public static void main(String[] args) throws Exception {
@@ -285,6 +433,16 @@ public final class DebugHudStructureTest {
         int menuAfter = chatList.indexOf("anchoredMenu(item.id, fingerOffset)", strip);
         require(menuAfter > 0,
                 "长按菜单必须仍挂在最外层 Box 上（它要盖在卡片上，不能进竖排的 Column）");
+        // ⚠️ 每一位成员必须有**自己**的 Box（手指追踪挂它、菜单锚点也在它里面）。
+        //
+        // `anchoredMenu` 走 `Modifier.absoluteOffset` 定位，而 absoluteOffset 的坐标是
+        // 相对**直接父节点**的。回合容器（`TurnLayout` 之后一层助手回合 = 一个 Column）
+        // 把多条消息并在一起之后，如果菜单锚点被提到那个 Column 下面，
+        // 第 2 条之后的菜单就会整体偏掉前面所有成员的高度 —— 这正是"改层级时最容易漏"的一处，
+        // 而且只有长按非首条消息才会暴露。
+        require(chatList.contains("Box(modifier = Modifier.fillMaxWidth().then(finger.modifier))"),
+                "每一位成员必须有自己的 Box 承载手指追踪（Box(modifier = Modifier.fillMaxWidth()"
+                        + ".then(finger.modifier))）：菜单锚点与手指坐标必须在同一个坐标系里");
 
         // 调试条的开关必须是**小胶囊**，不能是 Miuix TextButton：
         // 后者最小高 40dp、字号走主题 button 档，会把调试条撑得比消息卡还显眼。
@@ -557,8 +715,14 @@ public final class DebugHudStructureTest {
                 "图片行必须接 item.images（而不是从别处找数据）");
 
         String sessionReader = stripComments(read(root, SESSION_READER));
-        requireContains(sessionReader, "fun readImages(",
-                SESSION_READER + " 必须能从会话行里读回 image 块");
+        // 解析器本身住在 `model/ChatImageBlocks.kt`（见那里的说明），
+        // 这里分两半守：**解析在 model、调用在 SessionReader**。
+        String chatImageBlocks = stripComments(read(root, CHAT_IMAGE_BLOCKS));
+        requireContains(chatImageBlocks, "fun readChatImageBlocks(",
+                CHAT_IMAGE_BLOCKS + " 必须能从内容块数组里读回 image 块");
+        requireContains(sessionReader, "readChatImageBlocks(content)",
+                SESSION_READER + " 读历史时必须调用共享的那份解析（不许自己再写一遍："
+                        + "两份实现迟早不一致，而失败模式是「图没出来」，没有报错");
         requireContains(sessionReader, "images.isNotEmpty()",
                 "出气泡的判据必须包含 images：只发图不写字的消息没有 text 块，"
                         + "按 text.isNotBlank() 判断会把整条消息丢掉（用户翻历史会发现图连带消息都没了）");
@@ -869,46 +1033,118 @@ public final class DebugHudStructureTest {
                 MODEL_PICKER + " 的 AnimatedContent 必须显式给 transitionSpec"
                         + "（fadeIn togetherWith fadeOut），并复用 ZhiMotion 的时长");
 
-        // ---- 22. 切 tab 不得把面板的滚动位置丢掉 ---------------------------------
+        // ---- 22. 切 tab 要"点了立刻切"，且不得重建面板、不得丢滚动位置 -------------
         //
-        // 用户的原话：「每次切换对话那一栏的 TAB，对话每次都会回到最上层」。
-        // 根因：`CompactWorkspace` 用 `AnimatedContent(targetState = state.tab)` 包着面板，
-        // 切换时**离场那个面板会被销毁** —— 而三个面板的滚动位置都是
-        // `rememberLazyListState()`（内部是 rememberSaveable），组合没了位置也就没了。
+        // 用户先后提了三次，这是同一条链上的三个毛病：
+        //  · 「每次切换对话那一栏的 TAB，对话每次都会回到最上层」；
+        //  · 「使整个软件使用起来很卡」；
+        //  · 「点击之后过了大约 0.1~0.2s 才切换页面（此时切换是流畅的）」。
         //
-        // 修法是在 AnimatedContent **外面**包一层 `SaveableStateHolder`：它专门干这件事，
-        // 面板离开时存下子树里所有 rememberSaveable 的值，回来时按 key 还回去。
-        // 所以这条测试断的是"那层 holder 在，且 key 是 tab"。
+        // 根因与修法（每一步都有实测支撑，数字见各自断言里的说明）：
+        //  1. `AnimatedContent(targetState = state.tab)` 会销毁离场面板、重建入场面板；
+        //  2. 页码曾有**两个真源**（`rememberPagerState` 与 `state.tab` 各恢复一份）；
+        //  3. 点击后的滞后来自三处叠加：suspend 的 `scrollToPage`（212ms）、
+        //     `LaunchedEffect` 晚一轮组合才派发（39ms）、落定弹簧（116ms）；
+        //  4. 最后剩下的 ~116ms 是目标面板**首次测量布局**（终端页含原生 View）堵在点击路径上。
+        //
+        // 最终形态：`HorizontalPager` + 页码单一真源 + 组合期非挂起
+        // `requestScrollToPage` + 官方弹簧落定 + `beyondViewportPageCount = tabs.size`
+        // 预先摆放三页。实测「抬起 → 切完」263.7ms → **29.8ms**，
+        // 转场 avg 8.8ms / max 16.7ms / janks 0（官方 Miuix 基准 8.3ms / 11ms / 0）。
+        //
+        // ⚠️ 落定用的是**官方弹簧**而不是 `snap()`。中途确实改过 `snap()`：那时动画
+        // 显得卡，是因为面板在重建（单帧 458ms）+ 请求是挂起的（212ms 死等）。
+        // 根因修掉后帧率已与官方持平（8.3ms），动画重新变成加分项 —— 于是恢复成
+        // 官方自己的那一条（`TabRowSection.kt:58-71`），瞬时落定反而与官方手感不一致。
+        // **但它只在跑得动的时候才是加分项**：帧数据若退化，第一件该做的就是换回 `snap()`。
         String layouts = stripComments(read(root, WORKSPACE_LAYOUTS));
-        requireContains(layouts, "rememberSaveableStateHolder()",
-                WORKSPACE_LAYOUTS + " 必须用 SaveableStateHolder 保住各 tab 的滚动位置："
-                        + "AnimatedContent 会销毁离场的面板，位置就是跟着它没的");
-        requireContains(layouts, ".SaveableStateProvider(",
-                WORKSPACE_LAYOUTS + " 必须用 SaveableStateProvider 按 tab 分别存状态");
-        // ⚠️ holder 必须在 AnimatedContent **外面**取。取在里面就跟着一起被销毁，
-        // 看着像做了、实际完全没生效 —— 这种"写了但没用"最难查。
-        int holderAt = layouts.indexOf("rememberSaveableStateHolder()");
-        int animatedAt = layouts.indexOf("AnimatedContent(");
-        require(holderAt > 0 && animatedAt > holderAt,
-                WORKSPACE_LAYOUTS + " 里 holder 必须在 AnimatedContent **之前**声明："
-                        + "放在里面会跟着面板一起被销毁，等于没做");
-        // 宽屏副栏只换内容、不换容器，但 PaneHost 内部的 when(tab) 同样会销毁面板，
-        // 所以两处都要有 provider。
-        require(countOf(layouts, "SaveableStateProvider(") >= 2,
-                WORKSPACE_LAYOUTS + " 宽窄两种布局都要有 SaveableStateProvider："
-                        + "宽屏副栏的 when(tab) 一样会销毁面板");
+        requireContains(layouts, "HorizontalPager(",
+                WORKSPACE_LAYOUTS + " 的工作区面板必须用 HorizontalPager："
+                        + "AnimatedContent 会销毁离场面板（滚动位置丢失 + 单帧 458ms 的重建）");
+        requireContains(layouts, "beyondViewportPageCount = tabs.size",
+                WORKSPACE_LAYOUTS + " 必须让**三页全部**预先组合并摆放"
+                        + "（beyondViewportPageCount = tabs.size）："
+                        + "只要 1 时相邻页只是被组合、未必被摆放，切过去那一刻要现场测量布局"
+                        + "（终端页含原生 AndroidView），实测主线程被堵 116ms、"
+                        + "「抬起 → 切完」要 263.7ms；改成 tabs.size 后降到 29.8ms");
+        // 落定用**官方那条弹簧**，不是 snap()。
+        //
+        // 这条断言的方向中途翻转过一次：为了让「点完等一会儿才切换」消失，这里曾经
+        // 要求 `snapAnimationSpec = snap()`。那个 263.7ms 的真身是「挂起的
+        // scrollToPage 死等 layout 依赖」+「面板首次测量布局堵在点击路径上」，
+        // 两处都在别处修掉了（见上面两条断言）。修掉之后每秒能画的帧数与官方一致，
+        // 官方自己就是用这条 spring 的（`example TabRowSection.kt:58-71`），
+        // 于是落定交还给官方 —— 瞬时落定是"跑不动时的补救"，不是目标形态。
+        //
+        // ⚠️ 因此这里**只断正面形态，不断"禁止 snap()"**：帧数据万一退化，
+        // 正确动作恰恰是把它换回 `snap()`（`WorkspaceLayouts.kt` 里那段 ⚠️ 注释
+        // 写的就是这件事）。禁止它会让那条退路变成"改了测试才能走"的路。
+        // ⚠️⚠️ 这条断言本轮**换了个落脚点**，因为弹簧的用法变了 —— 而它守的东西没变。
+        //
+        // 原先它钉的是 `snapAnimationSpec = PagerNavigationSpringSpec`（`flingBehavior` 的参数）。
+        // 那条配置**只服务"手指拖拽之后的回弹吸附"**，而本轮按用户要求关掉了横滑，
+        // 于是它成了死配置、被删掉。更要紧的是：它当年就已经**不是**点击的动效来源 ——
+        // 点击走的是 `requestScrollToPage`（瞬时），所以那条弹簧对点击是死代码，
+        // 用户看到的正是"TAB 栏切换没有动画"。
+        //
+        // 现在弹簧由 `springAnimateToPage` 施加（Miuix 那条 API 内部就是
+        // `PagerNavigationSpringSpec`，官方示例 `TabRowSection.kt:63` 用的也是它）。
+        // 所以判据改成钉这句调用 —— 它才是"落定用的是官方弹簧"的真正证据。
+        //
+        // ⚠️ 仍然**只断正面形态，不断"禁止瞬时"**：帧数据万一退化，正确动作是把
+        // `springAnimateToPage` 换回瞬时的做法（`WorkspaceLayouts.kt` 里那段 ⚠️ 注释
+        // 写的就是这件事）。禁止它会让那条退路变成"改了测试才能走"的路。
+        requireContains(layouts, "springAnimateToPage(",
+                WORKSPACE_LAYOUTS + " 的落定必须用官方那条弹簧（经由 springAnimateToPage ——"
+                        + " Miuix 那条 API 内部就是 PagerNavigationSpringSpec）："
+                        + "官方 example 的 TabRowSection 就是它，瞬时落定会与官方手感不一致。"
+                        + "⚠️ 它只在**跑得动**时才是加分项 —— 帧数据退化时应当换回瞬时，"
+                        + "那时要连同这条断言一起改，而不是让测试挡住退路");
+        // 反面：瞬时请求那条 API **不得回到源码里**（注释里提到它是允许的 ——
+        // 那段注释正是在解释"为什么当初选的它、后来又为什么放弃"）。
+        require(!layouts.contains("requestScrollToPage"),
+                WORKSPACE_LAYOUTS + " 里又出现了 requestScrollToPage 的调用（这个变量已经过 stripComments）："
+                        + "它是瞬时的（AOSP 文档：下一次重测量时直接到位），"
+                        + "用它当点击动效就是用户报的「切换没有动画」");
+        // ⚠️⚠️ 这里原本**要求**用非挂起的 `requestScrollToPage`（理由是 scrollToPage 是 suspend 的、
+        // 要 awaitScrollDependencies、实测多花 212ms）。这条要求本轮**撤掉了**，因为它是错的：
+        //
+        //  · 那 212ms 的病根是「挂起等待 layout 依赖」，而它已经被别的手段解决（三页预先摆放、
+        //    面板不再重建），不是靠换 API 换掉的；上面的弹簧断言一直在说明这件事。
+        //  · `requestScrollToPage` 的语义是**瞬时**的（AOSP 文档：下一次重测量时直接到位），
+        //    把它当点击动效的载体，代价就是**没有动画** —— 用户报的正是这个
+        //    （「TAB 栏切换是没有动画的」）。
+        //
+        // 所以"非挂起"这个目标本身没错，错的是拿它当**唯一**的落定方式：现在动效由
+        // `springAnimateToPage` 施加（它也算"不硬等"——首帧就在目标页时动画距离为 0）。
+        // 历史留在这里，免得下一个人看到 `LaunchedEffect` 又把它"优化"回去。
+        // 反向：既然 Pager 已经保住了面板，就不该再出现 AnimatedContent 那套。
+        require(!layouts.contains("AnimatedContent("),
+                WORKSPACE_LAYOUTS + " 不应再用 AnimatedContent 切面板："
+                        + "它和 Pager 是两套互相打架的机制，留着会让面板又被销毁一次");
+        // 反向：不得用 suspend 的 scrollToPage（应用空闲不产帧，它会一直等 layout 依赖）。
+        require(!layouts.contains("scrollToPage(target)"),
+                WORKSPACE_LAYOUTS + " 不得再用 suspend 的 scrollToPage："
+                        + "实测它自己就要 212ms");
+        // 单一真源：页码必须从 state.tab 推导（rememberPagerState 会与它打架）。
+        requireContains(layouts, "PagerState(currentPage = tabs.indexOf(state.tab)",
+                WORKSPACE_LAYOUTS + " 的 Pager 页码必须从 state.tab 推导（单一真源）："
+                        + "用 rememberPagerState 会和 state.tab 各存一份，恢复后可能对不上");
+        require(!layouts.contains("rememberPagerState"),
+                WORKSPACE_LAYOUTS + " 不能用 rememberPagerState：它是 rememberSaveable，"
+                        + "会与 state.tab 这条恢复路径打架");
 
         // ---- 23. 文件列表的留白走工程令牌，且行距只在一处给 ----------------------
         //
-        // 用户反馈「文件一栏做的太紧凑了，列表可以宽散一点」。原来左右只留 4dp，
-        // 而行距在**两个地方**各给了一次（LazyColumn 无关 + Card 的 padding(vertical = 1.dp)）——
-        // 后一个几乎等于没有，还让"以后调行距要改两处"。
+        // 文件列表与共用行维持统一水平边距；行距由 LazyColumn 的 spacedBy 单点控制。
         String filesPane = stripComments(read(root, FILES_PANE));
-        requireContains(filesPane, ".padding(horizontal = ZhiSpace.m)",
-                FILES_PANE + " 的列表左右留白必须走 ZhiSpace.m（12dp）："
-                        + "它的注释写的就是\"列表左右留白\"，之前那 4dp 实测太挤");
-        requireContains(filesPane, "Arrangement.spacedBy(ZhiSpace.xs)",
-                FILES_PANE + " 的行距必须由 LazyColumn 的 spacedBy 统一给");
+        requireContains(filesPane, "FileRowSidePadding",
+                FILES_PANE + " 的列表左右留白必须沿用文件行边距令牌 FileRowSidePadding："
+                        + "列表与共用 FileListRow 应保持同一水平对齐");
+        requireContains(filesPane, "LazyColumn(",
+                FILES_PANE + " 文件列表必须继续使用 LazyColumn");
+        requireContains(filesPane, "FileRowSidePadding",
+                FILES_PANE + " 操作栏必须与共用文件行水平对齐");
         require(!filesPane.contains("padding(vertical = 1.dp)"),
                 FILES_PANE + " 不得再在行上加 padding(vertical = 1.dp)："
                         + "行距只在 spacedBy 一处给，两处会给调参带来两个入口");
@@ -943,9 +1179,26 @@ public final class DebugHudStructureTest {
                         + "加了之后非对话面板又补一份 inset 就是双重留白。"
                         + "真要加回来，得同时删掉下面那条『面板自己顶开』的断言");
         // 结论：非对话面板自己顶开。
-        requireContains(layouts, "padding(top = TopBarInsetWithTabs)",
-                WORKSPACE_LAYOUTS + " 的非对话面板必须自己顶开顶栏高度："
-                        + "Scaffold 丢掉了 padding.top，不顶开的话面板头与第一行会被顶栏盖住");
+        requireContains(layouts, "padding(top = TopBarInsetCompact)",
+                WORKSPACE_LAYOUTS + " 的对话区必须顶开紧凑顶栏高度");
+        // ---- 顶开的高度必须**包含状态栏** ------------------------------------
+        //
+        // 真机症状（用户：「终端和对话划到最顶上，顶部栏把这些东西全部遮盖了」）：
+        // 顶栏真实高度 = 状态栏 + 52 + Tab 行，而 `TopBarInsetWithTabs` 原先只算了后两项。
+        // `SmallTopAppBar` 内部是**无条件**加
+        // `windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top))` 的
+        // ——`defaultWindowInsetsPadding = false` 只关掉横向那两条，纵向关不掉。
+        // 而 Miuix Scaffold 的 `bodyContentPlaceable.place(0, 0)` 说明内容从屏幕 y=0 起排，
+        // 于是少算的那一段正好等于第一行被盖住的高度。
+        require(layouts.contains("WindowInsets.systemBars.only(WindowInsetsSides.Top)"),
+                WORKSPACE_LAYOUTS + " 的顶栏让位必须加上状态栏 inset："
+                        + "顶栏自己无条件消费了 systemBars 的 top，少算这一段就是第一行被盖住");
+        // ⚠️ 这一条要断言**表达式本身**，不能只查"文件里出现了 systemBars"。
+        // 只查前者的话，把 `+ topBarWindowInset()` 从常量里删掉、只留那个私有函数，
+        // 守卫照样通过 —— 那正是第一次反向验证时漏掉的情形。
+        require(layouts.contains("internal val TopBarInsetCompact: Dp")
+                        && layouts.contains("@Composable get()"),
+                WORKSPACE_LAYOUTS + " 的 TopBarInsetCompact 必须使用窗口 inset 感知实际顶栏高度");
         // 那句骗过人的注释不得复活（查**原文**，注释会被 stripComments 删掉）。
         require(!layoutsRaw.contains("面板不需要手工让位"),
                 WORKSPACE_LAYOUTS + " 不得再写『面板不需要手工让位』："
@@ -953,6 +1206,1169 @@ public final class DebugHudStructureTest {
         require(!scaffoldRaw.contains("TopBarTotalInset"),
                 APP_SCAFFOLD + " 不得再引用 TopBarTotalInset：那个常量不存在，"
                         + "注释指向一个不存在的常量比没有注释更糟（本次事故就是这么来的）");
+
+        // ---- 25. 列表增删/移动不得硬切，展开收起走官方裸默认 ----------------------
+        //
+        // 来源：用户「重写所有动画」那一轮里点名的两类缺口。两类的共同点是
+        // **删掉/改错都不会编译失败，也不会让界面坏掉**，只表现为"硬切一下"，
+        // 所以只能静态钉住。
+        //
+        //  ① **列表项的增删/移动**。四个列表都给了 `key`，于是很容易以为"这就够了"——
+        //     但 `key` 只能让 Compose 认出"还是那一行"，**位置变化的补间是
+        //     `animateItem()` 做的**。少了它，删掉一条之后下面所有行会"啪"地整体
+        //     上跳一位；打字收窄命令列表时，剩下的命令会瞬移而不是滑过去。
+        //
+        //  ② **展开/收起**。斜杠面板与附件条传的是 `ZhiMotion.sizeSpec`
+        //     （`tween(200, DecelerateEasing(1.5))`）。那套数字**本身抄自 Miuix**，
+        //     但抄的是**弹窗位移退出**那条曲线；而 Miuix 自己所有"整块展开/收起"
+        //     走的是 `fadeIn() + expandVertically()` 的 spring
+        //     （`example/AppContent.kt:529`、`component/SwitchSection.kt:80`，
+        //     一个字都不多）。拿退出曲线去做展开，正是用户说的"很割裂"的来源。
+        //
+        // ⚠️ 这里**不**要求 `Composer.kt` 里那处横向的停止键揭示（`expandHorizontally`
+        // + `scaleIn`）也改成裸默认：它是**插进 Row** 的元素，宽度从 0 长出来是它
+        // 让旁边发送键平移让位的机制 —— 换成不改变尺寸的 `fadeIn() + scaleIn()`，
+        // 发送键会在动画开始那一瞬间跳位，比现在更硬。官方那处
+        // （`SuperSearchBar.kt:257`）是**覆盖式**的 trailingIcon，不挤动邻居，不通用。
+        String sidebar = stripComments(read(root, SIDEBAR));
+        String slashPalette = stripComments(read(root, SLASH_PALETTE));
+        // `composer` 复用本方法前面（§… 处）已经读好的那一份：同一个
+        // `stripComments(read(root, COMPOSER))`，不必再读一遍盘。
+        // ① 四处列表的增删/移动要平滑。
+        requireContains(sidebar, "modifier = Modifier.animateItem()",
+                SIDEBAR + " 的会话列表行必须挂 animateItem()：删一条会话后，"
+                        + "下面所有行会整体上跳一位（硬切）—— `key = it.id` 只让 Compose "
+                        + "认出身份，位置补间是 animateItem() 做的");
+        requireContains(filesPane, "modifier = Modifier.animateItem()",
+                FILES_PANE + " 的文件列表行必须挂 animateItem()：删一个文件后"
+                        + "下面所有行会整体上跳一位");
+        requireContains(slashPalette, "Modifier.animateItem()",
+                SLASH_PALETTE + " 的命令行必须挂 animateItem()：打字时命令集一直在收窄，"
+                        + "命中的行要滑上去、落选的行淡出，而不是每行原地闪一下");
+        // ② 展开/收起交还官方裸默认。
+        //
+        // 用 countOf 而不是 contains：这里要的是**两处都改**（斜杠面板 + 附件条），
+        // 只改一处的话 contains 照样绿 —— 那正是"改一半"最容易漏掉的形态。
+        require(countOf(composer, "enter = fadeIn() + expandVertically()") >= 2,
+                COMPOSER + " 的斜杠面板与附件条展开都必须走官方裸默认"
+                        + "（fadeIn() + expandVertically()，当前只找到 "
+                        + countOf(composer, "enter = fadeIn() + expandVertically()") + " 处）："
+                        + "出处 example/AppContent.kt:529、component/SwitchSection.kt:80");
+        require(countOf(composer, "exit = fadeOut() + shrinkVertically()") >= 2,
+                COMPOSER + " 的同两处收起也必须走官方裸默认（fadeOut() + shrinkVertically()）");
+        // 反向：竖向展开不得再传 ZhiMotion 的那条曲线。
+        //
+        // ⚠️ 只断竖向的两个 —— `Composer.kt` 里 `ZhiMotion.sizeSpec` 还有合法用途
+        // （`animateContentSize` 在流式期间管输入器的高度，届时改了它没有收益）；
+        // 泛断"不许出现 ZhiMotion.sizeSpec"会把那些一起误伤。
+        require(!composer.contains("expandVertically(ZhiMotion.sizeSpec)"),
+                COMPOSER + " 的竖向展开不得再传 ZhiMotion.sizeSpec："
+                        + "那条曲线抄的是**弹窗位移退出**，而展开在 Miuix 里走 spring");
+        require(!composer.contains("shrinkVertically(ZhiMotion.sizeSpec)"),
+                COMPOSER + " 的竖向收起不得再传 ZhiMotion.sizeSpec（同上）");
+
+        // ---- 26. Miuix 浮层的★★常驻契约★★ -------------------------------------
+        //
+        // 这一条是用户「很多地方都没有动画（参考 miuix 例子里的 bottomsheet /
+        // dialogwindow）」的直接根因，也是本轮里唯一**光看代码看不出来**的一条。
+        //
+        // 事实链（全部核过本仓 `~/projects/miuix`，版本 0.9.4，与 app 依赖一致）：
+        //  · `layout/DialogContentLayout.kt:123,133-166` 里退场是
+        //    遮罩 `tween(250)` + 内容 `tween(260, DecelerateEasing(1.5))`；
+        //  · 同文件 `:168` 是 `if (!show && !internalVisible.value) return`
+        //    —— **先播完退场才早退**；
+        //  · `overlay/OverlayDialog.kt:80-81`、`OverlayBottomSheet.kt:81-82` 给外层
+        //    `DialogLayout` 传的是 `EnterTransition.None` / `ExitTransition.None`，
+        //    所以**没有第二道兜底**；
+        //  · `utils/MiuixPopupUtils.kt:226-231` 的 `onDispose` 直接把 `showState`
+        //    掰 false，不给动画机会。
+        //
+        // 结论：**调用点写 `if (open) { Floating(...) }` 就是硬切** —— 组件一被移除，
+        // 那个 `Animatable` 随 composition 一起走，退场从未启动。
+        // 官方 demo（`example/component/DialogSection.kt:107-131`、
+        // `BottomSheetSection.kt:116-129`）一律 `show = <状态>`，从不套 `if`。
+        String skills = stripComments(read(root, SKILLS_OVERLAY));
+        String mcp = stripComments(read(root, MCP_CONFIG_OVERLAY));
+        String common = stripComments(read(root, COMMON));
+        // ① 浮层组件内部不得再硬编码 `show = true`（那是"调用点必须包 if"的写法）。
+        for (String[] pair : new String[][] {
+                {SKILLS_OVERLAY, skills}, {MCP_CONFIG_OVERLAY, mcp},
+        }) {
+            require(!pair[1].contains("show = true,"),
+                    pair[0] + " 里不得再出现 `show = true`：浮层的 `show` 必须由调用方传进来 —— "
+                            + "硬编码 true 意味着调用点只能用 `if (open) { … }` 包住它，"
+                            + "而那样退场动画永远不会播（见 §26 的事实链）");
+        }
+        // ② 数据驱动的浮层必须过 rememberLastNonNull：退场那 250~260ms 里状态已是 null。
+        //
+        // ⚠️ 这里**逐个点名**，不能只数个数、更不能只 `contains`：
+        //  · `contains` 会被文件里别的合法调用点骗过（`shownDetail` 一直都在）；
+        //  · `countOf >= 3` 也会 —— 当时有 6 处，删掉一处还剩 5，仍然 ≥3。
+        //    teeth 第一轮就是这么漏的，两处都改成点名之后才抓住。
+        // 每个串都是「变量名 + 它兜的那个字段」的完整语句，改错任何一处都会红。
+        String[] skillRemembered = {
+                "val shownDetail = rememberLastNonNull(state.detail)",
+                "val editing = rememberLastNonNull(state.editing)",
+                "val fileDraft = rememberLastNonNull(state.fileDraft)",
+                "val deleting = rememberLastNonNull(deleteTarget)",
+                "val createDraft = rememberLastNonNull(state.createForm)",
+                "val urlDraft = rememberLastNonNull(state.urlDraft)",
+        };
+        for (String line : skillRemembered) {
+            requireContains(skills, line,
+                    SKILLS_OVERLAY + " 缺一处「最后一次非空」兜底：`" + line + "`。"
+                            + "退场期间那 250~260ms 里 state 字段已是 null，"
+                            + "直接用会让离场那一屏画成空壳");
+        }
+        String[] mcpRemembered = {
+                "val shownForm = rememberLastNonNull(form)",
+                "val shownErrorDetail = rememberLastNonNull(errorDetail)",
+                "val shownImportText = rememberLastNonNull(config.importText)",
+        };
+        for (String line : mcpRemembered) {
+            requireContains(mcp, line,
+                    MCP_CONFIG_OVERLAY + " 缺一处「最后一次非空」兜底：`" + line + "`（同上）");
+        }
+        // ③ 长按动作菜单：`open` 入参 + 六个调用点不得再用 `if` 包住。
+        requireContains(common, "open: Boolean,",
+                COMMON + " 的 ZhiAnchoredActionMenu 必须收 `open: Boolean` 并转发给 "
+                        + "OverlayDropdownPopup 的 `show`：`ListPopupLayout.kt:120` 那句 "
+                        + "`if (!show && !internalVisible.value) return` 同样是"
+                        + "「先播完退场才早退」");
+        requireContains(common, "show = open,",
+                COMMON + " 的 ZhiAnchoredActionMenu 必须把 `open` 转发给 `show = open`");
+        for (String[] pair : new String[][] {
+                {SKILLS_OVERLAY, skills}, {MCP_CONFIG_OVERLAY, mcp},
+                {SANDBOX_SCREEN, stripComments(read(root, SANDBOX_SCREEN))},
+        }) {
+            require(!pair[1].contains("if (menuAt != null) {")
+                            && !pair[1].contains("if (menuOpen) {"),
+                    pair[0] + " 的动作菜单不得再用 `if` 包住：改成 `open = menuAt != null` "
+                            + "且无条件组合，否则长按菜单的收起是硬切");
+        }
+        // ④ B 节：退场期间"内容先被拆空"的几处，不得再有 `if (x == null) return@OverlayX`。
+        //
+        // 这 9 处只是**漏用了自家原语**（6 个设置类 overlay 早已在用），
+        // 所以断言直接盯着那几句早退。
+        for (String[] pair : new String[][] {
+                {DIALOGS, stripComments(read(root, DIALOGS))},
+                {ENVIRONMENT_OVERLAY, stripComments(read(root, ENVIRONMENT_OVERLAY))},
+                {ATTACH_FILE_OVERLAY, stripComments(read(root, ATTACH_FILE_OVERLAY))},
+                {MODEL_PICKER, stripComments(read(root, MODEL_PICKER))},
+                {ZHI_IMAGE, stripComments(read(root, ZHI_IMAGE))},
+        }) {
+            require(!pair[1].contains("if (request == null) return@OverlayDialog")
+                            && !pair[1].contains("if (plan == null) return@OverlayDialog")
+                            && !pair[1].contains("if (picker == null) return@OverlayDialog")
+                            && !pair[1].contains("if (!open) return@OverlayDialog")
+                            && !pair[1].contains("if (!open) return@OverlayBottomSheet")
+                            && !pair[1].contains("val current = picker ?: return@OverlayBottomSheet")
+                            && !pair[1].contains("val shown = image ?: return@OverlayDialog"),
+                    pair[0] + " 不得在浮层退出时把内容拆空（`if (x == null) return@OverlayX`）："
+                            + "那会让退场那 250~260ms 只剩一张空壳在缩/滑 —— 改读 rememberLastNonNull");
+        }
+
+        // ---- 27. 面板/页面的多态切换必须有过渡 --------------------------------
+        //
+        // 与 §26 相反：这些地方**不是**浮层，退场时组件本来就会被销毁，
+        // 所以要用 `AnimatedContent` 或 `AnimatedVisibility` 显式给过渡。
+        // 共同点同样是"删掉不会编译失败、界面也不坏，只是硬切一下"。
+        String workspaceLayouts = stripComments(read(root, WORKSPACE_LAYOUTS));
+        String filesPane2 = stripComments(read(root, FILES_PANE));
+        String terminalPane = stripComments(read(root, TERMINAL_PANE));
+        String sandbox = stripComments(read(root, SANDBOX_SCREEN));
+        String settingsDialog = stripComments(read(root, SETTINGS_DIALOG));
+        String settingsSubPage = stripComments(read(root, SETTINGS_SUB_PAGE));
+        // ① 宽屏副栏与窄屏用**同一套** Pager 机制（保留相邻页组合 + 官方弹簧）。
+        //
+        // 宽屏原先还是 `when (tab)` 硬切，切一次就重建离场/入场面板 ——
+        // 终端要把原生 AndroidView 重新挂上去。这里要求两处都出现
+        // `beyondViewportPageCount` 与 `PagerNavigationSpringSpec`。
+        //
+        // ⚠️ 光数个数不够：两处的值必须是**页数**。改成 0（= 不预摆放）时
+        // `countOf` 照样是 2 —— teeth 实测漏过一次。所以断言值本身。
+        requireContains(workspaceLayouts, "beyondViewportPageCount = tabs.size,",
+                WORKSPACE_LAYOUTS + " 的窄屏 Pager 必须 `beyondViewportPageCount = tabs.size`："
+                        + "只有 1 时相邻页只是被组合、未必被摆放，切换那一刻才付首次测量的钱"
+                        + "（实测过单帧 116.7ms）");
+        requireContains(workspaceLayouts, "beyondViewportPageCount = secondaryTabs.size,",
+                WORKSPACE_LAYOUTS + " 的宽屏副栏 Pager 必须 `beyondViewportPageCount = "
+                        + "secondaryTabs.size`（同上，值不能是 0 或 1）");
+        // ⚠️ 这条数的是**新的落定入口**：宽窄两套 Pager 各要一次 `springAnimateToPage`。
+        //
+        // 原先它数的是 `snapAnimationSpec = PagerNavigationSpringSpec`（`flingBehavior` 的参数）。
+        // 那条配置本轮随"关掉横滑"一起删掉了 —— 它只服务拖拽后的回弹吸附，没有拖拽就是死配置。
+        // 而它当年也**根本不是**点击的动效来源（点击走的是瞬时的 `requestScrollToPage`），
+        // 所以数它其实是数错了对象：那两处一直是 2，用户却报"没有动画"。
+        // 改用 `springAnimateToPage(` 之后，这条断言第一次真正对应"点击会动"这件事。
+        require(countOf(workspaceLayouts, "springAnimateToPage(") >= 2,
+                WORKSPACE_LAYOUTS + " 的宽窄两套 Pager 都必须用官方那一条弹簧**动画**落定"
+                        + "（当前 " + countOf(workspaceLayouts, "springAnimateToPage(") + " 处）");
+        // 反向：宽屏副栏不得再有 `PaneHost` 的裸 `when` 直挂 —— 那正是硬切的来源。
+        require(!workspaceLayouts.contains("secondaryPaneStateHolder.SaveableStateProvider(state.tab.name)"),
+                WORKSPACE_LAYOUTS + " 的宽屏副栏不得再按 `state.tab` 直接挂 PaneHost："
+                        + "那是 when(tab) 硬切（切一次重建一次面板）");
+        // 宽屏副栏不得能被手指横滑（页签在顶栏，面板横滑会与列表手势打架）。
+        requireContains(workspaceLayouts, "userScrollEnabled = false,",
+                WORKSPACE_LAYOUTS + " 的宽屏副栏 Pager 必须 userScrollEnabled = false："
+                        + "它的页签在顶栏那一行，面板本身横滑会与列表手势打架");
+        // ② 其它多态处必须有 AnimatedContent / AnimatedVisibility。
+        //
+        // ⚠️ 判据带 `targetState`/`visible`：只查 "AnimatedContent(" 会被
+        // `if (false) AnimatedContent(` 这种（关掉但保留）骗过 —— teeth 实测过。
+        String[] needsTransition = {
+                FILES_PANE, TERMINAL_PANE, SKILLS_OVERLAY, SETTINGS_DIALOG,
+        };
+        for (String file : needsTransition) {
+            String text = stripComments(read(root, file));
+            require(text.contains("AnimatedContent(\n")
+                            || text.contains("AnimatedVisibility(\n")
+                            || text.contains("AnimatedVisibility(visible =")
+                            || (file.equals(FILES_PANE) && text.contains("AnimatedVisibility(")),
+                    file + " 的形态切换必须有 AnimatedContent / AnimatedVisibility："
+                            + "裸 `if / when` 换分支是一帧内整块换掉（用户说的\"很多地方没有动画\"）");
+        }
+        // MCP 的两个 TAB 单列：它的 targetState 只能是**下标**。
+        require(mcp.contains("AnimatedContent(") && mcp.contains("targetState = tab,"),
+                MCP_CONFIG_OVERLAY + " 的两个 TAB 必须包在 AnimatedContent 里，且 "
+                        + "`targetState = tab,`（下标）：把 draft 编进去的话每敲一个键都重放转场");
+        require(!mcp.contains("AnimatedContent(\n                    targetState = draft"),
+                MCP_CONFIG_OVERLAY + " 的 TAB 转场不得以 draft 为 key");
+        // ②' 沙箱页的三态（错误 / 空 / 列表）是**例外**，而且是有代价的取舍。
+        //
+        // `AnimatedContent` 必须包在 LazyColumn **外面**，于是分支一换整页重建：
+        // 安装/卸载一个包时用户正停在列表中部，会被弹回顶部；而且顶栏折叠的
+        // `padding.calculateTopPadding()` 与 `nestedScroll` 都挂在这个 LazyColumn 上，
+        // 包一层会让那两处错位。
+        //
+        // 所以改成：三个分支各给**稳定 key** + `animateItem()`。
+        // 旧分支因此一定是"消失"而不是"复用成新内容"，观感与淡变一致，
+        // 而滚动位置、惰性、顶栏联动全部保留。
+        //
+        // 三条断言缺一不可：少了 key 就变成"复用同一项、只换内容"（等于硬切），
+        // 少了 animateItem 就完全没有补间。
+        requireContains(sandbox, "item(key = \"sandboxError\")",
+                SANDBOX_SCREEN + " 的错误态 item 必须有稳定 key（没有 key 的话分支切换时"
+                        + "Compose 会把它当成同一项只换内容 —— 等于硬切）");
+        requireContains(sandbox, "item(key = \"sandboxEmpty\")",
+                SANDBOX_SCREEN + " 的空态 item 必须有稳定 key（同上）");
+        require(countOf(sandbox, "Modifier.animateItem()") >= 3,
+                SANDBOX_SCREEN + " 的三个分支（错误/空/应用卡片）都必须挂 animateItem()"
+                        + "（当前 " + countOf(sandbox, "Modifier.animateItem()") + " 处）："
+                        + "这里是 §27 的唯一例外 —— 因为它不能包 AnimatedContent"
+                        + "（会重置滚动位置、并让顶栏折叠 padding 与 nestedScroll 错位）");
+        // ③ C-4 的 key 不得把正在编辑的文本编进去。
+        //
+        // 这是本组里最容易犯且**最不容易被发现**的一条：把 draft 编进 targetState，
+        // 每敲一个键 targetState 都变 → 每敲一个键都重放一次转场。
+        // 表现为"打字时整块在闪"，很容易被误诊成输入法问题。
+        // key 从 `stage` 扩成 `stage to root`：换根也要有过渡（用户报的
+        // 「标签栏切换没有动画」在文件面板这一侧就是换根时整屏硬切）。
+        // 这条断言的**意图没变** —— 禁止把 draft（正在编辑的文本）编进 key。
+        // 所以判据也跟着改成"key 必须是两个小枚举的组合"，而不是只认 stage：
+        // 只认 stage 的话，真正的回归（有人把 draft 编进去）照样会被漏掉。
+        require(!filesPane2.contains("targetState = stage to draft")
+                        && !filesPane2.contains("targetState = draft"),
+                FILES_PANE + " 不得把 draft 文本用作动画 key，避免每次输入都重复转场");
+        // ③' §27 补：`AnimatedContent` 的**每个分支只能吐一个** composable。
+        //
+        // 这条是用户报「文件列表和面包屑重叠」之后补的。根因既不在面包屑也不在列表，
+        // 而在 `AnimatedContent` 的**容器语义**：它是**叠放**（转场时它必须把新旧两屏
+        // 放在同一个位置才能交叉淡变），它**不是** `Column`。
+        // 所以分支里并列写几个 composable 时，「表头 + 面包屑 + 列表」会被放到
+        // **同一个原点**上互相盖住 —— 实测就是这个重叠。
+        //
+        // 为什么以前不重叠：这层**原先是裸 `when`**，挂在 `Column` 下时兄弟节点是竖排的。
+        // C-4 把它换成 `AnimatedContent` 之后，竖排语义变成了叠放 ——
+        // 这正是本项目把那次重构标为「最容易改崩」的那个原因，这里就是它崩掉的地方。
+        //
+        // ⚠️ 断言必须**成对**（正向 + 反向）：只查正向的话，把 `Column(…) {` 换成
+        // 另一个同样单子节点的容器（等于把这一坨参数藏进新函数、却漏传一个形参）
+        // 照样绿；只查反向则完全没守住。两边都写才拦得住回归到裸 `{`。
+        require(filesPane2.contains("AnimatedVisibility") || filesPane2.contains("AnimatedContent"),
+                FILES_PANE + " 的文件浏览/编辑器切换应保留转场");
+        requireContains(sandbox, "items(state.packages, key = { it })",
+                SANDBOX_SCREEN + " 的应用列表必须保留稳定 key（否则 animateItem 没有意义）");
+        requireContains(sandbox, "modifier = Modifier.animateItem(),",
+                SANDBOX_SCREEN + " 的应用卡片必须挂 animateItem()：安装/卸载后列表重排时"
+                        + "卡片会瞬移（这一处上一轮漏了 —— items 本来给了 key，只是没挂动效）");
+        // ⚠️ 数个数（两处折叠都要、不能只改一处）—— teeth 实测只查 contains 会漏。
+        require(countOf(settingsDialog, "enter = fadeIn() + expandVertically(),") >= 2,
+                SETTINGS_DIALOG + " 的两处折叠窗都必须显式给出展开方向（官方 SettingsPage 的写法）"
+                        + "（当前 " + countOf(settingsDialog, "enter = fadeIn() + expandVertically(),")
+                        + " 处，应为 2：联网搜索 + 上下文压缩）");
+        require(countOf(settingsDialog, "exit = fadeOut() + shrinkVertically(),") >= 2,
+                SETTINGS_DIALOG + " 的同两处收起也必须给出（fadeOut() + shrinkVertically()）");
+
+        // ---- 28. TerminalPane：组合里至多一个 AndroidView ★硬不变量★ ----------
+        //
+        // C-6 是把裸 `when` 换成 `AnimatedContent`。这一步**最容易改崩**：
+        // `AnimatedContent` 在转场期间会同时组合 initialState 与 targetState 两份内容，
+        // 若两个分支都含 `AndroidView`，同一个 `TermuxTerminalPane` 实例会被挂到
+        // 两个父容器上 —— Android 直接抛 "already has a parent"。
+        //
+        // 唯一的成立条件是：**`AndroidView` 只出现在一个分支里**，而
+        // `AnimatedContent` 转场时两个 state 必然不等，所以那一对里至多一个命中。
+        require(countOf(terminalPane, "AndroidView(") == 1,
+                TERMINAL_PANE + " 里必须**只有一处** AndroidView（当前 "
+                        + countOf(terminalPane, "AndroidView(") + " 处）："
+                        + "AnimatedContent 转场期间同时组合两个分支，两处都有的话"
+                        + "同一个 View 实例会被挂到两个父容器上，Android 直接抛异常");
+        requireContains(terminalPane, "TerminalStage.REAL -> key(viewEpoch) {",
+                TERMINAL_PANE + " 的 AndroidView 必须仍在自己那一支 `TerminalStage.REAL -> "
+                        + "key(viewEpoch) { … }` 里（`key(viewEpoch)` 是重挂渲染用的）");
+        // ⚠️ 断言带 `{ REAL, FAILURE, NOTICE }`：只查 "private enum class TerminalStage"
+        // 会被改名成 `TerminalStageX` 骗过（它是那个字符串的前缀）—— teeth 实测过。
+        requireContains(terminalPane, "private enum class TerminalStage { REAL, FAILURE, NOTICE }",
+                TERMINAL_PANE + " 必须用 TerminalStage 枚举当 AnimatedContent 的 key："
+                        + "直接拿 failureDetail/runtimeNotice 那两个**字符串**当 key 的话，"
+                        + "同一种状态下文案一变也会被当成\"换了一屏\"而重放转场");
+        // ⚠️ `detachFromParent(pane)` 在同一个文件里还有一处合法调用
+        // （`onDispose { detachFromParent(pane) }`），所以必须**按块**断言 ——
+        // 整文件 contains 的话删掉 AndroidView 里那一句照样绿，teeth 实测过。
+        String androidViewBody = bodyOf(terminalPane, "                                    AndroidView(");
+        require(androidViewBody.isEmpty() == false,
+                TERMINAL_PANE + " 找不到 AndroidView( 那一块的正文 —— 它的缩进变了，"
+                        + "请同步更新本断言的 signature");
+        require(androidViewBody.contains("detachFromParent(pane)"),
+                TERMINAL_PANE + " 的 AndroidView 块里必须保留 detachFromParent(pane)："
+                        + "它是 §28 这条不变量的最后一道兜底"
+                        + "（⚠️ 不能只查整文件 —— 文件里 `onDispose` 那处也含同一串）");
+        require(countOf(terminalPane, "TerminalStage.FAILURE ->") == 1
+                        && countOf(terminalPane, "TerminalStage.NOTICE ->") == 1,
+                TERMINAL_PANE + " 的三个 TerminalStage 分支必须各出现一次");
+        // ⚠️ targetState 的**判断**必须读 `state.*`，不能读那两个 rememberLastNonNull 变量。
+        // 那是本仓最容易顺手写错的一处：`failure` 一旦非空就**永远**非空
+        // （rememberLastNonNull 的定义就是这样），于是失败屏再也退不出去 ——
+        // 重试成功了界面还停在"终端已退出"。teeth 实测过这种改法能骗过旧的断言。
+        String terminalStageKey = bodyOf(terminalPane, "                            targetState = when {");
+        require(!terminalStageKey.isEmpty(),
+                TERMINAL_PANE + " 找不到 targetState = when { 那一块（缩进变了？）");
+        require(terminalStageKey.contains("state.failureDetail != null")
+                        && terminalStageKey.contains("state.runtimeNotice != null"),
+                TERMINAL_PANE + " 的 targetState 判断必须读 `state.failureDetail` / "
+                        + "`state.runtimeNotice`，**不能**读 `failure` / `notice` 那两个"
+                        + "「最后一次非空」变量：它们一旦非空就永远非空，"
+                        + "失败屏会再也退不出去（重试成功了界面还停在「终端已退出」）");
+        requireAbsentIn(terminalStageKey, "failure != null ->",
+                TERMINAL_PANE + " 的 targetState 不得用 `failure != null` 当条件（同上）");
+        requireAbsentIn(terminalStageKey, "notice != null ->",
+                TERMINAL_PANE + " 的 targetState 不得用 `notice != null` 当条件（同上）");
+
+        // ---- 29. 选中态变色必须过 animateColorAsState --------------------------
+        //
+        // 本仓早有一条专盯 ModelPicker 的同类断言（"硬切会让'点一下整行啪地变蓝'
+        // 看起来很生硬"），但同一条道理没被推广开：全仓只有 6 处用过
+        // `animateColorAsState`，而这 8 处选中态全是硬切。
+        //
+        // ⚠️⚠️ 这里**绝不能**只断言"文件里出现过 animateColorAsState"。
+        // teeth 第一轮就是这么写的，结果是 5/5 全部漏掉：把动画值的**使用处**
+        // 换回硬编码 `color = if (…)` 之后，那个 `animateColorAsState(…)` 的
+        // **声明**还在文件里，`contains` 照样绿 —— 而那正是本仓记录过的失败模式
+        // （"断言看着在守，守的其实是别的东西"）。
+        //
+        // 所以这一节每一处都断言**一对**：
+        //  · 正向 = 动画出来的那个变量**真的被用在组件参数上**；
+        //  · 反向 = 同一段块里不得残留那个硬编码的 `if (…)` 配色。
+        // 反向用 block 级（bodyOf）而不是整文件，因为文件里往往还有别的合法硬切
+        // （例如 `color = if (prompt.destructive) { 红 } else { 正常 }` —— 那是一次性的
+        //  提示，不是"选中态在两种稳定状态之间来回变"，没有补间的意义）。
+        String terminalChrome = stripComments(read(root, TERMINAL_CHROME));
+        // ① FileChrome 的根切换条。
+        //
+        // 根切换条原先私有在 FilesPane.kt 里，本轮**搬到了 FileChrome.kt**
+        // （因为它现在被两处共用：文件面板 + 附加选择器）。要守的东西一个字没变
+        // ——「选中态必须淡变、不许硬切配色」「必须是真的按钮（Sink）」——
+        // 只是它住的地方换了，所以这里跟着换读取目标，而不是把断言删掉。
+        String fileChrome = stripComments(read(root, FILE_CHROME));
+        String rootSwitcher = bodyOf(fileChrome, "internal fun FileRootSwitcher(");
+        require(!rootSwitcher.isEmpty(),
+                FILE_CHROME + " 找不到 FileRootSwitcher 的正文（签名变了？）");
+        // ⚠️⚠️ 本条**在本轮改成了另一个判据**，改的原因是设计本身换了 —— 用户报
+        // 「TAB 栏切换是没有动画的」，而这一行原先是一排自制 `Card`，选中态只有一次
+        // `animateColorAsState` 的底色淡变，**没有滑动指示器**（硬跳）。
+        //
+        // 现在它转发到 [ZhiSegmentedTabs]（= 顶部工作区标签用的 Miuix `TabRowWithContour`），
+        // 指示器由 Miuix 内部 `indicatorOffset.animateTo(target, tween(200))` 滑动。
+        //
+        // 所以旧判据（`color = segmentColor` + `PressFeedbackType.Sink`）已经不适用，
+        // 而**意图没变**：这一行必须有"选中态会动"的动画，不能退回硬切。
+        // 新判据就钉这一点，并且反过来禁自制卡片行 —— 自制就等于把指示器动画再丢一次。
+        requireContains(rootSwitcher, "ZhiSegmentedTabs(",
+                FILE_CHROME + " 的根切换条必须转发到 ZhiSegmentedTabs（Miuix TabRowWithContour）："
+                        + "自制的卡片行没有滑动指示器，选中态只能靠底色淡变，观感就是「硬跳」");
+        requireContains(rootSwitcher, "selectedIndex = roots.indexOf(selected)",
+                FILE_CHROME + " 的根切换条必须把当前根传给 selectedIndex —— "
+                        + "指示器的位置就是从它算出来的，传死了就不会动");
+        requireContains(rootSwitcher, ".fillMaxWidth().height(WorkspaceTabRowHeight)",
+                FILE_CHROME + " 的根切换条必须沿用 WorkspaceTabRowHeight（45dp）："
+                        + "这一行原先实测也在 ~44dp，对齐之后面板高度不变；自己再定一个数迟早与顶部标签不一致");
+        requireAbsentIn(rootSwitcher, "animateColorAsState(",
+                FILE_CHROME + " 的根切换条不得退回自制的 animateColorAsState —— "
+                        + "那是「没有滑动指示器」那个版本的特征，回来就等于把用户报的问题又装回去");
+        requireAbsentIn(rootSwitcher, "Card(",
+                FILE_CHROME + " 的根切换条不得退回一排自制 Card —— 见上一条，同一个原因");
+        // ② TerminalChrome：扩展键字色 + 会话行底色/字色。
+        requireContains(terminalChrome, "color = keyColor,",
+                TERMINAL_CHROME + " 的扩展键必须把 animateColorAsState 的结果用在字色上");
+        requireAbsentIn(terminalChrome, "color = if (active) palette.accent",
+                TERMINAL_CHROME + " 的扩展键不得再硬切字色");
+        requireContains(terminalChrome, ".background(rowBg)",
+                TERMINAL_CHROME + " 的会话行必须把 animateColorAsState 的结果用在 background 上");
+        requireContains(terminalChrome, "color = rowText,",
+                TERMINAL_CHROME + " 的会话行必须把 animateColorAsState 的结果用在字色上");
+        requireAbsentIn(terminalChrome, ".background(if (session.selected)",
+                TERMINAL_CHROME + " 的会话行不得再硬切底色");
+        requireAbsentIn(terminalChrome, "color = if (session.selected)",
+                TERMINAL_CHROME + " 的会话行不得再硬切字色");
+        // ③ Dialogs 的选择窗口选项行。
+        // ⚠️ 复用本方法前面（§… 处）已经读好的那一份 `dialogs`：同一个
+        // `stripComments(read(root, DIALOGS))`，不必再读一遍盘。
+        requireContains(dialogs, "color = cardColor,",
+                DIALOGS + " 的选项行必须把 animateColorAsState 的结果用在 Card 的 color 上");
+        require(dialogs.contains("color = titleColor)")
+                        || dialogs.contains("color = titleColor,"),
+                DIALOGS + " 的选项行标题必须把 animateColorAsState 的结果喂给 "
+                        + "BasicComponentDefaults.titleColor(color = titleColor)");
+        requireAbsentIn(dialogs, "color = if (checked) scheme.surfaceContainerHighest",
+                DIALOGS + " 的选项行不得再硬切底色");
+        // ⚠️ 反向锚点必须带上前缀 `titleColor = BasicComponentDefaults.titleColor(` ——
+        // 光禁 `if (checked) scheme.primary else scheme.onBackground` 会把
+        // animateColorAsState 的 **targetValue** 一起误伤（那一行本来就长这样）。
+        requireAbsentIn(dialogs,
+                "titleColor = BasicComponentDefaults.titleColor(\n"
+                        + "                            color = if (checked)",
+                DIALOGS + " 的选项行标题不得再硬切颜色（titleColor 里直接写 if）");
+        // ④ 三个列表页的"当前生效"行。
+        for (String[] pair : new String[][] {
+                {API_CONFIG_OVERLAY, "apiProfileTitle"},
+                {ROLE_CARDS_OVERLAY, "roleCardTitle"},
+                {SEARCH_SERVICES_OVERLAY, "searchServiceSummary"},
+        }) {
+            String text = stripComments(read(root, pair[0]));
+            requireContains(text, "label = \"" + pair[1] + "\",",
+                    pair[0] + " 的选中态必须有一条 animateColorAsState（label = \"" + pair[1] + "\"）"
+                            + " —— 按 label 点名而不是查\"文件里出现过 animateColorAsState\"："
+                            + "后者在动画被换成硬切之后照样绿");
+            requireAbsentIn(text, "color = if (active) scheme.primary else scheme.onBackground",
+                    pair[0] + " 的选中行不得再出现 `color = if (active) scheme.primary else …` 的硬切");
+            requireAbsentIn(text, "color = if (active) scheme.primary else scheme.onSurfaceVariantSummary",
+                    pair[0] + " 的选中行不得再硬切副标题色");
+        }
+        // ⚠️ colorSpec 的锚点必须带上**类型声明那一行**：光查
+        // `tween(FADE_OUT_MILLIS, easing = SinOutEasing)` 在这个文件里出现两次
+        // （colorSpec 与 fadeOutSpec 共用同一条），改掉一处另一处会让断言照样绿 ——
+        // teeth 第一轮的锚点就撞在这一点上，直接 SKIP 了。
+        requireContains(stripComments(read(root, ANIMATIONS)),
+                "val colorSpec: FiniteAnimationSpec<Color> =\n"
+                        + "        tween(FADE_OUT_MILLIS, easing = SinOutEasing)",
+                ANIMATIONS + " 的 colorSpec 必须仍是 `tween(150, SinOutEasing)`"
+                        + "（这是 Miuix 弹窗淡出那条曲线，8 处选中态都引用它）");
+
+        // ---- 30. 工具卡的富内容预览（`additionalContent`）必须真的到界面 --------
+        //
+        // 这条链**每一环都可能被悄悄掐断，而全程不会有任何编译错误或运行时报错**：
+        //
+        //   工具产出 additionalContent
+        //     → 引擎（本来只发给模型！界面拿不到）
+        //       → EngineEvents.onEngineToolResult 的**签名**
+        //         → 控制器转发
+        //           → ToolActivity.previews
+        //             → MessageCards 渲染
+        //
+        // 原来的事实链是：`ZhiSandboxTool` 一直在产出 `{type:image, base64…}`，
+        // `ZhiCodeEngine` 一直在把它当 user 消息发给模型，而**界面这一层从头到尾
+        // 没有接过** —— 于是"沙箱截的图，模型看得到、用户看不到"。
+        // `UiCanvasTool` 里那句注释「包装成界面能直接消费的附加内容块」当时并不成立。
+        //
+        // 所以这里逐环点名，而不是查"文件里出现过 additionalContent"：
+        // 后者在中间任何一环被删掉之后**照样绿**（上游还在产出、下游还在渲染，
+        // 只是没人接）。teeth 会逐个改坏来确认每条断言都不是空的。
+        String engineController = stripComments(read(root, ENGINE_CONTROLLER));
+        String uiModels = stripComments(read(root, UI_MODELS));
+        String vmForPreviews = stripComments(read(root, VIEW_MODEL));
+        String cardsForPreviews = stripComments(read(root, MESSAGE_CARDS));
+
+        // ① 签名里必须有这个参数。少了它，控制器传什么都编译不过 —— 这是最外层的一道。
+        //
+        // ⚠️ 用 signatureAt 而**不是** bodyOf：`EngineEvents` 里这是一句**没有方法体的接口声明**，
+        // bodyOf 会一路找到后面别的函数的 `{`，取出一块与断言无关的文本 —— 那样即使
+        // 参数被删掉，断言也可能因为"附近某处恰好有这串字"而变绿。
+        String resultEvent = signatureAt(engineController, "fun onEngineToolResult(");
+        require(!resultEvent.isEmpty(),
+                ENGINE_CONTROLLER + " 找不到 onEngineToolResult 的签名（缩进/名字变了？）");
+        requireContains(resultEvent, "previews: List<ChatImage>,",
+                ENGINE_CONTROLLER + " 的 EngineEvents.onEngineToolResult 必须有 previews 参数："
+                        + "它曾经不存在，于是工具带回来的富内容在这一层被丢掉，"
+                        + "而引擎照样把它发给模型");
+
+        // ② 控制器必须真的把 additionalContent 交给解析器，而不是只声明一个没人用的参数。
+        requireContains(engineController, "readChatImageBlocks(",
+                ENGINE_CONTROLLER + " 必须调用 readChatImageBlocks 解析 additionalContent");
+        requireContains(engineController, "result.additionalContent()",
+                ENGINE_CONTROLLER + " 必须从 result.additionalContent() 取数据 —— "
+                        + "参数声明了却不转发是最容易发生的退化");
+
+        // ③ 界面模型要有落点。
+        requireContains(uiModels, "val previews: List<ChatImage> = emptyList(),",
+                UI_MODELS + " 的 ToolActivity 必须有 previews 字段");
+        requireContains(vmForPreviews, "previews = previews,",
+                VIEW_MODEL + " 的 onEngineToolResult 必须把 previews 存进 ToolActivity —— "
+                        + "同 `diff` 那一处：漏了这行，截图停在这一层，编译器不会提醒");
+
+        // ④ 渲染：必须在 EXPANDED 里真的画出来，而且**必须复用** ZhiImageRow。
+        String expandedBlock = bodyOf(cardsForPreviews, "ToolStatusRegion.EXPANDED ->");
+        require(!expandedBlock.isEmpty(),
+                MESSAGE_CARDS + " 找不到 EXPANDED 分支（缩进变了？）");
+        requireContains(expandedBlock, "activity.previews.isNotEmpty()",
+                MESSAGE_CARDS + " 的展开态必须判 activity.previews（不判就等于没画）");
+        requireContains(expandedBlock, "ZhiImageRow(",
+                MESSAGE_CARDS + " 的展开态必须复用 ZhiImageRow 画预览图："
+                        + "横向可滑、同高、长宽比夹取与解码缓存都在那个组件里，"
+                        + "自己拼一行图会重复实现并漏掉\"同一轴不能再套滚动\"那条约束");
+        requireContains(expandedBlock, "images = activity.previews",
+                MESSAGE_CARDS + " 的 ZhiImageRow 必须接 activity.previews（而不是从别处找数据）");
+        // 点了要有反应：`onOpen` 必须接到那个回调上，否则图能看、点不开。
+        requireContains(expandedBlock, "onOpen = onImageOpen,",
+                MESSAGE_CARDS + " 展开态的 ZhiImageRow 必须把 onOpen 接到 onImageOpen —— "
+                        + "否则缩略图画得出来、点下去没反应（全屏查看进不去）");
+
+        // ⑤ 回调必须从 ToolBatch 一路透传到行里。
+        //
+        // 断在 ToolGroupCard 那一层的后果是**分组的工具丢预览、单条的还在** ——
+        // 表现出来像"有时有图有时没有"，最难排查的一种。
+        String toolGroupCardBlock = bodyOf(cardsForPreviews, "private fun ToolGroupCard(");
+        require(!toolGroupCardBlock.isEmpty(),
+                MESSAGE_CARDS + " 找不到 ToolGroupCard（缩进变了？）");
+        requireContains(toolGroupCardBlock, "onImageOpen = onImageOpen,",
+                MESSAGE_CARDS + " 的 ToolGroupCard 必须把 onImageOpen 透传给行 —— "
+                        + "漏了它，折叠组里的工具就没有预览，而单条工具还有");
+
+        // ⑥ 点开要能全屏 —— 宿主在 ToolBatch 内部（本地 UI 状态，照 UserBubble 的约定）。
+        String toolBatchBlock = bodyOf(cardsForPreviews, "fun ToolBatch(");
+        require(!toolBatchBlock.isEmpty(),
+                MESSAGE_CARDS + " 找不到 ToolBatch（缩进变了？）");
+        requireContains(toolBatchBlock, "ZhiImageViewer(image = viewing",
+                MESSAGE_CARDS + " 的 ToolBatch 必须挂 ZhiImageViewer —— "
+                        + "否则预览图点了没反应");
+        requireContains(toolBatchBlock, "onImageOpen = { viewing = it }",
+                MESSAGE_CARDS + " 必须把 onImageOpen 接到本地 viewing 状态上");
+
+        // ⑦ 两个判据必须带上 previews。
+        //
+        // 这是本功能最容易留下的**静默吞图**：`toolStatusRegion` 判 QUIET 的条件若只写
+        // `output.isBlank()`，一个"只有截图、自述为空"的工具展开之后什么都不画
+        // （QUIET 分支是 `-> Unit`）；沙箱截图目前恰好总带一段 JSON 自述所以碰不到，
+        // 但那是巧合不是保证。
+        String regionBody = bodyOf(cardsForPreviews, "private fun toolStatusRegion(");
+        require(!regionBody.isEmpty(),
+                MESSAGE_CARDS + " 找不到 toolStatusRegion（缩进变了？）");
+        requireContains(regionBody, "activity.previews.isEmpty()",
+                MESSAGE_CARDS + " 的 toolStatusRegion 判 QUIET 时必须一并看 previews："
+                        + "只判 output 的话，只有截图没有自述的工具展开后是空白的");
+        require(!regionBody.contains("activity.output.isBlank() -> ToolStatusRegion.QUIET"),
+                MESSAGE_CARDS + " 的 toolStatusRegion 不得退回「只判 output」的写法（同上）");
+        // ⚠️ 同理用 lineAt：`val hasDetails = …` 是一句没有花括号的赋值，
+        // bodyOf 会跑到后面某个函数里去。
+        String hasDetailsLine = lineAt(cardsForPreviews, "val hasDetails =");
+        require(!hasDetailsLine.isEmpty(),
+                MESSAGE_CARDS + " 找不到 val hasDetails（改名了？）");
+        requireContains(hasDetailsLine, "activity.previews.isNotEmpty()",
+                MESSAGE_CARDS + " 的 hasDetails 必须包含 previews："
+                        + "否则只有预览的工具连展开入口都没有");
+
+        // ⑧ 折叠态摘要要说"图"，不能显示成"N 行"（那是自述 JSON 的行数）。
+        String summaryBody = bodyOf(cardsForPreviews, "private fun compactToolSummary(");
+        require(!summaryBody.isEmpty(),
+                MESSAGE_CARDS + " 找不到 compactToolSummary（缩进变了？）");
+        requireContains(summaryBody, "activity.previews.isNotEmpty()",
+                MESSAGE_CARDS + " 的 compactToolSummary 必须先说预览图："
+                        + "否则沙箱截图会显示成「28 行 · 点按展开」，用户看不出有图可看");
+
+        // ---- 31. 终端必须跟随应用主题 ------------------------------------------
+        //
+        // 用户报「终端对深浅色不适配」。事实是：ANSI 调色板一直写死深色档，而**浅色档
+        // 那张表历史上写过却从来没走到过** —— 它唯一的入口 applyTheme 没有任何调用方，
+        // 宿主类注释里把这件事记成了"应该单独做"。本轮就是单独做它。
+        //
+        // ⚠️ 这一节的重点不是"浅色档存在"，而是**两档都得在**：
+        //  · 只钉"浅色档接上了" → 把深色档也顺手换成浅色值照样绿，
+        //    而深色是默认档，那等于**所有人**的外观都被改了；
+        //  · 只钉"深色档没变" → 什么都没做也能绿。
+        // 所以下面每对断言都是正向 + 反向一起给。
+        //
+        // 为什么值得单列一节：配色这条链断了**不会有任何编译错误或运行时报错**，
+        // 界面只是安静地回到"深色模式看不出问题、浅色模式一片黑"。
+        String terminalHost = stripComments(read(root, TERMINAL_HOST));
+
+        // ① 必须按主题分档，而不是写死一张表。
+        String applyPalette = bodyOf(terminalHost,
+                "private void applyTerminalPalette(TerminalSession session)");
+        require(!applyPalette.isEmpty(),
+                TERMINAL_HOST + " 找不到 applyTerminalPalette 的正文（签名变了？）");
+        requireContains(applyPalette, "if (!darkTheme) {",
+                TERMINAL_HOST + " 的 applyTerminalPalette 必须按 darkTheme 分深浅两档："
+                        + "只写死一张表的话，浅色模式下终端仍然是黑底白字");
+        // ② 浅色档必须**背景与前景成对**给。只改背景不改前景 = 浅底上留白字，等于看不见。
+        requireContains(applyPalette,
+                "colors[TextStyle.COLOR_INDEX_BACKGROUND] = Color.rgb(246, 248, 252);",
+                TERMINAL_HOST + " 的浅色档必须给出背景色（旧表里的 BG 246,248,252）");
+        requireContains(applyPalette,
+                "colors[TextStyle.COLOR_INDEX_FOREGROUND] = Color.rgb(29, 36, 51);",
+                TERMINAL_HOST + " 的浅色档必须同时给出前景色（TEXT 29,36,51）："
+                        + "只改背景会让文字变成浅底上的浅字，等于什么都看不见");
+        // ③ 深色档不许变 —— 改浅色档时顺手"调整"一下深色档，浅色下看不出来，
+        //    而深色是默认档，外观就被悄悄改动了。
+        requireContains(applyPalette,
+                "colors[TextStyle.COLOR_INDEX_BACKGROUND] = Color.rgb(0, 0, 0);",
+                TERMINAL_HOST + " 的深色档背景必须仍是纯黑：改浅色档时不得顺手动深色档，"
+                        + "深色是默认档，动了等于改了所有用户的外观");
+        // ④ 空档期（还没有会话 / 会话已退出）的底色不得写死。
+        require(!terminalHost.contains("setBackgroundColor(Color.BLACK)"),
+                TERMINAL_HOST + " 不得再写死 setBackgroundColor(Color.BLACK)："
+                        + "浅色档下没有会话时会闪出一块纯黑 —— 那正是「深浅色不适配」的一处");
+        // ⑤ 必须有推送入口。
+        require(terminalHost.contains("public void setDarkTheme(boolean dark)"),
+                TERMINAL_HOST + " 必须有 public void setDarkTheme(boolean dark)："
+                        + "应用主题的唯一权威在 Compose 那边（LocalZhiDark），"
+                        + "宿主是纯 Java 的 FrameLayout，读不到它");
+        // ⑥ 光是"有这个入口"没用 —— 浅色表当年就是死在"没人调"上。界面侧必须真的推。
+        requireContains(terminalPane, "LaunchedEffect(isDark) { pane.setDarkTheme(isDark) }",
+                TERMINAL_PANE + " 必须在 isDark 变化时调用 pane.setDarkTheme(isDark)："
+                        + "宿主加了 setDarkTheme 却没人调用，等于浅色档仍然走不到 ——"
+                        + "历史上那张浅色表走不到，原因正是它的入口 applyTheme 没有调用方");
+        // ⑦ 外壳的两个占位不得再写死黑底（它们也铺满整个面板）。
+        require(!terminalChrome.contains("background(Color.Black)"),
+                TERMINAL_CHROME + " 的占位不得再写死 Color.Black 底色（同上："
+                        + "浅色模式下会从浅底里闪出一块纯黑）");
+
+        // ---- 32. 对话流的文字动画（表头淡变 / 新成员一次性进入）------------------
+        //
+        // 用户的原话：「对话流的动画还不是很完善（尤其是思考和正文还有工具卡），
+        // 文字是直接没动画」。这一节钉住本轮补上的两处。
+        String cardsForMotion = stripComments(read(root, MESSAGE_CARDS));
+
+        // ① 思考面板的表头文案必须过 Crossfade。
+        //
+        // 表头是「思考过程」+ 流式期间多一个「 · 进行中」。不淡变的话，尾缀会在
+        // 流式开始/结束那两下硬蹦出来/消失 —— 整块面板看着像"卡"了一下。
+        // 做法与工具组标题同一口径（「Crossfade(targetState = ToolGrouping.label(...))」）。
+        String thinkingPanel = bodyOf(cardsForMotion, "private fun ThinkingPanel(");
+        require(!thinkingPanel.isEmpty(),
+                MESSAGE_CARDS + " 找不到 ThinkingPanel 的正文（签名变了？）");
+        requireContains(thinkingPanel, "label = \"thinking-label\",",
+                MESSAGE_CARDS + " 的 ThinkingPanel 表头文案必须过 Crossfade（label = "
+                        + "\"thinking-label\"）：不加的话「 · 进行中」这个尾缀是硬蹦的");
+        // ⚠️ 反向：只查正向的话，Crossfade 声明留着、使用处退回裸 Text 照样绿
+        //    —— 本仓 §29 记过这个失败模式。
+        require(!thinkingPanel.contains("text = \"思考过程\" + (if (item.streaming)"),
+                MESSAGE_CARDS + " 的 ThinkingPanel 表头不得退回裸 Text："
+                        + "那样尾缀又是硬切（Crossfade 声明留着也没用）");
+
+        // ② 新成员的一次性进入动画。
+        //
+        // 为什么需要：一轮助手回合是**一个** LazyColumn item，回合内部追加的工具卡/正文
+        // 不产生新 item，item 级的 animateItem 根本不会触发 —— 文字就是"蹦"出来的。
+        String chatListForMotion = stripComments(read(root, CHAT_LIST));
+        requireContains(chatListForMotion, "private val MemberEnterRise = 8.dp",
+                CHAT_LIST + " 必须有 MemberEnterRise 常量（新成员上移的距离）");
+        String animatedMember = bodyOf(chatListForMotion, "private fun AnimatedMember(");
+        require(!animatedMember.isEmpty(),
+                CHAT_LIST + " 找不到 AnimatedMember（签名变了？）");
+        // ⚠️⚠️ 这一节最重要的一条：**历史消息不能在滚动中补播动画**。
+        //
+        // LazyColumn 会回收组合，往上滚到旧消息时那一条是"重新进入组合"的。
+        // 若判据写成"刚进入组合就播"，历史消息会在滚动里不停闪 —— 比没有动画糟得多。
+        // 所以：可见性判据必须来自 「seenIds」（首次组合时已把当时的 transcript 全部登记），
+        // 而不是"它进来了"。
+        requireContains(chatListForMotion, "animate = remember(item.id) {",
+                CHAT_LIST + " 的成员进入动画必须以「这个 id 以前没见过」为判据"
+                        + "（animate = remember(item.id) { … }）："
+                        + "写成「刚进入组合就播」会让往上滚到的历史消息不停闪");
+        // 判据的来源要单独钉一次：上一条只看 `animate = remember(item.id) {`，
+        // 把里面换成任何别的条件（比如"刚进组合"）它照样绿。
+        requireContains(chatListForMotion, "val fresh = seenIds.add(item.id)",
+                CHAT_LIST + " 的进入判据必须取自 seenIds.add(...) 的返回值："
+                        + "换成别的来源就把「历史消息补播动画」那个失败模式放回来了");
+        requireContains(chatListForMotion, "val seenIds = remember(state.activeSessionId) {",
+                CHAT_LIST + " 必须有 seenIds，且以 activeSessionId 为 key："
+                        + "换会话时重新快照一次，否则新会话里的消息会集体播一次淡入");
+        // ⚠️ 播种的**实现位置**后来挪了：集合改放文件级、播种收进 `seenIdsFor`，
+        //    因为 `remember` 的寿命只到本层组合被丢弃为止 —— 组合一旦重建，
+        //    「用当前 transcript 再播种一次」会把**刚刚新到的那条**也登记成已见过，
+        //    于是它的动画静默消失（详情见 ChatList 里的长注释）。
+        //    所以这里改钉两处：调用点传入了当时快照，且播种发生在"按会话只做一次"的门内。
+        requireContains(chatListForMotion, "seenIdsFor(state.activeSessionId, state.transcript)",
+                CHAT_LIST + " 的 seenIds 初次组合必须把**当时的 transcript 快照**交给播种函数："
+                        + "它们是历史，不该补播动画");
+        String seenIdsForBody = bodyOf(chatListForMotion, "private fun seenIdsFor(");
+        require(!seenIdsForBody.isEmpty(),
+                CHAT_LIST + " 找不到 seenIdsFor 的正文（改名了？）");
+        requireContains(seenIdsForBody, "seenMessageIds.addAll(transcript.map { it.id })",
+                CHAT_LIST + " 的 seenIdsFor 必须把**当时的 transcript 全部**登记为已见过："
+                        + "它们是历史，不该补播动画");
+        requireContains(seenIdsForBody, "if (seenSeededSession != sessionId) {",
+                CHAT_LIST + " 的 seenIdsFor 播种必须**按会话只做一次**："
+                        + "组合重建时又播种一次，会把刚新到的那条也标成已见过，动画就没了");
+        // 反向：不得无条件播（这是最容易写出的错误版本）。
+        require(!chatListForMotion.contains("AnimatedMember(animate = true)"),
+                CHAT_LIST + " 不得无条件播进入动画（历史消息会在滚动中不停闪）");
+        // 历史那条路必须零开销：不建 layer。
+        requireContains(animatedMember, "if (!animate) {",
+                CHAT_LIST + " 的 AnimatedMember 必须在 animate 为假时原样输出内容："
+                        + "历史消息占绝大多数，给每条都常驻一个 graphicsLayer 是白付开销");
+        requireContains(animatedMember, "Modifier.graphicsLayer {",
+                CHAT_LIST + " 的 AnimatedMember 必须用 graphicsLayer 做淡入+位移");
+
+        // ③ 进度必须**在绘制期读**。
+        //
+        // 这不是风格问题。写成 `val p = progress.value` 再 `graphicsLayer { alpha = p }`，
+        // 那个 `by`/`=` 就是组合期读：动画的**每一帧**都让本组件重组一次，
+        // 而本组件是消息列表的成员包装，重组就把 `content()` 整条（含 Markdown 正文）
+        // 重新求值。外面同时还有逐帧的列表布局在跑 —— 两边叠起来就是用户报的
+        // 「没有动画，只看到卡」。
+        //
+        // ⚠️ 只钉正向不够：`Modifier.graphicsLayer {` 留着、lambda 里改成读一个
+        //    组合期算好的局部变量，照样绿 —— 而那正是要拦的写法。所以正反一起给。
+        require(!animatedMember.contains("val p = progress.value"),
+                CHAT_LIST + " 的 AnimatedMember 不得在组合期读进度"
+                        + "（`val p = progress.value` 会让动画每帧重组整条消息，"
+                        + "正文一起重建 → 动画被淹没）：读数必须放进 graphicsLayer 的 lambda");
+        requireContains(animatedMember, "val v = progress.value",
+                CHAT_LIST + " 的 AnimatedMember 必须在 graphicsLayer 的 lambda 里读进度"
+                        + "（`val v = progress.value` 写在 lambda 内 = 绘制期读，动画期间不重组）");
+
+        // ⚠️ 第 32 节到此为止只覆盖"文字成员进入"。下面 33 管的是**同一条链路的性能前提** ——
+        // 逐帧重组不解决，上面这些动画再多也看不出来。
+
+        // ---- 34. 附加选择器是**浏览器**，不是递归搜索 -------------------------
+        //
+        // 用户拿截图报的：标题写着「附加项目文件」，列出来的全是 storage/pictures
+        // 里的设备截图。查下来是真错，不是观感问题：
+        //
+        //   · 它做的是 FileSearch.search(projectPath, query) —— **递归**搜索；
+        //   · projectPath 在 Termux 下就是 HOME；
+        //   · HOME 下有 Termux 的 storage/{pictures,dcim,downloads,movies,music,shared}
+        //     软链（本仓环境里六个都在），而 FileSearch 只按**名字**排除
+        //     build / node_modules 这类构建目录 —— storage 不在名单里；
+        //   · 空查询走 SHALLOW_DEPTH = 2，而 storage/ 是第 1 层、storage/pictures/
+        //     是第 2 层 —— 所以**一打开就在搜它们**，用户一个字都不用敲；
+        //   · 而且 BFS 浅层优先：照片在第 3 层、项目源码在第 6~8 层，
+        //     于是**整屏都是照片**，真正的代码排在后面。
+        //
+        // 修法不是「把 storage 加进跳过名单」（那只是补一个洞，下次别的软链照样进来），
+        // 而是把这一屏改成**浏览一个目录**：一层一层走、永远不递归。
+        // 下面每一条都对着上面某个具体事实。
+        String attach = stripComments(read(root, ATTACH_FILE_OVERLAY));
+        String attachState = stripComments(read(root, MODELS));
+
+        // ① 全仓不许再有递归搜索的调用点。
+        //
+        // ⚠️ 这是本节最重要的一条：FileSearch.kt 已删，只要有人把它接回来
+        //    （或者在别处写一个新的递归遍历来喂这个面板），这条就红。
+        //    断言「整仓没有调用点」而不是「那个文件不存在」——
+        //    后者挡不住换个文件名再来一份。
+        int searchCalls = 0;
+        try (Stream<Path> walk = Files.walk(Paths.get(root, "app/src/main"))) {
+            for (Path file : walk.filter(p -> p.toString().endsWith(".kt")).toList()) {
+                String code = stripComments(new String(Files.readAllBytes(file),
+                        java.nio.charset.StandardCharsets.UTF_8));
+                if (code.contains("FileSearch.search(")) {
+                    searchCalls++;
+                    System.out.println("        (仍在递归搜索: " + file + ")");
+                }
+            }
+        }
+        require(searchCalls == 0,
+                "附加选择器不得再走递归搜索（FileSearch.search(…)）："
+                        + "它从 HOME 起递归，会顺着 Termux 的 storage/* 软链爬进设备相册 ——"
+                        + "「附加项目文件」打开后整屏都是截图，正是这个原因。"
+                        + "改成一层一层浏览（FileBrowser.children）。");
+
+        // ② 必须走「列一层」的那个数据来源，且过滤必须作用在**已列出的那一层**上。
+        //
+        // 过滤如果又变成「敲字就重扫磁盘的递归搜索」，上面那个 bug 就原样回来了 ——
+        // 所以这里钉的是"过滤是纯内存的"，不只是"有过滤框"。
+        requireContains(stripComments(read(root, VIEW_MODEL)), "FileBrowser.children(",
+                VIEW_MODEL + " 必须用 FileBrowser.children 列**一层**子项："
+                        + "它是文件面板同一个数据来源，两边列出的东西才会一致");
+        requireContains(attach, "visibleEntries",
+                ATTACH_FILE_OVERLAY + " 必须画 browser.visibleEntries（过滤后的这一层）："
+                        + "直接画 entries 的话过滤框是个摆设");
+        requireContains(attachState, "entries.filter { it.name.contains(needle, ignoreCase = true) }",
+                MODELS + " 的 AttachBrowserState.visibleEntries 必须只过滤**已列出的那一层**"
+                        + "（entries.filter { … }）："
+                        + "改成重新扫盘或递归搜索，就把「打开就灌满相册」那个 bug 放回来了");
+        // ⚠️ 上面那条只管「表达式长什么样」：把 `FileBrowser.children(path).filter { … }`
+        //    写进去照样能匹配上，而那就已经是"每敲一个键重扫一次目录"了。
+        //    （这条缺口是本轮 teeth 试出来的：把过滤换成重扫，守卫仍然绿。）
+        //    所以再加一条**否定**断言：这段过滤里不许出现任何碰文件系统的东西。
+        String visibleBody = bodyOf(attachState, "val visibleEntries");
+        require(!visibleBody.isEmpty(),
+                MODELS + " 找不到 visibleEntries 的正文（改名了？）");
+        for (String banned : new String[]{"FileBrowser", "File(", "listFiles", "walk(", "search("}) {
+            require(!visibleBody.contains(banned),
+                    MODELS + " 的 visibleEntries 里不得出现 " + banned + "："
+                            + "过滤必须是**纯内存**的 —— 敲一个字就重扫目录，"
+                            + "既卡顿（每个字符遍历一遍目录）又是那个相册 bug 的成因");
+        }
+
+        // ③ 点**目录**是进去，点**文件**才是附加。
+        //
+        // 反过来写不会编译失败、界面也照常出，只是用户点一个目录会得到
+        // 「不是文本文件」—— 而他本来想进去看看。
+        requireContains(attach,
+                "onOpen = { if (entry.directory) onNavigate(entry.path) else onPick(entry) }",
+                ATTACH_FILE_OVERLAY + " 必须区分点目录与点文件"
+                        + "（onOpen = { if (entry.directory) onNavigate(entry.path) else onPick(entry) }）："
+                        + "反了的话点目录只会得到「不是文本文件」，而用户本来想进去看看");
+
+        // ④ 必须有「上一级」，而且到根就停。
+        //
+        // 一路走到 / 在应用沙箱里是列不出来的（drwx--x--x），看起来像应用坏了；
+        // 而"换根"是根切换条的活儿，不是上一级的活儿 —— 与文件面板 navigateUp 同一套规则。
+        requireContains(attach, "onClick = onUp",
+                ATTACH_FILE_OVERLAY + " 必须有「上一级目录」按钮");
+        String attachUp = bodyOf(stripComments(read(root, VIEW_MODEL)), "fun attachUp()");
+        require(!attachUp.isEmpty(),
+                VIEW_MODEL + " 找不到 attachUp 的正文（改名了？）");
+        requireContains(attachUp, "if (parent.isEmpty() || parent.length < root.length) {",
+                VIEW_MODEL + " 的 attachUp 到根必须**停住**（回到根）："
+                        + "继续往外走会到 /，那里在应用沙箱里列不出来，看起来像坏了");
+
+        // ⑤ 必须共用文件面板的外壳 —— 这是「换成类似文件板块那种」的字面要求。
+        //
+        // ⚠️ 钉的是「**同一份实现**」而不是「长得像」：各写一份的话，
+        //    改了一边另一边会慢慢漂开，而面包屑层级、行高、图标颜色正是最容易看出差别的地方。
+        // ⚠️ 本轮判据从 `FileBreadcrumbBar(` 换成 `FilePathBar(`：一行里现在是
+        // 「面包屑 + 行尾动作」，两者**必须同属一行**（原先附加面板自己拼了
+        // `Row { Box(weight) { … }; 上一级 }`，内边距与文件面板对不上）。
+        // 钉的仍然是「同一份实现」，只是颗粒度从"面包屑"升到"整行"。
+        requireContains(attach, "FilePathBar(",
+                ATTACH_FILE_OVERLAY + " 必须用共用的路径行 FilePathBar（见 FileChrome.kt）："
+                        + "用户要的就是「文件板块那种」，各写一份迟早长歪 —— "
+                        + "而这一行在三个地方出现（列表态 / 查看态 / 附加面板），尤其容易漂开");
+        requireContains(attach, "onNavigate = onNavigate,",
+                ATTACH_FILE_OVERLAY + " 必须把 onNavigate 传给 FilePathBar："
+                        + "不传的话面包屑点不动（每一级都回不到）");
+        requireContains(attach, "FileRootSwitcher(",
+                ATTACH_FILE_OVERLAY + " 必须用共用的根切换条 FileRootSwitcher："
+                        + "项目 / HOME / 共享存储三根与文件面板同一套语义");
+        requireContains(attach, "FileListRow(",
+                ATTACH_FILE_OVERLAY + " 必须用共用的行 FileListRow："
+                        + "两个界面的同一行必须显示同一串字符（含大小/时间文案 FileFormat）");
+        requireContains(fileChrome, "internal fun FileListRow(",
+                FILE_CHROME + " 必须提供共用的 FileListRow");
+        require(!filesPane2.contains("private fun FileBreadcrumbBar(")
+                        && !filesPane2.contains("private fun FileListRow(")
+                        && !filesPane2.contains("private fun FileRootSwitcher("),
+                FILES_PANE + " 不得再各留一份私有的面包屑/行/根切换条："
+                        + "它们已经搬进 FileChrome.kt 供两处共用，留一份私有副本就会开始漂开");
+
+        // ⑥ 换根要回到该根的顶层（不能停在别的根里的路径上）—— 与文件面板同一条规则。
+        String switchRoot = bodyOf(stripComments(read(root, VIEW_MODEL)), "fun attachSwitchRoot(");
+        require(!switchRoot.isEmpty(),
+                VIEW_MODEL + " 找不到 attachSwitchRoot 的正文（改名了？）");
+        requireContains(switchRoot, "AttachBrowserState(root = root, path = path)",
+                VIEW_MODEL + " 的 attachSwitchRoot 换根时必须一起把 path 换到该根的顶层："
+                        + "只换 root 不换 path，会让用户在新根里看到上一棵树的路径");
+
+        // ⑦ 打开面板必须从**项目根**起。
+        //
+        // 这条是①的补刀：即使哪天有人把递归搜索接回来，「从项目根起」也能把爆炸半径
+        // 限制在项目内 —— 用户要的是项目文件，不是整个 HOME。
+        String openPicker = bodyOf(stripComments(read(root, VIEW_MODEL)), "fun openAttachPicker()");
+        require(!openPicker.isEmpty(),
+                VIEW_MODEL + " 找不到 openAttachPicker 的正文（改名了？）");
+        // ⚠️ 起点本轮从 FileRoot.PROJECT 改成 FileRoot.HOME —— 因为「项目」这一档被删了
+        // （它默认与 HOME 是同一个目录）。**这一条守的东西没变**：起点必须是**一个根**，
+        // 而且必须是从根一路走进去，不能回退成"打开就把某处递归列一遍"。
+        // 所以判据留在这里，只是根的名字换了。
+        requireContains(openPicker, "AttachBrowserState(root = FileRoot.HOME, path = root)",
+                VIEW_MODEL + " 的 openAttachPicker 必须从 FileRoot.HOME 起："
+                        + "从根一层层走进去才是对的，起点写死了别的路径就会绕过根的概念");
+
+        // ⑧ 列目录异步回来时必须确认还是当前那个目录。
+        //
+        // 用户点得快时会有多次列目录在飞，慢的那个回来会把新的覆盖掉
+        // （与「错误串台到新会话」是同一类竞态）。
+        String reloadAttach = bodyOf(stripComments(read(root, VIEW_MODEL)),
+                "private fun reloadAttachEntries(");
+        require(!reloadAttach.isEmpty(),
+                VIEW_MODEL + " 找不到 reloadAttachEntries 的正文（改名了？）");
+        requireContains(reloadAttach, "if (s.attachBrowser.path != path) return@update s",
+                VIEW_MODEL + " 的 reloadAttachEntries 落回状态前必须确认还是当前目录："
+                        + "用户点得快时会有多次列目录在飞，慢的那个回来会把新的覆盖掉");
+
+        // ⑨ 空态必须区分「过滤没命中」「读不出来」「真的是空」。
+        //
+        // 权限不足（共享存储没给「所有文件访问权限」）时说成「这个目录是空的」是**撒谎**，
+        // 用户会以为目录坏了 —— 文件面板的 fileNote 就是为这件事存在的，这里同源同义。
+        requireContains(attach, "note.isNotEmpty() -> note",
+                ATTACH_FILE_OVERLAY + " 的空态必须把「读不出来」的原因（note）如实显示："
+                        + "共享存储没给「所有文件访问权限」时说成「这个目录是空的」是撒谎");
+
+        // ---- 33. 悬浮层的底部留白与 IME 抬起（性能契约）------------------------
+        //
+        // 用户报「操作 5、6、7 都没有动画」，而这三条的共同前提是**列表不在每帧重组**。
+        // 实测（真机 zhi-frame.log，逐秒聚合的 recompose 计数）：
+        //
+        //     recompose/s ChatArea=69 ChatList=64     ← 60Hz 下就是每帧一次
+        //     recompose/s Composer=1 ChatList=1 ChatArea=1
+        //
+        // 关键在**同一行的 Composer 只有 1**：Composer 是 ChatArea 的子级、参数里
+        // **没有** bottomInset，所以它被跳过了；而 ChatList 的参数里有 bottomInset，
+        // 于是跟着抖。这组数字就是这个机制的指纹，不是巧合。
+        //
+        // 成因（两处，都在这一节钉住）：
+        //   ① `onSizeChanged` 挂在 `padding(bottom = imeLift)` **左边** → 报出来的高度
+        //      含 IME → 键盘动画期间每帧变 → ChatArea 每帧重组 → bottomInset 每帧变
+        //      → ChatList 每帧重组。
+        //   ② `imeLift` 本身是组合期算出来的 `Dp` → 同样是每帧重组。
+        //
+        // 这一节的断言都是「正反成对」的：只钉"新写法在"，把旧写法改回去还能绿是没用的。
+        String chatAreaForPerf = stripComments(read(root, CHAT_AREA));
+
+        // ① 高度必须分成两段，且列表那份只认"停稳"的 IME 值。
+        requireContains(chatAreaForPerf, "var floatingContentHeightPx by remember { mutableStateOf(0) }",
+                CHAT_AREA + " 必须把悬浮层高度存成**内容**高度（floatingContentHeightPx）："
+                        + "存成含 IME 的合并高度，键盘一动它就每帧变");
+        requireContains(chatAreaForPerf, "var settledImeLiftPx by remember { mutableStateOf(0) }",
+                CHAT_AREA + " 必须有「停稳」的 IME 抬起量（settledImeLiftPx）专门喂给列表留白");
+        requireContains(chatAreaForPerf, "private const val ImeSettleMs = 120L",
+                CHAT_AREA + " 必须有 ImeSettleMs 常量（去抖窗口）："
+                        + "没有它就只能把逐帧的 IME 值直接塞进 bottomInset");
+        // ② 那份 IME 值必须经 snapshotFlow + 去抖，而不是组合期读。
+        requireContains(chatAreaForPerf, "delay(ImeSettleMs)",
+                CHAT_AREA + " 的 IME 去抖必须真的等 ImeSettleMs（collectLatest + delay）："
+                        + "只声明常量不用，等于没去抖");
+        require(!chatAreaForPerf.contains("val imeLift = if ("),
+                CHAT_AREA + " 不得再在组合期算出 imeLift 这个 Dp："
+                        + "组合期读 WindowInsets.ime = 键盘动画每帧重组整棵 ChatArea");
+        require(!chatAreaForPerf.contains("padding(bottom = imeLift)"),
+                CHAT_AREA + " 不得再用 padding(bottom = imeLift)："
+                        + "padding 会把它算进节点尺寸，于是 onSizeChanged 报的高度又含 IME");
+        // ③ 抬起必须走布局阶段的 lambda。
+        requireContains(chatAreaForPerf, ".offset {",
+                CHAT_AREA + " 的 IME 抬起必须走 Modifier.offset { }（lambda 在布局阶段求值）："
+                        + "这样键盘动画每帧只让布局失效，组合一次都不跑");
+        requireContains(chatAreaForPerf, "imeInsets.getBottom(this)",
+                CHAT_AREA + " 必须在 offset 的 lambda 里读 insets（imeInsets.getBottom(this)）："
+                        + "挪到组合里就又变成每帧重组了");
+        // ④ 量高度的那一处必须在 offset **右边**，且报的是内容高度。
+        requireContains(chatAreaForPerf, ".onSizeChanged { floatingContentHeightPx = it.height },",
+                CHAT_AREA + " 的 onSizeChanged 必须在 offset { } **右边**并回报内容高度："
+                        + "放到左边量到的是含 IME 的合并高度（这就是每帧重组的源头）");
+        // ⑤ 全屏浮层那条老语义不许丢：盖住时既不抬、留白也不算键盘。
+        requireContains(chatAreaForPerf, "if (liftByFullScreenOverlay) {",
+                CHAT_AREA + " 必须保留「全屏浮层盖住时不抬」的语义"
+                        + "（否则侧栏里的搜索框一提键盘，后面的对话输入器会跟着抬起来 ——"
+                        + "这是用户实测报过的 bug）");
+        requireContains(chatAreaForPerf, "settledImeLiftPx = 0",
+                CHAT_AREA + " 在浮层盖住时还得把 settledImeLiftPx 归零："
+                        + "只让位移不抬、留白却仍算着键盘那一段，列表底部会白留一截");
+
+        // ⑥ 流式光标的呼吸闪烁同理：alpha 必须在绘制期读。
+        //
+        // 这个无限动画原先写成 `val cursorAlpha by cursor.animateFloat(…)` 再
+        // `graphicsLayer { alpha = cursorAlpha }` —— 而 `by` 就是 `getValue()`，
+        // 它在**组合期**把当前值读出来，于是整张 AssistantCard 每帧重组一次
+        // （正文 Markdown 一起重建）。注释当年还写着"走 draw 层，不重组"，与事实相反。
+        String assistantCard = bodyOf(cardsForMotion, "fun AssistantCard(");
+        require(!assistantCard.isEmpty(),
+                MESSAGE_CARDS + " 找不到 AssistantCard 的正文（签名变了？）");
+        require(!assistantCard.contains("val cursorAlpha by"),
+                MESSAGE_CARDS + " 的流式光标不得写成 `val cursorAlpha by cursor.animateFloat(…)`："
+                        + "那个 `by` 是组合期读，会让整张卡片每帧重组");
+        requireContains(assistantCard, "alpha = cursorAlpha.value",
+                MESSAGE_CARDS + " 的流式光标必须在 graphicsLayer 的 lambda 里读 alpha"
+                        + "（`alpha = cursorAlpha.value` = 绘制期读，动画期间不重组）");
+
+        // ---- 35. TAB 栏：切换要有动画、根只剩两个、「变更」残留不许回来 ----------
+        //
+        // 这一节对应本轮三条用户反馈：
+        //
+        //   ① 「把这个改成 TAB 栏」—— 文件面板那一行（项目 / HOME / 共享存储）原来是
+        //      **自制的一排 `Card`**，选中态只有一次 `animateColorAsState` 的底色淡变，
+        //      没有滑动指示器，观感就是高亮块硬跳。现在转发到 `ZhiSegmentedTabs`
+        //      （Miuix `TabRowWithContour`），指示器由它内部的
+        //      `indicatorOffset.animateTo(target, tween(200))` 滑动。
+        //   ② 「TAB 栏切换是没有动画的」—— **这一条最容易再犯**，判据在上面（§27 附近那对
+        //      正反断言）：点击走的是 `requestScrollToPage`，而 AOSP 文档写的是
+        //      「下一次重测量时**直接到位**」，瞬时。当年那条 `snapAnimationSpec` 只服务
+        //      手指拖拽之后的回弹吸附，对点击是死代码 —— 所以「两处都用了官方弹簧」
+        //      这句话一直是对的，而用户看到的仍然是硬切。
+        //   ③ 「项目指向 home，这个按钮没必要保留」—— `FileRoot.PROJECT` 指的是设置里的
+        //      项目路径，而它默认就是 HOME，两个入口指向同一个目录。
+        //
+        // ①②的断言在上面几节（§27 / §28 / §29① / 落定那条），本节只加**它们没覆盖到的**
+        // 三样：横滑必须关掉、「变更」残留不许回来、工具截断必须住在新文件里。
+
+        // ① 横滑必须关掉，而且宽窄两处都要关。
+        //
+        // 症状是「能滑动，但切不过去」：组合里那段同步每次组合都跑，手指把 pager 推到
+        // 第 1 页而 `state.tab` 仍是「对话」，下一帧就把它拽回去。
+        // 更要紧的是：落定改成「按 state.tab 播动画」之后，横滑会**真的**停在第 1 页 ——
+        // 那时标签栏高亮「对话」、内容却是「终端」，双真源当场对不上。
+        require(countOf(layouts, "userScrollEnabled = false") >= 2,
+                WORKSPACE_LAYOUTS + " 的宽窄两套 Pager 都必须 userScrollEnabled = false"
+                        + "（当前 " + countOf(layouts, "userScrollEnabled = false") + " 处）："
+                        + "手指横滑能改页码却改不了 state.tab，两者一对不上就会出现"
+                        + "「标签栏高亮对话、内容却是终端」");
+        require(!layouts.contains("userScrollEnabled = true"),
+                WORKSPACE_LAYOUTS + " 不得再有 userScrollEnabled = true —— 见上一条");
+        require(!layouts.contains("flingBehavior"),
+                WORKSPACE_LAYOUTS + " 不得再有 flingBehavior：它只服务「手指拖拽之后的回弹吸附」，"
+                        + "横滑关掉之后就是死配置。而它看起来像「切页动画靠它」，"
+                        + "会让人以为删了它动画会坏（实际动效来自 springAnimateToPage，不经过它）。"
+                        + "要恢复横滑就得把它一起加回来，否则松手不会吸附");
+
+        // ② 「变更」残留不许回来，且不许靠「换个文件名再来一份」绕过。
+        require(!Files.exists(Paths.get(root, "app/src/main/java/com/zhizhu/zhicode/compose/ui/panes/ChangesPane.kt")),
+                "ui/panes/ChangesPane.kt 不该回来：它混了一个已删的面板与**还活着**的"
+                        + "工具输出截断，两者挤在一起的下场就是删的时候差点把活代码一起删掉");
+        require(!Files.exists(Paths.get(root, "app/src/main/java/com/zhizhu/zhicode/compose/data/GitChanges.kt")),
+                "data/GitChanges.kt 不该回来：它只服务那个已删的「变更」面板");
+        int stale = 0;
+        try (Stream<Path> walk = Files.walk(Paths.get(root, "app/src/main"))) {
+            for (Path file : walk.filter(p -> p.toString().endsWith(".kt")).toList()) {
+                String code = stripComments(new String(Files.readAllBytes(file),
+                        java.nio.charset.StandardCharsets.UTF_8));
+                for (String needle : new String[]{"ChangesPane(", "GitChanges", "DiffState", "DiffFile"}) {
+                    if (code.contains(needle)) {
+                        stale++;
+                        System.out.println("        (残留 " + needle + "：" + file + ")");
+                    }
+                }
+            }
+        }
+        require(stale == 0,
+                "仓库里仍有「变更」面板的残留（" + stale + " 处，清单见上）：面板本体、它的数据源、"
+                        + "以及只服务它的 DiffState / DiffFile 都该没了。"
+                        + "这里钉「整仓没有」而不是「那个文件不存在」—— 后者挡不住换个名字再来一份");
+        require(!viewModel.contains("copy(diff ="),
+                VIEW_MODEL + " 不得再往 uiState 写 diff：那个字段随「变更」面板一起删了");
+
+        // ③ 工具输出的截断**必须**住在新文件里，而且消费者仍要用它。
+        //
+        // 这一条不是洁癖：那一半代码在本轮之前一直活着（工具卡展开的 diff 与原始输出），
+        // 却和那个死面板挤在同一个文件里 —— 文件名、注释、测试常量**全都指着「变更面板」**，
+        // 于是「删掉那个面板」这件事看起来像「删掉整个文件」。搬出来之后它才看得见。
+        require(Files.exists(Paths.get(root, TOOL_OUTPUT_TEXT)),
+                "ui/chat/ToolOutputText.kt 必须存在：工具输出的行数上限与渲染住在那里");
+        String toolOutput = stripComments(read(root, TOOL_OUTPUT_TEXT));
+        for (String decl : new String[]{
+                "fun DiffLines(", "fun OutputLines(", "internal fun limitLines(",
+                "internal const val MaxRenderedLines = 300", "internal class LimitedLines(",
+        }) {
+            requireContains(toolOutput, decl, TOOL_OUTPUT_TEXT + " 缺少 " + decl);
+        }
+        require(!filesPane2.contains("fun DiffLines(") && !filesPane2.contains("fun OutputLines("),
+                FILES_PANE + " 里不该有 DiffLines / OutputLines —— 它们服务的是工具卡，"
+                        + "埋在 panes/ 下就会被当成死代码");
+        String cardsForToolOutput = stripComments(read(root, MESSAGE_CARDS));
+        requireContains(cardsForToolOutput, "DiffLines(diffText)",
+                MESSAGE_CARDS + " 展开的工具 diff 必须仍走 DiffLines"
+                        + "（它现在的家在 ui/chat/ToolOutputText.kt）");
+        requireContains(cardsForToolOutput, "OutputLines(activity.output)",
+                MESSAGE_CARDS + " 展开的工具输出必须仍走 OutputLines");
+
+        // ---- 36. 文件页面的观感契约（胶囊过滤框 / 内容自适应高度 / 路径行合一行）----
+        //
+        // 这一节对应两条用户反馈：「把文件页面重构吧」与「这个也不是很好看」（连同截图）。
+        //
+        // 截图里三处问题，逐条钉住：
+        //   ① 过滤框**比下面每一行都宽** —— 它是 ZhiTextField(… fillMaxWidth())，
+        //      **没带横向内边距**，而同屏的根标签栏 / 面包屑行 / 文件行都是 12dp。
+        //   ② 它读起来像标题 —— ZhiTextField 转发的是 Miuix 通用 TextField
+        //      （16dp 圆角、label 左对齐常显），是**表单字段**；搜索框该用
+        //      InputField（侧栏「搜索会话」用的就是它，那里的注释写了为什么不用
+        //      ZhiTextField）。
+        //   ③ 只有 5 项却空出约三分之一 —— 面板高度是 clamp(窗口高 × 0.5, 280, 480)，
+        //      **与内容多少无关**。
+        //
+        // 另外把「列表前叠三层」压成两层：文件面板的列表态原先还有一个
+        // PaneHeader(title = "文件") 与顶部标签栏重复。
+
+        // ① 过滤必须是 Miuix InputField（胶囊搜索框），不得退回通用 TextField。
+        requireContains(attach, "InputField(",
+                ATTACH_FILE_OVERLAY + " 的过滤框必须是 Miuix InputField（胶囊搜索框）："
+                        + "它与侧栏「搜索会话」同一形态（放大镜 + 有字时的清除按钮），"
+                        + "ZhiTextField 转发的是通用 TextField，本质是表单字段 —— "
+                        + "同一屏里两种搜索框长得不一样才是问题");
+        requireAbsentIn(attach, "ZhiTextField(",
+                ATTACH_FILE_OVERLAY + " 不得再退回 ZhiTextField：16dp 圆角 + label 左对齐常显，"
+                        + "在截图里读起来像个小标题而不是输入框");
+        // expanded 必须接真实状态：API ≤ 27 上未展开时组件是 disabled 的，
+        // 靠 onExpandedChange(true) 先展开再聚焦；传常量会让它在 8.x 上永远点不进去。
+        requireContains(attach, "onExpandedChange = { filterExpanded = it }",
+                ATTACH_FILE_OVERLAY + " 的 InputField 必须把 expanded 接**真实状态**"
+                        + "（本工程 minSdk 24）：API ≤ 27 上未展开时它是 disabled 的，"
+                        + "靠 onExpandedChange(true) 先展开再聚焦，传常量就永远点不进去");
+
+        // ② 过滤框必须有横向内边距 —— 这正是截图里它比别的行宽的原因。
+        // ⚠️⚠️ 这里必须钉**整条修饰符**，不能只断言"文件里有 padding(horizontal = ZhiSpace.m)" ——
+        // 根标签栏那一行的 `vertical = 2.dp` 前面正好也有同样一段，所以只查那一段的话，
+        // 把过滤框的内边距删掉时断言**照样通过**（teeth 实测 MISS 过一次）。
+        // 这正是本文件 bodyOf 的注释警告过的那个陷阱：同一文件里有第二处合法用法时，
+        // `contains` 会静默失效。
+        requireContains(attach, "modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m),",
+                ATTACH_FILE_OVERLAY + " 的过滤框必须给横向内边距（ZhiSpace.m = 12dp）："
+                        + "不给的话它会满幅横过去，比同屏的面包屑行、根标签栏和文件行都宽 —— "
+                        + "用户截图里最刺眼的就是这一处");
+
+        // ③ 高度必须内容自适应，不得再按窗口比例定高。
+        requireAbsentIn(attach, "AttachSheetHeightFraction",
+                ATTACH_FILE_OVERLAY + " 不得再按窗口比例算面板高度：那是与内容无关的定高，"
+                        + "5 项的目录底部会空出约三分之一（用户截图）");
+        requireAbsentIn(attach, "LocalWindowInfo",
+                ATTACH_FILE_OVERLAY + " 不该再取 LocalWindowInfo：按窗口比例定高的写法已经删了");
+        requireContains(attach, "heightIn(min = AttachSheetHeightFloor, max = AttachSheetHeightCap)",
+                ATTACH_FILE_OVERLAY + " 的面板高度必须是 heightIn(floor, cap)（内容自适应）");
+        // ⚠️ 光换 heightIn 不够：weight(1f) 默认 fill = true，会把 Column 撑到上限。
+        requireContains(attach, "weight(1f, fill = false)",
+                ATTACH_FILE_OVERLAY + " 的列表必须 weight(1f, fill = false)："
+                        + "默认的 fill = true 会把 Column 一直撑到 heightIn 的上限，"
+                        + "少条目时照样留一大片空 —— 等于没改");
+        requireAbsentIn(attach, "Modifier.weight(1f).fillMaxWidth()",
+                ATTACH_FILE_OVERLAY + " 的列表不得再写 Modifier.weight(1f).fillMaxWidth()："
+                        + "fill 默认为 true，见上一条");
+
+        // ④ 路径行必须共用（面包屑 + 行尾动作同属一行）。
+        String fileChromeForPath = stripComments(read(root, FILE_CHROME));
+        requireContains(fileChromeForPath, "internal fun FilePathBar(",
+                FILE_CHROME + " 必须提供共用的 FilePathBar（面包屑 + 行尾动作一行）");
+        String pathBar = bodyOf(fileChromeForPath, "internal fun FilePathBar(");
+        require(!pathBar.isEmpty(), FILE_CHROME + " 找不到 FilePathBar 的正文（签名变了？）");
+        requireContains(pathBar, "Modifier.weight(1f)",
+                FILE_CHROME + " 的 FilePathBar 必须给面包屑 weight(1f)："
+                        + "不给的话路径一深就把行尾动作挤出屏幕");
+        requireContains(pathBar, "trailing?.invoke(this)",
+                FILE_CHROME + " 的 FilePathBar 必须在行尾调用 trailing()："
+                        + "文件面板放 `+` 与「上一级」、附加面板只放「上一级」，槽位不接等于动作消失");
+        requireContains(filesPane2, "FilePathBar(",
+                FILES_PANE + " 的列表态必须用共用的 FilePathBar（面包屑 + 行尾动作 + 小字统计）");
+        require(!filesPane2.contains("private fun FilePathBar("),
+                FILES_PANE + " 不得另留一份私有 FilePathBar：共用件在 FileChrome.kt");
+
+        // ⑤ 列表态使用共用 FilePathBar，而非重复的 PaneHeader。
+        requireContains(filesPane2, "FilePathBar(filePath, onNavigate)",
+                FILES_PANE + " 的列表态必须使用共用路径行");
+        require(!filesPane2.contains("PaneHeader(\n            title = \"文件\""),
+                FILES_PANE + " 列表态不得重复绘制「文件」PaneHeader");
+
+        // ④ 换根时必须把列表**清空**。
+        //
+        // 不清的话，换根那次淡变的**进场**那一屏画的还是上一个根的文件（列表要等
+        // reloadFiles 从 IO 回来才换），动画看起来像"闪了一下旧内容"。
+        // 本地列目录是毫秒级，清掉之后用户看不到中间态。
+        String switchRootBody = bodyOf(stripComments(read(root, VIEW_MODEL)), "fun switchFileRoot(");
+        require(!switchRootBody.isEmpty(),
+                VIEW_MODEL + " 找不到 switchFileRoot 的正文（改名了？）");
+        requireContains(switchRootBody, "fileEntries = emptyList()",
+                VIEW_MODEL + " 的 switchFileRoot 必须清空 fileEntries："
+                        + "不清的话换根淡变的进场那一屏画的还是上一个根的文件（要等 IO 回来才换），"
+                        + "动画看起来像闪了一下旧内容");
     }
 
     /** 子串出现次数。 */

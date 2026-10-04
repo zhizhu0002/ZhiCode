@@ -78,7 +78,8 @@ import java.util.concurrent.Executors
  *
  * ## 两个开关都是乐观更新 + 回滚
  *
- * 切换时先压住交互（`*Interactive = false`），服务端确认后再落定；失败则回到原值并提示。
+ * 切换时先打出「在飞」标志（`*Busy = true`，界面显示「正在应用…」并压住点击），
+ * 服务端确认后再落定；失败/超时则回到原值并提示。
  * `rootSettingInFlight` / `floatingLogInFlight` 是这两个流程的互斥位，防止连点造成状态错乱。
  */
 class SandboxBoard : ComponentActivity() {
@@ -293,8 +294,8 @@ class SandboxBoard : ComponentActivity() {
                     errorDetail = null,
                     dialog = null,
                 )
-                setRootSwitch(hideRoot, !rootSettingInFlight)
-                setFloatingLog(showLog, !floatingLogInFlight)
+                setRootSwitch(hideRoot, rootSettingInFlight)
+                setFloatingLog(showLog, floatingLogInFlight)
             }
         }
     }
@@ -364,8 +365,9 @@ class SandboxBoard : ComponentActivity() {
      * `sandbox/settings.json`，也就是控制器自己读的那份 —— 不需要控制器就能拿到真值。
      * 读不到时 `SandboxPrefs` 内部回退到安全默认值（两个都开），与控制器一致。
      *
-     * 回读在 worker 之外做（磁盘读，毫秒级）；`setRootSwitch(..., interactive = false)`
-     * 顺带把开关压成不可点 —— 后端不通时点它只会再失败一次。
+     * 回读在 worker 之外做（磁盘读，毫秒级），`setRootSwitch(..., busy = false)`,
+     * ——没有请求在飞，开关本身可点；后端不通时的不可能点由界面侧从
+     * `errorDetail` 推出来（见 `ZhiSandboxScreen.settingsEnabled`），不借在飞标志当禁用位。
      */
     private fun showBackendError(error: String) {
         if (destroyed) return
@@ -399,7 +401,7 @@ class SandboxBoard : ComponentActivity() {
     private fun confirmRootVisibilityChange(hidden: Boolean) {
         if (destroyed || rootSettingInFlight) return
         val previous = !hidden
-        setRootSwitch(previous, true)
+        setRootSwitch(previous, false)
         ui.value = ui.value.copy(dialog = SandboxDialog.RootVisibility(hidden))
     }
 
@@ -409,12 +411,13 @@ class SandboxBoard : ComponentActivity() {
         dismissDialog()
         rootSettingInFlight = true
         val generation = ++rootSettingGeneration
-        setRootSwitch(previous, false)
+        setRootSwitch(previous, true)
         armWatchdog(generation) {
             if (!rootSettingInFlight || generation != rootSettingGeneration) return@armWatchdog
             rootSettingInFlight = false
-            // 回到"服务端确认过的那个值"：这次调用没有结果，界面不能停在乐观值上。
-            setRootSwitch(previous, true)
+            // 回到"服务端确认过的那个值"：这次调用没有结果，界面不能停在乐观值上；
+            // 同时以 busy = false 收尾，否则开关会永远停在「正在应用…」。
+            setRootSwitch(previous, false)
             toast("Root 隐藏设置超时：控制器没有响应，请稍后重试")
         }
         worker.execute {
@@ -431,7 +434,7 @@ class SandboxBoard : ComponentActivity() {
                     // 超时已经处理过这一次（代数已变）：不要再覆盖用户之后的操作。
                     if (generation != rootSettingGeneration) return@runOnUiThread
                     rootSettingInFlight = false
-                    setRootSwitch(effective, true)
+                    setRootSwitch(effective, false)
                     toast("Root 隐藏已" + if (effective) "开启" else "关闭")
                     reload()
                 }
@@ -440,7 +443,7 @@ class SandboxBoard : ComponentActivity() {
                     if (destroyed) return@runOnUiThread
                     if (generation != rootSettingGeneration) return@runOnUiThread
                     rootSettingInFlight = false
-                    setRootSwitch(previous, true)
+                    setRootSwitch(previous, false)
                     toast("Root 隐藏设置失败: ${error.message}")
                 }
             }
@@ -460,9 +463,17 @@ class SandboxBoard : ComponentActivity() {
         watchdog.postDelayed({ if (!destroyed) onTimeout() }, WATCHDOG_TIMEOUT_MS)
     }
 
-    /** 写入「隐藏 Root」的实际值与「能否交互」。服务端确认前一律禁止交互。 */
-    private fun setRootSwitch(hidden: Boolean, interactive: Boolean) {
-        ui.value = ui.value.copy(hideRoot = hidden, hideRootInteractive = interactive)
+    /**
+     * 写入「隐藏 Root」的值与「请求是否在飞」。
+     *
+     * ⚠️ 第二个参数是 **busy（请求在飞）**，不是“已就绪”也不是“可交互”。
+     * 这个布尔曾经在两侧被读成了相反的意思：生产者当它“已就绪”（成功/超时/失败全传 true），
+     * 消费者当它“处理中”（true 就显示「正在应用…」并吞掉点击）—— 两边各自自洽，
+     * 合起来正好相反，于是一次成功的加载就把开关永久钉在「正在应用…」且点不动。
+     * 现在统一成 busy：**请求发出时 true，结果（成功/失败/超时）回来时 false**。
+     */
+    private fun setRootSwitch(hidden: Boolean, busy: Boolean) {
+        ui.value = ui.value.copy(hideRoot = hidden, hideRootBusy = busy)
     }
 
     // ------------------------------------------------------------------ 日志悬浮窗
@@ -471,14 +482,15 @@ class SandboxBoard : ComponentActivity() {
         if (destroyed || floatingLogInFlight) return
         floatingLogInFlight = true
         val generation = ++floatingLogGeneration
-        // 乐观更新：先按用户意图显示，服务端确认后再以实际值落定
-        setFloatingLog(enabled, false)
+        // 乐观更新：先按用户意图显示，服务端确认后再以实际值落定。
+        // 第二个参数是 busy = true：请求已经发出去了，界面要显示「正在应用…」并压住点击。
+        setFloatingLog(enabled, true)
         // 与「隐藏 Root」同款看门狗：`SandboxRpc.call` 没有超时，卡住就永远回不来，
         // 标志会永久为 true、开关再也点不动。见 watchdog 字段的注释。
         armWatchdog(generation) {
             if (!floatingLogInFlight || generation != floatingLogGeneration) return@armWatchdog
             floatingLogInFlight = false
-            setFloatingLog(!enabled, true)
+            setFloatingLog(!enabled, false)
             toast("日志悬浮窗设置超时：控制器没有响应，请稍后重试")
         }
         worker.execute {
@@ -494,7 +506,7 @@ class SandboxBoard : ComponentActivity() {
                     if (destroyed) return@runOnUiThread
                     if (generation != floatingLogGeneration) return@runOnUiThread
                     floatingLogInFlight = false
-                    setFloatingLog(effective, true)
+                    setFloatingLog(effective, false)
                     toast("日志悬浮窗已" + if (effective) "开启" else "关闭")
                     reload()
                 }
@@ -503,15 +515,16 @@ class SandboxBoard : ComponentActivity() {
                     if (destroyed) return@runOnUiThread
                     if (generation != floatingLogGeneration) return@runOnUiThread
                     floatingLogInFlight = false
-                    setFloatingLog(!enabled, true)
+                    setFloatingLog(!enabled, false)
                     toast("日志悬浮窗设置失败: ${error.message}")
                 }
             }
         }
     }
 
-    private fun setFloatingLog(enabled: Boolean, interactive: Boolean) {
-        ui.value = ui.value.copy(floatingLog = enabled, floatingLogInteractive = interactive)
+    /** 写入「日志悬浮窗」的值与「请求是否在飞」。极性与 [setRootSwitch] 一致：发出 true、结束 false。 */
+    private fun setFloatingLog(enabled: Boolean, busy: Boolean) {
+        ui.value = ui.value.copy(floatingLog = enabled, floatingLogBusy = busy)
     }
 
     // ------------------------------------------------------------------ 列表动作

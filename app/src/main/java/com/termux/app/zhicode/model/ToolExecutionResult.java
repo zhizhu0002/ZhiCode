@@ -9,7 +9,8 @@ import org.json.JSONArray;
  * 引擎不会回头改它。
  *
  * <h3>关于 {@link #diff} 与 {@link #addedLines}/{@link #deletedLines}</h3>
- * 这三项只给 Android 的变更列表用，**不会**作为工具输出发给模型：
+ * 这三项只给**界面**用（工具卡上的 +N −M 徽章、以及展开时看的 diff 文本），
+ * **不会**作为工具输出发给模型：
  * 模型需要的是「改了什么」，一段统一 diff 既占 token、又不如工具自述的摘要准确。
  *
  * <h3>关于附加内容</h3>

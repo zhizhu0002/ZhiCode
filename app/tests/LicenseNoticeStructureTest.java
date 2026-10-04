@@ -102,6 +102,17 @@ public final class LicenseNoticeStructureTest {
         require(notice.contains("bootstrap-aarch64.zip") && notice.contains("termux-packages"),
                 "NOTICE 必须指明 bootstrap 的来源以便使用者取得源码");
 
+        // 4h. Material Symbols 的路径数据是**内联进源码的**，不是依赖 ——
+        //     Apache-2.0 第 4 条对"被拷贝进本工程的数据"有额外要求（要说明出处与是否修改），
+        //     而这一条特别容易被当成"图标而已"忽略掉：删了它，编译、功能、别的测试全照过，
+        //     只有真出事时才被发现。
+        require(notice.contains("Material Symbols") && notice.contains("google/material-design-icons"),
+                "NOTICE 必须声明内联进来的 Material Symbols 路径数据及其上游仓库");
+        require(notice.contains("ZhiMaterialIcons.kt") && notice.contains("material-symbols-fetch.sh"),
+                "NOTICE 必须指出数据落在哪个文件、以及重新取用的脚本（可核对「未被手改」）");
+        require(notice.contains("逐字未改") || notice.contains("未修改数据本身"),
+                "NOTICE 必须写明我们对这些上游数据做了什么修改（按 Apache-2.0 第 4 条）");
+
         // 5. 分析过程的记录必须在，且指向可重跑的命令
         String analysis = read(root, "docs/licensing.md");
         require(analysis.contains("Java_com_termux_terminal_JNI_") && analysis.contains("jackpal"),

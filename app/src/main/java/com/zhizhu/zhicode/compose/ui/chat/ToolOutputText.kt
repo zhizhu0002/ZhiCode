@@ -1,221 +1,45 @@
-package com.zhizhu.zhicode.compose.ui.panes
+package com.zhizhu.zhicode.compose.ui.chat
+
+/**
+ * **工具输出**的行数上限与渲染（工具卡片专用）。
+ *
+ * ## 为什么单独一个文件
+ *
+ * 这两件事原先和「变更」面板挤在同一个文件里（`ui/panes/ChangesPane.kt`）：
+ * 面板是**死代码**（`WorkspaceTab` 早已只有 对话/终端/文件，`ChangesPane()` 没有任何调用方），
+ * 而下面这些还**活着** —— `MessageCards` 的两处在用：
+ *
+ *  · [DiffLines]：工具卡里展开的 diff（`MessageCards` 的 ToolRow）
+ *  · [OutputLines]：工具卡里展开的原始输出（同上）
+ *
+ * 混在一个文件里的后果很具体：面板删掉时这半活代码**差点被一起删掉**，
+ * 而且没人看得清它还活着（文件名、注释、测试常量全都指着"变更面板"）。
+ * 所以把它搬进 `ui/chat` —— 它服务的是工具卡，住在 `panes` 下本来就是历史错位。
+ *
+ * ⚠️ `MaxRenderedLines` / [limitLines] 的上限是**故意共用**的：diff 与原始输出走同一条
+ * "最多渲染 300 行 + 点按显示全部"，两处各定一个数字迟早对不上。
+ * `LimitLinesTest` 与 `ToolOutputBoundTest` 钉着这条。
+ */
 
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.zhizhu.zhicode.compose.theme.ZhiRadius
-import com.zhizhu.zhicode.compose.model.DiffFile
-import com.zhizhu.zhicode.compose.model.DiffState
 import com.zhizhu.zhicode.compose.theme.ZhiColors
-import com.zhizhu.zhicode.compose.ui.ZhiIcons
-import com.zhizhu.zhicode.compose.ui.ZhiMotion
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.utils.PressFeedbackType
-
-/** 变更面板，对应原版 renderChanges() + colorDiff() + updateDiffStats()。 */
-@Composable
-fun ChangesPane(
-    diff: DiffState,
-    isDark: Boolean,
-    modifier: Modifier = Modifier,
-    /**
-     * 刷新动作。**默认 `null` = 不显示**「刷新」按钮。
-     *
-     * 原来默认是 `{}`，于是按钮永远画出来、点了却什么都不发生（调用方也没传）。
-     * 改成可空后，没接线就不会出现"死按钮"；现已由 `AppScaffold` 接上
-     * `viewModel::refreshDiff`。
-     */
-    onRefresh: (() -> Unit)? = null,
-) {
-    val expanded = remember { mutableStateMapOf<String, Boolean>() }
-
-    Surface(modifier = modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            PaneHeader(
-                title = "Git 变更",
-                actionIcon = ZhiIcons.refresh,
-                actionDescription = "刷新变更列表",
-                onAction = onRefresh,
-                subtitle = if (diff.files.isEmpty()) null else "+${diff.additions}  −${diff.deletions}",
-            )
-            if (diff.files.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        // 空白态的文案必须区分「确实没有变更」与「没能读到变更」：
-                        // 原来写死"工作区没有未提交的变更"，于是 git 失败时界面
-                        // 会一口咬定没有变更 —— 明明什么都没查到却给了确定性结论。
-                        text = diff.note.ifEmpty { "工作区没有未提交的变更" },
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.BodySmall,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 28.dp),
-                    )
-                }
-                return@Surface
-            }
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp)) {
-                item { DiffStatBar(diff) }
-                items(diff.files, key = { it.name }) { file ->
-                    DiffFileCard(
-                        file = file,
-                        isDark = isDark,
-                        expanded = expanded[file.name] == true,
-                        onToggle = { expanded[file.name] = expanded[file.name] != true },
-                    )
-                }
-                item { Box(modifier = Modifier.padding(bottom = 10.dp)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DiffStatBar(diff: DiffState) {
-    val scheme = MiuixTheme.colorScheme
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 9.dp),
-        colors = CardDefaults.defaultColors(
-            color = ZhiColors.cardSurface(),
-            contentColor = scheme.onSurface,
-        ),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "${diff.files.size} 个文件已修改",
-                fontSize = ZhiTextScale.BodySmall,
-            )
-            Box(modifier = Modifier.weight(1f))
-            Text(
-                text = "+${diff.additions}",
-                color = ZhiColors.green(),
-                fontSize = ZhiTextScale.BodySmall,
-                fontWeight = FontWeight.Medium,
-            )
-            Text(
-                text = "  −${diff.deletions}",
-                color = ZhiColors.red(),
-                fontSize = ZhiTextScale.BodySmall,
-                fontWeight = FontWeight.Medium,
-            )
-        }
-    }
-}
-
-@Composable
-private fun DiffFileCard(
-    file: DiffFile,
-    isDark: Boolean,
-    expanded: Boolean,
-    onToggle: () -> Unit,
-) {
-    val scheme = MiuixTheme.colorScheme
-    Card(
-        onClick = onToggle,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 8.dp)
-            .animateContentSize(
-                animationSpec = ZhiMotion.sizeSpec,
-            ),
-        cornerRadius = ZhiRadius.card,
-        insideMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-        colors = CardDefaults.defaultColors(
-            color = ZhiColors.cardSurface(),
-            contentColor = scheme.onSurface,
-        ),
-        pressFeedbackType = PressFeedbackType.Sink,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // 展开指示用 Miuix 图标，不再用 ⌄ / › 字形
-            Icon(
-                imageVector = if (expanded) ZhiIcons.collapse else ZhiIcons.expand,
-                contentDescription = if (expanded) "折叠该文件" else "展开该文件",
-                tint = scheme.onSurfaceVariantSummary,
-                modifier = Modifier.size(13.dp),
-            )
-            Text(
-                text = file.name.substringAfterLast('/'),
-                fontSize = ZhiTextScale.BodySmall,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 6.dp).weight(1f),
-            )
-            if (file.additions > 0) {
-                Text(text = "+${file.additions}", color = ZhiColors.green(), fontSize = ZhiTextScale.Caption)
-            }
-            if (file.deletions > 0) {
-                Text(text = " −${file.deletions}", color = ZhiColors.red())
-            }
-        }
-        Text(
-            text = file.name.substringBeforeLast('/', ""),
-            color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Micro,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 19.dp, top = 2.dp),
-        )
-        if (expanded) {
-            DiffBlock(diff = file.diff, isDark = isDark, modifier = Modifier.padding(top = 8.dp))
-        }
-    }
-}
-
-/**
- * 逐行着色渲染 unified diff，对应原版 colorDiff()。
- *
- * <p>自带卡片外壳。**外面已经有卡片时用 [DiffLines]** —— 套两层实心卡会出现
- * 两个不同圆角的底板叠在一起（本工程为同类观感问题改过两次）。
- */
-@Composable
-fun DiffBlock(diff: String, isDark: Boolean, modifier: Modifier = Modifier) {
-    val scheme = MiuixTheme.colorScheme
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(vertical = 6.dp),
-        colors = CardDefaults.defaultColors(
-            color = ZhiColors.cardInnerSurface(),
-            contentColor = scheme.onSurface,
-        ),
-    ) {
-        DiffLines(diff)
-    }
-}
 
 /**
  * 只做**逐行着色**，不画容器。

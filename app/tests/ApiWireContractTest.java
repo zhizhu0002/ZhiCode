@@ -81,14 +81,22 @@ public final class ApiWireContractTest {
         // 把整条 "/v1/responses" 当叶子传进去会拼成 /v1/v1/responses（JVM 测试抓过）。
         require(responses.contains("\"/responses\"") && responses.contains("!codex"),
                 "Responses 端点必须区分标准（带 /v1）与 codex（不带），叶子统一为 /responses");
-        require(responses.contains("\"codex-responses\".equals(config.protocol)"),
+        require(responses.contains("WIRE_CODEX_RESPONSES.equals(config.protocol)"),
                 "codex 变体必须按协议名判定");
+        // 协议名的**取值**是持久化契约（写进设置与会话文件）：名字搬进实现类之后
+        // 仍然必须逐字是 codex-responses，否则旧配置会变成未知协议。
+        require(responses.contains("WIRE_CODEX_RESPONSES = \"codex-responses\""),
+                "WIRE_CODEX_RESPONSES 的取值必须逐字是 codex-responses");
         require(chat.contains("/chat/completions"),
                 "Chat 端点必须以 /chat/completions 为叶子交给 sessionEndpoint 去重");
         // 模型目录端点：三种协议统一走 /v1/models，且要避免 /v1/v1/models。
         require(resolver.contains("modelCatalogEndpoint") && resolver.contains("\"v1\"")
                         && resolver.contains("\"models\""),
                 "ApiEndpointResolver 必须提供 /v1/models 且避免版本段重复");
+        // codex 变体**排除**在目录之外：那个后端没有 /v1/models。照旧拼一个出来，
+        // 现象只是"模型列表空着"，看不出是"这个端点本来就不存在"。
+        require(resolver.contains("protocol == ApiProtocol.CODEX_RESPONSES"),
+                "Codex 必须排除在模型目录之外（返回空串让界面回落到手填模型名）");
         // URL 校验只校验、不改写：不能出现任何「补默认域名」的行为。
         require(urlPolicy.contains("requireBaseUrl") && urlPolicy.contains("https://")
                         && urlPolicy.contains("http://"),
@@ -191,9 +199,14 @@ public final class ApiWireContractTest {
         // 那是真正的行为断言，比在这里找字符串可靠得多。
         // 这里只钉住不能变的东西：**协议名是存盘格式的一部分**。
         for (String wire : new String[]{"anthropic", "openai-chat", "openai-responses",
-                "codex-responses", "openai-compatible"}) {
+                "openai-compatible"}) {
             require(protocol.contains(wire), "协议名的取值是持久化契约，必须存在: " + wire);
         }
+        // codex-responses 的线上名按仓库既有约定定义在**实现类**里（与
+        // DebugScriptedProvider.WIRE_NAME 同一约定，见 DebugHudStructureTest），
+        // 枚举引用它而不是两边各写一份字面量 —— 写歪了表现是"协议没实现"。
+        require(protocol.contains("OpenAIResponsesProvider.WIRE_CODEX_RESPONSES"),
+                "ApiProtocol 必须以 OpenAIResponsesProvider.WIRE_CODEX_RESPONSES 收录 codex 变体");
         require(providers.contains("ApiProtocol") && !providers.contains("\"anthropic\""),
                 "ModelProviders 必须通过 ApiProtocol 分派，不得再内联协议名字面量");
         require(providers.contains("IllegalArgumentException"),

@@ -77,7 +77,13 @@ fun SlashPalette(
             items(visible, key = { it.name }) { command ->
                 Card(
                     onClick = { onPick(command) },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    // 打字时命令集一直在收窄：命中的行要**滑上去**，落选的行淡出。
+                    //
+                    // `animateItem()` 放在最前（与 ChatList 的写法一致），`padding` 在里面：
+                    // 内外间距照旧，位置动画交给 LazyColumn 记账。
+                    // `key = it.name` 上面已给 —— 少了 key 的话 Compose 会把"剩下的行"
+                    // 当成整批新建，动画就退化成每行原地闪一下。
+                    modifier = Modifier.animateItem().fillMaxWidth().padding(horizontal = 4.dp),
                     cornerRadius = ZhiRadius.inner,
                     insideMargin = PaddingValues(horizontal = 8.dp, vertical = 9.dp),
                     colors = CardDefaults.defaultColors(

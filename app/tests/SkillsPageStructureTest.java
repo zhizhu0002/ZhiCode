@@ -243,8 +243,11 @@ public final class SkillsPageStructureTest {
         require(!has(skills, "SettingsPageKey(\"skills.editor\""),
                 "编辑文件不得再占一层页面栈（否则一次会推两页，看起来像凭空多出来一层）："
                         + "必须做成对话框");
-        require(has(skills, "SkillEditDialog(") && has(skills, "state.editing?.let { target ->"),
-                "编辑文件必须做成对话框（对话框也要挂在详情页的 overlay 里才有宿主）");
+        require(has(skills, "SkillEditDialog(")
+                        && has(skills, "val editing = rememberLastNonNull(state.editing)")
+                        && has(skills, "show = state.editing != null,"),
+                "编辑文件必须做成常驻对话框（挂在详情页的 overlay 里才有宿主）："
+                        + "`show` 由调用方传、内容用 rememberLastNonNull 兜住 —— 用 `if` 包住会丢退出动画");
 
         // ---- 3. 技能文件路径不得逃出技能目录 ---------------------------------
         //

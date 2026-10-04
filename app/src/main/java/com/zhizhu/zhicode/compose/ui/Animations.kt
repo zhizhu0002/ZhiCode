@@ -98,7 +98,15 @@ object ZhiMotion {
      */
     val progressSpec: AnimationSpec<Float> = folmeSpring(damping = 1.0f, response = 0.3f)
 
-    /** 强调/前景色的按压过渡：`MiuixIndication` 的按压退出参数。 */
+    /**
+     * 强调/前景色的按压过渡：`MiuixIndication` 的按压退出参数。
+     *
+     * ⚠️ 本仓目前**没有**调用点，这是故意的，不要删（也不要因为"零引用"去用上它）：
+     * 它是按下表里的一员（[pressSpec] 抄自 `MiuixIndication` 的按压回弹），
+     * 而按压反馈现在统一交给 Miuix 组件自己的 `pressFeedbackType`（`Sink`）处理 ——
+     * 在 Compose 侧再套一层 scale 会**叠成两层缩放**，按一下陷两下。
+     * 留着是为了以后真要在自绘控件上补按压反馈时有个带出处的值可用。
+     */
     val pressSpec: SpringSpec<Float> = folmeSpring(damping = 0.95f, response = 0.35f)
 
     /**

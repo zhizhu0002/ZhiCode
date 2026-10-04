@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiColors
@@ -44,7 +45,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * | 设置项类型 | 采用的 Miuix 组件 |
  * |---|---|
  * | 枚举 / 选项选择 | [OverlayDropdownPreference] |
- * | 数值输入 | [BasicComponent] + `bottomAction` 里的 [TextField]（见 [SettingsIntField]） |
+ * | 数值滑杆 | [SliderPreference]（有固定整数范围的设置项） |
+ * | 自由数值输入 | [BasicComponent] + `bottomAction` 里的 [TextField]（见 [SettingsIntField]） |
  * | 纯数字滚轮 | [OverlaySpinnerPreference]（设置页已不用，只剩调试页的组件陈列） |
  * | 布尔开关 | [SwitchPreference] |
  * | 入口（跳走做别的事） | [ArrowPreference] |
@@ -53,6 +55,18 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *
  * 这些组件内部都走 `BasicComponent`，所以标题/说明/按压态/圆角由 Miuix 统一负责。
  * 本文件只做一件事：把「蜘蛛 的语义」翻译成它们的参数。
+ *
+ * ## 行首图标：行式组件都收 `icon` + `plate` 一对参数
+ *
+ * 每一行都可以带一块行首图标（见 [SettingsIconPlate] 与 [SettingsPlateColors]），
+ * 这是「借鉴小米自带的设置」那一条的落点：参考物里每一行的行首都是一块彩色圆角方块，
+ * 而不是一个裸字形。
+ *
+ * 之所以做成**两个成对的参数**而不是一个 `startAction: @Composable` 槽位：
+ * 槽位形式下"这一行该有图标"这件事没有任何地方记录，漏掉一行也看不出来；
+ * 成对的 `icon` + `plate` 可以被 `SettingsIconPlateTest` 逐行数出来 ——
+ * 「有图标没底色」（退回改版前那个裸单色字形）与「有底色没图标」（一块空色块）
+ * 都能在守卫里被拦住。
  */
 
 /**
@@ -105,6 +119,8 @@ internal fun SettingsChoice(
     onSelect: (Int) -> Unit,
     summary: String? = null,
     warn: Boolean = false,
+    icon: Painter? = null,
+    plate: Color? = null,
 ) {
     OverlayDropdownPreference(
         items = options,
@@ -112,6 +128,7 @@ internal fun SettingsChoice(
         title = title,
         summary = summary,
         summaryColor = hintColors(warn),
+        startAction = plateStartAction(icon, plate),
         onSelectedIndexChange = { index -> options.getOrNull(index)?.let { onSelect(index) } },
     )
 }
@@ -133,6 +150,8 @@ internal fun SettingsNumber(
     options: List<Int>,
     onValueChange: (Int) -> Unit,
     summary: String? = null,
+    icon: Painter? = null,
+    plate: Color? = null,
 ) {
     val enabled = options.isNotEmpty()
     OverlaySpinnerPreference(
@@ -147,6 +166,7 @@ internal fun SettingsNumber(
         title = title,
         summary = summary,
         summaryColor = hintColors(warn = false),
+        startAction = plateStartAction(icon, plate),
         maxHeight = 260.dp,
         enabled = enabled,
     )
@@ -155,10 +175,8 @@ internal fun SettingsNumber(
 /**
  * 数值型设置项（自由输入）。
  *
- * 以前这类行走 [OverlaySpinnerPreference]（滚轮挑一个候选值）。问题在候选是**枚举出来的**：
- * 上下文窗口只有 128k/200k/1m/1.5m 四个值，联网超时只能按 5 秒步长跳 —— 用户想要
- * 别的值就只能改代码。而这些数本来就是文本可表达的（`128k` / `1.5m`），
- * 所以改用与「项目目录」同一套壳：标题 + 说明 + 底下一个输入框。
+ * 用于没有适合滑杆固定范围、需要自由输入的数值项（例如上下文窗口）。有限整数范围
+ * 且适合连续逐值调整的选项应优先使用 Miuix [SliderPreference]，不要在这里造输入框。
  *
  * ## 输入过程中**绝不回写**文本框
  *
@@ -187,6 +205,8 @@ internal fun SettingsIntField(
     summary: String? = null,
     /** 显示用的写法。上下文窗口要显示成 `200k` 而不是 `200000`。 */
     format: (Int) -> String = { it.toString() },
+    icon: Painter? = null,
+    plate: Color? = null,
 ) {
     // 文本框自己持有一份文本：真实值是被 clamp 过的，而用户打进来的字可能还没成型。
     var text by remember { mutableStateOf(format(value)) }
@@ -205,6 +225,8 @@ internal fun SettingsIntField(
             parse(raw)?.let { onValueChange(it.coerceIn(min, max)) }
         },
         summary = summary,
+        icon = icon,
+        plate = plate,
     )
 }
 
@@ -216,6 +238,18 @@ internal fun SettingsToggle(
     onCheckedChange: (Boolean) -> Unit,
     summary: String? = null,
     warn: Boolean = false,
+    /**
+     * 是否可用。
+     *
+     * 不可用时 Miuix 会把整行压成"点不动"的观感（滑块也会变灰），**不要再自己吞掉点击**
+     * 当兜底 —— 那会得到"看着能点、点了没反应"，比一个明显的灰开关更难查。
+     *
+     * 沙箱页用它表达"后端不通"：那时开关值是从 `SandboxPrefs` 回读的已保存值，
+     * 点它只会再失败一次。
+     */
+    enabled: Boolean = true,
+    icon: Painter? = null,
+    plate: Color? = null,
 ) {
     SwitchPreference(
         checked = checked,
@@ -223,6 +257,8 @@ internal fun SettingsToggle(
         title = title,
         summary = summary,
         summaryColor = hintColors(warn),
+        startAction = plateStartAction(icon, plate),
+        enabled = enabled,
     )
 }
 
@@ -238,10 +274,13 @@ internal fun SettingsEntry(
     valueText: String,
     onClick: () -> Unit,
     summary: String? = null,
+    icon: Painter? = null,
+    plate: Color? = null,
 ) {
     ArrowPreference(
         title = title,
         summary = summary ?: valueText,
+        startAction = plateStartAction(icon, plate),
         onClick = onClick,
     )
 }
@@ -251,6 +290,9 @@ internal fun SettingsEntry(
  *
  * 用 [BasicComponent] 而不是 `ArrowPreference`：后者行尾**总会**画一个 `›`，
  * 即便 `onClick = null`。只读行带箭头会让人以为能点，所以这里换掉。
+ *
+ * 这一行的行首是 [swatch] 色块本身，不是 [SettingsIconPlate]：色值行的行首就该是那个颜色，
+ * 再套一层彩色方块反而把要展示的颜色盖掉。所以它不收 `icon` / `plate`。
  */
 @Composable
 internal fun SettingsReadOnly(
@@ -299,11 +341,14 @@ internal fun SettingsTextField(
      */
     singleLine: Boolean = true,
     minLines: Int = 1,
+    icon: Painter? = null,
+    plate: Color? = null,
 ) {
     BasicComponent(
         title = title,
         summary = summary,
         summaryColor = hintColors(warn = false),
+        startAction = plateStartAction(icon, plate),
         insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         bottomAction = {
             ZhiTextField(
@@ -317,6 +362,19 @@ internal fun SettingsTextField(
             )
         },
     )
+}
+
+/**
+ * 行首图标块的 `startAction` 槽位。
+ *
+ * `icon` 与 `plate` **必须成对**给出（见文件顶部）。只给一半时这里返回 `null`，
+ * 界面会静默退回"没有图标的行" —— 这种退一半的情况由 `SettingsIconPlateTest`
+ * 逐行拦（它数的是调用点上的参数，不是这里的返回值），所以这里不做任何补救。
+ */
+@Composable
+private fun plateStartAction(icon: Painter?, plate: Color?): (@Composable () -> Unit)? {
+    if (icon == null || plate == null) return null
+    return { SettingsIconPlate(icon = icon, color = plate) }
 }
 
 /** 说明文字的颜色：[warn] 为真时用琥珀色，其余走 Miuix 的次级色。 */

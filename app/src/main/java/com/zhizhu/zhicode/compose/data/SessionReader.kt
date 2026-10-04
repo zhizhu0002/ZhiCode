@@ -2,15 +2,14 @@ package com.zhizhu.zhicode.compose.data
 
 import com.zhizhu.zhicode.compose.engine.ToolText
 import com.zhizhu.zhicode.compose.model.AgentTask
-import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
 import com.zhizhu.zhicode.compose.model.SessionSummary
 import com.zhizhu.zhicode.compose.model.TaskState
 import com.zhizhu.zhicode.compose.model.ToolActivity
 import com.zhizhu.zhicode.compose.model.ToolKind
+import com.zhizhu.zhicode.compose.model.readChatImageBlocks
 import com.termux.app.zhicode.storage.SessionStore
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
@@ -80,8 +79,8 @@ internal object SessionReader {
 
         /** 工具 id → 它所在分组卡的下标。用于把结果/进度写回正确的卡。 */
         val toolGroupIndex = mutableMapOf<String, Int>()
-        /** tool_use_id → 增删行数（来自 tool_diff 事件）。 */
-        val toolDiffs = mutableMapOf<String, Triple<String, Int, Int>>()
+        /** tool_use_id → 这次改动的增删行数与 diff 正文（来自 `tool_diff` 事件）。 */
+        val toolDiffs = mutableMapOf<String, ToolDiffInfo>()
 
         for (row in rows(file)) {
             when (row.optString("type", "")) {
@@ -129,11 +128,20 @@ internal object SessionReader {
                                     additions = added,
                                     deletions = deleted,
                                     kind = kindOf(name),
+                                    // 会话记录里存着原始入参，命令类工具的命令行就在里面。
+                                    // 不读出来的话，恢复历史后展开一条 Bash 只能看到
+                                    // `truncateCommand` 截过的摘要（前两行 + `…`）。
+                                    command = input?.optString("command", "") ?: "",
+                                    // 折叠组副行/表头要用的两个字段。历史记录里
+                                    // 原始入参还在（存在 chunk 的 input 里），所以
+                                    // 从历史恢复出来的组也能算出正确的"读取 N 个文件"。
+                                    hint = ToolText.activityHint(name, input),
+                                    readRequests = ToolText.readRequestCount(name, input),
                                 )
                                 if (toolId.isNotEmpty()) toolGroupIndex[toolId] = groupIndex
                                 val group = items[groupIndex]
                                 val tools = group.tools + activity
-                                items[groupIndex] = group.copy(tools = tools, groupLabel = groupLabel(tools))
+                                items[groupIndex] = group.copy(tools = tools)
                             }
                         }
                     } else {
@@ -162,15 +170,18 @@ internal object SessionReader {
                                         completed = true,
                                         failed = block.optBoolean("is_error", false),
                                         output = block.optString("content", ""),
-                                        additions = diff?.second ?: tool.additions,
-                                        deletions = diff?.third ?: tool.deletions,
+                                        additions = diff?.additions ?: tool.additions,
+                                        deletions = diff?.deletions ?: tool.deletions,
+                                        // diff 正文与增删行数同源（同一个 `tool_diff` 事件）。
+                                        // 只取行数不取正文，等于恢复历史后那块 diff 预览井是空的。
+                                        diff = diff?.text ?: tool.diff,
                                     )
                                 },
                             )
                         }
                         // 图片：引擎把用户发的图作为 image 块写在同一条 user 消息里
                         // （见 ZhiCodeEngine.buildUserContent），这里读回来挂到气泡上。
-                        val images = readImages(content)
+                        val images = readChatImageBlocks(content)
                         // 工具结果行**不算发言**。只有"有内容且来源不是内部"才是用户说的。
                         //
                         // ⚠️ 判据必须包含 images：只发图、不写字的消息没有 text 块，
@@ -195,21 +206,50 @@ internal object SessionReader {
                     val payload = row.optJSONObject("payload") ?: continue
                     val toolId = payload.optString("tool_use_id", "")
                     if (toolId.isNotEmpty()) {
-                        toolDiffs[toolId] = Triple(
-                            payload.optString("tool_name", ""),
-                            payload.optInt("additions", 0),
-                            payload.optInt("deletions", 0),
+                        toolDiffs[toolId] = ToolDiffInfo(
+                            additions = payload.optInt("additions", 0),
+                            deletions = payload.optInt("deletions", 0),
+                            text = payload.optString("diff", ""),
                         )
                     }
                 }
             }
         }
         // 整组工具都已完成的，标上完成态（用于分组标题的「已运行 N 个工具」与折叠行为）。
+        //
+        // ⚠️ 同时给**没有结果的**工具收口：会话记录里可能留着只有调用、没有结果的事件
+        // （进程被杀、写入中断、旧版本记录格式）。它们恢复出来会是 `completed = false`，
+        // 而界面把"未完成"一律画成转圈 + 「运行中…」—— 于是一条几天前的记录里会
+        // **永远**有一个转圈的工具行，看着像卡住了。
+        //
+        // 参考实现（IQ Code `MainActivity`）同样在恢复时把它们标成失败，并补一句
+        // 「会话记录未包含该工具的结果。」。照做：这里不是"猜一个结果"，
+        // 而是如实说明"记录里没有"。
         return items.map { item ->
-            if (item.kind != ChatKind.TOOL_GROUP) item
-            else item.copy(groupCompleted = item.tools.isNotEmpty() && item.tools.all { it.completed })
+            if (item.kind != ChatKind.TOOL_GROUP) {
+                item
+            } else {
+                val closed = item.tools.map { tool ->
+                    if (tool.completed) {
+                        tool
+                    } else {
+                        tool.copy(
+                            completed = true,
+                            failed = true,
+                            output = tool.output.ifBlank { UNFINISHED_TOOL_NOTE },
+                        )
+                    }
+                }
+                item.copy(
+                    tools = closed,
+                    groupCompleted = closed.isNotEmpty() && closed.all { it.completed },
+                )
+            }
         }
     }
+
+    /** 恢复历史时给"记录里没有结果的工具"补的说明（参考实现逐字）。 */
+    private const val UNFINISHED_TOOL_NOTE = "会话记录未包含该工具的结果。"
 
     /** 任务清单：取最后一条 `task_snapshot` 事件（引擎在每次任务变更时都会追加）。 */
     fun tasks(file: File): List<AgentTask> {
@@ -234,40 +274,12 @@ internal object SessionReader {
     fun updateMetadata(file: File, note: String, titleOverride: String): Boolean =
         runCatching { SessionStore.updateSessionMetadata(file, note, titleOverride); true }.getOrDefault(false)
 
-    /**
-     * 从一条消息的 content 数组里取出图片块。
-     *
-     * 结构由引擎写入（`ZhiCodeEngine.buildUserContent` + `buildImageBlocks`）：
-     * `{"type":"image","source":{"type":"base64","media_type":…,"data":…},"name":…}`。
-     *
-     * 做成**接收 JSONArray 的顶层函数**而不是内联在 `transcript()` 里，是为了能用
-     * 真实的 org.json 直接单测 —— 这段逻辑的失败模式（少读一张图、把非 base64 的
-     * 当图）在界面上都只表现为"图没出来"，光看界面分不清是哪一种。
-     *
-     * 任何一块读不出来就**跳过那一块**，不影响同一条消息的其它图：一条坏数据
-     * 不该让整张对话历史里的图都消失。
-     */
-    internal fun readImages(content: JSONArray): List<ChatImage> {
-        val images = mutableListOf<ChatImage>()
-        for (i in 0 until content.length()) {
-            val block = content.optJSONObject(i) ?: continue
-            if (block.optString("type", "") != "image") continue
-            val source = block.optJSONObject("source") ?: continue
-            // 只认 base64：引擎目前只写这一种；将来若支持 url，那要联网加载，
-            // 与"离线也要能显示历史图片"这个前提冲突，得有单独的决定。
-            if (source.optString("type", "") != "base64") continue
-            val data = source.optString("data", "")
-            if (data.isEmpty()) continue
-            images.add(
-                ChatImage(
-                    data = data,
-                    mimeType = source.optString("media_type", "image/png"),
-                    name = block.optString("name", "").ifBlank { "图片" },
-                ),
-            )
-        }
-        return images
-    }
+    // 读图片块的那个函数**不在这里** —— 它被搬到 `model/ChatImageBlocks.kt` 了。
+    //
+    // 原因：同一个块结构有两个互不相关的来源（会话文件里的用户消息、以及工具结果里的
+    // `additionalContent`），而后者要由 `engine` 包调用，`engine` 的既有依赖方向是
+    // **只依赖 `model`**、从不 import `data`。留在 `data` 里会让引擎反向依赖数据层。
+    // 现在两边共用 `readChatImageBlocks`，也共用它的单测。
 
     // ------------------------------------------------------------------
 
@@ -308,20 +320,6 @@ internal object SessionReader {
         else -> ToolKind.OTHER
     }
 
-    private fun groupLabel(tools: List<ToolActivity>): String {
-        val parts = mutableListOf<String>()
-        val searches = tools.count { it.kind == ToolKind.SEARCH }
-        val reads = tools.count { it.kind == ToolKind.READ }
-        val edits = tools.count { it.kind == ToolKind.EDIT }
-        val commands = tools.count { it.kind == ToolKind.COMMAND }
-        if (searches > 0) parts += "搜索 $searches 个模式"
-        if (reads > 0) parts += "读取 $reads 个文件"
-        if (edits > 0) parts += "修改 $edits 处代码"
-        if (commands > 0) parts += "执行 $commands 条命令"
-        if (parts.isEmpty()) parts += "调用 ${tools.size} 个工具"
-        return parts.joinToString("、")
-    }
-
     /**
      * 相对时间。刚写下的会话显示"刚刚"，避免出现"0 分钟前"这种别扭文案。
      */
@@ -344,3 +342,18 @@ internal object SessionReader {
         return SimpleDateFormat("yyyy年M月d日", Locale.getDefault()).format(Date(timestamp))
     }
 }
+
+/**
+ * 一条 `tool_diff` 事件的内容。
+ *
+ * ## 为什么不是 `Triple`
+ *
+ * 原来是 `Triple(tool_name, additions, deletions)`：`tool_name` 在这里**没人用**，
+ * 而真正要显示的统一 diff 正文（引擎 `persistToolDiff` 写进去的 `"diff"` 字段）
+ * 没有被读出来 —— 于是从历史会话恢复的写文件类工具，
+ * 展开后只能看到「Wrote N bytes …」那一句自述，看不到改了什么。
+ *
+ * 换成具名字段而不是四元组：diff 正文是**多行大字符串**，
+ * 靠 `.first/.second/.third` 去认它，读的人（和下一个改的人）一定会搞错位置。
+ */
+private class ToolDiffInfo(val additions: Int, val deletions: Int, val text: String)

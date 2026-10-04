@@ -75,6 +75,12 @@ public final class TypographyScaleTest {
      * **必须写下来**，而不是悄悄放宽断言。
      */
     private static final Map<String, String> BARE_FONT_ALLOWED = new LinkedHashMap<>();
+    static {
+        BARE_FONT_ALLOWED.put(
+                "app/src/main/java/com/zhizhu/zhicode/compose/ui/panes/FileChrome.kt",
+                "既有文件列表行的字号与小米文件管理器契约绑定，本轮仅重做预览/编辑器，未扩大此例外"
+        );
+    }
 
     private static void require(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);

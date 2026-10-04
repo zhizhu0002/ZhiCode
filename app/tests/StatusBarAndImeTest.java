@@ -38,6 +38,8 @@ public final class StatusBarAndImeTest {
             "app/src/main/java/com/zhizhu/zhicode/compose/ui/settings/SettingsDialog.kt";
     private static final String VM =
             "app/src/main/java/com/zhizhu/zhicode/compose/state/WorkspaceViewModel.kt";
+    private static final String CHAT_AREA =
+            "app/src/main/java/com/zhizhu/zhicode/compose/ui/ChatArea.kt";
 
     private static String squash(String text) {
         return text.replaceAll("\\s+", "");
@@ -116,5 +118,51 @@ public final class StatusBarAndImeTest {
                         + "只能由用户按自己机型选");
         require(vm.contains("setTerminalCharMode") && vm.contains("getTerminalCharMode"),
                 VM + " 必须落盘并在启动时读回该开关：不落盘就是「设置了重启就丢」");
+
+        // ---- 3. 输入器只在该跟键盘时跟键盘（R5 修的真机 bug）------------------
+        //
+        // 用户原话：「为什么在搜索会话打开输入法，后面的聊天发送框会自动抬起」。
+        //
+        // `WindowInsets.ime` 是**窗口级**的：它不区分键盘是谁提起来的。侧栏抽屉
+        // （窄屏，画在 Scaffold 之上）里的「搜索会话」输入框一提键盘，IME 就变正，
+        // 于是**后面那个对话输入器跟着往上顶**，从抽屉右侧那条缝里能直接看见它
+        // 整个上移了一截。
+        //
+        // 修法不是去猜"焦点在谁身上"（Compose 没给可靠的窗口级焦点查询），
+        // 而是按**有没有全屏浮层盖住工作区**判断。这条守卫钉的就是那几个标志位 ——
+        // 少一个就会出现"设置页里搜一下，背后的输入器动了"这同一类 bug。
+        String chatArea = stripComments(read(root, CHAT_AREA));
+        // ⚠️ 门控的**位置**后来挪了：让位量不再在组合期算成一个 `Dp`，而是进
+        //    `offset { }` 的 lambda（布局阶段读，键盘动画期间不重组）。
+        //    门控本身一秒都没放松 —— 它仍然是"这次 IME 变化是不是本输入器引起的"的唯一判据。
+        require(squash(chatArea).contains("vallift=if(liftByFullScreenOverlay)"),
+                CHAT_AREA + " 的 IME 让位量必须由 liftByFullScreenOverlay 门控："
+                        + "WindowInsets.ime 是窗口级的，侧栏搜索框提键盘时它会一起变正，"
+                        + "不门控就会把后面的对话输入器顶起来（用户报的真机 bug）");
+        require(!squash(chatArea).contains("vallift=(imeInsets.getBottom"),
+                CHAT_AREA + " 的让位量又变回无条件读 WindowInsets.ime 了（同上）");
+        // ⚠️ 光钉「使用处有门控」还不够：把门控**算成常量**（`= false` / `= true`）
+        //    使用处一个字都不用改，守卫照样绿 —— 而"永远不抬"和"永远抬"都是 bug。
+        //    （这条是本轮 teeth 试出来的：只改名不构成有意义回归，但把定义换成常量是。）
+        //    所以这里连**定义**一起钉死：四个标志位必须真的喂给这个门控。
+        //
+        //    用 squash 后的整串比对，代价是格式化它就不认了 —— 这是刻意的：
+        //    这行是唯一的权威判据，动了它就该有人回来重读注释、重跑 teeth。
+        require(squash(chatArea).contains("valliftByFullScreenOverlay="
+                        + "state.sidebarOpen||state.settingsOpen"
+                        + "||state.uiDebugOpen||state.environmentOpen"),
+                CHAT_AREA + " 的 liftByFullScreenOverlay 必须由四个「全屏浮层」标志位算出："
+                        + "把它换成常量（或去掉某一个标志位）就等于关掉了这道门控，"
+                        + "而使用处看起来毫无变化");
+        for (String flag : new String[]{
+                "state.sidebarOpen", "state.settingsOpen", "state.uiDebugOpen", "state.environmentOpen"}) {
+            require(squash(chatArea).contains(squash(flag)),
+                    "liftByFullScreenOverlay 必须包含 " + flag + "："
+                            + "那几个页面里都有输入框，漏一个就会重演"
+                            + "「打开搜索、后面的输入框自己抬起来」");
+        }
+
+        System.out.println("StatusBarAndImeTest PASS"
+                + "（状态栏可见 · 终端输入法由设置项驱动且默认正常 · 输入器只在该跟键盘时跟键盘）");
     }
 }

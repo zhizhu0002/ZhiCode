@@ -28,9 +28,18 @@ import java.util.*;
  */
 public final class ToolOutputBoundTest {
 
-    private static final String CHANGES = "app/src/main/java/com/zhizhu/zhicode/compose/ui/panes/ChangesPane.kt";
+    /**
+     * 工具输出的行数上限与渲染。
+     *
+     * ⚠️ 本轮它**搬过家**：原先住在 `ui/panes/ChangesPane.kt` —— 那个文件混了一个
+     * 已经删掉的「变更」面板和这套还活着的工具。所以这里跟着换成新路径，
+     * 而不是把断言删掉（它们守的东西一个字没变）。
+     */
+    private static final String TOOL_OUTPUT =
+            "app/src/main/java/com/zhizhu/zhicode/compose/ui/chat/ToolOutputText.kt";
     private static final String CARDS = "app/src/main/java/com/zhizhu/zhicode/compose/ui/chat/MessageCards.kt";
     private static final String TOOL_TEXT = "app/src/main/java/com/zhizhu/zhicode/compose/engine/ToolText.kt";
+    private static final String LIVE_OUTPUT = "app/src/main/java/com/zhizhu/zhicode/compose/model/LiveOutput.kt";
     private static final String COMPOSER = "app/src/main/java/com/zhizhu/zhicode/compose/ui/composer/Composer.kt";
     private static final String COMMON = "app/src/main/java/com/zhizhu/zhicode/compose/ui/Common.kt";
 
@@ -101,15 +110,15 @@ public final class ToolOutputBoundTest {
         String root = args.length > 0 ? args[0] : ".";
 
         // ---- 1. 两处渲染长文本的入口都必须走同一个行数上限 -------------------
-        String changes = stripComments(read(root, CHANGES));
+        String changes = stripComments(read(root, TOOL_OUTPUT));
         require(changes.contains("internal const val MaxRenderedLines = 300"),
-                CHANGES + " 里找不到 `internal const val MaxRenderedLines = 300` —— "
+                TOOL_OUTPUT + " 里找不到 `internal const val MaxRenderedLines = 300` —— "
                         + "超长输出的行数上限没了，一个 1000 行的 diff 会在**同一个 LazyColumn item** "
                         + "里生成 1000 个 Text，那个 item 比视口还高，懒加载复用彻底失效");
 
         // 上限必须真的被接到渲染路径上，不能只是个没人用的常量。
         String bounded = functionBody(changes, "private fun boundedTextLines(");
-        require(!bounded.isEmpty(), CHANGES + " 里找不到 boundedTextLines —— 上限的执行者没了");
+        require(!bounded.isEmpty(), TOOL_OUTPUT + " 里找不到 boundedTextLines —— 上限的执行者没了");
         require(squash(bounded).contains("limitLines(text,MaxRenderedLines)"),
                 "boundedTextLines 必须把 MaxRenderedLines 交给 limitLines 执行："
                         + "常量摆在那儿而渲染不走它，等于没有上限");
@@ -118,7 +127,7 @@ public final class ToolOutputBoundTest {
                         + "上限只该影响默认渲染，一个字节的数据都不能因为性能被藏没");
 
         String diffLines = functionBody(changes, "fun DiffLines(");
-        require(!diffLines.isEmpty(), CHANGES + " 里找不到 DiffLines");
+        require(!diffLines.isEmpty(), TOOL_OUTPUT + " 里找不到 DiffLines");
         require(diffLines.contains("boundedTextLines(diff)"),
                 "DiffLines 必须经过 boundedTextLines()：上限、以及「点按显示全部」这条出路"
                         + "都在那里。直接把 diff 交给 split('\\n') 就等于没有上限。");
@@ -128,14 +137,14 @@ public final class ToolOutputBoundTest {
 
         String outputLines = functionBody(changes, "fun OutputLines(");
         require(!outputLines.isEmpty(),
-                CHANGES + " 里找不到 OutputLines —— 展开的工具输出必须有与 DiffLines 同一套上限的"
+                TOOL_OUTPUT + " 里找不到 OutputLines —— 展开的工具输出必须有与 DiffLines 同一套上限的"
                         + "渲染入口（它就是原来参数位置上的裸 Text(activity.output)）");
         require(outputLines.contains("boundedTextLines("),
                 "OutputLines 必须经过 boundedTextLines()（理由同 DiffLines）");
 
         // 上限函数本身不许做字符串手术 —— 它存在的意义就是**避免** split。
         String limit = functionBody(changes, "internal fun limitLines(");
-        require(!limit.isEmpty(), CHANGES + " 里找不到 limitLines —— 截断规则被删了");
+        require(!limit.isEmpty(), TOOL_OUTPUT + " 里找不到 limitLines —— 截断规则被删了");
         require(!limit.contains(".split("),
                 "limitLines 里出现了 split：它的全部意义就是「在截断的同一次下标扫描里"
                         + "顺手把总行数算出来」，用 split 反而把要省的那次分配做了两遍");
@@ -169,10 +178,27 @@ public final class ToolOutputBoundTest {
                 "compactToolSummary 里又出现了 trim()：它会**复制整份输出**"
                         + "（上限 40 000 字符），而这里只需要去空白后的两个下标");
 
+        // 「哪一行才是有用的错误信息」现在在纯逻辑层（见 ToolInteractionTest 里
+        // ErrorSummary 的那几条断言 + ErrorSummaryTest），所以这里只钉一点：
+        // 界面不许自己再扫一遍。
         String errorLine = functionBody(cards, "private fun firstUsefulErrorLine(");
-        require(!errorLine.isEmpty(), CARDS + " 里找不到 firstUsefulErrorLine");
-        require(!errorLine.contains(".split("),
-                "firstUsefulErrorLine 里又出现了 split（理由同 compactToolSummary）");
+        require(errorLine.isEmpty(),
+                CARDS + " 里不许再留着 firstUsefulErrorLine 的自有实现："
+                        + "判据已挪到 ErrorSummary（纯逻辑、有单测）");
+        require(squash(cards).contains("ErrorSummary.firstUsefulLine("),
+                CARDS + " 的错误摘要必须转发到 ErrorSummary.firstUsefulLine");
+
+        // ---- 2b. 运行中的实时输出也必须有上限 ------------------------------
+        //
+        // 运行标签那几行是**每次都重算**的（工具行随重组刷新），所以裁剪同样
+        // 必须是"按下标取尾部"而不是先把整段切碎。判据在纯逻辑层，有单测。
+        String liveOutput = stripComments(read(root, LIVE_OUTPUT));
+        require(liveOutput.contains("fun preview(") && liveOutput.contains("fun tail("),
+                LIVE_OUTPUT + " 必须提供 tail / preview："
+                        + "运行中的行内输出按「尾部 N 字符」与「尾部 N 行」两种口径取");
+        require(liveOutput.contains("DEFAULT_KEEP"),
+                LIVE_OUTPUT + " 必须给缓冲一个上限（对应原版的 keep = 40000）："
+                        + "一条 apt install 能刷出几十万字符");
 
         // ---- 3. isFileDiff 不许 split --------------------------------------
         String toolText = stripComments(read(root, TOOL_TEXT));

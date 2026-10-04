@@ -2,11 +2,10 @@ package com.zhizhu.zhicode.compose.model
 
 import com.termux.app.zhicode.core.FileOps
 
-/** 对话流中的条目类型。对应原 蜘蛛 的 ChatItem 分类。 */
-enum class ChatKind { USER, ASSISTANT, TOOL_GROUP, ERROR, INFO }
+// `ChatKind` 与 `ToolKind` 都在自己的文件里：它们在 `model` 包内，
+// 而本文件还拖着一整套界面状态类 —— 纯逻辑层（ToolGrouping / TurnLayout）只需要那两个
+// 枚举，不该为了它们把这一整份编译进秒级回路。
 
-/** 工具类别，用于聚合卡的文案（"搜索 N 个模式 / 读取 N 个文件"）。 */
-enum class ToolKind { SEARCH, READ, EDIT, COMMAND, OTHER }
 
 enum class RiskLevel { NORMAL, HIGH }
 
@@ -22,9 +21,104 @@ data class ToolActivity(
     val additions: Int = 0,
     val deletions: Int = 0,
     val output: String = "",
+    /**
+     * 写文件类工具的**统一 diff**（引擎算好的，仅供界面显示，不发给模型）。
+     *
+     * ## 为什么必须单独存一份，不能从 [output] 里捞
+     *
+     * 引擎的 `Write/Edit/MultiEdit/Delete` 返回的 `content` 是**一句自述**
+     * （`Wrote 505 bytes to /data/.../x.txt`），真正的改动在
+     * `ToolExecutionResult.diff` 里（`tools/UnifiedDiff.create(...)`），
+     * 而 `ZhiCodeEngine.persistToolDiff` 也把它单独写进了 `tool_diff` 事件。
+     *
+     * 界面这边原来只认"输出文本本身长得像 diff"（`ToolText.isFileDiff(output)`）——
+     * 于是**那块更暗的 diff 预览井在真机上从来没出现过**：数据早就送到门口了
+     * （`ZhiEngineController` 一路 `diff = result.diff` 传进来），
+     * 却在这一层被丢掉。参考实现的展开态是「diff 井 + 输出井」两块**都画**
+     * （`addToolCard`：先 `colorDiff(item.diff)` 画在 `TERMINAL_BG` 上，再画 result），
+     * 不是二选一。
+     */
+    val diff: String = "",
+    /**
+     * 工具带回来的**富内容预览**（`ToolExecutionResult.additionalContent`）。
+     *
+     * ## 与 [diff] 是并列关系，不是替代
+     *
+     * 两者都从 `ToolExecutionResult` 来、都不是从 [output] 里捞的，而且**可以同时存在**：
+     * 展开态是「图片 → diff 井 → 输出井」三块都画（见 `MessageCards` 的 EXPANDED 分支）。
+     *
+     * ## 数据从哪来
+     *
+     * 目前只有 `Sandbox` 工具的 `screenshot` 会产出：沙箱把截图存到自己的私有目录后，
+     * 读回字节、base64 编码，包成 `{type:image, source:{type:base64, media_type, data}, name}`
+     * 塞进 `additionalContent`（`ZhiSandboxTool.screenshotResult`）。
+     *
+     * ## 曾经漏在哪
+     *
+     * 引擎一直把它当作 user 消息的一部分发给模型（`ZhiCodeEngine` 的
+     * `additionalToolContent`），**但界面这一层从来没有接过** —— 于是"沙箱截的图
+     * 模型看得到、用户看不到"。`UiCanvasTool` 里那句注释"包装成界面能直接消费的
+     * 附加内容块"当时是**不成立的**。现在这条链是：工具产出 → 引擎透传 →
+     * `ZhiEngineController` 用 `readChatImageBlocks` 解析 → 这里 → 工具卡渲染。
+     *
+     * ## 为什么只存 base64 字符串而不解码
+     *
+     * 与用户消息里的图同一个理由（见 [ChatImage]）：解码要几十毫秒且可能 OOM，
+     * 必须交给界面层在 `Dispatchers.Default` 上做；这一层只做搬运。
+     */
+    val previews: List<ChatImage> = emptyList(),
     val expanded: Boolean = false,
     val awaitingPermission: Boolean = false,
     val kind: ToolKind = ToolKind.OTHER,
+    /**
+     * 本工具开始执行的时刻（`System.currentTimeMillis()`），0 表示还没有基准。
+     *
+     * ## 为什么需要它
+     *
+     * [elapsedMs] 是**跟着输出块**推过来的（引擎按 chunk 回调进度）。一个跑 30 秒
+     * 都不吐字的命令，那个值就停在最后一次进度的位置上，界面上看起来像卡死了。
+     * 有了起点，界面侧的定时刷新才能自己把秒数续下去（见 `ToolActions.displayElapsedMs`）。
+     *
+     * 从历史会话恢复出来的工具是**已完成**的，`startedAtMs` 保持 0 —— 那些工具的耗时
+     * 取引擎存下来的值即可，不需要也不应该重新计时。
+     */
+    val startedAtMs: Long = 0L,
+    /**
+     * 运行中累积的标准输出 / 错误输出**字符数**。
+     *
+     * 只给运行中的标签用（`实时 00:12 · 标准输出 12.3 KB · 错误输出 0 B · 进程运行中`）。
+     * 为什么要分开两份：只看 [output] 的总长说不出"错误输出有多少"，
+     * 而恰恰是错误输出的体量在决定用户要不要去点开看。
+     *
+     * 工具结束后这两个值不再更新（结束时 [output] 换成了最终结果，与原版一致）。
+     */
+    val stdoutChars: Int = 0,
+    val stderrChars: Int = 0,
+    /**
+     * 命令类工具的**原始命令行**（未截断、保留换行）。
+     *
+     * 折叠态显示的是 [summary] —— 那是 `ToolText.truncateCommand` + `shorten(190)` 的产物，
+     * 主要为了"标题行不撑破"。但**展开态必须看得到完整命令**：一条 `&&` 串起来的
+     * 多行脚本被截成前两行 + `…` 之后，用户根本无法核对它到底跑了什么
+     * （参考实现同样是 `item.expanded ? command : truncateCommand(command)`）。
+     */
+    val command: String = "",
+    /**
+     * 这一条在折叠组副行里要显示的路径 / 模式（`ToolText.activityHint` 的产物）。
+     *
+     * 为什么不拿 [summary] 凑合：两者的字段回退规则是**不一样**的（`stat` 取 `path`、
+     * `ls` 的默认值是 `.`），而且 `ReadMany` 在 [summary] 里没有分支（原版也没有），
+     * 副行却要显示"第一个路径 · +N"。所以在登记工具时就按参考实现的
+     * `toolActivityHint` 算好存下来，而不是渲染时猜。
+     */
+    val hint: String = "",
+    /**
+     * `ReadMany` 这一次读了几个文件（其余工具是 0）。
+     *
+     * 组表头要把 `ReadMany` 按**它实际带了几条路径**计入"读取 N 个文件"
+     * （见 [ToolGrouping.label]）：算成 1 的话，一个读了 20 个文件的组会显示"读取 1 个文件"。
+     */
+    val readRequests: Int = 0,
 )
 
 /**
@@ -60,8 +154,22 @@ data class ChatItem(
     val thinkingExpanded: Boolean = false,
     val processSteps: List<String> = emptyList(),
     val tools: List<ToolActivity> = emptyList(),
-    val groupLabel: String = "",
+    // ⚠️ 这里**没有**批次级的汇总标签（曾经叫 `groupLabel`：「修改 1 处代码」这类）。
+    //
+    // 它没有任何渲染位置了：参考实现里，一个批次里的工具分成两种长相 ——
+    // 单个工具就是**扁平一行**（没有标题、没有徽章），只有"连续的 read/search 且 ≥2"
+    // 才折成一组，而那一组的标题直接说明干了什么（「正在搜索 2 个模式、读取 3 个文件」，
+    // 见 `ToolGrouping.label`）。留着批次级标签只会让人以为还要在哪儿画它。
     val groupCompleted: Boolean = false,
+    /**
+     * 已经展开的**折叠组**（值是 `ToolGrouping.Segment.Group.key`，即首成员的 toolId）。
+     *
+     * 为什么要单独一份，而不是像以前那样拿"组里有没有成员 `expanded`"当整组展开：
+     * 成员自己的 `expanded` 是**那条工具的输出**展开（点行尾的 `⌄`），
+     * 而这里是**整组展开**（点组表头）—— 两件事共用一个标志位时，
+     * 点开一条工具的输出会连带把整组摊开，而且收起时也不知道该收哪一层。
+     */
+    val expandedGroups: Set<String> = emptySet(),
     val contextTokens: Int = -1,
     val contextWindow: Int = 0,
     val streaming: Boolean = false,
@@ -211,6 +319,15 @@ enum class ChoiceIntent {
     MESSAGE_ACTION,
     SESSION_ACTION,
 
+    // ⚠️ 这里**没有** TOOL_ACTION，而且不能再加回来。
+    //
+    // 它曾经存在：单个工具的 `⋯` 把菜单塞进 `choicePicker`，再由界面按 anchorId 认领。
+    // 但 [ChoicePickerState.isActionMenu] 只认上面这两个 intent，于是工具菜单**退化成
+    // 屏幕中央的对话框** —— 一个只作用于某一行的动作，弹窗出现在屏幕正中。
+    // 现在那个 `⋯` 是 Miuix 下拉菜单（与输入器底排同一组件），菜单内容仍是
+    // `ToolActions.options(...)`，选中的文案直接走 `applyToolAction(itemId, toolId, label)`。
+    // 也就是说：工具菜单不再需要经过本枚举，也不需要在这一层中转。
+
     /** 计划模式的目标澄清：选完（或自由回答）后才产出计划。 */
     PLAN_GOAL,
 
@@ -219,37 +336,32 @@ enum class ChoiceIntent {
 
     /** 会话备注：没有选项，只靠自由输入提交（允许空串表示清除）。 */
     SESSION_NOTE,
-}
 
-data class DiffFile(
-    val name: String,
-    val additions: Int,
-    val deletions: Int,
-    val diff: String,
-)
-
-data class DiffState(
-    val files: List<DiffFile> = emptyList(),
-    val loading: Boolean = false,
     /**
-     * 空列表时要显示的说明。
+     * 会话重命名：和 [SESSION_NOTE] 一样没有选项，只靠自由输入提交。
      *
-     * 为什么需要这个字段：变更面板的空白态原来写死「工作区没有未提交的变更」，
-     * 但 git **失败**时（运行时未安装 / 不是 git 仓库 / 目录不存在）列表同样是空的。
-     * 那样界面会一口咬定"没有变更" —— 明明什么都没查到，却给出了确定性结论。
-     * 所以把原因带上来，空白态显示真实原因。
+     * 单独开一个 intent 而不是复用 [SESSION_NOTE]，是因为两者写盘时
+     * `SessionReader.updateMetadata(file, note, titleOverride)` 的字段正好相反：
+     * 备注只改 note（titleOverride 传空串 = 不覆盖），重命名只改 title（note 原样带回）。
+     * 混用一个 intent 迟早会把标题写成备注。
      */
-    val note: String = "",
-) {
-    val additions: Int get() = files.sumOf { it.additions }
-    val deletions: Int get() = files.sumOf { it.deletions }
+    SESSION_RENAME,
 }
 
+/**
+ * 文件面板里的一行。
+ *
+ * <p>[modifiedAt] 是**修改时间**（毫秒，0 = 拿不到）。它在列表的第二行与
+ * [size] 并排显示 —— 这一行原先只有一个字节数，而"最后一次改动是什么时候"
+ * 是浏览代码目录时最常问的问题（小米文件管理器的列表行也是这两项）。
+ * 拿不到时给 0，[FileFormat.time] 会把它显示成空串而不是编一个时间。
+ */
 data class FileEntry(
     val name: String,
     val path: String,
     val directory: Boolean,
     val size: Long = 0L,
+    val modifiedAt: Long = 0L,
 )
 
 data class OpenFile(
@@ -260,19 +372,23 @@ data class OpenFile(
 )
 
 /**
- * 文件面板的根（三选一）。
+ * 文件面板的根（**两选一**）。
  *
- * <p>做成可切换而不是固定一个根，是因为这三处是**三种不同的活儿**：
- * 项目里是代码，HOME 里是配置（`.bashrc`、脚本），共享存储里是用户真正
- * 要处理的文件（下载、截图、导出）。原先面板被 `rootPath() = projectPath`
- * 关在项目里，HOME 与共享存储都走不到。
+ * ## 原先有第三个：「项目」
+ *
+ * 它指向设置里的**项目路径**，而项目路径默认就是 HOME —— 于是用户看到的是
+ * 「项目」与「HOME」两个按钮指向**同一个目录**（截图里点了「项目」，面包屑却停在
+ * `home`），纯冗余。所以按用户的要求把它删掉，只留 HOME 与共享存储。
+ *
+ * ⚠️ 代价说清：设置里改过**自定义项目路径**的用户，那个目录在文件面板里
+ * 没有直达入口了（若它在 HOME 之下，仍可一层层点进去）。项目路径本身没有被删，
+ * 它还给会话与引擎用，只是不再是文件面板的一个根。
  *
  * <p>⚠️ 共享存储那一路要**先给「所有文件访问权限」**才列得出东西，
  * 否则 `list()` 返回 null。界面据 [WorkspaceUiState.fileNote] 那条
  * 「无法读取（权限不足）」如实呈现，而不是显示"0 项"骗人。
  */
 enum class FileRoot(val label: String) {
-    PROJECT("项目"),
     HOME("HOME"),
     SHARED("共享存储"),
 }
@@ -289,9 +405,27 @@ data class FileNameForm(
     /** 重命名时被改的那条；新建时为 null。 */
     val target: FileEntry? = null,
     val draft: String = "",
+    /**
+     * **提交之后**由 `FileOps` 返回的失败原因（重名、没权限、目录不存在…）。
+     *
+     * <p>为什么要有这个字段：这些原因只有真去建/去改才知道，而原先它们被写进
+     * `WorkspaceUiState.message` —— 那条反馈挂在 `MessageBar` 上，而 `MessageBar`
+     * 是 `ChatArea` 的孩子。也就是说在**文件页上提交失败，界面上什么都不会出现**。
+     * 现在它回填到表单里，弹窗保持打开、就地显示原因（小米的 `textinput_dialog`
+     * 也是这个形状：输入框下面一行默认隐藏的错误行）。
+     *
+     * <p>改名字时会被清掉（见 `WorkspaceViewModel.updateFileNameDraft`），
+     * 否则用户一改名字，上一次的"已经存在"还挂在那里。
+     */
+    val failure: String? = null,
 ) {
-    /** 校验结果，直接显示给用户。规则见 `FileOps.nameError`。 */
-    val error: String? get() = FileOps.nameError(draft)
+    /**
+     * 校验结果，直接显示给用户。规则见 `FileOps.nameError`。
+     *
+     * <p>顺序是刻意的：先看 [failure]（那是文件系统说的），没有才现算名字规则 ——
+     * 反过来的话，"重名"会被一句"名字不能为空"盖掉（用户明明填了名字）。
+     */
+    val error: String? get() = failure ?: FileOps.nameError(draft)
 
     val saveable: Boolean get() = error == null
 }
@@ -299,33 +433,86 @@ data class FileNameForm(
 /**
  * 删除确认。
  *
- * <p>[count] 是**会一起消失的条目数（含自己）**。删除一个目录会带走里面的全部内容，
- * 只说「确定删除 sub 吗？」等于没告诉用户代价。数字来自
- * `FileOps.countForDelete`（不跟符号链接进去 —— 跟进去会虚高）。
+ * <p>[count] 是**会一起消失的条目数（含这些目标自己）**。删除一个目录会带走里面的
+ * 全部内容，只说「确定删除 sub 吗？」等于没告诉用户代价。数字来自
+ * `FileOps.countForDelete`（不跟符号链接进去 —— 跟进去会虚高），多选时按条累加。
+ *
+ * <p>目标从"一条"改成"一组"是为了长按多选（对齐小米文件管理器的选择模式）：
+ * 多选态下的删除必须一次说清"删的是哪几条、一共会消失多少项"。
  */
 data class FileDeletePrompt(
-    val entry: FileEntry,
+    val entries: List<FileEntry>,
     val count: Int,
 ) {
     /** 是不是"会带走别的东西"的那种删除。 */
-    val destructive: Boolean get() = count > 1
+    val destructive: Boolean get() = count > entries.size
+
+    /**
+     * 确认文案里的操作对象。
+     *
+     * <p>单条给名字（用户点的是它），多条给「选中的 N 项」—— 把五个名字拼进一句话
+     * 会撑成三行，反而看不清删的是哪几个。
+     */
+    val label: String
+        get() = if (entries.size == 1) "「${entries[0].name}」" else "选中的 ${entries.size} 项"
 }
 
 /**
- * 「附加项目文件」的一条搜索结果。
+ * 「附加项目文件」选择器的状态：**它在浏览哪一个目录**。
  *
- * 放在 model 包而不是作为 `FileSearch` 的内部类：它出现在公开的
- * [WorkspaceUiState.attachHits] 里，而 `FileSearch` 是 `internal` 工具对象
- * （与 `FileBrowser` 一样）—— Kotlin 不允许公开类型暴露 internal 类型参数。
- * 这也与 [FileEntry] / [OpenFile] 的位置保持一致。
+ * ## 为什么不是一份搜索结果
+ *
+ * 这里原先存的是 `attachHits: List<FileHit>` —— 一坨**递归搜索**出来的扁平结果。
+ * 实测它有个很难看的失效：搜索从 HOME 起递归，而 HOME 下有 Termux 的
+ * `storage/{pictures,dcim,downloads,…}` 软链（`FileSearch` 只按**名字**排除
+ * `build`/`node_modules` 这类构建目录，`storage` 不在名单里），空查询的深度上限（2）
+ * 又刚好够到 `storage/pictures/`。于是**面板一打开**、用户一个字都还没敲，
+ * 列表里就灌满了 `storage/pictures/END…` 的截图 —— 标题写着「附加项目文件」，
+ * 内容却是设备相册；而且 BFS 浅层优先，照片在第 3 层、项目源码在第 6~8 层，
+ * 所以它们还排在真正的代码前面。
+ *
+ * 改成"浏览一个目录"之后这个问题从根上没有了：**一层一层走，不递归**，
+ * 那六个软链只是"可以点进去的一个目录"。
+ *
+ * ## 三个字段的分工
+ *
+ * - [attachRoot]：[FileRoot] 与文件面板同一个枚举、同一套语义；
+ * - [attachPath]：当前目录的绝对路径；
+ * - [attachEntries]：**这一层**的子项（`FileBrowser.children` 的结果，
+ *   与文件面板 `fileEntries` 是同一个数据来源）；
+ * - [attachFilter]：只过滤 [attachEntries] 的**文本**，纯内存、不碰磁盘。
+ *
+ * ⚠️ 过滤不做递归搜索是本设计的一部分，不是省事：那正是上面那个 bug 的成因。
  */
-data class FileHit(
-    /** 绝对路径，附加时用它读文件。 */
-    val path: String,
-    /** 相对项目根的路径。界面显示它更短也更容易认。 */
-    val relative: String,
-    val size: Long = 0L,
-)
+data class AttachBrowserState(
+    /** 当前根：项目 / HOME / 共享存储。 */
+    val root: FileRoot = FileRoot.HOME,
+    /** 当前目录的绝对路径。 */
+    val path: String = "",
+    /** 当前目录的**一层**子项。 */
+    val entries: List<FileEntry> = emptyList(),
+    /**
+     * 目录内的名字过滤串。
+     *
+     * 只作用于 [entries]（已列出的这一层），不会去扫磁盘 ——
+     * 所以输入框每敲一个键都是纯内存操作，也**不会**顺着软链爬进相册。
+     */
+    val filter: String = "",
+    /**
+     * 目录读不出来时的原因（权限不足 / 不存在）。
+     *
+     * 与文件面板的 `fileNote` 同源同义：区分「真的是空目录」与「列不出来」，
+     * 否则只显示"0 项"，看起来像应用坏了。
+     */
+    val note: String = "",
+) {
+    /** 按 [filter] 过滤后的可见子项。 */
+    val visibleEntries: List<FileEntry> get() {
+        val needle = filter.trim()
+        if (needle.isEmpty()) return entries
+        return entries.filter { it.name.contains(needle, ignoreCase = true) }
+    }
+}
 
 data class TerminalLine(val text: String, val tone: TerminalTone = TerminalTone.NORMAL)
 
@@ -409,21 +596,20 @@ data class WorkspaceUiState(
     val planApproval: PlanApproval? = null,
     val choicePicker: ChoicePickerState? = null,
     val attachments: List<Attachment> = emptyList(),
-    val diff: DiffState = DiffState(),
     val terminalLines: List<TerminalLine> = emptyList(),
     val filePath: String = "",
     val fileEntries: List<FileEntry> = emptyList(),
     /**
      * 文件列表为空时要显示的说明。
      *
-     * 与 [DiffState.note] 同一个道理：目录**不存在**与目录**真的为空**
+     * 与 [AttachBrowserState.note] 同一个道理：目录**不存在**与目录**真的为空**
      * 在界面上都是"0 项"，但前者是故障、后者是正常。不区分的话，
      * 用户看到一个空的文件面板只会以为应用坏了。
      */
     val fileNote: String = "",
     val openFile: OpenFile? = null,
     /** 文件面板的根：项目 / HOME / 共享存储。 */
-    val fileRoot: FileRoot = FileRoot.PROJECT,
+    val fileRoot: FileRoot = FileRoot.HOME,
     /**
      * 编辑中的正文。**null 表示只读查看**（不是"空文件"）——
      * 这个区别是刻意的：空文件也必须能进入编辑态去写内容。
@@ -433,19 +619,40 @@ data class WorkspaceUiState(
     val fileNameForm: FileNameForm? = null,
     /** 非空即删除确认打开。 */
     val fileDeletePrompt: FileDeletePrompt? = null,
+    /**
+     * 长按选中的那些条目（**以路径为键**）。
+     *
+     * <p>非空即「选择模式」：顶部路径行换成「已选择 N 项」+ 全选/取消全选，
+     * 底部出现操作栏（重命名 / 附加到对话 / 删除），点一行变成"勾/取消勾"而不是打开。
+     * 这套形状来自小米文件管理器的 action mode（它的字符串里有
+     * `action_mode_select_all`=全选、`action_mode_deselect_all`=取消全选）。
+     *
+     * <p>⚠️ 用**路径**而不是整个 [FileEntry]：列表会因为重命名/删除重新加载，
+     * 条目对象每次都是新的，存对象的话"选中"会在刷新后莫名其妙地丢掉。
+     * 代价是路径本身变了（重命名）就选不中了 —— 而重命名后本来也该退出选择模式。
+     *
+     * <p>⚠️ 切根/换目录时必须清空（见 `switchFileRoot` / `navigateTo`）：
+     * 留着的话，在 A 目录选中的东西会在 B 目录里被"删除"，而那是另一批文件。
+     */
+    val fileSelection: Set<String> = emptySet(),
+    val fileSelectionMode: Boolean = false,
+    /** 小米式文件操作暂存区：路径列表 + 是否在粘贴成功后删除源。 */
+    val fileClipboard: List<String> = emptyList(),
+    val fileClipboardMove: Boolean = false,
     /** 共享存储当前是否给过「所有文件访问权限」。界面据此提示怎么开。 */
     val sharedStorageGranted: Boolean = false,
     /**
      * 非空即「附加项目文件」面板打开（输入器 `+` 的第一项）。
      *
-     * 用 [attachHits] 承载搜索结果而不是在 Composable 里现搜：搜目录是 IO，
-     * 放 recomposition 里会每个字符都卡一下。
+     * 面板里的一切（当前目录、这一层的子项、目录内过滤串）都在 [attachBrowser] 里 ——
+     * 它是一台**浏览器**，不是一份搜索结果（为什么，见 [AttachBrowserState]）。
+     *
+     * ⚠️ 列目录是 IO，所以照样不能在 Composable 里现列：`FileBrowser.children` 由
+     * ViewModel 在 IO 线程跑，结果落进 [attachBrowser]。
      */
     val attachPickerOpen: Boolean = false,
-    /** 附加面板的搜索串。 */
-    val attachQuery: String = "",
-    /** 附加面板当前的搜索结果（已由 ViewModel 在 IO 线程算好）。 */
-    val attachHits: List<FileHit> = emptyList(),
+    /** 选择器的浏览位置与这一层的子项。 */
+    val attachBrowser: AttachBrowserState = AttachBrowserState(),
     /**
      * 最后一次操作反馈（「已切换 API 配置」「保存失败：…」）。
      *
@@ -532,6 +739,23 @@ data class WorkspaceUiState(
     val debugPreviousProfileId: String = "",
     /** 非空即设置弹窗打开；所有编辑先落在这里，「保存」才写回上面的字段。 */
     val settingsDraft: SettingsDraft? = null,
+    /**
+     * "把对话流滚到底"的信号：**每次用户发出消息**就 +1。
+     *
+     * ## 为什么需要它
+     *
+     * 对话流是自动吸底的，但用户一往上翻历史就**暂停跟随**（见 `AutoFollowPolicy`），
+     * 而且暂停状态住在 `ChatList` 自己的 `remember` 里 —— 界面外部没有任何入口能把它
+     * 恢复成"跟随"。于是出现这么一种情形：用户往上翻看历史，直接在输入框里发一条，
+     * 气泡与新回复全都落在屏幕**外**，界面上看不出"发出去了"。
+     *
+     * 参考实现（IQ Code `scrollChat()`）的做法就是发消息时**无条件**恢复跟随并滚到底：
+     * 用户此刻的意图已经由"按下发送"表达得很清楚了。
+     *
+     * 用递增的计数而不是布尔：连发两条也要各触发一次；用布尔的话第二次没有"变化"，
+     * 效果不会重放。
+     */
+    val scrollToBottomToken: Long = 0L,
 ) {
     val activeSession: SessionSummary?
         get() = sessions.firstOrNull { it.id == activeSessionId }
@@ -557,8 +781,6 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/web", "联网搜索设置；也可直接输入 /web 搜索词"),
     SlashCommand("/terminal", "打开内置 Termux 终端"),
     SlashCommand("/sandbox", "打开 ZhiCode 沙箱；Agent 可安装、运行和调试虚拟 APK"),
-    SlashCommand("/diff", "打开 Claude Code 风格代码修改 Diff"),
-    SlashCommand("/changes", "打开 Git 变更与 Diff"),
     SlashCommand("/files", "打开项目文件与代码编辑器"),
     SlashCommand("/doctor", "检查 Termux 运行环境"),
     SlashCommand("/repair", "修复中断的 apt/dpkg 状态"),

@@ -3,6 +3,7 @@ package com.zhizhu.zhicode.compose.ui
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.data.Clipboard
 
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.drawBehind
@@ -19,10 +20,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -83,16 +90,45 @@ fun ZhiMarkdown(
     val split = remember(source, streaming) { splitForStreaming(source, streaming) }
     val blocks = remember(split.settled) { parseMarkdown(split.settled) }
 
+    // 前沿淡入的斜坡宽度：按**到达速率**换算，目标是固定时长（见 TailFadeRate）。
+    //
+    // ⚠️ key 是 `source` 而不是 `split.tail`：速率要按**整段正文**的增长来估，
+    // 而 tail 在跨过块边界时会突然归零重算 —— 按 tail 估会在每次换段时把速率
+    // 估成负数（文本变短），于是斜坡在开新段时抖一下。整段正文的长度只增不减，
+    // 估计干净得多；而**要用宽度的地方是 tail**，两者本来就是分开的两件事。
+    //
+    // ⚠️ 这段计算只在文本真的变了时跑（`remember(source)`），所以没有额外帧。
+    val fadeRate = remember { TailFadeRate() }
+    val fadeRamp = remember(source) { fadeRate.widthFor(source.length, System.nanoTime()) }
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        blocks.forEach { block -> MdBlockView(block, bodyFontSize) }
+        // ⚠️ 淡入的落点有两处，缺一不可：
+        //   · 切过（长消息）→ 淡在 `split.tail` 上；
+        //   · 没切（短于 [MinSettledChars]）→ 全部都在 `blocks` 里，
+        //     那就淡在**最后一个块**上，否则短消息一个字都不淡。
+        //   两处互斥（tail 为空时才是"没切"），所以同一时刻只有一个在淡。
+        blocks.forEachIndexed { index, block ->
+            MdBlockView(
+                block = block,
+                fontSize = bodyFontSize,
+                fadeTail = streaming && split.tail.isEmpty() && index == blocks.lastIndex,
+                fadeRamp = fadeRamp,
+            )
+        }
         // 在写尾部按行内渲染（不是纯文本）：模型正在写的那一段里的 `代码`、**粗体**
         // 照常生效，只有块级语法（标题/列表/围栏）要等它跨过块边界。
         if (split.tail.isNotEmpty()) {
             Text(
-                text = rememberInline(split.tail, inlineStyles),
+                text = rememberInlineFading(
+                    text = split.tail,
+                    styles = inlineStyles,
+                    base = scheme.onSurface,
+                    fade = true,
+                    ramp = fadeRamp,
+                ),
                 color = scheme.onSurface,
                 fontSize = bodyFontSize,
                 lineHeight = bodyFontSize * 1.5f,
@@ -128,7 +164,12 @@ private fun splitForStreaming(source: String, streaming: Boolean): MdStreamSplit
 
 /** 递归渲染一个块。引用块内部会有嵌套的块，所以这里必须能自我调用。 */
 @Composable
-private fun MdBlockView(block: MdBlock, fontSize: TextUnit) {
+private fun MdBlockView(
+    block: MdBlock,
+    fontSize: TextUnit,
+    fadeTail: Boolean = false,
+    fadeRamp: Int = TailFadeMinChars,
+) {
     val scheme = MiuixTheme.colorScheme
     val inlineStyles = rememberInlineStyles(fontSize)
 
@@ -148,7 +189,16 @@ private fun MdBlockView(block: MdBlock, fontSize: TextUnit) {
         )
 
         is MdBlock.Paragraph -> Text(
-            text = rememberInline(block.text, inlineStyles),
+            // 段落是在写正文最常见（也是唯一常见）的形状，所以淡入只在这里落点。
+            // 标题/列表/引用/代码块不淡：它们在被写出来的一瞬间本来就是"跳"着出现的
+            // （块级结构变了），给它们加前沿淡入反而看不出差别，只会多付 span 的开销。
+            text = rememberInlineFading(
+                text = block.text,
+                styles = inlineStyles,
+                base = scheme.onSurface,
+                fade = fadeTail,
+                ramp = fadeRamp,
+            ),
             color = scheme.onSurface,
             fontSize = fontSize,
             lineHeight = fontSize * 1.5f,
@@ -207,7 +257,7 @@ private fun BulletRow(block: MdBlock.Bullet, fontSize: TextUnit, styles: InlineS
         if (block.task != null) {
             // 任务项用勾选框一样的方块，而不是圆点：语义不同（一个是"待办"，一个是"列举"）
             Icon(
-                imageVector = if (block.task) ZhiIcons.done else ZhiIcons.pending,
+                painter = if (block.task) ZhiIcons.done else ZhiIcons.pending,
                 contentDescription = if (block.task) "已完成" else "未完成",
                 tint = if (block.task) ZhiColors.green() else scheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(top = 2.dp).size(fontSize.value.dp + 2.dp),
@@ -239,6 +289,17 @@ private fun BulletRow(block: MdBlock.Bullet, fontSize: TextUnit, styles: InlineS
 @Composable
 private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
     val scheme = MiuixTheme.colorScheme
+    val context = LocalContext.current
+    // 复制反馈的**本地**状态：点击后把标签换成「已复制」，约 520ms 后复原
+    // （时长对齐参考实现 `MarkdownRenderer` 的 `postDelayed(..., 520)`）。
+    // 不往 ViewModel 里放：这个状态只影响这一个代码块，而且它随滚动回收，
+    // 放进全局 state 反而会出现"滚回来还是已复制"的残留。
+    var copied by remember(block.body) { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (!copied) return@LaunchedEffect
+        delay(CopyFeedbackMs)
+        copied = false
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.inner,
@@ -249,15 +310,48 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
         ),
     ) {
         Column {
-            // 有语言标记时在最上方用小字标出，便于一眼看出是哪种代码
-            if (block.lang.isNotBlank()) {
-                Text(
-                    text = block.lang,
-                    color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Micro,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(bottom = 4.dp),
-                )
+            // 语言标记与「复制」同处一行：语言靠左（便于一眼看出是哪种代码），
+            // 复制按钮靠右（离拇指最近的位置）。
+            //
+            // 代码块是对话流里最常被整段拿走的东西（命令、补丁、配置），而在这之前
+            // 唯一的复制途径是长按整条消息「复制」—— 那会把整篇回答一起复制走。
+            if (block.lang.isNotBlank() || block.body.isNotBlank()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // ⚠️ 语言为空时显示 `text`，**不能留空**。
+                    //
+                    // 依据是官方实现（反编译 `MarkdownRenderer.codeBlock()`）：
+                    //   `String lowerCase = (str == null || str.trim().isEmpty())
+                    //                        ? "text" : str.trim().toLowerCase(Locale.US);`
+                    //   `textView.setText(lowerCase);`   ← 永远不会是空串
+                    //
+                    // 留空的后果是这一行变成「左边一片空白 + 右边一个复制按钮」。
+                    // 它在结构上仍是表头（高度 24dp 胶囊 + 4dp 下边距），但**看起来就是
+                    // 代码块顶部多出一大块空**——用户就是这么报的：
+                    // 「为什么这个 card 顶部有这么多空」。
+                    // 多数工具输出与不带语言的围栏都走这一支（`bash`/`json` 这类标记是少数），
+                    // 所以这个空行出现在绝大多数代码块上。
+                    //
+                    // 另外，`copy`/`copied` 也是官方那两个字面量（上面 520ms 的复原节奏
+                    // 同样取自那里），语言占位沿用官方的 `text` 而不是自造词。
+                    Text(
+                        text = block.lang.ifBlank { "text" },
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = ZhiTextScale.Micro,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ZhiSmallPill(
+                        label = if (copied) "已复制" else "复制",
+                        highlighted = copied,
+                        onClick = {
+                            val ok = Clipboard.copy(context, "ZhiCode 代码块", block.body)
+                            copied = ok
+                        },
+                    )
+                }
             }
             Text(
                 text = block.body,
@@ -269,6 +363,9 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
         }
     }
 }
+
+/** 「已复制」保留多久（参考实现 `MarkdownRenderer` 用的是 520ms）。 */
+private const val CopyFeedbackMs = 520L
 
 /**
  * 表格。
@@ -382,6 +479,235 @@ private fun rememberInlineStyles(fontSize: TextUnit): InlineStyles {
 @Composable
 private fun rememberInline(text: String, styles: InlineStyles): AnnotatedString =
     remember(text, styles) { inline(text, styles) }
+
+/**
+ * 流式正文的「前沿淡入」：**最末尾 [TailFadeChars] 个字按离末尾的距离给一个透明度斜坡**。
+ *
+ * ## 为什么是"空间斜坡"而不是"定时器逐字揭示"
+ *
+ * 常见的打字机做法是起一个定时器（官方 20ms/字、GetStream 30ms/词），每 tick 把
+ * "可见字数" +1。那条路在 Compose 里有三个代价，本工程都实测过：
+ *
+ *  1. **每秒多 20~50 次重组。** 本轮刚把 `ChatArea` 从 69 次/秒压到 2 次/秒
+ *     （见 ChatArea 的说明），定时器等于把这个量在正文节点上再引回来。
+ *  2. **会追不上。** 揭示速率写死的话，模型出字快于它时就积压；正文越长越明显
+ *     —— 官方自己都得按长度把间隔从 20ms 退化到 32/48ms，正是这个病的症状。
+ *  3. **它是"事后补动画"**：文字其实早就到了，只是被压着不放，等于给用户**加延迟**。
+ *
+ * 空间斜坡把这三条一起解决：透明度是**位置**的函数，不是时间的函数。
+ * 于是：
+ *
+ *  · **零额外帧。** 不需要动画、不需要定时器 —— 斜坡只在文本内容变化时重算一次
+ *    （而文本本来就每个 delta 变一次，这是流式的固有成本，不是这里加的）。
+ *  · **速率自适应，恒不落后。** 一个字符从末尾往前"走"出斜坡所花的时间是
+ *    `斜坡宽度 / 到达速率`：出字快就淡得快，出字慢就淡得慢。永远没有队列。
+ *  · **不加延迟。** 文字到达即显示，只是末尾那几个还浅着、随后变实。
+ *
+ * ## ⚠️⚠️ 斜坡宽度必须按**时间**给，不能按**字数**给（第一版就是这里错了）
+ *
+ * 第一版把宽度写死成 8 个字，结果**用户完全看不到**。原因不是没生效，是物理：
+ *
+ *     可见时长 = 斜坡宽度 ÷ 到达速率
+ *
+ * 8 个字在 30 字/秒下是 265ms（勉强），在 100 字/秒下只有 **80ms**；
+ * 而真实的流式每个 delta 常常一次带进好几个字符 —— 最新那 8 个字往往
+ * **同一帧内就来齐了**，于是斜坡瞬间走完，再叠加一个很浅的下限（0.52），
+ * 就是"什么都看不见"。
+ *
+ * 所以宽度改成 [TailFadeRate] 实测出来的结果：目标时长固定 [TailFadeMillis]，
+ * 宽度 = 到达速率 × 目标时长，只受 [TailFadeMinChars] 下限约束。
+ * 于是**快模型和慢模型看到的是同样长的一段淡入**。
+ *
+ * ⚠️ 这一点仍然是零定时器：速率只用"这次比上次多几个字 / 隔了多少纳秒"估计，
+ * 而那两个量在每次 delta 组合时本来就拿得到（文本变了才会有这一次组合）。
+ * 没有额外的帧、没有额外的状态写入。
+ *
+ * ## ⚠️⚠️ 宽度上限**不能**卡在"一行左右"（第二版就是这里错了）
+ *
+ * 第二版把上限设成 28 个字，用户反馈「输出太快会导致动画不明显」。
+ * 原因还是同一个公式：
+ *
+ *     可见时长 = 斜坡宽度 ÷ 到达速率
+ *
+ * 上限一卡，**超过 `上限 ÷ 目标时长` 字/秒之后时长就又开始变短**：
+ *
+ *     40 字/秒 → 17 字        → 420ms   ✅ 目标内
+ *    100 字/秒 → 28 字（截断） → 280ms   ❌
+ *    273 字/秒 → 28 字（截断） → 103ms   ❌ 几乎看不见
+ *
+ * （273 字/秒不是假想值：本工程的「调试 · 本地模拟」provider 是 22ms/6 字，
+ *   正好就是这个速率 —— 也就是说**调试模式下必然撞到这个上限**。）
+ *
+ * 所以 [TailFadeMaxChars] 取 120：420ms 一直守到 **285 字/秒**，
+ * 覆盖真实模型的全部常见区间与调试 provider。
+ *
+ * 上限仍然存在，只为一件事兜底：极端突发（一次几百字）不该让斜坡宽到几屏。
+ *
+ * ## ⚠️ 它不完美的地方（写在这里免得被当成 bug）
+ *
+ * 流**中途停顿**时（模型在思考）末尾那一截会停在斜坡上、达不到全不透明。
+ * 这是刻意的取舍：换成定时器方案停顿时会淡完，但代价是上面那三条。
+ * 停顿期间被"停住"的那一截最长就是 [TailFadeMaxChars]（约 3 行），
+ * 且下限是 [TailFadeFloor]（不是 0），所以观感是"末尾几行渐变着变浅"，仍然读得清。
+ * 流式一结束就不再有斜坡（`streaming` 翻假 → 不再走这条路），所以**定稿后一律全实**。
+ */
+
+/** 一个字从最浅走到全实的目标时长。想更明显就调大它（斜坡会变宽）。 */
+private const val TailFadeMillis = 420f
+
+/**
+ * 斜坡宽度的下限。
+ *
+ * 不能太小：小到几个字就又回到"看不见"。12 个字在 30 字/秒下 ≈ 400ms，够看见。
+ */
+private const val TailFadeMinChars = 12
+
+/**
+ * 斜坡宽度的上限。
+ *
+ * ⚠️ 这个值**不是**用来"把停顿时的半透明那一截压短"的 —— 那样做会顺带把
+ * 高到达速率下的时长也压短（见类文档里的算式）。它只为一件事兜底：
+ * 极端突发（一次几百字）不该让斜坡宽到几屏。
+ *
+ * 120 字 ≈ 3 行，同时保证 [TailFadeMillis] 一直守到 285 字/秒。
+ */
+private const val TailFadeMaxChars = 120
+
+/**
+ * 两次采样之间的最大间隔（秒）。超过它就不更新速率估计。
+ *
+ * ## 为什么需要这个
+ *
+ * 模型"思考"时会停顿几秒。停顿结束后第一个 delta 的间隔里**大部分是思考时间**，
+ * 拿它算速率会得出一个很低的数（几字/秒），于是斜坡塌到下限、接下来几个 delta
+ * 才慢慢被 EMA 拉回来 —— 观感就是"刚恢复输出那一下，淡入突然变窄又变宽"。
+ *
+ * 那个样本说的其实不是"流式节奏"，而是"模型想了多久"，所以直接不要它。
+ * 0.5s 定得比较宽松：正常流式的 delta 间隔是 20~50ms，差一个量级，
+ * 不会把真正"出字变慢"的情形误判成停顿。
+ *
+ * 早退发生在**已经写回 lastLength / lastAt 之后**，所以下一次采样照常按新时刻算。
+ */
+private const val TailFadeMaxGapSeconds = 0.5f
+
+/**
+ * 斜坡最浅处的透明度。
+ *
+ * 0.30 —— 比第一版的 0.52 深得多（那半档变化本来就看不出来），
+ * 又留得够读：停顿期间最末那个字是 0.30，往前一个字比一个字实。
+ */
+private const val TailFadeFloor = 0.30f
+
+/**
+ * 到达速率的估计器：把"斜坡宽度"从**字数**换算成**时间**。
+ *
+ * ⚠️ 字段全部是**普通字段，不是 snapshot state** —— 这一点是刻意的：
+ * 写 state 会让它自己触发重组，变成"写 → 重组 → 再写"的回路
+ * （本工程在 FrameTrace 里记过这个坑）。这里的写只发生在组合期间，
+ * 不会让任何东西失效。
+ *
+ * ⚠️ 同一份文本重复组合时（`length` 没变）必须**原样返回、不更新估计**：
+ * 否则 dLen = 0 → 速率被 EMA 拉向 0 → 斜坡莫名缩短。
+ */
+private class TailFadeRate {
+    private var lastLength = 0
+    private var lastAtNanos = 0L
+    private var charsPerSecond = 0f
+    private var width = TailFadeMinChars
+
+    fun widthFor(length: Int, nowNanos: Long): Int {
+        if (length == lastLength) return width
+
+        val prevLength = lastLength
+        val prevAt = lastAtNanos
+        lastLength = length
+        lastAtNanos = nowNanos
+
+        // 首帧，或者文本**变短**了（跨过块边界、开了新的一段）：
+        // 沿用上一次的宽度，不重估 —— 换段不该让淡入忽长忽短。
+        if (prevAt == 0L || length < prevLength) return width
+
+        val seconds = (nowNanos - prevAt) / 1_000_000_000.0
+        if (seconds <= 0.0) return width
+        // 间隔太长 = 那段时间里模型在思考，不是在出字：这个样本说的不是流式节奏，
+        // 拿它算会把速率估得很低、让斜坡塌下去（见 TailFadeMaxGapSeconds 的说明）。
+        if (seconds > TailFadeMaxGapSeconds) return width
+
+        val rate = ((length - prevLength) / seconds).toFloat()
+        // EMA 平滑：单次突发的 chunk（比如一次来 40 个字）不该让斜坡瞬间变宽。
+        charsPerSecond =
+            if (charsPerSecond <= 0f) rate else charsPerSecond * 0.6f + rate * 0.4f
+        width = (charsPerSecond * TailFadeMillis / 1000f).toInt()
+            .coerceIn(TailFadeMinChars, TailFadeMaxChars)
+        return width
+    }
+}
+
+/**
+ * [inline] + 可选的前沿淡入。
+ *
+ * [fade] 为假时**完全等于** [rememberInline]（同一个 key 组合、同一个结果），
+ * 所以定稿消息与历史消息一分钱都不多付。
+ */
+@Composable
+private fun rememberInlineFading(
+    text: String,
+    styles: InlineStyles,
+    base: Color,
+    fade: Boolean,
+    ramp: Int,
+): AnnotatedString = remember(text, styles, base, fade, ramp) {
+    val annotated = inline(text, styles)
+    if (fade) fadeTailOf(annotated, base, ramp) else annotated
+}
+
+/**
+ * 给末尾 [ramp] 个字叠一层透明度。
+ *
+ * ⚠️ **跳过已经有自己颜色的字符**（`代码` 的 primary 色、链接色、行内高亮的底色）。
+ * 不跳的话，斜坡的颜色会盖掉它们的语法色 —— 末尾那半行里的代码会**短暂掉色**，
+ * 看起来像闪了一下，比不淡还糟。宁可让那几个字不淡，也不要颜色乱跳。
+ */
+private fun fadeTailOf(source: AnnotatedString, base: Color, ramp: Int): AnnotatedString {
+    val length = source.text.length
+    if (length == 0) return source
+    // 只挑"自带颜色或底色"的 span：其余的（粗体/斜体）只是字形变化，没有颜色可盖。
+    val colored = source.spanStyles.filter {
+        it.item.color != null || it.item.background != null
+    }
+    val builder = AnnotatedString.Builder(source)
+    var touched = false
+    for (index in (length - ramp).coerceAtLeast(0) until length) {
+        if (colored.any { index >= it.start && index < it.end }) continue
+        builder.addStyle(
+            SpanStyle(color = base.copy(alpha = fadeAlpha(index, length, ramp))),
+            index,
+            index + 1,
+        )
+        touched = true
+    }
+    // 整段都被语法色占住时不返回新对象：省一次 AnnotatedString 拷贝。
+    return if (touched) builder.toAnnotatedString() else source
+}
+
+/**
+ * 第 [index] 个字的透明度：离末尾越远越实，超过斜坡宽度 [ramp] 就是全实。
+ *
+ * 线性就够 —— 起点和终点之间的跨度最多 [TailFadeMaxChars] 个字，看不出曲线差别，
+ * 而线性少一次 pow、少一个要调的参数。
+ *
+ * ⚠️ 分母是 `ramp - 1`（不是 `ramp`），这样**末尾那个字正好落在 [TailFadeFloor]**、
+ * 往前第 ramp 个字正好全实。写成除以 `ramp` 的话两端都够不到：
+ * 末尾那个字够不到下限、最前一个也到不了 1（那个 bug 会让注释与代码对不上，
+ * 而且"下限"这个可调参数就失去意义了）。第一版真写出过这个 bug。
+ */
+private fun fadeAlpha(index: Int, length: Int, ramp: Int): Float {
+    if (ramp <= 1) return 1f
+    val fromEnd = length - index // 末尾那个字是 1
+    if (fromEnd >= ramp) return 1f
+    val t = (fromEnd - 1).toFloat() / (ramp - 1)
+    return (TailFadeFloor + (1f - TailFadeFloor) * t).coerceAtMost(1f)
+}
 
 /**
  * [MdSpan] 列表 → [AnnotatedString]。

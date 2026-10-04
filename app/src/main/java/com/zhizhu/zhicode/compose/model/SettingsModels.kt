@@ -269,6 +269,15 @@ data class SearchServicesState(
     val services: List<SearchService> = emptyList(),
     val activeId: String = "",
     val form: SearchServiceDraft? = null,
+    /**
+     * 载荷还没读完。见 `WorkspaceViewModel.openSearchServices`。
+     *
+     * 页面**先**推入（同步、在这一帧内），数据**后**读（IO 线程）。
+     * 这段时间里 `services` 是空的 —— 而「一个服务都没有」本身是个合法状态，
+     * 页面本来就得能画出来。所以 `loading` 的职责只有一个：别让用户把
+     * 「正在读」误读成「配置丢了」。
+     */
+    val loading: Boolean = false,
 )
 
 /**
@@ -301,6 +310,26 @@ enum class ApiProtocol(val label: String) {
     ANTHROPIC("Anthropic"),
 
     /**
+     * Codex 变体（参考图表单里 `OpenAI Responses` 之后那一项）。
+     *
+     * 它**不是** `OPENAI_RESPONSES` 的别名，虽然共用同一个传输实现：
+     * 端点、UA 与四个关联头都不一样（`/responses` 而非 `/v1/responses`、
+     * 自称 `codex_cli_rs/<ver>`、外加 `originator`/`session-id`/`thread-id`/
+     * `x-client-request-id`），请求体也不一样（必须 `store:false`，
+     * 且**不能**发 `max_output_tokens`）。详见 `OpenAIResponsesProvider`。
+     */
+    CODEX_RESPONSES("Codex Responses"),
+
+    /**
+     * ZCode（Z.ai 的套餐网关）。
+     *
+     * 报文形状与 [ANTHROPIC] 相同，差别在连接与请求头：网关地址、授权码、
+     * 以及它要求的**额外身份头**都由用户自己填（见 [ApiProfileDraft.extraHeaders]）。
+     * 我们不内置它的地址，也不内置它的客户端标识 —— 理由见 `ZcodeWire` 的类注释。
+     */
+    ZCODE("ZCode"),
+
+    /**
      * 调试用：不发网络请求，按脚本产出回复（含真实的工具调用）。
      *
      * 只在 debug 构建里出现在协议下拉与「新增配置」的候选里（见
@@ -327,6 +356,8 @@ data class ApiProfile(
     val baseUrl: String,
     val apiKey: String,
     val model: String,
+    /** 额外请求头（JSON 对象文本），空串表示不加。见 [ApiProfileDraft.extraHeaders]。 */
+    val extraHeaders: String = "",
 ) {
     /** 参考图卡片第二行的 `协议名 · 模型名` 形式。 */
     val summary: String get() = "${protocol.label} · ${model.ifBlank { "未设置模型" }}"
@@ -340,6 +371,17 @@ data class ApiProfileDraft(
     val baseUrl: String = "",
     val apiKey: String = "",
     val model: String = "",
+    /**
+     * 额外请求头（JSON 对象文本），空串表示不加。
+     *
+     * 目前只有 [ApiProtocol.ZCODE] 用得上：那个网关要求特定的身份头才受理。
+     * 做成用户填而不是内置，是因为那些头的取值属于那个服务的客户端标识，
+     * 写死在代码里等于替用户宣称一个身份，而且对方一改所有人都一起断。
+     *
+     * 只有 ZCode 协议下才显示这个输入框（见 `ApiConfigOverlay`）——
+     * 对别的协议显示一个"额外请求头"框，只会让人以为那是必需项。
+     */
+    val extraHeaders: String = "",
     /** 编辑已有记录时为真：密钥框留空表示"沿用原密钥"。 */
     val isEditing: Boolean = false,
 ) {
@@ -358,6 +400,7 @@ data class ApiProfileDraft(
             baseUrl = profile.baseUrl,
             apiKey = "",
             model = profile.model,
+            extraHeaders = profile.extraHeaders,
             isEditing = true,
         )
     }
@@ -373,10 +416,27 @@ data class ApiConfigState(
     val profiles: List<ApiProfile>,
     val activeId: String,
     val form: ApiProfileDraft? = null,
+    /** 载荷还没读完，见 `WorkspaceViewModel.openApiConfig`。 */
+    val loading: Boolean = false,
 )
 
 /** 模型目录里的一项。[displayName] 可能与 [id] 相同，界面据此决定要不要重复显示。 */
 data class ModelOption(val id: String, val displayName: String)
+
+/**
+ * 模型选择面板里的一行套餐额度。
+ *
+ * 字段都是**显示用的文本**（`remaining`/`total`/`resetLabel` 已格式化）：这样界面层
+ * 不需要认识单位换算与倒计时分档，那些规则只有一处实现（见 `ZcodeWire`）。
+ */
+data class QuotaRow(
+    val name: String,
+    val remaining: String,
+    val total: String,
+    /** 剩余比例 0..1，用于进度条。 */
+    val fraction: Float,
+    val resetLabel: String,
+)
 
 /** MCP 服务器的连接方式。取值必须与引擎 `McpConfigStore.Server.type` 一致。 */
 enum class McpType(val value: String, val label: String) {
@@ -562,6 +622,8 @@ data class McpConfigState(
     val importText: String? = null,
     /** 导入对话框的错误提示（解析失败时才有）。 */
     val importError: String? = null,
+    /** 载荷还没读完，见 `WorkspaceViewModel.openMcpConfig`。 */
+    val loading: Boolean = false,
 )
 
 /** Skill 的作用域。目录约定必须与引擎 `SkillTool` 一致，见 `SkillStore`。 */
@@ -641,6 +703,8 @@ data class SkillsState(
     val fileDraft: SkillFileDraft? = null,
     /** 「从 URL 导入」表单。 */
     val urlDraft: SkillUrlDraft? = null,
+    /** 载荷还没读完，见 `WorkspaceViewModel.openSkills`。 */
+    val loading: Boolean = false,
 ) {
     /** 按 [query] 过滤后的列表。名称与说明都命中。 */
     val visibleSkills: List<SkillEntry>
@@ -790,6 +854,8 @@ data class RoleCardsState(
     val cards: List<RoleCard>,
     val activeId: String,
     val editor: RoleCardEditor? = null,
+    /** 载荷还没读完，见 `WorkspaceViewModel.openRoleCards`。 */
+    val loading: Boolean = false,
 )
 
 /** 新增 / 编辑角色卡的草稿。[id] 为空表示新增。 */
@@ -825,6 +891,8 @@ data class MemoryFile(
 data class MemoryState(
     val files: List<MemoryFile>,
     val editing: MemoryEditor? = null,
+    /** 载荷还没读完，见 `WorkspaceViewModel.openMemory`。 */
+    val loading: Boolean = false,
 )
 
 /** 正在编辑的记忆文件。新建一个尚不存在的文件时 [exists] 为 false。 */
@@ -858,6 +926,23 @@ data class ModelPickerState(
     val loading: Boolean = true,
     val status: String = "正在从当前 API 获取模型…",
     val models: List<ModelOption> = emptyList(),
+    /**
+     * 套餐额度行（目前只有 ZCode 会填）。空表示不显示额度卡片。
+     *
+     * 每行的数字与倒计时**已经是成品文案**（由协议层算好）：分档规则属于协议知识，
+     * 界面再算一遍迟早会和那边不一致。
+     */
+    val quota: List<QuotaRow> = emptyList(),
+    /**
+     * 额度读取失败的原因（空表示没失败）。
+     *
+     * 与 [quota] 分开而不是共用一个字段：额度成功时它是空的，失败时 [quota] 是空的 ——
+     * 但"没额度"和"读不到额度"是两件事，卡片要说的话也不一样（前者不显示卡片，
+     * 后者要说明为什么读不到并留一个「刷新」）。
+     */
+    val quotaError: String = "",
+    /** [models] 旁边的一句补充，如「（仅套餐可用模型）」。 */
+    val modelsNote: String = "",
     /**
      * 已配置的 API 记录，用于面板里的快速切换 tab 栏。
      *
