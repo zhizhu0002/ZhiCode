@@ -127,18 +127,11 @@ public class FileOpsTest {
         assertEquals("子目录必须保持为空", 0, trap.list().length);
     }
 
-    /** 建议名要避开冲突，且保留扩展名。 */
-    @Test
-    public void suggestNameAvoidsCollisions() throws Exception {
-        File dir = tmp.newFolder("w");
-        assertEquals("a.txt", FileOps.suggestName(dir, "a.txt"));
-        FileOps.createFile(dir, "a.txt");
-        assertEquals("a (2).txt", FileOps.suggestName(dir, "a.txt"));
-        FileOps.createFile(dir, "a (2).txt");
-        assertEquals("a (3).txt", FileOps.suggestName(dir, "a.txt"));
-        // 隐藏文件整体当名字，不能拆成空名字 + 扩展名
-        assertEquals(".bashrc", FileOps.suggestName(dir, ".bashrc"));
-    }
+    /*
+     * 这里原本有一条 `suggestNameAvoidsCollisions`，随 `FileOps.suggestName` 一起删了：
+     * 那个函数唯一的调用者是「新建」表单，而它现在**不预填名字**（见 FileOps 里的注释）。
+     * 留着一条给死代码用的用例，只会让"这个能力还在被用"看起来成立。
+     */
 
     // ---- 重命名 ---------------------------------------------------------
 

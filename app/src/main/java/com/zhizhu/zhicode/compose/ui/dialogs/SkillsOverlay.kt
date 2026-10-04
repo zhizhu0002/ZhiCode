@@ -258,7 +258,7 @@ fun SkillsOverlay(
                         },
                         onImport = {
                             showAddSheet = false
-                            pickSkillFile.launch(arrayOf("text/*", "application/octet-stream", "application/zip"))
+                            pickSkillFile.launch(SkillImportMimeTypes)
                         },
                         onUrl = {
                             showAddSheet = false
@@ -1049,6 +1049,22 @@ private fun SkillEditDialog(
         }
     }
 }
+
+/**
+ * 导入技能那个选择器接受的 MIME 类型。
+ *
+ * ⚠️ 「文本」那一项是**拼**出来的，不能改回字面量。字面量里含有
+ * 「斜杠紧跟星号」这个序列，而 `app/tests/` 下每个测试都自带一份按正则删注释的
+ * `stripComments` —— 正则不认识字符串字面量，会把那个序列当成块注释的开头，
+ * **把后面一大段源码整块删掉**。实测过（`ChatArea.kt` 里同一处写法让
+ * 397 行以后的内容在测试眼里全部消失）。这里一直没暴露，只是因为被删掉的那段
+ * 恰好没有断言要检的 token。
+ */
+private val SkillImportMimeTypes = arrayOf(
+    listOf("text", "*").joinToString("/"),
+    "application/octet-stream",
+    "application/zip",
+)
 
 // ------------------------------------------------------------------ 新建文件（对话框）
 

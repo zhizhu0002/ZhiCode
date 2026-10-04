@@ -97,6 +97,7 @@ import com.zhizhu.zhicode.compose.model.SearchFieldName
 import com.zhizhu.zhicode.compose.model.SearchService
 import com.zhizhu.zhicode.compose.model.SearchServiceDraft
 import com.zhizhu.zhicode.compose.model.SearchServicesState
+import com.zhizhu.zhicode.compose.model.FileFormat
 import com.zhizhu.zhicode.compose.model.SettingsDraft
 import com.zhizhu.zhicode.compose.model.SlashCommand
 import com.zhizhu.zhicode.compose.model.ThemeMode
@@ -107,7 +108,6 @@ import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
-import com.zhizhu.zhicode.compose.ui.zhiFormatSize
 import com.termux.app.zhicode.core.FileOps
 import com.termux.app.zhicode.core.PlanApprovalGate
 import com.termux.app.zhicode.core.StorageLinks
@@ -3810,36 +3810,127 @@ class WorkspaceViewModel(
     fun attachProjectFile(path: String) {
         viewModelScope.launch {
             val name = File(path).name
-            val projectRoot = _state.value.projectPath.trimEnd('/')
-            val relative =
-                if (projectRoot.isNotEmpty() && path.startsWith("$projectRoot/")) {
-                    path.removePrefix("$projectRoot/")
-                } else {
-                    path
-                }
-            val size = withContext(Dispatchers.IO) { runCatching { File(path).length() }.getOrDefault(0L) }
-            val body = withContext(Dispatchers.IO) { FileBrowser.readTextForAttachment(path) }
-            if (body == null) {
+            if (!attachPath(path, name)) {
                 _state.update { it.copy(message = "附加失败：$name 不是文本文件或读不了", messageIsError = true) }
+            }
+        }
+    }
+
+    /**
+     * 真正把一条文本附件放进状态。返回 false 表示这个文件不该/不能附加。
+     *
+     * <p>抽出来是因为现在有**三个**入口：附件面板点一行、选择模式批量附加、
+     * 系统文件管理器（SAF）挑文件。三处各写一遍的话，"截断到 256 KB、
+     * 二进制要拒绝、同一路径去重"这几条迟早只有一处生效。
+     *
+     * <p>[label] 单独传而不是从路径推：SAF 那条路上的路径是个 content URI，
+     * 它的末段是文档 id（一串数字），显示给用户毫无意义 —— 那种情况下要传
+     * 显示名。文件系统那条路上两者相同。
+     */
+    private suspend fun attachPath(path: String, label: String, detail: String? = null): Boolean {
+        val body = withContext(Dispatchers.IO) { FileBrowser.readTextForAttachment(path) } ?: return false
+        val size = withContext(Dispatchers.IO) { runCatching { File(path).length() }.getOrDefault(0L) }
+        // 见 attachProjectFile 的 KDoc：项目根之下的给相对路径，否则给绝对路径。
+        // SAF 那条路没有文件系统路径可算，由调用方直接把 detail 给进来。
+        val key = detail ?: run {
+            val projectRoot = _state.value.projectPath.trimEnd('/')
+            if (projectRoot.isNotEmpty() && path.startsWith("$projectRoot/")) path.removePrefix("$projectRoot/") else path
+        }
+        _state.update { s ->
+            // 同一路径只留一条（用 key 去重，它在项目内唯一）：
+            // 连着点两次应该还是那一份，而不是叠两份进提示词。
+            val kept = s.attachments.filterNot { it.detail == key }
+            s.copy(
+                attachments = kept + Attachment(
+                    id = nextId("file"),
+                    label = label,
+                    detail = key,
+                    isImage = false,
+                    textBody = body,
+                ),
+                message = "已附加：$key（${FileFormat.size(size)}）",
+                messageIsError = false,
+            )
+        }
+        return true
+    }
+
+    /**
+     * 系统文件管理器（SAF）挑来的文件直接附加。
+     *
+     * <h3>为什么不复制进项目目录</h3>
+     *
+     * 附件在引擎那边**本来就是内联文本**（见 [Attachment.textBody] 与
+     * `buildPromptWithTextAttachments`）：发送时内容被包进 `<attached_context>`，
+     * 不是把路径交给模型去读。所以"把文件复制到项目里"这一步对功能没有任何贡献，
+     * 只会往用户的工程里丢一份副本（而用户挑的多半是项目外的文档）。
+     *
+     * 于是**不需要任何存储权限**：SAF 给的是一次性的读授权，我们当场读、
+     * 读完就进内存。这也是为什么这条入口能work —— 直接去扫 `/sdcard` 反而要
+     * 「所有文件访问权限」。
+     *
+     * <p>⚠️ 不取 `takePersistableUriPermission`：授权只为"立刻读一次"服务，
+     * 读完内容就进了内存，不需要跨进程重启保留（与 SkillsOverlay 导入文件同一判断）。
+     */
+    fun attachDocument(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val context = getApplication<android.app.Application>()
+            val label = withContext(Dispatchers.IO) { documentDisplayName(context, uri) } ?: "文件"
+            // 先拿到**字节**（而不是直接解成字符串）：长度要报给用户，
+            // 而 `String.toByteArray()` 再算一遍是重新编码一次 —— 对 UTF-8 通常相等，
+            // 但没必要绕这一圈，而且非 UTF-8 的输入会让数字对不上。
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        // 与 FileBrowser 同一套上限：256 KB 截断 + NUL 判定二进制。
+                        // 各写一份的话，"附加一个 500 MB 的视频"迟早会把内存吃光。
+                        readBounded(input, DocumentAttachLimit)
+                    }
+                }.getOrNull()
+            }
+            if (bytes == null || (bytes.isNotEmpty() && bytes.any { it == 0.toByte() })) {
+                _state.update { it.copy(message = "附加失败：$label 不是文本文件或读不了", messageIsError = true) }
                 return@launch
             }
-            val id = nextId("file")
+            val body = String(bytes, Charsets.UTF_8)
             _state.update { s ->
-                // 同一路径只留一条（用相对路径去重，它在项目内唯一）：
-                // 连着点两次应该还是那一份，而不是叠两份进提示词。
-                val kept = s.attachments.filterNot { it.detail == relative }
+                val kept = s.attachments.filterNot { it.detail == uri.toString() }
                 s.copy(
                     attachments = kept + Attachment(
-                        id = id,
-                        label = name,
-                        detail = relative,
+                        id = nextId("doc"),
+                        label = label,
+                        detail = uri.toString(),
                         isImage = false,
                         textBody = body,
                     ),
-                    message = "已附加：$relative（${zhiFormatSize(size)}）",
+                    message = "已附加：$label（${FileFormat.size(bytes.size.toLong())}）",
+                    messageIsError = false,
                 )
             }
         }
+    }
+
+    /** SAF 文档的显示名。取不到就返回 null，由调用方给个兜底标签。 */
+    private fun documentDisplayName(context: android.content.Context, uri: android.net.Uri): String? =
+        runCatching {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+            }
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    /** 读满上限就停（与 `FileBrowser` 的 256 KB 同一口径）。 */
+    private fun readBounded(input: java.io.InputStream, limit: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream(minOf(limit, 64 * 1024))
+        val buffer = ByteArray(64 * 1024)
+        var remaining = limit
+        while (remaining > 0) {
+            val read = input.read(buffer, 0, minOf(buffer.size, remaining))
+            if (read <= 0) break
+            out.write(buffer, 0, read)
+            remaining -= read
+        }
+        return out.toByteArray()
     }
 
     /**
@@ -5192,7 +5283,11 @@ class WorkspaceViewModel(
 
     fun navigateTo(path: String) {
         // 列目录要读盘，放 IO 线程：大目录（例如 node_modules）在主线程列会卡住界面。
-        _state.update { it.copy(filePath = path, openFile = null) }
+        //
+        // ⚠️ 同时清掉选择：`fileSelection` 存的是**路径**，跨目录之后那些路径
+        // 指向的是另一个目录里的东西。留着的话，在 A 目录选中的文件会在 B 目录里
+        // 被"删除/附加" —— 而那是另外一批文件。
+        _state.update { it.copy(filePath = path, openFile = null, fileSelection = emptySet()) }
         viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
     }
 
@@ -5245,6 +5340,8 @@ class WorkspaceViewModel(
                 fileDraft = null,
                 fileNameForm = null,
                 fileDeletePrompt = null,
+                // 同 navigateTo：跨根之后旧路径完全没有意义。
+                fileSelection = emptySet(),
                 // ⚠️ 必须清空：不清的话，换根那次淡变的**进场**那一屏画的还是上一个根的文件
                 // （列表要等 reloadFiles 从 IO 回来才换），于是动画看起来像"闪了一下旧内容"。
                 // 清掉之后进场是干净的，本地列目录是毫秒级，用户看不到中间态。
@@ -5318,18 +5415,20 @@ class WorkspaceViewModel(
 
     // ---------- 文件：新建 / 重命名 / 删除 ----------
 
-    /** 打开「新建文件」表单。[directory] 为真时建目录。 */
-    fun newFileForm(directory: Boolean) {
-        val path = _state.value.filePath
-        val base = if (directory) "新建文件夹" else "新建文件.txt"
-        _state.update {
-            it.copy(
-                fileNameForm = FileNameForm(
-                    title = if (directory) "新建文件夹" else "新建文件",
-                    draft = FileOps.suggestName(File(path), base),
-                ),
-            )
-        }
+    /**
+     * 打开「新建」表单。
+     *
+     * <p>**没有 `directory` 参数**：建文件还是建文件夹是弹窗上两个按钮的选择，
+     * 只有点下去那一刻才知道。原先这里按扩展名猜（`name.contains('.')`）——
+     * 那是"两个入口各建一种"时代的产物，而它会把 `Makefile`、`LICENSE`、
+     * `.gitignore` 这类**没有扩展名的文件**建成目录，用户点完「文件」得到一个文件夹。
+     *
+     * <p>名字框**留空**（占位符提示"名称"）。原先预填 `新建文件.txt` / `新建文件夹`，
+     * 现在两种可能并存，预填哪一个都会让另一个按钮建出用户没想要的名字
+     * （点「文件夹」得到一个叫 `新建文件.txt` 的文件夹）。
+     */
+    fun newFileForm() {
+        _state.update { it.copy(fileNameForm = FileNameForm(title = "新建", draft = "")) }
     }
 
     /** 打开「重命名」表单。 */
@@ -5340,7 +5439,9 @@ class WorkspaceViewModel(
     }
 
     fun updateFileNameDraft(text: String) = _state.update { s ->
-        s.copy(fileNameForm = s.fileNameForm?.copy(draft = text))
+        // 改名字就把上一次的失败原因清掉：不清的话"已经存在"会一直挂在那里，
+        // 用户明明已经换成另一个名字了，看到的还是上一个错。
+        s.copy(fileNameForm = s.fileNameForm?.copy(draft = text, failure = null))
     }
 
     fun cancelFileNameForm() = _state.update { it.copy(fileNameForm = null) }
@@ -5348,26 +5449,34 @@ class WorkspaceViewModel(
     /**
      * 提交「新建 / 重命名」。
      *
-     * 新建之后**立刻打开它**（文件）或**走进去**（目录）—— 「新建了个文件然后还要自己找出来」
+     * <p>[directory] 来自弹窗上被点的那一个按钮（重命名时无意义，走 target 那一支）。
+     *
+     * <p>新建之后**立刻打开它**（文件）或**走进去**（目录）—— 「新建了个文件然后还要自己找出来」
      * 是一步没必要的操作。重命名则刷新列表即可（当前内容还开着，路径没变）。
+     *
+     * <p>失败**回填进表单**（`failure`）而不是写 `message`：`MessageBar` 是 `ChatArea`
+     * 的孩子，在文件页上提交失败时界面上什么都看不见（弹窗还会照常关掉，
+     * 看起来像"建成功了但列表里没有"）。
      */
-    fun submitFileNameForm() {
+    fun submitFileNameForm(directory: Boolean = false) {
         val form = _state.value.fileNameForm ?: return
         val dir = File(_state.value.filePath)
         viewModelScope.launch(Dispatchers.IO) {
             val name = form.draft
             val error = if (form.target != null) {
                 FileOps.rename(File(form.target.path), name)
+            } else if (directory) {
+                FileOps.createDirectory(dir, name)
             } else {
-                // 用扩展名猜是文件还是目录：表单里带 `.` 的当文件建。
-                if (name.contains('.')) FileOps.createFile(dir, name)
-                else FileOps.createDirectory(dir, name)
+                FileOps.createFile(dir, name)
             }
             if (error != null) {
-                _state.update { it.copy(message = error) }
+                _state.update { s ->
+                    s.copy(fileNameForm = s.fileNameForm?.copy(failure = error))
+                }
                 return@launch
             }
-            _state.update { it.copy(fileNameForm = null) }
+            _state.update { it.copy(fileNameForm = null, message = if (form.target != null) "已重命名为 $name" else "已新建 $name") }
             val created = File(dir, name)
             if (form.target == null && created.isDirectory) {
                 navigateTo(created.absolutePath)
@@ -5377,15 +5486,21 @@ class WorkspaceViewModel(
                     val opened = FileBrowser.read(created.absolutePath)
                     _state.update { it.copy(openFile = opened) }
                 }
-                _state.update { it.copy(message = if (form.target != null) "已重命名为 $name" else "已新建 $name") }
             }
         }
     }
 
-    /** 打开删除确认（带"会一起消失多少条"）。 */
+    /** 打开单条删除确认（带"会一起消失多少条"）。 */
     fun requestDelete(entry: FileEntry) {
-        _state.update {
-            it.copy(fileDeletePrompt = FileDeletePrompt(entry = entry, count = FileOps.countForDelete(File(entry.path))))
+        openDeletePrompt(listOf(entry))
+    }
+
+    private fun openDeletePrompt(entries: List<FileEntry>) {
+        if (entries.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            // 数条数要递归读盘（`countForDelete`），放 IO 线程。
+            val count = entries.sumOf { FileOps.countForDelete(File(it.path)) }
+            _state.update { it.copy(fileDeletePrompt = FileDeletePrompt(entries = entries, count = count)) }
         }
     }
 
@@ -5393,20 +5508,28 @@ class WorkspaceViewModel(
 
     fun confirmDelete() {
         val prompt = _state.value.fileDeletePrompt ?: return
+        val targets = prompt.entries
         viewModelScope.launch(Dispatchers.IO) {
-            val error = FileOps.delete(File(prompt.entry.path))
-            if (error != null) {
-                _state.update { it.copy(message = error, fileDeletePrompt = null) }
+            var failed: String? = null
+            targets.forEach { entry ->
+                val error = FileOps.delete(File(entry.path))
+                if (error != null && failed == null) failed = error
+            }
+            if (failed != null) {
+                _state.update { it.copy(fileDeletePrompt = null, message = failed, messageIsError = true) }
                 return@launch
             }
+            val removed = targets.map { it.path }.toSet()
             _state.update { s ->
                 s.copy(
                     fileDeletePrompt = null,
                     // 删掉的正是当前打开的文件时要把它关掉，否则面板会一直显示
                     // 一个已经不存在的文件的正文 —— 再点保存就会把它**建回来**。
-                    openFile = if (s.openFile?.path == prompt.entry.path) null else s.openFile,
-                    fileDraft = if (s.openFile?.path == prompt.entry.path) null else s.fileDraft,
-                    message = "已删除 ${prompt.entry.name}",
+                    openFile = if (s.openFile?.path in removed) null else s.openFile,
+                    fileDraft = if (s.openFile?.path in removed) null else s.fileDraft,
+                    // 选中的东西被删掉之后选择模式自然结束（空集合＝不在选择模式）。
+                    fileSelection = s.fileSelection - removed,
+                    message = if (targets.size == 1) "已删除 ${targets[0].name}" else "已删除 ${targets.size} 项",
                 )
             }
             reloadFiles()
@@ -5414,6 +5537,139 @@ class WorkspaceViewModel(
     }
 
     fun closeFile() = _state.update { it.copy(openFile = null, fileDraft = null) }
+
+    // ---------- 文件：选择模式（长按多选） ----------
+
+    /**
+     * 长按一行：**进入选择模式并选中它**。
+     *
+     * <p>已经在选择模式里时长按＝切换这一条（与小米一致：选择模式下长按和点击
+     * 都是勾/取消勾，不会突然又"进入一次"）。
+     */
+    fun longPressFileEntry(entry: FileEntry) {
+        _state.update { s ->
+            val selection = if (s.fileSelection.isEmpty()) setOf(entry.path) else s.fileSelection
+            s.copy(fileSelection = if (selection.contains(entry.path)) selection - entry.path else selection + entry.path)
+        }
+    }
+
+    /**
+     * 点一行。
+     *
+     * <p>选择模式下是"勾/取消勾"，而不是打开 —— 这一条与长按共用同一份切换逻辑，
+     * 分成两套的话迟早出现"长按进去了、一点又跳出去"。
+     */
+    fun toggleFileSelection(entry: FileEntry) {
+        _state.update { s ->
+            s.copy(
+                fileSelection = if (s.fileSelection.contains(entry.path)) s.fileSelection - entry.path
+                else s.fileSelection + entry.path,
+            )
+        }
+    }
+
+    /** 选择模式是否开着。 */
+    private fun selectionOn(): Boolean = _state.value.fileSelection.isNotEmpty()
+
+    fun clearFileSelection() = _state.update { it.copy(fileSelection = emptySet()) }
+
+    /**
+     * 「全选」/「取消全选」。
+     *
+     * <p>判据是"当前这一层的**全部**条目是否都选中了"，而不是另存一个布尔：
+     * 另存的话，用户全选之后又手动取消一条，按钮还写着「取消全选」，
+     * 点下去却什么都不会变（或者更糟 —— 变成"选全部"）。
+     */
+    fun toggleSelectAllFiles() {
+        val all = _state.value.fileEntries.map { it.path }.toSet()
+        _state.update { s ->
+            val allSelected = all.isNotEmpty() && s.fileSelection.containsAll(all)
+            s.copy(fileSelection = if (allSelected) emptySet() else all)
+        }
+    }
+
+    /** 选择模式下选中的那些条目（按当前列表里的条目还原）。 */
+    private fun selectedEntries(): List<FileEntry> {
+        val selection = _state.value.fileSelection
+        return _state.value.fileEntries.filter { it.path in selection }
+    }
+
+    /** 重命名选中的那一条（只在**恰好选中一条**时可用）。 */
+    fun renameSelectedEntry() {
+        val entry = selectedEntries().singleOrNull() ?: return
+        clearFileSelection()
+        renameForm(entry)
+    }
+
+    /** 删除选中的那些（走同一个确认弹窗，代价按条累加）。 */
+    fun deleteSelectedEntries() {
+        val entries = selectedEntries()
+        if (entries.isEmpty()) return
+        openDeletePrompt(entries)
+    }
+
+    /**
+     * 把选中的文件附加到下一条消息。
+     *
+     * <p>这是选择模式里最有用的一个动作：一次挑好几个文件丢进输入器，
+     * 比在附件面板里一个一个点快得多（那个面板一次只能附加一个）。
+     *
+     * <p>读文本可能有失败（二进制、太大），失败的**逐条说清**、成功的照样进去，
+     * 而不是整批失败 —— 用户挑了五个文件，其中一个是图片，不该整批白干。
+     */
+    fun attachSelectedEntries() {
+        val entries = selectedEntries().filterNot { it.directory }
+        if (entries.isEmpty()) return
+        clearFileSelection()
+        viewModelScope.launch(Dispatchers.IO) {
+            var attached = 0
+            val refused = mutableListOf<String>()
+            entries.forEach { entry ->
+                if (attachPath(entry.path, entry.name)) attached++ else refused += entry.name
+            }
+            // 附加完切到对话页：附件是给「下一条消息」的，留在文件页看不到它们，
+            // 用户会以为没生效。
+            _state.update {
+                it.copy(
+                    message = if (refused.isEmpty()) "已附加 $attached 个文件"
+                    else "已附加 $attached 个，${refused.size} 个读不了（${refused.joinToString("、")}）",
+                    messageIsError = refused.isNotEmpty(),
+                    tab = if (attached > 0) WorkspaceTab.CHAT else it.tab,
+                )
+            }
+        }
+    }
+
+    /** 进入选择模式时用：共享存储没授权时给一个真能点的入口。 */
+    fun openSharedStorageSettings() {
+        val context = getApplication<android.app.Application>()
+        val pkg = context.packageName
+        val launched = runCatching {
+            val intent = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    android.net.Uri.parse("package:$pkg"),
+                )
+            } else {
+                // API 30 以下没有「所有文件访问权限」这一页，退到应用详情页。
+                android.content.Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.parse("package:$pkg"),
+                )
+            }
+            context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+        launched.onFailure { error ->
+            // ViewModel 手里只有 Application 上下文，必须带 NEW_TASK（见 openSandbox）。
+            // 有些 ROM 把这两个页面也裁掉了 —— 失败就如实说，不静默吞掉。
+            _state.update {
+                it.copy(
+                    message = "打不开系统设置页：${error.javaClass.simpleName}。请手动到「设置 → 应用 → ZhiCode → 权限 → 文件和媒体 → 允许管理所有文件」",
+                    messageIsError = true,
+                )
+            }
+        }
+    }
 
     // ---------- 操作反馈 ----------
     //
@@ -5448,6 +5704,16 @@ class WorkspaceViewModel(
         private fun trimZero(value: Float): String =
             if (value >= 100f || value % 1f == 0f) String.format(Locale.US, "%.0f", value)
             else String.format(Locale.US, "%.1f", value)
+
+        /**
+         * SAF 文档附加的字节上限。
+         *
+         * 与 `FileBrowser.MAX_PREVIEW_BYTES` **同一个数**：附件在引擎那边是内联文本，
+         * 它进的是模型上下文，256 KB 已经很大了。这里写死常量而不是把
+         * `FileBrowser` 的那个 private 常量公开，是因为两者服务的不是同一个上限来源
+         * —— 但 256 KB 这个数必须一致，改一个另一个也要改（guard 里钉着）。
+         */
+        private const val DocumentAttachLimit = 256 * 1024
 
         /** 思考预览保留的尾部字符数（原版 `liveThinking` 上限 1200）。 */
         private const val THINKING_LIMIT = 1200

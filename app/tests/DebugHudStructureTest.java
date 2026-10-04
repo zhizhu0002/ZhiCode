@@ -2084,7 +2084,7 @@ public final class DebugHudStructureTest {
                         + "项目 / HOME / 共享存储三根与文件面板同一套语义");
         requireContains(attach, "FileListRow(",
                 ATTACH_FILE_OVERLAY + " 必须用共用的行 FileListRow："
-                        + "两个界面的同一行必须显示同一串字符（含尺寸文案 formatFileSize）");
+                        + "两个界面的同一行必须显示同一串字符（含大小/时间文案 FileFormat）");
         requireContains(fileChrome, "internal fun FileListRow(",
                 FILE_CHROME + " 必须提供共用的 FileListRow");
         require(!filesPane2.contains("private fun FileBreadcrumbBar(")
@@ -2373,9 +2373,9 @@ public final class DebugHudStructureTest {
                         + "不给的话路径一深就把行尾动作挤出屏幕");
         requireContains(pathBar, "trailing?.invoke(this)",
                 FILE_CHROME + " 的 FilePathBar 必须在行尾调用 trailing()："
-                        + "文件面板放三个动作、附加面板放「上一级」，槽位不接等于动作消失");
+                        + "文件面板放 `+` 与「上一级」、附加面板只放「上一级」，槽位不接等于动作消失");
         requireContains(filesPane2, "FilePathBar(",
-                FILES_PANE + " 的列表态必须用共用的 FilePathBar（面包屑 + 三个动作合成一行）");
+                FILES_PANE + " 的列表态必须用共用的 FilePathBar（面包屑 + 行尾动作 + 小字统计）");
         require(!filesPane2.contains("private fun FilePathBar("),
                 FILES_PANE + " 不得另留一份私有 FilePathBar：共用件在 FileChrome.kt");
 

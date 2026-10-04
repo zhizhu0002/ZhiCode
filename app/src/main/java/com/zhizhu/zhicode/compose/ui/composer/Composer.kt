@@ -84,10 +84,19 @@ fun Composer(
     onStop: () -> Unit,
     onPickSlash: (SlashCommand) -> Unit,
     onRemoveAttachment: (Attachment) -> Unit,
-    // ---- `+` 菜单的三个动作（原来只有一个 onAttach 直接弹相册）----
+    // ---- `+` 菜单的动作 ----
     onAttachFile: () -> Unit,
     onOpenFilesTab: () -> Unit,
     onPickImage: () -> Unit,
+    /**
+     * 走**系统文件管理器**（SAF）挑文件附加，可多选。
+     *
+     * <p>与 [onAttachFile] 的分工：那个是**项目目录内**的浏览器（快，但只覆盖项目里
+     * 的东西），这个是系统范围（能挑到下载目录、别的 App 的文档），代价是每次都要
+     * 经过系统那个选择器。两条路都留着 —— 只留系统那条的话"附加一个项目里的文件"
+     * 要翻半个手机去找。
+     */
+    onPickSystemFiles: () -> Unit,
     /**
      * 取某个待发附件的图片（输入器里的缩略图）。
      *
@@ -293,6 +302,11 @@ fun Composer(
                 val attachFileIcon = ZhiIcons.file
                 val filesIcon = ZhiIcons.files
                 val photoIcon = ZhiIcons.image
+                // 「从系统文件管理器选」用**打开的文件夹**（`directory`）：
+                // 它是"去别处挑一份文件"，与上面那条 `file`（一个文档，指项目内的）
+                // 和 `files`（合口的文件夹，指我们自己的文件面板）都是不同的字形，
+                // 三者在同一张菜单里并排出现，必须一眼分得开。
+                val systemFileIcon = ZhiIcons.directory
                 ZhiIconDropdownMenu(
                     /*
                      * ⚠️ 这份 `listOf` 必须 `remember`。
@@ -308,13 +322,22 @@ fun Composer(
                      * lambda，Compose 的 lambda 记忆化让它们跨重组保持同一实例，
                      * 所以这个 `remember` 是真的会命中。
                      */
-                    items = remember(attachFileIcon, filesIcon, photoIcon, onAttachFile, onOpenFilesTab, onPickImage) {
+                    items = remember(
+                        attachFileIcon, filesIcon, photoIcon, systemFileIcon,
+                        onAttachFile, onOpenFilesTab, onPickImage, onPickSystemFiles,
+                    ) {
                         listOf(
                             ZhiMenuItem(
                                 text = "附加项目文件",
-                                summary = "搜索并附加",
+                                summary = "浏览项目目录",
                                 icon = attachFileIcon,
                                 onClick = onAttachFile,
+                            ),
+                            ZhiMenuItem(
+                                text = "文件管理器",
+                                summary = "从系统里挑，可多选",
+                                icon = systemFileIcon,
+                                onClick = onPickSystemFiles,
                             ),
                             ZhiMenuItem(
                                 text = "打开文件工作区",

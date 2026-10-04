@@ -1089,6 +1089,7 @@ private fun RadiusAndIconSection() {
         "more" to ZhiIcons.more,
         "moreVert" to ZhiIcons.moreVert,
         "search" to ZhiIcons.search,
+        "add" to ZhiIcons.add,
         "done" to ZhiIcons.done,
         "failed" to ZhiIcons.failed,
         "pending" to ZhiIcons.pending,
@@ -2496,6 +2497,9 @@ private fun ComposerSection(state: WorkspaceUiState, viewModel: WorkspaceViewMod
             onAttachFile = viewModel::openAttachPicker,
             onOpenFilesTab = {},
             onPickImage = {},
+            // 调试页只是组件预览：起系统的 SAF 选择器会把这个页面顶掉，
+            // 而预览的目的正是"看着它长什么样"。
+            onPickSystemFiles = {},
             // 调试页的输入器只是组件预览，附件缩略图没有待发数据可画；
             // 这里返回 null 会让芯片回退成「图标 + 文件名」形态（不影响真实输入器）。
             onAttachmentImage = { null },

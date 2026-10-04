@@ -1055,20 +1055,16 @@ fun ZhiAnchoredActionMenu(
 }
 
 /**
- * 人类可读的字节数。
+ * 人类可读的字节数 —— **已经搬走了**。
  *
- * 用 1000 进制而不是 1024：这是文件管理器的通行做法（也才与「2.4 MB」这种
- * 系统显示的读数对得上）。
+ * <p>它原先叫 `zhiFormatSize` 住在这里，而 `FileChrome.kt` 里还另有一份
+ * 字节完全相同的 `formatFileSize`（注释写着"三个使用者，没必要各写一份"，
+ * 自己却是重复的那一份）。现在收成唯一一份：[com.zhizhu.zhicode.compose.model.FileFormat.size]。
  *
- * 放在这里是因为它有三处使用者（文件面板、附加面板、附加后的提示），
- * 之前是 `FilesPane` 里的私有函数，没必要各写一份。
+ * <p>搬去 `model/` 而不是留在这里，是因为 ViewModel 也要用它
+ * （`"已附加：x（1.2 KB）"`）—— 反向 import `ui` 是把界面层当工具库。
+ * 顺带它就能被纯 JVM 单测覆盖（`FileFormatTest`，挂在 test-jvm-fast 快路径里）。
  */
-internal fun zhiFormatSize(bytes: Long): String = when {
-    bytes <= 0L -> "0 B"
-    bytes < 1_000L -> "$bytes B"
-    bytes < 1_000_000L -> String.format(java.util.Locale.US, "%.1f KB", bytes / 1000f)
-    else -> String.format(java.util.Locale.US, "%.1f MB", bytes / 1_000_000f)
-}
 
 /** 横向分隔线。转发到 Miuix [HorizontalDivider]（默认 0.75dp 的 HyperOS 细分线）。 */
 @Composable

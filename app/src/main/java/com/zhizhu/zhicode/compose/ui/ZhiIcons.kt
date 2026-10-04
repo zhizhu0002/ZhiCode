@@ -207,6 +207,25 @@ object ZhiIcons {
 
     val search: Painter @Composable get() = vector(ZhiMaterialIcons.Search)
 
+    /**
+     * 「新建」：裸 `+`。
+     *
+     * 与 [attach] **共用同一个字形**（`Add`），但语义名分开。
+     *
+     * 为什么不去另找一个字形：`+` 就是"新建"这件事最短的表达，而小米文件管理器的
+     * 那一行也只有一个 `+`（`res/layout/phone_file_explorer_list.xml` 的
+     * `@id/action_create`）。换一个"文档 + 加号"之类的字形反而会让这一行更挤。
+     *
+     * 为什么名字要分开：`IconSetTest` 的两两撞脸检查是**按语义名**比字形的，
+     * 而这里两者本来就该是同一个字形。真按字形判重的话，
+     * 就会为了"通过检查"把它换成某个更差的形状 —— 那条检查的注释里
+     * （`terminal` 与 `tool(COMMAND)`）已经写过这层意思：
+     * **同一个字形可以用在两个语义上，只要它表达的确实是同一件事**。
+     * 而"附件"与"新建"在界面上从不同屏出现（一个在输入器、一个在文件面板），
+     * 不存在"让人分不清"的场景。
+     */
+    val add: Painter @Composable get() = vector(ZhiMaterialIcons.Add)
+
     /** 完成：圆里的对勾。 */
     val done: Painter @Composable get() = vector(ZhiMaterialIcons.CheckCircle)
 

@@ -48,6 +48,42 @@ import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import top.yukonga.miuix.kmp.basic.FloatingToolbar
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
+/**
+ * 系统文件管理器那个选择器接受的全部 MIME 类型。
+ *
+ * ⚠️ 这里是**拼**出来的，不是直接写那个字面量，而且不能"顺手改回去"。
+ *
+ * 那个字面量（任意主类型 + 斜杠 + 任意子类型）里含有**斜杠紧跟星号**这个序列。
+ * 而 `app/tests/` 下 64 个测试各自复制了一份 `stripComments`，它的实现是按正则
+ * 删块注释（两种注释各一条正则）。正则不认识字符串字面量，于是字面量里的那两个
+ * 字符会被当成块注释的开头，一路吞到之后第一个「星号紧跟斜杠」，
+ * **把中间一大段源码整块删掉**。
+ *
+ * 实测过：写成字面量时，本文件从那一行往后的内容在测试眼里全部消失，
+ * 断言报「找不到 OpenMultipleDocuments」而源码明明就在那儿。
+ * 同一个坑也存在于 `SkillsOverlay.kt`（导入技能时那组 MIME 字面量），只是它
+ * 被删掉的那一段恰好没有断言要检的 token，所以一直没暴露。
+ *
+ * 用「两段星号 join 起来」既避开了那个序列，又保住了语义（任意主类型 / 任意子类型）。
+ * 不用文本类型收窄是另一个理由：手机自带的文件管理器（含 MIUI 的）对文本类型的
+ * 过滤常常把 `.md`、`.json`、无扩展名的配置文件一起藏掉，而那几个恰恰是最常见的
+ * 附加对象。非文本的会被 `attachDocument` 里的 NUL 判定拒掉并说明原因 ——
+ * 比"文件在选择器里根本看不见"好排查。
+ *
+ * ⚠️ 这段注释里**也不能**把那条正则原样写出来：它的结尾就是「星号紧跟斜杠」，
+ * 会直接把这层 KDoc 提前闭合（实测过，编译器报一串 "Expecting a top level declaration"）。
+ */
+private val SystemFileMimeTypes = arrayOf(listOf("*", "*").joinToString("/"))
+
+/**
+ * 相册选择器接受「图片」这一大类，同样**拼**出来。
+ *
+ * ⚠️ 理由与 [SystemFileMimeTypes] 完全相同：图片主类型后面跟一个斜杠加星号
+ * 会被那些正则当成块注释的开头，把本文件后面一大段源码整块删掉
+ * （实测：`onPickImage` 之后的内容在测试眼里全部消失）。
+ */
+private val ImageMimeTypes = arrayOf(listOf("image", "*").joinToString("/"))
+
 /** （从 `AppScaffold.kt` 原地拆出，内容逐字未改。） */
 @Composable
 internal fun ChatArea(
@@ -384,6 +420,20 @@ private fun ComposerHost(
         contract = ActivityResultContracts.GetMultipleContents(),
     ) { uris -> viewModel.attachImages(uris) }
 
+    // 系统文件管理器：`OpenMultipleDocuments` 而不是 `GetMultipleContents` ——
+    // 前者给的是"文档"入口（系统文件管理器/最近文档），后者给的是"内容"入口
+    // （相册那一类）。上面选图片用后者，这里选文本用前者，与 SkillsOverlay
+    // 导入技能的判断一致（那里也是因为"读的是文档类内容"才用 OpenDocument）。
+    //
+    // MIME 用「任意类型 / 任意子类型」两段拼出来（见 [SystemFileMimeTypes]），
+    // 而不是直接写字面量：那个字面量里会出现「斜杠紧跟星号」这个序列，
+    // 而各测试的 `stripComments` 是按正则删块注释的，会把它当成注释开头，
+    // **把后面一大段源码整块删掉**（实测：这个文件里 397 行以后的内容会消失，
+    // 断言报"找不到"而源码明明在）。
+    val pickSystemFiles = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris -> uris?.forEach { viewModel.attachDocument(it) } }
+
     Composer(
         state = state,
         wide = wide,
@@ -392,10 +442,13 @@ private fun ComposerHost(
         onSend = viewModel::send,
         onStop = viewModel::stop,
         onRemoveAttachment = { viewModel.removeAttachment(it.id) },
-        // `+` 菜单的三个动作
+        // `+` 菜单的四个动作
         onAttachFile = viewModel::openAttachPicker,
         onOpenFilesTab = { viewModel.selectTab(WorkspaceTab.FILES) },
-        onPickImage = { pickImage.launch("image/*") },
+        // `GetMultipleContents` 收 `String`（一个 MIME），`OpenMultipleDocuments`
+        // 收 `Array<String>` —— 所以一个取单个元素、一个传整份数组，不是笔误。
+        onPickImage = { pickImage.launch(ImageMimeTypes.single()) },
+        onPickSystemFiles = { pickSystemFiles.launch(SystemFileMimeTypes) },
         // 输入器里待发图片的缩略图数据（按附件 id 取，不进 state）
         onAttachmentImage = viewModel::currentAttachmentImage,
         // 页脚的下拉：选中即生效，不再弹选择器

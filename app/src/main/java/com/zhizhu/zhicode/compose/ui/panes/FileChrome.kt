@@ -4,11 +4,13 @@ import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -21,6 +23,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.termux.shared.termux.TermuxConstants
 import com.zhizhu.zhicode.compose.model.FileEntry
+import com.zhizhu.zhicode.compose.model.FileFormat
 import com.zhizhu.zhicode.compose.model.FileRoot
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
@@ -123,12 +126,18 @@ internal fun FileRootSwitcher(
  * 用户的原话是「把文件页面重构吧」「这个也不是很好看」。所以这里收成一份：
  * **面包屑占满剩余宽度、动作靠右**，三处共用同一行几何。
  *
- * ## `trailing` 是必需而不是可选
+ * ## [summary]：第二行的小字统计
  *
- * 文件面板要在这一行放三个动作（新建文件 / 新建文件夹 / 上一级），附加面板只放
- * 一个（上一级）。做成插槽之后两处是**同一段布局代码**；若各写一份，
- * 「上一级」在一边是 30dp 图标、在另一边是别的东西，迟早对不上 —— 而
- * [FileChrome] 文件头写的就是"两边必须一直是同一副样子"。
+ * 「文件夹 3 · 文件 12」这一行来自小米文件管理器（它的列表上方有一行
+ * `文件夹: N 文件: M`，`res/layout/phone_file_explorer_list.xml` 上面的
+ * storage 行与分组表头的 `@id/group_file_count` 都是这个用途）。
+ *
+ * 它取代了原先被删掉的那个 `PaneHeader("文件", "N 项")` 的位置价值：
+ * 那个标题是**冗余的**（与顶部标签栏正在高亮的那一项同一件事），但"这个目录里
+ * 有多少东西"不是冗余的 —— 一屏只放得下七八行，用户需要知道还有多少在下面。
+ *
+ * 统计**只数当前这一层**（不回递归）：递归数一个 `node_modules` 会卡住界面，
+ * 而我们真正想回答的只是"这一层还有多少行没看到"。
  *
  * @param trailing 行尾动作。`null` 时不占位（查看/编辑态的面包屑行就是这样）。
  * ⚠️ 用**可空槽位**而不是 `= {}`（与 `PaneHeader` 的 `actions` 同一写法），
@@ -140,19 +149,41 @@ internal fun FilePathBar(
     filePath: String,
     onNavigate: (String) -> Unit,
     modifier: Modifier = Modifier,
+    summary: String = "",
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // 面包屑自己带横向滚动（Miuix `BreadcrumbBar` 的语义），所以给它 weight 占满，
-        // 路径深了会在这块区域里滚，而不是把动作按钮挤出屏幕。
-        Box(modifier = Modifier.weight(1f)) {
-            FileBreadcrumbBar(filePath = filePath, onNavigate = onNavigate)
+    Column(modifier = modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 面包屑自己带横向滚动（Miuix `BreadcrumbBar` 的语义），所以给它 weight 占满，
+            // 路径深了会在这块区域里滚，而不是把动作按钮挤出屏幕。
+            Box(modifier = Modifier.weight(1f)) {
+                FileBreadcrumbBar(filePath = filePath, onNavigate = onNavigate)
+            }
+            trailing?.invoke(this)
         }
-        trailing?.invoke(this)
+        if (summary.isNotEmpty()) {
+            Text(
+                text = summary,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = ZhiTextScale.Micro,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                // 与面包屑的 insideMargin（横向 6 + 8）大致对齐，让这行小字
+                // 不贴着屏幕左边缘，也不与上一行错开太多。
+                modifier = Modifier.padding(start = 14.dp, top = 1.dp),
+            )
+        }
     }
+}
+
+/** 「文件夹 N · 文件 M」。两处（文件面板 / 附加面板）必须用同一串字符。 */
+internal fun fileCountSummary(entries: List<FileEntry>): String {
+    if (entries.isEmpty()) return ""
+    val dirs = entries.count { it.directory }
+    return "文件夹 $dirs · 文件 ${entries.size - dirs}"
 }
 
 /** 把绝对路径拆成 Miuix `BreadcrumbBar` 需要的层级列表。 */
@@ -218,39 +249,63 @@ internal fun breadcrumbItems(filePath: String): List<BreadcrumbItem> {
 }
 
 /**
- * 文件行：此前 vertical = 20dp 导致行高约 60dp，一屏放不下几个文件（V2）。
- * 收到 11dp ≈ 40dp 行高，仍在 Material 触摸目标下限（48dp）附近，密度观感
- * 与 Miuix 设置列表行一致。
+ * 文件行：**两行**（文件名 / 次要信息），40dp 图标。
  *
- * <p>尾部的动作**由调用方给**（[trailing]）：
+ * ## 为什么改成两行
  *
- *  · 文件面板塞「重命名 / 删除」，两个都用 [com.zhizhu.zhicode.compose.ui.ZhiIconButton]
- *    的 `compact` 压到 30dp —— 与 `PaneHeader` 的做法一致：Miuix `TextButton` 写死
- *    `MinWidth=58dp`/`MinHeight=40dp`，在这条 40dp 高的行里放不下，图标按钮才是能安全压小的那个。
- *  · 附加选择器塞「＋ 附加」，因为那里点整行就是附加，不需要再给两个破坏性动作。
+ * 原先是一行：`图标 · 文件名 · 字节数 · [重命名][删除]`。用户给的两张截图里
+ * 最刺眼的就是这一行 —— 命名一长，右边的四个东西把文件名挤成两三个字加省略号，
+ * 而"重命名/删除"两个图标在**每一行**都挂着，一屏十几行就是二十几个图标。
  *
- * ⚠️ 尾部做成插槽而不是"给两个可空回调"：可空回调那种写法会让"这一行能不能改名"
- * 只能靠传 null 表达，而插槽直接把"这里放什么"交给调用方，读起来没有隐藏状态。
+ * 小米文件管理器的列表行是两行（`res/layout/file_item_list_layout.xml`）：
+ * 第一行文件名（`@id/file_name`，`maxLines=2`）+ 第二行次要信息（`@id/file_size`），
+ * 图标 40dp（`category_common_file_icon_size`），整行 `list_item_height=70dp`。
+ * 我们按自己的令牌折算（不照搬 70dp —— 那会让我们 44dp 行的界面突然变胖）：
+ * 图标 15dp 保持不变（超集：它同时也是"这是目录还是文件"的颜色信号），
+ * 第二行用 `ZhiTextScale.Micro`（最小档），行高靠内容撑 + `heightIn(min = 44.dp)`
+ * 保住原来的行距观感。
+ *
+ * ## 次要信息显示什么
+ *
+ * - **文件**：`1.2 KB · 今天 13:53`（大小 + 修改时间，与小米一致）；
+ * - **目录**：只有一行小字（目录的 `length()` 是 0，"0 B" 是噪音），
+ *   整行**垂直居中** —— 目录行少一行内容，不居中会看起来像"文字偏上了"。
+ *
+ * ## 行尾为什么不再挂动作
+ *
+ * 「重命名 / 删除」搬到**长按选择模式**里去了（见 `FilesPane` 的选择态底部栏），
+ * 这与小米一致（它的长按是 action mode）。这里只留 [trailing] 插槽 ——
+ * 附加选择器用它放「＋ 附加」（那里点整行就是附加，多一个动作是多余的）。
  */
 @Composable
 internal fun FileListRow(
     entry: FileEntry,
     onOpen: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    trailing: @Composable RowScope.() -> Unit = {},
+    selected: Boolean = false,
+    selectionMode: Boolean = false,
+    now: Long = System.currentTimeMillis(),
+    trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
+    // 选中时整行换底色。**不能只靠左边的勾**：列表里勾与图标并排，
+    // 一行里两个圆形/方形标记很难一眼分清哪个是"选中"、哪个是"这是目录"。
+    val background = if (selected) scheme.primaryContainer else ZhiColors.cardSurface()
     Card(
         onClick = onOpen,
+        onLongPress = onLongPress,
         // 行距由 LazyColumn 的 `spacedBy` 统一给（原来这里还有一个 `padding(vertical = 1.dp)`，
         // 两个地方都给间距会让以后调行距要改两处，而且那 1dp 几乎等于没有）。
         // `modifier` 里是 `animateItem()`，所以它在 fillMaxWidth **之前**：
         // 尺寸照旧铺满，动画交给 LazyColumn 记账。
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().heightIn(min = FileRowMinHeight),
         cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(start = ZhiSpace.m, end = ZhiSpace.xs, top = 4.dp, bottom = 4.dp),
+        // 尾部的内边距比原先小（那是为两个 30dp 图标留的）：没有常驻动作之后，
+        // 右边缘可以收到与 `ZhiSpace.s` 同级，文件名能多占几个字符。
+        insideMargin = PaddingValues(start = ZhiSpace.m, end = ZhiSpace.m, top = 5.dp, bottom = 5.dp),
         colors = CardDefaults.defaultColors(
-            color = ZhiColors.cardSurface(),
+            color = background,
             contentColor = scheme.onSurface,
         ),
         pressFeedbackType = PressFeedbackType.Sink,
@@ -259,36 +314,61 @@ internal fun FileListRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
+            // 选择模式下的勾。放在**图标左边**（小米在右边，但我们的行尾还留给
+            // 附加面板的「＋ 附加」；插槽在右边，勾也在右边就会两个东西挤在一起）。
+            if (selectionMode) {
+                Icon(
+                    painter = if (selected) ZhiIcons.done else ZhiIcons.pending,
+                    contentDescription = null,
+                    tint = if (selected) scheme.primary else scheme.onSurfaceVariantSummary,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
             Icon(
                 painter = if (entry.directory) ZhiIcons.directory else ZhiIcons.file,
                 contentDescription = null,
                 tint = if (entry.directory) scheme.primary else scheme.onSurfaceVariantSummary,
                 modifier = Modifier.size(15.dp),
             )
-            Text(
-                text = entry.name,
-                fontSize = ZhiTextScale.Caption,
-                fontWeight = if (entry.directory) FontWeight.Medium else FontWeight.Normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            Column(
                 modifier = Modifier.weight(1f),
-            )
-            if (!entry.directory) {
+                // 目录只有一行小字，居中；文件两行，顶部对齐。
+                verticalArrangement = if (entry.directory) Arrangement.Center else Arrangement.Top,
+            ) {
                 Text(
-                    text = formatFileSize(entry.size),
-                    color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Micro,
+                    text = entry.name,
+                    fontSize = ZhiTextScale.Caption,
+                    fontWeight = if (entry.directory) FontWeight.Medium else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                val info = fileInfoLine(entry, now)
+                if (info.isNotEmpty()) {
+                    Text(
+                        text = info,
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = ZhiTextScale.Micro,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-            trailing()
+            trailing?.invoke(this)
         }
     }
 }
 
-/** 行尾的字节数文案。**共用**：两个界面里的同一行必须显示同一串字符。 */
-internal fun formatFileSize(bytes: Long): String = when {
-    bytes <= 0L -> "0 B"
-    bytes < 1_000L -> "$bytes B"
-    bytes < 1_000_000L -> String.format(java.util.Locale.US, "%.1f KB", bytes / 1000f)
-    else -> String.format(java.util.Locale.US, "%.1f MB", bytes / 1_000_000f)
+/** 两行行的高下限：比原来单行的 40dp 略高，但不照搬小米的 70dp。 */
+internal val FileRowMinHeight = 44.dp
+
+/**
+ * 行的第二行小字。
+ *
+ * 目录给空串（目录的 `length()` 恒为 0，"0 B" 是噪音，而它已经有颜色区分了）；
+ * 修改时间取不到时（[FileEntry.modifiedAt] 为 0）也不显示，而不是编一个时间。
+ */
+internal fun fileInfoLine(entry: FileEntry, now: Long): String {
+    if (entry.directory) return ""
+    val time = FileFormat.time(entry.modifiedAt, now)
+    return if (time.isEmpty()) FileFormat.size(entry.size) else "${FileFormat.size(entry.size)} · $time"
 }

@@ -180,24 +180,21 @@ public final class FileOps {
         return null;
     }
 
-    /** 当前目录下与 {@code name} 冲突时的建议名：{@code a.txt} → {@code a (2).txt}。 */
-    public static String suggestName(File dir, String name) {
-        if (dir == null || !dir.isDirectory()) return name;
-        if (!new File(dir, name).exists()) return name;
-        String base = name;
-        String ext = "";
-        int dot = name.lastIndexOf('.');
-        // 隐藏文件（.bashrc）整体当名字，不把 `.bashrc` 拆成空名字 + 扩展名。
-        if (dot > 0 && dot < name.length() - 1) {
-            base = name.substring(0, dot);
-            ext = name.substring(dot);
-        }
-        for (int i = 2; i < 1000; i++) {
-            String candidate = base + " (" + i + ")" + ext;
-            if (!new File(dir, candidate).exists()) return candidate;
-        }
-        return name;
-    }
+    /*
+     * 「建议名」`suggestName(dir, name)`（`a.txt` → `a (2).txt`）**已经删掉**。
+     *
+     * <p>它唯一的调用者是文件面板的「新建」表单：那里原先**预填**名字，
+     * 所以需要一个避开重名的建议名。现在新建弹窗的名字框是**空的**
+     * （见 `WorkspaceViewModel.newFileForm`），建什么类型也由按下的按钮决定 ——
+     * 一个"还没输入就先替你起好名字"的助手没有用武之地了。
+     *
+     * <p>重名不再靠"提前改名"规避，而是提交时由 {@link #create} 拒绝并把原因
+     * 回填进弹窗（用户会看到「「x」已经存在」）。这条路更短，也不会出现
+     * "预填的名字其实已经被别人占用"那种自相矛盾的提示。
+     *
+     * <p>⚠️ 别再把它加回来当通用工具：没有调用者的工具函数会慢慢被人当成
+     * "现有能力"引用（而它连一条测试都没有了）。真需要时再连同用例一起加。
+     */
 
     /** 目录里的项数（用于删除前的提示）。读不到时返回 -1。 */
     public static int childCount(File dir) {

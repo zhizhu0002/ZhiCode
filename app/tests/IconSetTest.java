@@ -276,6 +276,8 @@ public final class IconSetTest {
                 {"more", "ZhiMaterialIcons.MoreHoriz", "更多操作是**横排**三点"},
                 {"moreVert", "ZhiMaterialIcons.MoreVert", "竖向排布处的更多是竖排三点"},
                 {"search", "ZhiMaterialIcons.Search", "搜索是放大镜"},
+                {"add", "ZhiMaterialIcons.Add",
+                        "新建是裸 +（与 attach 同字形，但语义名分开：一个在文件面板、一个在输入器，从不同屏出现）"},
                 {"done", "ZhiMaterialIcons.CheckCircle", "完成是圆里的对勾"},
                 {"failed", "ZhiMaterialIcons.Error",
                         "失败是圆里的感叹号；原先与 close 共用同一个字形"},
@@ -318,8 +320,16 @@ public final class IconSetTest {
             int at = body.indexOf(key);
             require(at >= 0, ICONS + " 里找不到 " + name + " 的定义");
             String window = body.substring(at, Math.min(body.length(), at + 160));
-            require(window.contains(expected),
-                    "「" + name + "」必须指向 " + expected + " —— " + row[2]);
+            // ⚠️ 必须连结尾的 `)` 一起比，不能只比字形名。
+            //
+            // 实测（teeth §37 ①d MISS）：`add` 期望的是 `ZhiMaterialIcons.Add`，
+            // 而 `ZhiMaterialIcons.AddCircle` **以它开头** —— 单纯 `contains` 时，
+            // 把 `add` 的映射改成 `AddCircle` 照样通过。这是常见的**前缀陷阱**：
+            // 断言看着在守，其实恒真（`newSession` ↔ `AddCircle` 那一对就是靠
+            // 这条才拦得住）。
+            require(window.contains(expected + ")"),
+                    "「" + name + "」必须指向 " + expected + " —— " + row[2]
+                            + "\n（注意：只比字形名会被前缀骗过 —— `Add` 是 `AddCircle` 的前缀）");
         }
 
         // ---- 4. 两两不许撞脸 -------------------------------------------------
@@ -332,6 +342,9 @@ public final class IconSetTest {
                 {"skill", "tool(COMMAND)", "技能与跑命令不该撞脸"},
                 {"runtime", "tool(OTHER)", "运行环境与「未知工具」是两件事"},
                 {"more", "moreVert", "横排三点与竖排三点是不同的控件"},
+                {"add", "newSession",
+                        "「新建」是裸 +，「新建会话」是圆里的 +："
+                                + "两者还是**前缀**关系（Add / AddCircle），最容易在断言里被放过"},
                 {"floatingBall", "image", "「悬浮球」与「图片」是两件事"},
                 {"directory", "files", "「目录」是打开的文件夹，页签是合口的"},
                 {"done", "check", "「完成」是圆里的对勾，列表标记是裸对勾"},

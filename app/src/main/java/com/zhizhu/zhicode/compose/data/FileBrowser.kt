@@ -55,6 +55,9 @@ internal object FileBrowser {
                     // 符号链接指向目录时也要当成目录，否则点进去会变成"打开文件"。
                     directory = runCatching { file.isDirectory }.getOrDefault(false),
                     size = runCatching { if (file.isFile) file.length() else 0L }.getOrDefault(0L),
+                    // 目录也取一次 lastModified：它对目录同样有意义（"这个目录里最后动过的是什么时候"），
+                    // 而列表行只在文件上显示时间，所以这次取值不会白花 —— 它同时给排序留了余地。
+                    modifiedAt = runCatching { file.lastModified() }.getOrDefault(0L),
                 )
             }
             .sortedWith(compareByDescending<FileEntry> { it.directory }.thenBy { it.name.lowercase() })

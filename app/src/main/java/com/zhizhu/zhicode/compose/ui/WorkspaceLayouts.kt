@@ -479,10 +479,10 @@ private fun PaneHost(
             onSave = viewModel::saveFile,
             onCancelEdit = viewModel::cancelEditingFile,
             nameForm = state.fileNameForm,
-            onNewFile = { viewModel.newFileForm(directory = false) },
-            onNewDirectory = { viewModel.newFileForm(directory = true) },
+            // 只有一个「新建」入口：建文件还是建文件夹由弹窗里按下的那个按钮决定
+            // （见 WorkspaceViewModel.submitFileNameForm 的 KDoc）。
+            onNewEntry = viewModel::newFileForm,
             onRename = viewModel::renameForm,
-            onRequestDelete = viewModel::requestDelete,
             onNameDraftChange = viewModel::updateFileNameDraft,
             onSubmitName = viewModel::submitFileNameForm,
             onCancelName = viewModel::cancelFileNameForm,
@@ -490,6 +490,16 @@ private fun PaneHost(
             onConfirmDelete = viewModel::confirmDelete,
             onCancelDelete = viewModel::cancelDelete,
             sharedStorageGranted = state.sharedStorageGranted,
+            onGrantSharedStorage = viewModel::openSharedStorageSettings,
+            // 长按多选。
+            selection = state.fileSelection,
+            onLongPressEntry = viewModel::longPressFileEntry,
+            onToggleEntry = viewModel::toggleFileSelection,
+            onToggleSelectAll = viewModel::toggleSelectAllFiles,
+            onClearSelection = viewModel::clearFileSelection,
+            onRenameSelected = viewModel::renameSelectedEntry,
+            onDeleteSelected = viewModel::deleteSelectedEntries,
+            onAttachSelected = viewModel::attachSelectedEntries,
             modifier = modifier,
         )
         WorkspaceTab.CHAT -> ChatArea(state = state, viewModel = viewModel, wide = false, modifier = modifier, glass = glass)

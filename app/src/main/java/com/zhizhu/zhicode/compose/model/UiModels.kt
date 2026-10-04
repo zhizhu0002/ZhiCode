@@ -348,11 +348,20 @@ enum class ChoiceIntent {
     SESSION_RENAME,
 }
 
+/**
+ * 文件面板里的一行。
+ *
+ * <p>[modifiedAt] 是**修改时间**（毫秒，0 = 拿不到）。它在列表的第二行与
+ * [size] 并排显示 —— 这一行原先只有一个字节数，而"最后一次改动是什么时候"
+ * 是浏览代码目录时最常问的问题（小米文件管理器的列表行也是这两项）。
+ * 拿不到时给 0，[FileFormat.time] 会把它显示成空串而不是编一个时间。
+ */
 data class FileEntry(
     val name: String,
     val path: String,
     val directory: Boolean,
     val size: Long = 0L,
+    val modifiedAt: Long = 0L,
 )
 
 data class OpenFile(
@@ -396,9 +405,27 @@ data class FileNameForm(
     /** 重命名时被改的那条；新建时为 null。 */
     val target: FileEntry? = null,
     val draft: String = "",
+    /**
+     * **提交之后**由 `FileOps` 返回的失败原因（重名、没权限、目录不存在…）。
+     *
+     * <p>为什么要有这个字段：这些原因只有真去建/去改才知道，而原先它们被写进
+     * `WorkspaceUiState.message` —— 那条反馈挂在 `MessageBar` 上，而 `MessageBar`
+     * 是 `ChatArea` 的孩子。也就是说在**文件页上提交失败，界面上什么都不会出现**。
+     * 现在它回填到表单里，弹窗保持打开、就地显示原因（小米的 `textinput_dialog`
+     * 也是这个形状：输入框下面一行默认隐藏的错误行）。
+     *
+     * <p>改名字时会被清掉（见 `WorkspaceViewModel.updateFileNameDraft`），
+     * 否则用户一改名字，上一次的"已经存在"还挂在那里。
+     */
+    val failure: String? = null,
 ) {
-    /** 校验结果，直接显示给用户。规则见 `FileOps.nameError`。 */
-    val error: String? get() = FileOps.nameError(draft)
+    /**
+     * 校验结果，直接显示给用户。规则见 `FileOps.nameError`。
+     *
+     * <p>顺序是刻意的：先看 [failure]（那是文件系统说的），没有才现算名字规则 ——
+     * 反过来的话，"重名"会被一句"名字不能为空"盖掉（用户明明填了名字）。
+     */
+    val error: String? get() = failure ?: FileOps.nameError(draft)
 
     val saveable: Boolean get() = error == null
 }
@@ -406,16 +433,28 @@ data class FileNameForm(
 /**
  * 删除确认。
  *
- * <p>[count] 是**会一起消失的条目数（含自己）**。删除一个目录会带走里面的全部内容，
- * 只说「确定删除 sub 吗？」等于没告诉用户代价。数字来自
- * `FileOps.countForDelete`（不跟符号链接进去 —— 跟进去会虚高）。
+ * <p>[count] 是**会一起消失的条目数（含这些目标自己）**。删除一个目录会带走里面的
+ * 全部内容，只说「确定删除 sub 吗？」等于没告诉用户代价。数字来自
+ * `FileOps.countForDelete`（不跟符号链接进去 —— 跟进去会虚高），多选时按条累加。
+ *
+ * <p>目标从"一条"改成"一组"是为了长按多选（对齐小米文件管理器的选择模式）：
+ * 多选态下的删除必须一次说清"删的是哪几条、一共会消失多少项"。
  */
 data class FileDeletePrompt(
-    val entry: FileEntry,
+    val entries: List<FileEntry>,
     val count: Int,
 ) {
     /** 是不是"会带走别的东西"的那种删除。 */
-    val destructive: Boolean get() = count > 1
+    val destructive: Boolean get() = count > entries.size
+
+    /**
+     * 确认文案里的操作对象。
+     *
+     * <p>单条给名字（用户点的是它），多条给「选中的 N 项」—— 把五个名字拼进一句话
+     * 会撑成三行，反而看不清删的是哪几个。
+     */
+    val label: String
+        get() = if (entries.size == 1) "「${entries[0].name}」" else "选中的 ${entries.size} 项"
 }
 
 /**
@@ -580,6 +619,22 @@ data class WorkspaceUiState(
     val fileNameForm: FileNameForm? = null,
     /** 非空即删除确认打开。 */
     val fileDeletePrompt: FileDeletePrompt? = null,
+    /**
+     * 长按选中的那些条目（**以路径为键**）。
+     *
+     * <p>非空即「选择模式」：顶部路径行换成「已选择 N 项」+ 全选/取消全选，
+     * 底部出现操作栏（重命名 / 附加到对话 / 删除），点一行变成"勾/取消勾"而不是打开。
+     * 这套形状来自小米文件管理器的 action mode（它的字符串里有
+     * `action_mode_select_all`=全选、`action_mode_deselect_all`=取消全选）。
+     *
+     * <p>⚠️ 用**路径**而不是整个 [FileEntry]：列表会因为重命名/删除重新加载，
+     * 条目对象每次都是新的，存对象的话"选中"会在刷新后莫名其妙地丢掉。
+     * 代价是路径本身变了（重命名）就选不中了 —— 而重命名后本来也该退出选择模式。
+     *
+     * <p>⚠️ 切根/换目录时必须清空（见 `switchFileRoot` / `navigateTo`）：
+     * 留着的话，在 A 目录选中的东西会在 B 目录里被"删除"，而那是另一批文件。
+     */
+    val fileSelection: Set<String> = emptySet(),
     /** 共享存储当前是否给过「所有文件访问权限」。界面据此提示怎么开。 */
     val sharedStorageGranted: Boolean = false,
     /**
