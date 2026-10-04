@@ -37,6 +37,7 @@ import com.zhizhu.zhicode.compose.model.FileRoot
 import com.zhizhu.zhicode.compose.model.OpenFile
 import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
+import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
@@ -171,13 +172,21 @@ fun FilesPane(
                 // （测试里把这次重构标为「C-6 最容易改崩」，这就是它崩掉的那一处。）
                 when (st) {
                     FileStage.LIST -> Column(modifier = Modifier.fillMaxSize()) {
-                        PaneHeader(
-                            title = "文件",
-                            subtitle = "${entries.size} 项",
-                            // 行尾三个动作：新建文件 / 新建文件夹 / 上一级。
-                            // 用 actions 槽而不是 actionIcon —— 只给一个图标按钮的话
-                            // 「上一级」和「新建」只能二选一。
-                            actions = {
+                        // ⚠️ 这里原先是一个 `PaneHeader(title = "文件", subtitle = "N 项")`，
+                        // **下面**再单独一行面包屑 —— 于是列表前叠了三层
+                        // （根标签栏 + 表头 + 面包屑），而那个标题"文件"与**顶部标签栏
+                        // 正在高亮的那一项**完全是同一件事，纯重复。
+                        //
+                        // 现在合成一行：面包屑 + 三个动作，共用 [FilePathBar]
+                        // （附加面板那一行也是它，两处的行几何因此严格一致）。
+                        //
+                        // 代价说清：**「N 项」不再显示**。空目录本来就走空态文案
+                        // （`emptyNote`），不缺这个数字；条数很多时也确实没有再回来的必要。
+                        FilePathBar(
+                            filePath = filePath,
+                            onNavigate = onNavigate,
+                            trailing = {
+                                // 三个动作：新建文件 / 新建文件夹 / 上一级。
                                 ZhiIconButton(
                                     icon = ZhiIcons.file,
                                     description = "新建文件",
@@ -201,8 +210,9 @@ fun FilesPane(
                                 )
                             },
                         )
-                        // 路径用 Miuix BreadcrumbBar 展示，点击任一层级都能直接跳转
-                        FileBreadcrumbBar(filePath = filePath, onNavigate = onNavigate)
+                        // 表头下面那条分隔线不能丢：查看/编辑分支的 `PaneHeader` 自带一条，
+                        // 少了它，切形态时那条线会忽隐忽现。
+                        ZhiHorizontalDivider()
                         nameForm?.let { form ->
                             FileNameFormCard(
                                 form = form,
@@ -346,7 +356,9 @@ fun FilesPane(
                                 }
                             },
                         )
-                        FileBreadcrumbBar(filePath = file.path, onNavigate = onNavigate)
+                        // 同样走 [FilePathBar]：这一行没有行尾动作，但**行高与内边距**
+                        // 必须与列表分支、附加面板完全一致，否则切形态时面包屑会跳一下。
+                        FilePathBar(filePath = file.path, onNavigate = onNavigate)
                         if (editing) {
                             // 编辑态：整块可滚动的多行输入框。用等宽字体 —— 缩进与列对齐
                             // 在读代码时是有意义的信息，换了比例字体就没法看了。

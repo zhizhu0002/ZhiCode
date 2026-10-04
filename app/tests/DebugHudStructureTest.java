@@ -2068,9 +2068,17 @@ public final class DebugHudStructureTest {
         //
         // ⚠️ 钉的是「**同一份实现**」而不是「长得像」：各写一份的话，
         //    改了一边另一边会慢慢漂开，而面包屑层级、行高、图标颜色正是最容易看出差别的地方。
-        requireContains(attach, "FileBreadcrumbBar(",
-                ATTACH_FILE_OVERLAY + " 必须用共用的面包屑 FileBreadcrumbBar（见 FileChrome.kt）："
-                        + "用户要的就是「文件板块那种」，各写一份迟早长歪");
+        // ⚠️ 本轮判据从 `FileBreadcrumbBar(` 换成 `FilePathBar(`：一行里现在是
+        // 「面包屑 + 行尾动作」，两者**必须同属一行**（原先附加面板自己拼了
+        // `Row { Box(weight) { … }; 上一级 }`，内边距与文件面板对不上）。
+        // 钉的仍然是「同一份实现」，只是颗粒度从"面包屑"升到"整行"。
+        requireContains(attach, "FilePathBar(",
+                ATTACH_FILE_OVERLAY + " 必须用共用的路径行 FilePathBar（见 FileChrome.kt）："
+                        + "用户要的就是「文件板块那种」，各写一份迟早长歪 —— "
+                        + "而这一行在三个地方出现（列表态 / 查看态 / 附加面板），尤其容易漂开");
+        requireContains(attach, "onNavigate = onNavigate,",
+                ATTACH_FILE_OVERLAY + " 必须把 onNavigate 传给 FilePathBar："
+                        + "不传的话面包屑点不动（每一级都回不到）");
         requireContains(attach, "FileRootSwitcher(",
                 ATTACH_FILE_OVERLAY + " 必须用共用的根切换条 FileRootSwitcher："
                         + "项目 / HOME / 共享存储三根与文件面板同一套语义");
@@ -2292,6 +2300,96 @@ public final class DebugHudStructureTest {
                         + "（它现在的家在 ui/chat/ToolOutputText.kt）");
         requireContains(cardsForToolOutput, "OutputLines(activity.output)",
                 MESSAGE_CARDS + " 展开的工具输出必须仍走 OutputLines");
+
+        // ---- 36. 文件页面的观感契约（胶囊过滤框 / 内容自适应高度 / 路径行合一行）----
+        //
+        // 这一节对应两条用户反馈：「把文件页面重构吧」与「这个也不是很好看」（连同截图）。
+        //
+        // 截图里三处问题，逐条钉住：
+        //   ① 过滤框**比下面每一行都宽** —— 它是 ZhiTextField(… fillMaxWidth())，
+        //      **没带横向内边距**，而同屏的根标签栏 / 面包屑行 / 文件行都是 12dp。
+        //   ② 它读起来像标题 —— ZhiTextField 转发的是 Miuix 通用 TextField
+        //      （16dp 圆角、label 左对齐常显），是**表单字段**；搜索框该用
+        //      InputField（侧栏「搜索会话」用的就是它，那里的注释写了为什么不用
+        //      ZhiTextField）。
+        //   ③ 只有 5 项却空出约三分之一 —— 面板高度是 clamp(窗口高 × 0.5, 280, 480)，
+        //      **与内容多少无关**。
+        //
+        // 另外把「列表前叠三层」压成两层：文件面板的列表态原先还有一个
+        // PaneHeader(title = "文件") 与顶部标签栏重复。
+
+        // ① 过滤必须是 Miuix InputField（胶囊搜索框），不得退回通用 TextField。
+        requireContains(attach, "InputField(",
+                ATTACH_FILE_OVERLAY + " 的过滤框必须是 Miuix InputField（胶囊搜索框）："
+                        + "它与侧栏「搜索会话」同一形态（放大镜 + 有字时的清除按钮），"
+                        + "ZhiTextField 转发的是通用 TextField，本质是表单字段 —— "
+                        + "同一屏里两种搜索框长得不一样才是问题");
+        requireAbsentIn(attach, "ZhiTextField(",
+                ATTACH_FILE_OVERLAY + " 不得再退回 ZhiTextField：16dp 圆角 + label 左对齐常显，"
+                        + "在截图里读起来像个小标题而不是输入框");
+        // expanded 必须接真实状态：API ≤ 27 上未展开时组件是 disabled 的，
+        // 靠 onExpandedChange(true) 先展开再聚焦；传常量会让它在 8.x 上永远点不进去。
+        requireContains(attach, "onExpandedChange = { filterExpanded = it }",
+                ATTACH_FILE_OVERLAY + " 的 InputField 必须把 expanded 接**真实状态**"
+                        + "（本工程 minSdk 24）：API ≤ 27 上未展开时它是 disabled 的，"
+                        + "靠 onExpandedChange(true) 先展开再聚焦，传常量就永远点不进去");
+
+        // ② 过滤框必须有横向内边距 —— 这正是截图里它比别的行宽的原因。
+        // ⚠️⚠️ 这里必须钉**整条修饰符**，不能只断言"文件里有 padding(horizontal = ZhiSpace.m)" ——
+        // 根标签栏那一行的 `vertical = 2.dp` 前面正好也有同样一段，所以只查那一段的话，
+        // 把过滤框的内边距删掉时断言**照样通过**（teeth 实测 MISS 过一次）。
+        // 这正是本文件 bodyOf 的注释警告过的那个陷阱：同一文件里有第二处合法用法时，
+        // `contains` 会静默失效。
+        requireContains(attach, "modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m),",
+                ATTACH_FILE_OVERLAY + " 的过滤框必须给横向内边距（ZhiSpace.m = 12dp）："
+                        + "不给的话它会满幅横过去，比同屏的面包屑行、根标签栏和文件行都宽 —— "
+                        + "用户截图里最刺眼的就是这一处");
+
+        // ③ 高度必须内容自适应，不得再按窗口比例定高。
+        requireAbsentIn(attach, "AttachSheetHeightFraction",
+                ATTACH_FILE_OVERLAY + " 不得再按窗口比例算面板高度：那是与内容无关的定高，"
+                        + "5 项的目录底部会空出约三分之一（用户截图）");
+        requireAbsentIn(attach, "LocalWindowInfo",
+                ATTACH_FILE_OVERLAY + " 不该再取 LocalWindowInfo：按窗口比例定高的写法已经删了");
+        requireContains(attach, "heightIn(min = AttachSheetHeightFloor, max = AttachSheetHeightCap)",
+                ATTACH_FILE_OVERLAY + " 的面板高度必须是 heightIn(floor, cap)（内容自适应）");
+        // ⚠️ 光换 heightIn 不够：weight(1f) 默认 fill = true，会把 Column 撑到上限。
+        requireContains(attach, "weight(1f, fill = false)",
+                ATTACH_FILE_OVERLAY + " 的列表必须 weight(1f, fill = false)："
+                        + "默认的 fill = true 会把 Column 一直撑到 heightIn 的上限，"
+                        + "少条目时照样留一大片空 —— 等于没改");
+        requireAbsentIn(attach, "Modifier.weight(1f).fillMaxWidth()",
+                ATTACH_FILE_OVERLAY + " 的列表不得再写 Modifier.weight(1f).fillMaxWidth()："
+                        + "fill 默认为 true，见上一条");
+
+        // ④ 路径行必须共用（面包屑 + 行尾动作同属一行）。
+        String fileChromeForPath = stripComments(read(root, FILE_CHROME));
+        requireContains(fileChromeForPath, "internal fun FilePathBar(",
+                FILE_CHROME + " 必须提供共用的 FilePathBar（面包屑 + 行尾动作一行）");
+        String pathBar = bodyOf(fileChromeForPath, "internal fun FilePathBar(");
+        require(!pathBar.isEmpty(), FILE_CHROME + " 找不到 FilePathBar 的正文（签名变了？）");
+        requireContains(pathBar, "Modifier.weight(1f)",
+                FILE_CHROME + " 的 FilePathBar 必须给面包屑 weight(1f)："
+                        + "不给的话路径一深就把行尾动作挤出屏幕");
+        requireContains(pathBar, "trailing?.invoke(this)",
+                FILE_CHROME + " 的 FilePathBar 必须在行尾调用 trailing()："
+                        + "文件面板放三个动作、附加面板放「上一级」，槽位不接等于动作消失");
+        requireContains(filesPane2, "FilePathBar(",
+                FILES_PANE + " 的列表态必须用共用的 FilePathBar（面包屑 + 三个动作合成一行）");
+        require(!filesPane2.contains("private fun FilePathBar("),
+                FILES_PANE + " 不得另留一份私有 FilePathBar：共用件在 FileChrome.kt");
+
+        // ⑤ 列表态不得再有 PaneHeader —— 它的「文件」标题与顶部标签栏是同一件事。
+        String listBranch = bodyOf(filesPane2, "FileStage.LIST -> Column(modifier = Modifier.fillMaxSize())");
+        require(!listBranch.isEmpty(),
+                FILES_PANE + " 找不到列表分支的正文（写法变了？）");
+        requireAbsentIn(listBranch, "PaneHeader(",
+                FILES_PANE + " 的列表态不得再挂 PaneHeader：title = 文件 与顶部标签栏"
+                        + "正在高亮的那一项是**同一件事**，而它下面还单独占了一行面包屑 —— "
+                        + "列表前叠了三层。现在合成一行 FilePathBar。");
+        requireContains(listBranch, "ZhiHorizontalDivider()",
+                FILES_PANE + " 的列表态必须保留一条分隔线：查看/编辑态的 PaneHeader 自带一条，"
+                        + "少了它切形态时那条线会忽隐忽现");
 
         // ④ 换根时必须把列表**清空**。
         //

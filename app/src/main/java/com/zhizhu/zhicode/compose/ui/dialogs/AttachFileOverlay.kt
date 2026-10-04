@@ -4,21 +4,23 @@ import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.AttachBrowserState
 import com.zhizhu.zhicode.compose.model.FileEntry
@@ -26,20 +28,33 @@ import com.zhizhu.zhicode.compose.model.FileRoot
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
-import com.zhizhu.zhicode.compose.ui.ZhiTextField
-import com.zhizhu.zhicode.compose.ui.panes.FileBreadcrumbBar
 import com.zhizhu.zhicode.compose.ui.panes.FileListRow
+import com.zhizhu.zhicode.compose.ui.panes.FilePathBar
 import com.zhizhu.zhicode.compose.ui.panes.FileRootSwitcher
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
+import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** 附加文件 sheet 的定高参数（含义与取值理由见 ModelPickerOverlay 的同名常量）。 */
-private const val AttachSheetHeightFraction = 0.5f
+/**
+ * 附加文件 sheet 的高度边界。
+ *
+ * ⚠️ 这里原来还有一个 `AttachSheetHeightFraction = 0.5f`，面板高度是
+ * `clamp(窗口高 × 0.5, 280dp, 480dp)` —— **与内容多少无关**。定高的好处是
+ * chrome（根标签栏 / 面包屑 / 过滤框）的位置永远不跳，代价在用户截图里露了出来：
+ * 一个只有 5 项的目录，底部空了约三分之一。
+ *
+ * 现在改成**内容自适应**：少时贴着内容（下限 [AttachSheetHeightFloor]），
+ * 多时才长到上限 [AttachSheetHeightCap]。代价说清：从少项目录进到多项目录时，
+ * 面板会看到一次高度变化 —— 这是"不留一大片空"必须付的。
+ *
+ * ⚠️ 光把 `.height(sheetHeight)` 换成 `.heightIn(...)` 是**不够的**：
+ * 列表那边的 `weight(1f)` 默认 `fill = true`，会把 Column 一直撑到上限，
+ * 等于什么都没改。必须同时写 `weight(1f, fill = false)`（见列表那一行的注释）。
+ */
 private val AttachSheetHeightCap = 480.dp
 private val AttachSheetHeightFloor = 280.dp
 
@@ -77,6 +92,16 @@ private val AttachSheetHeightFloor = 280.dp
  * fade。底部 sheet 自带上滑进场、下拉 / 点背板关闭。过滤框留在**不滚动**的头部
  * （原来就这条规则，sheet 里照样成立），列表吃掉余量并内部滚动。
  *
+ * ## 过滤框：胶囊搜索框，而不是表单字段
+ *
+ * 原来是 `ZhiTextField`（转发 Miuix 通用 `TextField`：16dp 圆角、label 左对齐常显、
+ * 默认 16dp 内边距），而且 `fillMaxWidth()` **没带横向内边距** —— 于是它成了整屏
+ * 唯一满幅的元素，比下面的文件行和上面的根标签栏都宽一截，读起来还像个小标题。
+ *
+ * 现在换成 Miuix `InputField`（`SearchBar.kt` 那一节）：胶囊底、自带放大镜与
+ * 有字时出现的清除按钮。**侧栏的「搜索会话」用的就是它**，那里的注释写着为什么
+ * 不用 `ZhiTextField`；同一屏里两种搜索框长得不一样才是问题，所以统一到它。
+ *
  * 标题由 [OverlayBottomSheet] 自己渲染，**不再**套 `DialogShell`（两行标题 +
  * weight 语义对不上，见 ModelPickerOverlay 的说明）。
  */
@@ -104,15 +129,16 @@ fun AttachFileOverlay(
         // 把内容全拆掉，退场那 250~260ms 只是一张空壳在滑下去。
         val visible = browser.visibleEntries.ifEmpty { shownBrowser.orEmpty() }
         val scheme = MiuixTheme.colorScheme
-        // 定高（ModelPickerBody 同款写法）：目录项从 0 条到几十条时面板高度不跳，
-        // 过滤框与面包屑的位置稳定。
-        // ⚠️ 窗口高度取 LocalWindowInfo，不能取 BoxWithConstraints。
-        val windowHeight = LocalWindowInfo.current.containerDpSize.height
-        val sheetHeight = (windowHeight * AttachSheetHeightFraction)
-            .coerceAtMost(AttachSheetHeightCap)
-            .coerceAtLeast(AttachSheetHeightFloor)
-
-        Column(modifier = Modifier.fillMaxWidth().height(sheetHeight)) {
+        // 过滤框是否已展开。`InputField` 的必填参数，且承担 API ≤ 27 上的
+        // 「先展开再聚焦」兼容职责（见下面那段注释），所以必须是真的状态。
+        var filterExpanded by remember { mutableStateOf(false) }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                // 内容自适应：少时贴内容、多时才到上限。见两个常量的注释
+                // （原先这里是按窗口比例算出来的**定高**）。
+                .heightIn(min = AttachSheetHeightFloor, max = AttachSheetHeightCap),
+        ) {
             // 1) 根切换条（与文件面板共用）。换根是这一屏最常用的动作之一，
             //    所以放在最上面一行，而不是藏进菜单。
             FileRootSwitcher(
@@ -121,45 +147,52 @@ fun AttachFileOverlay(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 2.dp),
             )
 
-            // 2) 面包屑 + 「上一级」。两者都在**不滚动**的头部：
-            //    目录走深了以后，回退入口跟着滚上去就等于没有。
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // 面包屑自己带横向滚动（Miuix BreadcrumbBar 的语义），所以这里给 weight 让它占满。
-                Box(modifier = Modifier.weight(1f)) {
-                    FileBreadcrumbBar(filePath = browser.path, onNavigate = onNavigate)
-                }
-                ZhiIconButton(
-                    icon = ZhiIcons.upLevel,
-                    description = "上一级目录",
-                    onClick = onUp,
-                    iconSize = 16.dp,
-                    compact = 30.dp,
-                )
-            }
+            // 2) 面包屑 + 「上一级」，共用 [FilePathBar]（与文件面板**同一行几何**）。
+            //    两者都在**不滚动**的头部：目录走深了以后，回退入口跟着滚上去就等于没有。
+            FilePathBar(
+                filePath = browser.path,
+                onNavigate = onNavigate,
+                trailing = {
+                    ZhiIconButton(
+                        icon = ZhiIcons.upLevel,
+                        description = "上一级目录",
+                        onClick = onUp,
+                        iconSize = 16.dp,
+                        compact = 30.dp,
+                    )
+                },
+            )
 
-            // 3) 目录内过滤（不滚动头部）。
+            // 3) 目录内过滤（不滚动头部）。Miuix `InputField` = 胶囊搜索框，
+            //    与侧栏「搜索会话」同一形态。
             //
-            // 代价说清：Miuix `InputField` 有 45dp 最小高度，常驻会少显示一行列表。
-            // 这里仍然常驻 —— 它是"边看边改"的控件，跟着滚上去就没法用了；
-            // 而文件面板那边不留过滤框是因为那一屏本身还要放表头 + 三个动作按钮。
-            ZhiTextField(
-                value = browser.filter,
-                onValueChange = onFilterChange,
-                label = "在当前目录里过滤",
-                useLabelAsPlaceholder = true,
-                colors = TextFieldDefaults.textFieldColors(
-                    labelColor = scheme.onSurfaceVariantSummary,
-                ),
-                insideMargin = DpSize(10.dp, 2.dp),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+            // ⚠️ 横向内边距**必须**给：不给的话它会满幅横过去，比同屏的面包屑行、
+            //    根标签栏和文件行都宽（用户截图里最刺眼的就是这一处）。
+            //
+            // ⚠️ `expanded` 必须接**真实状态**，不能传常量：API ≤ 27（本工程 minSdk 24）
+            //    上 `hasFocusReassignBug` 为 true，未展开时组件是 **disabled** 的，
+            //    靠 `onExpandedChange(true)` 先展开再聚焦。传常量的话那个回调是空的，
+            //    Android 8.x 上这个框永远点不进去。（与 `Sidebar.kt` 同一处理由。）
+            //
+            // ⚠️ 代价说清：`InputField` 的 `label` 只在「未展开且为空」时当占位符显示
+            //    （源码 `labelText = if (!(query.isNotEmpty() || expanded)) label else ""`），
+            //    所以**第一次点开之后**占位文字就让位给放大镜图标。侧栏本来就是这个行为，
+            //    两处一致 —— 要的是"同一个搜索框"，不是"每处一套占位符规则"。
+            InputField(
+                query = browser.filter,
+                onQueryChange = onFilterChange,
+                onSearch = { },
+                expanded = filterExpanded,
+                onExpandedChange = { filterExpanded = it },
+                label = "在本目录里过滤",
+                modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m),
             )
 
             // 4) 一层子项。空时把**原因**说出来，别让面板空着让人以为坏了。
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            // ⚠️ `fill = false` 是这一整处改动的**关键**：默认 `fill = true` 会把
+            // Column 撑到 heightIn 的上限，少条目时照样是一大片空 —— 等于没改。
+            // 置 false 之后列表按内容高，Column 也就按内容高（下限由 heightIn 的 min 托住）。
+            Box(modifier = Modifier.weight(1f, fill = false).fillMaxWidth()) {
                 val listState = rememberLazyListState()
                 LazyColumn(
                     state = listState,

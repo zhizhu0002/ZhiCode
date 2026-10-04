@@ -107,6 +107,54 @@ internal fun FileRootSwitcher(
     }
 }
 
+/**
+ * 「当前路径」那一行：**面包屑 + 行尾动作**。
+ *
+ * ## 为什么要有这个组件（而不是各写一排）
+ *
+ * 这一行原先在三处各写一份，而且三份都不一样：
+ *
+ * | 位置 | 原先 | 毛病 |
+ * |---|---|---|
+ * | 文件面板 · 列表 | `PaneHeader("文件", "N 项")` + 单独一行面包屑 | 标题与**顶部标签栏**重复；列表前叠了三层 |
+ * | 文件面板 · 查看/编辑 | `PaneHeader(文件名, "语言 · 只读")` + 面包屑 | 同上（文件名是真信息，保留） |
+ * | 附加面板 | `Row { Box(weight) { 面包屑 }; 上一级 }` | 与文件面板的行高、内边距各不相同 |
+ *
+ * 用户的原话是「把文件页面重构吧」「这个也不是很好看」。所以这里收成一份：
+ * **面包屑占满剩余宽度、动作靠右**，三处共用同一行几何。
+ *
+ * ## `trailing` 是必需而不是可选
+ *
+ * 文件面板要在这一行放三个动作（新建文件 / 新建文件夹 / 上一级），附加面板只放
+ * 一个（上一级）。做成插槽之后两处是**同一段布局代码**；若各写一份，
+ * 「上一级」在一边是 30dp 图标、在另一边是别的东西，迟早对不上 —— 而
+ * [FileChrome] 文件头写的就是"两边必须一直是同一副样子"。
+ *
+ * @param trailing 行尾动作。`null` 时不占位（查看/编辑态的面包屑行就是这样）。
+ * ⚠️ 用**可空槽位**而不是 `= {}`（与 `PaneHeader` 的 `actions` 同一写法），
+ * 顺带避开一个坑：测试按花括号配对取函数正文时，参数默认值的那对 `{}`
+ * 会被当成函数体 —— `DebugHudStructureTest.bodyOf` 在 FilePathBar 上实测踩到过。
+ */
+@Composable
+internal fun FilePathBar(
+    filePath: String,
+    onNavigate: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    trailing: (@Composable RowScope.() -> Unit)? = null,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 面包屑自己带横向滚动（Miuix `BreadcrumbBar` 的语义），所以给它 weight 占满，
+        // 路径深了会在这块区域里滚，而不是把动作按钮挤出屏幕。
+        Box(modifier = Modifier.weight(1f)) {
+            FileBreadcrumbBar(filePath = filePath, onNavigate = onNavigate)
+        }
+        trailing?.invoke(this)
+    }
+}
+
 /** 把绝对路径拆成 Miuix `BreadcrumbBar` 需要的层级列表。 */
 @Composable
 internal fun FileBreadcrumbBar(
