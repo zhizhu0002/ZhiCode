@@ -88,7 +88,7 @@ fun FilesPane(
      */
     emptyNote: String = "",
     // ---- 可读写相关（都来自 FileOps 封装好的操作） ----
-    root: FileRoot = FileRoot.PROJECT,
+    root: FileRoot = FileRoot.HOME,
     onSwitchRoot: (FileRoot) -> Unit = {},
     draft: String? = null,
     onStartEdit: () -> Unit = {},
@@ -112,12 +112,17 @@ fun FilesPane(
     Surface(modifier = modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
         Column(modifier = Modifier.fillMaxSize()) {
             FileRootSwitcher(selected = root, onSelect = onSwitchRoot)
-            // 三种形态（目录列表 / 只读查看 / 编辑）之间的过渡。
+            // 过渡有两个轴：**形态**（目录列表 / 只读查看 / 编辑）与**根**（HOME / 共享存储）。
             //
             // key 用**小枚举**，绝不把 `draft` 文本或 `openFile` 编进去：
             // 把 draft 编进去的话每敲一个键 targetState 都变，转场会被重放（等于没在写字）。
             // 载荷（`openFile`）走 rememberLastNonNull —— 退场那 200ms 里它可能已经变 null，
             // 直接用会让离场那一屏画成空白。
+            //
+            // 根也编进来，是因为用户报的「标签栏切换没有动画」在文件面板这一侧就是"换根时整屏硬切"。
+            // 两条轴共用同一个 AnimatedContent（而不是再嵌一层）：
+            // 嵌套要把下面两百行整体缩进一遍，纯属给 diff 添噪音，而判据本来就分得开 ——
+            // `stageMoved` 为 false 就是纯换根，走淡变。
             val shownFile = rememberLastNonNull(openFile)
             val stage = when {
                 openFile == null -> FileStage.LIST
@@ -125,11 +130,16 @@ fun FilesPane(
                 else -> FileStage.VIEW
             }
             AnimatedContent(
-                targetState = stage,
+                targetState = stage to root,
                 // 进出文件＝进出**一层**，用横向推移；
                 // 只读 ↔ 编辑＝同一层的模式切换，用淡变（横推会显得像换了个文件）。
                 transitionSpec = {
-                    if (targetState == FileStage.LIST || initialState == FileStage.LIST) {
+                    // 换根 = 同一层的**另一个地方** → 淡变。
+                    // 不横推，是因为横推在本文件里已经表达了「进出**一层**目录」；
+                    // 两个语义共用一个动画，用户就分不清"我换了个根"还是"我进了个目录"。
+                    val stageMoved = targetState.first != initialState.first
+                    val listInvolved = targetState.first == FileStage.LIST || initialState.first == FileStage.LIST
+                    if (stageMoved && listInvolved) {
                         (slideInHorizontally(ZhiMotion.enterSpec) { it / 3 } + fadeIn(ZhiMotion.fadeInSpec))
                             .togetherWith(
                                 slideOutHorizontally(ZhiMotion.exitSpec) { -it / 3 } +
@@ -140,7 +150,8 @@ fun FilesPane(
                     }
                 },
                 label = "fileStage",
-            ) { st ->
+            ) { key ->
+                val st = key.first
                 // ⚠️⚠️ 每个分支**必须只吐一个** composable —— 这里是外层那个 `Column(…)`。
                 //
                 // [AnimatedContent] 的容器是**叠放**语义（转场时它必须把新旧两屏放在同一个

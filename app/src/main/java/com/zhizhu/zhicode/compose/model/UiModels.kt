@@ -363,19 +363,23 @@ data class OpenFile(
 )
 
 /**
- * 文件面板的根（三选一）。
+ * 文件面板的根（**两选一**）。
  *
- * <p>做成可切换而不是固定一个根，是因为这三处是**三种不同的活儿**：
- * 项目里是代码，HOME 里是配置（`.bashrc`、脚本），共享存储里是用户真正
- * 要处理的文件（下载、截图、导出）。原先面板被 `rootPath() = projectPath`
- * 关在项目里，HOME 与共享存储都走不到。
+ * ## 原先有第三个：「项目」
+ *
+ * 它指向设置里的**项目路径**，而项目路径默认就是 HOME —— 于是用户看到的是
+ * 「项目」与「HOME」两个按钮指向**同一个目录**（截图里点了「项目」，面包屑却停在
+ * `home`），纯冗余。所以按用户的要求把它删掉，只留 HOME 与共享存储。
+ *
+ * ⚠️ 代价说清：设置里改过**自定义项目路径**的用户，那个目录在文件面板里
+ * 没有直达入口了（若它在 HOME 之下，仍可一层层点进去）。项目路径本身没有被删，
+ * 它还给会话与引擎用，只是不再是文件面板的一个根。
  *
  * <p>⚠️ 共享存储那一路要**先给「所有文件访问权限」**才列得出东西，
  * 否则 `list()` 返回 null。界面据 [WorkspaceUiState.fileNote] 那条
  * 「无法读取（权限不足）」如实呈现，而不是显示"0 项"骗人。
  */
 enum class FileRoot(val label: String) {
-    PROJECT("项目"),
     HOME("HOME"),
     SHARED("共享存储"),
 }
@@ -433,7 +437,7 @@ data class FileDeletePrompt(
  *
  * ## 三个字段的分工
  *
- * - [attachRoot]：[FileRoot] 三选一，与文件面板同一个枚举、同一套语义；
+ * - [attachRoot]：[FileRoot] 与文件面板同一个枚举、同一套语义；
  * - [attachPath]：当前目录的绝对路径；
  * - [attachEntries]：**这一层**的子项（`FileBrowser.children` 的结果，
  *   与文件面板 `fileEntries` 是同一个数据来源）；
@@ -443,7 +447,7 @@ data class FileDeletePrompt(
  */
 data class AttachBrowserState(
     /** 当前根：项目 / HOME / 共享存储。 */
-    val root: FileRoot = FileRoot.PROJECT,
+    val root: FileRoot = FileRoot.HOME,
     /** 当前目录的绝对路径。 */
     val path: String = "",
     /** 当前目录的**一层**子项。 */
@@ -566,7 +570,7 @@ data class WorkspaceUiState(
     val fileNote: String = "",
     val openFile: OpenFile? = null,
     /** 文件面板的根：项目 / HOME / 共享存储。 */
-    val fileRoot: FileRoot = FileRoot.PROJECT,
+    val fileRoot: FileRoot = FileRoot.HOME,
     /**
      * 编辑中的正文。**null 表示只读查看**（不是"空文件"）——
      * 这个区别是刻意的：空文件也必须能进入编辑态去写内容。

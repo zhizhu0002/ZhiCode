@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.animation.core.snap
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,7 +39,6 @@ import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.panes.FilesPane
 import com.zhizhu.zhicode.compose.ui.panes.TerminalPane
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
-import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
 import top.yukonga.miuix.kmp.utils.springAnimateToPage
 
 /** （以下内容从 `AppScaffold.kt` 原地拆出，注释逐字未改。） */
@@ -106,18 +104,20 @@ internal fun WideWorkspace(
             // 没被单独量过。
             //
             // 现在照窄屏已验证的做法：`HorizontalPager` 保留相邻页的组合，
-            // 转场交给官方那条 `PagerNavigationSpringSpec`。
+            // 转场交给官方那条弹簧 —— 由 `springAnimateToPage` 驱动
+            // （`PagerNavigationSpringSpec`），与窄屏同一句、同一条曲线。
             //
-            // 三个必须显式给出的参数：
+            // 两个必须显式给出的参数：
             //  · `userScrollEnabled = false`：副栏的页签是**顶栏那一行**，
             //    面板本身不该能被手指横滑（滑动与"列表横向手势"会打架）。
-            //    窄屏那边保留滑动（底部导航条 + 滑动是导航栏的通行约定），
-            //    这里没有那条约定，所以关掉。
+            //    ⚠️ 窄屏本轮**也关掉了**，但理由与手势无关，而是**唯一真源**：
+            //    手指横滑能改页码却改不了 `state.tab`，两者一对不上就会出现
+            //    「标签栏高亮对话、内容却是终端」（窄屏那段注释里有实测症状）。
             //  · `beyondViewportPageCount = secondary.size`：三页都预先组合并摆放，
             //    切换那一刻不再付首次测量的钱（窄屏那段注释里有实测依据）。
-            //  · `flingBehavior(snapAnimationSpec = PagerNavigationSpringSpec)`：
-            //    与窄屏同一条曲线。宽屏副栏大约占屏宽一半，滑动距离短，
-            //    这条弹簧在短距离下同样只是"可见的滑动"而不是一段等待。
+            //
+            // （原先这里还有第三个参数 `flingBehavior(snapAnimationSpec = …)`：它只服务
+            //   "手指拖拽之后的回弹吸附"，横滑关掉之后就是死配置，已随窄屏一起去掉。）
             //
             // `rememberSaveableStateHolder` 仍然保留，但**挪进每一页内部**：
             // 它原本解决的是"面板被销毁后还能记住滚动位置"，现在面板不销毁了，
@@ -129,22 +129,20 @@ internal fun WideWorkspace(
                     secondaryTabs.size
                 }
             }
-            // 与窄屏同款：状态是唯一真源，页码**在组合期**用非挂起的请求跟随它。
-            val requestedSecondary = secondaryTabs.indexOf(state.tab)
-            if (requestedSecondary >= 0 && requestedSecondary != secondaryPagerState.currentPage &&
-                requestedSecondary != secondaryPagerState.targetPage
-            ) {
-                secondaryPagerState.requestScrollToPage(requestedSecondary)
+            // 与窄屏同款：状态是唯一真源，页码用**动画**跟随它。
+            // 不用 `requestScrollToPage` —— 它是瞬时的（"下一次重测量时直接到位"），
+            // 点了会硬切；窄屏那段注释里有完整的来源与取舍。
+            LaunchedEffect(state.tab) {
+                val target = secondaryTabs.indexOf(state.tab)
+                if (target >= 0) secondaryPagerState.springAnimateToPage(target)
             }
             val secondaryPaneStateHolder = rememberSaveableStateHolder()
             HorizontalPager(
                 state = secondaryPagerState,
                 modifier = Modifier.weight(1f),
+                // 宽屏本来就关掉了横滑（见上方），所以 flingBehavior 是死配置 ——
+                // 与窄屏同款，随横滑一起去掉。
                 userScrollEnabled = false,
-                flingBehavior = PagerDefaults.flingBehavior(
-                    state = secondaryPagerState,
-                    snapAnimationSpec = PagerNavigationSpringSpec,
-                ),
                 beyondViewportPageCount = secondaryTabs.size,
                 pageContent = { page ->
                     val tab = secondaryTabs[page]
@@ -219,33 +217,37 @@ internal fun CompactWorkspace(
     }
     // 状态（ViewModel）是唯一来源：点击页签改 state.tab，再由这里把 pager 跟过去。
     //
-    // ---- 为什么是 `requestScrollToPage`，而且**直接写在组合里** ----
+    // ---- 为什么是「动画跟随」，而不是当初那个 `requestScrollToPage` ----
     //
-    // 这里是整条链上最贵的一跳，实测（逐段打时间戳，升到终端页那一次）：
+    // 这里一度用的是 `pagerState.requestScrollToPage(target)`，为的是绕开一条死等：
+    // `scrollToPage` 是 **suspend** 的，内部 `awaitScrollDependencies()` 要等 Pager 的
+    // layout 依赖就绪，应用空闲时不产帧就干等（逐段打时间戳实测过 263.7ms，其中它占 212ms），
+    // 而 `requestScrollToPage` 非挂起、由 Pager 在本次组合之后的布局阶段自己完成。
     //
-    // ```
-    // up → onClick                2ms    ✅
-    // onClick → LaunchedEffect     39ms   ← 状态变到 effect 被派发
-    // LaunchedEffect 体内          212ms  ← 就是这一句 scrollToPage
-    // → 落定                       11ms
-    // 合计                       263.7ms  ← 用户说的"点完要等 0.1~0.2s"
-    // ```
+    // ⚠️ 但那个 API 的语义是**瞬时**的，这一点当时判断错了。AOSP `PagerState.kt` 的文档：
     //
-    // 两个毛病叠在一起：
-    //  1. `scrollToPage` 是 **suspend** 的，内部要 `awaitScrollDependencies()`
-    //     等 Pager 的 layout 依赖就绪。应用空闲时不产帧，它就在那里干等 —— 212ms。
-    //  2. `LaunchedEffect` 的 body 要等状态改完之后的下一轮组合才被派发，白搭 39ms。
+    //   | Requests the [page] to be at the snapped position **during the next remeasure** …
+    //   | Any scroll in progress will be cancelled.
     //
-    // `requestScrollToPage` 是**非挂起**的"请求"：它只记下目标页，由 Pager 在
-    // 本次组合之后的布局阶段自己完成，既不等待也不占用一帧。而它被设计成可以在
-    // 组合期调用（这是官方推荐的"程序化换页"用法），所以第 2 跳也一并省掉。
+    // 实现就是 `snapToItem(page, offsetFraction, forceRemeasure = false)` —— 直接到位。
+    // 而 `snapAnimationSpec` 只管**手指拖拽之后**的回弹吸附，从不管程序化请求，
+    // 所以那条弹簧对点击是死代码。观感就是用户报的「TAB 栏切换是没有动画的」。
+    //
+    // 现在走 Miuix 官方那条（`PagerGestureUtils.kt` 的注释就写着 "**Animates** to [target]…"，
+    // 官方示例 `TabRowSection.kt:63` 用的也正是它）：`springAnimateToPage`。
+    //
+    // 首帧与进程重建都**不会误播**：`PagerState(currentPage = tabs.indexOf(state.tab))`
+    // 一上来就在目标页，动画距离为 0，等于不播。
+    //
+    // 代价照实说：`LaunchedEffect` 那一跳约一帧（上面那张表里量到 39ms）。
+    // 这次要的就是动画，动画本身 200~300ms，那一帧可以忽略。
     ZhiFrameTrace.stamp("compose-enter")
-    val requestedPage = tabs.indexOf(state.tab)
-    if (requestedPage >= 0 && requestedPage != pagerState.currentPage &&
-        requestedPage != pagerState.targetPage
-    ) {
-        pagerState.requestScrollToPage(requestedPage)
-        ZhiFrameTrace.stamp("requested-$requestedPage")
+    LaunchedEffect(state.tab) {
+        val target = tabs.indexOf(state.tab)
+        if (target >= 0) {
+            ZhiFrameTrace.stamp("animate-to-$target")
+            pagerState.springAnimateToPage(target)
+        }
     }
     // 诊断：量「手指抬起 → 页面真正切完」用了多久。
     //
@@ -268,29 +270,42 @@ internal fun CompactWorkspace(
         snapshotFlow { pagerState.currentPage }
             .collect { page -> ZhiFrameTrace.stamp("current-$page") }
     }
-    // 落定用**官方那一条弹簧**（`TabRowSection.kt:68-71` 的写法）。
+    // 动效走**官方那一条弹簧**（`PagerNavigationSpringSpec`；官方示例 `TabRowSection.kt:63`）。
     //
     // 这里一度改成 `snap()` 瞬时落定，因为实测「抬起 → 切完」要 263.7ms。但那 263.7ms
     // 里弹簧只占 116ms，真正的病根是另外两处：面板在**重建**（单帧 458.5ms）与请求是
-    // **挂起**的（`scrollToPage` 要等 layout 依赖，212ms 死等）。两处都已修掉之后：
-    //   · 请求走非挂起的 `requestScrollToPage` → **同一帧**就发出，不再有死等；
-    //   · 三页预先摆放 → 切换时不再现场测量布局；
-    //   · 帧率追平官方（release 实测 8.3ms / janks 0）。
-    // 于是这条弹簧恢复成官方手感是安全的：它带来的是**可见的滑动**，而不是一段空白等待。
+    // **挂起**的（`scrollToPage` 要等 layout 依赖，212ms 死等）。两处都已修掉，帧率追平
+    // 官方（release 实测 8.3ms / janks 0）—— 动画这时才是加分项，而不是一段空白等待。
     // 这也正是用户要的（他另外那个 App 的页签就是有切换动画的）。
     //
+    // ⚠️⚠️ 但"弹簧"这个词一度让人以为点击**早就在动**了。**不是。** 当年为了绕开那 212ms
+    // 死等，请求换成了非挂起的 `requestScrollToPage`，而它的语义是瞬时的
+    // （"下一次重测量时直接到位"）—— 于是这条弹簧对点击成了**死代码**，用户看到的是硬切。
+    // 现在动效来自上面那句 `springAnimateToPage`，用的仍是这条 spec。
+    //
+    // ⚠️ 它**不经过** `flingBehavior`：那条 `PagerDefaults.flingBehavior(…)` 只服务
+    // "手指拖拽之后的回弹吸附"，既然横滑已关掉就是死配置，已删。反过来说 ——
+    // 要恢复横滑，必须把它**一起**加回来，否则松手不会吸附。
+    //
     // ⚠️ 若哪天帧数据退化（avg 明显高于官方 8.3~15.4ms，或 max 回到数百 ms），
-    // 第一件该做的就是把这里换回 `snap()`：动画只有在**跑得动**的时候才是加分项。
-    val flingBehavior = PagerDefaults.flingBehavior(
-        state = pagerState,
-        snapAnimationSpec = PagerNavigationSpringSpec,
-    )
+    // 第一件该做的就是把动效换回瞬时：动画只有在**跑得动**的时候才是加分项。
 
     Column(modifier = Modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.weight(1f),
-            flingBehavior = flingBehavior,
+            // 不接受横滑切页 —— 这一条与上面「唯一真源」是**同一个决定**。
+            //
+            // 实测过的症状：在对话页左右滑，能滑动，但**切不过去**。原因是组合里那段同步
+            // 每次组合都跑，手指把 pager 推到第 1 页而 `state.tab` 仍是「对话」，
+            // 于是下一帧就把它拽回去。
+            //
+            // 更要紧的是：换成「按 state.tab 播动画」之后，横滑会**真的**停在第 1 页 ——
+            // 那时标签栏高亮「对话」、内容却是「终端」，双真源当场对不上。
+            // 页码只能由 `state.tab` 驱动，所以手势就删掉（用户也是这么要求的）。
+            //
+            // 顺带的好处：面板很重（终端里有原生 `AndroidView`），拖拽过程中来回测量本来就贵。
+            userScrollEnabled = false,
             // 相邻页留在组合里：这就是"不再重建面板"的关键。
             //
             // 取值 = 页数（而不是 1）：实测切到终端页时，`currentPage`/`settledPage`

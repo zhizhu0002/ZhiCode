@@ -113,6 +113,16 @@ public final class DebugHudStructureTest {
      */
     private static final String FILE_CHROME = SRC + "ui/panes/FileChrome.kt";
 
+    /**
+     * 工具输出的行数上限与渲染（工具卡展开的 diff 与原始输出）。
+     *
+     * ⚠️ 本轮它**搬过家**：原先住在 `ui/panes/ChangesPane.kt` —— 那个文件混着一个
+     * 已经删掉的「变更」面板和这套还活着的工具。两者挤在一起的下场是：
+     * 删面板时差点把活代码一起删掉，而且没人看得清它还活着（文件名、注释、
+     * 测试常量**全都指着"变更面板"**）。所以 §35 也钉住它必须住在 ui/chat 下。
+     */
+    private static final String TOOL_OUTPUT_TEXT = SRC + "ui/chat/ToolOutputText.kt";
+
     /** 侧栏：会话列表（删除/重排时行要不瞬移，见 §25）。 */
     private static final String SIDEBAR = SRC + "ui/Sidebar.kt";
 
@@ -1069,14 +1079,45 @@ public final class DebugHudStructureTest {
         // ⚠️ 因此这里**只断正面形态，不断"禁止 snap()"**：帧数据万一退化，
         // 正确动作恰恰是把它换回 `snap()`（`WorkspaceLayouts.kt` 里那段 ⚠️ 注释
         // 写的就是这件事）。禁止它会让那条退路变成"改了测试才能走"的路。
-        requireContains(layouts, "snapAnimationSpec = PagerNavigationSpringSpec",
-                WORKSPACE_LAYOUTS + " 的落定必须用官方那条弹簧（PagerNavigationSpringSpec）："
+        // ⚠️⚠️ 这条断言本轮**换了个落脚点**，因为弹簧的用法变了 —— 而它守的东西没变。
+        //
+        // 原先它钉的是 `snapAnimationSpec = PagerNavigationSpringSpec`（`flingBehavior` 的参数）。
+        // 那条配置**只服务"手指拖拽之后的回弹吸附"**，而本轮按用户要求关掉了横滑，
+        // 于是它成了死配置、被删掉。更要紧的是：它当年就已经**不是**点击的动效来源 ——
+        // 点击走的是 `requestScrollToPage`（瞬时），所以那条弹簧对点击是死代码，
+        // 用户看到的正是"TAB 栏切换没有动画"。
+        //
+        // 现在弹簧由 `springAnimateToPage` 施加（Miuix 那条 API 内部就是
+        // `PagerNavigationSpringSpec`，官方示例 `TabRowSection.kt:63` 用的也是它）。
+        // 所以判据改成钉这句调用 —— 它才是"落定用的是官方弹簧"的真正证据。
+        //
+        // ⚠️ 仍然**只断正面形态，不断"禁止瞬时"**：帧数据万一退化，正确动作是把
+        // `springAnimateToPage` 换回瞬时的做法（`WorkspaceLayouts.kt` 里那段 ⚠️ 注释
+        // 写的就是这件事）。禁止它会让那条退路变成"改了测试才能走"的路。
+        requireContains(layouts, "springAnimateToPage(",
+                WORKSPACE_LAYOUTS + " 的落定必须用官方那条弹簧（经由 springAnimateToPage ——"
+                        + " Miuix 那条 API 内部就是 PagerNavigationSpringSpec）："
                         + "官方 example 的 TabRowSection 就是它，瞬时落定会与官方手感不一致。"
-                        + "⚠️ 它只在**跑得动**时才是加分项 —— 帧数据退化时应当换回 snap()，"
+                        + "⚠️ 它只在**跑得动**时才是加分项 —— 帧数据退化时应当换回瞬时，"
                         + "那时要连同这条断言一起改，而不是让测试挡住退路");
-        requireContains(layouts, "requestScrollToPage(requestedPage)",
-                WORKSPACE_LAYOUTS + " 必须用非挂起的 requestScrollToPage："
-                        + "scrollToPage 是 suspend 的，要 awaitScrollDependencies，实测多花 212ms");
+        // 反面：瞬时请求那条 API **不得回到源码里**（注释里提到它是允许的 ——
+        // 那段注释正是在解释"为什么当初选的它、后来又为什么放弃"）。
+        require(!layouts.contains("requestScrollToPage"),
+                WORKSPACE_LAYOUTS + " 里又出现了 requestScrollToPage 的调用（这个变量已经过 stripComments）："
+                        + "它是瞬时的（AOSP 文档：下一次重测量时直接到位），"
+                        + "用它当点击动效就是用户报的「切换没有动画」");
+        // ⚠️⚠️ 这里原本**要求**用非挂起的 `requestScrollToPage`（理由是 scrollToPage 是 suspend 的、
+        // 要 awaitScrollDependencies、实测多花 212ms）。这条要求本轮**撤掉了**，因为它是错的：
+        //
+        //  · 那 212ms 的病根是「挂起等待 layout 依赖」，而它已经被别的手段解决（三页预先摆放、
+        //    面板不再重建），不是靠换 API 换掉的；上面的弹簧断言一直在说明这件事。
+        //  · `requestScrollToPage` 的语义是**瞬时**的（AOSP 文档：下一次重测量时直接到位），
+        //    把它当点击动效的载体，代价就是**没有动画** —— 用户报的正是这个
+        //    （「TAB 栏切换是没有动画的」）。
+        //
+        // 所以"非挂起"这个目标本身没错，错的是拿它当**唯一**的落定方式：现在动效由
+        // `springAnimateToPage` 施加（它也算"不硬等"——首帧就在目标页时动画距离为 0）。
+        // 历史留在这里，免得下一个人看到 `LaunchedEffect` 又把它"优化"回去。
         // 反向：既然 Pager 已经保住了面板，就不该再出现 AnimatedContent 那套。
         require(!layouts.contains("AnimatedContent("),
                 WORKSPACE_LAYOUTS + " 不应再用 AnimatedContent 切面板："
@@ -1359,10 +1400,16 @@ public final class DebugHudStructureTest {
         requireContains(workspaceLayouts, "beyondViewportPageCount = secondaryTabs.size,",
                 WORKSPACE_LAYOUTS + " 的宽屏副栏 Pager 必须 `beyondViewportPageCount = "
                         + "secondaryTabs.size`（同上，值不能是 0 或 1）");
-        require(countOf(workspaceLayouts, "snapAnimationSpec = PagerNavigationSpringSpec") >= 2,
-                WORKSPACE_LAYOUTS + " 的宽窄两套 Pager 都必须用官方那一条弹簧落定"
-                        + "（当前 " + countOf(workspaceLayouts, "snapAnimationSpec = PagerNavigationSpringSpec")
-                        + " 处）");
+        // ⚠️ 这条数的是**新的落定入口**：宽窄两套 Pager 各要一次 `springAnimateToPage`。
+        //
+        // 原先它数的是 `snapAnimationSpec = PagerNavigationSpringSpec`（`flingBehavior` 的参数）。
+        // 那条配置本轮随"关掉横滑"一起删掉了 —— 它只服务拖拽后的回弹吸附，没有拖拽就是死配置。
+        // 而它当年也**根本不是**点击的动效来源（点击走的是瞬时的 `requestScrollToPage`），
+        // 所以数它其实是数错了对象：那两处一直是 2，用户却报"没有动画"。
+        // 改用 `springAnimateToPage(` 之后，这条断言第一次真正对应"点击会动"这件事。
+        require(countOf(workspaceLayouts, "springAnimateToPage(") >= 2,
+                WORKSPACE_LAYOUTS + " 的宽窄两套 Pager 都必须用官方那一条弹簧**动画**落定"
+                        + "（当前 " + countOf(workspaceLayouts, "springAnimateToPage(") + " 处）");
         // 反向：宽屏副栏不得再有 `PaneHost` 的裸 `when` 直挂 —— 那正是硬切的来源。
         require(!workspaceLayouts.contains("secondaryPaneStateHolder.SaveableStateProvider(state.tab.name)"),
                 WORKSPACE_LAYOUTS + " 的宽屏副栏不得再按 `state.tab` 直接挂 PaneHost："
@@ -1420,9 +1467,22 @@ public final class DebugHudStructureTest {
         // 这是本组里最容易犯且**最不容易被发现**的一条：把 draft 编进 targetState，
         // 每敲一个键 targetState 都变 → 每敲一个键都重放一次转场。
         // 表现为"打字时整块在闪"，很容易被误诊成输入法问题。
-        requireContains(filesPane2, "targetState = stage,",
-                FILES_PANE + " 的 AnimatedContent 必须以**小枚举** stage 为 key，"
-                        + "不能把 draft（正在编辑的文本）编进去 —— 那样每敲一个键都会重放转场");
+        // key 从 `stage` 扩成 `stage to root`：换根也要有过渡（用户报的
+        // 「标签栏切换没有动画」在文件面板这一侧就是换根时整屏硬切）。
+        // 这条断言的**意图没变** —— 禁止把 draft（正在编辑的文本）编进 key。
+        // 所以判据也跟着改成"key 必须是两个小枚举的组合"，而不是只认 stage：
+        // 只认 stage 的话，真正的回归（有人把 draft 编进去）照样会被漏掉。
+        requireContains(filesPane2, "targetState = stage to root,",
+                FILES_PANE + " 的 AnimatedContent 必须以**小枚举** stage + root 为 key，"
+                        + "不能把 draft（正在编辑的文本）或 openFile 编进去 —— "
+                        + "前者每敲一个键都重放转场，后者每次开合文件都重放");
+        require(!filesPane2.contains("targetState = stage to draft")
+                        && !filesPane2.contains("targetState = draft"),
+                FILES_PANE + " 的转场 key 里出现了 draft：编辑时每敲一个键 targetState 都变，"
+                        + "转场会被重放，等于没在写字");
+        requireContains(filesPane2, "val stageMoved = targetState.first != initialState.first",
+                FILES_PANE + " 的 transitionSpec 必须区分「换了 stage」与「只换了 root」："
+                        + "不区分的话换根会走横推，与「进出一层目录」的语义撞车");
         require(filesPane2.contains("private enum class FileStage"),
                 FILES_PANE + " 必须有 FileStage 枚举（LIST/VIEW/EDIT）："
                         + "把 `openFile == null` / `draft != null` 直接拼成 key 时，"
@@ -1552,21 +1612,30 @@ public final class DebugHudStructureTest {
         String rootSwitcher = bodyOf(fileChrome, "internal fun FileRootSwitcher(");
         require(!rootSwitcher.isEmpty(),
                 FILE_CHROME + " 找不到 FileRootSwitcher 的正文（签名变了？）");
-        require(rootSwitcher.contains("color = segmentColor,")
-                        && rootSwitcher.contains("contentColor = segmentContent,"),
-                FILE_CHROME + " 的根切换条必须把 animateColorAsState 的结果用在 Card 的 "
-                        + "color / contentColor 上：只声明不用等于没做动画");
-        requireAbsentIn(rootSwitcher, "color = if (active)",
-                FILE_CHROME + " 的根切换条不得再出现 `color = if (active) …` 的硬切配色");
-        requireAbsentIn(rootSwitcher, "contentColor = if (active)",
-                FILE_CHROME + " 的根切换条不得再出现 `contentColor = if (active) …` 的硬切配色");
-        // 下沉反馈也必须落在**这一段**里（FileListRow 那张卡也是 Sink，整文件查会漏）。
-        requireAbsentIn(rootSwitcher, "pressFeedbackType = PressFeedbackType.None",
-                FILE_CHROME + " 的根切换条必须给 pressFeedbackType = PressFeedbackType.Sink，"
-                        + "它是真按钮，按下去要有下沉反馈（Miuix Card 的默认值是 None；"
-                        + "对照官方 CardSection.kt:122）");
-        requireContains(rootSwitcher, "pressFeedbackType = PressFeedbackType.Sink",
-                FILE_CHROME + " 的根切换条缺 pressFeedbackType = Sink");
+        // ⚠️⚠️ 本条**在本轮改成了另一个判据**，改的原因是设计本身换了 —— 用户报
+        // 「TAB 栏切换是没有动画的」，而这一行原先是一排自制 `Card`，选中态只有一次
+        // `animateColorAsState` 的底色淡变，**没有滑动指示器**（硬跳）。
+        //
+        // 现在它转发到 [ZhiSegmentedTabs]（= 顶部工作区标签用的 Miuix `TabRowWithContour`），
+        // 指示器由 Miuix 内部 `indicatorOffset.animateTo(target, tween(200))` 滑动。
+        //
+        // 所以旧判据（`color = segmentColor` + `PressFeedbackType.Sink`）已经不适用，
+        // 而**意图没变**：这一行必须有"选中态会动"的动画，不能退回硬切。
+        // 新判据就钉这一点，并且反过来禁自制卡片行 —— 自制就等于把指示器动画再丢一次。
+        requireContains(rootSwitcher, "ZhiSegmentedTabs(",
+                FILE_CHROME + " 的根切换条必须转发到 ZhiSegmentedTabs（Miuix TabRowWithContour）："
+                        + "自制的卡片行没有滑动指示器，选中态只能靠底色淡变，观感就是「硬跳」");
+        requireContains(rootSwitcher, "selectedIndex = roots.indexOf(selected)",
+                FILE_CHROME + " 的根切换条必须把当前根传给 selectedIndex —— "
+                        + "指示器的位置就是从它算出来的，传死了就不会动");
+        requireContains(rootSwitcher, ".fillMaxWidth().height(WorkspaceTabRowHeight)",
+                FILE_CHROME + " 的根切换条必须沿用 WorkspaceTabRowHeight（45dp）："
+                        + "这一行原先实测也在 ~44dp，对齐之后面板高度不变；自己再定一个数迟早与顶部标签不一致");
+        requireAbsentIn(rootSwitcher, "animateColorAsState(",
+                FILE_CHROME + " 的根切换条不得退回自制的 animateColorAsState —— "
+                        + "那是「没有滑动指示器」那个版本的特征，回来就等于把用户报的问题又装回去");
+        requireAbsentIn(rootSwitcher, "Card(",
+                FILE_CHROME + " 的根切换条不得退回一排自制 Card —— 见上一条，同一个原因");
         // ② TerminalChrome：扩展键字色 + 会话行底色/字色。
         requireContains(terminalChrome, "color = keyColor,",
                 TERMINAL_CHROME + " 的扩展键必须把 animateColorAsState 的结果用在字色上");
@@ -2031,9 +2100,13 @@ public final class DebugHudStructureTest {
         String openPicker = bodyOf(stripComments(read(root, VIEW_MODEL)), "fun openAttachPicker()");
         require(!openPicker.isEmpty(),
                 VIEW_MODEL + " 找不到 openAttachPicker 的正文（改名了？）");
-        requireContains(openPicker, "AttachBrowserState(root = FileRoot.PROJECT, path = root)",
-                VIEW_MODEL + " 的 openAttachPicker 必须从 FileRoot.PROJECT 起："
-                        + "从 HOME 起正是「打开就灌满相册」的起点");
+        // ⚠️ 起点本轮从 FileRoot.PROJECT 改成 FileRoot.HOME —— 因为「项目」这一档被删了
+        // （它默认与 HOME 是同一个目录）。**这一条守的东西没变**：起点必须是**一个根**，
+        // 而且必须是从根一路走进去，不能回退成"打开就把某处递归列一遍"。
+        // 所以判据留在这里，只是根的名字换了。
+        requireContains(openPicker, "AttachBrowserState(root = FileRoot.HOME, path = root)",
+                VIEW_MODEL + " 的 openAttachPicker 必须从 FileRoot.HOME 起："
+                        + "从根一层层走进去才是对的，起点写死了别的路径就会绕过根的概念");
 
         // ⑧ 列目录异步回来时必须确认还是当前那个目录。
         //
@@ -2130,6 +2203,108 @@ public final class DebugHudStructureTest {
         requireContains(assistantCard, "alpha = cursorAlpha.value",
                 MESSAGE_CARDS + " 的流式光标必须在 graphicsLayer 的 lambda 里读 alpha"
                         + "（`alpha = cursorAlpha.value` = 绘制期读，动画期间不重组）");
+
+        // ---- 35. TAB 栏：切换要有动画、根只剩两个、「变更」残留不许回来 ----------
+        //
+        // 这一节对应本轮三条用户反馈：
+        //
+        //   ① 「把这个改成 TAB 栏」—— 文件面板那一行（项目 / HOME / 共享存储）原来是
+        //      **自制的一排 `Card`**，选中态只有一次 `animateColorAsState` 的底色淡变，
+        //      没有滑动指示器，观感就是高亮块硬跳。现在转发到 `ZhiSegmentedTabs`
+        //      （Miuix `TabRowWithContour`），指示器由它内部的
+        //      `indicatorOffset.animateTo(target, tween(200))` 滑动。
+        //   ② 「TAB 栏切换是没有动画的」—— **这一条最容易再犯**，判据在上面（§27 附近那对
+        //      正反断言）：点击走的是 `requestScrollToPage`，而 AOSP 文档写的是
+        //      「下一次重测量时**直接到位**」，瞬时。当年那条 `snapAnimationSpec` 只服务
+        //      手指拖拽之后的回弹吸附，对点击是死代码 —— 所以「两处都用了官方弹簧」
+        //      这句话一直是对的，而用户看到的仍然是硬切。
+        //   ③ 「项目指向 home，这个按钮没必要保留」—— `FileRoot.PROJECT` 指的是设置里的
+        //      项目路径，而它默认就是 HOME，两个入口指向同一个目录。
+        //
+        // ①②的断言在上面几节（§27 / §28 / §29① / 落定那条），本节只加**它们没覆盖到的**
+        // 三样：横滑必须关掉、「变更」残留不许回来、工具截断必须住在新文件里。
+
+        // ① 横滑必须关掉，而且宽窄两处都要关。
+        //
+        // 症状是「能滑动，但切不过去」：组合里那段同步每次组合都跑，手指把 pager 推到
+        // 第 1 页而 `state.tab` 仍是「对话」，下一帧就把它拽回去。
+        // 更要紧的是：落定改成「按 state.tab 播动画」之后，横滑会**真的**停在第 1 页 ——
+        // 那时标签栏高亮「对话」、内容却是「终端」，双真源当场对不上。
+        require(countOf(layouts, "userScrollEnabled = false") >= 2,
+                WORKSPACE_LAYOUTS + " 的宽窄两套 Pager 都必须 userScrollEnabled = false"
+                        + "（当前 " + countOf(layouts, "userScrollEnabled = false") + " 处）："
+                        + "手指横滑能改页码却改不了 state.tab，两者一对不上就会出现"
+                        + "「标签栏高亮对话、内容却是终端」");
+        require(!layouts.contains("userScrollEnabled = true"),
+                WORKSPACE_LAYOUTS + " 不得再有 userScrollEnabled = true —— 见上一条");
+        require(!layouts.contains("flingBehavior"),
+                WORKSPACE_LAYOUTS + " 不得再有 flingBehavior：它只服务「手指拖拽之后的回弹吸附」，"
+                        + "横滑关掉之后就是死配置。而它看起来像「切页动画靠它」，"
+                        + "会让人以为删了它动画会坏（实际动效来自 springAnimateToPage，不经过它）。"
+                        + "要恢复横滑就得把它一起加回来，否则松手不会吸附");
+
+        // ② 「变更」残留不许回来，且不许靠「换个文件名再来一份」绕过。
+        require(!Files.exists(Paths.get(root, "app/src/main/java/com/zhizhu/zhicode/compose/ui/panes/ChangesPane.kt")),
+                "ui/panes/ChangesPane.kt 不该回来：它混了一个已删的面板与**还活着**的"
+                        + "工具输出截断，两者挤在一起的下场就是删的时候差点把活代码一起删掉");
+        require(!Files.exists(Paths.get(root, "app/src/main/java/com/zhizhu/zhicode/compose/data/GitChanges.kt")),
+                "data/GitChanges.kt 不该回来：它只服务那个已删的「变更」面板");
+        int stale = 0;
+        try (Stream<Path> walk = Files.walk(Paths.get(root, "app/src/main"))) {
+            for (Path file : walk.filter(p -> p.toString().endsWith(".kt")).toList()) {
+                String code = stripComments(new String(Files.readAllBytes(file),
+                        java.nio.charset.StandardCharsets.UTF_8));
+                for (String needle : new String[]{"ChangesPane(", "GitChanges", "DiffState", "DiffFile"}) {
+                    if (code.contains(needle)) {
+                        stale++;
+                        System.out.println("        (残留 " + needle + "：" + file + ")");
+                    }
+                }
+            }
+        }
+        require(stale == 0,
+                "仓库里仍有「变更」面板的残留（" + stale + " 处，清单见上）：面板本体、它的数据源、"
+                        + "以及只服务它的 DiffState / DiffFile 都该没了。"
+                        + "这里钉「整仓没有」而不是「那个文件不存在」—— 后者挡不住换个名字再来一份");
+        require(!viewModel.contains("copy(diff ="),
+                VIEW_MODEL + " 不得再往 uiState 写 diff：那个字段随「变更」面板一起删了");
+
+        // ③ 工具输出的截断**必须**住在新文件里，而且消费者仍要用它。
+        //
+        // 这一条不是洁癖：那一半代码在本轮之前一直活着（工具卡展开的 diff 与原始输出），
+        // 却和那个死面板挤在同一个文件里 —— 文件名、注释、测试常量**全都指着「变更面板」**，
+        // 于是「删掉那个面板」这件事看起来像「删掉整个文件」。搬出来之后它才看得见。
+        require(Files.exists(Paths.get(root, TOOL_OUTPUT_TEXT)),
+                "ui/chat/ToolOutputText.kt 必须存在：工具输出的行数上限与渲染住在那里");
+        String toolOutput = stripComments(read(root, TOOL_OUTPUT_TEXT));
+        for (String decl : new String[]{
+                "fun DiffLines(", "fun OutputLines(", "internal fun limitLines(",
+                "internal const val MaxRenderedLines = 300", "internal class LimitedLines(",
+        }) {
+            requireContains(toolOutput, decl, TOOL_OUTPUT_TEXT + " 缺少 " + decl);
+        }
+        require(!filesPane2.contains("fun DiffLines(") && !filesPane2.contains("fun OutputLines("),
+                FILES_PANE + " 里不该有 DiffLines / OutputLines —— 它们服务的是工具卡，"
+                        + "埋在 panes/ 下就会被当成死代码");
+        String cardsForToolOutput = stripComments(read(root, MESSAGE_CARDS));
+        requireContains(cardsForToolOutput, "DiffLines(diffText)",
+                MESSAGE_CARDS + " 展开的工具 diff 必须仍走 DiffLines"
+                        + "（它现在的家在 ui/chat/ToolOutputText.kt）");
+        requireContains(cardsForToolOutput, "OutputLines(activity.output)",
+                MESSAGE_CARDS + " 展开的工具输出必须仍走 OutputLines");
+
+        // ④ 换根时必须把列表**清空**。
+        //
+        // 不清的话，换根那次淡变的**进场**那一屏画的还是上一个根的文件（列表要等
+        // reloadFiles 从 IO 回来才换），动画看起来像"闪了一下旧内容"。
+        // 本地列目录是毫秒级，清掉之后用户看不到中间态。
+        String switchRootBody = bodyOf(stripComments(read(root, VIEW_MODEL)), "fun switchFileRoot(");
+        require(!switchRootBody.isEmpty(),
+                VIEW_MODEL + " 找不到 switchFileRoot 的正文（改名了？）");
+        requireContains(switchRootBody, "fileEntries = emptyList()",
+                VIEW_MODEL + " 的 switchFileRoot 必须清空 fileEntries："
+                        + "不清的话换根淡变的进场那一屏画的还是上一个根的文件（要等 IO 回来才换），"
+                        + "动画看起来像闪了一下旧内容");
     }
 
     /** 子串出现次数。 */

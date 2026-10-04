@@ -3,10 +3,12 @@ package com.zhizhu.zhicode.compose.ui.panes
 import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -15,7 +17,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.termux.shared.termux.TermuxConstants
@@ -25,7 +26,8 @@ import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
-import com.zhizhu.zhicode.compose.ui.ZhiMotion
+import com.zhizhu.zhicode.compose.ui.ZhiSegmentedTabs
+import com.zhizhu.zhicode.compose.ui.WorkspaceTabRowHeight
 import top.yukonga.miuix.kmp.basic.BreadcrumbBar
 import top.yukonga.miuix.kmp.basic.BreadcrumbItem
 import top.yukonga.miuix.kmp.basic.Card
@@ -62,10 +64,23 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  */
 
 /**
- * 根切换条。
+ * 根切换条：**标签栏**（Miuix `TabRowWithContour`，与顶部工作区标签同一个组件）。
  *
- * 三个根是三种不同的活儿（项目=代码、HOME=配置、共享存储=用户的文件），
- * 放在标题栏下方一行，而不是藏进菜单里 —— 换根是这一屏最常用的动作之一。
+ * ## 原先是一排自制卡片，用户报了「切换没有动画」
+ *
+ * 它原来是 `Row { FileRoot.entries.forEach { Card(…) } }`，选中态只有一次
+ * `animateColorAsState` 的底色淡变 —— **没有滑动指示器**。
+ * 所以观感是"高亮块硬跳"，而不是标签栏那种"指示器滑过去"。
+ *
+ * 现在转发到 [ZhiSegmentedTabs]（= 顶部工作区标签用的那一个）：
+ *
+ *  · 指示器由 Miuix 内部 `indicatorOffset.animateTo(target, tween(200))` 滑动（`TabRow.kt`）；
+ *  · 字号、圆角、行高、按压反馈全部与顶部一致，不必再各调一套；
+ *  · 两颗按钮等分整行（`matchWidth = true`）。
+ *
+ * ⚠️ 行高沿用 [WorkspaceTabRowHeight]（45dp）。这不是"顺手对齐"：换根这一行原先
+ * 实测也在 ~44dp（外层 4dp 上下留白 + 卡片 6dp 内边距 + 一行 Footnote），
+ * 所以对齐之后**面板高度没有变**，只是里面的东西换成了真标签栏。
  */
 @Composable
 internal fun FileRootSwitcher(
@@ -73,50 +88,22 @@ internal fun FileRootSwitcher(
     onSelect: (FileRoot) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val scheme = MiuixTheme.colorScheme
-    Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
+    val roots = FileRoot.entries
+    Box(
+        modifier = modifier.fillMaxWidth().height(WorkspaceTabRowHeight),
+        contentAlignment = Alignment.Center,
     ) {
-        FileRoot.entries.forEach { root ->
-            val active = root == selected
-            // 选中/未选中的底色与文字色都走淡变：选中时底色与文字是**同时**变的，
-            // 只淡其中一个会出现「字已经变了、底还是旧色」的中间态，比不做动画更难看。
-            // 令牌用 [ZhiMotion.colorSpec]（150ms + SinOut），与 ModelPicker 那几个
-            // 选中行同一条曲线。对照 upstream `CardSection.kt:122`：可点的卡用 `Sink`。
-            val segmentColor by animateColorAsState(
-                targetValue = if (active) scheme.primaryContainer else ZhiColors.cardSurface(),
-                animationSpec = ZhiMotion.colorSpec,
-                label = "fileRootSegment",
-            )
-            val segmentContent by animateColorAsState(
-                targetValue = if (active) scheme.onPrimaryContainer else scheme.onSurface,
-                animationSpec = ZhiMotion.colorSpec,
-                label = "fileRootSegmentContent",
-            )
-            Card(
-                onClick = { if (!active) onSelect(root) },
-                modifier = Modifier.weight(1f),
-                cornerRadius = ZhiRadius.inner,
-                insideMargin = PaddingValues(vertical = 6.dp),
-                colors = CardDefaults.defaultColors(
-                    color = segmentColor,
-                    contentColor = segmentContent,
-                ),
-                // Miuix 的默认值是 `PressFeedbackType.None`（这是**超出手册默认**的一项，
-                // 不是改回默认）：它是一个真的按钮，按下去要有下沉反馈。
-                // 对应 upstream 官方示例 `CardSection.kt:122`「可点卡片用 Sink」。
-                pressFeedbackType = PressFeedbackType.Sink,
-            ) {
-                Text(
-                    text = root.label,
-                    fontSize = ZhiTextScale.Footnote,
-                    fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
+        ZhiSegmentedTabs(
+            tabs = roots.map { it.label },
+            selectedIndex = roots.indexOf(selected).coerceAtLeast(0),
+            onSelect = { index ->
+                // 点当前那一项不该回调：Miuix 会照常高亮，而我们这里的回调会触发
+                // 一次多余的「回到该根顶层」（用户明明就在顶层，却被弹回顶上）。
+                roots.getOrNull(index)?.let { if (it != selected) onSelect(it) }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            matchWidth = true,
+        )
     }
 }
 

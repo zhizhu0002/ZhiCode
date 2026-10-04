@@ -82,13 +82,21 @@ public final class FilePanelWriteTest {
                 VM + " 的增/改/删都必须走 FileOps：名字校验（带 / 会写到别的目录去）、"
                         + "拒绝覆盖、删除不跟符号链接，全在那一处");
 
-        // ---- 2. 根可切换：项目 / HOME / 共享存储 --------------------------
+        // ---- 2. 根可切换：HOME / 共享存储 ----------------------------------
+        //
+        // ⚠️ 本轮删掉了第三档「项目」。它指向设置里的项目路径，而那个路径默认就是
+        // HOME —— 于是两个按钮指向同一个目录（用户截图里点了「项目」，面包屑却停在
+        // `home`），纯冗余。所以这里从三档改成两档，并**反过来**钉住它不许回来：
+        // 它回来的唯一方式就是有人又把 projectPath 当成一个独立的位置。
         require(models.contains("enum class FileRoot"),
-                MODELS + " 必须有 FileRoot：三个根是三种不同的活儿"
-                        + "（项目=代码、HOME=配置、共享存储=用户的文件）");
-        for (String tier : new String[]{"PROJECT", "HOME", "SHARED"}) {
+                MODELS + " 必须有 FileRoot：两个根是两种不同的活儿"
+                        + "（HOME=代码与配置、共享存储=用户的文件）");
+        for (String tier : new String[]{"HOME", "SHARED"}) {
             require(models.contains(tier), MODELS + " 的 FileRoot 缺少 " + tier + " 档");
         }
+        require(!models.contains("PROJECT"),
+                MODELS + " 的 FileRoot 不该再有 PROJECT 档：它默认与 HOME 是同一个目录，"
+                        + "两个入口指向同一处只会让人怀疑自己点错了");
         require(!squash(vm).contains("privatesuspendfunrootPath"),
                 VM + " 的 rootPath 不该是常量：它原先恒等于 projectPath，"
                         + "于是 HOME 与共享存储都走不到");

@@ -3694,7 +3694,7 @@ class WorkspaceViewModel(
         _state.update {
             it.copy(
                 attachPickerOpen = true,
-                attachBrowser = AttachBrowserState(root = FileRoot.PROJECT, path = root),
+                attachBrowser = AttachBrowserState(root = FileRoot.HOME, path = root),
             )
         }
         reloadAttachEntries(root)
@@ -3752,7 +3752,6 @@ class WorkspaceViewModel(
 
     /** 某个 [FileRoot] 的顶层路径。与文件面板的 `rootPath()` 同一套对应关系。 */
     private fun attachRootPath(root: FileRoot): String = when (root) {
-        FileRoot.PROJECT -> _state.value.projectPath
         FileRoot.HOME -> TermuxConstants.TERMUX_HOME_DIR_PATH
         FileRoot.SHARED -> StorageLinks.EXTERNAL_ROOT
     }
@@ -5229,7 +5228,6 @@ class WorkspaceViewModel(
      * 都走不到（面包屑点不出去，「上一级」也会被弹回来）。
      */
     private fun rootPath(): String = when (_state.value.fileRoot) {
-        FileRoot.PROJECT -> _state.value.projectPath
         FileRoot.HOME -> TermuxConstants.TERMUX_HOME_DIR_PATH
         FileRoot.SHARED -> StorageLinks.EXTERNAL_ROOT
     }
@@ -5240,7 +5238,6 @@ class WorkspaceViewModel(
             it.copy(
                 fileRoot = root,
                 filePath = when (root) {
-                    FileRoot.PROJECT -> it.projectPath
                     FileRoot.HOME -> TermuxConstants.TERMUX_HOME_DIR_PATH
                     FileRoot.SHARED -> StorageLinks.EXTERNAL_ROOT
                 },
@@ -5248,6 +5245,11 @@ class WorkspaceViewModel(
                 fileDraft = null,
                 fileNameForm = null,
                 fileDeletePrompt = null,
+                // ⚠️ 必须清空：不清的话，换根那次淡变的**进场**那一屏画的还是上一个根的文件
+                // （列表要等 reloadFiles 从 IO 回来才换），于是动画看起来像"闪了一下旧内容"。
+                // 清掉之后进场是干净的，本地列目录是毫秒级，用户看不到中间态。
+                fileEntries = emptyList(),
+                fileNote = "",
             )
         }
         viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
