@@ -46,8 +46,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import java.io.File
 
-internal val FileRowMinHeight = 72.dp
-internal val FileRowSidePadding = 28.dp
+internal val FileRowMinHeight = 64.dp
+internal val FileRowSidePadding = 20.dp
 
 @Composable
 internal fun FileRootSwitcher(selected: FileRoot, onSelect: (FileRoot) -> Unit, modifier: Modifier = Modifier) {
@@ -69,7 +69,7 @@ internal fun FilePathBar(
     summary: String = "",
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
-    Column(modifier.fillMaxWidth().padding(horizontal = FileRowSidePadding, vertical = 4.dp)) {
+    Column(modifier.fillMaxWidth().padding(horizontal = FileRowSidePadding, vertical = 0.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             FileBreadcrumbBar(filePath, onNavigate, Modifier.weight(1f))
             trailing?.invoke(this)
@@ -91,7 +91,7 @@ internal fun FileBreadcrumbBar(filePath: String, onNavigate: (String) -> Unit, m
         onItemClick = { index -> items.getOrNull(index)?.let { onNavigate(it.path) } },
         highlightIndex = items.lastIndex,
         modifier = modifier,
-        insideMargin = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+        insideMargin = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
     )
 }
 
@@ -127,25 +127,25 @@ internal fun FileListRow(
         onLongPress = onLongPress,
         modifier = modifier.fillMaxWidth().heightIn(min = FileRowMinHeight),
         cornerRadius = 0.dp,
-        insideMargin = PaddingValues(horizontal = FileRowSidePadding, vertical = 15.5.dp),
+        insideMargin = PaddingValues(horizontal = FileRowSidePadding, vertical = 10.dp),
         colors = CardDefaults.defaultColors(color = background, contentColor = scheme.onSurface),
         pressFeedbackType = PressFeedbackType.Sink,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Icon(
                 painter = if (entry.directory) androidx.compose.ui.res.painterResource(com.zhizhu.zhicode.compose.R.drawable.file_browser_folder) else ZhiIcons.file,
                 contentDescription = null,
                 tint = if (entry.directory) Color.Unspecified else scheme.primary,
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(36.dp),
             )
             Column(Modifier.weight(1f)) {
-                Text(entry.name, fontSize = 17.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(entry.name, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 var dirCount by remember(entry.path, entry.modifiedAt) { mutableStateOf<Int?>(null) }
                 if (entry.directory) LaunchedEffect(entry.path, entry.modifiedAt) {
                     dirCount = withContext(Dispatchers.IO) { FileOps.childCount(File(entry.path)).takeIf { it >= 0 } }
                 }
                 val info = fileInfoLine(entry, now, dirCount)
-                if (info.isNotEmpty()) Text(info, fontSize = 12.sp, color = scheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                if (info.isNotEmpty()) Text(info, fontSize = 11.sp, color = scheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 1.dp))
             }
             when {
                 selectionMode -> Checkbox(state = if (selected) ToggleableState.On else ToggleableState.Off, onClick = null)

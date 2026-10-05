@@ -59,6 +59,8 @@ import com.zhizhu.zhicode.compose.model.FileDeletePrompt
 import com.zhizhu.zhicode.compose.model.FileEntry
 import com.zhizhu.zhicode.compose.model.FileNameForm
 import com.zhizhu.zhicode.compose.model.FileRoot
+import com.zhizhu.zhicode.compose.model.FileListOptions
+import com.zhizhu.zhicode.compose.model.FileSortKey
 import com.zhizhu.zhicode.compose.model.LiveOutput
 import com.zhizhu.zhicode.compose.model.McpConfigState
 import com.zhizhu.zhicode.compose.model.McpScope
@@ -570,7 +572,13 @@ class WorkspaceViewModel(
     /** 刷新文件面板当前目录的列表，并同步 [WorkspaceUiState.fileNote]。 */
     private fun reloadFiles() {
         val path = _state.value.filePath
-        val entries = FileBrowser.children(path)
+        val options = _state.value.fileListOptions
+        val loaded = FileBrowser.children(path)
+        val entries = loaded
+            .asSequence()
+            .filter { options.query.isBlank() || it.name.contains(options.query.trim(), ignoreCase = true) }
+            .sortedWith(fileComparator(options))
+            .toList()
         val dir = java.io.File(path)
         val note = when {
             entries.isNotEmpty() -> ""
@@ -4716,6 +4724,22 @@ class WorkspaceViewModel(
 
     // ---------- 工作区 ----------
 
+    /**
+     * 新 Activity 从启动器打开时回到对话页。
+     *
+     * 工作区页签不是会话内容，不应被旧 Activity/系统恢复成文件页；运行中的用户主动
+     * 切页仍由 [selectTab] 保留，不在每次 onResume 时强行打断。
+     */
+    fun resetTabForLaunch() {
+        _state.update {
+            it.copy(
+                tab = WorkspaceTab.CHAT,
+                fileSelection = emptySet(),
+                fileSelectionMode = false,
+            )
+        }
+    }
+
     fun selectTab(tab: WorkspaceTab) {
         _state.update {
             it.copy(
@@ -5293,7 +5317,7 @@ class WorkspaceViewModel(
         // ⚠️ 同时清掉选择：`fileSelection` 存的是**路径**，跨目录之后那些路径
         // 指向的是另一个目录里的东西。留着的话，在 A 目录选中的文件会在 B 目录里
         // 被"删除/附加" —— 而那是另外一批文件。
-        _state.update { it.copy(filePath = path, openFile = null, fileSelection = emptySet(), fileSelectionMode = false) }
+        _state.update { it.copy(filePath = path, openFile = null, fileDraft = null, fileSelection = emptySet(), fileSelectionMode = false, fileListOptions = FileListOptions()) }
         viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
     }
 
@@ -5317,7 +5341,15 @@ class WorkspaceViewModel(
         }
         viewModelScope.launch(Dispatchers.IO) {
             val file = FileBrowser.read(entry.path)
-            _state.update { it.copy(openFile = file, message = "已打开 ${entry.name}（只读）") }
+            val editable = isEditablePreview(file)
+            _state.update {
+                it.copy(
+                    openFile = file,
+                    // 正常文本打开即进入编辑态；截断、二进制和读失败仍保持只读。
+                    fileDraft = file.takeIf { editable }?.content,
+                    message = if (editable) "已打开 ${entry.name}（可编辑）" else "已打开 ${entry.name}（只读）",
+                )
+            }
         }
     }
 
@@ -5354,9 +5386,46 @@ class WorkspaceViewModel(
                 // 清掉之后进场是干净的，本地列目录是毫秒级，用户看不到中间态。
                 fileEntries = emptyList(),
                 fileNote = "",
+                fileListOptions = FileListOptions(),
             )
         }
         viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
+    }
+
+    fun updateFileQuery(query: String) {
+        _state.update { it.copy(fileListOptions = it.fileListOptions.copy(query = query)) }
+        viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
+    }
+
+    fun updateFileSort(key: FileSortKey, descending: Boolean = _state.value.fileListOptions.descending) {
+        _state.update { it.copy(fileListOptions = it.fileListOptions.copy(sortKey = key, descending = descending)) }
+        viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
+    }
+
+    fun toggleFileSortDirection() {
+        val current = _state.value.fileListOptions
+        updateFileSort(current.sortKey, !current.descending)
+    }
+
+    fun setFileGrid(grid: Boolean) {
+        _state.update { it.copy(fileListOptions = it.fileListOptions.copy(grid = grid)) }
+    }
+
+    /**
+     * 文件管理器式排序：目录永远在文件之前，正序/倒序只改变每组内部顺序。
+     * 不能对完整列表直接调用 reversed()，否则倒序会把文件夹整体翻到文件后面。
+     */
+    private fun fileComparator(options: FileListOptions): Comparator<FileEntry> {
+        val inside = when (options.sortKey) {
+            FileSortKey.NAME -> compareBy<FileEntry> { it.name.lowercase() }
+            FileSortKey.SIZE -> compareBy<FileEntry> { it.size }.thenBy { it.name.lowercase() }
+            FileSortKey.MODIFIED -> compareBy<FileEntry> { it.modifiedAt }.thenBy { it.name.lowercase() }
+            FileSortKey.TYPE -> compareBy<FileEntry> {
+                it.name.substringAfterLast('.', "").lowercase()
+            }.thenBy { it.name.lowercase() }
+        }
+        val orderedInside = if (options.descending) inside.reversed() else inside
+        return compareBy<FileEntry> { if (it.directory) 0 else 1 }.then(orderedInside)
     }
 
     /** 共享存储没授权时，跳去系统那个「所有文件访问权限」页面。 */
@@ -5373,13 +5442,29 @@ class WorkspaceViewModel(
     fun startEditingFile() {
         val open = _state.value.openFile ?: return
         if (!isEditablePreview(open)) {
-            _state.update { it.copy(message = "这个文件不能编辑（二进制或读取失败）") }
+            _state.update { it.copy(message = "这个文件不能编辑（二进制、读取失败或预览已截断）") }
             return
         }
         _state.update { it.copy(fileDraft = open.content) }
     }
 
     fun updateFileDraft(text: String) = _state.update { it.copy(fileDraft = text) }
+
+    /** 重新读取当前文件；编辑页会在调用前处理未保存确认。 */
+    fun reloadOpenFile(charsetName: String? = null) {
+        val open = _state.value.openFile ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = FileBrowser.read(open.path, charsetName ?: open.charsetName)
+            val editable = isEditablePreview(file)
+            _state.update {
+                it.copy(
+                    openFile = file,
+                    fileDraft = file.takeIf { editable }?.content,
+                    message = "已重新加载 ${file.name}",
+                )
+            }
+        }
+    }
 
     /** 放弃改动。没有这一步的话，误点「编辑」就只能靠保存来退出。 */
     fun cancelEditingFile() = _state.update {
@@ -5392,18 +5477,28 @@ class WorkspaceViewModel(
      * 成功后**重新读一遍**这个文件（而不是把草稿写进 openFile）：读回来的是磁盘上
      * 真实的样子。写盘可能被截断、可能有编码问题，用草稿冒充成功等于对用户说谎。
      */
-    fun saveFile() {
+    fun saveFile(text: String? = null) {
         val open = _state.value.openFile ?: return
-        val draft = _state.value.fileDraft ?: return
+        val targetPath = open.path
+        val draft = text ?: _state.value.fileDraft ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            val error = FileOps.write(File(open.path), draft)
+            val charset = runCatching { java.nio.charset.Charset.forName(open.charsetName) }
+                .getOrDefault(Charsets.UTF_8)
+            val error = FileOps.write(File(targetPath), draft, charset)
             if (error != null) {
-                _state.update { it.copy(message = "保存失败：$error") }
+                _state.update { state ->
+                    if (state.openFile?.path == targetPath) state.copy(message = "保存失败：$error") else state
+                }
                 return@launch
             }
-            val reread = FileBrowser.read(open.path)
-            _state.update {
-                it.copy(openFile = reread, fileDraft = null, message = "已保存 ${open.name}")
+            val reread = FileBrowser.read(targetPath, open.charsetName)
+            _state.update { state ->
+                // 保存可能跨过一次返回/重新打开。旧 IO 结果不能覆盖新页面。
+                if (state.openFile?.path == targetPath) {
+                    state.copy(openFile = reread, fileDraft = null, message = "已保存 ${open.name}")
+                } else {
+                    state
+                }
             }
             reloadFiles()
         }
@@ -5418,7 +5513,9 @@ class WorkspaceViewModel(
      * 而不是"文件大不大"，因为 4MB 的文本是合法的、80 字节的二进制不是。
      */
     private fun isEditablePreview(open: OpenFile): Boolean =
-        !open.content.startsWith("（二进制文件，") && !open.content.startsWith("（读取失败")
+        !open.truncated &&
+            !open.content.startsWith("（二进制文件，") &&
+            !open.content.startsWith("（读取失败")
 
     // ---------- 文件：新建 / 重命名 / 删除 ----------
 
@@ -5693,8 +5790,10 @@ class WorkspaceViewModel(
      * 而不是整批失败 —— 用户挑了五个文件，其中一个是图片，不该整批白干。
      */
     fun attachSelectedEntries() {
-        val entries = selectedEntries().filterNot { it.directory }
-        if (entries.isEmpty()) return
+        val entries = selectedEntries()
+        // 附加的语义是读取文件正文；目录或文件夹/文件混选时明确置灰，避免
+        // 用户点下后悄悄忽略一部分选择。
+        if (entries.isEmpty() || entries.any { it.directory }) return
         clearFileSelection()
         viewModelScope.launch(Dispatchers.IO) {
             var attached = 0

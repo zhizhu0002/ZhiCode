@@ -10,12 +10,9 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -24,17 +21,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
 import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
@@ -105,6 +99,11 @@ internal fun ChatArea(
     // 注意 `workingStatus` 因此不再有专门的展示位（它是"正在思考…/正在执行 X…"这类
     // 进行时文案）。当前是否在跑由输入器右侧的停止键表达。
     ZhiFrameTrace.countRecompose("ChatArea")
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(Unit) {
+        // 只清理首帧系统/Compose 自动分配的焦点；用户点击输入框后的焦点不受影响。
+        focusManager.clearFocus(force = true)
+    }
     val floating = state.tasks.isNotEmpty()
 
     // 对话区**不加框**（改过两次，别再加回来）。
@@ -154,36 +153,13 @@ internal fun ChatArea(
         // 差一帧都能看出来），而列表的底部留白只解决"最后一条别被挡住"，
         // 键盘动画途中它跟不跟手**完全看不出来**。于是把逐帧的那份只留给布局，
         // 把列表这份压成低频 —— 重组次数就从"每帧"降到"每次键盘开合一两次"。
-        var settledImeLiftPx by remember { mutableStateOf(0) }
-        var imeFollowToken by remember { mutableStateOf(0) }
-        val imeInsets = WindowInsets.ime
-        val navigationBars = WindowInsets.navigationBars
+        var composerFocused by remember { mutableStateOf(false) }
+        val imeMotion = LocalImeMotion.current
         val density = LocalDensity.current
-        // 全屏浮层盖住工作区时，这一次 IME 变化与本输入器无关（见下面 offset 处的说明）。
+        // 全屏浮层盖住工作区时，窗口级 IME 属于浮层里的输入框，不应抬起后面的聊天输入器。
         val liftByFullScreenOverlay = state.sidebarOpen || state.settingsOpen ||
             state.uiDebugOpen || state.environmentOpen
-
-        LaunchedEffect(imeInsets, navigationBars, density, liftByFullScreenOverlay) {
-            // 被全屏浮层盖住时，这一次 IME 变化与工作区无关，留白里的键盘项按原语义归零。
-            if (liftByFullScreenOverlay) {
-                settledImeLiftPx = 0
-                return@LaunchedEffect
-            }
-            snapshotFlow {
-                (imeInsets.getBottom(density) - navigationBars.getBottom(density)).coerceAtLeast(0)
-            }
-                .distinctUntilChanged()
-                // `collectLatest` + `delay` 就是一个只用稳定 API 实现的去抖：
-                // 值还在动的时候，下一个新值会**取消**上一个块里的 delay，于是永远落不了地；
-                // 只有连续 ImeSettleMs 没有新值时才写一次状态。
-                // （不用 `debounce`：它是 `@FlowPreview`，本工程没有开那个 opt-in。）
-                .collectLatest { target ->
-                    delay(ImeSettleMs)
-                    val wasOpen = settledImeLiftPx > 0
-                    settledImeLiftPx = target
-                    if (!wasOpen && target > 0) imeFollowToken++
-                }
-        }
+        val settledImeLiftPx = if (liftByFullScreenOverlay) 0 else imeMotion.settledLiftPx
 
         val bottomInset = with(density) {
             ((floatingContentHeightPx + settledImeLiftPx).toDp() + FloatingBottomGap)
@@ -212,7 +188,8 @@ internal fun ChatArea(
             // 顶部留白：S1 重构后顶栏在 topBar 槽位已由 Scaffold padding 处理，
             // 对话列表不再需要让出头部高度，可从 Scaffold padding 顶部起排。
             bottomInset = bottomInset,
-            imeFollowToken = imeFollowToken,
+            imeOpenGeneration = if (liftByFullScreenOverlay) 0 else imeMotion.openGeneration,
+            composerFocused = composerFocused,
             // 首条消息落在顶栏（含 Tab 行）下缘；列表全高，滚动时消息从顶栏 blur 下穿过
             topInset = TopBarInsetCompact,
             // 主体调试模式：在真实消息上就地显示类型/长度/工具计数 + Markdown 源码开关；
@@ -287,12 +264,7 @@ internal fun ChatArea(
                 .offset {
                     // ⚠️ 别把这个读操作挪到组合里（比如 `val lift by remember { … }`），
                     // 一挪回组合就又变成每帧重组了 —— 那正是这次要修的东西。
-                    val lift = if (liftByFullScreenOverlay) {
-                        0
-                    } else {
-                        (imeInsets.getBottom(this) - navigationBars.getBottom(this))
-                            .coerceAtLeast(0)
-                    }
+                    val lift = if (liftByFullScreenOverlay) 0 else imeMotion.currentLiftPx
                     IntOffset(0, -lift)
                 }
                 // 实测**内容**高度（任务卡 + 反馈条 + 输入器自己）回报给上面的 bottomInset。
@@ -334,7 +306,13 @@ internal fun ChatArea(
             )
 
             // 悬浮输入器
-            ComposerHost(state = state, viewModel = viewModel, wide = wide, glass = glass)
+            ComposerHost(
+                state = state,
+                viewModel = viewModel,
+                wide = wide,
+                glass = glass,
+                onFocusChanged = { composerFocused = it },
+            )
         }
     }
 }
@@ -366,7 +344,6 @@ private val MinFloatingInset = 72.dp
  * 120ms 落在键盘动画的帧间隔之外（60Hz 一帧 16.7ms，120ms ≈ 7 帧没有新值才算停），
  * 键盘在动的时候绝不会被判定为停稳。
  */
-private const val ImeSettleMs = 120L
 
 /**
  * 悬浮的任务与状态卡。
@@ -411,6 +388,7 @@ private fun ComposerHost(
     viewModel: WorkspaceViewModel,
     wide: Boolean,
     glass: Glass,
+    onFocusChanged: (Boolean) -> Unit,
 ) {
     // 用 GetMultipleContents 而不是 GetContent：相册里一次挑多张是常态
     // （对比截图、多页文档），只能选一张的话用户得反复进出选择器。
@@ -460,6 +438,7 @@ private fun ComposerHost(
         onPickSlash = viewModel::pickSlashCommand,
         // 主体调试模式：输入行下方实时渲染当前输入的 Markdown（与对话流同一渲染器）
         debugMode = state.debugAppMode,
+        onFocusChanged = onFocusChanged,
     )
 }
 

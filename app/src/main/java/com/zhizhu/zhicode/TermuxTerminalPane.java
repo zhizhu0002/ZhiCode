@@ -460,8 +460,9 @@ public final class TermuxTerminalPane extends FrameLayout
                 view.attachSession(attached);
                 applyTerminalPalette(attached);
                 view.onScreenUpdated();
-                view.requestFocus();
-                view.postDelayed(TermuxTerminalPane.this::showKeyboard, 180);
+                // 这里只挂载终端，不主动 requestFocus/showKeyboard：宽屏 Pager 会预组合终端页，
+                // 如果在 attach 时抢焦点，应用每次启动都会把软键盘拉出来，即使用户仍在对话页。
+                // 用户点击终端或显式点「切换键盘」时，TerminalView 再按正常路径取得焦点。
                 // attach 时视图可能还没有尺寸（那时 TerminalView 的 mEmulator 会保持 null，
                 // 屏幕画成纯黑）。再确认一次：尺寸已经定下来就立刻量一次。
                 refreshTerminal();

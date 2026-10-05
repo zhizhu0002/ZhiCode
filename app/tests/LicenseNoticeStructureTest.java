@@ -113,8 +113,20 @@ public final class LicenseNoticeStructureTest {
         require(notice.contains("逐字未改") || notice.contains("未修改数据本身"),
                 "NOTICE 必须写明我们对这些上游数据做了什么修改（按 Apache-2.0 第 4 条）");
 
+        // 4i. MaterialFiles 只作为 GPL-3.0 的交互参考记录，不得被误报成已内嵌源码。
+        require(notice.contains("MaterialFiles") && notice.contains("GPL-3.0")
+                        && notice.contains("未复制"),
+                "NOTICE 必须记录 MaterialFiles 的 GPL-3.0 来源，并明确本工程未复制其源码");
         // 5. 分析过程的记录必须在，且指向可重跑的命令
         String analysis = read(root, "docs/licensing.md");
+        require(analysis.contains("MaterialFiles") && analysis.contains("设计参考")
+                        && analysis.contains("未复制"),
+                "docs/licensing.md 必须说明 MaterialFiles 仅是设计参考而不是源码依赖");
+        require(notice.contains("Rosemoe Sora Editor") && notice.contains("LGPL-2.1")
+                        && notice.contains("language-textmate"),
+                "NOTICE 必须记录 Sora Editor 及其 LGPL-2.1 组件");
+        require(analysis.contains("Rosemoe Sora Editor") && analysis.contains("0.24.6"),
+                "docs/licensing.md 必须记录 Sora Editor 的版本与来源");
         require(analysis.contains("Java_com_termux_terminal_JNI_") && analysis.contains("jackpal"),
                 "docs/licensing.md 必须记录 libtermux.so 的许可判定依据");
         require(analysis.contains("tools/provenance.sh"),

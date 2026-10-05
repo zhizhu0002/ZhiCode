@@ -223,8 +223,29 @@ object ZhiIcons {
      */
     val add: Painter @Composable get() = vector(ZhiMaterialIcons.Add)
 
+    /** 新建：带圆环的加号，和附件动作区分开。 */
+    val newEntry: Painter @Composable get() = vector(ZhiMaterialIcons.AddCircle)
+
+    /** 文件操作：复制。 */
+    val copy: Painter @Composable get() = vector(ZhiMaterialIcons.ContentCopy)
+
+    /** 文件操作：粘贴。 */
+    val paste: Painter @Composable get() = vector(ZhiMaterialIcons.ContentPaste)
+
+    /** 文件页网格显示。 */
+    val grid: Painter @Composable get() = vector(ZhiMaterialIcons.GridView)
+
+    /** 编辑器自动换行。 */
+    val wrapText: Painter @Composable get() = vector(ZhiMaterialIcons.WrapText)
+
+    /** 文件页列表显示。 */
+    val list: Painter @Composable get() = vector(ZhiMaterialIcons.List)
+
     /** 完成：圆里的对勾。 */
     val done: Painter @Composable get() = vector(ZhiMaterialIcons.CheckCircle)
+
+    /** 保存：软盘。 */
+    val save: Painter @Composable get() = vector(ZhiMaterialIcons.Save)
 
     /** 失败：圆里的感叹号。与 [close] 不是同一个字形。 */
     val failed: Painter @Composable get() = vector(ZhiMaterialIcons.Error)

@@ -105,9 +105,12 @@ android {
 
 // Strip the AIDL-generated "Using: ..." comment line which contains backslash sequences
 // that Java's compiler mis-parses as Unicode escapes on Windows paths.
+// Resolve the generated-source directory during configuration. Referencing the
+// Groovy script's buildDir from a task action breaks Gradle configuration cache.
+def aidlOut = layout.buildDirectory.dir("generated/aidl_source_output_dir").get().asFile
+
 tasks.matching { it.name.startsWith('compileReleaseJavaWithJavac') || it.name.startsWith('compileDebugJavaWithJavac') }.all {
     doFirst {
-        def aidlOut = file("$buildDir/generated/aidl_source_output_dir")
         if (aidlOut.exists()) {
             aidlOut.eachFileRecurse { f ->
                 if (f.name.endsWith('.java')) {

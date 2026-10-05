@@ -206,6 +206,11 @@ dependencies {
      */
     implementation 'androidx.profileinstaller:profileinstaller:1.4.0'
 
+    // 高性能增量代码编辑器：缩放、惯性滚动与 TextMate 语法分析。
+    // LGPL-2.1，许可证与来源见 NOTICE。
+    implementation 'io.github.rosemoe:editor:0.24.6'
+    implementation 'io.github.rosemoe:language-textmate:0.24.6'
+
     // 原版引擎源码里用到了 androidx.annotation 的 @NonNull/@Nullable 等注解，仅编译期需要
     compileOnly 'androidx.annotation:annotation:1.8.1'
 

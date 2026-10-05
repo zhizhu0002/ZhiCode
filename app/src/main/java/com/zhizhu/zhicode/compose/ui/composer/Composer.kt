@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -116,6 +117,7 @@ fun Composer(
      */
     debugMode: Boolean = false,
     modifier: Modifier = Modifier,
+    onFocusChanged: (Boolean) -> Unit = {},
 ) {
     ZhiFrameTrace.countRecompose("Composer")
     val scheme = MiuixTheme.colorScheme
@@ -223,7 +225,10 @@ fun Composer(
                     // 比原版的 minLines = 2 更矮，只占一行起，随内容长高
                     minLines = 1,
                     maxLines = 5,
-                    modifier = Modifier.weight(1f).heightIn(min = 36.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 36.dp)
+                        .onFocusChanged { onFocusChanged(it.isFocused) },
                 )
 
 

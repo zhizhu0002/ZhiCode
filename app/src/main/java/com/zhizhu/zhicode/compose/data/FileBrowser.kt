@@ -11,7 +11,8 @@ import java.io.File
  * 设计取舍：
  * - **不缓存**。文件面板是"看一眼"的场景，缓存反而会在 Agent 改了文件之后显示旧内容；
  *   目录深度只有一层，`File.listFiles()` 足够快。
- * - **只读**。写入由 Agent 的工具完成，界面不提供编辑入口（避免两套写路径打架）。
+ * - **正文由编辑页负责写入**。这里仍只做文件系统读取；保存统一经 ViewModel → FileOps，
+ *   避免列表、编辑页和 Agent 各自维护一套写路径。
  * - **大文件截断**。打开一个几 MB 的日志会把界面拖死，所以超过 [MAX_PREVIEW_BYTES]
  *   只读前一段并明确标注"已截断"，而不是假装完整。
  * - **二进制不显示**。用 NUL 字节判断：显示乱码比显示"这是一个二进制文件"更没用。
@@ -64,8 +65,8 @@ internal object FileBrowser {
             .toList()
     }
 
-    /** 读取文本文件用于预览。 */
-    fun read(path: String): OpenFile {
+    /** 读取文本文件用于预览。默认 UTF-8；编辑页可传入用户选择的编码。 */
+    fun read(path: String, charsetName: String = "UTF-8"): OpenFile {
         val file = File(path)
         val name = file.name
         if (!file.isFile) {
@@ -84,13 +85,22 @@ internal object FileBrowser {
             )
         }
 
-        val text = String(bytes, Charsets.UTF_8)
+        val charset = runCatching { java.nio.charset.Charset.forName(charsetName) }
+            .getOrDefault(Charsets.UTF_8)
+        val text = String(bytes, charset)
         val content = if (size > MAX_PREVIEW_BYTES) {
             text + "\n\n…（文件共 $size 字节，此处只显示前 $MAX_PREVIEW_BYTES 字节）"
         } else {
             text
         }
-        return OpenFile(name = name, path = path, language = languageFor(name), content = content)
+        return OpenFile(
+            name = name,
+            path = path,
+            language = languageFor(name),
+            content = content,
+            truncated = size > MAX_PREVIEW_BYTES,
+            charsetName = charset.name(),
+        )
     }
 
     /**

@@ -1,15 +1,13 @@
 package com.zhizhu.zhicode.compose.ui
 
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,14 +17,9 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.animation.core.snap
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.Modifier
@@ -38,12 +31,11 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.panes.FilesPane
 import com.zhizhu.zhicode.compose.ui.panes.TerminalPane
-import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
-import top.yukonga.miuix.kmp.utils.springAnimateToPage
 
-/** （以下内容从 `AppScaffold.kt` 原地拆出，注释逐字未改。） */
+internal val SidebarWidth = 258.dp
+internal val DividerWidth = 1.dp
 
-/** 宽屏：侧栏常驻 + 对话主栏 + 工作区副栏。宽屏顶栏在右侧内容区顶部（S1 重构）。 */
+/** 宽屏：侧栏常驻 + 对话主栏 + 工作区副栏。 */
 @Composable
 internal fun WideWorkspace(
     state: WorkspaceUiState,
@@ -53,17 +45,9 @@ internal fun WideWorkspace(
     glassMain: Glass,
 ) {
     Row(modifier = Modifier.fillMaxSize()) {
-        // 侧栏保持**满高**：宽屏顶栏现在位于右侧内容区内部（Column 顶部），
-        // 不再悬浮盖住侧栏，所以侧栏不需要让位。
-        ZhiSidebarHost(
-            state = state,
-            viewModel = viewModel,
-            modifier = Modifier.width(SidebarWidth),
-        )
+        ZhiSidebarHost(state = state, viewModel = viewModel, modifier = Modifier.width(SidebarWidth))
         ZhiVerticalDivider()
         Column(modifier = Modifier.weight(56f)) {
-            // 宽屏顶栏（含玻璃模糊）：排在内容 Column 顶部，占布局高度而非悬浮。
-            // 触发器从此处于 Scaffold 根坐标系，「+」菜单等 Overlay 弹层锚点正确。
             ZhiTopBar(
                 state = TopBarState.from(state),
                 wide = true,
@@ -76,99 +60,40 @@ internal fun WideWorkspace(
                 onSettings = viewModel::openSettings,
                 tabs = null,
             )
-            // 输入器现在由 ChatArea 以悬浮层形式托管
             ChatArea(state = state, viewModel = viewModel, wide = true, modifier = Modifier.weight(1f), glass = glass)
         }
         ZhiVerticalDivider()
         Column(modifier = Modifier.weight(44f)) {
             val secondary = WorkspaceTab.entries.filter { it != WorkspaceTab.CHAT }
-            // 顶栏不再悬浮覆盖副栏，按键组不再需要躲开头部
-            Column {
-                WorkspaceTabs(
-                    tabs = secondary,
-                    selected = state.tab,
-                    // 测量点必须在 selectTab **之前**：我们要的是"点击 → 第一帧"，
-                    // 放在后面就变成"状态已改 → 第一帧"，那个数测不出滞后（见 FrameTrace）。
-                    onSelect = { tab ->
-                        ZhiFrameTrace.begin("tab:${tab.name}")
-                        viewModel.selectTab(tab)
-                    },
-                )
-            }
-            // ---- 副栏换面板：与窄屏用**同一套**机制 ----
-            //
-            // 原来是 `rememberSaveableStateHolder` + `PaneHost` 内部的 `when (tab)`：
-            // 切一次页签就销毁离场面板、重建入场面板 —— 终端要把原生 `AndroidView`
-            // 重新挂上去、文件面板要重建整棵列表。这与窄屏当初那组实测数据里
-            // `avg 27~53ms / max 458.5ms` 是同一个病（单帧重建），只是在宽屏上
-            // 没被单独量过。
-            //
-            // 现在照窄屏已验证的做法：`HorizontalPager` 保留相邻页的组合，
-            // 转场交给官方那条弹簧 —— 由 `springAnimateToPage` 驱动
-            // （`PagerNavigationSpringSpec`），与窄屏同一句、同一条曲线。
-            //
-            // 两个必须显式给出的参数：
-            //  · `userScrollEnabled = false`：副栏的页签是**顶栏那一行**，
-            //    面板本身不该能被手指横滑（滑动与"列表横向手势"会打架）。
-            //    ⚠️ 窄屏本轮**也关掉了**，但理由与手势无关，而是**唯一真源**：
-            //    手指横滑能改页码却改不了 `state.tab`，两者一对不上就会出现
-            //    「标签栏高亮对话、内容却是终端」（窄屏那段注释里有实测症状）。
-            //  · `beyondViewportPageCount = secondary.size`：三页都预先组合并摆放，
-            //    切换那一刻不再付首次测量的钱（窄屏那段注释里有实测依据）。
-            //
-            // （原先这里还有第三个参数 `flingBehavior(snapAnimationSpec = …)`：它只服务
-            //   "手指拖拽之后的回弹吸附"，横滑关掉之后就是死配置，已随窄屏一起去掉。）
-            //
-            // `rememberSaveableStateHolder` 仍然保留，但**挪进每一页内部**：
-            // 它原本解决的是"面板被销毁后还能记住滚动位置"，现在面板不销毁了，
-            // 它改为兜住"页面被回收（内存压力下 Pager 会丢远处页）后滚动位置不丢"。
-            // 直接删掉会因为这份能力变少而被 SidebarMetricsTest 一类守卫问起。
-            val secondaryTabs = remember { secondary }
-            val secondaryPagerState = remember(secondaryTabs) {
-                PagerState(currentPage = secondaryTabs.indexOf(state.tab).coerceAtLeast(0)) {
-                    secondaryTabs.size
-                }
-            }
-            // 与窄屏同款：状态是唯一真源，页码用**动画**跟随它。
-            // 不用 `requestScrollToPage` —— 它是瞬时的（"下一次重测量时直接到位"），
-            // 点了会硬切；窄屏那段注释里有完整的来源与取舍。
-            LaunchedEffect(state.tab) {
-                val target = secondaryTabs.indexOf(state.tab)
-                if (target >= 0) secondaryPagerState.springAnimateToPage(target)
-            }
-            val secondaryPaneStateHolder = rememberSaveableStateHolder()
-            HorizontalPager(
-                state = secondaryPagerState,
-                modifier = Modifier.weight(1f),
-                // 宽屏本来就关掉了横滑（见上方），所以 flingBehavior 是死配置 ——
-                // 与窄屏同款，随横滑一起去掉。
-                userScrollEnabled = false,
-                beyondViewportPageCount = secondaryTabs.size,
-                pageContent = { page ->
-                    val tab = secondaryTabs[page]
-                    secondaryPaneStateHolder.SaveableStateProvider(tab.name) {
+            WorkspaceTabs(
+                tabs = secondary,
+                selected = state.tab.takeIf { it in secondary } ?: secondary.first(),
+                onSelect = viewModel::selectTab,
+            )
+            Box(Modifier.weight(1f)) {
+                val paneTab = state.tab.takeIf { it in secondary } ?: secondary.first()
+                key(paneTab) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = true,
+                        enter = fadeIn(tween(150)) + slideInHorizontally(tween(180)) { it / 14 },
+                        exit = ExitTransition.None,
+                    ) {
                         PaneHost(
                             state = state,
                             viewModel = viewModel,
                             isDark = isDark,
                             glass = glass,
-                            tabOverride = tab,
+                            tabOverride = paneTab,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
-                },
-            )
+                }
+            }
         }
     }
 }
 
-/** 宽屏侧栏宽度。 */
-internal val SidebarWidth = 258.dp
-
-/** Miuix 纵向分隔线的宽度；顶栏偏移要把它算进去。 */
-internal val DividerWidth = 1.dp
-
-/** 窄屏：底部 Tab 切换，一次只显示一个面板。 */
+/** 窄屏：底部 Tab 切换；页面与状态直接对应，不做 Pager 或转场动画。 */
 @Composable
 internal fun CompactWorkspace(
     state: WorkspaceUiState,
@@ -176,150 +101,14 @@ internal fun CompactWorkspace(
     isDark: Boolean,
     glass: Glass,
 ) {
-    // ## 为什么换成 `HorizontalPager`（R6）
-    //
-    // 原来是 `AnimatedContent` + `slideIn/OutHorizontally` + `fadeIn/Out`，四件套叠起来的
-    // 结果是**每一帧都在超额**。改前的实测（debug 沙箱，40 帧窗口）：
-    //
-    // ```
-    // tab:TERMINAL tapToFirstFrame=14.4ms span=2117.4ms avg=52.9ms max=458.5ms janks=8
-    // tab:CHAT     tapToFirstFrame=10.2ms span=1108.6ms avg=27.7ms  max=200.0ms janks=7
-    // ```
-    //
-    // 关键读数有两个，各自指向不同的病因：
-    //  · `tapToFirstFrame` 只有 10~14ms（**不到一帧**）→ 起手并不慢，
-    //    所以「导航栈要等协程派发」那个猜测不是主因；
-    //  · `avg` 27~53ms、`max` 200~458ms → **每一帧都超额，其中一帧超了 27 倍**。
-    //    那几帧在干什么：`AnimatedContent` 切换时**销毁离场面板、重建入场面板** ——
-    //    终端要把原生 `AndroidView` 重新挂上去、文件面板要重建整棵列表。
-    //
-    // 换成官方示例（`example/.../AppContent.kt`）的做法后这两件事一起解决：
-    //  · `HorizontalPager` **保留**相邻页面的组合（默认就保留一页），
-    //    切过去时终端/文件面板早就建好了，不再有那 200~458ms 的重建帧；
-    //  · 转场交给 `PagerNavigationSpringSpec`（官方那一条 `spring(stiffness=322.2,
-    //    dampingRatio≈0.9, visibilityThreshold=0.5)`），比自己拼四条 spec 更少更一致。
-    //
-    // 顺带删掉 `SaveableStateHolder`：以前是为了"面板被销毁后还能记住滚动位置"，
-    // 现在面板根本不销毁，留着就是多余的间接层。
-    val tabs = WorkspaceTab.entries
-    // ⚠️ 用 `remember` + 直接构造，**不用** `rememberPagerState`。
-    //
-    // `rememberPagerState` 内部是 `rememberSaveable`：进程/Activity 重建后它会把
-    // **上次保存的页码**恢复回来，而 `state.tab` 是另一条恢复路径（VM / 磁盘设置）。
-    // 两者一旦不一致（实测过：导航条高亮「对话」、Pager 却停在第 2 页显示文件面板），
-    // 页面内容就和导航条对不上 —— 这是双真源必然的后果。
-    //
-    // 现在只留 `state.tab` 一个真源：页码在每次组合开始时**从它推导**，
-    // 之后由下面的 effect 跟随它的变化。代价是重建后不保留"滑到一半"的位置，
-    // 而那个位置本来也不该越过 `state.tab` 说话。
-    val pagerState = remember(tabs) {
-        PagerState(currentPage = tabs.indexOf(state.tab).coerceAtLeast(0)) { tabs.size }
-    }
-    // 状态（ViewModel）是唯一来源：点击页签改 state.tab，再由这里把 pager 跟过去。
-    //
-    // ---- 为什么是「动画跟随」，而不是当初那个 `requestScrollToPage` ----
-    //
-    // 这里一度用的是 `pagerState.requestScrollToPage(target)`，为的是绕开一条死等：
-    // `scrollToPage` 是 **suspend** 的，内部 `awaitScrollDependencies()` 要等 Pager 的
-    // layout 依赖就绪，应用空闲时不产帧就干等（逐段打时间戳实测过 263.7ms，其中它占 212ms），
-    // 而 `requestScrollToPage` 非挂起、由 Pager 在本次组合之后的布局阶段自己完成。
-    //
-    // ⚠️ 但那个 API 的语义是**瞬时**的，这一点当时判断错了。AOSP `PagerState.kt` 的文档：
-    //
-    //   | Requests the [page] to be at the snapped position **during the next remeasure** …
-    //   | Any scroll in progress will be cancelled.
-    //
-    // 实现就是 `snapToItem(page, offsetFraction, forceRemeasure = false)` —— 直接到位。
-    // 而 `snapAnimationSpec` 只管**手指拖拽之后**的回弹吸附，从不管程序化请求，
-    // 所以那条弹簧对点击是死代码。观感就是用户报的「TAB 栏切换是没有动画的」。
-    //
-    // 现在走 Miuix 官方那条（`PagerGestureUtils.kt` 的注释就写着 "**Animates** to [target]…"，
-    // 官方示例 `TabRowSection.kt:63` 用的也正是它）：`springAnimateToPage`。
-    //
-    // 首帧与进程重建都**不会误播**：`PagerState(currentPage = tabs.indexOf(state.tab))`
-    // 一上来就在目标页，动画距离为 0，等于不播。
-    //
-    // 代价照实说：`LaunchedEffect` 那一跳约一帧（上面那张表里量到 39ms）。
-    // 这次要的就是动画，动画本身 200~300ms，那一帧可以忽略。
-    ZhiFrameTrace.stamp("compose-enter")
-    LaunchedEffect(state.tab) {
-        val target = tabs.indexOf(state.tab)
-        if (target >= 0) {
-            ZhiFrameTrace.stamp("animate-to-$target")
-            pagerState.springAnimateToPage(target)
-        }
-    }
-    // 诊断：量「手指抬起 → 页面真正切完」用了多久。
-    //
-    // 这是用户能直接感受到的那个数（他说的"点击之后过了大约 0.1~0.2s 才切换页面，
-    // 此时切换是流畅的"就是它），而帧统计给不出来 —— 帧统计只说每帧多长。
-    // ⚠️ 起点必须是 ACTION_UP：onClick 在抬起后才触发，拿 ACTION_DOWN 当起点
-    // 测到的只是"按住时长"，此前据此得出过完全错误的结论。
-    LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.settledPage }
-            .collect { settled ->
-                ZhiFrameTrace.stamp("settle-$settled")
-                ZhiFrameTrace.note("pager/settled page=$settled")
-                ZhiFrameTrace.markPageSettled()
-            }
-    }
-    // 诊断：`currentPage` 变化（内容真正开始移动）与 `settledPage`（Pager 记账完成）
-    // 是**两个不同的时刻**。用户看得见的是前者；后者只是内部标记。
-    // 分开量才能判断剩下的几十毫秒到底是不是用户能感知的。
-    LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.currentPage }
-            .collect { page -> ZhiFrameTrace.stamp("current-$page") }
-    }
-    // 动效走**官方那一条弹簧**（`PagerNavigationSpringSpec`；官方示例 `TabRowSection.kt:63`）。
-    //
-    // 这里一度改成 `snap()` 瞬时落定，因为实测「抬起 → 切完」要 263.7ms。但那 263.7ms
-    // 里弹簧只占 116ms，真正的病根是另外两处：面板在**重建**（单帧 458.5ms）与请求是
-    // **挂起**的（`scrollToPage` 要等 layout 依赖，212ms 死等）。两处都已修掉，帧率追平
-    // 官方（release 实测 8.3ms / janks 0）—— 动画这时才是加分项，而不是一段空白等待。
-    // 这也正是用户要的（他另外那个 App 的页签就是有切换动画的）。
-    //
-    // ⚠️⚠️ 但"弹簧"这个词一度让人以为点击**早就在动**了。**不是。** 当年为了绕开那 212ms
-    // 死等，请求换成了非挂起的 `requestScrollToPage`，而它的语义是瞬时的
-    // （"下一次重测量时直接到位"）—— 于是这条弹簧对点击成了**死代码**，用户看到的是硬切。
-    // 现在动效来自上面那句 `springAnimateToPage`，用的仍是这条 spec。
-    //
-    // ⚠️ 它**不经过** `flingBehavior`：那条 `PagerDefaults.flingBehavior(…)` 只服务
-    // "手指拖拽之后的回弹吸附"，既然横滑已关掉就是死配置，已删。反过来说 ——
-    // 要恢复横滑，必须把它**一起**加回来，否则松手不会吸附。
-    //
-    // ⚠️ 若哪天帧数据退化（avg 明显高于官方 8.3~15.4ms，或 max 回到数百 ms），
-    // 第一件该做的就是把动效换回瞬时：动画只有在**跑得动**的时候才是加分项。
-
     Box(modifier = Modifier.fillMaxSize()) {
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.fillMaxSize(),
-            // 不接受横滑切页 —— 这一条与上面「唯一真源」是**同一个决定**。
-            //
-            // 实测过的症状：在对话页左右滑，能滑动，但**切不过去**。原因是组合里那段同步
-            // 每次组合都跑，手指把 pager 推到第 1 页而 `state.tab` 仍是「对话」，
-            // 于是下一帧就把它拽回去。
-            //
-            // 更要紧的是：换成「按 state.tab 播动画」之后，横滑会**真的**停在第 1 页 ——
-            // 那时标签栏高亮「对话」、内容却是「终端」，双真源当场对不上。
-            // 页码只能由 `state.tab` 驱动，所以手势就删掉（用户也是这么要求的）。
-            //
-            // 顺带的好处：面板很重（终端里有原生 `AndroidView`），拖拽过程中来回测量本来就贵。
-            userScrollEnabled = false,
-            // 相邻页留在组合里：这就是"不再重建面板"的关键。
-            //
-            // 取值 = 页数（而不是 1）：实测切到终端页时，`currentPage`/`settledPage`
-            // 要比请求晚 **116~122ms** 才更新，而且同期帧统计里正好有一条 `max=116.7ms`
-            // —— 那不是"缺帧"，是**主线程被占住**：目标面板要首次测量布局
-            // （终端面板里是原生 `AndroidView` + Termux 会话），把这一下堵在点击路径上了。
-            // 只有 1 时相邻页只是被组合、未必被摆放，所以切换那一刻才付这笔钱。
-            // 取页数让三页都在切换前就完成组合与摆放，把成本挪到启动阶段。
-            beyondViewportPageCount = tabs.size,
-            pageContent = { page ->
-                // ⚠️ 这里**绝对不要**放 `ZhiFrameTrace.note` 之类的埋点：
-                // `sink` 会往对话流写消息 → 改状态 → 重组 → 再记 → 无限重组。
-                // 实测过一次，日志里 `pager/compose` 刷屏，等于自己造了一个永久卡顿源。
-                when (tabs[page]) {
+        key(state.tab) {
+            AnimatedVisibility(
+                visible = true,
+                enter = fadeIn(tween(150)) + slideInHorizontally(tween(180)) { it / 14 },
+                exit = ExitTransition.None,
+            ) {
+                when (state.tab) {
                     WorkspaceTab.CHAT -> ChatArea(
                         state = state,
                         viewModel = viewModel,
@@ -327,39 +116,23 @@ internal fun CompactWorkspace(
                         modifier = Modifier.fillMaxSize(),
                         glass = glass,
                     )
-                    // ⚠️ 这两个面板（终端 / 文件）必须**自己顶开顶栏高度**。
-                    //
-                    // 规则：Scaffold 的 content lambda **有意丢掉了 `padding.top`**
-                    // （为了让顶栏 blur 有内容可采样），所以内容实际从 y=0 铺满 ——
-                    // 任何不自己顶开的面板，头部都会被顶栏盖住：面板标题、向上按钮、
-                    // 面包屑连同第一行一起消失。用户截图里"上面有一行被裁掉"就是这个。
-                    //
-                    // 对话面板**不**在这里补：它的留白由 ChatList 的 topInset 负责，
-                    // 因为它需要能滚到顶栏下面被模糊。
                     else -> PaneHost(
                         state = state,
                         viewModel = viewModel,
                         isDark = isDark,
                         glass = glass,
-                        tabOverride = tabs[page],
+                        tabOverride = state.tab,
                         modifier = Modifier.fillMaxSize().padding(top = TopBarInsetCompact),
                     )
                 }
-            },
-        )
+            }
+        }
     }
 }
 
 /** 工作区 Tab 行高度 = 官方 `TabRowDefaults.TabRowWithContourHeight`（45dp）。 */
 internal val WorkspaceTabRowHeight = 45.dp
 
-/**
- * 工作区 Tab 行。转发到 [ZhiSegmentedTabs]（Miuix `TabRowWithContour`，即带轮廓变体）。
- *
- * `matchWidth = true`：4 项等分填满整行（S3 重构：等分上限改为官方
- * `TabRowDefaults.TabRowWithContourMaxWidth` 的三倍即 252dp——4 项等分在
- * 450dpi 手机上约 100dp/项，252dp 足够表达"等分"语义又远小于原来的 1000dp）。
- */
 @Composable
 internal fun WorkspaceTabs(
     tabs: List<WorkspaceTab>,
@@ -367,18 +140,13 @@ internal fun WorkspaceTabs(
     onSelect: (WorkspaceTab) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(
+    ZhiSegmentedTabs(
+        tabs = tabs.map { it.label },
+        selectedIndex = tabs.indexOf(selected).coerceAtLeast(0),
+        onSelect = { index -> tabs.getOrNull(index)?.takeIf { it != selected }?.let(onSelect) },
         modifier = modifier.fillMaxWidth().height(WorkspaceTabRowHeight),
-        contentAlignment = Alignment.Center,
-    ) {
-        ZhiSegmentedTabs(
-            tabs = tabs.map { it.label },
-            selectedIndex = tabs.indexOf(selected).coerceAtLeast(0),
-            onSelect = { index -> tabs.getOrNull(index)?.let(onSelect) },
-            modifier = Modifier.fillMaxWidth(),
-            matchWidth = true,
-        )
-    }
+        matchWidth = true,
+    )
 }
 
 /**
@@ -465,19 +233,16 @@ private fun PaneHost(
         WorkspaceTab.FILES -> FilesPane(
             filePath = state.filePath,
             entries = state.fileEntries,
-            openFile = state.openFile,
             emptyNote = state.fileNote,
+            listOptions = state.fileListOptions.copy(grid = false),
+            onQueryChange = viewModel::updateFileQuery,
+            onSortChange = viewModel::updateFileSort,
+            onToggleSortDirection = viewModel::toggleFileSortDirection,
             onOpen = viewModel::openFile,
             onUp = viewModel::navigateUp,
             onNavigate = viewModel::navigateTo,
-            onCloseFile = viewModel::closeFile,
             root = state.fileRoot,
             onSwitchRoot = viewModel::switchFileRoot,
-            draft = state.fileDraft,
-            onStartEdit = viewModel::startEditingFile,
-            onDraftChange = viewModel::updateFileDraft,
-            onSave = viewModel::saveFile,
-            onCancelEdit = viewModel::cancelEditingFile,
             nameForm = state.fileNameForm,
             // 只有一个「新建」入口：建文件还是建文件夹由弹窗里按下的那个按钮决定
             // （见 WorkspaceViewModel.submitFileNameForm 的 KDoc）。

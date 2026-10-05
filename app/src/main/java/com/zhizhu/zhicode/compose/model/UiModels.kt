@@ -369,6 +369,10 @@ data class OpenFile(
     val path: String,
     val language: String,
     val content: String,
+    /** 预览只读了前缀，不能把这份不完整正文保存回原文件。 */
+    val truncated: Boolean = false,
+    /** 当前正文使用的字符编码；保存时必须沿用它。 */
+    val charsetName: String = "UTF-8",
 )
 
 /**
@@ -392,6 +396,17 @@ enum class FileRoot(val label: String) {
     HOME("HOME"),
     SHARED("共享存储"),
 }
+
+enum class FileSortKey(val label: String) {
+    NAME("名称"), SIZE("大小"), MODIFIED("修改时间"), TYPE("类型")
+}
+
+data class FileListOptions(
+    val query: String = "",
+    val sortKey: FileSortKey = FileSortKey.NAME,
+    val descending: Boolean = false,
+    val grid: Boolean = false,
+)
 
 /**
  * 「新建 / 重命名」共用的名字表单。
@@ -607,6 +622,7 @@ data class WorkspaceUiState(
      * 用户看到一个空的文件面板只会以为应用坏了。
      */
     val fileNote: String = "",
+    val fileListOptions: FileListOptions = FileListOptions(),
     val openFile: OpenFile? = null,
     /** 文件面板的根：项目 / HOME / 共享存储。 */
     val fileRoot: FileRoot = FileRoot.HOME,
