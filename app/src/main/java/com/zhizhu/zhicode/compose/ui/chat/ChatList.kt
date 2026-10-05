@@ -124,8 +124,10 @@ fun ChatList(
      * 用它把内容顶到卡片上方，保证被遮住的对话仍能滑出来看到。
      */
     bottomInset: Dp = 0.dp,
-    /** ChatArea 在 IME 稳定后递增的像素 token；只在键盘真正打开并完成布局后触发一次吸底。 */
-    imeFollowToken: Int = 0,
+    /** Activity 级 IME 从关闭到打开的代数；只在输入框真实聚焦时用于一次吸底。 */
+    imeOpenGeneration: Int = 0,
+    /** 发送框是否真实取得焦点；侧栏搜索框弹键盘时必须为 false。 */
+    composerFocused: Boolean = false,
     /** 顶部预留高度：顶栏改成悬浮层后，内容要能滚到它下面。 */
     topInset: Dp = 0.dp,
     /**
@@ -233,8 +235,13 @@ fun ChatList(
      * 日志输出时不用 `animateScrollToItem`：内容连续增长时每一步都起动画
      * 会互相打断，反而更抖。
      */
-    LaunchedEffect(listState, imeFollowToken) {
-        if (imeFollowToken > 0) {
+    var handledImeGeneration by remember { mutableStateOf(imeOpenGeneration) }
+    LaunchedEffect(listState, imeOpenGeneration, composerFocused) {
+        // autoFollow 是键盘打开前的用户意图快照：只有本来就在底部才吸底，
+        // 键盘缩短 viewport 后不能再用 canScrollForward 反推，否则会把真正贴底误判成历史位置。
+        if (!composerFocused || imeOpenGeneration <= handledImeGeneration) return@LaunchedEffect
+        handledImeGeneration = imeOpenGeneration
+        if (autoFollowState.value) {
             snapshotFlow { listState.layoutInfo.totalItemsCount to listState.layoutInfo.viewportEndOffset }
                 .first { (count, viewport) -> count > 0 && viewport > 0 }
             withFrameNanos { }
@@ -290,6 +297,10 @@ fun ChatList(
             state.transcript.map { TurnLayout.Entry(it.id, isUser = it.kind == ChatKind.USER) },
         )
     }
+    // TurnLayout only stores ids. Resolve them through one index instead of scanning the
+    // complete transcript once for every member of every block (which becomes quadratic
+    // for long sessions).
+    val transcriptById = remember(state.transcript) { state.transcript.associateBy { it.id } }
 
     // 「已经见过」的消息 id —— 用来判断某个成员是**本次新出现的**还是历史。
     //
@@ -361,7 +372,7 @@ fun ChatList(
                     is TurnLayout.Block.Standalone -> listOf(block.id)
                     is TurnLayout.Block.Turn -> block.ids
                 }
-                val members = memberIds.mapNotNull { id -> state.transcript.firstOrNull { it.id == id } }
+                val members = memberIds.mapNotNull { transcriptById[it] }
                 if (members.isEmpty()) return@items
                 Box(
                     modifier = Modifier

@@ -792,6 +792,25 @@ node 不在时会**明确失败**，不静默跳过 —— 静默跳过等于这
 | 能防 | 漏分支、契约被改、声明被删 | 计算结果错、边界条件错 |
 | 不能防 | 逻辑写错但不改结构 | 结构性遗漏 |
 
+## Rosemoe Sora Editor：编辑器第三方依赖
+
+编辑页的编辑器能力使用 [Rosemoe/sora-editor](https://github.com/Rosemoe/sora-editor)，
+版本 `0.24.6`，包括 `editor` 与 `language-textmate`。该库提供增量
+语法高亮、缩放、惯性滚动和 TextMate 语言支持，许可证是 LGPL-2.1；本工程通过 Maven
+构件使用，没有复制其源代码。对应许可证记录见 `NOTICE`。
+
+
+文件编辑页参考了 [zhanghai/MaterialFiles](https://github.com/zhanghai/MaterialFiles)
+的独立文件页信息层级：从文件列表进入完整文件页、顶栏返回、文件名作为标题、正文占满
+页面、编辑与保存是页面级动作。MaterialFiles 的仓库许可证是 GPL-3.0。
+
+本工程只参考可观察的交互和布局原则，未复制其 Kotlin/Java/XML 源码、资源、类名或实现
+片段；当前编辑页完全使用本工程已有的 Compose/Miuix 与 Rosemoe Sora `CodeEditor`。
+所以这里不把 MaterialFiles 当作本工程的链接依赖，也不把本工程自己的实现标成
+MaterialFiles 派生代码。
+若未来直接移植其源码，必须另行处理 GPL-3.0 的源代码提供与整体许可证边界，不能沿用本段
+“仅作设计参考”的说明。
+
 各项许可的**完整原文**：
 
 | 组件 | 许可 | 原文位置 |

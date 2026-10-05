@@ -154,17 +154,29 @@ val blocks = remember(source) { parseMarkdown(source) }
 
 ---
 
-## 8. 构建期的性能工作
+## 8. 图片、超长正文与超长会话
+
+图片链路在 `ui/ZhiImage.kt`：先用 `inJustDecodeBounds` 读取原图尺寸，再按显示尺寸选择 `inSampleSize`，缩略图使用有界 `LruCache`，解码放在 `Dispatchers.Default`。因此高清截图不会按原始像素直接塞进主线程，也不会因为 LazyColumn 回收而每次重新解码。
+
+助手正文超过 `MaxInitialMarkdownChars` 时先渲染有界前缀，用户主动点击后才展开完整正文；这避免一条异常长回复在首帧同时触发完整 Markdown 解析和巨大测量。工具 diff/输出继续使用 `MaxRenderedLines` 的行数上限，完整内容仍保留在模型中。
+
+`ChatList` 先把 transcript 建成 `id -> ChatItem` 索引，再按 `TurnLayout` 的稳定 block key 渲染，避免每个回合成员都线性扫描整条历史。文件列表也按稳定 path key 渲染，列表与宫格使用分区标题，宫格的批量选择在指针层完成并保留边缘自动滚动。
+
+流式消息不再对每个中间高度启动 `animateContentSize`；流式期间只更新内容，消息定稿后的展开/收起仍保留尺寸动画。无限光标只在 `graphicsLayer` 绘制阶段读动画值，避免整张消息卡每帧重组。
+
+## 9. 构建期的性能工作
 
 见 [`build-and-release.md`](build-and-release.md)：
 
 - `app` 与 `Bcore` 的 release 都开 R8（体积 43,210,837 → 35,911,932 字节是 app 那一档的贡献）；
 - `app/src/main/baseline-prof.txt` 手写冷启动路径 + `androidx.profileinstaller` 装机
   （`minSdk 24`，而 API 26~27 没有系统级 profile 安装流程，正是最需要它的档位）。
+- `gradle.properties` 开启 Gradle daemon、并行任务、构建缓存与 configuration cache；`Bcore/build.gradle` 的 AIDL 清理任务在配置期解析 `layout.buildDirectory`，避免配置缓存执行期引用 Groovy `buildDir`。
+- Kotlin/AGP 编译没有可安全开启的“GPU 加速”开关；构建加速主要来自缓存、配置缓存、守护进程与受控 worker 并行，避免在移动设备上无界并发导致内存抖动。
 
 ---
 
-## 9. 这些约束怎么被守住
+## 10. 这些约束怎么被守住
 
 | 机制 | 覆盖 |
 | --- | --- |

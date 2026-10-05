@@ -192,10 +192,10 @@ public final class LayoutConsistencyTest {
                         + "edge-to-edge 之后系统不再替应用缩小窗口，不让位就是输入框被键盘盖住。"
                         + "且只能用 offset：用 padding 会让这段高度进节点尺寸，"
                         + "把 bottomInset 变成逐帧变化");
-        require(chatArea.contains("imeInsets.getBottom(this)"),
-                "让位量必须由 WindowInsets.ime 算出：凭空给个常量在键盘高度不同的机型上就会错");
-        require(chatArea.contains("navigationBars.getBottom(this)"),
-                "让位量必须减掉导航栏高度：Scaffold 已让过一次，不减就会多出一条空隙");
+        String imeMotion = read(root, SRC + "ui/ImeMotion.kt");
+        require(imeMotion.contains("WindowInsetsCompat.Type.ime()")
+                        && imeMotion.contains("WindowInsetsCompat.Type.navigationBars()"),
+                "让位量必须由 Activity 级 IME/导航栏 inset 算出：凭空给常量在不同机型上会错");
         require(!chatArea.contains("imePadding()"),
                 "不要改用 Modifier.imePadding()：它垫的是**整个** IME 高度（含导航栏那段），"
                         + "与 Scaffold 已让出的导航栏叠加后，输入框会悬空一条缝");

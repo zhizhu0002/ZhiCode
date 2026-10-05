@@ -187,8 +187,9 @@ public final class IconSetTest {
         // 就是"这个图标和别人不一样大"的来源。
         require(material.contains("private fun material(name: String, pathData: String): ImageVector"),
                 MATERIAL + " 必须有唯一的 material() 构造入口（视口换算只写一次）");
-        int lazyCount = countOf(material, ": ImageVector by lazy { material(");
-        require(lazyCount == declared.size(),
+        int lazyCount = countOf(material, ": ImageVector by lazy { material(")
+                + countOf(material, ": ImageVector by lazy { material(");
+        require(lazyCount == declared.size() * 2,
                 MATERIAL + " 里有 " + declared.size() + " 个字形，但只有 " + lazyCount
                         + " 个走 material()：绕开它的那个会用自己的视口换算，"
                         + "大小就会和整集不一致");

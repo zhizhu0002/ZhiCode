@@ -53,6 +53,12 @@ ArrowBack:arrow_back
 MoreHoriz:more_horiz
 MoreVert:more_vert
 Search:search
+Save:save
+ContentCopy:content_copy
+ContentPaste:content_paste
+WrapText:wrap_text
+GridView:grid_view
+Sort:sort
 CheckCircle:check_circle
 Check:check
 Error:error

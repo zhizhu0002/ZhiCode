@@ -18,7 +18,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -380,16 +384,14 @@ private fun MdTableView(table: MdBlock.Table, fontSize: TextUnit, styles: Inline
     val cols = maxOf(table.header.size, table.rows.maxOfOrNull { it.size } ?: 0)
     if (cols == 0) return
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(0.dp),
-        colors = CardDefaults.defaultColors(
-            color = scheme.surfaceContainerHighest,
-            contentColor = scheme.onSurface,
-        ),
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .background(scheme.surfaceContainerHighest, RoundedCornerShape(ZhiRadius.inner))
+            .padding(horizontal = 2.dp),
     ) {
-        Column {
+        Column(Modifier.widthIn(min = (cols * 116).dp)) {
             TableRow(
                 cells = table.header,
                 cols = cols,
@@ -438,7 +440,7 @@ private fun TableRow(
                 fontSize = if (header) fontSize else (fontSize.value - 0.5).sp,
                 fontWeight = if (header) FontWeight.Bold else FontWeight.Normal,
                 lineHeight = fontSize * 1.35f,
-                modifier = Modifier.weight(1f).padding(end = if (c == cols - 1) 0.dp else 6.dp),
+                modifier = Modifier.width(116.dp).padding(end = if (c == cols - 1) 0.dp else 6.dp),
             )
         }
     }

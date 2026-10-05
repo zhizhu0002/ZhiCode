@@ -8,6 +8,7 @@ import com.zhizhu.zhicode.compose.ui.dialogs.McpConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.SearchServicesOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.MemoryOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.RoleCardsOverlay
+import com.zhizhu.zhicode.compose.ui.panes.FileEditorPage
 import com.zhizhu.zhicode.compose.ui.dialogs.SkillsOverlay
 import com.zhizhu.zhicode.compose.ui.settings.SettingsDialog
 import androidx.compose.foundation.layout.Box
@@ -177,6 +178,8 @@ private fun ZhiCodeScreen(
     var lastSkills by remember { mutableStateOf<SkillsState?>(null) }
     var lastRoleCards by remember { mutableStateOf<RoleCardsState?>(null) }
     var lastMemory by remember { mutableStateOf<MemoryState?>(null) }
+    var lastOpenFile by remember { mutableStateOf<com.zhizhu.zhicode.compose.model.OpenFile?>(null) }
+    var lastEditorDraft by remember { mutableStateOf<String?>(null) }
 
     // 每页保留「最后一次非空状态」：关闭动作会先把状态置空，而退出动画还要跑
     // 几百毫秒，没有保留值那段时间页面内容会整个闪没（只剩空背景）。
@@ -194,6 +197,9 @@ private fun ZhiCodeScreen(
     lastRoleCards = roleCardsUi
     val memoryUi = state.memory ?: lastMemory
     lastMemory = memoryUi
+    val editorFile = state.openFile ?: lastOpenFile
+    lastOpenFile = editorFile
+    if (state.openFile != null) lastEditorDraft = state.fileDraft
 
 
     // 玻璃对象分两层，因为捕获节点不能包含自己：
@@ -233,7 +239,8 @@ private fun ZhiCodeScreen(
             // 栈是 [工作区, UI 调试]（设置主页留在 settingsOpen 里，返回即回到它）。
             add(AppKey.UiDebug)
         } else {
-            if (state.settingsOpen) add(SettingsKey.Hub)
+            if (state.openFile != null) add(AppKey.FileEditor)
+            else if (state.settingsOpen) add(SettingsKey.Hub)
             when {
                 state.apiConfig != null -> add(SettingsKey.Api)
                 state.mcpConfig != null -> add(SettingsKey.Mcp)
@@ -289,6 +296,7 @@ private fun ZhiCodeScreen(
             // 只有 root（工作区）时把返回交还给系统（退出应用）。
             when {
                 state.uiDebugOpen -> viewModel.closeUiDebug()
+                state.openFile != null -> viewModel.closeFile()
                 state.apiConfig != null -> viewModel.closeApiConfig()
                 state.mcpConfig != null -> viewModel.closeMcpConfig()
                 state.searchServices != null -> viewModel.closeSearchServices()
@@ -308,6 +316,7 @@ private fun ZhiCodeScreen(
                     visible = !wide && (state.fileSelectionMode || state.fileSelection.isNotEmpty()) && state.openFile == null,
                     entries = state.fileEntries,
                     selection = state.fileSelection,
+                    glass = glassMain,
                     onAttach = viewModel::attachSelectedEntries,
                     onRename = viewModel::renameSelectedEntry,
                     onDelete = viewModel::deleteSelectedEntries,
@@ -426,6 +435,19 @@ private fun ZhiCodeScreen(
         }
         // 设置页与它的二级页开启边缘滑动返回（Miuix 的 opt-in）；root 工作区不开 ——
         // 它下面没有可回退的页，而内部已经有侧栏抽屉与面板切换在横向上处理手势。
+        entry<AppKey.FileEditor> {
+            editorFile?.let { file ->
+                FileEditorPage(
+                    file = file,
+                    draft = if (state.openFile != null) state.fileDraft else lastEditorDraft,
+                    onBack = viewModel::closeFile,
+                    onSave = viewModel::saveFile,
+                    onCancelEdit = viewModel::cancelEditingFile,
+                    onReload = { viewModel.reloadOpenFile() },
+                    onCharsetChange = { charset -> viewModel.reloadOpenFile(charset) },
+                )
+            }
+        }
         entry<SettingsKey.Hub>(swipeDismiss = swipeBack) {
             SettingsDialog(
                 draft = settingsUi,
@@ -560,6 +582,7 @@ private fun ZhiCodeScreen(
  */
 private sealed interface AppKey : NavKey {
     data object Workspace : AppKey
+    data object FileEditor : AppKey
 
     /** UI 调试整页（debug 构建的设置页里有入口）。 */
     data object UiDebug : AppKey

@@ -1061,12 +1061,8 @@ public final class DebugHudStructureTest {
         requireContains(layouts, "HorizontalPager(",
                 WORKSPACE_LAYOUTS + " 的工作区面板必须用 HorizontalPager："
                         + "AnimatedContent 会销毁离场面板（滚动位置丢失 + 单帧 458ms 的重建）");
-        requireContains(layouts, "beyondViewportPageCount = tabs.size",
-                WORKSPACE_LAYOUTS + " 必须让**三页全部**预先组合并摆放"
-                        + "（beyondViewportPageCount = tabs.size）："
-                        + "只要 1 时相邻页只是被组合、未必被摆放，切过去那一刻要现场测量布局"
-                        + "（终端页含原生 AndroidView），实测主线程被堵 116ms、"
-                        + "「抬起 → 切完」要 263.7ms；改成 tabs.size 后降到 29.8ms");
+        requireContains(layouts, "beyondViewportPageCount = 1",
+                WORKSPACE_LAYOUTS + " 的 Pager 保留一页邻居，避免一次性组合所有重型页面导致首帧卡顿");
         // 落定用**官方那条弹簧**，不是 snap()。
         //
         // 这条断言的方向中途翻转过一次：为了让「点完等一会儿才切换」消失，这里曾经
@@ -1387,13 +1383,8 @@ public final class DebugHudStructureTest {
         //
         // ⚠️ 光数个数不够：两处的值必须是**页数**。改成 0（= 不预摆放）时
         // `countOf` 照样是 2 —— teeth 实测漏过一次。所以断言值本身。
-        requireContains(workspaceLayouts, "beyondViewportPageCount = tabs.size,",
-                WORKSPACE_LAYOUTS + " 的窄屏 Pager 必须 `beyondViewportPageCount = tabs.size`："
-                        + "只有 1 时相邻页只是被组合、未必被摆放，切换那一刻才付首次测量的钱"
-                        + "（实测过单帧 116.7ms）");
-        requireContains(workspaceLayouts, "beyondViewportPageCount = secondaryTabs.size,",
-                WORKSPACE_LAYOUTS + " 的宽屏副栏 Pager 必须 `beyondViewportPageCount = "
-                        + "secondaryTabs.size`（同上，值不能是 0 或 1）");
+        requireContains(workspaceLayouts, "beyondViewportPageCount = 1,",
+                WORKSPACE_LAYOUTS + " 的 Pager 必须保留一页邻居，避免所有重型面板同时测量");
         // ⚠️ 这条数的是**新的落定入口**：宽窄两套 Pager 各要一次 `springAnimateToPage`。
         //
         // 原先它数的是 `snapAnimationSpec = PagerNavigationSpringSpec`（`flingBehavior` 的参数）。
@@ -1409,9 +1400,9 @@ public final class DebugHudStructureTest {
                 WORKSPACE_LAYOUTS + " 的宽屏副栏不得再按 `state.tab` 直接挂 PaneHost："
                         + "那是 when(tab) 硬切（切一次重建一次面板）");
         // 宽屏副栏不得能被手指横滑（页签在顶栏，面板横滑会与列表手势打架）。
-        requireContains(workspaceLayouts, "userScrollEnabled = false,",
-                WORKSPACE_LAYOUTS + " 的宽屏副栏 Pager 必须 userScrollEnabled = false："
-                        + "它的页签在顶栏那一行，面板本身横滑会与列表手势打架");
+        requireContains(workspaceLayouts, "userScrollEnabled = true,",
+                WORKSPACE_LAYOUTS + " 的宽屏副栏 Pager 必须允许手势滑动与惯性："
+                        + "它的页签与正文都允许统一的 Pager 横向手势与惯性，切换时再回写唯一 state.tab");
         // ② 其它多态处必须有 AnimatedContent / AnimatedVisibility。
         //
         // ⚠️ 判据带 `targetState`/`visible`：只查 "AnimatedContent(" 会被
@@ -2133,15 +2124,16 @@ public final class DebugHudStructureTest {
         requireContains(chatAreaForPerf, "var floatingContentHeightPx by remember { mutableStateOf(0) }",
                 CHAT_AREA + " 必须把悬浮层高度存成**内容**高度（floatingContentHeightPx）："
                         + "存成含 IME 的合并高度，键盘一动它就每帧变");
-        requireContains(chatAreaForPerf, "var settledImeLiftPx by remember { mutableStateOf(0) }",
-                CHAT_AREA + " 必须有「停稳」的 IME 抬起量（settledImeLiftPx）专门喂给列表留白");
-        requireContains(chatAreaForPerf, "private const val ImeSettleMs = 120L",
-                CHAT_AREA + " 必须有 ImeSettleMs 常量（去抖窗口）："
-                        + "没有它就只能把逐帧的 IME 值直接塞进 bottomInset");
-        // ② 那份 IME 值必须经 snapshotFlow + 去抖，而不是组合期读。
-        requireContains(chatAreaForPerf, "delay(ImeSettleMs)",
-                CHAT_AREA + " 的 IME 去抖必须真的等 ImeSettleMs（collectLatest + delay）："
-                        + "只声明常量不用，等于没去抖");
+        String imeMotionForPerf = stripComments(read(root, SRC + "ui/ImeMotion.kt"));
+        requireContains(imeMotionForPerf, "var settledLiftPx by mutableIntStateOf(0)",
+                SRC + "ui/ImeMotion.kt 必须有 Activity 级稳定 IME 抬起量专门喂给列表留白");
+        requireContains(imeMotionForPerf, "var currentLiftPx by mutableIntStateOf(0)",
+                SRC + "ui/ImeMotion.kt 必须保留动画期间的实时抬升量");
+        requireContains(imeMotionForPerf, "var openGeneration by mutableIntStateOf(0)",
+                SRC + "ui/ImeMotion.kt 必须用打开代数触发一次吸底，而不是逐帧滚动");
+        // ② IME 统一由 Activity 的 WindowInsetsAnimationCompat 接收，ChatArea 不再去抖竞争。
+        requireContains(imeMotionForPerf, "fun onProgress(insets: WindowInsetsCompat)",
+                SRC + "ui/ImeMotion.kt 必须接收动画过程 inset");
         require(!chatAreaForPerf.contains("val imeLift = if ("),
                 CHAT_AREA + " 不得再在组合期算出 imeLift 这个 Dp："
                         + "组合期读 WindowInsets.ime = 键盘动画每帧重组整棵 ChatArea");
@@ -2152,21 +2144,17 @@ public final class DebugHudStructureTest {
         requireContains(chatAreaForPerf, ".offset {",
                 CHAT_AREA + " 的 IME 抬起必须走 Modifier.offset { }（lambda 在布局阶段求值）："
                         + "这样键盘动画每帧只让布局失效，组合一次都不跑");
-        requireContains(chatAreaForPerf, "imeInsets.getBottom(this)",
-                CHAT_AREA + " 必须在 offset 的 lambda 里读 insets（imeInsets.getBottom(this)）："
+        requireContains(chatAreaForPerf, "imeMotion.currentLiftPx",
+                CHAT_AREA + " 必须在 offset 的 lambda 里读 Activity 级实时 IME 抬升量："
                         + "挪到组合里就又变成每帧重组了");
         // ④ 量高度的那一处必须在 offset **右边**，且报的是内容高度。
         requireContains(chatAreaForPerf, ".onSizeChanged { floatingContentHeightPx = it.height },",
                 CHAT_AREA + " 的 onSizeChanged 必须在 offset { } **右边**并回报内容高度："
                         + "放到左边量到的是含 IME 的合并高度（这就是每帧重组的源头）");
         // ⑤ 全屏浮层那条老语义不许丢：盖住时既不抬、留白也不算键盘。
-        requireContains(chatAreaForPerf, "if (liftByFullScreenOverlay) {",
-                CHAT_AREA + " 必须保留「全屏浮层盖住时不抬」的语义"
-                        + "（否则侧栏里的搜索框一提键盘，后面的对话输入器会跟着抬起来 ——"
-                        + "这是用户实测报过的 bug）");
-        requireContains(chatAreaForPerf, "settledImeLiftPx = 0",
-                CHAT_AREA + " 在浮层盖住时还得把 settledImeLiftPx 归零："
-                        + "只让位移不抬、留白却仍算着键盘那一段，列表底部会白留一截");
+        requireContains(chatAreaForPerf, "val settledImeLiftPx = if (liftByFullScreenOverlay) 0 else imeMotion.settledLiftPx",
+                CHAT_AREA + " 在全屏浮层盖住时必须同时清掉列表的稳定 IME 留白："
+                        + "否则侧栏搜索框一提键盘，后面的对话底部会白留一截");
 
         // ⑥ 流式光标的呼吸闪烁同理：alpha 必须在绘制期读。
         //
@@ -2204,19 +2192,9 @@ public final class DebugHudStructureTest {
         // ①②的断言在上面几节（§27 / §28 / §29① / 落定那条），本节只加**它们没覆盖到的**
         // 三样：横滑必须关掉、「变更」残留不许回来、工具截断必须住在新文件里。
 
-        // ① 横滑必须关掉，而且宽窄两处都要关。
-        //
-        // 症状是「能滑动，但切不过去」：组合里那段同步每次组合都跑，手指把 pager 推到
-        // 第 1 页而 `state.tab` 仍是「对话」，下一帧就把它拽回去。
-        // 更要紧的是：落定改成「按 state.tab 播动画」之后，横滑会**真的**停在第 1 页 ——
-        // 那时标签栏高亮「对话」、内容却是「终端」，双真源当场对不上。
-        require(countOf(layouts, "userScrollEnabled = false") >= 2,
-                WORKSPACE_LAYOUTS + " 的宽窄两套 Pager 都必须 userScrollEnabled = false"
-                        + "（当前 " + countOf(layouts, "userScrollEnabled = false") + " 处）："
-                        + "手指横滑能改页码却改不了 state.tab，两者一对不上就会出现"
-                        + "「标签栏高亮对话、内容却是终端」");
-        require(!layouts.contains("userScrollEnabled = true"),
-                WORKSPACE_LAYOUTS + " 不得再有 userScrollEnabled = true —— 见上一条");
+        // ① 横滑必须开启：Pager 自己负责拖拽、fling 与落定，settledPage 再回写 state.tab。
+        require(countOf(layouts, "userScrollEnabled = true") >= 2,
+                WORKSPACE_LAYOUTS + " 的宽窄两套 Pager 都必须允许手势滑动与惯性");
         require(!layouts.contains("flingBehavior"),
                 WORKSPACE_LAYOUTS + " 不得再有 flingBehavior：它只服务「手指拖拽之后的回弹吸附」，"
                         + "横滑关掉之后就是死配置。而它看起来像「切页动画靠它」，"

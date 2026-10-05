@@ -20,6 +20,13 @@
 | 会话与任务 | `SessionStore`、`TaskStore`、`PlanStore` |
 | 界面 | 全部走 Miuix 组件；语义色与字阶集中在 `ZhiColors` / `ZhiTextScale` / `ZhiRadius` / `ZhiDialogWidth` |
 
+### 当前 UI 边界
+
+- `WorkspaceLayouts.kt` 只负责宽窄屏工作区、标签页与 Pager；主板块禁止手势横滑，页签状态由 `WorkspaceUiState.tab` 单向驱动。
+- `FilesPane.kt` 负责文件浏览、紧凑搜索、分区列表/四列无卡片宫格与拖动批量选择；文件复制/移动等实际操作仍由 `WorkspaceViewModel` 与 `FileOps` 负责。
+- `FileEditorPage.kt` 负责编辑器页面生命周期、空查询安全搜索、紧凑查找行与可展开的 MT 风格单列工具面板；Sora 的 AndroidView 配置集中在 `SoraEditorHost.kt`。
+- `ui/chat/` 按回合块渲染对话。Markdown 表格在自己的横向滚动容器中渲染，超长助手正文默认有界预览，工具输出按行数有界。
+
 ### 明确未做
 
 - **悬浮球、Frida/Debug 图形界面**：调试走 `iqdebug` / Debug 工具，没有独立仪表盘页面。
@@ -42,7 +49,7 @@ app/src/main/java/com/zhizhu/zhicode/compose/
   ui/AppScaffold.kt                   Scaffold + 宽窄屏布局 + 弹窗挂载点
   ui/chat/                            对话流、消息卡片、进度卡
   ui/composer/                        输入器与斜杠命令面板
-  ui/panes/                           Changes / Terminal / Files 三个面板
+  ui/panes/                           Terminal / Files / Sora 编辑器面板
   ui/dialogs/                         各弹窗（外壳见 dialogs/DialogShell.kt）
   ui/settings/                        设置页与设置行
 ```
@@ -58,6 +65,7 @@ app/src/main/java/com/zhizhu/zhicode/compose/
 | `black-reflection/` `compiler/` | Bcore 的注解驱动反射与其注解处理器 |
 | `app/tests/` | **源码级结构测试**（零依赖，只读源码文本断言） |
 | `app/src/test/` | **JVM 行为测试**（真跑逻辑） |
+| `app/src/main/assets/sora/` | Sora TextMate grammar 资源（只保留实际使用的语言） |
 | `tools/` | `provenance.sh`、历史改写脚本等 |
 | `docs/` | 本目录下这些文档 |
 

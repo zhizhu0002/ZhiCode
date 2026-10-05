@@ -402,6 +402,8 @@ run ComposerMenuTest "$PROJECT_ROOT"
 # 部分输入法据此切到安全/密码键盘 —— 用户报的正是这个。
 # StatusBarAndImeTest.java
 run StatusBarAndImeTest "$PROJECT_ROOT"
+# ---------- 启动 IME 与工作区页签单一真源 ----------
+run ImeLaunchAndWorkspaceStateTest "$PROJECT_ROOT"
 # ---------- 「高风险」红标按命令内容判 ----------
 # 原先 highRisk = (kind == SYSTEM || SHELL)，等于每个 shell 命令都挂红标。
 # 红标天天出现就不再是信息 —— 这条同时守住判定表本身不许退化成「全都危险」。

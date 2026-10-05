@@ -183,7 +183,7 @@ public final class FilePanelWriteTest {
         }
         // 写操作必须走 FileOps（名字校验、原子保存、删除不跟符号链接都在那里，
         // 且有 26 条单测）。就地写 File.writeText 会绕过全部这些。
-        require(sqVm.contains("FileOps.write(File(open.path),draft)"),
+        require(sqVm.contains("FileOps.write(File(targetPath),draft,charset)"),
                 VM + " 的保存必须走 FileOps.write：它做的是「先写 .tmp 再改名」，"
                         + "中途被杀不会留下半截源文件 —— 就地 writeText 会");
         require(sqVm.contains("FileOps.createFile(") && sqVm.contains("FileOps.createDirectory(")
@@ -276,15 +276,37 @@ public final class FilePanelWriteTest {
 
         // ---- 3. UI 上是真的能操作 -----------------------------------------
         for (String callback : new String[]{
-                "onStartEdit", "onSave", "onCancelEdit", "onNewEntry",
-                "onRename", "onConfirmDelete", "onSwitchRoot"}) {
+                "onOpen", "onNewEntry", "onRename", "onConfirmDelete", "onSwitchRoot"}) {
             require(pane.contains(callback),
                     PANE + " 缺少 " + callback + "：写操作必须在界面上真的有入口，"
                             + "只在 ViewModel 里有函数等于没有");
         }
-        require(pane.contains("ZhiTextField("),
-                PANE + " 的编辑态必须能真的输入（ZhiTextField）："
-                        + "只显示正文而没有输入控件等于还是只读");
+        String editorPage = read(root, "app/src/main/java/com/zhizhu/zhicode/compose/ui/panes/FileEditorPage.kt");
+        require(!pane.contains("FileEditor("),
+                PANE + " 只负责目录浏览，文件正文必须在独立文件页中呈现，避免列表与编辑器割裂");
+        require(editorPage.contains("AndroidView(") && editorPage.contains("CodeEditor(")
+                        && editorPage.contains("SoraEditorHost.configure"),
+                "FileEditorPage 必须使用同一份 Sora CodeEditor 承担预览与编辑");
+        require(!editorPage.contains("content.split('\\n')") && !editorPage.contains("ZhiTextField("),
+                "FileEditorPage 的长文本编辑器不得全文 split 或用 ZhiTextField 逐字回写正文");
+        require(editorPage.contains("onSave") && editorPage.contains("onCancelEdit")
+                        && editorPage.contains("onBack") && editorPage.contains("TopAppBar("),
+                "FileEditorPage 必须提供顶部返回、放弃、保存和标题栏级动作");
+        require(editorPage.contains("ZhiIconButton") && editorPage.contains("ZhiIcons.save")
+                        && editorPage.contains("ZhiIcons.moreVert"),
+                "编辑页顶部保存/放弃/更多必须使用图标按钮，而不是文字按钮");
+        require(editorPage.contains("OverlayIconCascadingDropdownMenu")
+                        && editorPage.contains("text = \"编码\"")
+                        && editorPage.contains("children = charsetOptions.map"),
+                "顶部三点菜单必须有带子菜单的编码入口");
+        require(editorPage.contains("OverlayDialog") && editorPage.contains("DialogShell")
+                        && editorPage.contains("您确定要舍弃对该文档未保存的变更吗？")
+                        && editorPage.contains("继续编辑") && editorPage.contains("舍弃"),
+                "编辑后返回必须弹出未保存变更确认，并提供舍弃/继续编辑");
+        require(editorPage.contains("current != originalText"),
+                "未修改正文时返回应直接退出，只有实际变更才弹确认");
+        require(!editorPage.contains("FilePathBar(") && !editorPage.contains("面包屑"),
+                "FileEditorPage 不应再显示路径面包屑，正文应直接从标题栏下开始");
         require(dialogText.contains("ZhiFieldError("),
                 DIALOGS + " 的名字表单错误行必须走 ZhiFieldError："
                         + "标题下方那一条要与其他表单「有错才出现、左边缘对齐」一致");
@@ -398,6 +420,11 @@ public final class FilePanelWriteTest {
                 VM + " 必须用 isEditablePreview 门控编辑："
                         + "FileBrowser.read 对二进制返回的是「（二进制文件，N 字节…）」"
                         + "这句**给人看的提示**，把它当正文保存回去会把文件写坏");
+        require(models.contains("val truncated: Boolean = false")
+                        && models.contains("val charsetName: String = \"UTF-8\""),
+                MODELS + " 的 OpenFile 必须记录预览是否截断：截断正文不能进入保存链路");
+        require(sqVm.contains("!open.truncated"),
+                VM + " 的 isEditablePreview 必须拦住已截断预览，避免保存时覆盖原文件");
         for (String marker : new String[]{"（二进制文件，", "（读取失败"}) {
             require(vm.contains(marker),
                     VM + " 的 isEditablePreview 必须拦住「" + marker + "」这类预览");
@@ -407,6 +434,9 @@ public final class FilePanelWriteTest {
         require(sqVm.contains("it.copy(fileDraft=open.content)"),
                 VM + " 进入编辑态应当直接把正文放进 draft："
                         + "不能用「内容非空」当条件，否则新建的空文件永远编辑不了");
+        String openFileBody = bodyOf(vm, "fun openFile(entry: FileEntry)");
+        require(openFileBody.contains("fileDraft = file.takeIf { editable }?.content"),
+                VM + " 打开正常文本后必须直接进入编辑态；截断/二进制/读失败仍保持只读");
 
         // ---- 6b. 列表行：两行信息层级 + 大小/时间的格式化 -------------------
         //
@@ -463,12 +493,27 @@ public final class FilePanelWriteTest {
                 VM + " 的 openSharedStorageSettings 必须打开系统那一页："
                         + "只说一句「去授权」而不跳转等于没做");
 
-        // ---- 7. 接线：布局层必须把回调真的传下去 --------------------------
+        // ---- 7. 接线：独立文件页必须由外层导航栈承载 ------------------------
+        String scaffold = read(root, "app/src/main/java/com/zhizhu/zhicode/compose/ui/AppScaffold.kt");
+        require(scaffold.contains("data object FileEditor : AppKey"),
+                "AppScaffold 必须有独立的 FileEditor 页面 key");
+        require(scaffold.contains("entry<AppKey.FileEditor>")
+                        && scaffold.contains("add(AppKey.FileEditor)"),
+                "点击文件后必须压入独立 FileEditor 页面，而不是在文件列表内切换正文");
+        String fileEntry = windowAfter(scaffold, "entry<AppKey.FileEditor>", 240);
+        require(!fileEntry.contains("swipeDismiss"),
+                "FileEditor 页面不得开启边缘返回手势：它会与正文水平滚动冲突");
+        require(scaffold.contains("onBack = viewModel::closeFile")
+                        && scaffold.contains("onSave = viewModel::saveFile"),
+                "FileEditor 页面必须把返回与保存接回 ViewModel");
+        require(sqVm.contains("valtargetPath=open.path")
+                        && sqVm.contains("state.openFile?.path==targetPath"),
+                VM + " 异步保存回写前必须校验目标路径，不能覆盖用户后来打开的另一个文件");
+
+        // ---- 7b. 接线：目录浏览层仍必须把回调真的传下去 --------------------
         for (String wiring : new String[]{
                 "onSwitchRoot = viewModel::switchFileRoot",
-                "onSave = viewModel::saveFile",
                 "onConfirmDelete = viewModel::confirmDelete",
-                "onStartEdit = viewModel::startEditingFile",
                 "onNewEntry = viewModel::newFileForm",
                 "onLongPressEntry = viewModel::longPressFileEntry",
                 "onToggleSelectAll = viewModel::toggleSelectAllFiles",

@@ -5,6 +5,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -226,11 +227,17 @@ public final class FileOps {
         }
     }
 
-    /** 保存文本。返回 null 表示成功。 */
+    /** 保存 UTF-8 文本。返回 null 表示成功。 */
     public static String write(File target, String text) {
+        return write(target, text, StandardCharsets.UTF_8);
+    }
+
+    /** 保存指定编码文本。返回 null 表示成功。 */
+    public static String write(File target, String text, Charset charset) {
         if (target == null) return "文件不存在";
         if (text == null) text = "";
-        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        if (charset == null) charset = StandardCharsets.UTF_8;
+        byte[] bytes = text.getBytes(charset);
         if (bytes.length > MAX_WRITE_BYTES) {
             return "内容太大（" + bytes.length + " 字节，上限 " + MAX_WRITE_BYTES + "）";
         }
@@ -243,7 +250,7 @@ public final class FileOps {
         // 那比保存失败糟得多（用户会以为文件本来就是坏的）。
         File temp = new File(parent, "." + target.getName() + ".tmp");
         try (FileOutputStream out = new FileOutputStream(temp);
-             Writer writer = new OutputStreamWriter(out, StandardCharsets.UTF_8)) {
+             Writer writer = new OutputStreamWriter(out, charset)) {
             writer.write(text);
             writer.flush();
         } catch (IOException e) {
@@ -254,7 +261,7 @@ public final class FileOps {
         if (!temp.renameTo(target)) {
             // 改名失败（目标被占）时退一步直接覆盖写，别把内容丢在临时文件里。
             try (FileOutputStream out = new FileOutputStream(target);
-                 Writer writer = new OutputStreamWriter(out, StandardCharsets.UTF_8)) {
+                 Writer writer = new OutputStreamWriter(out, charset)) {
                 writer.write(text);
                 writer.flush();
             } catch (IOException e) {

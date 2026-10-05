@@ -91,6 +91,8 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  */
 private val BubbleMargin = PaddingValues(horizontal = 10.dp, vertical = 5.dp)
 private val MessageMargin = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+/** Markdown above this size is previewed first; the full body remains in the model. */
+private const val MaxInitialMarkdownChars = 120_000
 
 /**
  * 用户气泡宽度占可用宽的比例（**上限**，不是固定值）。
@@ -213,6 +215,13 @@ fun AssistantCard(
     onLongPress: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
+    var showFullBody by remember(item.id) { mutableStateOf(false) }
+    val bodyTooLong = item.body.length > MaxInitialMarkdownChars
+    val markdownBody = if (bodyTooLong && !showFullBody) {
+        item.body.take(MaxInitialMarkdownChars)
+    } else {
+        item.body
+    }
     // 与 UserBubble 用同一套容器参数（同样的 ZhiRadius.card 圆角与 BubbleMargin 内边距），
     // 只是配色中性、占满宽度。
     //
@@ -267,7 +276,11 @@ fun AssistantCard(
                 // 必然成本**，不是 bug。若真机上真的出现"流式一顿一顿"，回退点就是
                 // 这一处 —— 把它改回按 item.streaming 分支，其余几项动画不受影响
                 // （它们各自独立）。守卫 `MarkdownStreamingTest` 会把回退方向的选择记下来。
-                .animateContentSize(animationSpec = ZhiMotion.sizeSpec),
+                // Streaming text changes frequently. Animating every intermediate height
+                // keeps a second layout animation alive for the entire response and makes
+                // long replies compete with Markdown measurement; the settled card still
+                // gets the smooth expand/collapse transition.
+                .then(if (item.streaming) Modifier else Modifier.animateContentSize(animationSpec = ZhiMotion.sizeSpec)),
         ) {
             if (item.thinking.isNotEmpty() || item.processSteps.isNotEmpty()) {
                 ThinkingPanel(item = item, onToggle = onToggleThinking)
@@ -279,10 +292,24 @@ fun AssistantCard(
             // `streaming` 传下去，Markdown 层据此只在**跨过块边界**时重解析前缀
             // （见 settledPrefixLength）：不传的话每 32ms 会重建整篇。
             ZhiMarkdown(
-                source = item.body,
+                source = markdownBody,
                 bodyFontSize = 14.sp,
-                streaming = item.streaming,
+                streaming = item.streaming && !bodyTooLong,
             )
+            if (bodyTooLong && !showFullBody) {
+                Surface(
+                    onClick = { showFullBody = true },
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    color = Color.Transparent,
+                    contentColor = scheme.primary,
+                ) {
+                    Text(
+                        text = "正文较长，已显示前 ${MaxInitialMarkdownChars / 1000} KB · 点按展开全部",
+                        color = scheme.primary,
+                        fontSize = ZhiTextScale.Footnote,
+                    )
+                }
+            }
             if (item.streaming) {
                 // 流式光标呼吸闪烁：之前是一块静止的字符，文本区里唯一「活着」的
                 // 记号却不动。周期 = 淡入 300ms 去程 + 300ms 回程。

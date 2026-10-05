@@ -192,8 +192,30 @@ BuildConfig.APPLICATION_ID 派生。保留它是因为类名与调用点遍布�
     按 Apache-2.0 第 4 条在此声明"未修改数据本身"）。
 
 
-8. 关于本工程自己的代码
+8. MaterialFiles 交互参考 — GPL-3.0（未复制源码）
 ----------------------------------------------------------------
+
+来源 : https://github.com/zhanghai/MaterialFiles
+许可 : GNU General Public License v3.0
+许可原文: https://raw.githubusercontent.com/zhanghai/MaterialFiles/master/LICENSE
+
+本工程参考 MaterialFiles 的独立文件页、顶部返回/文件名层级与正文占满页面的交互形态。
+本工程没有复制 MaterialFiles 的 Kotlin、Java、XML、资源或类名；编辑页是基于本工程
+现有 Compose/Miuix 与 Rosemoe Sora CodeEditor 的独立实现。因此本项是设计参考，不是随发行物
+链接或内嵌的 MaterialFiles 第三方代码。
+
+
+9. Rosemoe Sora Editor — LGPL-2.1
+----------------------------------------------------------------
+
+来源 : https://github.com/Rosemoe/sora-editor
+构件 : io.github.rosemoe:editor:0.24.6
+        io.github.rosemoe:language-textmate:0.24.6
+
+许可 : GNU Lesser General Public License v2.1
+许可原文: https://github.com/Rosemoe/sora-editor/blob/main/LICENSE
+
+本工程使用 Sora Editor 的增量文本布局、缩放、滚动与 TextMate 语法高亮能力；未复制其源码。
 
 蜘蛛自己的代码（Compose 界面层、宿主层重写部分、新增的诊断与安全边界等）
 按同目录 LICENSE 的 MIT 发布。
