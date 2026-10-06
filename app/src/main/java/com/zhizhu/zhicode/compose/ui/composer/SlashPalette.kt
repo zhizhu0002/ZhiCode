@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui.composer
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -57,14 +56,14 @@ fun SlashPalette(
             Text(
                 text = "斜杠命令",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontWeight = FontWeight.Bold,
             )
             Box(modifier = Modifier.weight(1f))
             Text(
                 text = "${matches.size} 条匹配",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             )
         }
         LazyColumn(
@@ -95,7 +94,7 @@ fun SlashPalette(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = command.name,
-                            fontSize = ZhiTextScale.Caption,
+                            fontSize = MiuixTheme.textStyles.body2.fontSize,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.width(112.dp),
@@ -103,7 +102,7 @@ fun SlashPalette(
                         Text(
                             text = command.hint,
                             color = scheme.onSurfaceVariantSummary,
-                            fontSize = ZhiTextScale.Footnote,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )

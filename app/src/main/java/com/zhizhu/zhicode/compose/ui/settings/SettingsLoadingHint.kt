@@ -11,7 +11,6 @@ import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 
 /**
  * 二级设置页的「正在读取」占位。
@@ -42,7 +41,7 @@ internal fun SettingsLoadingHint(text: String = "正在读取…") {
         Text(
             text = text,
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
         )
     }
 }

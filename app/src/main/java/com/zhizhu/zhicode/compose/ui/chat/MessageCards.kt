@@ -1,8 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.chat
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -12,8 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
 import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -46,7 +44,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import android.os.SystemClock
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.engine.ToolText
@@ -123,13 +120,13 @@ fun EmptyState() {
         Text(
             text = "想让智蛛做什么？",
             color = scheme.onBackground,
-            fontSize = ZhiTextScale.Title,
+            fontSize = MiuixTheme.textStyles.title1.fontSize,
             fontWeight = FontWeight.Bold,
         )
         Text(
             text = "智蛛可以读取项目、编辑文件、运行命令，并在内置 Termux 环境中验证修改。",
             color = scheme.onBackgroundVariant,
-            fontSize = ZhiTextScale.BodySmall,
+            fontSize = MiuixTheme.textStyles.body1.fontSize,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp),
         )
     }
@@ -165,7 +162,7 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
             // 之前是 `fillMaxWidth(0.86f)` —— 那是**强制** 86%，于是像「1」这样的
             // 短消息也会撑成一条几乎整行宽的蓝条。见根部的 BoxWithConstraints。
             modifier = Modifier.widthIn(max = maxBubbleWidth),
-            cornerRadius = 18.dp,
+            cornerRadius = ZhiRadius.floating,
             insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             colors = CardDefaults.defaultColors(
                 color = scheme.primary,
@@ -185,7 +182,7 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
             if (item.body.isNotBlank()) {
                 Text(
                     text = item.body,
-                    fontSize = ZhiTextScale.Subheading,
+                    fontSize = MiuixTheme.textStyles.title4.fontSize,
                     fontWeight = FontWeight.Normal,
                 )
             }
@@ -236,9 +233,9 @@ fun AssistantCard(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 2.dp),
         cornerRadius = ZhiRadius.card,
         insideMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-        // 透明底：不再是"一块卡片"，只剩长按入口 + 左侧竖线的身份标记
+        // 助手正文使用极轻的容器底，保留阅读连续性，同时与用户气泡形成清晰层级。
         colors = CardDefaults.defaultColors(
-            color = Color.Transparent,
+            color = scheme.surfaceContainer.copy(alpha = 0.42f),
             contentColor = scheme.onSurface,
         ),
         pressFeedbackType = PressFeedbackType.None,
@@ -293,7 +290,7 @@ fun AssistantCard(
             // （见 settledPrefixLength）：不传的话每 32ms 会重建整篇。
             ZhiMarkdown(
                 source = markdownBody,
-                bodyFontSize = 14.sp,
+                bodyFontSize = MiuixTheme.textStyles.main.fontSize,
                 streaming = item.streaming && !bodyTooLong,
             )
             if (bodyTooLong && !showFullBody) {
@@ -306,7 +303,7 @@ fun AssistantCard(
                     Text(
                         text = "正文较长，已显示前 ${MaxInitialMarkdownChars / 1000} KB · 点按展开全部",
                         color = scheme.primary,
-                        fontSize = ZhiTextScale.Footnote,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     )
                 }
             }
@@ -344,17 +341,17 @@ fun AssistantCard(
                 Text(
                     text = "▍",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.BodySmall,
+                    fontSize = MiuixTheme.textStyles.body1.fontSize,
                     modifier = Modifier
                         .padding(top = 1.dp)
                         .graphicsLayer { alpha = cursorAlpha.value },
                 )
             }
-            // 上下文页脚淡入：流式一结束它就出现，之前是瞬间蹦出来的。
+                // 上下文页脚随高度出现/收回，不让文字单独淡入淡出。
             AnimatedVisibility(
                 visible = !item.streaming && item.contextTokens >= 0,
-                enter = fadeIn(ZhiMotion.fadeInSpec),
-                exit = fadeOut(ZhiMotion.fadeOutSpec),
+                enter = expandVertically(animationSpec = ZhiMotion.sizeSpec, expandFrom = Alignment.Top),
+                exit = shrinkVertically(animationSpec = ZhiMotion.sizeSpec, shrinkTowards = Alignment.Top),
             ) {
                 ContextFooter(
                     tokens = item.contextTokens,
@@ -386,7 +383,7 @@ private fun ContextFooter(tokens: Int, window: Int) {
     Text(
         text = label,
         color = color,
-        fontSize = ZhiTextScale.Micro,
+        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
         fontFamily = FontFamily.Monospace,
         modifier = Modifier.padding(top = 5.dp, end = 3.dp),
     )
@@ -413,30 +410,22 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                         tint = scheme.primary,
                         modifier = Modifier.size(13.dp),
                     )
-                    // 表头文案也是**会变的文字**：流式期间尾部多一个「 · 进行中」。
-                    // 走 Crossfade 淡变，而不是让它硬蹦出来/消失 —— 只有尾缀瞬间跳变
-                    // 时，整块面板看起来像"卡"了一下。做法与工具组标题
-                    // （`Crossfade(targetState = ToolGrouping.label(...))`）同一处口径。
-                    Crossfade(
-                        targetState = "思考过程" + (if (item.streaming) " · 进行中" else ""),
-                        animationSpec = ZhiMotion.fadeOutSpec,
-                        label = "thinking-label",
+                    Text(
+                        text = "思考过程" + (if (item.streaming) " · 进行中" else ""),
+                        color = scheme.primary,
+                        fontSize = MiuixTheme.textStyles.body2.fontSize,
                         modifier = Modifier.padding(start = 5.dp),
-                    ) { label ->
-                        Text(
-                            text = label,
-                            color = scheme.primary,
-                            fontSize = ZhiTextScale.Caption,
-                        )
-                    }
+                    )
                 }
             }
-        // 展开/收起：高度由 AssistantCard 外层的 animateContentSize 平滑过渡，
-        // 两份文字本身再用 Crossfade 淡变 —— 之前只有卡片高度在动，
-        // 文字是瞬间蹦出来/消失的。
-        Crossfade(
+        // 展开/收起只改变内容高度，不再交叉淡化两份文本；旧内容会从顶部
+        // 逐帧收回，新内容也从同一条边缘展开，和工具组保持同一交互模型。
+        AnimatedContent(
             targetState = item.thinkingExpanded,
-            animationSpec = ZhiMotion.fadeOutSpec,
+            transitionSpec = {
+                expandVertically(animationSpec = ZhiMotion.sizeSpec, expandFrom = Alignment.Top) togetherWith
+                    shrinkVertically(animationSpec = ZhiMotion.sizeSpec, shrinkTowards = Alignment.Top)
+            },
             label = "thinking-panel",
         ) { expanded ->
             if (expanded) {
@@ -446,7 +435,7 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                             Text(
                                 text = "· $step",
                                 color = scheme.onSurfaceVariantSummary,
-                                fontSize = ZhiTextScale.Caption,
+                                fontSize = MiuixTheme.textStyles.body2.fontSize,
                                 modifier = Modifier.padding(start = 6.dp, top = 2.dp),
                             )
                         }
@@ -455,7 +444,7 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                         Text(
                             text = item.thinking,
                             color = scheme.onSurfaceVariantSummary,
-                            fontSize = ZhiTextScale.Caption,
+                            fontSize = MiuixTheme.textStyles.body2.fontSize,
                             modifier = Modifier.padding(start = 6.dp, top = 4.dp),
                         )
                     }
@@ -464,7 +453,7 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                 Text(
                     text = item.thinking,
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 6.dp),
@@ -707,24 +696,17 @@ private fun ToolGroupCard(
                 },
                 modifier = Modifier.size(13.dp),
             )
-            // 组标题同样是**会变的文字**（「正在读取 2 个文件」→「已读取 2 个文件」，
-            // 计数与失败数也在涨），所以走 Crossfade 淡变 —— 只让卡片高度动、
-            // 文字瞬间跳变正是被点名过的观感问题。
-            Crossfade(
-                targetState = ToolGrouping.label(group, batchDone = done),
-                animationSpec = ZhiMotion.fadeOutSpec,
-                label = "group-label",
+            // 标题直接更新；组本身的展开/收起由内容高度过渡负责，避免标题和
+            // 内容同时保留两套淡变文本。
+            Text(
+                text = ToolGrouping.label(group, batchDone = done),
+                color = scheme.onSurface,
+                fontSize = MiuixTheme.textStyles.body1.fontSize,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 6.dp).weight(1f),
-            ) { text ->
-                Text(
-                    text = text,
-                    color = scheme.onSurface,
-                    fontSize = ZhiTextScale.BodySmall,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            )
             // ⚠️ 这里**没有**折叠箭头，是刻意的（用户：「⌃/⌄ 箭头可以去掉，
             // 因为点击内容可以快速收回或展开」）。
             //
@@ -739,7 +721,7 @@ private fun ToolGroupCard(
         Text(
             text = ToolGrouping.subtitle(group, expanded = expanded, batchDone = done),
             color = if (failed) ZhiColors.red() else scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Caption,
+            fontSize = MiuixTheme.textStyles.body2.fontSize,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = 21.dp, top = 2.dp),
@@ -891,7 +873,7 @@ private fun ToolRow(
             Text(
                 text = activity.displayName,
                 color = scheme.onSurface,
-                fontSize = ZhiTextScale.Caption,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -902,7 +884,7 @@ private fun ToolRow(
                 Text(
                     text = "  " + activity.summary,
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -984,7 +966,7 @@ private fun ToolRow(
             Text(
                 text = "  " + commandLine,
                 color = if (activity.expanded) scheme.onSurface else scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontFamily = FontFamily.Monospace,
                 // 展开时**不限制行数**：完整命令是用户主动要求看的，再截就等于没展开。
                 maxLines = if (activity.expanded) Int.MAX_VALUE else 2,
@@ -994,13 +976,14 @@ private fun ToolRow(
             )
         }
 
-        // 状态区切换（运行中 → 折叠摘要 → 展开输出）整块 Crossfade 淡变：
-        // 高度仍由外层 Column 的 animateContentSize 管，文字不再瞬间跳变。
-        // 目标态收敛成枚举：运行中 elapsedMs 一直在变，但 region 不变，
-        // Crossfade 就不会被打断重放。
-        Crossfade(
+        // 状态区只有尺寸过渡：旧内容从顶部收回，新内容从同一边缘展开。
+        // 不使用淡入淡出，避免长输出在收回时先淡掉、再让卡片缩小。
+        AnimatedContent(
             targetState = toolStatusRegion(activity),
-            animationSpec = ZhiMotion.fadeOutSpec,
+            transitionSpec = {
+                expandVertically(animationSpec = ZhiMotion.sizeSpec, expandFrom = Alignment.Top) togetherWith
+                    shrinkVertically(animationSpec = ZhiMotion.sizeSpec, shrinkTowards = Alignment.Top)
+            },
             label = "tool-status",
         ) { region ->
             when (region) {
@@ -1023,7 +1006,7 @@ private fun ToolRow(
                 ToolStatusRegion.COLLAPSED -> Text(
                     text = "  ⎿  " + collapsedSummary,
                     color = if (activity.failed) ZhiColors.red() else scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(start = 22.dp, bottom = 2.dp),
                 )
@@ -1141,7 +1124,7 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
             Text(
                 text = label,
                 color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Micro,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 fontFamily = FontFamily.Monospace,
             )
             if (live.isNotEmpty()) {
@@ -1157,7 +1140,7 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
                     Text(
                         text = live,
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Micro,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         fontFamily = FontFamily.Monospace,
                         maxLines = 12,
                         overflow = TextOverflow.Ellipsis,
@@ -1197,7 +1180,7 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
                 Text(
                     text = activity.displayName,
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Micro,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1207,7 +1190,7 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
                 Text(
                     text = if (activity.awaitingPermission) "等待授权…" else label,
                     color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Micro,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                 )
@@ -1218,7 +1201,7 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
                 Text(
                     text = ToolText.truncateCommand(activity.command),
                     color = scheme.onSurface,
-                    fontSize = ZhiTextScale.Micro,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -1232,7 +1215,7 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
             Text(
                 text = body,
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Micro,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 fontFamily = FontFamily.Monospace,
                 // 实时区只按行数控制高度（见 `LiveOutput.preview`）：
                 // 一行很长的编译命令折成三行会把工具行顶得很高，而这几行的
@@ -1443,7 +1426,7 @@ private fun DiffCount(label: String, color: Color) {
     Text(
         text = label,
         color = color,
-        fontSize = ZhiTextScale.Micro,
+        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
         fontFamily = FontFamily.Monospace,
         modifier = Modifier.padding(horizontal = 5.dp),
     )
@@ -1472,7 +1455,7 @@ fun ErrorCard(item: ChatItem) {
         content = {
             ZhiMarkdown(
                 source = item.body,
-                bodyFontSize = 13.sp,
+                bodyFontSize = MiuixTheme.textStyles.body1.fontSize,
                 modifier = Modifier.padding(top = 4.dp),
             )
         },
@@ -1497,7 +1480,7 @@ fun InfoCard(item: ChatItem) {
             // 现在由行内解析只给反引号包住的部分加等宽 + 底色。
             ZhiMarkdown(
                 source = item.body,
-                bodyFontSize = 12.sp,
+                bodyFontSize = MiuixTheme.textStyles.body2.fontSize,
                 modifier = Modifier.padding(top = 3.dp),
             )
         },

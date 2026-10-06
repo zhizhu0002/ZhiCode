@@ -42,7 +42,6 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
@@ -154,7 +153,7 @@ private fun CollapsedPill(
             )
             Text(
                 text = label,
-                fontSize = ZhiTextScale.Footnote,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(start = 6.dp),
             )
@@ -200,7 +199,7 @@ private fun ExpandedHud(
                 )
                 Text(
                     text = "调试仪表盘",
-                    fontSize = ZhiTextScale.Body,
+                    fontSize = MiuixTheme.textStyles.main.fontSize,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(start = 6.dp),
                 )
@@ -272,13 +271,13 @@ private fun HudRow(name: String, value: String, valueColor: Color = Color.Unspec
     ) {
         Text(
             text = name,
-            fontSize = ZhiTextScale.Micro,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             color = scheme.onSurfaceVariantSummary,
             modifier = Modifier.width(74.dp),
         )
         Text(
             text = value,
-            fontSize = ZhiTextScale.Micro,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             fontFamily = FontFamily.Monospace,
             color = if (valueColor == Color.Unspecified) scheme.onSurface else valueColor,
             modifier = Modifier.weight(1f),
@@ -347,11 +346,11 @@ private fun MarkdownPreviewBlock(state: WorkspaceUiState) {
                 text = "输入框为空。在输入框里写 Markdown（# 标题、- 列表、**粗体**、`代码`、表格…），" +
                     "这里会立刻显示它在对话流里的样子。",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Micro,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             )
         } else {
             // 用的就是对话流的渲染器：所以这里的排版问题就是消息里会有的问题。
-            ZhiMarkdown(source = source, bodyFontSize = ZhiTextScale.Micro)
+            ZhiMarkdown(source = source, bodyFontSize = MiuixTheme.textStyles.footnote2.fontSize)
         }
     }
 }
@@ -367,7 +366,7 @@ private fun ToolsBlock(state: WorkspaceUiState) {
             Text(
                 text = "本次会话还没有工具调用。发一条需要工具的任务，这里会逐条列出来。",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Micro,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             )
         }
         return
@@ -394,13 +393,13 @@ private fun ToolsBlock(state: WorkspaceUiState) {
                 )
                 Text(
                     text = tool.displayName,
-                    fontSize = ZhiTextScale.Micro,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(start = 5.dp),
                 )
                 Text(
                     text = " " + tool.summary,
-                    fontSize = ZhiTextScale.Micro,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     fontFamily = FontFamily.Monospace,
                     color = scheme.onSurfaceVariantSummary,
                     modifier = Modifier.weight(1f),
@@ -409,7 +408,7 @@ private fun ToolsBlock(state: WorkspaceUiState) {
             Row(modifier = Modifier.padding(start = 17.dp)) {
                 Text(
                     text = status,
-                    fontSize = ZhiTextScale.Micro,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     color = when {
                         tool.failed -> ZhiColors.red()
                         tool.awaitingPermission -> scheme.primary
@@ -420,20 +419,20 @@ private fun ToolsBlock(state: WorkspaceUiState) {
                 if (tool.additions > 0 || tool.deletions > 0) {
                     Text(
                         text = "  +${tool.additions} −${tool.deletions}",
-                        fontSize = ZhiTextScale.Micro,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         color = scheme.onSurfaceVariantSummary,
                     )
                 }
                 Text(
                     text = "  cid=${tool.id}",
-                    fontSize = ZhiTextScale.Micro,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     color = scheme.onSurfaceVariantSummary,
                 )
             }
             if (tool.output.isNotBlank()) {
                 Text(
                     text = tool.output.take(160).let { if (tool.output.length > 160) "$it…" else it },
-                    fontSize = ZhiTextScale.Micro,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     fontFamily = FontFamily.Monospace,
                     color = scheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(start = 17.dp, top = 1.dp),
@@ -453,7 +452,7 @@ private fun TranscriptBlock(state: WorkspaceUiState) {
             Text(
                 text = "对话流为空（界面上此时显示的是空状态）。",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Micro,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             )
         }
         return
@@ -465,7 +464,7 @@ private fun TranscriptBlock(state: WorkspaceUiState) {
         ) {
             Text(
                 text = item.kind.name,
-                fontSize = ZhiTextScale.Micro,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 fontWeight = FontWeight.Medium,
                 color = when (item.kind) {
                     ChatKind.ERROR -> ZhiColors.red()
@@ -476,7 +475,7 @@ private fun TranscriptBlock(state: WorkspaceUiState) {
             )
             Text(
                 text = item.digest(),
-                fontSize = ZhiTextScale.Micro,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 fontFamily = FontFamily.Monospace,
                 color = scheme.onSurfaceVariantSummary,
                 modifier = Modifier.weight(1f),
@@ -546,7 +545,7 @@ private fun QuickActionsBlock(state: WorkspaceUiState, viewModel: WorkspaceViewM
         Text(
             text = "最近动作：$lastAction",
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Micro,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
         )
     }
 }
@@ -565,7 +564,7 @@ private fun CompactAction(label: String, onClick: () -> Unit) {
         ),
         pressFeedbackType = PressFeedbackType.Sink,
     ) {
-        Text(text = label, fontSize = ZhiTextScale.Micro, fontWeight = FontWeight.Medium)
+        Text(text = label, fontSize = MiuixTheme.textStyles.footnote2.fontSize, fontWeight = FontWeight.Medium)
     }
 }
 

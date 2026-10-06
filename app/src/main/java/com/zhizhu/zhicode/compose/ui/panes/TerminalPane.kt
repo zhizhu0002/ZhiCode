@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -416,7 +415,7 @@ private fun TerminalPlaceholder(
                             Text(
                                 text = line.text.ifEmpty { " " },
                                 color = toneColor(line.tone, scheme.onSurface),
-                                fontSize = ZhiTextScale.Caption,
+                                fontSize = MiuixTheme.textStyles.body2.fontSize,
                                 fontFamily = FontFamily.Monospace,
                                 modifier = Modifier.animateItem(),
                             )
@@ -436,7 +435,7 @@ private fun TerminalPlaceholder(
                     "内置 Termux 环境未就绪，无法启动终端。"
                 },
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp),
             )
         }

@@ -29,12 +29,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,7 +64,6 @@ import com.zhizhu.zhicode.compose.model.FileSortKey
 import com.zhizhu.zhicode.compose.model.fileRangeSelection
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.theme.ZhiColors
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMaterialIcons
@@ -81,6 +85,8 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
+import top.yukonga.miuix.kmp.utils.springAnimateToPage
 
 @Composable
 fun FilesPane(
@@ -127,19 +133,119 @@ fun FilesPane(
     BackHandler(active && effectiveSelectionMode, onClearSelection)
     Surface(modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
         Column(Modifier.fillMaxSize()) {
-            FileRootSwitcher(root, onSwitchRoot)
-            FileBrowserList(
-                filePath, entries, root, emptyNote, sharedStorageGranted, onGrantSharedStorage,
-                onUp,
-                listOptions, onQueryChange, onSortChange, onToggleSortDirection,
-                selection, effectiveSelectionMode, fileClipboardCount, fileClipboardMove, onPasteFiles, onOpen, onNavigate, onNewEntry,
-                onLongPressEntry, onToggleEntry, onSetSelection, onToggleSelectAll, onClearSelection,
+            var pagerRoot by remember { mutableStateOf(root) }
+            LaunchedEffect(root) { pagerRoot = root }
+            FileRootSwitcher(pagerRoot, { selected ->
+                pagerRoot = selected
+                onSwitchRoot(selected)
+            })
+            FileRootPager(
+                selectedRoot = root,
+                onSwitchRoot = onSwitchRoot,
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                filePath = filePath,
+                entries = entries,
+                emptyNote = emptyNote,
+                sharedStorageGranted = sharedStorageGranted,
+                onGrantSharedStorage = onGrantSharedStorage,
+                onUp = onUp,
+                listOptions = listOptions,
+                onQueryChange = onQueryChange,
+                onSortChange = onSortChange,
+                onToggleSortDirection = onToggleSortDirection,
+                selection = selection,
+                selectionMode = effectiveSelectionMode,
+                fileClipboardCount = fileClipboardCount,
+                fileClipboardMove = fileClipboardMove,
+                onPasteFiles = onPasteFiles,
+                onOpen = onOpen,
+                onNavigate = onNavigate,
+                onNewEntry = onNewEntry,
+                onLongPressEntry = onLongPressEntry,
+                onToggleEntry = onToggleEntry,
+                onSetSelection = onSetSelection,
+                onToggleSelectAll = onToggleSelectAll,
+                onClearSelection = onClearSelection,
+                onPageSelected = { pagerRoot = it },
             )
         }
     }
     NewEntryDialog(nameForm?.takeIf { it.target == null }, onNameDraftChange, onSubmitName, onCancelName)
     RenameEntryDialog(nameForm?.takeIf { it.target != null }, onNameDraftChange, { onSubmitName(false) }, onCancelName)
     DeleteConfirmDialog(deletePrompt, onConfirmDelete, onCancelDelete)
+}
+
+@Composable
+private fun FileRootPager(
+    selectedRoot: FileRoot,
+    onSwitchRoot: (FileRoot) -> Unit,
+    modifier: Modifier,
+    filePath: String,
+    entries: List<FileEntry>,
+    emptyNote: String,
+    sharedStorageGranted: Boolean,
+    onGrantSharedStorage: () -> Unit,
+    onUp: () -> Unit,
+    listOptions: FileListOptions,
+    onQueryChange: (String) -> Unit,
+    onSortChange: (FileSortKey, Boolean) -> Unit,
+    onToggleSortDirection: () -> Unit,
+    selection: Set<String>,
+    selectionMode: Boolean,
+    fileClipboardCount: Int,
+    fileClipboardMove: Boolean,
+    onPasteFiles: () -> Unit,
+    onOpen: (FileEntry) -> Unit,
+    onNavigate: (String) -> Unit,
+    onNewEntry: () -> Unit,
+    onLongPressEntry: (FileEntry) -> Unit,
+    onToggleEntry: (FileEntry) -> Unit,
+    onSetSelection: (Set<String>) -> Unit,
+    onToggleSelectAll: () -> Unit,
+    onClearSelection: () -> Unit,
+    onPageSelected: (FileRoot) -> Unit = {},
+) {
+    val roots = remember { FileRoot.entries.toList() }
+    val pagerState = rememberPagerState(pageCount = { roots.size })
+    val currentSelectedRoot by rememberUpdatedState(selectedRoot)
+    var pagerInitialized by remember { mutableStateOf(false) }
+    LaunchedEffect(pagerState, selectedRoot) {
+        val target = roots.indexOf(selectedRoot).coerceIn(0, roots.lastIndex)
+        if (!pagerInitialized) {
+            if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+            pagerInitialized = true
+        } else if (pagerState.currentPage != target) {
+            pagerState.springAnimateToPage(target)
+        }
+    }
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage to pagerState.isScrollInProgress }
+            .collect { (page, scrolling) ->
+                roots.getOrNull(page)?.let { root ->
+                    onPageSelected(root)
+                    if (!scrolling && root != currentSelectedRoot) onSwitchRoot(root)
+                }
+            }
+    }
+    val flingBehavior = PagerDefaults.flingBehavior(
+        state = pagerState,
+        snapAnimationSpec = PagerNavigationSpringSpec,
+    )
+    HorizontalPager(
+        state = pagerState,
+        modifier = modifier,
+        userScrollEnabled = false,
+        flingBehavior = flingBehavior,
+        key = { roots[it] },
+        pageContent = { page ->
+            FileBrowserList(
+                filePath, entries, roots[page], emptyNote, sharedStorageGranted, onGrantSharedStorage,
+                onUp, listOptions, onQueryChange, onSortChange, onToggleSortDirection,
+                selection, selectionMode, fileClipboardCount, fileClipboardMove, onPasteFiles, onOpen, onNavigate, onNewEntry,
+                onLongPressEntry, onToggleEntry, onSetSelection, onToggleSelectAll, onClearSelection,
+            )
+        },
+    )
 }
 
 @Composable
@@ -155,8 +261,9 @@ private fun FileBrowserList(
     onLongPressEntry: (FileEntry) -> Unit, onToggleEntry: (FileEntry) -> Unit,
     onSetSelection: (Set<String>) -> Unit, onToggleSelectAll: () -> Unit, onClearSelection: () -> Unit,
 ) {
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
+    Column(Modifier.fillMaxSize()) {
+        val listState = rememberLazyListState()
+        val scope = rememberCoroutineScope()
     val currentEntries by rememberUpdatedState(entries)
     val currentSelection by rememberUpdatedState(selection)
     val currentMode by rememberUpdatedState(selectionMode)
@@ -179,7 +286,7 @@ private fun FileBrowserList(
     Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = FileRowSidePadding), verticalAlignment = Alignment.CenterVertically) {
         if (selectionMode) {
             ZhiIconButton(ZhiIcons.close, "退出选择", onClearSelection, compact = 40.dp)
-            Text("已选择 ${selection.size} 项", fontSize = ZhiTextScale.Body, modifier = Modifier.weight(1f))
+            Text("已选择 ${selection.size} 项", fontSize = MiuixTheme.textStyles.main.fontSize, modifier = Modifier.weight(1f))
             ZhiIconButton(
                 icon = ZhiIcons.listCount,
                 description = if (allSelected) "取消全选" else "全选",
@@ -189,7 +296,19 @@ private fun FileBrowserList(
                 background = if (allSelected) MiuixTheme.colorScheme.primary else Color.Transparent,
             )
         } else {
-            Text(fileCountSummary(entries), fontSize = ZhiTextScale.Footnote, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
+            ZhiTextField(
+                value = listOptions.query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.weight(1f).heightIn(min = 40.dp, max = 48.dp),
+                label = "搜索文件",
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                insideMargin = androidx.compose.ui.unit.DpSize(8.dp, 0.dp),
+                leadingIcon = { Icon(ZhiIcons.search, "搜索文件", tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.size(18.dp)) },
+                trailingIcon = if (listOptions.query.isNotEmpty()) {
+                    { ZhiIconButton(ZhiIcons.close, "清除搜索", { onQueryChange("") }, compact = 32.dp, iconSize = 16.dp) }
+                } else null,
+            )
             OverlayIconDropdownMenu(sortMenuEntries, minHeight = 40.dp, minWidth = 44.dp, collapseOnSelection = true) {
                 Icon(ZhiMaterialIcons.Sort, "排序与显示方式", modifier = Modifier.size(20.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
@@ -207,8 +326,8 @@ private fun FileBrowserList(
             content = { TextButton("去授权", onGrantSharedStorage) },
         )
     }
-    Box(Modifier.fillMaxSize()) {
-        LazyColumn(
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            LazyColumn(
             state = listState,
             contentPadding = PaddingValues(bottom = if (selectionMode) 96.dp else 16.dp),
             modifier = Modifier.fillMaxSize().pointerInput(filePath) {
@@ -275,7 +394,8 @@ private fun FileBrowserList(
                 FileListRow(entry = entry, onOpen = { if (selectionMode) onToggleEntry(entry) else onOpen(entry) }, selected = entry.path in selection, selectionMode = selectionMode, modifier = Modifier.animateItem())
             }
         }
-        if (entries.isEmpty()) Text(emptyNote.ifEmpty { "这个目录是空的" }, modifier = Modifier.align(Alignment.Center), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            if (entries.isEmpty()) Text(emptyNote.ifEmpty { "这个目录是空的" }, modifier = Modifier.align(Alignment.Center), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        }
     }
 }
 
@@ -349,7 +469,7 @@ private fun FileToolbarAction(icon: ImageVector, label: String, onClick: () -> U
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(imageVector = icon, contentDescription = label, modifier = Modifier.size(18.dp), tint = content)
-            Text(label, fontSize = ZhiTextScale.Footnote, color = content)
+            Text(label, fontSize = MiuixTheme.textStyles.footnote1.fontSize, color = content)
         }
     }
 }

@@ -157,24 +157,24 @@ object ZhiColors {
     /**
      * 主背板（窗口最底层整片颜色）。
      *
-     * 深色 `#242424`（比纯黑亮一点，让纯黑的板块能"退到后面"）；
-     * 浅色 `#EDEDED`。
+     * 深色 `#28282A`（比面板略亮，保留 HyperOS 的柔和层次）；
+     * 浅色 `#F1F1F3`。
      *
      * 与 [panelSurface] 的关系是：**背板退后、板块站出来**。
-     * 深色下板块是纯黑，所以背板必须比它亮，否则两者糊成一片。
+     * 背板只负责托住工作区，不与内容卡片争夺注意力。
      */
     @Composable
     fun backdrop(): Color = if (isDark()) DarkBackdrop else PanelLight
 
-    /** 侧栏 / 面板底色：深色**纯黑**、浅色**纯白**。 */
+    /** 侧栏 / 面板底色：深色柔黑、浅色柔白。 */
     @Composable
-    fun panelSurface(): Color = if (isDark()) Color.Black else Color.White
+    fun panelSurface(): Color = if (isDark()) PanelDark else Color.White
 
     /**
      * 面板里的卡片底。
      *
-     * 深色：比纯黑面板**亮**一档（`#2A2A2A`），否则黑底黑卡完全看不见；
-     * 浅色：比纯白面板**暗**一档（`#F8F8F8`）。
+     * 深色：比柔黑面板**亮**一档（`#323235`），让分组边界自然出现；
+     * 浅色：比纯白面板**暗**一档（`#FAFAFC`）。
      */
     @Composable
     fun cardSurface(): Color = if (isDark()) DarkCard else CardLight
@@ -211,10 +211,11 @@ object ZhiColors {
     private val TerminalDark = Color(0xFF0A0B0C)
     private val TerminalLight = Color(0xFFE7E5DE)
 
-    private val DarkBackdrop = Color(0xFF242424)
-    private val DarkCard = Color(0xFF2E2E2E)
-    private val PanelLight = Color(0xFFEDEDED)
-    private val CardLight = Color(0xFFF8F8F8)
+    private val DarkBackdrop = Color(0xFF28282A)
+    private val PanelDark = Color(0xFF1C1C1E)
+    private val DarkCard = Color(0xFF323235)
+    private val PanelLight = Color(0xFFF1F1F3)
+    private val CardLight = Color(0xFFFAFAFC)
     private val CardInnerLight = Color(0xFFF0F0F0)
 }
 

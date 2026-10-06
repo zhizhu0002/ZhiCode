@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.data.Clipboard
@@ -343,7 +342,7 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
                     Text(
                         text = block.lang.ifBlank { "text" },
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Micro,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.weight(1f),
                     )

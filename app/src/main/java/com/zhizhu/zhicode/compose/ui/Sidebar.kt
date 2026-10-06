@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.ColumnScope
@@ -93,7 +92,7 @@ data class SidebarState(
  * | 行高 | `heightIn(max = 46.dp)` 截断 | Miuix 自己的 `heightIn(min = 56.dp)` |
  * | 卡片圆角 | `ZhiRadius.card` = 14dp | `CardDefaults.CornerRadius` = 16dp |
  * | 行图标 | `Modifier.size(16.dp)` | 字形固有 24dp（文档 `Icon` 无默认尺寸） |
- * | 会话行 | 手搭 `Row` + `ZhiTextScale` | `BasicComponent`（标题 `headline1`、摘要 `body2`） |
+ * | 会话行 | 手搭 `Row` + `主题 textStyles` | `BasicComponent`（标题 `headline1`、摘要 `body2`） |
  * | 搜索框 | `ZhiTextField` | `InputField`（文档 `SearchBar` 一节，45dp 胶囊） |
  *
  * ## 几何：一条 28dp 基线
@@ -225,7 +224,7 @@ fun ZhiSidebar(
                         Text(
                             text = if (query.isBlank()) "暂无已保存会话" else "没有匹配的会话",
                             color = scheme.onSurfaceVariantSummary,
-                            fontSize = ZhiTextScale.Caption,
+                            fontSize = MiuixTheme.textStyles.body2.fontSize,
                             modifier = Modifier.padding(
                                 start = 16.dp, top = ZhiSpace.s, bottom = ZhiSpace.s,
                             ),
@@ -389,7 +388,7 @@ private fun SessionRowInner(
     //
     // 底色淡入，切换会话时不会硬跳。
     val background by animateColorAsState(
-        targetValue = if (active) scheme.secondaryContainer else Color.Transparent,
+        targetValue = if (active) scheme.secondaryContainer.copy(alpha = 0.72f) else Color.Transparent,
         animationSpec = ZhiMotion.colorSpec,
         label = "sessionRowBackground",
     )

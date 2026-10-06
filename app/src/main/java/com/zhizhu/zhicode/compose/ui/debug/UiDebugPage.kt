@@ -58,7 +58,6 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.ui.ZhiAnchoredActionMenu
 import com.zhizhu.zhicode.compose.ui.ZhiChip
@@ -158,7 +157,7 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
  * ## 纪律
  *
  * - 这里**不新造样式**：视觉一律取自 `Zhi*` 令牌与 Miuix 组件本身，颜色/字号/圆角
- *   必须走 `MiuixTheme.colorScheme` / `ZhiTextScale` / `ZhiRadius` —— 这一页的意义
+ *   必须走 `MiuixTheme.colorScheme` / `主题 textStyles` / `ZhiRadius` —— 这一页的意义
  *   就是"看到的即真实组件"，一旦自己写死数值，它就开始骗人了（由
  *   `UiDebugPageStructureTest` 守着）。
  * - 输入框走 `ZhiTextField`（工程唯一转发点，见 `TextFieldConventionTest`）。
@@ -261,7 +260,7 @@ private fun DebugSection(title: String, subtitle: String? = null, content: @Comp
                 Text(
                     text = subtitle,
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp),
                 )
             }
@@ -982,13 +981,13 @@ private fun SwatchGrid(tokens: List<Pair<String, Color>>) {
                         )
                         Text(
                             text = name,
-                            fontSize = ZhiTextScale.Micro,
+                            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                             color = scheme.onSurfaceVariantSummary,
                             modifier = Modifier.padding(top = 3.dp),
                         )
                         Text(
                             text = hexOf(color),
-                            fontSize = ZhiTextScale.Micro,
+                            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                             color = scheme.onBackgroundVariant,
                         )
                     }
@@ -1013,17 +1012,17 @@ private fun hexOf(color: Color): String = String.format(
 private fun TypographySection() {
     val scheme = MiuixTheme.colorScheme
     val steps = listOf(
-        "Title" to ZhiTextScale.Title,
-        "TitleSmall" to ZhiTextScale.TitleSmall,
-        "Heading" to ZhiTextScale.Heading,
-        "Subheading" to ZhiTextScale.Subheading,
-        "Body" to ZhiTextScale.Body,
-        "BodySmall" to ZhiTextScale.BodySmall,
-        "Caption" to ZhiTextScale.Caption,
-        "Footnote" to ZhiTextScale.Footnote,
-        "Micro" to ZhiTextScale.Micro,
+        "Title" to MiuixTheme.textStyles.title1.fontSize,
+        "TitleSmall" to MiuixTheme.textStyles.title2.fontSize,
+        "Heading" to MiuixTheme.textStyles.title3.fontSize,
+        "Subheading" to MiuixTheme.textStyles.title4.fontSize,
+        "Body" to MiuixTheme.textStyles.main.fontSize,
+        "BodySmall" to MiuixTheme.textStyles.body1.fontSize,
+        "Caption" to MiuixTheme.textStyles.body2.fontSize,
+        "Footnote" to MiuixTheme.textStyles.footnote1.fontSize,
+        "Micro" to MiuixTheme.textStyles.footnote2.fontSize,
     )
-    DebugSection("设计令牌 · 字阶", "ZhiTextScale 的 9 档；正文样式由主题 textStyles 接管") {
+    DebugSection("设计令牌 · 字阶", "主题 textStyles 的 9 档；正文样式由主题 textStyles 接管") {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
             steps.forEach { (name, size) ->
                 Row(
@@ -1033,7 +1032,7 @@ private fun TypographySection() {
                     Text(
                         text = "${name} · ${size.value}sp",
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Micro,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         modifier = Modifier.width(120.dp),
                     )
                     Text(text = "蜘蛛 ZhiCode 示例 Aa 123", fontSize = size)
@@ -1131,7 +1130,7 @@ private fun RadiusAndIconSection() {
         Text(
             text = radii.joinToString("   ") { it.first },
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Micro,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             modifier = Modifier.padding(horizontal = 12.dp),
         )
         Column(
@@ -1159,7 +1158,7 @@ private fun RadiusAndIconSection() {
                             Text(
                                 text = name,
                                 color = scheme.onSurfaceVariantSummary,
-                                fontSize = ZhiTextScale.Micro,
+                                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(top = 3.dp),
@@ -1243,12 +1242,12 @@ private fun MiuixBasicsSection() {
                     contentColor = scheme.onSurface,
                 ),
             ) {
-                Text(text = "Card（ZhiRadius.card）· 可点", fontSize = ZhiTextScale.Body)
+                Text(text = "Card（ZhiRadius.card）· 可点", fontSize = MiuixTheme.textStyles.main.fontSize)
                 HorizontalPairDivider()
                 Text(
                     text = "Card 的按压反馈与 squircle 圆角由 Miuix 负责。",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                 )
             }
             Row(
@@ -1288,7 +1287,7 @@ private fun MiuixBasicsSection() {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(text = "FloatingToolbar", fontSize = ZhiTextScale.BodySmall)
+                    Text(text = "FloatingToolbar", fontSize = MiuixTheme.textStyles.body1.fontSize)
                     Spacer(modifier = Modifier.weight(1f))
                     ZhiChip(
                         label = "点我复制 chip 文本",
@@ -1300,7 +1299,7 @@ private fun MiuixBasicsSection() {
                 Text(
                     text = "最近一次点击：$lastTap",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                 )
             }
         }
@@ -1520,7 +1519,7 @@ private fun DebugApiSection(state: WorkspaceUiState, viewModel: WorkspaceViewMod
                 )
                 Text(
                     text = if (isDebugProfile) "当前生效：调试 · 本地模拟（不出网）" else "当前生效：${state.profileName}",
-                    fontSize = ZhiTextScale.BodySmall,
+                    fontSize = MiuixTheme.textStyles.body1.fontSize,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.padding(start = 6.dp),
                 )
@@ -1541,21 +1540,21 @@ private fun DebugApiSection(state: WorkspaceUiState, viewModel: WorkspaceViewMod
             Text(
                 text = "发消息时在正文里带上关键词即可选场景：",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Caption,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
                 modifier = Modifier.padding(top = 4.dp),
             )
             DEBUG_SCENARIOS.forEach { (keyword, effect) ->
                 Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
                     Text(
                         text = keyword,
-                        fontSize = ZhiTextScale.Micro,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         fontFamily = FontFamily.Monospace,
                         color = scheme.primary,
                         modifier = Modifier.width(56.dp),
                     )
                     Text(
                         text = effect,
-                        fontSize = ZhiTextScale.Micro,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         color = scheme.onSurfaceVariantSummary,
                         modifier = Modifier.weight(1f),
                     )
@@ -1625,13 +1624,13 @@ private fun MarkdownSampleBlock(sample: MarkdownSample) {
     Column(modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
         Text(
             text = sample.title,
-            fontSize = ZhiTextScale.BodySmall,
+            fontSize = MiuixTheme.textStyles.body1.fontSize,
             fontWeight = FontWeight.Medium,
         )
         Text(
             text = sample.note,
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Micro,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(
@@ -1651,7 +1650,7 @@ private fun MarkdownSampleBlock(sample: MarkdownSample) {
             ) {
                 Text(
                     text = sample.source,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     fontFamily = FontFamily.Monospace,
                 )
             }
@@ -1899,7 +1898,7 @@ private fun ConversationSection(resetToken: Int) {
             Text(
                 text = "样例数据控制",
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Caption,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(
@@ -2025,7 +2024,7 @@ private fun ConversationSection(resetToken: Int) {
             Text(
                 text = "空状态（对话流无内容时）",
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Caption,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
                 modifier = Modifier.padding(top = 10.dp),
             )
             // 空状态是整屏居中的组件，这里给它一个受限高度，免得在画廊里吃掉大半屏。
@@ -2158,31 +2157,31 @@ private fun DebugImageBubble(
                     Text(
                         text = "示例图片 · 点按切换比例",
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Micro,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
             }
             Text(
                 text = image.name,
-                fontSize = ZhiTextScale.Caption,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(top = 6.dp),
             )
             Text(
                 text = "${image.dimensions} · ${image.size} · ${image.mime}",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Micro,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             )
             Text(
                 text = image.caption,
-                fontSize = ZhiTextScale.BodySmall,
+                fontSize = MiuixTheme.textStyles.body1.fontSize,
                 modifier = Modifier.padding(top = 3.dp),
             )
             Text(
                 text = "长按可复制图片信息",
                 color = scheme.primary,
-                fontSize = ZhiTextScale.Micro,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 modifier = Modifier.padding(top = 3.dp),
             )
         }
@@ -2198,7 +2197,7 @@ private fun InteractionLog(log: List<String>, onClear: () -> Unit) {
             Text(
                 text = "交互日志（最近 ${log.size} 条）",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Caption,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
             )
             Spacer(modifier = Modifier.weight(1f))
             TextButton(text = "清空", onClick = onClear)
@@ -2207,7 +2206,7 @@ private fun InteractionLog(log: List<String>, onClear: () -> Unit) {
             Text(
                 text = "还没有交互。点上面的按钮或长按任意一条消息试试。",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Caption,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
             )
         } else {
             Card(
@@ -2223,7 +2222,7 @@ private fun InteractionLog(log: List<String>, onClear: () -> Unit) {
                     log.forEach { line ->
                         Text(
                             text = "· $line",
-                            fontSize = ZhiTextScale.Footnote,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                             fontFamily = FontFamily.Monospace,
                         )
                     }
@@ -2455,7 +2454,7 @@ private fun TaskCardSection() {
                 Text(
                     text = "任务卡点一下 = 打开任务清单窗口（真实浮层）",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -2469,7 +2468,7 @@ private fun TaskCardLabel(text: String) {
     Text(
         text = text,
         color = MiuixTheme.colorScheme.primary,
-        fontSize = ZhiTextScale.Micro,
+        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
         fontWeight = FontWeight.Medium,
         modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
     )
@@ -2585,21 +2584,21 @@ private fun ChromeSection() {
                 Text(
                     text = "最近一次交互：$lastTap",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                 )
             }
             Row(
                 modifier = Modifier.fillMaxWidth().height(30.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(text = "纵向分隔线 →", fontSize = ZhiTextScale.Caption)
+                Text(text = "纵向分隔线 →", fontSize = MiuixTheme.textStyles.body2.fontSize)
                 Spacer(modifier = Modifier.width(8.dp))
                 ZhiVerticalDivider(modifier = Modifier.fillMaxHeight().width(1.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "ZhiVerticalDivider",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                 )
             }
         }
@@ -2654,7 +2653,7 @@ private fun OverlayEntrySection(state: WorkspaceUiState, viewModel: WorkspaceVie
             Text(
                 text = if (openNow.isEmpty()) "当前没有浮层打开" else "当前打开：${openNow.joinToString(" / ")}",
                 color = MiuixTheme.colorScheme.primary,
-                fontSize = ZhiTextScale.Caption,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
             )
             SettingsFootnote(
                 "权限确认 / 计划审批 / 选择器这三类浮层由真实任务流触发，没有可构造的入口，" +
@@ -2698,13 +2697,13 @@ private fun StateSnapshotSection(state: WorkspaceUiState) {
                 ) {
                     Text(
                         text = name,
-                        fontSize = ZhiTextScale.Caption,
+                        fontSize = MiuixTheme.textStyles.body2.fontSize,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                         modifier = Modifier.width(88.dp),
                     )
                     Text(
                         text = value,
-                        fontSize = ZhiTextScale.Caption,
+                        fontSize = MiuixTheme.textStyles.body2.fontSize,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.weight(1f),
                     )

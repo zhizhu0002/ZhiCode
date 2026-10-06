@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -170,7 +169,7 @@ private fun ApiProfileList(
                     text = "还没有 API 配置。点右上角「新增」填写你自己服务的 Base URL、协议与模型名 —— " +
                         "应用不预置任何厂商地址，API Key 会存进系统加密存储。",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 )
             }
@@ -231,7 +230,7 @@ private fun ApiProfileList(
             text = "新增或编辑后，密钥会存进系统加密存储（AndroidKeyStore）。" +
                 "编辑已有配置时密钥框留空表示沿用原密钥。",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
@@ -381,7 +380,7 @@ private fun ApiProfileForm(
                 Text(
                     text = ZCODE_HEADERS_HINT,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                 )
             }

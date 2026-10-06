@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 
@@ -83,7 +82,7 @@ fun EnvironmentOverlay(
                     Text(
                         text = if (runtimeReady) "内置 Termux 环境：已就绪" else "内置 Termux 环境：未安装",
                         color = if (runtimeReady) scheme.primary else scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.BodySmall,
+                        fontSize = MiuixTheme.textStyles.body1.fontSize,
                     )
                     if (installing) {
                         LinearProgressIndicator(
@@ -96,14 +95,14 @@ fun EnvironmentOverlay(
                         Text(
                             text = if (message.isBlank()) "$progress%" else "$progress% · $message",
                             color = scheme.onSurfaceVariantSummary,
-                            fontSize = ZhiTextScale.Caption,
+                            fontSize = MiuixTheme.textStyles.body2.fontSize,
                             modifier = Modifier.padding(top = 6.dp),
                         )
                     } else if (message.isNotBlank()) {
                         Text(
                             text = message,
                             color = scheme.onSurfaceVariantSummary,
-                            fontSize = ZhiTextScale.Caption,
+                            fontSize = MiuixTheme.textStyles.body2.fontSize,
                             modifier = Modifier.padding(top = 6.dp),
                         )
                     }
@@ -136,7 +135,7 @@ fun EnvironmentOverlay(
                     Text(
                         text = "诊断报告",
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Caption,
+                        fontSize = MiuixTheme.textStyles.body2.fontSize,
                         // 用 weight 而不是 fillMaxWidth(0.6f)：后者是**固定比例**占位，
                         // 和同一行里两个按钮抢宽度 —— 窄屏上「修复」放不下就把文字
                         // 折成竖排（实测截图上就是竖着的两个字）。weight 让标签
@@ -161,7 +160,7 @@ fun EnvironmentOverlay(
                 Text(
                     text = report.ifBlank { "（无内容，点「重新检测」）" },
                     color = scheme.onBackground,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.fillMaxWidth(),
                 )

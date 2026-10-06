@@ -11,7 +11,6 @@ import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.FileDeletePrompt
 import com.zhizhu.zhicode.compose.model.FileNameForm
 import com.zhizhu.zhicode.compose.theme.ZhiColors
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
@@ -221,7 +220,7 @@ internal fun DeleteConfirmDialog(
                         "删除${shown.label}？无法撤销。"
                     },
                     color = if (shown.destructive) ZhiColors.red() else scheme.onSurface,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     modifier = Modifier.padding(start = 12.dp, bottom = 4.dp),
                 )
             }

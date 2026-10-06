@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -96,7 +95,7 @@ private fun MemoryFileList(
                 "「让智蛛完善」会让 Agent 读取现有说明与构建清单后直接整理 ZhiCode.md；" +
                 "平时的任务里 Agent 也可以自己用 Read 打开它。",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
@@ -120,7 +119,7 @@ private fun MemoryFileList(
                         Text(
                             text = if (file.exists) "编辑" else "创建",
                             color = scheme.primary,
-                            fontSize = ZhiTextScale.Caption,
+                            fontSize = MiuixTheme.textStyles.body2.fontSize,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(end = 12.dp),
                         )
@@ -143,7 +142,7 @@ private fun MemoryEditorBody(
         Text(
             text = editing.path,
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Micro,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
         // 与设置主页同形态：编辑区放进分组卡（分组卡 insideMargin=0，行自带边距）。
@@ -168,7 +167,7 @@ private fun MemoryEditorBody(
                 "当前 ${editing.body.length} 字"
             },
             color = if (editing.empty) scheme.error else scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }

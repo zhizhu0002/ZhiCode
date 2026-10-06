@@ -1,10 +1,5 @@
 package com.zhizhu.zhicode.compose.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,9 +12,19 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.Modifier
@@ -31,8 +36,11 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.panes.FilesPane
 import com.zhizhu.zhicode.compose.ui.panes.TerminalPane
+import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
+import top.yukonga.miuix.kmp.utils.springAnimateToPage
+import kotlinx.coroutines.launch
 
-internal val SidebarWidth = 258.dp
+internal val SidebarWidth = 264.dp
 internal val DividerWidth = 1.dp
 
 /** 宽屏：侧栏常驻 + 对话主栏 + 工作区副栏。 */
@@ -65,69 +73,129 @@ internal fun WideWorkspace(
         ZhiVerticalDivider()
         Column(modifier = Modifier.weight(44f)) {
             val secondary = WorkspaceTab.entries.filter { it != WorkspaceTab.CHAT }
+            val paneTabs = remember { secondary }
+            val panePager = rememberPagerState(pageCount = { paneTabs.size })
+            val paneScope = rememberCoroutineScope()
             WorkspaceTabs(
-                tabs = secondary,
-                selected = state.tab.takeIf { it in secondary } ?: secondary.first(),
-                onSelect = viewModel::selectTab,
+                tabs = paneTabs,
+                selected = paneTabs.getOrNull(panePager.currentPage) ?: paneTabs.first(),
+                onSelect = { tab ->
+                    paneScope.launch { panePager.springAnimateToPage(paneTabs.indexOf(tab)) }
+                },
             )
-            Box(Modifier.weight(1f)) {
-                val paneTab = state.tab.takeIf { it in secondary } ?: secondary.first()
-                key(paneTab) {
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = true,
-                        enter = fadeIn(tween(150)) + slideInHorizontally(tween(180)) { it / 14 },
-                        exit = ExitTransition.None,
-                    ) {
-                        PaneHost(
-                            state = state,
-                            viewModel = viewModel,
-                            isDark = isDark,
-                            glass = glass,
-                            tabOverride = paneTab,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                }
-            }
+            WorkspacePager(
+                tabs = paneTabs,
+                pagerState = panePager,
+                selectedTab = state.tab.takeIf { it in paneTabs } ?: paneTabs.first(),
+                modifier = Modifier.weight(1f),
+                compact = false,
+                state = state,
+                viewModel = viewModel,
+                isDark = isDark,
+                glass = glass,
+            )
         }
     }
 }
 
-/** 窄屏：底部 Tab 切换；页面与状态直接对应，不做 Pager 或转场动画。 */
+/** 窄屏：底部 Tab 切换；内容使用 Miuix 官方示例同款 HorizontalPager。 */
 @Composable
 internal fun CompactWorkspace(
     state: WorkspaceUiState,
     viewModel: WorkspaceViewModel,
     isDark: Boolean,
     glass: Glass,
+    onPageSelected: (WorkspaceTab) -> Unit = {},
 ) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        key(state.tab) {
-            AnimatedVisibility(
-                visible = true,
-                enter = fadeIn(tween(150)) + slideInHorizontally(tween(180)) { it / 14 },
-                exit = ExitTransition.None,
-            ) {
-                when (state.tab) {
-                    WorkspaceTab.CHAT -> ChatArea(
-                        state = state,
-                        viewModel = viewModel,
-                        wide = false,
-                        modifier = Modifier.fillMaxSize(),
-                        glass = glass,
-                    )
-                    else -> PaneHost(
-                        state = state,
-                        viewModel = viewModel,
-                        isDark = isDark,
-                        glass = glass,
-                        tabOverride = state.tab,
-                        modifier = Modifier.fillMaxSize().padding(top = TopBarInsetCompact),
-                    )
+    val tabs = remember { WorkspaceTab.entries.toList() }
+    val pagerState = rememberPagerState(pageCount = { tabs.size })
+    WorkspacePager(
+        tabs = tabs,
+        pagerState = pagerState,
+        selectedTab = state.tab,
+        modifier = Modifier.fillMaxSize(),
+        compact = true,
+        state = state,
+        viewModel = viewModel,
+        isDark = isDark,
+        glass = glass,
+        onPageSelected = onPageSelected,
+    )
+}
+
+/**
+ * 工作区内容页：与 Miuix 官方示例的布局板块相同，TabRow 只负责选择，
+ * HorizontalPager 负责页面跟手、点击后的弹簧吸附和拖动后的 fling。
+ */
+@Composable
+private fun WorkspacePager(
+    tabs: List<WorkspaceTab>,
+    pagerState: PagerState,
+    selectedTab: WorkspaceTab,
+    modifier: Modifier,
+    compact: Boolean,
+    state: WorkspaceUiState,
+    viewModel: WorkspaceViewModel,
+    isDark: Boolean,
+    glass: Glass,
+    onPageSelected: (WorkspaceTab) -> Unit = {},
+) {
+    val currentSelectedTab by rememberUpdatedState(selectedTab)
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage to pagerState.isScrollInProgress }
+            .collect { (page, scrolling) ->
+                tabs.getOrNull(page)?.let { tab ->
+                    onPageSelected(tab)
+                    if (!scrolling && tab != currentSelectedTab) viewModel.selectTab(tab)
                 }
             }
+    }
+    var pagerInitialized by remember { mutableStateOf(false) }
+    LaunchedEffect(pagerState, selectedTab) {
+        val target = tabs.indexOf(selectedTab).coerceIn(0, tabs.lastIndex)
+        if (!pagerInitialized) {
+            if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+            pagerInitialized = true
+        } else if (pagerState.currentPage != target) {
+            // 顶部 Tab 点击先更新 ViewModel；外部状态变化必须反向驱动 Pager，
+            // 否则选中态可能变化而页面仍停在旧页。
+            pagerState.springAnimateToPage(target)
         }
     }
+    val flingBehavior = PagerDefaults.flingBehavior(
+        state = pagerState,
+        snapAnimationSpec = PagerNavigationSpringSpec,
+    )
+    HorizontalPager(
+        state = pagerState,
+        modifier = modifier,
+        userScrollEnabled = false,
+        flingBehavior = flingBehavior,
+        key = { tabs[it] },
+        pageContent = { page ->
+            when (tabs[page]) {
+                WorkspaceTab.CHAT -> ChatArea(
+                    state = state,
+                    viewModel = viewModel,
+                    wide = !compact,
+                    modifier = Modifier.fillMaxSize(),
+                    glass = glass,
+                )
+                else -> PaneHost(
+                    state = state,
+                    viewModel = viewModel,
+                    isDark = isDark,
+                    glass = glass,
+                    tabOverride = tabs[page],
+                    modifier = if (compact) {
+                        Modifier.fillMaxSize().padding(top = TopBarInsetCompact)
+                    } else {
+                        Modifier.fillMaxSize()
+                    },
+                )
+            }
+        },
+    )
 }
 
 /** 工作区 Tab 行高度 = 官方 `TabRowDefaults.TabRowWithContourHeight`（45dp）。 */
@@ -140,9 +208,10 @@ internal fun WorkspaceTabs(
     onSelect: (WorkspaceTab) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val selectedIndex = tabs.indexOf(selected).coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
     ZhiSegmentedTabs(
         tabs = tabs.map { it.label },
-        selectedIndex = tabs.indexOf(selected).coerceAtLeast(0),
+        selectedIndex = selectedIndex,
         onSelect = { index -> tabs.getOrNull(index)?.takeIf { it != selected }?.let(onSelect) },
         modifier = modifier.fillMaxWidth().height(WorkspaceTabRowHeight),
         matchWidth = true,

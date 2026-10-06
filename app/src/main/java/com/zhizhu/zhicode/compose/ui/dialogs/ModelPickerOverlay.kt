@@ -1,10 +1,5 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,10 +13,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -46,6 +48,9 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
+import top.yukonga.miuix.kmp.utils.springAnimateToPage
+import kotlinx.coroutines.launch
 
 /**
  * 模型选择面板。
@@ -186,20 +191,11 @@ private val SheetHeightCap = 560.dp
 private val SheetHeightFloor = 320.dp
 
 /**
- * 中间那块内容的标识：**换了 API 或加载状态变了，就换一块内容**。
- *
- * 必须把 `activeProfileId` 也算进来 —— 只盯 `loading` 的话，切 tab 时
- * 如果新配置的目录**已经缓存**（状态直接从"列表A"变成"列表B"、中间没有 loading 态），
- * AnimatedContent 会认为 targetState 没变、于是整块内容**硬切**。
- * 这正是用户说的"TAB 切换太生硬"。
- */
-private data class PickerContentKey(val profileId: String, val loading: Boolean)
-
-/**
  * API 切换 tab 栏（在模型名输入框的正上方）。
  *
  * 用既有的 [ZhiSegmentedTabs]（Miuix `TabRowWithContour` 的转发）：`matchWidth = false`
- * 时项数超出一屏会自动横向滚动 —— API 记录多了也放得下。
+ * 时项数超出一屏会自动横向滚动 —— API 记录多了也放得下。选择态由 Pager.currentPage
+ * 驱动，页面内容由同一个 Pager 负责跟手。
  *
  * ## 为什么只有多于一条时才画
  *
@@ -210,15 +206,16 @@ private data class PickerContentKey(val profileId: String, val loading: Boolean)
 @Composable
 private fun ProfileTabs(
     picker: ModelPickerState,
-    onSelectProfile: (String) -> Unit,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
 ) {
     if (!picker.showProfileTabs) return
     ZhiSegmentedTabs(
         tabs = picker.profiles.map { it.name },
-        selectedIndex = picker.activeProfileIndex,
+        selectedIndex = selectedIndex.coerceIn(0, picker.profiles.lastIndex),
         onSelect = { index ->
-            // 越界保护：下标来自 Miuix 的回调，而 profiles 是状态，两者之间隔了一次重组。
-            picker.profiles.getOrNull(index)?.let { onSelectProfile(it.id) }
+            // 点击只启动 Pager 弹簧；配置切换在 Pager settle 后发起。
+            if (index in picker.profiles.indices) onSelect(index)
         },
         modifier = Modifier.fillMaxWidth().padding(bottom = PickerGroupSpacing),
     )
@@ -248,7 +245,7 @@ private fun PickerLoading(status: String) {
             Text(
                 text = status,
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             )
@@ -478,7 +475,7 @@ private fun QuotaCard(
                 Text(
                     text = "套餐额度",
                     color = scheme.onBackground,
-                    fontSize = ZhiTextScale.Subheading,
+                    fontSize = MiuixTheme.textStyles.title4.fontSize,
                     modifier = Modifier.weight(1f),
                 )
                 // 文案是动作而不是状态，所以用 SecondaryButton 而不是可点的文字：
@@ -491,7 +488,7 @@ private fun QuotaCard(
                 Text(
                     text = error,
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 )
             }
@@ -506,13 +503,13 @@ private fun QuotaCard(
                         Text(
                             text = row.name,
                             color = scheme.onBackground,
-                            fontSize = ZhiTextScale.Body,
+                            fontSize = MiuixTheme.textStyles.main.fontSize,
                             modifier = Modifier.weight(1f),
                         )
                         Text(
                             text = "${row.remaining} / ${row.total}",
                             color = scheme.onSurfaceVariantSummary,
-                            fontSize = ZhiTextScale.Footnote,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                         )
                     }
                     ZhiUsageBar(
@@ -523,7 +520,7 @@ private fun QuotaCard(
                     Text(
                         text = row.resetLabel,
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Footnote,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                         modifier = Modifier.padding(top = 3.dp),
                     )
                 }
@@ -570,41 +567,52 @@ private fun ModelPickerBody(
             insideMargin = PickerSectionInsideMargin,
         )
 
-        // 加载态与列表之间淡变过渡，并且**换 API 时也走这条过渡**。
-        //
-        // 之前 targetState 只盯 `picker.loading`，于是有两种生硬：
-        // 1. 目录回来时一整块"啪"地换掉；
-        // 2. 切 tab 时若新配置的目录**已缓存**（状态直接从"列表A"变成"列表B"、
-        //    中间根本没有 loading 态），AnimatedContent 认为 targetState 没变，
-        //    整块内容硬切 —— 这正是"TAB 切换太生硬"。
-        // 所以 key 里必须带上 `activeProfileId`（见 PickerContentKey 的注释）。
-        //
-        // 只把这一块包进 AnimatedContent（下面的 tab 栏、输入框、按钮都留在外面）：
-        // 外面那些在两种状态下是同一批控件，让它们跟着淡变反而会闪。
-        AnimatedContent(
-            targetState = PickerContentKey(picker.activeProfileId, picker.loading),
-            // 中间那块吃掉定高列里的余量（理由见 SheetHeightFraction 的注释）。
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            transitionSpec = {
-                fadeIn(ZhiMotion.fadeInSpec) togetherWith fadeOut(ZhiMotion.fadeOutSpec)
-            },
-            label = "modelPickerContent",
-        ) { key ->
-            if (key.loading) {
-                PickerLoading(status = picker.status)
-            } else {
-                ModelPickerLoaded(
-                    picker = picker,
-                    listMaxHeight = listMaxHeight,
-                    onPickModel = onPickModel,
-                    onRefreshQuota = onRefreshQuota,
-                )
-            }
+        val profileCount = picker.profiles.size
+        val pagerState = rememberPagerState(pageCount = { maxOf(profileCount, 1) })
+        val pagerScope = rememberCoroutineScope()
+        val currentActiveIndex by rememberUpdatedState(picker.activeProfileIndex)
+        LaunchedEffect(pagerState, picker.activeProfileIndex, profileCount) {
+            val target = picker.activeProfileIndex.coerceIn(0, maxOf(profileCount - 1, 0))
+            if (pagerState.currentPage != target) pagerState.springAnimateToPage(target)
         }
+        LaunchedEffect(pagerState) {
+            snapshotFlow { pagerState.currentPage to pagerState.isScrollInProgress }
+                .collect { (page, scrolling) ->
+                    if (!scrolling && page != currentActiveIndex) {
+                        picker.profiles.getOrNull(page)?.let { onSelectProfile(it.id) }
+                    }
+                }
+        }
+        val flingBehavior = PagerDefaults.flingBehavior(
+            state = pagerState,
+            snapAnimationSpec = PagerNavigationSpringSpec,
+        )
 
-        // tab 栏在模型名输入框的**正上方**：换一份 API 记录，下面那个框里的模型名
-        // 通常也要跟着换，两者挨着才看得出关系。
-        ProfileTabs(picker = picker, onSelectProfile = onSelectProfile)
+        // Pager 占中间剩余空间；搜索框和 API Tab 保持在内容底部，顺序与原布局一致。
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            userScrollEnabled = false,
+            flingBehavior = flingBehavior,
+            key = { page -> picker.profiles.getOrNull(page)?.id ?: "model-picker-empty" },
+            pageContent = { page ->
+                val pageProfile = picker.profiles.getOrNull(page)
+                if (pageProfile == null || page == picker.activeProfileIndex) {
+                    if (picker.loading) {
+                        PickerLoading(status = picker.status)
+                    } else {
+                        ModelPickerLoaded(
+                            picker = picker,
+                            listMaxHeight = listMaxHeight,
+                            onPickModel = onPickModel,
+                            onRefreshQuota = onRefreshQuota,
+                        )
+                    }
+                } else {
+                    PickerLoading(status = "正在切换到 ${pageProfile.name}…")
+                }
+            },
+        )
 
         ZhiTextField(
             value = picker.query,
@@ -613,6 +621,12 @@ private fun ModelPickerBody(
             useLabelAsPlaceholder = true,
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(top = PickerGroupSpacing),
+        )
+
+        ProfileTabs(
+            picker = picker,
+            selectedIndex = pagerState.currentPage,
+            onSelect = { index -> pagerScope.launch { pagerState.springAnimateToPage(index) } },
         )
 
         // 这里原本有一行说明文字（"点列表里的模型会立刻选中并保存…"），已按用户要求去掉。

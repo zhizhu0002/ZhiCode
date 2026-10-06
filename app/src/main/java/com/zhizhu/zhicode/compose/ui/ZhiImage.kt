@@ -42,7 +42,6 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -304,7 +303,7 @@ private fun FallbackLabel(name: String, failed: Boolean, maxWidth: Dp, modifier:
     ) {
         Text(
             text = name,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             color = scheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -313,7 +312,7 @@ private fun FallbackLabel(name: String, failed: Boolean, maxWidth: Dp, modifier:
         if (failed) {
             Text(
                 text = "图片无法显示",
-                fontSize = ZhiTextScale.Caption,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
                 color = scheme.onSurfaceVariantSummary,
             )
         }

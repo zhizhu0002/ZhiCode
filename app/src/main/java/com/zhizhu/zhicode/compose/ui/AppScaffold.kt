@@ -128,6 +128,7 @@ private fun ZhiCodeScreen(
 ) {
     val configuration = LocalConfiguration.current
     val wide = configuration.screenWidthDp >= 600
+    var pagerSelectedTab by remember { mutableStateOf(state.tab) }
 
     // 帧耗时测量的出口：结果以一条 INFO 消息落在对话流里（仅 debug 构建会触发）。
     // 之所以不只用 logcat：沙箱 guest 的日志不进宿主 logcat，而截图是唯一可靠的观察通道。
@@ -348,8 +349,12 @@ private fun ZhiCodeScreen(
                             viewModel.openSettings()
                         },
                         tabs = WorkspaceTab.entries,
+                        selectedTab = pagerSelectedTab,
                         onSelectTab = { tab ->
                             ZhiFrameTrace.begin("tab:${tab.name}")
+                            // 先更新顶栏的立即反馈；Pager 随后由 selectedTab effect
+                            // 启动弹簧动画，settle 后再由 WorkspacePager 写回 ViewModel。
+                            pagerSelectedTab = tab
                             viewModel.selectTab(tab)
                         },
                     )
@@ -384,7 +389,13 @@ private fun ZhiCodeScreen(
                             glassMain = glassMain,
                         )
                     } else {
-                        CompactWorkspace(state = state, viewModel = viewModel, isDark = isDark, glass = glass)
+                        CompactWorkspace(
+                            state = state,
+                            viewModel = viewModel,
+                            isDark = isDark,
+                            glass = glass,
+                            onPageSelected = { pagerSelectedTab = it },
+                        )
                     }
                 }
 

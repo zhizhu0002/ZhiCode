@@ -43,7 +43,6 @@ import com.zhizhu.zhicode.compose.model.SkillFileNode
 import com.zhizhu.zhicode.compose.model.SkillScope
 import com.zhizhu.zhicode.compose.model.SkillUrlDraft
 import com.zhizhu.zhicode.compose.model.SkillsState
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.ZhiAnchoredActionMenu
 import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiFloatingActionButton
@@ -423,7 +422,7 @@ private fun SkillListBody(
                             Text(
                                 text = "${state.visibleSkills.size} 个技能",
                                 color = scheme.onSurfaceVariantSummary,
-                                fontSize = ZhiTextScale.Footnote,
+                                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                                 modifier = Modifier.fillMaxWidth()
                                     .padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
                             )
@@ -446,7 +445,7 @@ private fun SkillListBody(
                     text = "技能按需加载：Agent 用 Skill 工具读取，你也可以把它附加到下一条消息。" +
                         "SKILL.md 是技能本体，同目录的其它文件会跟着一起分发。",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 )
             }
@@ -473,13 +472,13 @@ private fun SkillEmptyState() {
         Text(
             text = "无技能",
             color = scheme.onBackground,
-            fontSize = ZhiTextScale.Body,
+            fontSize = MiuixTheme.textStyles.main.fontSize,
             fontWeight = FontWeight.Medium,
         )
         Text(
             text = "点击右下角的 + 按钮以添加技能",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
         )
     }
 }
@@ -522,13 +521,13 @@ private fun SkillRow(
                     Text(
                         text = skill.name,
                         color = scheme.onBackground,
-                        fontSize = ZhiTextScale.Body,
+                        fontSize = MiuixTheme.textStyles.main.fontSize,
                         fontWeight = FontWeight.Medium,
                     )
                     Text(
                         text = skill.summary,
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Footnote,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                         maxLines = 2,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -537,7 +536,7 @@ private fun SkillRow(
                             Text(
                                 text = skill.sizeLabel,
                                 color = scheme.onSurfaceVariantSummary,
-                                fontSize = ZhiTextScale.Micro,
+                                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                                 modifier = Modifier.padding(start = 8.dp),
                             )
                         }
@@ -576,7 +575,7 @@ private fun EmptyHint(text: String) {
     Text(
         text = text,
         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        fontSize = ZhiTextScale.Footnote,
+        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
     )
 }
@@ -602,7 +601,7 @@ private fun SkillDetailBody(
         Text(
             text = detail.entry.path,
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Micro,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
@@ -634,7 +633,7 @@ private fun SkillDetailBody(
             text = "SKILL.md 是技能本体，引擎的 Skill 工具按这个名字加载，所以它的 name 字段" +
                 "必须和技能名一致；同目录的其它文件（含子目录）会跟着技能一起分发。",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
@@ -872,7 +871,7 @@ private fun SkillCreateDialog(
                         else -> "粘贴完整的 SKILL.md 文件内容"
                     },
                     color = if (nameBroken) scheme.error else scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     fontWeight = if (nameBroken) FontWeight.Medium else FontWeight.Normal,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
@@ -937,7 +936,7 @@ private fun SkillUrlDialog(
                     text = "支持 http(s)：指向一份 SKILL.md 就直接进确认框；指向 zip 压缩包" +
                         "（例如仓库的下载地址）会把里面每个 SKILL.md 都导入。",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
                 if (draft.loading) {
@@ -949,7 +948,7 @@ private fun SkillUrlDialog(
                         Text(
                             text = "正在下载…",
                             color = scheme.onSurfaceVariantSummary,
-                            fontSize = ZhiTextScale.Footnote,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                             modifier = Modifier.padding(start = 8.dp),
                         )
                     }
@@ -1019,7 +1018,7 @@ private fun SkillEditDialog(
                 Text(
                     text = "${target.name} / ${target.relativePath}",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Micro,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 )
                 ZhiTextField(
@@ -1039,7 +1038,7 @@ private fun SkillEditDialog(
                     text = if (target.empty) "内容为空：保存后会生成一个空文件。"
                     else "当前 ${target.body.length} 字。",
                     color = if (target.empty) scheme.error else scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
             }
@@ -1131,7 +1130,7 @@ private fun SkillFileDialog(
                     text = "文件会建在这个技能自己的目录里，跟着技能一起分发；" +
                         "名字里可以用 / 建子目录（例：reference/api.md）。",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
             }
@@ -1165,7 +1164,7 @@ private fun DeleteFileDialog(
             Text(
                 text = "确定删除 ${file.relativePath} 吗？这个操作不可恢复。",
                 color = scheme.onBackground,
-                fontSize = ZhiTextScale.Footnote,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 modifier = Modifier.fillMaxWidth(),
             )
         }

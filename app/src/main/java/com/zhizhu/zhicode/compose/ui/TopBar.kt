@@ -16,7 +16,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiGlass
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
@@ -97,6 +96,7 @@ fun ZhiTopBar(
     // 随头部一起悬浮的按键组；为 null 时不渲染（宽屏的按键组在右侧栏各自的位置）。
     tabs: List<WorkspaceTab>? = null,
     onSelectTab: (WorkspaceTab) -> Unit = {},
+    selectedTab: WorkspaceTab = state.tab,
 ) {
     val scheme = MiuixTheme.colorScheme
 
@@ -125,7 +125,7 @@ fun ZhiTopBar(
     SmallTopAppBar(
         modifier = Modifier,
         title = "ZhiCode",
-        color = if (blurActive) Color.Transparent else scheme.surface,
+        color = if (blurActive) Color.Transparent else scheme.surfaceContainer,
         defaultWindowInsetsPadding = false,
         navigationIcon = {
             if (!wide) {
@@ -139,12 +139,12 @@ fun ZhiTopBar(
         actions = {
             if (wide) {
                 Text(
-                    text = if (state.composerBusy) "● 工作中 · ${state.modelLabel}" else "● ${state.modelLabel}",
+                    text = if (state.composerBusy) "工作中 · ${state.modelLabel}" else state.modelLabel,
                     color = if (state.composerBusy) scheme.primary else scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(end = 6.dp),
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                 )
             }
 
@@ -158,8 +158,12 @@ fun ZhiTopBar(
                 label = WorkspaceViewModel.formatTokens(state.contextTokens) + "/" +
                     WorkspaceViewModel.formatTokens(state.contextWindow),
                 onClick = onContextClick,
-                fontSize = ZhiTextScale.Footnote,
-                containerColor = if (ctxPct >= 90) scheme.errorContainer else Color.Unspecified,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                containerColor = when {
+                    ctxPct >= 90 -> scheme.errorContainer
+                    ctxPct >= 72 -> scheme.primary.copy(alpha = 0.12f)
+                    else -> Color.Unspecified
+                },
                 contentColor = when {
                     ctxPct >= 90 -> scheme.error
                     ctxPct >= 72 -> scheme.primary
@@ -171,7 +175,7 @@ fun ZhiTopBar(
                 Text(
                     text = state.deviceStatus,
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     maxLines = 1,
                     modifier = Modifier.padding(start = 8.dp),
                 )
@@ -192,7 +196,7 @@ fun ZhiTopBar(
                 if (tabs != null) {
                     WorkspaceTabs(
                         tabs = tabs,
-                        selected = state.tab,
+                        selected = selectedTab,
                         onSelect = onSelectTab,
                     )
                 }

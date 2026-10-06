@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui
 import com.zhizhu.zhicode.compose.theme.ZhiColors
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
 
@@ -26,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,6 +75,8 @@ import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.basic.VerticalDivider
 import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.popup.OverlayDropdownPopup
+import top.yukonga.miuix.kmp.preference.CheckboxLocation
+import top.yukonga.miuix.kmp.preference.CheckboxPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
@@ -149,7 +151,7 @@ internal fun FloatingBottomShell(
         color = glass.surfaceColor(scheme.surfaceContainer),
         cornerRadius = ZhiRadius.floating,
         outSidePadding = PaddingValues(0.dp),
-        shadowElevation = 12.dp,
+        shadowElevation = 10.dp,
         showDivider = false,
         content = content,
     )
@@ -228,7 +230,7 @@ fun ZhiFilledIconButton(
     size: Dp = 34.dp,
     square: Boolean = false,
     glyph: String? = null,
-    glyphSize: TextUnit = ZhiTextScale.TitleSmall,
+    glyphSize: TextUnit = MiuixTheme.textStyles.title2.fontSize,
     /** 前景色。默认 `onPrimary`（配 `primary` 容器）；配 `error` 容器时要传 `onError`。 */
     contentColor: Color = Color.Unspecified,
 ) {
@@ -316,7 +318,7 @@ fun ZhiChip(
     modifier: Modifier = Modifier,
     active: Boolean = false,
     maxLines: Int = 1,
-    fontSize: TextUnit = ZhiTextScale.Caption,
+    fontSize: TextUnit = MiuixTheme.textStyles.body2.fontSize,
     containerColor: Color = Color.Unspecified,
     contentColor: Color = Color.Unspecified,
 ) {
@@ -325,7 +327,7 @@ fun ZhiChip(
     val targetBackground = when {
         containerColor != Color.Unspecified -> containerColor
         active -> scheme.primary
-        else -> scheme.surfaceContainerHigh
+        else -> scheme.surfaceContainer
     }
     val background by animateColorAsState(
         targetValue = targetBackground,
@@ -371,13 +373,13 @@ fun ZhiSmallPill(
     ZhiPillSurface(
         onClick = onClick,
         modifier = modifier.height(PillHeight),
-        color = Color.Transparent,
+        color = if (highlighted) scheme.primary.copy(alpha = 0.12f) else Color.Transparent,
         contentColor = foreground,
         cornerRadius = PillHeight / 2,
     ) {
         Text(
             text = label,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             maxLines = 1,
             modifier = Modifier.padding(horizontal = 8.dp),
         )
@@ -503,13 +505,13 @@ fun ZhiSectionLabel(
 }
 
 /**
- * `matchWidth` 时用的宽度上限（S3 重构：从 1000dp 收敛到 252dp）。
+ * `matchWidth` 时使用足够大的宽度上限，让 Miuix 按可用宽度计算真正的等分 Tab。
  *
- * Miuix 宽度算法是 `(可用宽 − (n−1)×间距) / n` 再 `coerceIn(minWidth, maxWidth)`。
- * 4 项等分在 450dpi 手机上约 100dp/项，252dp 足够表达"等分"语义
- * 又不会像 1000dp 那样完全架空官方 84dp 上限的设计意图。
+ * Miuix 的宽度算法会在 `maxWidth * tabCount + spacing` 小于可用宽度时允许等分宽度，
+ * 因此这里不能使用 252dp 之类的较小上限：工作区三项在宽屏上会被错误限制成固定窄块，
+ * 剩余空间变成空白，选中胶囊与内容区域看起来就像错位。非等分场景仍使用 Miuix 默认宽度。
  */
-private val TabsMatchWidthLimit = 252.dp
+private val TabsMatchWidthLimit = 1000.dp
 
 /**
  * 分段按钮组。转发到 Miuix **[TabRowWithContour]** —— `TabRow` 的带轮廓变体。
@@ -547,10 +549,19 @@ fun ZhiSegmentedTabs(
     modifier: Modifier = Modifier,
     matchWidth: Boolean = false,
 ) {
+    if (tabs.isEmpty()) return
+    val safeSelectedIndex = selectedIndex.coerceIn(0, tabs.lastIndex)
+    // 只向 Miuix 转发合法下标；调用方若在列表更新后暂时拿到旧下标，
+    // 不应把越界值传入组件或触发一次无效的回调。
+    val selectTab = rememberUpdatedState(onSelect)
     TabRowWithContour(
         tabs = tabs,
-        selectedTabIndex = selectedIndex,
-        onTabSelected = onSelect,
+        selectedTabIndex = safeSelectedIndex,
+        onTabSelected = { index ->
+            if (index in tabs.indices && index != safeSelectedIndex) {
+                selectTab.value(index)
+            }
+        },
         modifier = modifier,
         minWidth = if (matchWidth) 0.dp else TabRowDefaults.TabRowWithContourMinWidth,
         maxWidth = if (matchWidth) TabsMatchWidthLimit else TabRowDefaults.TabRowWithContourMaxWidth,
@@ -706,7 +717,7 @@ fun ZhiTextDropdownChip(
             Text(
                 text = label,
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
@@ -839,6 +850,34 @@ fun ZhiTextField(
 }
 
 /**
+ * Miuix 复选设置行的稳定转发。
+ *
+ * 选择列表优先使用官方 [CheckboxPreference]，让标题、摘要、点击语义与复选框
+ * 的位置都由 Miuix 统一处理。调用点只负责把业务状态接到回调上。
+ */
+@Composable
+fun ZhiCheckboxPreference(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    summary: String? = null,
+    startAction: (@Composable () -> Unit)? = null,
+    enabled: Boolean = true,
+) {
+    CheckboxPreference(
+        title = title,
+        summary = summary,
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        modifier = modifier,
+        startAction = startAction,
+        checkboxLocation = CheckboxLocation.End,
+        enabled = enabled,
+    )
+}
+
+/**
  * 表单校验提示（表单里唯一该用的错误行）。
  *
  * <p>两条纪律，都是用户实测反馈出来的：
@@ -859,7 +898,7 @@ fun ZhiFieldError(message: String?, touched: Boolean = true) {
     Text(
         text = message,
         color = MiuixTheme.colorScheme.error,
-        fontSize = ZhiTextScale.Footnote,
+        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
         fontWeight = FontWeight.Medium,
         modifier = Modifier
             .fillMaxWidth()
@@ -1159,7 +1198,7 @@ fun ZhiNoticeBar(
             ZhiNoticeTone.ERROR -> scheme.errorContainer
             // 琥珀在主题里没有对应的容器色，用「琥珀按低透明度铺在表面色上」——
             // 这样深浅色两档都成立，也不写死一个只在深色下对的十六进制值。
-            ZhiNoticeTone.WARN -> ZhiColors.amber().copy(alpha = 0.18f).compositeOver(scheme.surface)
+            ZhiNoticeTone.WARN -> ZhiColors.amber().copy(alpha = 0.16f).compositeOver(scheme.surface)
             ZhiNoticeTone.INFO -> scheme.surfaceContainer
         },
     ) {
@@ -1168,7 +1207,7 @@ fun ZhiNoticeBar(
                 Text(
                     text = title,
                     color = titleColor,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     fontWeight = FontWeight.Bold,
                 )
             }
@@ -1178,7 +1217,7 @@ fun ZhiNoticeBar(
                 Text(
                     text = text,
                     color = bodyColor,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 )
             }
         }

@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui.chat
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -133,14 +132,14 @@ private fun CardBody(
             Text(
                 text = "任务进度",
                 color = scheme.onSurface,
-                fontSize = ZhiTextScale.BodySmall,
+                fontSize = MiuixTheme.textStyles.body1.fontSize,
                 fontWeight = FontWeight.Bold,
             )
             Box(modifier = Modifier.weight(1f))
             Text(
                 text = "$done / ${tasks.size}",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             )
         }
         // 进度条平滑推进
@@ -162,7 +161,7 @@ private fun CardBody(
                     Text(
                         text = task.title,
                         color = if (task.state == TaskState.PENDING) scheme.onSurfaceVariantSummary else scheme.onSurface,
-                        fontSize = ZhiTextScale.BodySmall,
+                        fontSize = MiuixTheme.textStyles.body1.fontSize,
                         fontWeight = if (task.state == TaskState.RUNNING) FontWeight.Medium else FontWeight.Normal,
                     )
                     // 悬浮形态不给详情：它是"贴一条注记"，不是详情面板（全量在任务清单窗口里）。
@@ -174,7 +173,7 @@ private fun CardBody(
                             Text(
                                 text = firstLine,
                                 color = scheme.onSurfaceVariantSummary,
-                                fontSize = ZhiTextScale.Footnote,
+                                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                             )
                         }
                     }
@@ -187,8 +186,8 @@ private fun CardBody(
         if (hidden > 0) {
             Text(
                 text = "还有 $hidden 条 · 点按查看全部",
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Footnote,
+                color = scheme.primary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
@@ -197,19 +196,22 @@ private fun CardBody(
         // 悬浮卡现在只看 tasks 决定是否出现，所以 "有任务但此刻没有进行时状态"
         // （例如任务已全部完成）是正常组合，那时就该省掉这一行。
         if (status.isNotBlank()) {
-            ZhiHorizontalDivider(modifier = Modifier.padding(top = 10.dp, bottom = 8.dp))
+            ZhiHorizontalDivider(
+                modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
+                color = scheme.outline.copy(alpha = 0.45f),
+            )
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "计划模式",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                 )
                 Box(modifier = Modifier.weight(1f))
                 Text(
                     text = status,
                     color = scheme.primary,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     fontWeight = FontWeight.Medium,
                 )
             }

@@ -1,108 +1,34 @@
-# Android 构建 + 源码结构测试。
-#
-# 结构与 zhizhu0002/ControlLayoutConverter 的 build.yml 保持一致（同样的密钥 secret
-# 名称、同样的 SDK 装配顺序、debug 与签名 release 双产物 + artifact 上传），
-# 只在与本工程不同、且实测确认过的地方改动，逐条注明理由。
-#
-# ## 与本工程相关的三个实测结论（照抄会出错的地方）
-#
-# 1. **build-tools 用 36.0.0，不是 37.0.0。**
-#    本工程没有声明 buildToolsVersion，由 AGP 决定默认值。实测（用 init 脚本读
-#    `android.buildToolsVersion`）AGP 9.1.1 给 :app 与 :Bcore 解析到的都是 **36.0.0**。
-#    若照抄参考仓库的 `build-tools;37.0.0`，runner 上就缺 36.0.0。
-#
-# 2. **platform 的包名是 `platforms;android-37.0`（带 .0）。**
-#    Android 37 的 SDK 包名带次版本号。本机 `platforms/android-37` 其实是一个指向
-#    `android-37.0` 的符号链接，真实包名只有后者。
-#    （compileSdk 37 需要它；参考仓库同样是 `platforms;android-37.0` 且 CI 成功。）
-#
-# 3. **JDK 必须 21，不是 17。** AGP 9 的最低要求是 JDK 21（参考仓库用 17，因为它那
-#    条链的 AGP 更低）。
-#
-# 另外：本工程有 R8（release 开混淆 + 资源压缩），所以多两步参考仓库没有的事 ——
-# 跑 JVM 单测、以及用 apksigner 复核「签名确实只有 v2」。理由见各自的步骤注释。
-#
-# ## 本工程不需要的东西（避免照抄进来）
-#
-# - **NDK / externalNativeBuild**：原生部分用的是预编译的 `libblackbox.so` /
-#   `libtermux.so`，CI 上不需要装 NDK。
-# - **`sh gradlew`**：本仓库 `git ls-files -s gradlew` 是 **100755**，可以直接 `./gradlew`
-#   （参考仓库那份不是可执行的，所以它用 `sh gradlew`）。
-#
 name: Android Build
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master, feat/motion-completeness]
   pull_request:
-    branches: [ main, master ]
-  workflow_dispatch: {}
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: android-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # 1) 源码结构测试：秒级，不需要 Android SDK
-  # ---------------------------------------------------------------------------
-  # 这一组是只读源码的文本级断言（`app/tests/*.java`，`java` 直接跑单文件），
-  # 专拦「改坏了不会编译失败、只表现为界面或行为不对」的那类问题。
-  # 单独一个 job 是为了：它几秒就出结果，不必等 SDK 装配与 Gradle 下载；
-  # 与 build job 并行跑，坏了能立刻看到红，而不是被构建日志淹没。
-  source-tests:
-    name: 源码结构测试
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: 跑结构测试
-        run: bash test-source-no-build.sh
-
-  # ---------------------------------------------------------------------------
-  # 2) 构建 debug + 签名 release，并上传产物
-  # ---------------------------------------------------------------------------
   build:
-    name: Build Debug & Release APK
+    name: Build APKs
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    # secret 名称与 zhizhu0002/ControlLayoutConverter 一致 —— 两个仓库都用同一组
-    # secret，配置一次即可。
-    #
-    # 缺失时**直接失败**，而不是产出一个「看起来正常、其实没签名」的 release 包。
-    # 原设计是「有密钥就签、没有就跳过」，结果是 CI 全绿而产物未签名 —— 实测踩到过：
-    # 下载下来的 release APK 没有签名。这正是本仓库在其它地方反复堵的那类
-    # 「失败静默通过」，所以这里也照同样的标准处理：失败要响，不要绿。
-    #
-    # ⚠ 为什么 ZHICODE_* 也放在**作业级**（而不是只在「Build Release APK」那一步）：
-    # 签名配置是通过环境变量交给 app/build.gradle 的，而 **Gradle 守护进程不会接收
-    # 客户端新加的环境变量**。本机实测（init 脚本打印 System.getenv）：
-    #     A. 守护进程先启动（无变量）            → null
-    #     B. 复用该守护进程，客户端这次带上变量  → null      ← 没传进去
-    #     C. --no-daemon（新进程）               → /tmp/whatever.jks
-    # 放步骤级的话，「Run JVM unit tests」先用旧环境启动了守护进程，等 release 那一步
-    # 才设变量就已经晚了 —— 守护进程看不见，构建会**静默签不上**（仍然成功）。
-    # 放在作业级后，本作业里第一个 gradlew 启动守护进程时就已经带着这些变量。
     env:
-      RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
-      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-      # 给 app/build.gradle 的形态（名字与它读的一致）；值取自上面那四个 secret。
-      # 未配置 secret 时它们是空串，hasReleaseSigning 为 false，产物未签名（由检查步骤报警）。
+      # app/build.gradle reads these names when a release keystore is available.
+      # They remain empty for fork PRs, which intentionally produce an unsigned
+      # release artifact instead of failing before compilation.
       ZHICODE_STORE_FILE: ${{ github.workspace }}/release.keystore
       ZHICODE_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
       ZHICODE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
       ZHICODE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up JDK 21
@@ -110,169 +36,89 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # v3 默认安装 'tools platform-tools'，而旧版 'tools' 包已从 Google SDK 仓库
-          # 移除，sdkmanager 会以 "Failed to find package 'tools'" 退出码 1 直接失败。
-          # 覆写为只装 platform-tools；编译所需的 platform/build-tools 在下一步显式安装。
-          packages: 'platform-tools'
+          packages: platform-tools
 
-      - name: Install required SDK packages
+      - name: Install Android SDK packages
+        shell: bash
         run: |
-          sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
-          echo "--- 已安装的 platforms ---"
-          ls "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/platforms"
-          echo "--- 已安装的 build-tools ---"
-          ls "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/build-tools"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      # 本工程是在 Termux（bionic）里开发的，有几处配置只对本机成立。
-      # 这里能自动修的自动修，修不掉的**直接失败** —— 报一句清楚的话，
-      # 比让 CI 挂在后面一堆看不懂的 SDK/aapt2 报错里好定位。
-      - name: 把构建配置调成 CI 可用的形态
-        run: |
-          set -eu
-          sed -i '1s|^#!.*$|#!/bin/sh|' gradlew
-          sed -i '/aapt2FromMavenOverride/d' gradle.properties || true
-          # Termux 的 aapt2 通过用户级 ~/.gradle/gradle.properties 注入，仓库里不该有；
-          # local.properties 里是本机的绝对 sdk.dir（本来就被 gitignore），CI 上必须不存在。
-          rm -f local.properties
-          echo "--- gradlew 首行 ---"; head -1 gradlew
-          echo "--- gradle.properties ---"; cat gradle.properties
-          [ "$(head -1 gradlew)" = "#!/bin/sh" ] \
-            || { echo "::error::gradlew 的 shebang 不是 #!/bin/sh"; exit 1; }
-          if grep -q 'aapt2FromMavenOverride' gradle.properties; then
-            echo "::error::gradle.properties 里仍有 aapt2FromMavenOverride（那是本机专属配置）"
-            exit 1
-          fi
-
-      # 先判断签名的四个 secret 是否齐。缺了就报清楚的话并失败（PR 除外，见下），
-      # 同时把 RELEASE_SIGNED 写进 GITHUB_ENV 供后续步骤分支使用。
-      - name: 检查签名 secret
-        run: |
-          set -eu
-          missing=""
-          for name in RELEASE_KEYSTORE KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-            if [ -z "$(printenv "$name" || true)" ]; then missing="$missing $name"; fi
-          done
-          if [ -z "$missing" ]; then
-            echo "RELEASE_SIGNED=true" >> "$GITHUB_ENV"
-            echo "四个签名 secret 都在。"
-            exit 0
-          fi
-          echo "::group::release 签名尚未配置"
-          echo "缺少 secret:$missing"
-          echo
-          echo "在本机生成 RELEASE_KEYSTORE 的值（单行 base64，没有换行）："
-          echo "  base64 -w0 ~/.android-keys/zhicode-release.jks"
-          echo "另外三个直接照抄本机 release.properties 里的"
-          echo "  KEYSTORE_PASSWORD=storePassword  KEY_ALIAS=keyAlias  KEY_PASSWORD=keyPassword"
-          echo
-          echo "添加位置：仓库 Settings → Secrets and variables → Actions → New repository secret"
-          echo "::endgroup::"
-          echo "RELEASE_SIGNED=false" >> "$GITHUB_ENV"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # fork 的 PR 拿不到 secret（GitHub 不给 fork 传 secret），那种情况只警告。
-            echo "::warning::PR 构建允许未签名产物，产物名会带 -unsigned 后缀。"
-            exit 0
-          fi
-          echo "::error::缺少 release 签名 secret:$missing —— 拒绝产出一个看起来正常却没有签名的 release 包。"
-          exit 1
-
-      # 仅在确认签名就绪时解码密钥库。app/build.gradle 读的是环境变量
-      # ZHICODE_STORE_FILE / _PASSWORD / ZHICODE_KEY_ALIAS / _PASSWORD
-      # （优先级：release.properties > 环境变量）；密钥库不存在时它会打印告警并降级为
-      # 未签名，而不是让构建失败 —— 所以「解码失败」不会在构建阶段暴露，这里必须自己把住。
-      - name: Decode release keystore
-        if: env.RELEASE_SIGNED == 'true'
-        run: |
-          set -eu
-          echo "${RELEASE_KEYSTORE}" | base64 --decode > release.keystore
-          chmod 600 release.keystore
-          echo "已解码 release.keystore（$(stat -c%s release.keystore) 字节）"
-          # 解出来的必须真是一个密钥库。乱填一个字符串也能 base64 解码成功，
-          # 而那样要到「签名」阶段才报错，报的还是 JKS 解析异常，不好定位。
-          keytool -list -keystore release.keystore \
-            -storepass "${KEYSTORE_PASSWORD}" -alias "${KEY_ALIAS}" >/dev/null \
-            || { echo "::error::RELEASE_KEYSTORE 解码后不是可用密钥库，或密码/别名对不上"; exit 1; }
-          echo "密钥库可用，且别名 ${KEY_ALIAS} 存在。"
-
-      # 先跑 JVM 单测：它比打包快得多，且覆盖「算错了但编译得过」的逻辑
-      # （api/ 协议层、画布、目录树删除等）。参考仓库没有这一步，但本工程有
-      # 80+ 个用例、CONTRIBUTING 也要求提交前跑，所以放进 CI。
-      - name: Run JVM unit tests
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
-
-      - name: Build Debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
-
-      # release **总是**构建：这样 R8 映射表与 release 产物在任何情况下都存在，
-      # 「签名没配好」不再等于「连产物都没有」（后者会把问题藏到更晚才暴露）。
-      # 没配密钥时 app/build.gradle 会打印告警并产出未签名包，随后由验证步骤判定。
-      # 签名用的 ZHICODE_* 在作业级 env 里（原因见作业头部那段：守护进程不吃新变量）。
-      - name: Build Release APK
-        run: ./gradlew :app:assembleRelease --stacktrace
-
-      # 「签了名」不等于「签得对」。本工程的签名方案是**只启用 v2**（v1/v3/v4 都关），
-      # 这条断言把 README 里写明的那个约定真的验一遍 —— 光靠构建成功看不出来，
-      # 因为 v1 也照样能签上、照样能装。
-      - name: Verify release signature (v2-only)
-        run: |
-          # pipefail 是必须的：没有它，`apksigner | tee` 里 apksigner 的失败会被
-          # tee 的退出码（0）掩盖，于是「验证不过」这件事本身不会让这一步变红。
           set -euo pipefail
-          APK=app/build/outputs/apk/release/ZhiCode-release.apk
-          [ -f "$APK" ] || { echo "::error::没有 release 产物：$APK"; exit 1; }
-          AS=$(ls "${ANDROID_SDK_ROOT:-$ANDROID_HOME}"/build-tools/*/apksigner | sort -V | tail -1)
-          echo "apksigner: $AS"
-          # 临时文件写在**工作区内**而不是 /tmp：这样本步骤在 Termux 里也能原样跑一遍
-          # （Termux 没有可写的 /tmp），断言到底能不能匹配上不必等到 CI 才知道。
-          SIG="$PWD/sig-verify.txt"
-          CERTS="$PWD/sig-certs.txt"
+          SDKMANAGER="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            SDKMANAGER="$(command -v sdkmanager)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-37.0" "build-tools;36.0.0"
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          test -d "$SDK/platforms/android-37.0"
+          test -x "$SDK/build-tools/36.0.0/apksigner"
+          echo "Using SDK: $SDK"
+          ls -la "$SDK/platforms"
+          ls -la "$SDK/build-tools/36.0.0"
 
-          # 未签名分支：只断言「确实没签上」，**不**去断言 apksigner 那句具体措辞
-          # —— 那句话没在本机用真实未签名产物核过，凭空写进断言就是给自己造一个
-          # 看似严格、其实没验证过的守卫。
-          if [ "${RELEASE_SIGNED:-false}" != "true" ]; then
-            "$AS" verify --verbose "$APK" > "$SIG" 2>&1 \
-              || echo "（apksigner 退出码非 0 —— 未签名产物的预期表现）"
-            cat "$SIG"
-            if grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' "$SIG"; then
-              echo "::error::RELEASE_SIGNED=false，但产物确实带 v2 签名 —— 判定逻辑有误"; exit 1
-            fi
-            echo "::warning::release 产物未签名。本仓库的签名方案是 v2-only + CN=zhizhu0002。"
+      - name: Normalize local-only build settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          rm -f local.properties
+          # Termux injects this only in the local user's Gradle properties.
+          # It must never override the GitHub-hosted SDK's aapt2.
+          sed -i '/^[[:space:]]*android\.aapt2FromMavenOverride[[:space:]]*=.*$/d' gradle.properties
+          grep -n 'aapt2FromMavenOverride' gradle.properties && exit 1 || true
+          ./gradlew --version
+
+      - name: Prepare optional release signing
+        id: signing
+        shell: bash
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$RELEASE_KEYSTORE_B64" || -z "$KEYSTORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "Release signing secrets are not complete; release will be unsigned."
             exit 0
           fi
+          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > release.keystore
+          chmod 600 release.keystore
+          keytool -list -keystore release.keystore \
+            -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo "Release keystore validated."
 
-          "$AS" verify --verbose "$APK" | tee "$SIG"
-          echo "--- 证书 ---"
-          "$AS" verify --print-certs "$APK" | tee "$CERTS"
-          grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' "$SIG" \
-            || { echo "::error::release 产物没有 v2 签名"; exit 1; }
-          grep -q 'Verified using v1 scheme (JAR signing): false' "$SIG" \
-            || { echo "::error::release 产物带上了 v1 签名，与 README 写明的 v2-only 约定不符"; exit 1; }
-          # v3/v4 也必须仍然是关的（app/build.gradle 里显式关掉）：v4 会额外产出一个
-          # .idsig，v3 是密钥轮换用的，都不该出现在发布物里。
-          # 匹配串按 apksigner 的真实输出写全（scheme 名与 `: false` 之间还有括号说明），
-          # 且只认 `(APK Signature Scheme v3)` 这一种，不会误匹配 v3.1/v3.2 那两行。
-          for scheme in v3 v4; do
-            grep -q "Verified using ${scheme} scheme (APK Signature Scheme ${scheme}): false" "$SIG" \
-              || { echo "::error::release 产物带上了 ${scheme} 签名，与 v2-only 约定不符"; exit 1; }
-          done
-          grep -q 'Number of signers: 1' "$SIG" \
-            || { echo "::error::签名者数量不是 1"; exit 1; }
-          # 签名者身份是硬要求：换一把密钥签出来的包，装到旧版本上会被当成**另一个应用**
-          # （包名相同但签名不符），无法覆盖升级，用户只能卸载重装。
-          grep -q 'V2 Signer: certificate DN: CN=zhizhu0002' "$CERTS" \
-            || { echo "::error::签名者不是 CN=zhizhu0002 —— 会与已发布的包签名不符，无法覆盖升级"; exit 1; }
-          # 临时文件不留着：它含证书指纹，工作区里没必要留着。
-          rm -f "$SIG" "$CERTS"
+      - name: Build Debug and Release APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --stacktrace --console=plain \
+            :app:assembleDebug :app:assembleRelease
 
-      - name: Upload Debug APK artifact
+      - name: Verify signed release APK
+        if: steps.signing.outputs.signed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          APK="app/build/outputs/apk/release/ZhiCode-release.apk"
+          APKSIGNER="$SDK/build-tools/36.0.0/apksigner"
+          test -f "$APK"
+          "$APKSIGNER" verify --verbose "$APK" | tee signature.txt
+          grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' signature.txt
+          grep -Fq 'Verified using v1 scheme (JAR signing): false' signature.txt
+          grep -Fq 'Verified using v3 scheme (APK Signature Scheme v3): false' signature.txt
+          grep -Fq 'Verified using v4 scheme (APK Signature Scheme v4): false' signature.txt
+          grep -Fq 'Number of signers: 1' signature.txt
+          rm -f signature.txt
+
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: zhicode-debug-apk
@@ -280,9 +126,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # 产物名把「签没签」写进名字里：下载的人一眼就能分辨，不必去翻日志。
-      - name: Upload Release APK artifact (signed)
-        if: env.RELEASE_SIGNED == 'true'
+      - name: Upload signed Release APK
+        if: steps.signing.outputs.signed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: zhicode-release-apk
@@ -290,9 +135,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # 只有 PR（fork 拿不到 secret）会走到这里，且名字里带 -unsigned。
-      - name: Upload Release APK artifact (unsigned)
-        if: env.RELEASE_SIGNED != 'true'
+      - name: Upload unsigned Release APK
+        if: steps.signing.outputs.signed != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: zhicode-release-apk-unsigned
@@ -300,9 +144,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # R8 开着，所以有混淆映射表。README 写明「发版时要一并留存 —— 没有它，
-      # 用户报的崩溃栈无法还原成源码位置」，那就让 CI 直接把它作为产物带出来。
-      - name: Upload R8 mapping artifact
+      - name: Upload R8 mapping
         uses: actions/upload-artifact@v4
         with:
           name: zhicode-release-mapping

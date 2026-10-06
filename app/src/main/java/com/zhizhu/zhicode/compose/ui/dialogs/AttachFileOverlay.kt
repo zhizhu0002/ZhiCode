@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -225,7 +224,7 @@ fun AttachFileOverlay(
                                     whileClosing = browser.entries.isEmpty() && shownBrowser != null,
                                 ),
                                 color = scheme.onSurfaceVariantSummary,
-                                fontSize = ZhiTextScale.BodySmall,
+                                fontSize = MiuixTheme.textStyles.body1.fontSize,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
                             )

@@ -22,7 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.FloatingToolbar
 import top.yukonga.miuix.kmp.basic.Text
@@ -125,7 +124,7 @@ fun MessageBar(
                 ) {
                     Text(
                         text = text,
-                        fontSize = ZhiTextScale.Footnote,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                         color = scheme.onSurface,
                         maxLines = MAX_LINES,
                         overflow = TextOverflow.Ellipsis,

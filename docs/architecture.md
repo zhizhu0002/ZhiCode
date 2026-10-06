@@ -18,14 +18,14 @@
 | 虚拟化沙箱 | `Bcore/`（BlackBox 血统）—— 免安装运行 APK、Frida 注入、原生调试 |
 | MCP / 技能 / 角色卡 / 记忆 | `McpStore`、`McpRuntime`、`SkillStore`、`RoleCardStore`、`MemoryStore` |
 | 会话与任务 | `SessionStore`、`TaskStore`、`PlanStore` |
-| 界面 | 全部走 Miuix 组件；语义色与字阶集中在 `ZhiColors` / `ZhiTextScale` / `ZhiRadius` / `ZhiDialogWidth` |
+| 界面 | 全部走 Miuix 组件；语义色、字阶与动画 token 集中在 `ZhiColors` / `ZhiTextStyles` / `ZhiRadius` / `ZhiMotion` |
 
 ### 当前 UI 边界
 
-- `WorkspaceLayouts.kt` 只负责宽窄屏工作区、标签页与 Pager；主板块禁止手势横滑，页签状态由 `WorkspaceUiState.tab` 单向驱动。
+- `WorkspaceLayouts.kt` 只负责宽窄屏工作区、标签页与 Pager；主板块禁止手势横滑，点击 Tab 通过统一 Pager 动画切页，页签状态在 Pager settle 后单向写回 `WorkspaceUiState.tab`。
 - `FilesPane.kt` 负责文件浏览、紧凑搜索、分区列表/四列无卡片宫格与拖动批量选择；文件复制/移动等实际操作仍由 `WorkspaceViewModel` 与 `FileOps` 负责。
 - `FileEditorPage.kt` 负责编辑器页面生命周期、空查询安全搜索、紧凑查找行与可展开的 MT 风格单列工具面板；Sora 的 AndroidView 配置集中在 `SoraEditorHost.kt`。
-- `ui/chat/` 按回合块渲染对话。Markdown 表格在自己的横向滚动容器中渲染，超长助手正文默认有界预览，工具输出按行数有界。
+- `ui/chat/` 按回合块渲染对话。Markdown 表格在自己的横向滚动容器中渲染，超长助手正文默认有界预览，思考区与工具组按高度展开/收回，工具输出使用有界内层 LazyColumn 分块渲染。
 
 ### 明确未做
 
@@ -41,7 +41,7 @@
 ```
 app/src/main/java/com/zhizhu/zhicode/compose/
   MainActivity.kt                     ComponentActivity → setContent { ZhiCodeApp() }
-  theme/                              ZhiColors / ZhiRadius / ZhiMotion / ZhiTextScale（自有紧凑字阶）
+  theme/                              ZhiColors / ZhiRadius / ZhiMotion / ZhiTextStyles（主题字阶）
   model/UiModels.kt                   ChatItem / ToolActivity / SessionSummary / PermissionMode 等
   data/                               真实数据层（ApiConfig / Mcp / Memory / Session / GitChanges …）
   state/WorkspaceViewModel.kt         StateFlow<WorkspaceUiState> + EngineEvents 实现
@@ -58,13 +58,11 @@ app/src/main/java/com/zhizhu/zhicode/compose/
 
 | 目录 | 内容 |
 | --- | --- |
-| `api/` | 纯 Java 的协议层，**不依赖 `android.*`** —— 所以能在 JVM 上直接跑单测 |
-| `core/` | Agent 主循环与工具集 |
-| `sandbox/` | 沙箱宿主层（`ZhiSandbox` 等） |
+| `app/src/main/java/com/termux/app/zhicode/api/` | 纯 Java 的协议层与协议适配 |
+| `app/src/main/java/com/termux/app/zhicode/core/` | Agent 主循环与工具集 |
+| `app/src/main/java/com/termux/app/zhicode/sandbox/` | 沙箱宿主层（`ZhiSandbox` 等） |
 | `Bcore/` | 虚拟化引擎（BlackBox 血统），含预编译的 `libblackbox.so` |
 | `black-reflection/` `compiler/` | Bcore 的注解驱动反射与其注解处理器 |
-| `app/tests/` | **源码级结构测试**（零依赖，只读源码文本断言） |
-| `app/src/test/` | **JVM 行为测试**（真跑逻辑） |
 | `app/src/main/assets/sora/` | Sora TextMate grammar 资源（只保留实际使用的语言） |
 | `tools/` | `provenance.sh`、历史改写脚本等 |
 | `docs/` | 本目录下这些文档 |
@@ -133,9 +131,15 @@ Miuix 下拉菜单 + 一个**只观察不消费**的指针修饰符（`zhiObserv
 
 ---
 
-## 6. 质量守卫怎么组织
+## 6. 验证与边界
 
-两类测试**互补**，判断标准很简单：
+当前源码整理与 UI 改动采用非测试验证入口：先执行 `git diff --check`，再执行离线 Kotlin
+编译，发布前执行离线 Release APK 构建。旧的结构检查与 JVM 测试目录不属于本轮源码整理范围，
+也不作为本文的构建入口。
+
+引擎、权限、文件访问与沙箱属于独立运行时边界；UI 性能改动不得通过修改这些层来绕过成本。
+
+<!--
 
 > **如果一处改动「写错了也不会编译失败」，那它需要的是守卫或单测**，而不是指望 review 时有人看见。
 
@@ -149,4 +153,5 @@ bash test-source-no-build.sh          # 全部结构测试
 ./gradlew :app:testDebugUnitTest      # JVM 行为测试
 ```
 
-完整清单见 [`README`](../README.md) 与 [`CONTRIBUTING.md`](../CONTRIBUTING.md)。
+完整的源码说明见 [`README`](../README.md) 与 [`CONTRIBUTING.md`](../CONTRIBUTING.md)。
+-->

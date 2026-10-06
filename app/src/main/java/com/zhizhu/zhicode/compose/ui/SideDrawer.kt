@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -74,13 +75,13 @@ internal fun ZhiSideDrawer(
         ) {
             Surface(
                 modifier = Modifier
-                    .width(width)
+                    .width(width.coerceAtMost(320.dp))
                     .fillMaxHeight()
                     .then(
                         glass.blur(
                             Modifier,
                             RoundedCornerShape(topEnd = ZhiRadius.floating, bottomEnd = ZhiRadius.floating),
-                            radius = 24f,
+                            radius = 20f,
                         ),
                     ),
                 color = glass.surfaceColor(scheme.surfaceContainer),

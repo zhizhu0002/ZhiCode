@@ -11,8 +11,8 @@
 
 **不是 UI 原型** —— 真实引擎、真实环境、真实沙箱都已经接上：
 
-- **Agent 引擎** — `core/ZhiCodeEngine.java`：流式输出、工具调用、子代理、steering、视觉消息过滤
-- **模型接入** — `api/` 下的 OpenAI Responses / Chat Completions / Anthropic 等协议适配，支持自定义 Base URL 与明文 HTTP 开关
+- **Agent 引擎** — `app/src/main/java/com/termux/app/zhicode/core/ZhiCodeEngine.java`：流式输出、工具调用、子代理、steering、视觉消息过滤
+- **模型接入** — `app/src/main/java/com/termux/app/zhicode/api/` 下的 OpenAI Responses / Chat Completions / Anthropic 等协议适配，支持自定义 Base URL 与明文 HTTP 开关
 - **内置终端** — 自带 Termux bootstrap（解压约 32 MB）→ 真实 PTY（`TerminalSession` + `libtermux.so`）
 - **虚拟化沙箱** — `Bcore/`（BlackBox 血统）：免安装运行 APK、Frida 注入、原生调试
 - **MCP / 技能 / 角色卡 / 记忆** — `McpStore`、`McpRuntime`、`SkillStore`、`RoleCardStore`、`MemoryStore`
@@ -68,7 +68,7 @@
 ```
 app/src/main/java/com/zhizhu/zhicode/compose/
   MainActivity.kt                     ComponentActivity → setContent { ZhiCodeApp() }
-  theme/                              ZhiColors / ZhiRadius / ZhiMotion / ZhiTextScale（自有紧凑字阶）
+  theme/                              ZhiColors / ZhiRadius / ZhiMotion / ZhiTextStyles（主题字阶）
   model/UiModels.kt                   ChatItem / ToolActivity / SessionSummary / PermissionMode 等
   data/                               真实数据层（ApiConfig / Mcp / Memory / Session / GitChanges …）
   state/WorkspaceViewModel.kt         StateFlow<WorkspaceUiState> + EngineEvents 实现
@@ -76,13 +76,15 @@ app/src/main/java/com/zhizhu/zhicode/compose/
   ui/AppScaffold.kt                   Scaffold + 宽窄屏布局 + 弹窗挂载点
   ui/chat/                            对话流、消息卡片、进度卡
   ui/composer/                        输入器与斜杠命令面板
-  ui/panes/                           Changes / Terminal / Files 三个面板
+  ui/panes/                           Terminal / Files / Sora 编辑器面板
   ui/dialogs/                         各弹窗（外壳见 dialogs/DialogShell.kt）
   ui/settings/                        设置页与设置行
 ```
 
-顶层还有：`api/`（纯 Java 协议层，**不依赖 `android.*`**，所以能在 JVM 上跑单测）、
-`core/`、`sandbox/`、`Bcore/`、`app/tests/`（源码级结构测试）、`app/src/test/`（JVM 行为测试）。
+应用源码还包含 `app/src/main/java/com/termux/app/zhicode/` 下的协议、引擎、Termux 与沙箱宿主代码；
+`Bcore/`、`black-reflection/`、`compiler/` 是独立模块。界面源码位于
+`app/src/main/java/com/zhizhu/zhicode/compose/`，其中 `ui/chat/`、`ui/panes/` 与 `ui/dialogs/`
+分别承载对话流、工作区面板和弹窗。
 
 细节见 [`docs/architecture.md`](docs/architecture.md)。
 
@@ -91,8 +93,10 @@ app/src/main/java/com/zhizhu/zhicode/compose/
 ## 界面层
 
 全部走 Miuix，**唯一的转发层是 `compose/ui/Common.kt`** —— 调用点用 `Zhi*` 包装、不直接引库，
-库升级只影响一个文件。尺寸 / 颜色 / 字阶一律取自 `ZhiColors` / `ZhiRadius` / `ZhiTextScale` /
-`ZhiMotion` 等 token，不要在调用点写新数字。
+库升级只影响一个文件。尺寸 / 颜色 / 字阶一律取自 `ZhiColors` / `ZhiRadius` / `ZhiTextStyles` /
+`ZhiMotion` 等 token，不要在调用点写新数字。工作区、文件根、模型 API、MCP 与调试页的分段控件
+统一通过 `ZhiSegmentedTabs` 使用 Miuix `TabRowWithContour`；工作区与文件根的页内容由 Pager 驱动，
+顶层页签禁用横向手势，点击是唯一切换入口。
 
 有几处**刻意不用** Miuix 的组件（`WindowDialog`、`Checkbox`、`RadioButton`、`TabRow`、
 `InputField`、`SnackbarHost` 等），每条都有理由；弹窗上还踩过一批只有真机才看得出来的坑。
@@ -110,10 +114,14 @@ app/src/main/java/com/zhizhu/zhicode/compose/
 
 ---
 
-## 质量守卫
+## 质量说明
 
-除常规单测外，`test-source-no-build.sh` 里有一组**只读源码的结构测试**（不需要 Android SDK，
-`java` 直接跑），专门拦「改坏了不会编译失败、只会表现为界面或行为不对」的那类问题：
+项目历史上包含源码结构检查与 JVM 行为测试，但当前开发流程以源码审查、`git diff --check`
+和离线 Kotlin/Release 编译为准；不要把旧测试入口当作发布构建入口。本文不列出已废弃的
+守卫文件或测试命令，避免将过时流程误当成当前工具链的一部分。
+
+当前 UI 性能约定包括：对话流使用稳定 block key 的单一外层 `LazyColumn`；工具组和思考面板
+按高度收回/展开；工具输出使用有界窗口与内层 lazy chunks；文件查询在 IO 线程去抖并丢弃过期结果。
 
 | 守卫 | 拦什么 |
 | --- | --- |
@@ -151,8 +159,9 @@ bash test-source-no-build.sh          # 全部结构测试
 
 ## 贡献
 
-欢迎参与！提交前请读 [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 特别是「守卫测试」与「不要顺手重构」
-两条，以及那两个必须先跑绿的命令。
+欢迎参与！提交前请读 [`CONTRIBUTING.md`](CONTRIBUTING.md)，并保持修改范围与当前模块边界一致。
+推荐的最小本地验证是 `git diff --check` 与 `./gradlew :app:compileReleaseKotlin --offline`；发布前再执行
+`./gradlew :app:assembleRelease --offline`。
 
 ---
 

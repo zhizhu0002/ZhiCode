@@ -45,7 +45,6 @@ import com.zhizhu.zhicode.compose.model.TurnLayout
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
@@ -517,7 +516,7 @@ private fun MessageDebugStrip(item: ChatItem) {
         ) {
             Text(
                 text = item.kind.name,
-                fontSize = ZhiTextScale.Micro,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 fontWeight = FontWeight.Bold,
                 color = when (item.kind) {
                     ChatKind.ERROR -> ZhiColors.red()
@@ -539,7 +538,7 @@ private fun MessageDebugStrip(item: ChatItem) {
                     if (item.contextTokens >= 0) append(" ctx").append(item.contextTokens)
                     append("  ").append(item.id)
                 },
-                fontSize = ZhiTextScale.Micro,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 fontFamily = FontFamily.Monospace,
                 color = scheme.onSurfaceVariantSummary,
                 // 元信息是**单行且不换行**的：它不该把消息卡往下推，
@@ -571,7 +570,7 @@ private fun MessageDebugStrip(item: ChatItem) {
             ) {
                 Text(
                     text = item.body,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     fontFamily = FontFamily.Monospace,
                 )
             }
@@ -625,7 +624,7 @@ private fun InlineTaskList(tasks: List<AgentTask>) {
     ) {
         Text(
             text = "TASK_LIST  $done/${tasks.size}  （调试模式 · 完整清单）",
-            fontSize = ZhiTextScale.Micro,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
             color = scheme.primary,
@@ -661,13 +660,13 @@ private fun InlineTaskList(tasks: List<AgentTask>) {
                         )
                         Text(
                             text = task.title,
-                            fontSize = ZhiTextScale.BodySmall,
+                            fontSize = MiuixTheme.textStyles.body1.fontSize,
                             fontWeight = if (task.state == TaskState.RUNNING) FontWeight.Medium else FontWeight.Normal,
                             modifier = Modifier.padding(start = 7.dp).weight(1f),
                         )
                         Text(
                             text = task.state.name,
-                            fontSize = ZhiTextScale.Micro,
+                            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                             fontFamily = FontFamily.Monospace,
                             color = scheme.onSurfaceVariantSummary,
                         )
@@ -677,7 +676,7 @@ private fun InlineTaskList(tasks: List<AgentTask>) {
                     if (task.detail.isNotBlank()) {
                         ZhiMarkdown(
                             source = task.detail,
-                            bodyFontSize = ZhiTextScale.Caption,
+                            bodyFontSize = MiuixTheme.textStyles.body2.fontSize,
                             modifier = Modifier.padding(start = 20.dp, top = 3.dp),
                         )
                     }

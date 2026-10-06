@@ -7,7 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * 字阶的守卫：token → 档位 的接线，以及 Miuix 的两处设计意图没被覆盖掉。
+ * 字阶的守卫：主题样式槽位的接线，以及 Miuix 的两处设计意图没被覆盖掉。
  *
  * 为什么值得留一条：字阶**错了不会编译失败**。body2 接错到正文档、两档调成相等，
  * 界面只会层级不清，code review 最容易滑过去。跑真 JVM，不需要 Robolectric。
@@ -21,7 +21,7 @@ class ZhiTextStylesTest {
      * R1 重设计：手机紧凑中间值
      * （title1..4 = 24/19/16/15，main/paragraph/button/headline1 = 14，
      *  body1/headline2 = 13，body2/subtitle = 12，footnote1/2 = 11/10）。
-     * token → 档位的接线断言不变。
+     * 主题样式槽位的接线断言不变。
      */
     private val expected = listOf(
         "title1" to 24f, "title2" to 19f, "title3" to 16f, "title4" to 15f,
@@ -53,7 +53,7 @@ class ZhiTextStylesTest {
     }
 
     @Test
-    fun `每个 token 落到预期档位`() {
+    fun `每个 Miuix 样式槽位落到预期字号`() {
         for ((name, want) in expected) {
             assertEquals(name, want, size(name), 0.001f)
         }
@@ -77,21 +77,6 @@ class ZhiTextStylesTest {
         assertEquals(FontWeight.Bold, s.subtitle.fontWeight)
     }
 
-    /** 档位表自己的单调性：类初始化时就会抛，这里显式钉一次。 */
-    private val scaleOrder = listOf(
-        ZhiTextScale.Micro, ZhiTextScale.Footnote, ZhiTextScale.Caption, ZhiTextScale.BodySmall,
-        ZhiTextScale.Body, ZhiTextScale.Subheading, ZhiTextScale.Heading,
-        ZhiTextScale.TitleSmall, ZhiTextScale.Title,
-    )
+    /** Miuix 官方样式槽位的层级由上面的字号断言覆盖。 */
 
-    @Test
-    fun `档位严格递增`() {
-        for (i in 1 until scaleOrder.size) {
-            assertEquals(
-                "第 $i 档必须大于前一档",
-                true,
-                scaleOrder[i].value > scaleOrder[i - 1].value,
-            )
-        }
-    }
 }

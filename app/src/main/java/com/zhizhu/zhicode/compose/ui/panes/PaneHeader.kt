@@ -2,7 +2,6 @@ package com.zhizhu.zhicode.compose.ui.panes
 
 import com.zhizhu.zhicode.compose.theme.ZhiRow
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -79,14 +78,14 @@ fun PaneHeader(
             Text(
                 text = title,
                 color = scheme.onBackground,
-                fontSize = ZhiTextScale.BodySmall,
+                fontSize = MiuixTheme.textStyles.body1.fontSize,
                 fontWeight = FontWeight.Bold,
             )
             if (subtitle != null) {
                 Text(
                     text = subtitle,
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }

@@ -30,8 +30,6 @@ val blocks = remember(source) { parseMarkdown(source) }
 同时行内解析要走 `rememberInline`：`inline()` 非 `@Composable`，内部跑 `parseInline` +
 `buildAnnotatedString`，直接在参数位置调用会让**每个段落每次重组**都重跑一遍。
 
-**守住**：`MarkdownStreamingTest` + `MarkdownStreamSplitTest`（13 条边界：围栏、CRLF、
-空行、尾部只有空白）。
 
 ---
 
@@ -74,7 +72,6 @@ val blocks = remember(source) { parseMarkdown(source) }
 `ToolRow` 里那两个 O(输出长度) 的计算也移进了 `remember`。
 ⚠️ **key 不能是 `activity` 整体**：它带 `elapsedMs`，运行中每秒都在变，那样等于每秒白算一次。
 
-**守住**：`ToolOutputBoundTest`。
 
 ---
 
@@ -89,7 +86,6 @@ val blocks = remember(source) { parseMarkdown(source) }
 
 三个调用点（`+` 菜单、权限 chip、推理 chip）都已包进 `remember`。
 
-**守住**：`ToolOutputBoundTest`。
 
 ---
 
@@ -105,8 +101,6 @@ val blocks = remember(source) { parseMarkdown(source) }
 ⚠️ `saveSkillFile` 的**存在性检查与写入必须留在同一个 IO 块里**：拆成两块会多出一个
 「查过了但还没写」的窗口，双击能建出两份同名文件。
 
-**守住**：`MainThreadIoBoundTest`（断言的是**执行顺序** —— `launch(Dispatchers.IO)` 必须出现在
-`SkillStore` 调用**之前**，而不是"文件里出现过 `Dispatchers.IO`"）。
 
 ---
 
@@ -150,7 +144,6 @@ val blocks = remember(source) { parseMarkdown(source) }
 对话流那个还改成了**长驻** effect + `snapshotFlow` 观察内容指纹，而不是把长度当 `LaunchedEffect`
 的 key —— 后者每个 token 都要重建一次协程。
 
-**守住**：`MainThreadIoBoundTest`（终端那处）。
 
 ---
 
@@ -176,21 +169,14 @@ val blocks = remember(source) { parseMarkdown(source) }
 
 ---
 
-## 10. 这些约束怎么被守住
+## 10. 当前验证入口
 
-| 机制 | 覆盖 |
-| --- | --- |
-| `MarkdownStreamingTest`（源码结构） | 流式切分、行内缓存、流式期间不挂尺寸动画 |
-| `MarkdownStreamSplitTest`（JVM 单测） | 切点函数的行为与边界 |
-| `ToolOutputBoundTest`（源码结构） | 行数上限、不做 O(n) 字符串手术、`items` 已缓存 |
-| `LimitLinesTest`（JVM 单测） | 截断规则的行为、口径、守恒 |
-| `MainThreadIoBoundTest`（源码结构） | IO 线程顺序、组件收窄、`@Immutable` 自洽、贴底不挂起 |
-| `R8ConfigTest`（源码结构） | R8 配置、keep 规则、baseline profile 合法性 |
+源码改动先用 `git diff --check` 检查空白与补丁完整性，再执行：
 
 ```bash
-bash test-source-no-build.sh          # 全部结构测试
-./gradlew :app:testDebugUnitTest      # JVM 行为测试
+./gradlew :app:compileReleaseKotlin --offline
+./gradlew :app:assembleRelease --offline
 ```
 
-> 判断标准很简单：**如果一处改动「写错了也不会编译失败」，那它需要的是守卫或单测**，
-> 而不是指望 review 时有人看见。
+Release 构建完成后，产物位于 `app/build/outputs/apk/release/`；发布签名与映射表规则
+见 [`build-and-release.md`](build-and-release.md)。

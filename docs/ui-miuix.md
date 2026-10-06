@@ -18,9 +18,9 @@
 `TabRowWithContour`、`OverlayDialog`、`OverlayDropdownPopup`、`DropdownEntry` / `DropdownItem`、
 `BreadcrumbBar`、`VerticalScrollBar`、`TooltipBox`、`TextField`。
 
-**尺寸 / 颜色 / 字阶一律取自 token**：`ZhiColors`、`ZhiRadius`、`ZhiTextScale`、`ZhiDialogWidth`、
-`ZhiMotion`、`ZhiSpace`。要加新档位就加到 token 里（并写清理由），不要在调用点写新数字 ——
-`TypographyScaleTest` 会拦住裸 `fontSize = N.sp`。
+**尺寸 / 颜色 / 字阶优先取 Miuix 主题与项目布局常量**：颜色使用 `MiuixTheme.colorScheme` / `ZhiColors`，
+圆角使用 Miuix 默认值或 `ZhiRadius` 的语义例外，字号直接使用 `MiuixTheme.textStyles.*`。
+主题入口 `zhiTextStyles()` 只在一处保留手机紧凑值；调用点不再维护另一套字号 token，也不写新的裸字号。
 
 自写的按压缩放（曾经的 `iqPressScale` / `IqPressable`）已**删除**：Miuix `Card` / `Surface(onClick)`
 自带按压反馈，再叠自写缩放会双重触发。
@@ -36,7 +36,7 @@
 | 组件 | 为什么不用 |
 | --- | --- |
 | `WindowDialog` | 它另开一个**独立 Android Window**，拿不到 `Scaffold` 的 `popupHost`，内部的 `Overlay*` 会失效，也参与不了主窗口的背景模糊。**全部弹窗改用 `OverlayDialog`。** |
-| `Checkbox` | 固定 26dp 且是圆形，从外部改不小（`requiredSize` 施加在调用方 modifier 之后）。下拉/选择器里的选中态改用与 Miuix 一致的 `Check` 图标 + `DropdownDefaults.CheckIconSize`。 |
+| 直接使用 `Checkbox` | 普通设置/选择行优先使用 Miuix `CheckboxPreference`（项目通过 `ZhiCheckboxPreference` 转发），下拉/紧凑选择器里的选中态使用与 Miuix 一致的 `Check` 图标 + `DropdownDefaults.CheckIconSize`。只有组件陈列或需要直接控制 toggle 的特殊区域才直接使用 `Checkbox`；它固定 26dp 且是圆形，不能当作紧凑列表行控件。 |
 | `RadioButton` | **未选中时不绘制任何东西**，行首只剩一块空白。 |
 | `TabRow` | 选中胶囊向外绘制会盖住相邻内容，改用 `TabRowWithContour`。 |
 | `TopAppBar` | 大标题布局与原版 48dp 紧凑栏差异大。不过顶栏现在已改用官方 `SmallTopAppBar`（保留官方 padding 与 50dp 高度，不再覆写）。 |
@@ -60,10 +60,12 @@
 
 ### 字号
 
-Miuix 字号阶梯偏大（`title1=32sp` … `body2=14sp`），且 `BasicComponent` 的标题走 `headline1`、
-说明走 `body2`，`TextField` / `TextButton` 也走主题样式 —— **逐个传 `fontSize` 无效**。
+Miuix 组件统一读取官方 `TextStyles` 槽位：`BasicComponent` 的标题走 `headline1`、说明走 `body2`，
+`TextField` / `TextButton` / Preference 也走主题样式 —— **逐个传 `fontSize` 不能改变这些内部文字**。
 
-因此弹窗内嵌一层 `MiuixTheme(textStyles = compactDialogTextStyles())` 整体收小。
+应用在 `AppScaffold` 的 `MiuixTheme(textStyles = zhiTextStyles())` 入口保留手机紧凑字号，
+但调用点只读取 `MiuixTheme.textStyles.main/body1/body2/footnote1/title*`，不再使用额外的
+`ZhiTextScale` token。要回到 Miuix 默认字号，只需移除主题入口的 `textStyles` 覆盖，恢复路径是单一的。
 
 ---
 

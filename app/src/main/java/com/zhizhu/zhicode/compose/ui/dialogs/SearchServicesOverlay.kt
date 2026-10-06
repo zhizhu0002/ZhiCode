@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -138,7 +137,7 @@ private fun SearchServiceList(
                         "点右上角「新增」可以接入 Tavily、Exa、Brave、Perplexity、SearXNG 等 —— " +
                         "密钥存进系统加密存储，与其他 API 密钥同一套保护。",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 )
             }
@@ -248,7 +247,7 @@ private fun SearchServiceForm(
                 Text(
                     text = "申请地址：$url",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                 )
             }
@@ -322,7 +321,7 @@ private fun SearchServiceField(
         Text(
             text = field.hint,
             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
         )
     }

@@ -29,7 +29,6 @@ import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.ui.ZhiAnchoredActionMenu
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -78,7 +77,7 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
  *
  * 现在这一屏跟其余界面走**同一套主题栈**（见 `SandboxBoard` 里的 `setContent`）：
  * `LocalZhiDark` → `MiuixTheme(colors = …backdrop(), textStyles = zhiTextStyles())`，
- * 圆角统一走 [ZhiRadius]、字阶统一走 [ZhiTextScale]，控件全部是 Miuix 组件。
+ * 圆角统一走 [ZhiRadius]、字阶统一走 [主题 textStyles]，控件全部是 Miuix 组件。
  *
  * ## 这个文件只负责画
  *
@@ -377,7 +376,7 @@ private fun StatusLine(status: String, tone: SandboxStatusTone) {
     Text(
         text = status,
         color = color,
-        fontSize = ZhiTextScale.Caption,
+        fontSize = MiuixTheme.textStyles.body2.fontSize,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
     )
 }
@@ -430,13 +429,13 @@ private fun EmptyState(modifier: Modifier = Modifier) {
             Text(
                 text = "还没有沙箱应用",
                 color = scheme.onBackground,
-                fontSize = ZhiTextScale.Subheading,
+                fontSize = MiuixTheme.textStyles.title4.fontSize,
                 fontWeight = FontWeight.Medium,
             )
             Text(
                 text = "导入一个 APK，或让 Agent 调用 Sandbox install。",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Caption,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
@@ -576,7 +575,7 @@ private fun SandboxDialogHost(
                     text = rootVisibilityEffect(current.hidden) +
                         "\n\n所有正在运行的 Guest 将停止，重新启动后生效。",
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.BodySmall,
+                    fontSize = MiuixTheme.textStyles.body1.fontSize,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -595,7 +594,7 @@ private fun SandboxDialogHost(
                 Text(
                     text = current.packageName,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Caption,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -615,7 +614,7 @@ private fun SandboxDialogHost(
                     text = current.packageName + "\n\n首次使用需要从 Frida 官方发布页下载 arm64 Gadget，" +
                         "并校验固定的 SHA-256。",
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.BodySmall,
+                    fontSize = MiuixTheme.textStyles.body1.fontSize,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -628,7 +627,7 @@ private fun SandboxDialogHost(
                     Text(
                         text = "正在读取…",
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.BodySmall,
+                        fontSize = MiuixTheme.textStyles.body1.fontSize,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
@@ -642,7 +641,7 @@ private fun SandboxDialogHost(
                     Text(
                         text = current.body,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Footnote,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.fillMaxWidth(),
                     )

@@ -1,5 +1,4 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 
 import androidx.compose.foundation.layout.Arrangement
@@ -127,7 +126,7 @@ internal fun DialogShell(
             Text(
                 text = title,
                 color = titleColor,
-                fontSize = ZhiTextScale.TitleSmall,
+                fontSize = MiuixTheme.textStyles.title2.fontSize,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Start,
                 modifier = Modifier.weight(1f),
@@ -219,7 +218,7 @@ internal fun PrimaryButton(
         ),
         modifier = modifier,
     ) {
-        Text(text = text, fontSize = ZhiTextScale.BodySmall)
+        Text(text = text, fontSize = MiuixTheme.textStyles.body1.fontSize)
     }
 }
 

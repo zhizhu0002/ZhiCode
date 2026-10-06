@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui.composer
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandHorizontally
@@ -162,7 +161,7 @@ fun Composer(
                     .animateContentSize(
                         animationSpec = ZhiMotion.sizeSpec,
                     )
-                    .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 5.dp),
+                    .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 6.dp),
             ) {
             // 附件条随附件增减平滑展开/收起。
             // 同样交还给官方裸默认（出处见上面斜杠面板那一处的说明）：附件条和斜杠面板
@@ -211,7 +210,7 @@ fun Composer(
                     useLabelAsPlaceholder = true,
                     // 透明容器 + 透明描边：只留外层方角框
                     colors = TextFieldDefaults.textFieldColors(
-                        backgroundColor = Color.Transparent,
+                        backgroundColor = scheme.surfaceContainerHighest.copy(alpha = 0.34f),
                         labelColor = scheme.onSurfaceVariantSummary,
                         borderColor = Color.Transparent,
                     ),
@@ -219,7 +218,7 @@ fun Composer(
                     insideMargin = DpSize(6.dp, 1.dp),
                     // 常规字重的正文样式：Miuix 主题默认文字样式偏粗，会显得比原版重
                     textStyle = MiuixTheme.textStyles.main.copy(
-                        fontSize = ZhiTextScale.Subheading,
+                        fontSize = MiuixTheme.textStyles.title4.fontSize,
                         fontWeight = FontWeight.Normal,
                     ),
                     // 比原版的 minLines = 2 更矮，只占一行起，随内容长高
@@ -237,7 +236,10 @@ fun Composer(
             // ---- 主体调试模式：输入行下方的 Markdown 实时预览 ----
             // 用生产渲染器 ZhiMarkdown，所以这里看到的排版就是消息里会有的排版。
             if (debugMode) {
-                ZhiHorizontalDivider(modifier = Modifier.fillMaxWidth())
+                ZhiHorizontalDivider(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = scheme.outline.copy(alpha = 0.45f),
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -245,14 +247,14 @@ fun Composer(
                     Text(
                         text = "M↓ 实时预览",
                         color = scheme.primary,
-                        fontSize = ZhiTextScale.Micro,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
                         text = "  ${state.composerText.length} 字 · ${state.attachments.size} 附件 · " +
                             (state.slashQuery?.let { "斜杠「$it」" } ?: "无斜杠"),
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Micro,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         fontFamily = FontFamily.Monospace,
                     )
                 }
@@ -260,13 +262,13 @@ fun Composer(
                     Text(
                         text = "输入框为空；在上面写点 Markdown（# 标题 / - 列表 / **粗体** / `代码` / 表格）即会在此渲染。",
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Micro,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
                     )
                 } else {
                     ZhiMarkdown(
                         source = state.composerText,
-                        bodyFontSize = ZhiTextScale.Caption,
+                        bodyFontSize = MiuixTheme.textStyles.body2.fontSize,
                         modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
                     )
                 }
@@ -478,7 +480,7 @@ private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
         cornerRadius = ZhiRadius.inner,
         insideMargin = PaddingValues(start = 8.dp, end = 2.dp),
         colors = CardDefaults.defaultColors(
-            color = scheme.surfaceContainerHighest,
+            color = scheme.surfaceContainerHigh,
             contentColor = scheme.onSurface,
         ),
     ) {
@@ -491,7 +493,7 @@ private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
             )
             Text(
                 text = attachment.label,
-                fontSize = ZhiTextScale.Footnote,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.width(112.dp).padding(start = 4.dp),

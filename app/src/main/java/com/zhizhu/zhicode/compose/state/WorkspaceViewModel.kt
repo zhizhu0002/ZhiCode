@@ -245,6 +245,7 @@ class WorkspaceViewModel(
      * 选模型把正在进行的目录请求取消掉（列表就此停在加载中）。
      */
     private var modelSaveJob: Job? = null
+    private var fileReloadJob: Job? = null
 
     /**
      * 会话级模型覆盖。
@@ -590,7 +591,12 @@ class WorkspaceViewModel(
             dir.list() == null -> "无法读取（权限不足）：$path"
             else -> ""
         }
-        _state.update { it.copy(fileEntries = entries, fileNote = note) }
+        _state.update { state ->
+            // 目录读取本身可能无法被底层 API 中断；旧 Job 即使被取消，
+            // 也不能在新路径或新搜索词之后把旧结果写回来。
+            if (state.filePath != path || state.fileListOptions != options) state
+            else state.copy(fileEntries = entries, fileNote = note)
+        }
     }
 
     private var idCounter = 0L
@@ -5318,7 +5324,7 @@ class WorkspaceViewModel(
         // 指向的是另一个目录里的东西。留着的话，在 A 目录选中的文件会在 B 目录里
         // 被"删除/附加" —— 而那是另外一批文件。
         _state.update { it.copy(filePath = path, openFile = null, fileDraft = null, fileSelection = emptySet(), fileSelectionMode = false, fileListOptions = FileListOptions()) }
-        viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
+        scheduleFileReload()
     }
 
     fun navigateUp() {
@@ -5389,17 +5395,25 @@ class WorkspaceViewModel(
                 fileListOptions = FileListOptions(),
             )
         }
-        viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
+        scheduleFileReload()
+    }
+
+    private fun scheduleFileReload(debounceMs: Long = 0L) {
+        fileReloadJob?.cancel()
+        fileReloadJob = viewModelScope.launch(Dispatchers.IO) {
+            if (debounceMs > 0) delay(debounceMs)
+            reloadFiles()
+        }
     }
 
     fun updateFileQuery(query: String) {
         _state.update { it.copy(fileListOptions = it.fileListOptions.copy(query = query)) }
-        viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
+        scheduleFileReload(debounceMs = 180L)
     }
 
     fun updateFileSort(key: FileSortKey, descending: Boolean = _state.value.fileListOptions.descending) {
         _state.update { it.copy(fileListOptions = it.fileListOptions.copy(sortKey = key, descending = descending)) }
-        viewModelScope.launch(Dispatchers.IO) { reloadFiles() }
+        scheduleFileReload()
     }
 
     fun toggleFileSortDirection() {

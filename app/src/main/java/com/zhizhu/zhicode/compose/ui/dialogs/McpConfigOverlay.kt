@@ -1,6 +1,5 @@
 package com.zhizhu.zhicode.compose.ui.dialogs
 
-import com.zhizhu.zhicode.compose.theme.ZhiTextScale
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -60,7 +59,6 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Switch
-import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
@@ -288,7 +286,7 @@ private fun McpServerList(
         Text(
             text = "配置文件：${config.filePath}",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Micro,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
@@ -317,7 +315,7 @@ private fun McpServerList(
                 "所以只在点「测试连接」时才执行 —— 打开这一页不会自动跑。" +
                 "停用的服务器不会被 Agent 调用，也不会被测试。",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         )
     }
@@ -405,13 +403,13 @@ private fun McpEmptyState() {
         Text(
             text = "没有 MCP 服务器",
             color = scheme.onBackground,
-            fontSize = ZhiTextScale.Body,
+            fontSize = MiuixTheme.textStyles.main.fontSize,
             fontWeight = FontWeight.Medium,
         )
         Text(
             text = "点右下角 + 添加，或用右上角「导入」粘贴一份 JSON 配置",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
         )
     }
 }
@@ -469,7 +467,7 @@ private fun McpServerCard(
                     Text(
                         text = server.name,
                         color = if (server.enabled) scheme.onBackground else scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Body,
+                        fontSize = MiuixTheme.textStyles.main.fontSize,
                         fontWeight = FontWeight.Medium,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -531,7 +529,7 @@ private fun McpStatusLine(
             Text(
                 text = "正在连接…",
                 color = scheme.onSurfaceVariantSummary,
-                fontSize = ZhiTextScale.Micro,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 modifier = Modifier.padding(start = 6.dp),
             )
         }
@@ -539,7 +537,7 @@ private fun McpStatusLine(
         status == null -> Text(
             text = "未测试 · 点 ⋮ 里的「测试连接」",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Micro,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
         )
 
         status.connected -> Text(
@@ -549,7 +547,7 @@ private fun McpStatusLine(
                 if (off > 0) append("（其中 $off 个已停用）")
             },
             color = scheme.primary,
-            fontSize = ZhiTextScale.Micro,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
         )
 
         else -> Text(
@@ -558,7 +556,7 @@ private fun McpStatusLine(
             // "点这一条看详情"。
             text = "连接失败：${status.error}（点这里看全文）",
             color = scheme.error,
-            fontSize = ZhiTextScale.Micro,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             maxLines = 2,
             modifier = Modifier
                 .fillMaxWidth()
@@ -708,7 +706,7 @@ private fun McpConnectionForm(
             text = "「名称」用来在 Agent 调用时标识这台服务器，改动名称等于换了一台" +
                 "（原名称的记录会被覆盖）。",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
@@ -758,7 +756,7 @@ private fun McpToolsTab(
                     Text(
                         text = "正在连接服务器，读取工具清单…",
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Footnote,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
@@ -769,7 +767,7 @@ private fun McpToolsTab(
                     Text(
                         text = "还没有工具清单。工具由服务器自己声明，要先连上去才拿得到。",
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Footnote,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     )
                     TextButton(
                         text = "测试连接",
@@ -784,7 +782,7 @@ private fun McpToolsTab(
                     Text(
                         text = "连接失败，读不到工具清单：${status.error}",
                         color = scheme.error,
-                        fontSize = ZhiTextScale.Footnote,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                         fontWeight = FontWeight.Medium,
                     )
                     TextButton(
@@ -797,7 +795,7 @@ private fun McpToolsTab(
                 status.tools.isEmpty() -> Text(
                     text = "这台服务器声明了 0 个工具。",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 )
 
@@ -806,7 +804,7 @@ private fun McpToolsTab(
                         text = "共 ${status.tools.size} 个工具，" +
                             "${status.tools.count { !it.enabled }} 个已停用。",
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Footnote,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
                     )
                     status.tools.forEach { tool ->
@@ -824,7 +822,7 @@ private fun McpToolsTab(
             text = "工具开关只影响本机：关掉的工具不会出现在 Agent 看到的清单里，也调用不了。" +
                 "「调用前需要确认」是让每次调用都弹一次确认框（停用的工具不会走到那一步）。",
             color = scheme.onSurfaceVariantSummary,
-            fontSize = ZhiTextScale.Footnote,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
@@ -867,7 +865,7 @@ private fun McpToolRow(
                 Text(
                     text = "启用",
                     color = scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Micro,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 )
                 // 用裸 Switch 而不是 SwitchPreference：后者自带标题行与内边距，
                 // 塞进 BasicComponent 的 endActions（一个 RowScope）里会撑成两层。
@@ -890,7 +888,7 @@ private fun McpToolRow(
                     Text(
                         text = tool.description,
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Footnote,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     )
                 }
                 if (tool.parameters.isNotEmpty()) {
@@ -908,7 +906,7 @@ private fun McpToolRow(
                     Text(
                         text = "带 * 的是必填参数。",
                         color = scheme.onSurfaceVariantSummary,
-                        fontSize = ZhiTextScale.Micro,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     )
                 }
                 // 审批开关只在启用时有意义：停用的工具永远不会走到"要不要确认"。
@@ -956,7 +954,7 @@ private fun TextDetailDialog(show: Boolean, title: String, body: String, onDismi
             Text(
                 text = body,
                 color = scheme.onBackground,
-                fontSize = ZhiTextScale.Footnote,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontFamily = FontFamily.Monospace,
                 // ⚠️ 这里**既不能**套 verticalScroll，**也不能**加 heightIn 上限。
                 //
@@ -1021,7 +1019,7 @@ private fun McpImportDialog(
                         "同名服务器会被跳过（不覆盖你已有的设置），" +
                         "既没有 url 也没有 command 的条目会被拒绝。",
                     color = if (error != null) scheme.error else scheme.onSurfaceVariantSummary,
-                    fontSize = ZhiTextScale.Footnote,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     fontWeight = if (error != null) FontWeight.Medium else FontWeight.Normal,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
