@@ -165,31 +165,142 @@ Compose 界面在 `dump_ui` 里通常只呈现一个 `AndroidComposeView`，因�
 
 ---
 
-## 6. 代码结构
+## 6. 项目结构
+
+分三层看：**仓库根**（模块与构建）→ **两棵源码树**（Agent 侧 Java / 应用侧 Kotlin）→ **资源与测试**。
+最后一张表是「想改什么 → 去哪个文件」，改代码时从它进最快。
+
+### 6.1 仓库根
+
+| 路径 | 内容 |
+| --- | --- |
+| `app/` | 应用模块：Compose 界面 + Agent 引擎 / 协议 / 工具 / 沙箱宿主。**6.2 与 6.3 讲的就是它** |
+| `Bcore/` | 虚拟化运行时（BlackBox 血统）。第三方 Apache-2.0，见 [`NOTICE`](NOTICE) 第 2 节 |
+| `black-reflection/` | Bcore 的注解驱动反射。同上 |
+| `compiler/` | 编译期注解处理器（`annotationProcessor`，不进 APK）。同上 |
+| `docs/` | 七份专题文档，清单见第 11 节 |
+| `tools/` | `provenance.sh`（归属度量）、`rewrite-history-index-filter.sh`（历史改写）、`material-symbols-fetch.sh`（图标重取）、`termux-bootstrap-fork/`（bootstrap 构建配方） |
+| `.github/workflows/build.yml` | CI：构建 debug + release，按 4 个 secret 是否齐全决定是否签名 |
+| `gradle/` `gradlew` `gradlew.bat` | Gradle wrapper（版本写死在 `gradle-wrapper.properties`） |
+| `settings.gradle` | 四个模块的声明与仓库配置 |
+| `build.gradle` `gradle.properties` | 根构建脚本与 Gradle 开关 |
+| `app/build.gradle` | **SDK 版本、`applicationId`、签名、R8、依赖** —— 包名的唯一来源就是这里的 `applicationId` |
+| `test-jvm-fast.sh` | JVM 单测快路径，见第 4 节 |
+| `LICENSE` `NOTICE` `THIRD-PARTY-LICENSES/` | 三份**必须随发行物一起给出**的许可文件，见第 10 节 |
+| `README.md` `CONTRIBUTING.md` `SECURITY.md` | 本文件与两份约定 |
+| `local.properties` `release.properties` | **本机专属、已 gitignore、不在仓库里**：SDK 路径与签名密钥库 |
+
+> ⚠️ `local.properties` 与 `release.properties` **不是可以清理的垃圾** —— 删了就构建不了 / 签不了名，且无法从仓库恢复。
+> 同理 `gradle/wrapper/gradle-wrapper.jar` 看着像产物，其实是构建必需。
+
+### 6.2 `app/src/main/java` —— 两棵源码树
 
 ```
 app/src/main/java/
-  com/termux/app/zhicode/        Agent 侧（纯 Java 为主）
-    api/                         模型协议层（Responses / Chat Completions / Anthropic / 兼容与 zcode 适配）
-    core/                        引擎、权限门、风险分类、上下文压缩、文件操作
-    tools/                       工具集与注册表
-    mcp/  agents/  tasks/  storage/  model/  security/  json/  termux/
-  com/termux/                    Termux 终端模拟与视图（Apache-2.0 第三方，见 NOTICE）
-    terminal/  view/  shared/termux/
-  com/zhizhu/zhicode/            应用侧
-    compose/                     Compose 界面层
-      theme/  model/  data/  state/  engine/  runtime/  editor/
-      ui/                        Common.kt（Miuix 唯一转发层）、AppScaffold、chat/、composer/、panes/、dialogs/、settings/、sandbox/、debug/
-    sandbox/                     沙箱宿主层（引擎门面、RPC、guest 桥、Frida、调试）
-    background/                  前台保活
-Bcore/  black-reflection/  compiler/     第三方虚拟化运行时及其注解处理（Apache-2.0）
-tools/                                   provenance、历史改写、bootstrap 构建配方、图标取用脚本
-docs/                                    本目录
+  com/termux/app/zhicode/        ← Agent 侧（Java 为主）
+    core/          ZhiCodeEngine（主循环）、PermissionGate / PermissionModePolicy（权限）、
+                   RiskClassifier、ContextCompactor、FileOps、SystemPromptBuilder、
+                   StorageLinks、SteeringQueue、QuestionGate、PlanApprovalGate、VisionMessageFilter
+    api/           模型协议层：ModelProvider 接口 + Responses / Chat Completions / Anthropic 三个适配、
+                   ApiEndpointResolver / ApiUrlPolicy（地址解析与白名单）、ProviderTransport、
+                   RequestFailure / StreamFailure、ModelCatalogClient
+      compat/      跨协议映射（推理档位等）
+      zcode/       自有适配（ZcodeWire / ZcodeHarness / ZcodeDeviceMid）
+    tools/         工具实现 + ToolRegistry / ToolSchemas / PathPolicy / UnifiedDiff / TextFiles
+    agents/        子代理的定义、加载与调度（SubagentManager）
+    mcp/           MCP 运行时
+    tasks/         TaskStore
+    storage/       落盘层：会话（SessionStore + SegmentLog / BlobStore / Index / Snapshot）、
+                   设置、计划、MCP 配置、原子写（AtomicFiles）
+    model/         SessionConfig、ToolCall、AssistantTurn、ToolExecutionResult、PlanWorkflowState
+    security/      AndroidSecretStore（Android Keystore + AES-GCM）
+    termux/        TermuxShellExecutor（内置 shell 的执行入口）、BashCompletionCoordinator
+    json/          JsonItems
+
+  com/termux/                    ← Termux 上游（**Apache-2.0 第三方**，见 NOTICE 第 3 节）
+    terminal/      终端缓冲区 / emulator / session（TerminalSession 经 JNI 调 libtermux.so）
+    view/          终端视图 / 渲染器 / 手势 / 文本选择
+    shared/termux/ TermuxConstants —— 路径与品牌 slug 的唯一来源（本工程整体重写，见 NOTICE 第 4 节）
+
+  com/zhizhu/zhicode/            ← 应用侧（Kotlin 为主）
+    ZhiCodeApplication.kt        进程角色判定与启动期装配
+    MainActivity.kt              setContent { ZhiCodeApp() }
+    RuntimeInstaller.kt          bootstrap 解压与安装
+    TermuxTerminalPane.java      终端面板的 View 与状态宿主
+    FileTree.kt                  ZhiFileProvider.java   ZhiDocumentsProvider.kt
+    UiCanvasController.java      UiCanvasStore.java
+    compose/
+      theme/      颜色 / 圆角 / 间距 / 动效 / 字阶 token（改视觉先看这里）
+      model/      UiModels（含 WorkspaceUiState）、ToolKind、TurnLayout、ToolGrouping…
+      data/       数据层：API 配置、模型目录、MCP、技能、角色卡、记忆、搜索服务、会话读取、文件浏览
+      state/      WorkspaceViewModel + Factory（StateFlow<WorkspaceUiState> + 引擎事件）
+      engine/     ZhiEngineController（引擎接线与流式合并）、ToolText
+      runtime/    EnvDoctor（环境自检）
+      editor/     EditorActivity + EditorViewModel + EditorFileIo —— **独立进程 `:editor`**
+      ui/         ← 展开见下
+    sandbox/      沙箱宿主层（16 个类：引擎门面 ZhiSandbox、RPC、guest 桥、Frida、调试、保活、叠加层）
+    background/   前台保活
 ```
 
-`app/src/main/java` 下是 Java（Agent 侧为主）与 Kotlin（Compose 界面侧）两棵树，
-**具体文件数请自己数**（见第 2 节末尾的命令）。
-更细的分层、状态与引擎如何对接、以及沙箱层的不变式见 **[`docs/architecture.md`](docs/architecture.md)**。
+`compose/ui/` 是界面的全部，值得单独展开：
+
+```
+    ui/
+      Common.kt            ★ Miuix 组件的唯一转发层（调用点只引 Zhi* 包装，不直接引库）
+      AppScaffold.kt       Scaffold + 宽窄屏布局 + 弹窗挂载点
+      WorkspaceLayouts.kt  工作区页签与 Pager
+      ChatArea.kt  TopBar.kt  Sidebar.kt  SideDrawer.kt  MessageBar.kt
+      Animations.kt  Glass.kt  ImeMotion.kt  OverlayHost.kt
+      Markdown.kt  MarkdownParse.kt  ZhiImage.kt  ZhiIcons.kt  ZhiMaterialIcons.kt
+      chat/       对话流、消息卡、工具输出分块、自动贴底
+      composer/   输入器与斜杠命令面板
+      panes/      终端 / 文件 / Sora 编辑器面板
+      dialogs/    各弹窗（外壳统一在 DialogShell.kt）
+      settings/   设置页与设置行
+      sandbox/    沙箱管理界面
+      debug/      仅 debug 构建可见的组件陈列页与帧率浮层
+```
+
+### 6.3 资源与测试
+
+```
+app/src/main/
+  assets/
+    bootstrap-aarch64.zip          Termux 用户空间（前缀已编译成 com.zhizhu.code，无需解压期改写）
+    zhicode/*.sh                   6 个 apt / dpkg 前缀改写钩子（装官方 deb 时用）
+    sora/textmate/                 TextMate 语法 / 主题 / languages.json
+                                   ⚠️ 来源与未核实项见该目录下的 NOTICE.md
+  jniLibs/arm64-v8a/libtermux.so   原生 PTY 桥（Apache-2.0）
+  res/drawable/                    只有一个 XML —— 界面几乎全部由 Compose 绘制
+  AndroidManifest.xml              权限、组件与进程声明（`:editor`、`:zhisandbox` 都在这里）
+  baseline-prof.txt                手写冷启动 profile
+
+app/src/test/java/                 全部 JVM 单测（覆盖面与跑法见第 4 节）
+app/src/test/resources/            单测用的基线数据
+```
+
+### 6.4 按功能找文件
+
+| 想改什么 | 去这里 |
+| --- | --- |
+| 引擎主循环、工具调用时序、子代理 | `com/termux/app/zhicode/core/ZhiCodeEngine.java` |
+| 模型请求与流式解析 | `com/termux/app/zhicode/api/` |
+| 加一个工具 | `.../zhicode/tools/` + `ToolRegistry.java` + `ToolSchemas.java` |
+| 权限怎么判、怎么问 | `.../zhicode/core/PermissionGate.java`、`PermissionModePolicy.java` |
+| Agent 的系统提示词 | `.../zhicode/core/SystemPromptBuilder.java` |
+| 会话如何落盘 / 迁移 | `.../zhicode/storage/SessionStore.java`（及同目录的 SegmentLog / BlobStore / Index / Snapshot） |
+| 内置 shell 怎么执行命令 | `.../zhicode/termux/TermuxShellExecutor.java` |
+| 界面 token（颜色 / 圆角 / 字阶） | `com/zhizhu/zhicode/compose/theme/` |
+| 某个界面组件 | `compose/ui/<区域>/`；先确认 `Common.kt` 里有没有现成的 `Zhi*` 包装 |
+| 界面状态与事件流 | `compose/state/WorkspaceViewModel.kt` |
+| 沙箱进程模型与不变式 | `com/zhizhu/zhicode/sandbox/` + [`docs/sandbox-host.md`](docs/sandbox-host.md) |
+| R8 keep 规则 | `app/proguard-rules.pro`、`Bcore/consumer-rules.pro` |
+| 包名 / SDK 版本 / 依赖 | `app/build.gradle` |
+
+> 这里**不写死文件数与行数** —— 每加一个类就过期。要数自己跑：
+> `find app/src/main/java -name '*.java' | wc -l`、`find app/src/main/java -name '*.kt' | wc -l`。
+
+更细的分层、状态与引擎如何对接、以及沙箱层不得放宽的不变式见 **[`docs/architecture.md`](docs/architecture.md)**。
 
 ---
 
