@@ -214,9 +214,31 @@ object ZhiColors {
     private val DarkBackdrop = Color(0xFF28282A)
     private val PanelDark = Color(0xFF1C1C1E)
     private val DarkCard = Color(0xFF323235)
-    private val PanelLight = Color(0xFFF1F1F3)
-    private val CardLight = Color(0xFFFAFAFC)
-    private val CardInnerLight = Color(0xFFF7F7F8)
+
+    /**
+     * 浅色中性阶。
+     *
+     * 这几个值**不只本工程自己取**：[ZhiAppTheme] 会拿它们覆写 Miuix 浅色方案里
+     * 那几个更脏的灰（`surfaceContainerHigh` / `surfaceContainerHighest` = `#E8E8E8`、
+     * `secondary` = `#E6E6E6`、`secondaryVariant` / `secondaryContainer` = `#F0F0F0`）。
+     * 所以它们是**浅色模式唯一的中性色来源**，改这里即可全局生效，不要再去各调用点
+     * 逐个换色 —— 那样只会得到第二套灰。
+     */
+    internal val PanelLight = Color(0xFFF1F1F3)
+    internal val CardLight = Color(0xFFFAFAFC)
+    internal val CardInnerLight = Color(0xFFF7F7F8)
+
+    /** 浅色的次级填充（对应 Miuix 的 `secondary` / `secondaryVariant` / `secondaryContainer`）。 */
+    internal val SoftFillLight = Color(0xFFF2F2F4)
+
+    /**
+     * 浅色的弱化文字 / 图标色（对应 Miuix 的 `onBackgroundVariant`）。
+     *
+     * Miuix 浅色给的是 `#8C93B0` —— 一个**带蓝味**的灰。整个浅色方案里其余中性色都是
+     * 纯灰，只有它是蓝灰：铺在白底上既显得脏，对比度也只有约 2.9:1。换成中性灰后
+     * 对比度约 5.3:1，且与 [PanelLight] / [CardLight] 同一族。
+     */
+    internal val MutedLight = Color(0xFF6E6E76)
 }
 
 /**
