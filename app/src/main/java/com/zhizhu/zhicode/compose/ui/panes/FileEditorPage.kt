@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,6 +44,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zhizhu.zhicode.compose.editor.EditorFileIo
 import com.zhizhu.zhicode.compose.editor.EditorViewModel
 import com.zhizhu.zhicode.compose.theme.LocalZhiDark
+import com.zhizhu.zhicode.compose.ui.FloatingBottomShell
+import com.zhizhu.zhicode.compose.ui.Glass
+import com.zhizhu.zhicode.compose.ui.rememberGlass
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
@@ -85,6 +87,7 @@ internal fun FileEditorScreen(viewModel: EditorViewModel, onExit: () -> Unit) {
     val context = LocalContext.current
     val dark = LocalZhiDark.current
     val colors = MiuixTheme.colorScheme
+    val glass = rememberGlass()
     val prefs = remember(context) {
         context.getSharedPreferences(EDITOR_PREFS, android.content.Context.MODE_PRIVATE)
     }
@@ -180,48 +183,7 @@ internal fun FileEditorScreen(viewModel: EditorViewModel, onExit: () -> Unit) {
     Scaffold(
         modifier = Modifier.fillMaxSize().imePadding(),
         topBar = {
-            if (searchVisible) {
-                EditorSearchTopBar(
-                    query = searchQuery,
-                    currentMatch = currentMatch,
-                    totalMatches = totalMatches,
-                    replaceExpanded = replaceExpanded,
-                    replaceQuery = replaceQuery,
-                    matchCase = matchCase,
-                    wholeWord = wholeWord,
-                    regex = regex,
-                    replaceEnabled = !readOnly,
-                    enabled = editor != null,
-                    onQueryChange = { searchQuery = it; applySearch(it) },
-                    onToggleReplace = { replaceExpanded = !replaceExpanded },
-                    onReplaceQueryChange = { replaceQuery = it },
-                    onToggleMatchCase = { matchCase = !matchCase; applySearch() },
-                    onToggleWholeWord = { wholeWord = !wholeWord; applySearch() },
-                    onToggleRegex = { regex = !regex; applySearch() },
-                    onPrevious = {
-                        searcher()?.takeIf { it.hasQuery() }?.let { runCatching { it.gotoPrevious() } }
-                        updateMatches()
-                    },
-                    onNext = {
-                        searcher()?.takeIf { it.hasQuery() }?.let { runCatching { it.gotoNext() } }
-                        updateMatches()
-                    },
-                    onReplace = {
-                        searcher()?.takeIf { it.hasQuery() }?.let {
-                            runCatching { it.replaceCurrentMatch(replaceQuery) }
-                            applySearch()
-                        }
-                    },
-                    onReplaceAll = {
-                        searcher()?.takeIf { it.hasQuery() }?.let {
-                            runCatching { it.replaceAll(replaceQuery) { applySearch() } }
-                            applySearch()
-                        }
-                    },
-                    onClose = ::closeSearch,
-                )
-            } else {
-                SmallTopAppBar(
+            SmallTopAppBar(
                     title = if (state.dirty) "• ${state.fileName}" else state.fileName,
                     titleColor = colors.onSurface,
                     color = colors.surface,
@@ -275,7 +237,6 @@ internal fun FileEditorScreen(viewModel: EditorViewModel, onExit: () -> Unit) {
                         )
                     },
                 )
-            }
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
@@ -287,7 +248,7 @@ internal fun FileEditorScreen(viewModel: EditorViewModel, onExit: () -> Unit) {
                 )
             } else {
                 SoraEditor(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = glass.capture(Modifier.fillMaxSize()),
                     content = content,
                     isReadOnly = readOnly,
                     language = language,
@@ -306,6 +267,51 @@ internal fun FileEditorScreen(viewModel: EditorViewModel, onExit: () -> Unit) {
                         created.setHighlightCurrentLine(highlightLine)
                         created.getComponent(EditorAutoCompletion::class.java).setEnabled(completion)
                     },
+                )
+            }
+            if (searchVisible) {
+                EditorSearchTopBar(
+                    glass = glass,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 8.dp),
+                    query = searchQuery,
+                    currentMatch = currentMatch,
+                    totalMatches = totalMatches,
+                    replaceExpanded = replaceExpanded,
+                    replaceQuery = replaceQuery,
+                    matchCase = matchCase,
+                    wholeWord = wholeWord,
+                    regex = regex,
+                    replaceEnabled = !readOnly,
+                    enabled = editor != null,
+                    onQueryChange = { searchQuery = it; applySearch(it) },
+                    onToggleReplace = { replaceExpanded = !replaceExpanded },
+                    onReplaceQueryChange = { replaceQuery = it },
+                    onToggleMatchCase = { matchCase = !matchCase; applySearch() },
+                    onToggleWholeWord = { wholeWord = !wholeWord; applySearch() },
+                    onToggleRegex = { regex = !regex; applySearch() },
+                    onPrevious = {
+                        searcher()?.takeIf { it.hasQuery() }?.let { runCatching { it.gotoPrevious() } }
+                        updateMatches()
+                    },
+                    onNext = {
+                        searcher()?.takeIf { it.hasQuery() }?.let { runCatching { it.gotoNext() } }
+                        updateMatches()
+                    },
+                    onReplace = {
+                        searcher()?.takeIf { it.hasQuery() }?.let {
+                            runCatching { it.replaceCurrentMatch(replaceQuery) }
+                            applySearch()
+                        }
+                    },
+                    onReplaceAll = {
+                        searcher()?.takeIf { it.hasQuery() }?.let {
+                            runCatching { it.replaceAll(replaceQuery) { applySearch() } }
+                            applySearch()
+                        }
+                    },
+                    onClose = ::closeSearch,
                 )
             }
         }
@@ -432,6 +438,8 @@ private fun EditorMoreMenu(
 
 @Composable
 private fun EditorSearchTopBar(
+    glass: Glass,
+    modifier: Modifier = Modifier,
     query: String,
     currentMatch: Int,
     totalMatches: Int,
@@ -455,10 +463,11 @@ private fun EditorSearchTopBar(
     onClose: () -> Unit,
 ) {
     val colors = MiuixTheme.colorScheme
-    Surface(
-        modifier = Modifier.fillMaxWidth().statusBarsPadding(),
-        color = colors.surface,
-        shadowElevation = 2.dp,
+    FloatingBottomShell(
+        wide = false,
+        glass = glass,
+        modifier = modifier,
+        verticalPadding = 0.dp,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)
