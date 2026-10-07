@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -415,11 +416,23 @@ internal fun FileSelectionToolbar(
         Surface(
             modifier = Modifier
                 .padding(horizontal = 18.dp, vertical = 6.dp)
-                .then(glass.blur(Modifier, RoundedCornerShape(28.dp), radius = 20f)),
+                .then(glass.blur(Modifier, RoundedCornerShape(28.dp), radius = 20f))
+                .border(
+                    width = 1.dp,
+                    color = if (ZhiColors.isDark()) {
+                        Color.White.copy(alpha = 0.10f)
+                    } else {
+                        Color.White.copy(alpha = 0.62f)
+                    },
+                    shape = RoundedCornerShape(28.dp),
+                ),
             shape = RoundedCornerShape(28.dp),
-            color = glass.surfaceColor(MiuixTheme.colorScheme.surfaceContainer),
+            color = glass.surfaceColor(
+                if (ZhiColors.isDark()) MiuixTheme.colorScheme.surfaceContainer
+                else ZhiColors.panelSurface(),
+            ),
             contentColor = MiuixTheme.colorScheme.onSurface,
-            shadowElevation = 6.dp,
+            shadowElevation = 12.dp,
         ) {
             Row(
                 Modifier.padding(horizontal = 6.dp, vertical = 4.dp),

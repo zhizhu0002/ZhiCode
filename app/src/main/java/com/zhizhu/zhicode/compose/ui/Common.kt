@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
@@ -148,11 +149,22 @@ internal fun FloatingBottomShell(
             .padding(vertical = verticalPadding)
             // 横向内缩在**布局层**，卡片贴住布局框 —— 与之前发送栏一致。
             .padding(horizontal = floatingHorizontalInset(wide))
-            .then(glass.blur(Modifier, RoundedCornerShape(ZhiRadius.floating), radius = 24f)),
+            .then(glass.blur(Modifier, RoundedCornerShape(ZhiRadius.floating), radius = 24f))
+            // 玻璃边缘的高光 + 阴影共同给出悬浮层与背景的距离；浅色不能只靠
+            // 白色底，因为那会回到"一块平白卡片"，也正是 blur 看不见的原因。
+            .border(
+                width = 1.dp,
+                color = if (ZhiColors.isDark()) {
+                    Color.White.copy(alpha = 0.10f)
+                } else {
+                    Color.White.copy(alpha = 0.62f)
+                },
+                shape = RoundedCornerShape(ZhiRadius.floating),
+            ),
         color = glass.surfaceColor(if (ZhiColors.isDark()) scheme.surfaceContainer else ZhiColors.panelSurface()),
         cornerRadius = ZhiRadius.floating,
         outSidePadding = PaddingValues(0.dp),
-        shadowElevation = 10.dp,
+        shadowElevation = 12.dp,
         showDivider = false,
         content = content,
     )

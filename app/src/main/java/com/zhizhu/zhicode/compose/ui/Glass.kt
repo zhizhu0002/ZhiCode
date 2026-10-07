@@ -82,9 +82,10 @@ class Glass internal constructor(internal val backdrop: LayerBackdrop?, private 
     @Composable
     fun surfaceColor(color: Color): Color =
         if (backdrop != null) {
-            // 浅色模式的半透明白色会把内容和背板混成一层灰雾；让主题容器
-            // 保持更高不透明度，模糊仍由 textureBlur 提供，不靠压低底色完成。
-            val alpha = if (!dark) 1f else 0.72f
+            // 浅色也必须保留透明度：alpha=1f 会把 textureBlur 的结果完全盖住，
+            // 所以发送框和底部悬浮栏看起来就像普通白色卡片。约 78% 能保留白色
+            // 的干净感，同时让后面的消息/代码块轮廓透出，立体感由 blur + 阴影共同完成。
+            val alpha = if (!dark) 0.78f else 0.72f
             color.copy(alpha = alpha)
         } else color
 }

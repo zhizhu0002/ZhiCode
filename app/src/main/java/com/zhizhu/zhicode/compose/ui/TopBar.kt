@@ -115,7 +115,17 @@ fun ZhiTopBar(
                     shape = RectangleShape,
                     blurRadius = ZhiGlass.FloatingBlur,
                     colors = BlurDefaults.blurColors(
-                        blendColors = listOf(BlendColorEntry(color = if (ZhiColors.isDark()) scheme.surface.copy(alpha = 0.8f) else Color.White)),
+                        blendColors = listOf(
+                            BlendColorEntry(
+                                color = if (ZhiColors.isDark()) {
+                                    scheme.surface.copy(alpha = 0.8f)
+                                } else {
+                                    // 不透明白会把 textureBlur 的结果盖住；浅色顶栏也要
+                                    // 留出玻璃透光，才能看到下方内容滚过顶栏的轮廓。
+                                    Color.White.copy(alpha = 0.72f)
+                                },
+                            ),
+                        ),
                     ),
                 )
             } else {
