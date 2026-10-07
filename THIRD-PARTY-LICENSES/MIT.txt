@@ -1,3 +1,24 @@
+================================================================================
+本文件是 MIT 许可原文，同时用作两份组件的许可声明。
+它覆盖：
+
+  ① ZhiCode 自身代码
+     版权行「Copyright (c) 2026 zhizhu0002」；
+     与仓库根目录的 LICENSE 条款部分一致（那份另有一段中文的范围说明）。
+     凡涉及本工程的代码，以根目录 LICENSE 为准。
+
+  ② termux-shared 的 TermuxConstants.java
+     来源：https://github.com/termux/termux-app 的 termux-shared 子库。
+     该库的 LICENSE.md 规定 termux-shared 整体为 MIT，但其中
+     src/main/java/com/termux/shared/termux/ 目录为 GPLv3-only，
+     并**点名排除** TermuxConstants.java 与 TermuxPropertyConstants.java 两个文件 ——
+     这两个文件按 MIT 发布（上游文件头里写有 SPDX-License-Identifier: MIT）。
+     本工程对应文件：app/src/main/java/com/termux/shared/termux/TermuxConstants.java
+     （该类在本工程中是整体重写过的，见 NOTICE 第 4 节。）
+
+以下为许可条款正文。
+================================================================================
+
 MIT License
 
 Copyright (c) 2026 zhizhu0002

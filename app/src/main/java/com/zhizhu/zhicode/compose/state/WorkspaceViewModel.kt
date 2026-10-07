@@ -148,7 +148,7 @@ class WorkspaceViewModel(
     /** 内置 Termux 环境安装器（第一次使用前会解压 32MB 的 bootstrap）。 */
     private val installer = RuntimeInstaller(application)
 
-    /** 真实 蜘蛛 引擎。懒创建，第一次发消息时才初始化。 */
+    /** 真实 ZhiCode 引擎。懒创建，第一次发消息时才初始化。 */
     private val engine = ZhiEngineController(application, this)
 
     // ------------------------------------------------------------------
@@ -1688,7 +1688,7 @@ class WorkspaceViewModel(
      * - 对话流里放一条可见的 `/init` 用户气泡：这条请求是应用自己发的，
      *   不显示出来的话用户会看到一条自己没写过的消息引发的回复。
      */
-    /** 界面入口：记忆面板里的「让蜘蛛完善」按钮。 */
+    /** 界面入口：记忆面板里的「让智蛛完善」按钮（`ui/dialogs/MemoryOverlay.kt`）。 */
     fun runInitFromUi() = runInitPrompt()
 
     private fun runInitPrompt() {

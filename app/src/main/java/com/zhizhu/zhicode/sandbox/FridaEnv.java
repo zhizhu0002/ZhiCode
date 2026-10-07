@@ -15,7 +15,7 @@ import java.security.MessageDigest;
 import java.util.Locale;
 
 /**
- * 按需把官方 arm64 Frida Gadget 装进蜘蛛的私有存储。
+ * 按需把官方 arm64 Frida Gadget 装进 ZhiCode 的私有存储。
  *
  * <p>来源被刻意钉死：URL 与压缩包 SHA-256 都指向 frida/frida 的官方 release，
  * 不从任意镜像取。传输与解压交给内置 Termux 的 curl + xz，

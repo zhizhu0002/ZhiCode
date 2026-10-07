@@ -1,23 +1,61 @@
 black-reflection — BlackBox 反射与注解处理模块
-================================================================
+================================================================================
 
-本模块属于 BlackBox 虚拟化引擎，**不是蜘蛛自己的代码**。
+本模块属于 BlackBox 虚拟化引擎，**不是 ZhiCode 自己的代码**。
 
-来源 : https://github.com/ALEX5402/NewBlackbox
-       （BlackBox 血统；原始仓库 FBlackBox/BlackBox 已由作者删除源码）
+来源 : https://github.com/ALEX5402/NewBlackbox（BlackBox 血统）
+       本仓库里的这一份是**经上游 IQ Code 的副本**搬过来的，见下面的「来源链」。
 许可 : Apache License 2.0（见同目录 LICENSE）
+许可原文: ../THIRD-PARTY-LICENSES/Apache-2.0.txt
 
 本模块的职责：
   编译期生成反射代理，避免运行期反射开销
 
+职责（模块名容易误解）：它做的是**编译期注解处理**，产出运行期可用的反射代理；
+引擎侧按 `@BClass` / `@BMethod(name = …)` 的字符串来找成员，所以这些注解与包名不能被 R8 改名
+（keep 规则必须写在被使用方继承的 consumer-rules.pro 里，理由见 docs/build-and-release.md）。
+
+
+来源链
+--------------------------------------------------------------------------------
+
+  ALEX5402/NewBlackbox ──(IQ Code 的 vendor 副本)──▶ IQ Code ──(本工程整棵复制)──▶ 本仓库
+
+搬过来时（提交 f849e14）本模块是**原样复制**：它是一个普通的 `java-library`，不含 Android 资源，
+也不参与 ndk-build，因此 vendoring 时没有任何构建脚本层面的改动。
+
 
 Apache-2.0 第 4 条要求的修改声明
-----------------------------------------------------------------
+--------------------------------------------------------------------------------
 
-蜘蛛在本模块中做了修改，未改动任何许可或版权声明，也未删除上游文件。
-可核对的主要修改点：
+**声明：本工程未对本模块的源码做过修改。** 这个结论是**核对过的**，不是「印象里没改」：
 
-  本模块目前未见蜘蛛对其源码的修改；如有，应在此补记。
+```bash
+# 抓取今天的上游 main，对整棵模块做逐文件比较（排除本工程新增的 LICENSE / NOTICE 与构建产物）
+curl -sL https://codeload.github.com/ALEX5402/NewBlackbox/tar.gz/refs/heads/main | tar xz
+diff -rq NewBlackbox-main/black-reflection black-reflection \
+  --exclude=LICENSE --exclude=NOTICE --exclude=build --exclude=.gradle
+# → 无输出（内容逐字节一致）
+```
 
-上游仓库只带 LICENSE，没有 NOTICE 文件，因此没有需要原样保留的 NOTICE。
-Apache-2.0 全文见同目录 LICENSE。
+另有两条辅助证据：
+
+```bash
+# ① 本模块内不含任何本工程标记
+git grep -nE 'zhizhu|ZhiCode' -- black-reflection           # → 只有本 NOTICE 自身
+# ② 本模块在本工程历史里只被动过两次（搬入 + 补许可声明）
+git log --oneline -- black-reflection
+```
+
+⚠️ **一条必须说明的边界**：上面的 diff 是拿「**今天的**上游 main」比的。
+上游是会变的，所以严格来说这证明的是「与今天的上游一致」；
+要证明「从搬入到现在一直没被改过」，依据是 ① 与 ② —— 它们查的是**本工程自己的历史与标记**，
+不受上游漂移影响。
+
+**未改动或删除**任何许可与版权声明（上游仓库只带 LICENSE、没有 NOTICE 文件，
+因此没有需要原样保留的 NOTICE）。
+
+⚠️ Apache-2.0 第 4(b) 条只对「修改过的文件」提出声明要求，本模块既然未修改，
+该项义务不适用 —— 这也是本模块比 Bcore 少一桩欠账的原因。
+
+Apache-2.0 全文见同目录 LICENSE，也可用 ../THIRD-PARTY-LICENSES/Apache-2.0.txt。

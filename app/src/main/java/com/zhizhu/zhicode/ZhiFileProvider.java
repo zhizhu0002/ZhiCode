@@ -35,7 +35,7 @@ import java.util.Locale;
  * </ol>
  *
  * <h3>允许分享的三个根</h3>
- * 手机共享存储、蜘蛛 HOME、以及应用缓存目录。缓存也在其中是因为本应用会把中间产物
+ * 手机共享存储、ZhiCode HOME、以及应用缓存目录。缓存也在其中是因为本应用会把中间产物
  * 写在那里，而给用户看/给别的应用用的东西常常就在那儿。
  */
 public final class ZhiFileProvider extends ContentProvider {

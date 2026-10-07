@@ -6,7 +6,7 @@
 #   ./apply-prefix-changes.sh <新包名> [新Java命名空间] [新显示名]
 #
 # 例：
-#   ./apply-prefix-changes.sh com.zhizhu.code com.zhizhu.code 蜘蛛
+#   ./apply-prefix-changes.sh com.zhizhu.code com.zhizhu.code ZhiCode
 #
 # 只改 scripts/properties.sh 中**实际赋值**的行；路径链全部自动派生，无需手改。
 # 幂等：重复运行不会叠加；每次改动保留 .bak。
@@ -21,7 +21,7 @@ PROPS="./scripts/properties.sh"
 
 if [[ -z "$PKG" ]]; then
     echo "用法: $0 <新包名> [新Java命名空间] [新显示名]" >&2
-    echo "例:   $0 com.zhizhu.code com.zhizhu.code 蜘蛛" >&2
+    echo "例:   $0 com.zhizhu.code com.zhizhu.code ZhiCode" >&2
     exit 64
 fi
 

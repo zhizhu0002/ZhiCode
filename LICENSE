@@ -20,27 +20,106 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----
+================================================================================
+以下为范围说明（不是 MIT 条款的一部分，也不修改 MIT 条款）
+================================================================================
 
-本许可只覆盖蜘蛛（ZhiCode）自己的代码。
+一、本文件覆盖什么
+--------------------------------------------------------------------------------
 
-分发物中还包含第三方组件，它们各自带自己的许可，**不受本文件约束**，
-详见同目录的 NOTICE 与 THIRD-PARTY-LICENSES/。
+本文件覆盖「ZhiCode」工程中**由本工程编写**的代码，即：
 
-两件必须知道的事：
+  · app/src/main/java/com/zhizhu/zhicode/**（Compose 界面层、沙箱宿主层、后台保活）
+  · app/src/main/java/com/termux/app/zhicode/**（Agent 引擎、协议层、工具集）
+  · Bcore / black-reflection / compiler 三个模块中**由本工程新增或修改**的部分
+  · scripts、tools、docs、构建脚本与仓库内其他由本工程编写的文件
 
-1. **本工程源自 IQ Code（MIT, © 2026 IQge），并含其部分代码。**
-   MIT 允许使用、修改、改名、再分发；除此之外，原作者已明确许可本工程改写与发行，
-   并同意不强制要求随附其版权声明。我们**自愿**保留其许可原文并致谢 ——
-   见 `THIRD-PARTY-LICENSES/IQ-Code-MIT.txt` 与 `NOTICE` 第 1 节。
-   派生关系与残留行数的度量方式见 `docs/licensing.md`。
+**不覆盖**发行物中的第三方组件 —— 它们各自带自己的许可，见第 3 节。
 
-2. **发行版里含 Termux 的 GPL 程序，但本项目整体不必是 GPL。**
-   assets/bootstrap-aarch64.zip 内是 bash、coreutils、apt 等**独立可执行程序**，
-   通过子进程调用；它们与 Spider 之间是「聚合分发」，不构成衍生作品，
-   因此各自适用各自的许可，而不传染本项目。
-   被链接进本应用进程的原生库 libtermux.so 属于 Apache-2.0，不是 GPL。
-   完整判断过程见 docs/licensing.md。
+二、使用这份代码需要做什么
+--------------------------------------------------------------------------------
 
-因此：**发行时除本文件外，必须一并提供 NOTICE 与 THIRD-PARTY-LICENSES/ 目录**，
-并保证 bootstrap 内各程序的许可与源码出处对使用者可得。
+MIT 的实质条件只有一条，原文即上面那段：
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+也就是说：**再分发的每一份副本里都要带上版权声明与这份许可声明。**
+除此之外你可以商用、修改、改名、闭源再分发、甚至卖掉它，都不需要额外获得许可。
+
+由此得到一条对发行方（包括作者自己）的硬要求：
+
+  ▸ 发一个 APK 或源码包时，**必须一并提供**：本文件（LICENSE）、NOTICE、
+    THIRD-PARTY-LICENSES/ 目录。三者缺一不可 —— 前两者是 MIT 的条件，
+    第三者覆盖第 3 节列出的第三方组件。
+
+这些文件被删掉不会导致编译失败、也不会导致运行异常 —— **所以没有任何构建期或测试期的机制
+会替你发现漏发**。发行前请**人工清点**这三者是否齐全（原先有一条结构断言
+`app/tests/LicenseNoticeStructureTest.java` 做过这件事，**它已随 `app/tests/` 整套删除**）。
+
+三、第三方组件不受本文件约束
+--------------------------------------------------------------------------------
+
+发行物（尤其是 APK）里同时包含下列内容，**它们不是本工程的代码，也不适用本文件**：
+
+  · Bcore / black-reflection / compiler —— BlackBox 血统的虚拟化引擎，Apache-2.0
+  · com/termux/terminal/、com/termux/view/ 与 libtermux.so —— Apache-2.0
+  · app/src/main/assets/bootstrap-aarch64.zip —— 独立可执行程序，
+    **各程序各自的许可**（内含 GPLv2+ / GPLv3 / Apache-2.0 / MIT / BSD 等）
+  · Miuix（Apache-2.0）、Rosemoe Sora Editor（LGPL-2.1）、AndroidX 等 Gradle 依赖
+  · Material Symbols 路径数据（Apache-2.0）、TextMate 语法与主题（MIT）
+
+逐项来源、许可、对应文件与是否修改，见 NOTICE 与 THIRD-PARTY-LICENSES/；
+判断依据与复核命令见 docs/licensing.md。**不要拿本文件去覆盖它们的许可。**
+
+四、为什么本工程整体不必 GPL 化
+--------------------------------------------------------------------------------
+
+这一条很容易被误解成「上面既然有 GPL 程序，整个工程就得跟着 GPL」。不是的，两条链路要分开看：
+
+  1. **bootstrap-aarch64.zip 里是数百个独立可执行程序**（bash、coreutils、apt 等）。
+     本应用以**子进程**方式启动它们（fork/exec），与本应用的代码之间不构成衍生作品。
+     GPL 明确允许把 GPL 程序与其它许可的程序**聚合**（aggregate）分发，
+     只要聚合体里每一部分仍受各自的许可约束。
+
+  2. **真正被链接进本应用进程的原生库只有 libtermux.so**（System.load）。
+     如果它是 GPL，整份应用就是衍生作品、本工程就必须 GPL 化 ——
+     但它按 termux-app 的例外条款属于 **Apache-2.0**（判定依据：它的导出符号是
+     `Java_com_termux_terminal_JNI_*`，对应 terminal-emulator 子库；
+     见 docs/licensing.md 第 7.3 节的核对命令）。
+
+  所以：**「子进程调用」不传染，「同进程链接」才需要看许可，而唯一被链接的那个恰好不是 GPL。**
+
+  要注意的是：发行 bootstrap 内的 GPL 程序时，**它们的源码必须对接收者可得**
+  （出处是 termux-packages 与本仓库的构建配方 tools/termux-bootstrap-fork/）。
+
+五、怎么核对本文的每一句话
+--------------------------------------------------------------------------------
+
+```bash
+# 本工程的版权行（MIT 要求保留的那一条）
+grep -n 'Copyright' LICENSE
+
+# 第三方组件的许可是否仍在随附文件里
+ls THIRD-PARTY-LICENSES/          # Apache-2.0.txt / IQ-Code-MIT.txt / MIT.txt
+grep -n 'libtermux.so' NOTICE     # 第 3 节的归属说明
+
+# 三份必须随发行物一起给出的文件是否齐全
+ls LICENSE NOTICE THIRD-PARTY-LICENSES/
+```
+
+**这一段只能人工做**：原先那条许可结构断言（`LicenseNoticeStructureTest`）已随
+`app/tests/` 整套删除，现在没有任何命令会替你判断「关键表述有没有被静默删掉」。
+逐项一致性的核对标准见 docs/licensing.md 第 10 节。
+
+```bash
+# libtermux.so 到底对应上游哪个文件（据此确定它属于哪个许可）
+tr -c '[:print:]' '\n' < app/src/main/jniLibs/arm64-v8a/libtermux.so \
+  | grep -a '^Java_com_termux_terminal_JNI_' | sort -u
+```
+
+六、免责
+--------------------------------------------------------------------------------
+
+本文不构成法律意见。涉及「某条链路是否构成衍生作品」「上游当时是什么许可」这类判断，
+docs/licensing.md 都写明了证据强度：能核到的给命令，核不到的标成未确证。

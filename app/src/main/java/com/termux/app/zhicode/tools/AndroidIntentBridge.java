@@ -29,13 +29,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 从蜘蛛自己的应用进程里启动 Android 组件。
+ * 从 ZhiCode 自己的应用进程里启动 Android 组件。
  *
  * <h3>为什么不能让 shell 去干这件事</h3>
  * 内置 Termux 里的二进制是 Linux 子进程。从那里调用 Android 的 {@code am}
  * 实现时，系统的调用方身份判定会看到一个不属于本应用 UID 的进程 ——
  * 后果是「谁能启动这个组件」的判定、以及 FileProvider 的 URI 授权都算在错的
- * UID 上。所以这里刻意在蜘蛛的 Java 进程里做
+ * UID 上。所以这里刻意在 ZhiCode 的 Java 进程里做
  * {@link Context#startActivity}。
  *
  * <h3>{@link #tryExecuteAmStart} 是给 Bash 工具用的后门</h3>

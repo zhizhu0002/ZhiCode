@@ -21,7 +21,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Agent 用来调试ZhiCode 沙箱进程的工具，附带一条需要 Root 的真机路径。
+ * Agent 用来调试 ZhiCode 沙箱进程的工具，附带一条需要 Root 的真机路径。
  *
  * <h3>两个 scope，两条完全不同的权限路径</h3>
  * <ul>

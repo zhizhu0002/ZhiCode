@@ -783,7 +783,7 @@ data class WorkspaceUiState(
         get() = if (contextWindow <= 0) 0f else (contextTokens.toFloat() / contextWindow).coerceIn(0f, 1f)
 }
 
-/** 与原 蜘蛛 一致的斜杠命令表（/help 显示，面板按前缀过滤）。 */
+/** 与上游原版 IQ Code 一致的斜杠命令表（/help 显示，面板按前缀过滤）。 */
 val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/help", "查看全部智蛛指令"),
     SlashCommand("/compact", "模型语义压缩；可追加摘要侧重点"),

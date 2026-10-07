@@ -36,7 +36,7 @@ import com.zhizhu.zhicode.compose.MainActivity;
  * <p>收起时只是一个圆形气泡；点一下展开成「日志 / 返回 / 停止」三个动作：
  * <ul>
  *   <li><b>日志</b>：弹出可复制、可刷新的日志面板（内容来自 {@link SandboxConsole#snapshot}）</li>
- *   <li><b>返回</b>：回到蜘蛛界面</li>
+ *   <li><b>返回</b>：回到 ZhiCode 界面</li>
  *   <li><b>停止</b>：停掉当前 guest 并收回控制栏</li>
  * </ul>
  * 拖动只移动整个面板；位移小于 {@link #TAP_SLOP_DP} 视为点击。

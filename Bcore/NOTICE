@@ -1,45 +1,124 @@
 Bcore — BlackBox 虚拟运行时（引擎主体）
-================================================================
+================================================================================
 
-本模块属于 BlackBox 虚拟化引擎，**不是蜘蛛自己的代码**。
+本模块属于 BlackBox 虚拟化引擎，**不是 ZhiCode 自己的代码**。
 
-来源 : https://github.com/ALEX5402/NewBlackbox
-       （BlackBox 血统；原始仓库 FBlackBox/BlackBox 已由作者删除源码）
+来源 : https://github.com/ALEX5402/NewBlackbox（BlackBox 血统）
+       本仓库里的这一份是**经上游 IQ Code 的副本**搬过来的，见下面的「来源链」。
 许可 : Apache License 2.0（见同目录 LICENSE）
+许可原文: ../THIRD-PARTY-LICENSES/Apache-2.0.txt
 
 本模块的职责：
   guest 进程管理、Activity/Service/ActivityManager 代理、系统服务 hook、包管理
 
 
-Apache-2.0 第 4 条要求的修改声明
-----------------------------------------------------------------
+来源链（为什么不能一句话说成「来自上游仓库」）
+--------------------------------------------------------------------------------
 
-蜘蛛在本模块中做了修改，未改动任何许可或版权声明，也未删除上游文件。
-可核对的主要修改点：
+本模块不是直接从 ALEX5402/NewBlackbox 取的，而是**从上游 IQ Code 的仓库整棵复制**过来的
+（提交 f849e14「Phase 7a: 移植 Bcore/black-reflection/compiler 三个模块并接入沙箱宿主」，
+该提交的信息里逐条列出了当时做的改动）。这一点很重要，因为它决定了「与上游的差异」
+**不能直接归因于本工程**：
+
+  ALEX5402/NewBlackbox ──(IQ Code 的 vendor 副本)──▶ IQ Code ──(本工程整棵复制)──▶ 本仓库
+
+所以拿本模块与 ALEX5402/NewBlackbox **今天的 main 分支**做 diff 时，差异里混着三件事：
+上游自己之后的演进、IQ Code 当时的改动、以及本工程后来的改动 —— 三者无法只靠 diff 分开。
+
+可复现的核对方式（三选一或都做）：
+
+```bash
+# ① 与今天的上游 main 做全树 diff（会看到上面说的混合差异）
+curl -sL https://codeload.github.com/ALEX5402/NewBlackbox/tar.gz/refs/heads/main | tar xz
+diff -rq NewBlackbox-main/Bcore Bcore | grep -v -e /build -e LICENSE -e NOTICE
+
+# ② 与本工程的 vendoring 提交对比（能得到「本工程自己改了什么」，这是可归因的部分）
+git show --stat f849e14 -- Bcore
+
+# ③ 找出带本工程标记的位置（最可靠的「这段是我们的」证据）
+git grep -nE 'zhizhu|ZhiCode|SandboxContract' -- Bcore
+```
+
+②③ 的结果是**可归因的**；① 的结果**不可归因**，只能用来提示「值得看一眼」。
+
+
+Apache-2.0 第 4 条要求的修改声明
+--------------------------------------------------------------------------------
+
+ZhiCode 在本模块中做了修改。可核对的部分如下：
+
+**一、本工程自己的修改（有标记可查）**
 
   1. 新增 SandboxContract.java
      src/main/java/top/niunaijun/blackbox/SandboxContract.java
 
-     把「沙箱控制器进程名」收敛成单一来源。改之前，这个串在引擎与
-     宿主层各写一份，任一处漏改就会出现「进程起了但没人应答」这类
-     难以定位的问题。刻意设计为编译期常量并**不**挂在 BlackBoxCore 上，
-     因为在主进程读 BlackBoxCore 的字段会触发它的静态初始化，
-     把整个 BlackBox 拉进本该干净的主进程。
+     把「沙箱控制器进程名」「引擎服务进程名」「guest 进程池前缀与数量」收敛成
+     **编译期常量**的单一来源。改之前这些串在引擎与宿主层各写一份，任一处漏改就会出现
+     「进程起了但没人应答」这类难以定位的问题。
+
+     刻意设计为编译期常量并**不**挂在 BlackBoxCore 上：在主进程读 BlackBoxCore 的字段
+     会触发它的静态初始化，把整个 BlackBox 拉进本该干净的主进程。
 
   2. BlackBoxCore.java
+     src/main/java/top/niunaijun/blackbox/BlackBoxCore.java
 
      - 新增 sandboxControllerProcessName()，返回
        getHostPkg() + SandboxContract.CONTROLLER_PROCESS_SUFFIX；
      - hookless 控制器初始化分支改为与上述单一来源比较；
-     - 启动阶段记录（writeStartupStage）按 pid 分文件。
-       原先写单一文件，多进程并发时后写的会冲掉先写的，
-       这正是「卡在哪一步」查不出来的原因；
-     - 一处日志文案中的旧品牌名改为蜘蛛。
+     - 启动阶段记录改为**按 pid 分文件**追加写。原先写单一文件，多进程并发时
+       后写的会冲掉先写的，这正是「卡在哪一步」查不出来的原因；
+     - 一处日志文案中的旧品牌名改为 ZhiCode。
+
+     （`git grep -cE 'zhizhu|ZhiCode|SandboxContract' -- \
+        Bcore/src/main/java/top/niunaijun/blackbox/BlackBoxCore.java`
+      可现场重跑；本文件不抄会随代码漂移的命中数。）
 
   3. src/main/AndroidManifest.xml
+     控制器进程名由 :iqsandbox 改为 :zhisandbox，与 Bcore 清单、宿主清单三处保持一致
+     （有结构测试守着这条不变式）。
 
-     控制器进程名由 :iqsandbox 改为 :zhisandbox，与 Bcore 清单、
-     宿主清单三处保持一致（有结构测试守着这条不变式）。
+**二、vendoring 时就带来的改动（记在提交 f849e14 里，改动集中在 build.gradle）**
 
-上游仓库只带 LICENSE，没有 NOTICE 文件，因此没有需要原样保留的 NOTICE。
-Apache-2.0 全文见同目录 LICENSE。
+  · 不走 ndk-build，改用预编译的 jniLibs/arm64-v8a/libblackbox.so（原因见该提交信息：
+    本机宿主是 aarch64，而 NDK 只发布 linux-x86_64 宿主工具链）；
+  · compileSdk 固定 35（Bcore 引用 android-37 已移除的常量）；
+  · aidlPackagedList 改属性赋值、去掉 lint.textOutput/textReport（AGP 9 的 API 变化）；
+  · 新增 jitpack 仓库（FreeReflection）。
+
+**三、与上游今天的 main 相比，本模块还有若干文件不同 —— 但归属不明**
+
+  实测（2026-10-07，对照当天抓取的 ALEX5402/NewBlackbox@main）：
+  **20 个文件内容不同**，另有 3 个上游文件在本模块中不存在
+  （`utils/LogSender.java`、`utils/SimpleCrashFix.java`、`closecode/Entry.java`），
+  本模块另有 1 个上游没有的目录（`jniLibs/`，放预编译的 libblackbox.so）。
+
+  这些差异里**只有 BlackBoxCore.java 带本工程标记**，其余 19 个文件不含任何
+  zhizhu / ZhiCode 字样 —— 也就是说它们更可能是「上游后续演进」或
+  「IQ Code 当时的副本」，而不是本工程的改动。**但本工程没有钉住 vendoring 时的上游
+  revision，所以无法逐文件给出结论。**
+
+  因此这里**不再声称「未删除上游文件」**（旧版本的这个说法无法核实：
+  上面那 3 个文件在当前对照里确实不在本模块中，究竟是当时的副本就没有、还是后来被删，
+  无法判定）。
+
+  ⚠️ 可关闭这个疑点的做法：把 vendoring 时的上游 revision（提交号或 tag）记下来，
+  然后用 `git diff <revision>` 重新归因。
+
+**四、预编译原生库**
+
+  jniLibs/arm64-v8a/libblackbox.so（343,624 字节，AARCH64 ELF）是**二进制产物**：
+  本仓库不含生成它的构建过程（当前上游 main 反而只有 ndk-build、不含预编译库），
+  它的来源是 vendoring 时从 IQ Code 的树里取的。
+  **本工程未对这个 .so 做过内容审计**（既没有它的构建配方，也没有其静态内容的清单），
+  这一点记在 docs/licensing.md 的开放项里。
+
+**五、许可与版权声明**
+
+  上游仓库只带 LICENSE、没有 NOTICE 文件，因此没有需要原样保留的 NOTICE。
+  本工程**未改动或删除**任何许可与版权声明文本。
+
+  ⚠️ Apache-2.0 第 4(b) 条要求「修改过的**文件**携带显眼声明」，而目前只有本文件
+  （模块级汇总声明），被修改的文件本身没有声明头（实测：Bcore/src/main/java 下
+  499 个 Java 文件里，带 Apache 声明头的为 0 个）。这是 docs/licensing.md 的开放项之一。
+
+Apache-2.0 全文见同目录 LICENSE，也可用 ../THIRD-PARTY-LICENSES/Apache-2.0.txt。

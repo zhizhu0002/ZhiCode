@@ -873,7 +873,7 @@ public class BlackBoxCore extends ClientConfiguration {
         }
 
         initNotificationManager();
-        // 蜘蛛把 BlackBox 与编辑器/Agent 隔离：专用控制器进程即 BlackBox 的控制/Main 进程。
+        // ZhiCode 把 BlackBox 与编辑器/Agent 隔离：专用控制器进程即 BlackBox 的控制/Main 进程。
         // getHostPkg() 仍返回宿主包名，authorities / proxy 组件 / 包身份都据此保持有效；
         // 变的只有进程角色判定。
         if (processName.equals(BlackBoxCore.getHostPkg())) {

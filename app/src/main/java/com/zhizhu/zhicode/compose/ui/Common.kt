@@ -232,7 +232,7 @@ fun ZhiIconButton(
  * `enabled` 的禁用态由 Miuix 自己处理，不再手写 alpha。
  *
  * [glyph] 非空时改用**文字字形**而不是矢量图标：Miuix 图标库没有纯右箭头，
- * 而原版 蜘蛛 的发送键本来就是文字字形（`text("↑")`），所以 `→` 走这里。
+ * 而上游原版 IQ Code 的发送键本来就是文字字形（`text("↑")`），所以 `→` 走这里。
  */
 @Composable
 fun ZhiFilledIconButton(

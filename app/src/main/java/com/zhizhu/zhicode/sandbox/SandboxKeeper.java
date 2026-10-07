@@ -15,7 +15,7 @@ import com.zhizhu.zhicode.compose.MainActivity;
 /**
  * Sandbox 保活服务。
  *
- * <p><b>为什么需要它。</b>guest 的虚拟 Activity 会盖住蜘蛛界面，此时主进程处于 paused。
+ * <p><b>为什么需要它。</b>guest 的虚拟 Activity 会盖住 ZhiCode 界面，此时主进程处于 paused。
  * 没有前台服务，系统会在内存压力下回收主进程，Agent 执行链与工具 worker 会随之中断 ——
  * 而 guest 还在前台跑，用户看到的只是"Agent 不动了"。本服务用一条常驻通知把主进程
  * 钉在前台，保证 guest 运行期间 Agent 不被回收。
@@ -24,7 +24,7 @@ import com.zhizhu.zhicode.compose.MainActivity;
  * guest 前调用），guest 启动失败或停止时立刻关掉（{@link ZhiSandbox#stop} 等），
  * 不在空闲时白占一条通知。
  *
- * <p>通知里的两个动作：点通知体回到蜘蛛界面；点"结束"按钮停掉本服务。
+ * <p>通知里的两个动作：点通知体回到 ZhiCode 界面；点"结束"按钮停掉本服务。
  */
 public final class SandboxKeeper extends Service {
 

@@ -1,23 +1,52 @@
 compiler — BlackBox 注解处理器模块
-================================================================
+================================================================================
 
-本模块属于 BlackBox 虚拟化引擎，**不是蜘蛛自己的代码**。
+本模块属于 BlackBox 虚拟化引擎，**不是 ZhiCode 自己的代码**。
 
-来源 : https://github.com/ALEX5402/NewBlackbox
-       （BlackBox 血统；原始仓库 FBlackBox/BlackBox 已由作者删除源码）
+来源 : https://github.com/ALEX5402/NewBlackbox（BlackBox 血统）
+       本仓库里的这一份是**经上游 IQ Code 的副本**搬过来的，见下面的「来源链」。
 许可 : Apache License 2.0（见同目录 LICENSE）
+许可原文: ../THIRD-PARTY-LICENSES/Apache-2.0.txt
 
 本模块的职责：
-  在构建期处理 black-reflection 的注解
+  在构建期处理 black-reflection 的注解，为它生成反射代理源码
+
+它与 black-reflection 是一对：black-reflection 提供注解与运行期侧，
+本模块是 `annotationProcessor`，只在编译期起作用（不进 APK）。
+
+
+来源链
+--------------------------------------------------------------------------------
+
+  ALEX5402/NewBlackbox ──(IQ Code 的 vendor 副本)──▶ IQ Code ──(本工程整棵复制)──▶ 本仓库
+
+搬过来时（提交 f849e14）本模块是**原样复制**：它是一个普通的 `java-library`，不含 Android 资源，
+也不参与 ndk-build，因此 vendoring 时没有任何构建脚本层面的改动。
 
 
 Apache-2.0 第 4 条要求的修改声明
-----------------------------------------------------------------
+--------------------------------------------------------------------------------
 
-蜘蛛在本模块中做了修改，未改动任何许可或版权声明，也未删除上游文件。
-可核对的主要修改点：
+**声明：本工程未对本模块的源码做过修改。** 这个结论是**核对过的**，不是「印象里没改」：
 
-  本模块目前未见蜘蛛对其源码的修改；如有，应在此补记。
+```bash
+# 抓取今天的上游 main，对整棵模块做逐文件比较（排除本工程新增的 LICENSE / NOTICE 与构建产物）
+curl -sL https://codeload.github.com/ALEX5402/NewBlackbox/tar.gz/refs/heads/main | tar xz
+diff -rq NewBlackbox-main/compiler compiler \
+  --exclude=LICENSE --exclude=NOTICE --exclude=build --exclude=.gradle
+# → 无输出（内容逐字节一致）
+```
 
-上游仓库只带 LICENSE，没有 NOTICE 文件，因此没有需要原样保留的 NOTICE。
-Apache-2.0 全文见同目录 LICENSE。
+另有两条辅助证据（不受上游漂移影响，查的是本工程自己的历史与标记）：
+
+```bash
+git grep -nE 'zhizhu|ZhiCode' -- compiler            # → 只有本 NOTICE 自身
+git log --oneline -- compiler                        # → 搬入 + 补许可声明，两次
+```
+
+**未改动或删除**任何许可与版权声明（上游仓库只带 LICENSE、没有 NOTICE 文件，
+因此没有需要原样保留的 NOTICE）。
+
+⚠️ Apache-2.0 第 4(b) 条只对「修改过的文件」提出声明要求，本模块既然未修改，该项义务不适用。
+
+Apache-2.0 全文见同目录 LICENSE，也可用 ../THIRD-PARTY-LICENSES/Apache-2.0.txt。

@@ -1,80 +1,123 @@
-蜘蛛 (ZhiCode) 第三方组件声明
-================================================================
+ZhiCode（ZhiCode）第三方组件声明
+================================================================================
 
-本文件列出蜘蛛分发物中包含的第三方代码及其许可。
-与 LICENSE（蜘蛛自身代码，MIT）配合使用。
+本文件列出 ZhiCode 分发物中包含的第三方代码、数据与二进制及其许可，并写明每一项
+「我们做了什么修改」—— 按 Apache-2.0 第 4 条与 MIT 的要求，这些是必须让接收者看到的信息。
 
-本文件中的每一项都是**实测得出**的：组件来源、许可类型都由实际文件
-或上游仓库的许可原文确认，不是按印象填写。判断依据记录在 docs/licensing.md。
+与 LICENSE（ZhiCode 自身代码，MIT）配合使用；许可原文在 THIRD-PARTY-LICENSES/。
+
+本文件的每一条都给出**来源 + 许可 + 对应文件 + 核实方式**，不按印象填写。
+判断依据、复核命令与**尚未闭合的缺口**集中在 docs/licensing.md。
 
 
 1. IQ Code — MIT（致谢）
-----------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 来源 : https://github.com/iqisge-gif/IQ-Code-Android
 许可 : MIT License, Copyright (c) 2026 IQge
-许可原文: THIRD-PARTY-LICENSES/IQ-Code-MIT.txt
+许可原文: THIRD-PARTY-LICENSES/IQ-Code-MIT.txt（逐字保留，未做任何改写）
 
-本工程的起点是 IQ Code。原作者已明确许可本工程改写、改名与发行，并同意
-不强制要求随附其版权声明 —— 也就是说，**下面这一节不是必须履行的许可义务，
-而是我们自愿保留的致谢。**
+本工程的起点是 IQ Code：协议层、Agent 主循环与工具集、沙箱宿主层的早期实现都从它那里起步，
+之后被分批重写。**重写不免除 MIT 的署名义务** —— 本项按 MIT 的既有条件随附其版权与许可声明。
 
-保留的理由与法律无关：本工程的归属度量工具（tools/provenance.sh）一直在拿本工程
-与原版逐行比对，派生关系本来就是自证的 —— 把出处写清楚比含糊过去更诚实，
-成本也只是一个段落。完整论证见 docs/licensing.md 的「署名」一节。
+LICENSE 与 docs/licensing.md 里都记有「原作者已明确许可本工程改写、改名与发行，并同意
+不强制要求随附其版权声明」这一条。那是仓库内的历史记录转述，**无法从本仓库核实**，
+因此不作为免除义务的依据；保留这份致谢的理由与法律无关 —— 我们是**自愿**保留的：
+归属度量工具（tools/provenance.sh）一直在拿本工程与原版逐行比对，派生关系本来就是自证的，
+把出处写清楚比含糊过去更诚实，成本也只是一个段落。
 
-当前残留：**权威值以 `bash tools/provenance.sh` 的输出为准**（它会归一化包名/品牌后
-逐行比对）。2026-09-27 的快照是「真正属于 IQ Code」**4,366 行**（沙箱宿主层 483 行 +
-Agent 运行时约 3,883 行），会随重写继续下降。沙箱宿主层已整体重写（逐行重合度从 96%
-降到约 11%）；Agent 运行时也已分批重写，会话存储、API 客户端、工具集、上下文压缩、
-权限门等都已完成。目标是把「净相同行」降到 0，目前尚未达到。
+当前残留行数请**以 `bash tools/provenance.sh` 的输出为准**（它会归一化包名与品牌后逐行比对，
+并把每一次扣减的依据写进 build/provenance-protocol-strings.txt）。本文件不抄会漂移的数字。
 
 
 2. BlackBox 虚拟化引擎（Bcore / black-reflection / compiler）— Apache-2.0
-----------------------------------------------------------------
+--------------------------------------------------------------------------------
 
-来源 : https://github.com/ALEX5402/NewBlackbox
-       （BlackBox 血统。原始仓库 FBlackBox/BlackBox 的**源码已被作者移除**：
-         仓库本身还在，但只余 README/.gitignore/.github，
-         其 README 写明作者决定删除该项目。详见 docs/licensing.md
-         「开源前的许可复核」一节，其中标注了此处无法确证的部分）
+来源 : https://github.com/ALEX5402/NewBlackbox（BlackBox 血统）
+       本工程的这一份是**经上游 IQ Code 的副本**搬过来的：
+       ALEX5402/NewBlackbox ──(IQ Code 的 vendor 副本)──▶ IQ Code ──(本工程整棵复制)──▶ 本仓库
+       搬入提交：f849e14「Phase 7a: 移植 Bcore/black-reflection/compiler 三个模块并接入沙箱宿主」。
+       更上游的原始仓库 FBlackBox/BlackBox 今天仍在，但源码与许可文件已被作者移除
+       （/license 端点返回 404），因此再往上一层当时是什么许可已无从查证。
+       见 docs/licensing.md 第 5.4 节。
 许可 : Apache License 2.0
 许可原文: THIRD-PARTY-LICENSES/Apache-2.0.txt
           以及各模块目录下的 LICENSE（Bcore/、black-reflection/、compiler/）
 
 对应目录 :
-  Bcore/            Android 虚拟运行时（guest 进程管理、Activity/Service 代理、
-                    系统服务 hook）
+  Bcore/            Android 虚拟运行时（guest 进程管理、Activity/Service 代理、系统服务 hook）
   black-reflection/ 反射与注解处理
   compiler/         编译期注解处理
 
 上游仓库只带 LICENSE，没有 NOTICE 文件，因此没有需要原样保留的 NOTICE。
+
+按 Apache-2.0 第 4 条，我们声明：**本工程对这些模块的构建脚本有改动，对 Bcore 的源码有改动；
+black-reflection 与 compiler 的源码未改动**（后者已与今天的上游 main 逐文件核对，内容一致）。
+
+逐模块的修改清单（这是 Apache-2.0 第 4(b) 条要求的那份声明）：
+
+  ▸ Bcore/NOTICE            —— 列出本工程自己的改动、vendoring 时带来的改动、
+                               与上游今天的差异（**归属不明**的那部分）以及预编译原生库的现状
+  ▸ black-reflection/NOTICE —— 声明未修改，并给出可重跑的核对方式
+  ▸ compiler/NOTICE         —— 同上
+
+⚠️ **两件尚未履行 / 尚未关闭的事**（详见 Bcore/NOTICE 与 docs/licensing.md 第 9 节）：
+
+  1. Apache-2.0 第 4(b) 条要求「修改过的**文件**携带显眼声明」，而目前只有模块级 NOTICE
+     的汇总声明，被修改的文件本身没有声明头（实测：Bcore/src/main/java 下 499 个 Java
+     文件里，带 Apache 声明头的为 0 个）。
+  2. 本工程没有钉住 vendoring 时的上游 revision，因此「与上游今天 main 的差异里，
+     哪些是上游自己的演进、哪些是 IQ Code 当时的改动」**无法逐文件归因**；
+     同时 Bcore 的预编译原生库 `jniLibs/arm64-v8a/libblackbox.so` 是一枚
+     **未经完整内容审计的二进制产物**（本仓库不含它的构建过程）。目前只核出了其中一项内容，
+     见下面的 2.1。
+
+
+2.1 静态链接在 libblackbox.so 内的 Dobby — Apache-2.0
+--------------------------------------------------------------------------------
+
+来源 : https://github.com/jmpews/Dobby（内联 hook 引擎）
+许可 : Apache License 2.0
+许可原文: THIRD-PARTY-LICENSES/Apache-2.0.txt
+
+**它不是一个独立文件**，而是**被静态链接进** Bcore 的预编译原生库：
+
+  Bcore/src/main/jniLibs/arm64-v8a/libblackbox.so（343,624 字节，AARCH64 ELF）
+
+因此它不会出现在 `gradle` 依赖列表里，也不会以文件形式躺在仓库里 ——
+只能从二进制内容上认出来。核对方式（可重跑）：
+
+```bash
+tr -c '[:print:]' '\n' < Bcore/src/main/jniLibs/arm64-v8a/libblackbox.so \
+  | grep -aiE 'dobby' | sort -u
+# → 命中一组 Dobby 的源码路径与符号，例如：
+#     /Users/runner/work/Dobby/Dobby/source/MemoryAllocator/MemoryArena.cc
+#     /Users/runner/work/Dobby/Dobby/source/InterceptRouting/...
+#     Dobby / DobbyHook / DobbySymbolResolver
+```
+
+（路径里的 `/Users/runner/work/...` 说明这枚 Dobby 是在某个 CI 的 macOS runner 上编译的，
+进一步印证它是**随该 .so 一起被 vendoring 进来的构建产物**，而不是本工程现场编的。）
+
 按 Apache-2.0 第 4 条，我们在此声明：
 
-  - 本工程对这些模块做了修改。可核对的主要修改点（逐项清单见各模块
-    目录下的 NOTICE，那里是 Apache-2.0 第 4 条要求的那份声明）：
-      * Bcore/src/main/java/top/niunaijun/blackbox/SandboxContract.java（新增）
-        控制器进程名的单一来源，供引擎与宿主层共同引用
-      * Bcore/src/main/java/top/niunaijun/blackbox/BlackBoxCore.java
-        hookless 控制器初始化分支、启动阶段按 pid 分文件的记录
-      * Bcore/src/main/AndroidManifest.xml 控制器进程名
-
-  - 未改动任何许可或版权声明，也未删除上游文件。
+  · **本工程没有修改 Dobby 的源码**（没有它的源码副本，也没有它的构建配方）；
+  · **未改动其许可与版权声明** —— 它的许可文本随本仓库的 THIRD-PARTY-LICENSES/Apache-2.0.txt 一并提供；
+  · 本工程**未对它做过完整的静态内容审计**：除本项之外，该 .so 里是否还含其它第三方组件
+    目前未知（见 docs/licensing.md 第 5.4 节与第 9 节）。
 
 
 3. Termux 终端模拟与视图 — Apache-2.0
-----------------------------------------------------------------
+--------------------------------------------------------------------------------
 
-来源 : https://github.com/termux/termux-app
-       terminal-emulator / terminal-view 两个子库
+来源 : https://github.com/termux/termux-app 的 terminal-emulator / terminal-view 两个子库
 许可 : Apache License 2.0
+许可原文: THIRD-PARTY-LICENSES/Apache-2.0.txt
 
   termux-app 整体是 GPLv3-only，但其根 LICENSE.md 明确列出例外：
-  terminal-emulator 与 terminal-view 两个库使用的
-  「Terminal Emulator for Android」(jackpal/Android-Terminal-Emulator)
-  代码按 Apache-2.0 发布。本节列出的文件全部落在该例外范围内。
-
-许可原文: THIRD-PARTY-LICENSES/Apache-2.0.txt
+  「Terminal Emulator for Android」(jackpal/Android-Terminal-Emulator) 的代码
+  按 Apache-2.0 发布，而 terminal-emulator / terminal-view 两个库正落在该例外内。
+  核对命令见 docs/licensing.md 第 7.3 节。
 
 对应文件 :
   app/src/main/java/com/termux/terminal/   终端缓冲区、emulator、session、字符宽度等
@@ -88,78 +131,83 @@ Agent 运行时约 3,883 行），会随重写继续下降。沙箱宿主层已�
 自带 Apache-2.0 头（Copyright (C) 2015 The Android Open Source Project），
 该声明已原样保留。
 
-注意：libtermux.so 是被 System.load 链接进本应用进程的原生库。
-它属于 Apache-2.0，**不是** GPL —— 这一点决定了本项目不必整体转为 GPL。
+**libtermux.so 是被 System.load 链接进本应用进程的原生库，它属于 Apache-2.0，不是 GPL** ——
+这一点决定了本工程不必整体转为 GPL。判定依据（导出符号 → 上游文件 → 例外条款）
+见 docs/licensing.md 第 7.3 节，可重跑。
 
 
 4. termux-shared · TermuxConstants — MIT
-----------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 来源 : https://github.com/termux/termux-app 的 termux-shared 子库
 许可 : MIT
-       termux-shared 的 LICENSE.md 规定该库代码为 GPLv3-only，
-       但**点名排除** TermuxConstants.java 与 TermuxPropertyConstants.java，
+       该库的 LICENSE.md 规定 termux-shared 整体为 MIT，但其中
+       src/main/java/com/termux/shared/termux/ 目录为 GPLv3-only，
+       并**点名排除** TermuxConstants.java 与 TermuxPropertyConstants.java ——
        这两个文件按 MIT 发布。
-许可原文: THIRD-PARTY-LICENSES/MIT.txt
+许可原文: THIRD-PARTY-LICENSES/MIT.txt（该文件在开头注明了这一份 MIT 覆盖的是哪个组件）
 
 对应文件 : app/src/main/java/com/termux/shared/termux/TermuxConstants.java
 
-该文件在蜘蛛中是**整体重写**的（原版把 com.iqge 的绝对路径写成
-static final 常量，会被 javac 内联且绑死包名），现在全部路径由
-BuildConfig.APPLICATION_ID 派生。保留它是因为类名与调用点遍布全工程。
+该文件在 ZhiCode 中是**整体重写**的：原版把应用私有目录的绝对路径写成 static final 常量，
+会被 javac 内联且绑死包名；现在全部路径在运行期由应用的 BuildConfig.APPLICATION_ID 派生。
+保留这个类名与调用点，是因为它们遍布全工程。
 
 
 5. Termux 用户空间（bootstrap 归档）— 各程序各自的许可
-----------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 文件 : app/src/main/assets/bootstrap-aarch64.zip
-       33 MB / 4,533 个文件 / 解压后约 90 MB
+       33,484,104 字节 / 4,533 个条目 / 解压后 90,872,448 字节
+       var/lib/dpkg/status 里当前有 85 个包（含目录项与符号链接清单）
 
-来源 : 由 termux/termux-packages 的 fork 构建，配方见
-       tools/termux-bootstrap-fork/（含构建工作流与验收脚本）
+来源 : 由 termux/termux-packages 的 fork 构建，配方见 tools/termux-bootstrap-fork/
+       （含构建工作流、裁剪脚本与验收脚本 VerifyBootstrap.java）
        构建目的：让归档内的前缀直接就是本应用的私有目录
-       （/data/data/com.zhizhu.code/files/usr），从而不需要任何
-       运行期前缀改写。
+       （/data/data/com.zhizhu.code/files/usr），从而不需要解压期的前缀改写。
 
-许可 : 归档内是数百个**独立程序**，各自适用各自的许可，其中包含：
-         bash        GPLv3
-         coreutils   GPLv3
-         apt/dpkg    GPLv2+
-         sed/grep    GPLv3
+许可 : 归档内是数百个**独立可执行程序**，各自适用各自的许可，其中包含：
+         bash        GPL-3.0        （TERMUX_PKG_LICENSE="GPL-3.0"）
+         coreutils   GPL-3.0
+         apt/dpkg    GPL-2.0+
+         sed/grep    GPL-3.0
          openssl     Apache-2.0
          zlib、xz、libc++ 等 LGPL / MIT / BSD 变体
-       完整列表以归档内各包自带文档与 termux-packages 的
-       <package>/build.sh 声明为准。
+       完整列表以归档内各包自带文档与 termux-packages 的 <package>/build.sh 声明为准。
 
 为什么这不要求本项目整体转为 GPL：
 
-  这些程序是**独立可执行文件**，由本应用以子进程方式启动，与本应用的代码之间
-  不构成衍生作品。GPL 明确允许把 GPL 程序与其它许可的程序聚合（aggregate）在一起
-  分发，只要聚合体中的每个部分仍受其自身许可约束。这与「把 GPL 库链接进同一个进程」
-  是两回事 —— 对照第 3 节：libtermux.so 是被链接进本进程的，但它是 Apache-2.0，
-  所以那条链路也不产生 GPL 传染。（完整论证见 docs/licensing.md。）
+  这些程序是**独立可执行文件**，由本应用以子进程方式启动（fork/exec），
+  与本应用的代码之间不构成衍生作品。GPL 明确允许把 GPL 程序与其它许可的程序
+  **聚合**（aggregate）在一起分发，只要聚合体中的每个部分仍受其自身许可约束。
+  这与「把 GPL 库链接进同一个进程」是两回事 —— 对照第 3 节：libtermux.so 确实是被
+  链接进本进程的，但它是 Apache-2.0，所以那条链路也不产生 GPL 传染。
 
-使用者要拿到这些程序的源码，出处是 termux-packages 与你自己的 fork（含构建配方）。
-发行时请确认该源码对接收者可得。
+使用者要拿到这些程序的源码，出处是 termux-packages 与上方的构建配方。
+**发行时请确认该源码对接收者可得。**
 
 
-6. 通过 Gradle 依赖引入的组件
-----------------------------------------------------------------
+6. 通过 Gradle 依赖引入的组件 — 随构件分发
+--------------------------------------------------------------------------------
 
-以下组件以 Maven 依赖形式引入，不修改、不内联其源码。
-它们各自的许可随构件分发，完整文本见构件 jar/aar 内或发布方仓库：
+以下组件以 Maven 依赖形式引入，不修改、不内联其源码，各自许可随构件分发
+（完整文本见构件 jar/aar 内或发布方仓库）：
 
-  top.yukonga.miuix.kmp:miuix-{ui,core,icons,preference,shader,squircle,blur-android} 0.9.4
+  top.yukonga.miuix.kmp:miuix-{ui,core,icons,preference,shader,squircle,nav,blur-android} 0.9.4
+  io.github.rosemoe:editor 0.24.6                                  ← LGPL-2.1，见第 9 节
+  io.github.rosemoe:language-textmate 0.24.6                       ← LGPL-2.1，见第 9 节
   androidx.activity:activity-compose 1.12.0
   androidx.lifecycle:lifecycle-viewmodel-compose 2.9.4
-  androidx.annotation:annotation 1.8.1
+  androidx.lifecycle:lifecycle-runtime-compose 2.9.4
+  androidx.profileinstaller:profileinstaller 1.4.0
+  androidx.annotation:annotation 1.8.1（compileOnly）
 
 以及在构建期由 AGP 自动并入的 AndroidX / Jetpack Compose 运行时构件。
-以上均为 Apache-2.0 或其兼容许可。
+以上（除已注明的 LGPL 项）均为 Apache-2.0 或其兼容许可。
 
 
 7. Material Symbols 图标（路径数据内联进源码）— Apache-2.0
-----------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 来源 : https://github.com/google/material-design-icons
        symbols/web/<名字>/materialsymbolsrounded/<名字>_fill1_24px.svg
@@ -172,53 +220,92 @@ BuildConfig.APPLICATION_ID 派生。保留它是因为类名与调用点遍布�
 
 对应文件 :
   app/src/main/java/com/zhizhu/zhicode/compose/ui/ZhiMaterialIcons.kt
-      51 个字形的 `<path d="...">` 原样内联；每个字形只多了一层视口换算
+      上游字形的 `<path d="...">` 原样内联；每个字形只多了一层视口换算
       （上游 viewBox 为 `0 -960 960 960`，Compose 视口为 24×24）。
-      **路径数据本身逐字未改**，这一点可以用下面的脚本重新取一遍来做 diff 核对。
+      **路径数据本身逐字未改** —— 这一点可以用下面的脚本重新取一遍来做 diff 核对。
 
   tools/material-symbols-fetch.sh
       重新取用脚本：按脚本内的「Kotlin 名 → 上游字形名」映射表重新下载并重写
       ZhiMaterialIcons.kt。任何人（包括 reviewer）都可以重跑它来核对
-      "文件里这份数据还是上游那份"。
+      「文件里这份数据还是上游那份」。
 
-  app/tests/MaterialSymbolGeometryTest.java
-      把每个字形的路径走一遍、量出墨迹范围并与基线表比对，
-      用来发现"数字抄错但照样能解析"的情况。
+      ⚠️ 原先还有一条 `app/tests/MaterialSymbolGeometryTest.java` 把每个字形的墨迹范围
+      量出来与基线表比对，用来发现「数字抄错但照样能解析」。**它已随 `app/tests/` 整套删除**，
+      所以现在核对路径数据只剩上面那个重取脚本（重跑后 `git diff` 应为空）。
 
-本工程对这两个文件的修改：
-  - ZhiMaterialIcons.kt 是**生成物**（由上面的脚本生成），
-    除视口换算与文件头说明外不含任何自行设计的图形；
-  - 未改动上游的许可与版权声明（上游该目录下没有 NOTICE 文件，
-    按 Apache-2.0 第 4 条在此声明"未修改数据本身"）。
+本工程对这些数据的修改：
+  · ZhiMaterialIcons.kt 是**生成物**（由上面的脚本生成），除视口换算与文件头说明外
+    不含任何自行设计的图形；**未修改数据本身**；
+  · 未改动上游的许可与版权声明（上游该目录下没有 NOTICE 文件，
+    按 Apache-2.0 第 4 条在此声明这一点）。
 
 
 8. MaterialFiles 交互参考 — GPL-3.0（未复制源码）
-----------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 来源 : https://github.com/zhanghai/MaterialFiles
 许可 : GNU General Public License v3.0
 许可原文: https://raw.githubusercontent.com/zhanghai/MaterialFiles/master/LICENSE
 
 本工程参考 MaterialFiles 的独立文件页、顶部返回/文件名层级与正文占满页面的交互形态。
-本工程没有复制 MaterialFiles 的 Kotlin、Java、XML、资源或类名；编辑页是基于本工程
-现有 Compose/Miuix 与 Rosemoe Sora CodeEditor 的独立实现。因此本项是设计参考，不是随发行物
-链接或内嵌的 MaterialFiles 第三方代码。
+本工程**未复制**它的 Kotlin、Java、XML、资源或类名；编辑页是基于本工程
+现有 Compose/Miuix 与 Rosemoe Sora CodeEditor 的独立实现。
+因此本项是设计参考，不是随发行物链接或内嵌的 MaterialFiles 第三方代码。
 
 
 9. Rosemoe Sora Editor — LGPL-2.1
-----------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 来源 : https://github.com/Rosemoe/sora-editor
 构件 : io.github.rosemoe:editor:0.24.6
-        io.github.rosemoe:language-textmate:0.24.6
+       io.github.rosemoe:language-textmate:0.24.6
 
 许可 : GNU Lesser General Public License v2.1
 许可原文: https://github.com/Rosemoe/sora-editor/blob/main/LICENSE
 
 本工程使用 Sora Editor 的增量文本布局、缩放、滚动与 TextMate 语法高亮能力；未复制其源码。
 
-蜘蛛自己的代码（Compose 界面层、宿主层重写部分、新增的诊断与安全边界等）
-按同目录 LICENSE 的 MIT 发布。
+⚠️ LGPL 通常还涉及「允许使用者替换为修改后的库版本」这一条。**本工程尚未评估这一点**，
+现状记录在 docs/licensing.md 第 6.2 节与第 9 节的开放项里。
 
-版权行为 Copyright (c) 2026 zhizhu0002（LICENSE 与 THIRD-PARTY-LICENSES/MIT.txt
-两处一致，由 app/tests/LicenseNoticeStructureTest.java 守着不再是占位写法）。
+
+10. TextMate 语法、语言配置与主题 — MIT / Apache-2.0
+--------------------------------------------------------------------------------
+
+文件位置 : app/src/main/assets/sora/textmate/**
+
+这些是随应用分发的**数据文件**（不是依赖），来源包含 Visual Studio Code、
+vscode-kotlin、vscode-logfile-highlighter、YAML-Syntax-Highlighter 等上游项目，已核实的四项均为 **MIT**；
+另有若干项（darcula / quietlight 主题、extra/generic 语法、languages.json 清单、
+未被清单引用的 grammars/generic-programming.tmLanguage.json）**尚未核到来源或许可**。
+
+逐项清单、已核实的版权行、已知的本地修改、以及**未核实项**与核实命令，
+见 app/src/main/assets/sora/textmate/NOTICE.md —— 那份文件是这一节的细则，请连它一起读。
+
+
+11. ZhiCode 自己的代码
+--------------------------------------------------------------------------------
+
+ZhiCode 自身的代码（Compose 界面层、沙箱宿主层、引擎与工具集、诊断与安全边界等）
+按根目录 LICENSE 的 MIT 发布，版权行为 Copyright (c) 2026 zhizhu0002。
+
+第三方组件**不受**该文件约束；分发时必须同时提供 LICENSE、本文件与 THIRD-PARTY-LICENSES/。
+
+⚠️ **这三份文件的存在没有任何自动化检查**：原先有一条源码文本级断言
+（`app/tests/LicenseNoticeStructureTest.java`）盯着它们与其中的关键表述，
+**它已随 `app/tests/` 整套删除**。删掉许可文件不会导致编译或运行失败，
+所以发行前必须**人工清点**这三者是否齐全、内容是否与代码一致。
+
+
+--------------------------------------------------------------------------------
+附：本文件与相关文件的分工
+
+  LICENSE                    本工程自身代码的 MIT 条款 + 范围说明
+  NOTICE                     本文件：第三方组件声明（来源 / 许可 / 对应文件 / 修改）
+  THIRD-PARTY-LICENSES/      许可原文（含 README.md 说明每个文件覆盖什么、是否可改）
+  docs/licensing.md          判断依据、复核命令、未确证事项与开放项
+  Bcore/、black-reflection/、
+  compiler/ 下的 NOTICE      各模块的 Apache-2.0 第 4(b) 条修改声明
+
+以上各文件**都没有自动化检查**（原来的 `LicenseNoticeStructureTest` 已随 app/tests/ 删除），
+改动它们之后请按 docs/licensing.md 的清单人工复核。

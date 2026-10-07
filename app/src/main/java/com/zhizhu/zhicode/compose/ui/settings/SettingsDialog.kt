@@ -55,7 +55,7 @@ import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
- * 蜘蛛 设置页：标题 + 返回 / 分组设置行。
+ * ZhiCode 设置页：标题 + 返回 / 分组设置行。
  *
  * ## 没有「保存」按钮：改动即时生效
  *

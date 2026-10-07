@@ -75,7 +75,7 @@ object ZhiRadius {
     val actionKey = 8.dp
 }
 
-/** 布局尺度常量，取自原 蜘蛛 的 dp() 用量。 */
+/** 布局尺度常量，取自上游原版 IQ Code 的 dp() 用量。 */
 object Dimens {
     val screenPadding = 12.dp
     val topBarHeight = 48.dp

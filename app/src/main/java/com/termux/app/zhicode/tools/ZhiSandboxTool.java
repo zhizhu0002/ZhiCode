@@ -18,7 +18,7 @@ import java.io.File;
 import java.io.FileInputStream;
 
 /**
- * Agent 用来操作ZhiCode 沙箱的入口。
+ * Agent 用来操作 ZhiCode 沙箱的入口。
  *
  * <h3>这个工具只碰沙箱，不碰真机</h3>
  * install 的落点永远是沙箱；即便调用者给了一个真机 APK 路径，
@@ -164,7 +164,7 @@ public final class ZhiSandboxTool implements ZhiTool {
      *
      * <p>先在本机解析这个 APK 的包信息，是为了在把文件交给沙箱之前就挡掉两类输入：
      * 不是有效 APK 的文件（否则失败信息会来自虚拟运行时的深处，难以解释），
-     * 以及蜘蛛自身（把宿主装进它自己的虚拟运行时只会得到一份互相递归的垃圾状态）。
+     * 以及 ZhiCode 自身（把宿主装进它自己的虚拟运行时只会得到一份互相递归的垃圾状态）。
      */
     private ToolExecutionResult install(String path) throws Exception {
         if (path == null || path.trim().isEmpty()) return ToolExecutionResult.error("install 需要 path");

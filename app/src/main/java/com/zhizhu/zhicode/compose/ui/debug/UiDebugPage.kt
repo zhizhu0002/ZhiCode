@@ -1035,7 +1035,7 @@ private fun TypographySection() {
                         fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         modifier = Modifier.width(120.dp),
                     )
-                    Text(text = "蜘蛛 ZhiCode 示例 Aa 123", fontSize = size)
+                    Text(text = "ZhiCode ZhiCode 示例 Aa 123", fontSize = size)
                 }
             }
         }

@@ -54,7 +54,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * | 自由文本 | [BasicComponent] + `bottomAction` 里的 [TextField] |
  *
  * 这些组件内部都走 `BasicComponent`，所以标题/说明/按压态/圆角由 Miuix 统一负责。
- * 本文件只做一件事：把「蜘蛛 的语义」翻译成它们的参数。
+ * 本文件只做一件事：把「ZhiCode 的语义」翻译成它们的参数。
  *
  * ## 行首图标：行式组件都收 `icon` + `plate` 一对参数
  *
