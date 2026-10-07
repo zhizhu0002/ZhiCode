@@ -598,6 +598,7 @@ public final class TermuxShellExecutor {
         try {
             thread.join(timeoutMs);
         } catch (InterruptedException interrupted) {
+            thread.interrupt();
             Thread.currentThread().interrupt();
         }
     }
@@ -986,7 +987,7 @@ public final class TermuxShellExecutor {
                     deliver(chunk);
                 }
             } catch (Exception failure) {
-                if (closed) return;
+                if (closed || failure instanceof InterruptedException) return;
                 String message = "\n[capture error: " + failure.getMessage() + "]";
                 synchronized (output) {
                     output.append(message);
@@ -1014,6 +1015,7 @@ public final class TermuxShellExecutor {
 
         /** 标记为主动关闭并关掉流 —— 之后读到的异常不再当成错误上报。 */
         void close() {
+            if (closed) return;
             closed = true;
             closeQuietly(input);
         }

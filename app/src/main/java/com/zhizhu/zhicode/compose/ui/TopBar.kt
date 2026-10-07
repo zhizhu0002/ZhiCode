@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiGlass
+import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
@@ -114,7 +115,7 @@ fun ZhiTopBar(
                     shape = RectangleShape,
                     blurRadius = ZhiGlass.FloatingBlur,
                     colors = BlurDefaults.blurColors(
-                        blendColors = listOf(BlendColorEntry(color = scheme.surface.copy(alpha = 0.8f))),
+                        blendColors = listOf(BlendColorEntry(color = if (ZhiColors.isDark()) scheme.surface.copy(alpha = 0.8f) else Color.White)),
                     ),
                 )
             } else {
@@ -188,6 +189,7 @@ fun ZhiTopBar(
                     icon = ZhiIcons.settings,
                     description = "打开设置",
                     onClick = onSettings,
+                    tint = scheme.onSurface,
                 )
             }
         },

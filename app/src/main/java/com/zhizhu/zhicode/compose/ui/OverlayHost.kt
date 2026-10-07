@@ -69,7 +69,6 @@ internal fun ZhiOverlayHost(
         browser = state.attachBrowser,
         onFilterChange = viewModel::updateAttachFilter,
         onNavigate = viewModel::attachNavigateTo,
-        onUp = viewModel::attachUp,
         onSwitchRoot = viewModel::attachSwitchRoot,
         onPick = { entry -> viewModel.attachProjectFile(entry.path) },
         onDismiss = viewModel::closeAttachPicker,

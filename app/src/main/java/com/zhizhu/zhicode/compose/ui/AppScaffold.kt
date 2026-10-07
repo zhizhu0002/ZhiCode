@@ -8,23 +8,24 @@ import com.zhizhu.zhicode.compose.ui.dialogs.McpConfigOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.SearchServicesOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.MemoryOverlay
 import com.zhizhu.zhicode.compose.ui.dialogs.RoleCardsOverlay
-import com.zhizhu.zhicode.compose.ui.panes.FileEditorPage
 import com.zhizhu.zhicode.compose.ui.dialogs.SkillsOverlay
 import com.zhizhu.zhicode.compose.ui.settings.SettingsDialog
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.Composable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.app.Application
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
@@ -33,9 +34,9 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zhizhu.zhicode.compose.editor.EditorActivity
+import com.zhizhu.zhicode.compose.theme.ZhiAppTheme
 import com.zhizhu.zhicode.compose.theme.ZhiColors
-import com.zhizhu.zhicode.compose.theme.LocalZhiDark
-import com.zhizhu.zhicode.compose.theme.zhiTextStyles
 import com.zhizhu.zhicode.compose.model.ApiConfigState
 import com.zhizhu.zhicode.compose.model.McpConfigState
 import com.zhizhu.zhicode.compose.model.SearchServicesState
@@ -57,9 +58,6 @@ import top.yukonga.miuix.kmp.nav.core.navBackStackOf
 import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
 import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
 import top.yukonga.miuix.kmp.nav.transition.NavTransitions
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.theme.darkColorScheme
-import top.yukonga.miuix.kmp.theme.lightColorScheme
 
 /**
  * 取（或创建）主 ViewModel。
@@ -81,42 +79,29 @@ private fun rememberWorkspaceViewModel(): WorkspaceViewModel {
 /** 应用入口：主题 + 主界面。 */
 @Composable
 fun ZhiCodeApp(viewModel: WorkspaceViewModel = rememberWorkspaceViewModel()) {
-    val state by viewModel.state.collectAsState()
+    // UI 收集与 Activity 生命周期绑定：后台时暂停快照消费，避免流式引擎仍在
+    // 组合树不可见时持续驱动整棵 UI。
+    val state by viewModel.state.collectAsStateWithLifecycle()
 
     // 深/浅只有一处判定（见 ZhiThemeMode 的推导）：应用设置 `ThemeMode` + 系统深浅。
     // 原先这里和三处各写一份，其中沙箱页那份读的是系统而不是应用设置，于是
     // 「设置里选浅色、系统是深色」时两屏颜色不一致。
     val isDark = ZhiThemeMode.rememberCurrentDark(state.themeMode)
-    val colors = if (isDark) darkColorScheme() else lightColorScheme()
-    // 应用内换主题时状态栏图标要跟着换 —— onResume 那条路径只在回到前台时补。
-    ZhiThemeMode.ApplySystemBars(isDark)
-
-    // LocalZhiDark 必须**先**提供，之后才能求任何 ZhiColors 层级色：
-    // 这些色函数靠 LocalZhiDark 判断深浅，读早了会拿到默认值 false（浅色），
-    // 于是深色模式下背板被设成浅灰、弹窗整片发白。
-    CompositionLocalProvider(LocalZhiDark provides isDark) {
-        // 主背板 = 灰（深色 #242424 / 浅色 #EDEDED），侧栏与面板则用纯黑/纯白。
-        // 两者是互换过的层级：背板退后，板块站出来。
-        // 之所以要覆盖主题的 background：Miuix 浅色方案里 background / surface /
-        // surfaceContainer 都是 #FFFFFF，纯白铺满后板块完全分不出来。
-        val appColors = colors.copy(background = ZhiColors.backdrop())
-        // textStyles 必须在这里给：Miuix 组件读的是主题样式（TextField→main、
-        // Button→button、BasicComponent→headline1/body2、SmallTitle→subtitle），
-        // 逐个传 fontSize 够不到它们。字阶与依据见 theme/ZhiTextStyles.kt。
-        MiuixTheme(colors = appColors, textStyles = zhiTextStyles()) {
-            // 这里**不再**挂常开的帧泵。
-            //
-            // 原来这里是 `ZhiFrameTraceHost()`，内部是
-            // `while (true) { withFrameNanos { ... } }` —— 等于**每一帧都主动申请一帧**，
-            // 应用永不休眠。实测空闲 14 秒、完全不碰屏幕时仍是：
-            //   idle frames=300 avg=8.3ms (=120.0fps)  ← 持续满帧
-            // 后果不是"多画几帧"，而是主线程永远被占着：任何触摸到达时都得等当前帧
-            // 画完，于是"点设置、点模型、点页签全都滞后"，与点哪里无关。
-            //
-            // 现在改成按需：只有 `ZhiFrameTrace.begin()` 之后才要帧（见那里的说明），
-            // 测量结束就自然停下，空闲时一帧都不申请。
-            ZhiCodeScreen(state = state, viewModel = viewModel, isDark = isDark)
-        }
+    // 主题栈只有一处（theme/ZhiAppTheme.kt）：编辑器那个独立 Activity 用的是同一个，
+    // 所以"应用内切主题后两屏颜色不一致"这类问题不会再出现。
+    ZhiAppTheme(mode = state.themeMode) {
+        // 这里**不再**挂常开的帧泵。
+        //
+        // 原来这里是 `ZhiFrameTraceHost()`，内部是
+        // `while (true) { withFrameNanos { ... } }` —— 等于**每一帧都主动申请一帧**，
+        // 应用永不休眠。实测空闲 14 秒、完全不碰屏幕时仍是：
+        //   idle frames=300 avg=8.3ms (=120.0fps)  ← 持续满帧
+        // 后果不是"多画几帧"，而是主线程永远被占着：任何触摸到达时都得等当前帧
+        // 画完，于是"点设置、点模型、点页签全都滞后"，与点哪里无关。
+        //
+        // 现在改成按需：只有 `ZhiFrameTrace.begin()` 之后才要帧（见那里的说明），
+        // 测量结束就自然停下，空闲时一帧都不申请。
+        ZhiCodeScreen(state = state, viewModel = viewModel, isDark = isDark)
     }
 }
 
@@ -128,7 +113,6 @@ private fun ZhiCodeScreen(
 ) {
     val configuration = LocalConfiguration.current
     val wide = configuration.screenWidthDp >= 600
-    var pagerSelectedTab by remember { mutableStateOf(state.tab) }
 
     // 帧耗时测量的出口：结果以一条 INFO 消息落在对话流里（仅 debug 构建会触发）。
     // 之所以不只用 logcat：沙箱 guest 的日志不进宿主 logcat，而截图是唯一可靠的观察通道。
@@ -179,8 +163,26 @@ private fun ZhiCodeScreen(
     var lastSkills by remember { mutableStateOf<SkillsState?>(null) }
     var lastRoleCards by remember { mutableStateOf<RoleCardsState?>(null) }
     var lastMemory by remember { mutableStateOf<MemoryState?>(null) }
-    var lastOpenFile by remember { mutableStateOf<com.zhizhu.zhicode.compose.model.OpenFile?>(null) }
-    var lastEditorDraft by remember { mutableStateOf<String?>(null) }
+
+    // ---- 编辑器（独立 Activity）------------------------------------------------
+    //
+    // 主界面与编辑器之间只有两条线：
+    //  · `state.pendingEditorOpen`：非空就打开它（然后立刻清标志，否则重组会重复启动）；
+    //  · 返回结果：RESULT_OK 表示编辑器里至少保存过一次 → 刷一次文件列表
+    //    （不刷的话列表上还是旧的大小/时间，用户会以为没存上）。
+    //
+    // 正文、脏状态、未保存确认全在编辑器那边（EditorViewModel），主界面一概不知道。
+    val context = LocalContext.current
+    val editorLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.refreshFiles()
+    }
+    LaunchedEffect(state.pendingEditorOpen) {
+        val path = state.pendingEditorOpen ?: return@LaunchedEffect
+        viewModel.consumePendingEditorOpen()
+        editorLauncher.launch(EditorActivity.intent(context, path))
+    }
 
     // 每页保留「最后一次非空状态」：关闭动作会先把状态置空，而退出动画还要跑
     // 几百毫秒，没有保留值那段时间页面内容会整个闪没（只剩空背景）。
@@ -198,9 +200,6 @@ private fun ZhiCodeScreen(
     lastRoleCards = roleCardsUi
     val memoryUi = state.memory ?: lastMemory
     lastMemory = memoryUi
-    val editorFile = state.openFile ?: lastOpenFile
-    lastOpenFile = editorFile
-    if (state.openFile != null) lastEditorDraft = state.fileDraft
 
 
     // 玻璃对象分两层，因为捕获节点不能包含自己：
@@ -240,8 +239,7 @@ private fun ZhiCodeScreen(
             // 栈是 [工作区, UI 调试]（设置主页留在 settingsOpen 里，返回即回到它）。
             add(AppKey.UiDebug)
         } else {
-            if (state.openFile != null) add(AppKey.FileEditor)
-            else if (state.settingsOpen) add(SettingsKey.Hub)
+            if (state.settingsOpen) add(SettingsKey.Hub)
             when {
                 state.apiConfig != null -> add(SettingsKey.Api)
                 state.mcpConfig != null -> add(SettingsKey.Mcp)
@@ -295,17 +293,20 @@ private fun ZhiCodeScreen(
         onBack = {
             // 系统返回：按当前栈顶逐级回退，并同步关掉 VM 的对应状态。
             // 只有 root（工作区）时把返回交还给系统（退出应用）。
+            //
+            // 读的是 `viewModel.state.value` 而不是闭包里捕获的 `state`：
+            // NavDisplay 会把这份 lambda 一直留着，而捕获进去的 state 是**上一次
+            // 组合的快照**，它会在"刚变脏、刚关闭"这类时刻过期。
+            val live = viewModel.state.value
             when {
-                state.uiDebugOpen -> viewModel.closeUiDebug()
-                state.openFile != null -> viewModel.closeFile()
-                state.apiConfig != null -> viewModel.closeApiConfig()
-                state.mcpConfig != null -> viewModel.closeMcpConfig()
-                state.searchServices != null -> viewModel.closeSearchServices()
-                state.searchServices != null -> viewModel.closeSearchServices()
-                state.skills != null -> viewModel.closeSkills()
-                state.roleCards != null -> viewModel.closeRoleCards()
-                state.memory != null -> viewModel.closeMemory()
-                state.settingsOpen -> viewModel.closeSettings()
+                live.uiDebugOpen -> viewModel.closeUiDebug()
+                live.apiConfig != null -> viewModel.closeApiConfig()
+                live.mcpConfig != null -> viewModel.closeMcpConfig()
+                live.searchServices != null -> viewModel.closeSearchServices()
+                live.skills != null -> viewModel.closeSkills()
+                live.roleCards != null -> viewModel.closeRoleCards()
+                live.memory != null -> viewModel.closeMemory()
+                live.settingsOpen -> viewModel.closeSettings()
             }
         },
     ) {
@@ -314,7 +315,7 @@ private fun ZhiCodeScreen(
         Scaffold(
             floatingToolbar = {
                 com.zhizhu.zhicode.compose.ui.panes.FileSelectionToolbar(
-                    visible = !wide && (state.fileSelectionMode || state.fileSelection.isNotEmpty()) && state.openFile == null,
+                    visible = !wide && (state.fileSelectionMode || state.fileSelection.isNotEmpty()),
                     entries = state.fileEntries,
                     selection = state.fileSelection,
                     glass = glassMain,
@@ -349,12 +350,10 @@ private fun ZhiCodeScreen(
                             viewModel.openSettings()
                         },
                         tabs = WorkspaceTab.entries,
-                        selectedTab = pagerSelectedTab,
+                        selectedTab = state.tab,
                         onSelectTab = { tab ->
                             ZhiFrameTrace.begin("tab:${tab.name}")
-                            // 先更新顶栏的立即反馈；Pager 随后由 selectedTab effect
-                            // 启动弹簧动画，settle 后再由 WorkspacePager 写回 ViewModel。
-                            pagerSelectedTab = tab
+                            // ViewModel 是唯一业务真源；Pager 由 state.tab 反向同步。
                             viewModel.selectTab(tab)
                         },
                     )
@@ -394,8 +393,7 @@ private fun ZhiCodeScreen(
                             viewModel = viewModel,
                             isDark = isDark,
                             glass = glass,
-                            onPageSelected = { pagerSelectedTab = it },
-                        )
+                            )
                     }
                 }
 
@@ -446,19 +444,6 @@ private fun ZhiCodeScreen(
         }
         // 设置页与它的二级页开启边缘滑动返回（Miuix 的 opt-in）；root 工作区不开 ——
         // 它下面没有可回退的页，而内部已经有侧栏抽屉与面板切换在横向上处理手势。
-        entry<AppKey.FileEditor> {
-            editorFile?.let { file ->
-                FileEditorPage(
-                    file = file,
-                    draft = if (state.openFile != null) state.fileDraft else lastEditorDraft,
-                    onBack = viewModel::closeFile,
-                    onSave = viewModel::saveFile,
-                    onCancelEdit = viewModel::cancelEditingFile,
-                    onReload = { viewModel.reloadOpenFile() },
-                    onCharsetChange = { charset -> viewModel.reloadOpenFile(charset) },
-                )
-            }
-        }
         entry<SettingsKey.Hub>(swipeDismiss = swipeBack) {
             SettingsDialog(
                 draft = settingsUi,
@@ -593,7 +578,6 @@ private fun ZhiCodeScreen(
  */
 private sealed interface AppKey : NavKey {
     data object Workspace : AppKey
-    data object FileEditor : AppKey
 
     /** UI 调试整页（debug 构建的设置页里有入口）。 */
     data object UiDebug : AppKey

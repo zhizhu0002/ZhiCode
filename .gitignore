@@ -34,3 +34,6 @@ release.properties
 # 临时产物：APK 抽查解包、构建日志
 .apkchk/
 .build-*.log
+
+# 编辑前的本地回滚点（含整棵源码树的快照，体积大且属本地临时产物）
+.iq-backups/

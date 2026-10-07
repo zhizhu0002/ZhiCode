@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
@@ -210,8 +211,9 @@ private fun ProfileTabs(
     onSelect: (Int) -> Unit,
 ) {
     if (!picker.showProfileTabs) return
+    val profileNames = remember(picker.profiles) { picker.profiles.map { it.name } }
     ZhiSegmentedTabs(
-        tabs = picker.profiles.map { it.name },
+        tabs = profileNames,
         selectedIndex = selectedIndex.coerceIn(0, picker.profiles.lastIndex),
         onSelect = { index ->
             // 点击只启动 Pager 弹簧；配置切换在 Pager settle 后发起。
@@ -362,8 +364,11 @@ private fun ModelList(
             .heightIn(max = listMaxHeight),
         verticalArrangement = Arrangement.spacedBy(ModelRowSpacing),
     ) {
-        items(models, key = { it.id }) { model ->
-            ModelRow(
+        items(
+            items = models,
+            key = { it.id },
+            contentType = { "model-row" },
+        ) { model ->            ModelRow(
                 option = model,
                 selected = model.id == picked,
                 onPick = { onPick(model.id) },

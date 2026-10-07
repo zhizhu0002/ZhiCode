@@ -1,10 +1,12 @@
 package com.zhizhu.zhicode.compose.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import com.zhizhu.zhicode.compose.theme.ZhiColors
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
@@ -31,6 +33,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  */
 @Composable
 fun rememberGlass(): Glass {
+    val isDark = ZhiColors.isDark()
     val supported = remember { isRuntimeShaderSupported() }
     // 关键：不支持时**连 layerBackdrop 都不创建**。
     // 只在 Modifier 上做恒等替换还不够 —— 光是把 blur 的代码路径执行到，
@@ -38,19 +41,23 @@ fun rememberGlass(): Glass {
     return if (supported) {
         // 捕获前先画一层不透明背景色：文档指出 layerBackdrop 只捕获自己的内容，
         // 若内容有透明区域，模糊会把颜色扩散进透明像素、出现明显色块。
-        val background = MiuixTheme.colorScheme.background
-        val backdrop = rememberLayerBackdrop {
-            drawRect(background)
-            drawContent()
+        key(isDark) {
+            val background = MiuixTheme.colorScheme.background
+            // 深浅切换时必须重建 backdrop；否则 RuntimeShader 继续持有上一主题的
+            // 背板快照，输入器和顶栏会出现蓝灰色旧色残留。
+            val backdrop = rememberLayerBackdrop {
+                drawRect(background)
+                drawContent()
+            }
+            remember(backdrop, isDark) { Glass(backdrop, isDark) }
         }
-        remember(backdrop) { Glass(backdrop) }
     } else {
-        remember { Glass(null) }
+        remember(isDark) { Glass(null, isDark) }
     }
 }
 
 /** 由 [rememberGlass] 创建，集中承载门控逻辑。 */
-class Glass internal constructor(internal val backdrop: LayerBackdrop?) {
+class Glass internal constructor(internal val backdrop: LayerBackdrop?, private val dark: Boolean) {
     /** 当前设备/Runtime 是否支持 RuntimeShader 模糊。 */
     val supported: Boolean get() = backdrop != null
 
@@ -72,6 +79,12 @@ class Glass internal constructor(internal val backdrop: LayerBackdrop?) {
      * 能模糊时压低不透明度，否则模糊会被不透明底色完全挡住、白做；
      * 不支持时保持原来的不透明底色，观感与改动前一致。
      */
+    @Composable
     fun surfaceColor(color: Color): Color =
-        if (backdrop != null) color.copy(alpha = 0.72f) else color
+        if (backdrop != null) {
+            // 浅色模式的半透明白色会把内容和背板混成一层灰雾；让主题容器
+            // 保持更高不透明度，模糊仍由 textureBlur 提供，不靠压低底色完成。
+            val alpha = if (!dark) 1f else 0.72f
+            color.copy(alpha = alpha)
+        } else color
 }

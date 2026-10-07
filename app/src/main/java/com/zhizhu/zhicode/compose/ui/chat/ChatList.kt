@@ -359,7 +359,16 @@ fun ChatList(
             // ⚠️ 每个成员仍在**容器内部**各自成一层组合（`key(item.id)`），
             // 手指追踪与长按菜单也挂在成员自己那一层 —— 于是菜单锚点与以前**完全一致**，
             // 不需要任何跨层坐标换算（那正是锚偏的常见来源）。
-            items(blocks, key = { it.key }) { block ->
+            items(
+                items = blocks,
+                key = { it.key },
+                contentType = { block ->
+                    when (block) {
+                        is TurnLayout.Block.Standalone -> "message-user"
+                        is TurnLayout.Block.Turn -> "message-turn"
+                    }
+                },
+            ) { block ->
                 // 新消息淡入 + 已有消息位置变化时平滑推移。
                 //
                 // ⚠️ `fadeOutSpec = null` 是刻意的，别加回来。
@@ -371,7 +380,9 @@ fun ChatList(
                     is TurnLayout.Block.Standalone -> listOf(block.id)
                     is TurnLayout.Block.Turn -> block.ids
                 }
-                val members = memberIds.mapNotNull { transcriptById[it] }
+                val members = remember(memberIds, transcriptById) {
+                    memberIds.mapNotNull { transcriptById[it] }
+                }
                 if (members.isEmpty()) return@items
                 Box(
                     modifier = Modifier
@@ -394,7 +405,7 @@ fun ChatList(
                             // 手指位置追踪：挂在这一条自己的 Box 上，于是记录到的坐标就是
                             // 「相对这一条」的，与 anchoredMenu 的锚点是同一个坐标系。
                             val finger = rememberFingerTracker()
-                            var fingerOffset by remember { mutableStateOf<DpOffset?>(null) }
+                            var fingerOffset by remember(item.id) { mutableStateOf<DpOffset?>(null) }
                             key(item.id) {
                                 // ⚠️ 每一位成员外面这一层 Box 是**必须**的，不是多余的嵌套：
                                 //
@@ -477,11 +488,15 @@ fun ChatList(
             // 「任务清单」窗口里。调试模式把它摊在对话流末尾，于是"任务与消息的对应
             // 关系"一眼可见，也不必再开一个窗口。
             if (debugMode && debugTasks.isNotEmpty()) {
-                item(key = "debug-tasks") { InlineTaskList(debugTasks) }
+                item(key = "debug-tasks", contentType = "debug-task-list") {
+                    InlineTaskList(debugTasks)
+                }
             }
             // 任务进度与工作状态**不放在滚动区**（对应原版把它们挂在固定的
             // chatBottomHost 上），改由 AppScaffold 固定在输入器上方。
-            item { Box(modifier = Modifier.size(10.dp)) }
+            item(key = "chat-bottom-spacer", contentType = "chat-spacer") {
+                Box(modifier = Modifier.size(10.dp))
+            }
         }
         // Miuix 滚动条：自动淡入淡出、可拖拽，比自绘指示条更贴近 HyperOS
         VerticalScrollBar(

@@ -2,6 +2,7 @@ package com.termux.app.zhicode.api;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -32,6 +33,10 @@ final class HttpRequestTracker {
 
     /** 建连超时。连不上应当在 30 秒内失败，而不是拖到用户以为卡死。 */
     static final int CONNECT_TIMEOUT_MS = 30_000;
+    /** 首字节超时；在响应头收到前不允许无限等待。 */
+    static final int FIRST_BYTE_TIMEOUT_MS = 45_000;
+    /** 单次请求总时长上限，防止持续少量输出的连接无限运行。 */
+    static final int TOTAL_TIMEOUT_MS = 30 * 60_000;
 
     /**
      * 读空闲超时。
@@ -57,7 +62,10 @@ final class HttpRequestTracker {
      */
     Scope begin(HttpURLConnection connection) throws InterruptedException {
         connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-        connection.setReadTimeout(READ_IDLE_TIMEOUT_MS);
+        // getResponseCode() can block before any response byte arrives. Use the shorter
+        // first-byte bound for that phase; markResponseStarted() switches to the longer
+        // idle-read bound for a legitimate streaming response.
+        connection.setReadTimeout(FIRST_BYTE_TIMEOUT_MS);
 
         Thread worker = Thread.currentThread();
         Scope scope = new Scope(worker, connection);
@@ -93,6 +101,7 @@ final class HttpRequestTracker {
 
         private final Thread worker;
         private final HttpURLConnection connection;
+        private final String requestId = UUID.randomUUID().toString();
 
         /** 是否已经断过。见 {@link #cancel()}。 */
         private final AtomicBoolean closed = new AtomicBoolean();
@@ -104,6 +113,7 @@ final class HttpRequestTracker {
          * {@link RequestFailure#code(boolean, IOException)}。
          */
         private volatile boolean responseStarted;
+        private final long startedAt = System.currentTimeMillis();
 
         private Scope(Thread worker, HttpURLConnection connection) {
             this.worker = worker;
@@ -113,6 +123,16 @@ final class HttpRequestTracker {
         /** 响应头已收到、开始读正文时调用。 */
         void markResponseStarted() {
             responseStarted = true;
+            // A response is now alive; allow the normal streaming idle window.
+            connection.setReadTimeout(READ_IDLE_TIMEOUT_MS);
+        }
+
+        String requestId() {
+            return requestId;
+        }
+
+        boolean exceedsTotalTimeout() {
+            return System.currentTimeMillis() - startedAt >= TOTAL_TIMEOUT_MS;
         }
 
         /**

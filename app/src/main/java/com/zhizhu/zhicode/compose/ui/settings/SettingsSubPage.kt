@@ -353,7 +353,7 @@ internal fun SettingsSubPage(
                         bottom = padding.calculateBottomPadding() + 16.dp,
                     ),
                 ) {
-                    item(key = "subPageBody") { content() }
+                    item(key = "subPageBody", contentType = "settings-subpage-body") { content() }
                 }
                 VerticalScrollBar(
                     adapter = rememberScrollBarAdapter(listState),

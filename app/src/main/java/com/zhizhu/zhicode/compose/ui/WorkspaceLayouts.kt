@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.painter.Painter
@@ -78,8 +79,11 @@ internal fun WideWorkspace(
             val paneScope = rememberCoroutineScope()
             WorkspaceTabs(
                 tabs = paneTabs,
-                selected = paneTabs.getOrNull(panePager.currentPage) ?: paneTabs.first(),
+                selected = state.tab.takeIf { it in paneTabs } ?: paneTabs.first(),
                 onSelect = { tab ->
+                    // 宽屏副栏也写入同一个业务真源；否则 TabRow 高亮、Pager 和
+                    // 下次 state 更新之间会出现短暂的双状态。
+                    viewModel.selectTab(tab)
                     paneScope.launch { panePager.springAnimateToPage(paneTabs.indexOf(tab)) }
                 },
             )
@@ -141,11 +145,14 @@ private fun WorkspacePager(
     onPageSelected: (WorkspaceTab) -> Unit = {},
 ) {
     val currentSelectedTab by rememberUpdatedState(selectedTab)
-    LaunchedEffect(pagerState) {
+    val latestOnPageSelected by rememberUpdatedState(onPageSelected)
+    LaunchedEffect(pagerState, tabs) {
         snapshotFlow { pagerState.currentPage to pagerState.isScrollInProgress }
             .collect { (page, scrolling) ->
                 tabs.getOrNull(page)?.let { tab ->
-                    onPageSelected(tab)
+                    // currentPage 只在页真正变化时变化；isScrollInProgress 仅负责
+                    // 把 settle 边界传给业务层，不把逐帧拖动状态向上扩散。
+                    latestOnPageSelected(tab)
                     if (!scrolling && tab != currentSelectedTab) viewModel.selectTab(tab)
                 }
             }
@@ -170,6 +177,8 @@ private fun WorkspacePager(
         state = pagerState,
         modifier = modifier,
         userScrollEnabled = false,
+        // 工作区只有少量页面；不要让 Pager 预组合远离当前页的重型对话、终端和文件树。
+        beyondViewportPageCount = 0,
         flingBehavior = flingBehavior,
         key = { tabs[it] },
         pageContent = { page ->
@@ -209,8 +218,9 @@ internal fun WorkspaceTabs(
     modifier: Modifier = Modifier,
 ) {
     val selectedIndex = tabs.indexOf(selected).coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
+    val labels = remember(tabs) { tabs.map { it.label } }
     ZhiSegmentedTabs(
-        tabs = tabs.map { it.label },
+        tabs = labels,
         selectedIndex = selectedIndex,
         onSelect = { index -> tabs.getOrNull(index)?.takeIf { it != selected }?.let(onSelect) },
         modifier = modifier.fillMaxWidth().height(WorkspaceTabRowHeight),
@@ -303,12 +313,11 @@ private fun PaneHost(
             filePath = state.filePath,
             entries = state.fileEntries,
             emptyNote = state.fileNote,
-            listOptions = state.fileListOptions.copy(grid = false),
+            listOptions = state.fileListOptions,
             onQueryChange = viewModel::updateFileQuery,
             onSortChange = viewModel::updateFileSort,
             onToggleSortDirection = viewModel::toggleFileSortDirection,
             onOpen = viewModel::openFile,
-            onUp = viewModel::navigateUp,
             onNavigate = viewModel::navigateTo,
             root = state.fileRoot,
             onSwitchRoot = viewModel::switchFileRoot,

@@ -26,8 +26,6 @@ import com.zhizhu.zhicode.compose.model.AttachBrowserState
 import com.zhizhu.zhicode.compose.model.FileEntry
 import com.zhizhu.zhicode.compose.model.FileRoot
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
-import com.zhizhu.zhicode.compose.ui.ZhiIconButton
-import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.panes.FileListRow
 import com.zhizhu.zhicode.compose.ui.panes.FilePathBar
 import com.zhizhu.zhicode.compose.ui.panes.FileRootSwitcher
@@ -111,7 +109,6 @@ fun AttachFileOverlay(
     browser: AttachBrowserState,
     onFilterChange: (String) -> Unit,
     onNavigate: (String) -> Unit,
-    onUp: () -> Unit,
     onSwitchRoot: (FileRoot) -> Unit,
     onPick: (FileEntry) -> Unit,
     onDismiss: () -> Unit,
@@ -151,20 +148,10 @@ fun AttachFileOverlay(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpace.m, vertical = 2.dp),
             )
 
-            // 2) 面包屑 + 「上一级」，共用 [FilePathBar]（与文件面板**同一行几何**）。
-            //    两者都在**不滚动**的头部：目录走深了以后，回退入口跟着滚上去就等于没有。
+            // 2) 面包屑。点击面包屑中的任一级即可返回该目录，不再额外显示上一级图标。
             FilePathBar(
                 filePath = browser.path,
                 onNavigate = onNavigate,
-                trailing = {
-                    ZhiIconButton(
-                        icon = ZhiIcons.back,
-                        description = "上一级目录",
-                        onClick = onUp,
-                        iconSize = 16.dp,
-                        compact = 30.dp,
-                    )
-                },
             )
 
             // 3) 目录内过滤（不滚动头部）。Miuix `InputField` = 胶囊搜索框，
@@ -203,7 +190,11 @@ fun AttachFileOverlay(
                     modifier = Modifier.fillMaxSize().padding(horizontal = ZhiSpace.m),
                     verticalArrangement = Arrangement.spacedBy(ZhiSpace.xs),
                 ) {
-                    items(visible, key = { it.path }) { entry ->
+                    items(
+                        items = visible,
+                        key = { it.path },
+                        contentType = { if (it.directory) "directory" else "file" },
+                    ) { entry ->
                         FileListRow(
                             entry = entry,
                             // ⚠️ 点目录是**进去**，点文件才是附加。

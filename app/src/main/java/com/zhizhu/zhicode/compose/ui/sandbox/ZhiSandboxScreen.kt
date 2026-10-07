@@ -294,8 +294,11 @@ fun ZhiSandboxScreen(
                         EmptyState(modifier = Modifier.animateItem())
                     }
                 } else {
-                    items(state.packages, key = { it }) { pkg ->
-                        AppCard(
+                    items(
+                        items = state.packages,
+                        key = { it },
+                        contentType = { "sandbox-package" },
+                    ) { pkg ->                        AppCard(
                             packageName = pkg,
                             onLaunch = onLaunch,
                             onStop = onStop,

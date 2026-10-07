@@ -97,9 +97,16 @@ internal fun FileBreadcrumbBar(filePath: String, onNavigate: (String) -> Unit, m
 internal fun breadcrumbItems(filePath: String): List<BreadcrumbItem> {
     val normalized = filePath.trimEnd('/').ifEmpty { "/" }
     val appRoot = TermuxConstants.TERMUX_DATA_DIR_PATH.trimEnd('/')
-    val start = if (normalized == appRoot || normalized.startsWith("$appRoot/")) appRoot else "/"
+    val sharedRoot = "/storage/emulated/0"
+    val isSharedPath = normalized == sharedRoot || normalized.startsWith("$sharedRoot/")
+    val start = when {
+        normalized == appRoot || normalized.startsWith("$appRoot/") -> appRoot
+        isSharedPath -> sharedRoot
+        else -> "/"
+    }
     val rest = if (normalized == start) "" else normalized.removePrefix(if (start == "/") "/" else "$start/")
-    val items = mutableListOf(BreadcrumbItem(start, start.substringAfterLast('/').ifEmpty { "/" }))
+    val startLabel = if (start == sharedRoot) "sdcard" else start.substringAfterLast('/').ifEmpty { "/" }
+    val items = mutableListOf(BreadcrumbItem(start, startLabel))
     var path = if (start == "/") "" else start
     rest.split('/').filter(String::isNotEmpty).forEach {
         path += "/$it"

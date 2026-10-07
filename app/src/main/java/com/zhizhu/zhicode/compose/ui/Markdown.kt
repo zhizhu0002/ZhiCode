@@ -52,6 +52,7 @@ import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import java.util.LinkedHashMap
 
 /**
  * Markdown 渲染层。语法解析在 `MarkdownParse.kt`（纯 Kotlin、可独立测试），
@@ -91,7 +92,12 @@ fun ZhiMarkdown(
     val scheme = MiuixTheme.colorScheme
     val inlineStyles = rememberInlineStyles(bodyFontSize)
     val split = remember(source, streaming) { splitForStreaming(source, streaming) }
-    val blocks = remember(split.settled) { parseMarkdown(split.settled) }
+    // 流式尾部会不断变化，不能写进进程级缓存；定稿正文则跨 LazyColumn 回收、
+    // 会话切换和相同内容的多个调用点复用 AST。组合级 remember 仍保留在外层，
+    // 这样热路径不需要每次触碰全局锁。
+    val blocks = remember(split.settled, streaming) {
+        if (streaming) parseMarkdown(split.settled) else MarkdownBlockCache.getOrParse(split.settled)
+    }
 
     // 前沿淡入的斜坡宽度：按**到达速率**换算，目标是固定时长（见 TailFadeRate）。
     //
@@ -148,6 +154,54 @@ fun ZhiMarkdown(
  * 于是 `parseMarkdown` 的 key 也只在跨块时失效 —— 这正是这次优化的全部意义。
  */
 private class MdStreamSplit(val settled: String, val tail: String)
+
+/**
+ * 定稿 Markdown 的跨组合缓存。
+ *
+ * `remember(source)` 只覆盖当前组合树：LazyColumn 回收一条历史消息后，下一次滚回来
+ * 仍会重新做整篇块解析。这里缓存的是不含主题/字号的纯 AST，因此可以安全地跨消息、
+ * 跨主题和跨组合复用；行内 `AnnotatedString` 仍由各自的 [InlineStyles] 缓存，避免把
+ * 主题色对象带进全局缓存。
+ *
+ * 只缓存定稿正文，并限制条数与源文本总量。流式文本每个 delta 都是新 key，放进这里
+ * 会把有限缓存变成“只进不命中”的队列；超长正文也宁可交给组合级 remember，避免
+ * 一个很大的回复长期占住进程级缓存。
+ */
+private object MarkdownBlockCache {
+    private const val MaxEntries = 12
+    private const val MaxSourceChars = 512 * 1024
+    private const val MaxCacheableSourceChars = 128 * 1024
+
+    private val entries = LinkedHashMap<String, List<MdBlock>>(MaxEntries, 0.75f, true)
+    private var sourceChars = 0
+
+    fun getOrParse(source: String): List<MdBlock> {
+        if (source.length > MaxCacheableSourceChars) return parseMarkdown(source)
+
+        synchronized(this) {
+            entries[source]?.let { return it }
+        }
+
+        val parsed = parseMarkdown(source)
+        synchronized(this) {
+            // 另一个组合可能在解析期间先填入了同一正文，优先复用那份。
+            entries[source]?.let { return it }
+            entries[source] = parsed
+            sourceChars += source.length
+            trim()
+        }
+        return parsed
+    }
+
+    private fun trim() {
+        val iterator = entries.entries.iterator()
+        while (entries.size > MaxEntries || sourceChars > MaxSourceChars) {
+            if (!iterator.hasNext()) break
+            sourceChars -= iterator.next().key.length
+            iterator.remove()
+        }
+    }
+}
 
 /**
  * 短于这个长度就不切。

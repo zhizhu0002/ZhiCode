@@ -29,6 +29,7 @@ import com.termux.app.zhicode.storage.ApiSettingsStore
 import com.termux.app.zhicode.tasks.TaskStore
 import org.json.JSONObject
 import java.io.File
+import java.util.LinkedHashMap
 import java.util.concurrent.Executors
 
 /**
@@ -155,6 +156,14 @@ internal class ZhiEngineController(
     private val deltaLock = Any()
     private val pendingText = StringBuilder()
     private var flushPosted = false
+    private var pendingTextGeneration = 0L
+    private val thinkingLock = Any()
+    private val pendingThinking = StringBuilder()
+    private var thinkingFlushPosted = false
+    private var thinkingGeneration = 0L
+    private val toolProgressLock = Any()
+    private val pendingToolProgress = LinkedHashMap<String, ToolProgressBuffer>()
+    private var toolProgressFlushPosted = false
 
     /** 回合代际。取消/重置后自增，用来静默丢弃在途的旧回调。 */
     @Volatile
@@ -167,8 +176,18 @@ internal class ZhiEngineController(
     @Volatile
     var sessionConfig: SessionConfig? = null
         private set
+    private var lastConfiguredFingerprint: String? = null
 
     private val flushDelta = Runnable { flushPendingText() }
+    private val flushThinking = Runnable { flushPendingThinking() }
+    private val flushToolProgress = Runnable { flushPendingToolProgress() }
+
+    private data class ToolProgressBuffer(
+        val id: String,
+        val stderr: Boolean,
+        val chunk: StringBuilder,
+        var elapsedMs: Long,
+    )
 
     /**
      * 引擎**生命周期**调用的串行后台线程。
@@ -209,8 +228,11 @@ internal class ZhiEngineController(
         val store = apiStore ?: ApiSettingsStore(appContext).also { apiStore = it }
         val base = runCatching { store.load() }.getOrElse { SessionConfig() }
         applyEngineOverrides(base, overrides)
+        val fingerprint = configurationFingerprint(base)
+        val changed = fingerprint != lastConfiguredFingerprint
         sessionConfig = base
         engine().configure(base)
+        if (changed) lastConfiguredFingerprint = fingerprint
         // ⚠️ 这里必须落盘。原先只把值写进内存与引擎，`ApiSettingsStore.save()` 在
         // 整个工程里**零调用方** —— 于是权限模式、推理档、上下文窗口、项目目录、
         // 联网搜索那一整套、自动压缩、自定义提示词，全都重启即丢。它们的存储键与
@@ -220,9 +242,21 @@ internal class ZhiEngineController(
         // （内存立即生效、磁盘异步写），唯一的重活——密钥加密——只在密钥**真的变了**
         // 时发生，而这里的 base 来自 store.load()，密钥与库里一致，不会触发。
         // 调用频率是「每条消息一次」，不是热路径。
-        runCatching { store.save(base) }
+        if (changed) runCatching { store.save(base) }
         return base
     }
+
+    private fun configurationFingerprint(config: SessionConfig): String = listOf(
+        config.profileId, config.profileRevision.toString(), config.credentialRevision.toString(),
+        config.protocol, config.baseUrl, config.extraHeaders, config.model, config.effort,
+        config.permissionMode, config.projectDirectory, config.customSystemPrompt,
+        config.roleCard, config.toolMode, config.visionEnabled.toString(),
+        config.autoCompact.toString(), config.contextWindowTokens.toString(),
+        config.webSearchEnabled.toString(), config.webSearchProvider,
+        config.webSearchMaxResults.toString(), config.webTimeoutMs.toString(),
+        config.rootExecutionEnabled.toString(), config.sandboxAgentFullAccess.toString(),
+        config.forcedKeepAliveEnabled.toString(), config.workflowId,
+    ).joinToString("\u0000")
 
     fun isBusy(): Boolean = engine?.isBusy ?: false
 
@@ -263,8 +297,20 @@ internal class ZhiEngineController(
         synchronized(deltaLock) {
             pendingText.setLength(0)
             flushPosted = false
+            pendingTextGeneration = generation
         }
         main.removeCallbacks(flushDelta)
+        main.removeCallbacks(flushThinking)
+        main.removeCallbacks(flushToolProgress)
+        synchronized(thinkingLock) {
+            pendingThinking.setLength(0)
+            thinkingFlushPosted = false
+            thinkingGeneration = generation
+        }
+        synchronized(toolProgressLock) {
+            pendingToolProgress.clear()
+            toolProgressFlushPosted = false
+        }
         val genAtSubmit = generation
         engineOps.execute {
             if (generation != genAtSubmit) return@execute
@@ -273,13 +319,35 @@ internal class ZhiEngineController(
     }
 
     fun resumeConversation(file: File) {
+        require(file.isFile) { "会话文件不存在：${file.absolutePath}" }
         generation++
         synchronized(deltaLock) {
             pendingText.setLength(0)
             flushPosted = false
+            pendingTextGeneration = generation
         }
         main.removeCallbacks(flushDelta)
-        engine().resumeConversation(file)
+        main.removeCallbacks(flushThinking)
+        main.removeCallbacks(flushToolProgress)
+        synchronized(thinkingLock) {
+            pendingThinking.setLength(0)
+            thinkingFlushPosted = false
+            thinkingGeneration = generation
+        }
+        synchronized(toolProgressLock) {
+            pendingToolProgress.clear()
+            toolProgressFlushPosted = false
+        }
+        val genAtSubmit = generation
+        engineOps.execute {
+            if (generation != genAtSubmit) return@execute
+            runCatching { engine().resumeConversation(file) }
+                .onFailure { error ->
+                    onMainForGeneration(genAtSubmit) {
+                        events.onEngineError("恢复会话失败：${error.message ?: error}", error)
+                    }
+                }
+        }
     }
 
     fun resetConversation() {
@@ -287,8 +355,20 @@ internal class ZhiEngineController(
         synchronized(deltaLock) {
             pendingText.setLength(0)
             flushPosted = false
+            pendingTextGeneration = generation
         }
         main.removeCallbacks(flushDelta)
+        main.removeCallbacks(flushThinking)
+        main.removeCallbacks(flushToolProgress)
+        synchronized(thinkingLock) {
+            pendingThinking.setLength(0)
+            thinkingFlushPosted = false
+            thinkingGeneration = generation
+        }
+        synchronized(toolProgressLock) {
+            pendingToolProgress.clear()
+            toolProgressFlushPosted = false
+        }
         // 与 cancel() 同样的代际守卫：排队的重置在执行时若已来了新回合，就让它过去
         // （引擎自己的 resetConversation() 开头也会再 cancel 一次，语义不会丢）。
         val genAtSubmit = generation
@@ -301,6 +381,8 @@ internal class ZhiEngineController(
     fun shutdown() {
         generation++
         main.removeCallbacks(flushDelta)
+        main.removeCallbacks(flushThinking)
+        main.removeCallbacks(flushToolProgress)
         runCatching { engine?.shutdown() }
         engineOps.shutdownNow()
     }
@@ -471,8 +553,13 @@ internal class ZhiEngineController(
     // ------------------------------------------------------------------
 
     private fun queueText(delta: String) {
+        if (delta.isEmpty()) return
         synchronized(deltaLock) {
-            if (generation != currentGeneration()) return
+            val gen = currentGeneration()
+            if (pendingTextGeneration != gen) {
+                pendingText.setLength(0)
+                pendingTextGeneration = gen
+            }
             pendingText.append(delta)
             if (flushPosted) return
             flushPosted = true
@@ -488,10 +575,9 @@ internal class ZhiEngineController(
             chunk = pendingText.toString()
             pendingText.setLength(0)
             flushPosted = false
-            gen = generation
+            gen = pendingTextGeneration
         }
-        if (chunk.isEmpty()) return
-        if (gen != generation) return
+        if (chunk.isEmpty() || gen != generation) return
         events.onEngineText(chunk)
     }
 
@@ -538,8 +624,16 @@ internal class ZhiEngineController(
 
     override fun onThinkingDelta(thinking: String) {
         if (thinking.isNullOrEmpty()) return
-        val gen = generation
-        onMainForGeneration(gen) { events.onEngineThinking(thinking) }
+        synchronized(thinkingLock) {
+            if (thinkingGeneration != generation) {
+                pendingThinking.setLength(0)
+                thinkingGeneration = generation
+            }
+            pendingThinking.append(thinking)
+            if (thinkingFlushPosted) return
+            thinkingFlushPosted = true
+        }
+        main.postDelayed(flushThinking, DELTA_MERGE_MS)
     }
 
     override fun onToolBatchStarted(batch: ZhiCodeEngine.ToolBatch?) {
@@ -567,9 +661,43 @@ internal class ZhiEngineController(
     }
 
     override fun onToolProgress(call: ToolCall?, chunk: String?, stderr: Boolean, elapsedMs: Long) {
-        if (call?.id == null || chunk.isNullOrEmpty()) return
-        val gen = generation
-        onMainForGeneration(gen) { events.onEngineToolProgress(call.id, chunk, stderr, elapsedMs) }
+        val id = call?.id ?: return
+        if (chunk.isNullOrEmpty()) return
+        synchronized(toolProgressLock) {
+            val existing = pendingToolProgress[id]
+            if (existing == null || existing.stderr != stderr) {
+                pendingToolProgress[id] = ToolProgressBuffer(id, stderr, StringBuilder(chunk), elapsedMs)
+            } else {
+                existing.chunk.append(chunk)
+                existing.elapsedMs = maxOf(existing.elapsedMs, elapsedMs)
+            }
+            if (toolProgressFlushPosted) return
+            toolProgressFlushPosted = true
+        }
+        main.postDelayed(flushToolProgress, TOOL_PROGRESS_MERGE_MS)
+    }
+
+    private fun flushPendingThinking() {
+        val text: String
+        val gen: Long
+        synchronized(thinkingLock) {
+            text = pendingThinking.toString()
+            pendingThinking.setLength(0)
+            thinkingFlushPosted = false
+            gen = thinkingGeneration
+        }
+        if (text.isNotEmpty() && gen == generation) events.onEngineThinking(text)
+    }
+
+    private fun flushPendingToolProgress() {
+        val rows: List<ToolProgressBuffer>
+        synchronized(toolProgressLock) {
+            rows = pendingToolProgress.values.toList()
+            pendingToolProgress.clear()
+            toolProgressFlushPosted = false
+        }
+        if (rows.isEmpty()) return
+        rows.forEach { row -> events.onEngineToolProgress(row.id, row.chunk.toString(), row.stderr, row.elapsedMs) }
     }
 
     override fun onToolResult(call: ToolCall?, result: ToolExecutionResult?) {
@@ -735,6 +863,7 @@ internal class ZhiEngineController(
     private companion object {
         /** 流式文本合并窗口。原版 `queueStreamingDelta` 用的是 32ms。 */
         const val DELTA_MERGE_MS = 32L
+        const val TOOL_PROGRESS_MERGE_MS = 48L
     }
 }
 

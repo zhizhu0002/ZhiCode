@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.absoluteOffset
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -148,7 +149,7 @@ internal fun FloatingBottomShell(
             // 横向内缩在**布局层**，卡片贴住布局框 —— 与之前发送栏一致。
             .padding(horizontal = floatingHorizontalInset(wide))
             .then(glass.blur(Modifier, RoundedCornerShape(ZhiRadius.floating), radius = 24f)),
-        color = glass.surfaceColor(scheme.surfaceContainer),
+        color = glass.surfaceColor(if (ZhiColors.isDark()) scheme.surfaceContainer else ZhiColors.panelSurface()),
         cornerRadius = ZhiRadius.floating,
         outSidePadding = PaddingValues(0.dp),
         shadowElevation = 10.dp,
@@ -178,7 +179,10 @@ fun ZhiIconButton(
     compact: Dp? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
-    val color = if (tint == Color.Unspecified) scheme.onBackgroundVariant else tint
+    // `onBackgroundVariant` 在浅色 Miuix 色板中是较弱的辅助色，作为通用
+    // 图标默认色会让菜单、返回和设置等可操作图标显得发灰；主文字色在深浅
+    // 主题中都保持足够对比度。明确传入的 tint（包括禁用态）仍优先保留。
+    val color = if (tint == Color.Unspecified) scheme.onSurface else tint
     val content: @Composable () -> Unit = {
         Icon(
             painter = icon,
@@ -337,7 +341,7 @@ fun ZhiChip(
     val foreground = when {
         contentColor != Color.Unspecified -> contentColor
         active -> scheme.onPrimary
-        else -> scheme.onSurfaceVariantSummary
+        else -> scheme.onSurface
     }
     ZhiPillSurface(
         onClick = onClick,
@@ -366,7 +370,7 @@ fun ZhiSmallPill(
 ) {
     val scheme = MiuixTheme.colorScheme
     val foreground by animateColorAsState(
-        targetValue = if (highlighted) scheme.primary else scheme.onSurfaceVariantSummary,
+        targetValue = if (highlighted) scheme.primary else scheme.onSurface,
         animationSpec = ZhiMotion.colorSpec,
         label = "pillForeground",
     )
@@ -554,6 +558,9 @@ fun ZhiSegmentedTabs(
     // 只向 Miuix 转发合法下标；调用方若在列表更新后暂时拿到旧下标，
     // 不应把越界值传入组件或触发一次无效的回调。
     val selectTab = rememberUpdatedState(onSelect)
+    // TabRow 自己拥有横向懒列表；把 state 稳定地留在 wrapper 内，避免每次上层
+    // 流式状态变化都重建横向滚动位置，也让选中项自动保持在可见区。
+    val tabListState = rememberLazyListState()
     TabRowWithContour(
         tabs = tabs,
         selectedTabIndex = safeSelectedIndex,
@@ -563,6 +570,8 @@ fun ZhiSegmentedTabs(
             }
         },
         modifier = modifier,
+        listState = tabListState,
+        itemSpacing = 4.dp,
         minWidth = if (matchWidth) 0.dp else TabRowDefaults.TabRowWithContourMinWidth,
         maxWidth = if (matchWidth) TabsMatchWidthLimit else TabRowDefaults.TabRowWithContourMaxWidth,
     )

@@ -72,21 +72,21 @@ fun PaneHeader(
     val scheme = MiuixTheme.colorScheme
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(ZhiRow.height).padding(start = ZhiSpace.m, end = ZhiSpace.xs),
+            modifier = Modifier.fillMaxWidth().height(ZhiRow.height).padding(horizontal = ZhiSpace.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = title,
                 color = scheme.onBackground,
-                fontSize = MiuixTheme.textStyles.body1.fontSize,
-                fontWeight = FontWeight.Bold,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                fontWeight = FontWeight.SemiBold,
             )
             if (subtitle != null) {
                 Text(
                     text = subtitle,
                     color = scheme.onSurfaceVariantSummary,
                     fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                    modifier = Modifier.padding(start = 8.dp),
+                    modifier = Modifier.padding(start = ZhiSpace.s),
                 )
             }
             // 把动作按钮推到行尾

@@ -62,6 +62,7 @@
     </queries>
 
     <application
+        android:enableOnBackInvokedCallback="true"
         android:name=".ZhiCodeApplication"
         android:allowBackup="false"
         android:label="ZhiCode"
@@ -100,6 +101,31 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          文本编辑器。**独立 Activity**（与 ZalithLauncher2 的 FileManagerActivity 同一形状）。
+
+          为什么不做成主界面里的一个页面：那意味着返回键、返回手势与输入法可见性
+          要在同一个窗口里和 NavDisplay、对话输入器分权 —— 反复出现的"编辑后返回不弹
+          未保存确认""键盘时有时无"都出自这里。独立窗口之后，这一屏的返回只有一个入口
+          （EditorActivity.onBackPressedDispatcher），输入法也只有一个主人。
+
+          · windowSoftInputMode="adjustResize"：**不带** stateAlwaysHidden。
+            主界面那份带它是为了让对话输入器不要一启动就弹键盘；编辑器正相反，
+            用户点正文就该出键盘。这个标志正是"显示请求被系统回滚"的来源。
+          · enableOnBackInvokedCallback="true"：让返回手势/预测性返回走
+            OnBackPressedDispatcher（应用级已经开了，这里显式重复一次，
+            因为这一屏的返回行为是关键路径，不该依赖继承）。
+          · configChanges 覆盖 uiMode/locale/layoutDirection：应用内换主题、
+            系统深浅变化时这一屏不重建，编辑中的正文与光标位置不会丢。
+        -->
+        <activity
+            android:name=".editor.EditorActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode|locale|layoutDirection"
+            android:enableOnBackInvokedCallback="true"
+            android:exported="false"
+            android:process=":editor"
+            android:windowSoftInputMode="adjustResize" />
 
         <!--
           APK 分享用的只读 ContentProvider（AndroidIntent 工具 install_apk 依赖它）。

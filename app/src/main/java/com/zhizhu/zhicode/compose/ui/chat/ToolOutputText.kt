@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import java.util.LinkedHashMap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -39,6 +40,10 @@ private const val MaxRenderedChars = 48_000
 /** 每个懒列表 item 的行数；只会组合视口附近的几个 chunk。 */
 private const val LinesPerChunk = 24
 
+/** 同一份完成态输出在多个工具行/多次回收中复用行索引；流式输出不进入此缓存。 */
+private const val MaxCachedIndexChars = 128 * 1024
+private const val MaxCachedIndexes = 12
+
 /** 内层输出窗口的高度上限，避免展开工具卡独占整个对话流。 */
 private val OutputWindowMaxHeight = 360.dp
 
@@ -57,7 +62,7 @@ private fun OutputWindow(text: String, diffMode: Boolean) {
     if (text.isEmpty()) return
 
     var showAll by remember(text) { mutableStateOf(false) }
-    val index = remember(text) { TextLayoutIndex(text) }
+    val index = remember(text) { ToolTextIndexCache.getOrBuild(text) }
     val window = remember(index, showAll) { index.window(showAll) }
 
     LazyColumn(
@@ -151,6 +156,35 @@ private fun MoreLinesRow(hidden: Int, onClick: () -> Unit) {
  * 原文的轻量行索引。只保存每行起点，不预先 split 字符串；展示时只为可见行创建
  * substring。对 300,000 字符的单行输出也只产生一个受 MaxRenderedChars 约束的 Text。
  */
+private object ToolTextIndexCache {
+    private val entries = LinkedHashMap<String, TextLayoutIndex>(MaxCachedIndexes, 0.75f, true)
+    private var sourceChars = 0
+
+    fun getOrBuild(source: String): TextLayoutIndex {
+        if (source.length > MaxCachedIndexChars) return TextLayoutIndex(source)
+        synchronized(this) {
+            entries[source]?.let { return it }
+        }
+        val index = TextLayoutIndex(source)
+        synchronized(this) {
+            entries[source]?.let { return it }
+            entries[source] = index
+            sourceChars += source.length
+            trim()
+        }
+        return index
+    }
+
+    private fun trim() {
+        val iterator = entries.entries.iterator()
+        while (entries.size > MaxCachedIndexes || sourceChars > MaxCachedIndexChars * 2) {
+            if (!iterator.hasNext()) break
+            sourceChars -= iterator.next().key.length
+            iterator.remove()
+        }
+    }
+}
+
 private class TextLayoutIndex(private val source: String) {
     private val starts: IntArray = buildList {
         add(0)

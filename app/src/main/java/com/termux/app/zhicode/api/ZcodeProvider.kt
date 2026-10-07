@@ -112,7 +112,7 @@ class ZcodeProvider : ModelProvider {
             }
 
             BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { reader ->
-                while (AnthropicMessagesProvider.readEvent(reader, decoder)) {
+                while (AnthropicMessagesProvider.readEvent(reader, decoder, request)) {
                     // 循环体为空是有意的：一次调用消费一个事件，见 readEvent 的说明。
                 }
             }

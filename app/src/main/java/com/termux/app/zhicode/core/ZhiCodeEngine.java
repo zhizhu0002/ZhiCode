@@ -240,8 +240,17 @@ public final class ZhiCodeEngine {
 
     /** 发给提供方的上下文。写入都在 agent 线程，读取（估算用量）在界面线程。 */
     private final JSONArray messages = new JSONArray();
+    /** 最近一次序列化的消息快照；只有历史版本变化时才重新序列化。 */
+    private volatile String cachedMessageSnapshotJson;
+    private volatile int messageRevision;
+    private volatile int cachedMessageRevision = -1;
+    private volatile String cachedSystemPrompt;
+    private volatile String cachedSystemPromptKey;
+    private volatile JSONArray cachedToolSchemas;
+    private volatile String cachedToolSchemasKey;
     private final Object messageLock = new Object();
     private final AtomicBoolean busy = new AtomicBoolean(false);
+    private volatile EngineTaskState taskState = EngineTaskState.IDLE;
     private long nextToolBatchId;
 
     private volatile Listener listener;
@@ -310,6 +319,14 @@ public final class ZhiCodeEngine {
         return busy.get();
     }
 
+    public EngineTaskState taskState() {
+        return taskState;
+    }
+
+    private void setTaskState(EngineTaskState next) {
+        if (next != null && next != taskState) taskState = next;
+    }
+
     public boolean isExecutingTool() {
         return executingTool;
     }
@@ -364,6 +381,10 @@ public final class ZhiCodeEngine {
             }
         }
         this.config = next;
+        cachedSystemPrompt = null;
+        cachedSystemPromptKey = null;
+        cachedToolSchemas = null;
+        cachedToolSchemasKey = null;
         bindTaskStore();
         invalidateMeasuredUsage();
     }
@@ -422,6 +443,8 @@ public final class ZhiCodeEngine {
         JSONObject message = new JSONObject().put("role", role).put("content", content);
         synchronized (messageLock) {
             messages.put(message);
+            messageRevision++;
+            cachedMessageSnapshotJson = null;
         }
         SessionStore store = sessionStore;
         if (store != null) store.appendMessage(role, content, messageId, turnId, origin);
@@ -430,7 +453,11 @@ public final class ZhiCodeEngine {
     /** 本地历史的快照。发请求用的是快照，之后历史怎么改都不影响已经发出去的那次。 */
     private JSONArray snapshotMessages() throws Exception {
         synchronized (messageLock) {
-            return new JSONArray(messages.toString());
+            if (cachedMessageSnapshotJson == null || cachedMessageRevision != messageRevision) {
+                cachedMessageSnapshotJson = messages.toString();
+                cachedMessageRevision = messageRevision;
+            }
+            return new JSONArray(cachedMessageSnapshotJson);
         }
     }
 
@@ -443,7 +470,8 @@ public final class ZhiCodeEngine {
     private JSONArray providerMessages() throws Exception {
         JSONArray snapshot = snapshotMessages();
         SessionConfig current = config;
-        return VisionMessageFilter.apply(snapshot, current == null || current.visionEnabled);
+        boolean visionEnabled = current == null || current.visionEnabled;
+        return VisionMessageFilter.apply(snapshot, visionEnabled);
     }
 
     private void appendConfigEvent() {
@@ -548,12 +576,15 @@ public final class ZhiCodeEngine {
         steering.clear();
         synchronized (messageLock) {
             clearMessagesLocked();
+            messageRevision++;
+            cachedMessageSnapshotJson = null;
         }
         invalidateMeasuredUsage();
         consecutiveAutoCompactFailures = 0;
         if (config == null) return;
         config.workflowId = UUID.randomUUID().toString();
         config.planWorkflowState = PlanWorkflowState.idle();
+        taskState = EngineTaskState.IDLE;
         sessionStore = null;
         bindTaskStore();
     }
@@ -577,6 +608,8 @@ public final class ZhiCodeEngine {
         synchronized (messageLock) {
             clearMessagesLocked();
             for (int i = 0; i < restored.length(); i++) messages.put(restored.getJSONObject(i));
+            messageRevision++;
+            cachedMessageSnapshotJson = null;
         }
         invalidateMeasuredUsage();
         consecutiveAutoCompactFailures = 0;
@@ -620,6 +653,7 @@ public final class ZhiCodeEngine {
         questionGate.cancelAll();
         planApprovalGate.cancelAll();
 
+        if (busy.get()) setTaskState(EngineTaskState.CANCELLING);
         Thread worker = agentThread;
         ModelProvider provider = activeProvider;
         Future<?> running = activeRun;
@@ -651,6 +685,8 @@ public final class ZhiCodeEngine {
     private void replaceMessagesLocked(JSONArray replacement) throws Exception {
         clearMessagesLocked();
         for (int i = 0; i < replacement.length(); i++) messages.put(replacement.getJSONObject(i));
+        messageRevision++;
+        cachedMessageSnapshotJson = null;
     }
 
     // ------------------------------------------------------------ 上下文用量
@@ -667,9 +703,7 @@ public final class ZhiCodeEngine {
         long measuredTokens = lastMeasuredContextTokens;
         int measuredMessages = lastMeasuredMessageCount;
         try {
-            synchronized (messageLock) {
-                snapshot = new JSONArray(messages.toString());
-            }
+            snapshot = snapshotMessages();
             SessionConfig current = config;
             if (current != null && !current.visionEnabled) VisionMessageFilter.apply(snapshot, false);
         } catch (Exception unreadable) {
@@ -895,6 +929,7 @@ public final class ZhiCodeEngine {
         String rootMessageId = messageId == null || messageId.trim().isEmpty()
                 ? UUID.randomUUID().toString()
                 : messageId;
+        setTaskState(EngineTaskState.MODEL);
         activeRun = executor.submit(() ->
                 runAgent(prompt == null ? "" : prompt, extras, turnConfig, turnId, rootMessageId));
     }
@@ -922,6 +957,7 @@ public final class ZhiCodeEngine {
      */
     private void runAgent(String prompt, JSONArray extraContent, SessionConfig turnConfig, String turnId,
                           String rootMessageId) {
+        long startedAt = System.currentTimeMillis();
         agentThread = Thread.currentThread();
         acquireTaskWakeLock();
         try {
@@ -938,6 +974,8 @@ public final class ZhiCodeEngine {
             maybeAutoCompact();
             drainSteeringPrompts("before-first-model");
             boolean finished = runTurnLoop(turnConfig);
+            appendEventSafely("turn_started", new JSONObject().put("turn_id", turnId)
+                    .put("prompt_chars", prompt == null ? 0 : prompt.length()));
             if (!finished) {
                 throw new IllegalStateException("Maximum agent turn count reached (" + turnConfig.maxAgentTurns
                         + "). The task did not reach a stable completion state; use /compact or continue the task.");
@@ -951,12 +989,25 @@ public final class ZhiCodeEngine {
                 return;
             }
             repairToolHistory(FAILED_TOOL_REASON, true);
+            setTaskState(EngineTaskState.FAILED);
+            appendFailureEvent(failure);
             Listener current = listener;
             if (current != null) {
                 current.onError(failure.getMessage() == null ? failure.toString() : failure.getMessage(), failure);
             }
         } finally {
+            appendEventSafely("turn_finished", safeTimingPayload(turnId, startedAt));
             finishTurn();
+        }
+    }
+
+    private JSONObject safeTimingPayload(String turnId, long startedAt) {
+        try {
+            return new JSONObject().put("turn_id", turnId == null ? "" : turnId)
+                    .put("duration_ms", Math.max(0L, System.currentTimeMillis() - startedAt))
+                    .put("state", taskState.name());
+        } catch (Exception ignored) {
+            return new JSONObject();
         }
     }
 
@@ -967,8 +1018,37 @@ public final class ZhiCodeEngine {
         store.appendTurnConfig(turnConfig, turnId);
     }
 
+    private void appendFailureEvent(Throwable failure) {
+        try {
+            JSONObject payload = new JSONObject()
+                    .put("turn_id", activeTurnId)
+                    .put("error_type", failure == null ? "Unknown" : failure.getClass().getSimpleName())
+                    .put("error", failure == null || failure.getMessage() == null
+                            ? String.valueOf(failure) : failure.getMessage());
+            appendEventSafely("turn_failed", payload);
+        } catch (Throwable ignored) {
+            // 诊断记录不能遮盖原始失败。
+        }
+    }
+
+    private void appendEventSafely(String type, JSONObject payload) {
+        SessionStore store = sessionStore;
+        if (store == null || type == null || payload == null) return;
+        try {
+            store.appendEvent(type, payload);
+        } catch (Throwable ignored) {
+            // 诊断事件不能遮盖原始失败，也不能让错误恢复路径再次失败。
+        }
+    }
+
     private void reportCancelledTurn() {
         repairToolHistory(CANCEL_TOOL_REASON, true);
+        try {
+            appendEventSafely("turn_cancelled", new JSONObject().put("turn_id", activeTurnId)
+                    .put("pending_steering", steering.size()));
+        } catch (Throwable ignored) {
+            // 取消本身不能因诊断事件失败而失败。
+        }
         Listener current = listener;
         if (current == null) return;
         current.onStatus("Cancelled");
@@ -993,6 +1073,8 @@ public final class ZhiCodeEngine {
         activeTurnConfig = null;
         activeTurnId = "";
         busy.set(false);
+        taskState = EngineTaskState.IDLE;
+        activeRun = null;
     }
 
     /**
@@ -1029,6 +1111,7 @@ public final class ZhiCodeEngine {
         StringBuilder streamedText = new StringBuilder();
         AssistantTurn assistant;
         executingModelRequest = true;
+        setTaskState(EngineTaskState.MODEL);
         activeProvider = provider;
         try {
             assistant = requestModelWithRetry(requestConfig, provider, state.systemPrompt,
@@ -1165,6 +1248,7 @@ public final class ZhiCodeEngine {
                 if (current != null) current.onToolUse(call);
                 ToolExecutionResult result;
                 executingTool = true;
+                setTaskState(EngineTaskState.TOOL);
                 try {
                     result = executeTool(call);
                 } finally {
@@ -1190,6 +1274,7 @@ public final class ZhiCodeEngine {
             }
         } finally {
             executingTool = false;
+            if (busy.get() && !Thread.currentThread().isInterrupted()) setTaskState(EngineTaskState.MODEL);
             if (toolResults.length() > 0) {
                 for (int i = 0; i < additionalToolContent.length(); i++) {
                     toolResults.put(additionalToolContent.get(i));
@@ -1503,6 +1588,14 @@ public final class ZhiCodeEngine {
             Thread.currentThread().interrupt();
             return ToolExecutionResult.error("Tool execution cancelled");
         } catch (Throwable failure) {
+            try {
+                appendEventSafely("tool_failed", new JSONObject()
+                        .put("tool", call == null ? "" : call.name)
+                        .put("error_type", failure.getClass().getSimpleName())
+                        .put("error", failure.getMessage() == null ? failure.toString() : failure.getMessage()));
+            } catch (Throwable ignored) {
+                // 诊断记录不能遮盖工具原始失败。
+            }
             return ToolExecutionResult.error(failure.getClass().getSimpleName() + ": "
                     + (failure.getMessage() == null ? failure.toString() : failure.getMessage()));
         }
@@ -1521,12 +1614,14 @@ public final class ZhiCodeEngine {
     }
 
     private ToolExecutionResult askUserQuestion(ToolCall call) throws Exception {
+        setTaskState(EngineTaskState.WAITING_QUESTION);
         if (!isToolAllowed("AskUserQuestion")) {
             return ToolExecutionResult.error("AskUserQuestion is not available to this subagent");
         }
         JSONArray questions = call.input.optJSONArray("questions");
         if (questions == null) questions = new JSONArray().put(call.input);
         JSONObject answers = questionGate.ask(questions, request -> forwardQuestionRequest(request));
+        if (busy.get()) setTaskState(EngineTaskState.TOOL);
         return ToolExecutionResult.ok(new JSONObject().put("answers", answers).toString());
     }
 
@@ -1545,8 +1640,13 @@ public final class ZhiCodeEngine {
                                  String effectivePermissionMode) throws InterruptedException {
         boolean sandboxFullAccess = sandboxFullAccessCoversCall(call, executionConfig, effectivePermissionMode);
         if (sandboxFullAccess) return true;
-        return permissionGate.require(effectivePermissionMode, tool, call,
-                request -> forwardPermissionRequest(request));
+        setTaskState(EngineTaskState.WAITING_PERMISSION);
+        try {
+            return permissionGate.require(effectivePermissionMode, tool, call,
+                    request -> forwardPermissionRequest(request));
+        } finally {
+            if (busy.get() && !Thread.currentThread().isInterrupted()) setTaskState(EngineTaskState.TOOL);
+        }
     }
 
     /**
@@ -1848,12 +1948,14 @@ public final class ZhiCodeEngine {
             throw new IllegalStateException("请等待当前任务结束后再压缩上下文");
         }
         manualCompactionThread = Thread.currentThread();
+        setTaskState(EngineTaskState.COMPACTING);
         try {
             reportStatus("正在调用模型整理上下文…");
             return compactContextSemantic(customInstructions, false);
         } finally {
             manualCompactionThread = null;
             busy.set(false);
+            taskState = EngineTaskState.IDLE;
             Listener current = listener;
             if (current != null) current.onTurnComplete("compacted");
         }
@@ -1875,8 +1977,10 @@ public final class ZhiCodeEngine {
         if (estimateContextTokens() < ContextCompactor.autoCompactThreshold(current)) return;
 
         reportStatus("正在调用模型自动压缩上下文…");
+        setTaskState(EngineTaskState.COMPACTING);
         try {
             String outcome = compactContextSemantic("", true);
+            if (busy.get() && !Thread.currentThread().isInterrupted()) setTaskState(EngineTaskState.MODEL);
             if (outcome.startsWith("上下文已经足够精简")) {
                 consecutiveAutoCompactFailures++;
             } else {
@@ -1885,6 +1989,7 @@ public final class ZhiCodeEngine {
         } catch (InterruptedException cancelled) {
             throw cancelled;
         } catch (Exception failure) {
+            if (busy.get() && !Thread.currentThread().isInterrupted()) setTaskState(EngineTaskState.MODEL);
             consecutiveAutoCompactFailures++;
             SessionStore store = sessionStore;
             if (store != null) {
@@ -2058,12 +2163,14 @@ public final class ZhiCodeEngine {
         if (listener == null) {
             return ToolExecutionResult.error("Plan approval UI is unavailable; remain in plan mode");
         }
+        setTaskState(EngineTaskState.WAITING_PLAN_APPROVAL);
         PlanApprovalGate.ApprovalResponse response = planApprovalGate.request(proposed,
                 request -> {
                     Listener activeListener = listener;
                     if (activeListener != null) activeListener.onPlanApprovalRequest(request);
                 });
 
+        if (busy.get()) setTaskState(EngineTaskState.TOOL);
         PlanWorkflowState live = config.planWorkflowState;
         boolean stillOurs = live != null
                 && live.isAwaitingApproval()
@@ -2138,6 +2245,7 @@ public final class ZhiCodeEngine {
     }
 
     public boolean respondPlanApproval(String requestId, PlanApprovalGate.Decision decision, String feedback) {
+        if (!busy.get()) return false;
         return planApprovalGate.respond(requestId, decision, feedback);
     }
 
@@ -2195,11 +2303,13 @@ public final class ZhiCodeEngine {
     }
 
     public boolean respondQuestion(String requestId, JSONObject answers) {
+        if (!busy.get()) return false;
         if (questionGate.respond(requestId, answers)) return true;
         return subagents != null && subagents.respondQuestion(requestId, answers);
     }
 
     public boolean respondPermission(String requestId, boolean allow) {
+        if (!busy.get()) return false;
         if (permissionGate.respond(requestId, allow)) return true;
         return subagents != null && subagents.respondPermission(requestId, allow);
     }
@@ -2222,6 +2332,14 @@ public final class ZhiCodeEngine {
      * {@link ToolRegistry} 里），因为它的语义是「停下来等人」，与普通工具不同。
      */
     private JSONArray effectiveToolSchemas() {
+        SessionConfig current = config;
+        String key = current == null ? "" : current.permissionMode + "\u0000"
+                + current.webSearchEnabled + "\u0000" + current.rootExecutionEnabled
+                + "\u0000" + (allowedTools == null ? "*" : allowedTools.toString())
+                + "\u0000" + subagentMode;
+        if (cachedToolSchemas != null && key.equals(cachedToolSchemasKey)) {
+            return cloneArray(cachedToolSchemas);
+        }
         JSONArray base = tools.apiSchemas();
         JSONArray schemas = new JSONArray();
         for (JSONObject schema : JsonItems.of(base)) {
@@ -2234,6 +2352,8 @@ public final class ZhiCodeEngine {
             JSONArray agentSchemas = subagents.apiSchemas();
             for (JSONObject schema : JsonItems.of(agentSchemas)) schemas.put(schema);
         }
+        cachedToolSchemas = cloneArray(schemas);
+        cachedToolSchemasKey = key;
         return schemas;
     }
 
@@ -2289,7 +2409,16 @@ public final class ZhiCodeEngine {
     // ------------------------------------------------------------ 其它
 
     private String buildSystemPrompt(SessionConfig promptConfig) {
-        return SystemPromptBuilder.build(promptConfig, additionalSystemPrompt);
+        SessionConfig current = promptConfig == null ? config : promptConfig;
+        String key = current == null ? additionalSystemPrompt
+                : current.model + "\u0000" + current.projectDirectory + "\u0000"
+                + current.customSystemPrompt + "\u0000" + current.roleCard
+                + "\u0000" + current.permissionMode + "\u0000" + additionalSystemPrompt;
+        if (cachedSystemPrompt != null && key.equals(cachedSystemPromptKey)) return cachedSystemPrompt;
+        String result = SystemPromptBuilder.build(current, additionalSystemPrompt);
+        cachedSystemPrompt = result;
+        cachedSystemPromptKey = key;
+        return result;
     }
 
     private static JSONArray cloneArray(JSONArray source) {

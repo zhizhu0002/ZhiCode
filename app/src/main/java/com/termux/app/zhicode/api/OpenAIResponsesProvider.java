@@ -11,11 +11,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -106,23 +104,25 @@ public final class OpenAIResponsesProvider implements ModelProvider {
         StreamDecoder decoder = new StreamDecoder(listener);
 
         try {
+            conn.setRequestProperty("x-request-id", request.requestId());
             JSONObject body = codex
                     ? HistoryBuilder.buildCodexRequest(config, systemPrompt, messages, tools)
                     : HistoryBuilder.buildStandardRequest(config, systemPrompt, messages, tools);
             writeRequestBody(conn, body);
 
             int status = conn.getResponseCode();
+            if (request.exceedsTotalTimeout()) throw new java.net.SocketTimeoutException("request total timeout");
             request.markResponseStarted();
             if (status < 200 || status >= 300) {
                 // 刻意不做「400 就降低推理档位重发」：那会让用户设的档位静默失效。
                 throw new IllegalStateException("Responses API HTTP " + status + ": "
-                        + truncate(readAll(conn.getErrorStream()), MAX_ERROR_CHARS));
+                        + truncate(ProviderTransport.readError(conn, MAX_ERROR_CHARS), MAX_ERROR_CHARS));
             }
 
             if (isPlainJson(conn.getContentType())) {
-                decoder.applyTerminalResponse(new JSONObject(readAll(conn.getInputStream())));
+                decoder.applyTerminalResponse(new JSONObject(ProviderTransport.readBody(conn, MAX_ERROR_CHARS)));
             } else {
-                readSse(conn.getInputStream(), decoder);
+                readSse(conn.getInputStream(), decoder, request);
                 if (!decoder.terminalEventSeen) {
                     // 这个协议把「流提前结束」表达成结构化失败码，而不是错误文案。
                     // 换掉它会让引擎的重试静默失效。
@@ -179,10 +179,7 @@ public final class OpenAIResponsesProvider implements ModelProvider {
     }
 
     private static void writeRequestBody(HttpURLConnection conn, JSONObject body) throws IOException {
-        try (BufferedWriter writer = new BufferedWriter(
-                new OutputStreamWriter(conn.getOutputStream(), StandardCharsets.UTF_8))) {
-            writer.write(body.toString());
-        }
+        ProviderTransport.writeJson(conn, body.toString());
     }
 
     // ------------------------------------------------------------ SSE 分帧
@@ -194,7 +191,7 @@ public final class OpenAIResponsesProvider implements ModelProvider {
      * 而事件边界是<b>空行</b>。逐行解析会在遇到多行 payload 时丢掉后半段
      * （表现为 JSON 解析失败或内容缺失）。
      */
-    private static void readSse(InputStream in, StreamDecoder decoder) throws Exception {
+    private static void readSse(InputStream in, StreamDecoder decoder, HttpRequestTracker.Scope request) throws Exception {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
             String eventName = null;
             StringBuilder data = new StringBuilder();
@@ -202,6 +199,9 @@ public final class OpenAIResponsesProvider implements ModelProvider {
             while ((line = reader.readLine()) != null) {
                 if (Thread.currentThread().isInterrupted()) {
                     throw new InterruptedException("ZhiCode request interrupted");
+                }
+                if (request.exceedsTotalTimeout()) {
+                    throw new java.net.SocketTimeoutException("request total timeout");
                 }
                 if (line.isEmpty()) {
                     if (data.length() > 0) {
@@ -1007,16 +1007,6 @@ public final class OpenAIResponsesProvider implements ModelProvider {
                 return new JSONObject();
             }
         }
-    }
-
-    private static String readAll(InputStream in) throws Exception {
-        if (in == null) return "";
-        StringBuilder out = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) out.append(line).append('\n');
-        }
-        return out.toString();
     }
 
     /** 注意这里**不加**省略标记：与另两家不同，这是既有行为。 */

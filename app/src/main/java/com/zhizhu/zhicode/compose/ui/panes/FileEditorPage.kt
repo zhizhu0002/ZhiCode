@@ -1,10 +1,21 @@
+/*
+ * Zalith Launcher 2
+ * Copyright (C) 2025 MovTery <movtery228@qq.com> and contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This file keeps the ZL2 editor state/layout while using this project's
+ * Miuix components and EditorViewModel adapters.
+ */
 package com.zhizhu.zhicode.compose.ui.panes
 
-import android.text.InputType
-import android.view.KeyEvent
-import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,16 +23,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.key
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -31,286 +39,519 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import com.zhizhu.zhicode.compose.model.OpenFile
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.zhizhu.zhicode.compose.editor.EditorFileIo
+import com.zhizhu.zhicode.compose.editor.EditorViewModel
+import com.zhizhu.zhicode.compose.theme.LocalZhiDark
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
-import io.github.rosemoe.sora.event.ContentChangeEvent
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.EditorSearcher
-import kotlinx.coroutines.delay
+import io.github.rosemoe.sora.widget.component.EditorAutoCompletion
+import io.github.rosemoe.sora.lang.Language
+import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
+import io.github.rosemoe.sora.widget.schemes.SchemeDarcula
+import io.github.rosemoe.sora.widget.schemes.SchemeGitHub
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TopAppBar
+import top.yukonga.miuix.kmp.basic.TooltipBox
 import top.yukonga.miuix.kmp.menu.OverlayIconCascadingDropdownMenu
-import top.yukonga.miuix.kmp.menu.OverlayIconDropdownMenu
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** Sora-backed text editor page with a compact search row. */
+private const val EDITOR_PREFS = "zl2_editor"
+
+/** ZL2 式编辑器，但控件全部接入本项目 Miuix 组件。 */
 @Composable
-internal fun FileEditorPage(
-    file: OpenFile,
-    draft: String?,
-    onBack: () -> Unit,
-    onSave: (String) -> Unit,
-    onCancelEdit: () -> Unit,
-    onReload: () -> Unit,
-    onCharsetChange: (String) -> Unit,
-) {
-    val editable = !file.truncated && !isPreviewMarker(file)
-    val editing = draft != null && editable
-    val scheme = MiuixTheme.colorScheme
-    val editorRef = remember(file.path, file.content, file.charsetName) { mutableStateOf<CodeEditor?>(null) }
-    val original = remember(file.path, file.content, file.charsetName) { draft ?: file.content }
-    var revision by remember { mutableIntStateOf(0) }
-    var discardPrompt by remember { mutableStateOf(false) }
-    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var wrapText by remember(file.path) { mutableStateOf(false) }
-    var searchOpen by remember(file.path) { mutableStateOf(false) }
-    var searchQuery by remember(file.path) { mutableStateOf("") }
-    var replaceQuery by remember(file.path) { mutableStateOf("") }
-    var replaceOpen by remember(file.path) { mutableStateOf(false) }
-    var regexSearch by remember(file.path) { mutableStateOf(false) }
-    var wholeWordSearch by remember(file.path) { mutableStateOf(false) }
-    var caseSensitiveSearch by remember(file.path) { mutableStateOf(false) }
-    var longTextPrompt by remember(file.path) { mutableStateOf(file.truncated) }
-    val shownPrompt = rememberLastNonNull(if (discardPrompt) true else null)
-    val shownLongTextPrompt = rememberLastNonNull(if (longTextPrompt) true else null)
-    val charsets = remember(file.charsetName) {
-        listOf("UTF-8", "GB18030", "GBK", "UTF-16LE", "UTF-16BE", "UTF-32LE", "UTF-32BE", "Big5", "Shift_JIS", "ISO-8859-1", "windows-1252")
-            .mapNotNull { name -> runCatching { java.nio.charset.Charset.forName(name) }.getOrNull() }
-            .let { list -> if (list.any { it.name().equals(file.charsetName, true) }) list else list + runCatching { java.nio.charset.Charset.forName(file.charsetName) }.getOrNull() }
-            .filterNotNull()
-            .distinctBy { it.name().lowercase() }
+internal fun FileEditorScreen(viewModel: EditorViewModel, onExit: () -> Unit) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val dark = LocalZhiDark.current
+    val colors = MiuixTheme.colorScheme
+    val prefs = remember(context) {
+        context.getSharedPreferences(EDITOR_PREFS, android.content.Context.MODE_PRIVATE)
     }
-    val current = revision.let { editorRef.value?.text?.toString() ?: original }
-    val dirty = editing && current != original
+
+    var editor by remember { mutableStateOf<CodeEditor?>(null) }
+    var language by remember { mutableStateOf<Language?>(null) }
+    var scheme by remember(dark) {
+        mutableStateOf<EditorColorScheme>(if (dark) SchemeDarcula() else SchemeGitHub())
+    }
+    var menuExpanded by remember { mutableStateOf(false) }
+    var searchVisible by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var replaceQuery by remember { mutableStateOf("") }
+    var replaceExpanded by remember { mutableStateOf(false) }
+    var currentMatch by remember { mutableIntStateOf(0) }
+    var totalMatches by remember { mutableIntStateOf(0) }
+    var matchCase by remember { mutableStateOf(false) }
+    var wholeWord by remember { mutableStateOf(false) }
+    var regex by remember { mutableStateOf(false) }
+    var wordwrap by remember { mutableStateOf(prefs.getBoolean("wordwrap", true)) }
+    var completion by remember { mutableStateOf(prefs.getBoolean("completion", true)) }
+    var lineNumbers by remember { mutableStateOf(prefs.getBoolean("line_number", true)) }
+    var highlightLine by remember { mutableStateOf(prefs.getBoolean("highlight_line", true)) }
+
+    val readOnly = !state.writable
+
+    LaunchedEffect(state.fileName, dark) {
+        language = SoraEditorHost.languageFor(context, state.fileName)
+        scheme = withContext(Dispatchers.IO) { SoraEditorHost.colorScheme(context, dark) }
+    }
+
+    fun searcher(): EditorSearcher? = editor
+        ?.takeUnless { it.isReleased }
+        ?.let { runCatching { it.getSearcher() }.getOrNull() }
+
+    fun clearMatches() {
+        currentMatch = 0
+        totalMatches = 0
+    }
+
+    fun updateMatches() {
+        val active = searcher()
+        if (active == null || !active.hasQuery()) {
+            clearMatches()
+            return
+        }
+        runCatching {
+            totalMatches = active.getMatchedPositionCount().coerceAtLeast(0)
+            currentMatch = (active.getCurrentMatchedPositionIndex() + 1)
+                .coerceIn(0, totalMatches)
+        }.onFailure { clearMatches() }
+    }
+
+    fun options(): EditorSearcher.SearchOptions {
+        val type = when {
+            regex -> EditorSearcher.SearchOptions.TYPE_REGULAR_EXPRESSION
+            wholeWord -> EditorSearcher.SearchOptions.TYPE_WHOLE_WORD
+            else -> EditorSearcher.SearchOptions.TYPE_NORMAL
+        }
+        return EditorSearcher.SearchOptions(type, !matchCase)
+    }
+
+    fun applySearch(pattern: String = searchQuery) {
+        val active = searcher() ?: return clearMatches()
+        if (pattern.isEmpty()) {
+            runCatching { active.stopSearch() }
+            clearMatches()
+            return
+        }
+        if (runCatching { active.search(pattern, options()) }.isFailure) {
+            runCatching { active.stopSearch() }
+        }
+        updateMatches()
+    }
 
     fun closeSearch() {
-        searchOpen = false
-        replaceOpen = false
+        searchVisible = false
         searchQuery = ""
         replaceQuery = ""
-        editorRef.value?.takeUnless { it.isReleased }?.let { editor -> runCatching { editor.getSearcher().stopSearch() } }
+        replaceExpanded = false
+        runCatching { searcher()?.stopSearch() }
+        clearMatches()
     }
 
-    LaunchedEffect(searchOpen, searchQuery, regexSearch, wholeWordSearch, caseSensitiveSearch, editorRef.value) {
-        val editor = editorRef.value ?: return@LaunchedEffect
-        if (editor.isReleased) return@LaunchedEffect
-        val searcher = runCatching { editor.getSearcher() }.getOrNull() ?: return@LaunchedEffect
-        if (!searchOpen || searchQuery.isEmpty()) {
-            runCatching { searcher.stopSearch() }
-            return@LaunchedEffect
-        }
-        delay(80)
-        if (!editor.isReleased && editor.isAttachedToWindow && searchQuery.isNotEmpty()) {
-            runCatching {
-                val options = if (regexSearch) {
-                    EditorSearcher.SearchOptions(EditorSearcher.SearchOptions.TYPE_REGULAR_EXPRESSION, !caseSensitiveSearch)
-                } else if (wholeWordSearch) {
-                    EditorSearcher.SearchOptions(EditorSearcher.SearchOptions.TYPE_WHOLE_WORD, !caseSensitiveSearch)
-                } else {
-                    EditorSearcher.SearchOptions(!caseSensitiveSearch, false)
-                }
-                searcher.search(searchQuery, options)
-            }
-        }
+    LaunchedEffect(searchVisible, searchQuery, matchCase, wholeWord, regex) {
+        if (searchVisible) applySearch() else clearMatches()
     }
 
-    fun request(action: () -> Unit) {
-        if (dirty) { pendingAction = action; discardPrompt = true } else action()
-    }
-    fun close() = request(onBack)
-    fun saveAndExit() {
-        editorRef.value?.takeUnless { it.isReleased }?.let { editor -> onSave(editor.text.toString()); onBack() }
+    val requestExit: () -> Unit = {
+        if (state.dirty) viewModel.requestExitConfirm() else onExit()
     }
 
-    BackHandler(onBack = ::close)
     Scaffold(
+        modifier = Modifier.fillMaxSize().imePadding(),
         topBar = {
-            TopAppBar(
-                title = "",
-                color = scheme.surface,
-                navigationIcon = { ZhiIconButton(ZhiIcons.back, "返回文件列表", ::close) },
-                actions = {
-                    Box(Modifier.weight(1f).horizontalScroll(rememberScrollState()), contentAlignment = Alignment.CenterStart) {
-                        Text(if (dirty) "*${file.name}" else file.name, color = scheme.onBackground, maxLines = 1)
-                    }
-                    if (editing) ZhiIconButton(ZhiIcons.save, "保存文件", { editorRef.value?.takeUnless { it.isReleased }?.let { onSave(it.text.toString()) } }, tint = scheme.onBackground)
-                    OverlayIconCascadingDropdownMenu(
-                        entry = DropdownEntry(items = listOf(
-                            DropdownItem("自动换行", selected = wrapText, onClick = {
-                                wrapText = !wrapText
-                                editorRef.value?.takeUnless { it.isReleased }?.setWordwrap(wrapText)
-                            }),
-                            DropdownItem("搜索", onClick = { searchOpen = true }),
-                            DropdownItem("重新加载", onClick = { request(onReload) }),
-                            DropdownItem("编码", children = charsets.map { charset ->
-                                DropdownItem(charset.displayName(), selected = charset.name().equals(file.charsetName, true), onClick = { request { onCharsetChange(charset.name()) } })
-                            }),
-                        )),
-                        content = { Icon(ZhiIcons.moreVert, "更多操作", tint = scheme.onBackground) },
-                    )
-                },
-            )
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) {
-            if (searchOpen) {
-                EditorSearchPanel(
+            if (searchVisible) {
+                EditorSearchTopBar(
                     query = searchQuery,
-                    onQueryChange = { searchQuery = it },
+                    currentMatch = currentMatch,
+                    totalMatches = totalMatches,
+                    replaceExpanded = replaceExpanded,
                     replaceQuery = replaceQuery,
+                    matchCase = matchCase,
+                    wholeWord = wholeWord,
+                    regex = regex,
+                    replaceEnabled = !readOnly,
+                    enabled = editor != null,
+                    onQueryChange = { searchQuery = it; applySearch(it) },
+                    onToggleReplace = { replaceExpanded = !replaceExpanded },
                     onReplaceQueryChange = { replaceQuery = it },
-                    replaceOpen = replaceOpen,
-                    onReplaceOpenChange = { replaceOpen = it },
-                    regex = regexSearch,
-                    wholeWord = wholeWordSearch,
-                    caseSensitive = caseSensitiveSearch,
-                    onRegexChange = { regexSearch = it },
-                    onWholeWordChange = { wholeWordSearch = it },
-                    onCaseSensitiveChange = { caseSensitiveSearch = it },
-                    onClose = ::closeSearch,
-                    onPrevious = { editorRef.value?.takeUnless { it.isReleased }?.let { runCatching { it.getSearcher().gotoPrevious() } } },
-                    onNext = { editorRef.value?.takeUnless { it.isReleased }?.let { runCatching { it.getSearcher().gotoNext() } } },
-                    onReplace = { if (searchQuery.isNotEmpty()) editorRef.value?.takeUnless { it.isReleased }?.let { runCatching { it.getSearcher().replaceCurrentMatch(replaceQuery) } } },
-                    onReplaceAll = { if (searchQuery.isNotEmpty()) editorRef.value?.takeUnless { it.isReleased }?.let { runCatching { it.getSearcher().replaceAll(replaceQuery) } } },
-                )
-            }
-            key(file.path, file.content, file.charsetName) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 2.dp).weight(1f),
-                    factory = { context ->
-                        CodeEditor(context).apply {
-                            editorRef.value = this
-                            isFocusable = true
-                            isFocusableInTouchMode = true
-                            isClickable = true
-                            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                            runCatching { SoraEditorHost.configure(this, context, file.language.takeUnless { file.truncated }.orEmpty()) }.onFailure { setEditorLanguage(null) }
-                            setText(draft ?: file.content)
-                            setEditable(editing)
-                            subscribeEvent(ContentChangeEvent::class.java) { _, _ -> revision++ }
-                            post { if (isAttachedToWindow && editing) requestFocus() }
+                    onToggleMatchCase = { matchCase = !matchCase; applySearch() },
+                    onToggleWholeWord = { wholeWord = !wholeWord; applySearch() },
+                    onToggleRegex = { regex = !regex; applySearch() },
+                    onPrevious = {
+                        searcher()?.takeIf { it.hasQuery() }?.let { runCatching { it.gotoPrevious() } }
+                        updateMatches()
+                    },
+                    onNext = {
+                        searcher()?.takeIf { it.hasQuery() }?.let { runCatching { it.gotoNext() } }
+                        updateMatches()
+                    },
+                    onReplace = {
+                        searcher()?.takeIf { it.hasQuery() }?.let {
+                            runCatching { it.replaceCurrentMatch(replaceQuery) }
+                            applySearch()
                         }
                     },
-                    update = { editor ->
-                        editorRef.value = editor
-                        editor.setEditable(editing)
-                        editor.isFocusable = true
-                        editor.isFocusableInTouchMode = true
+                    onReplaceAll = {
+                        searcher()?.takeIf { it.hasQuery() }?.let {
+                            runCatching { it.replaceAll(replaceQuery) { applySearch() } }
+                            applySearch()
+                        }
+                    },
+                    onClose = ::closeSearch,
+                )
+            } else {
+                SmallTopAppBar(
+                    title = if (state.dirty) "• ${state.fileName}" else state.fileName,
+                    titleColor = colors.onSurface,
+                    color = colors.surface,
+                    defaultWindowInsetsPadding = true,
+                    navigationIcon = {
+                        ZhiIconButton(ZhiIcons.back, "返回文件列表", onClick = requestExit)
+                    },
+                    actions = {
+                        if (state.notice != null) {
+                            Text(
+                                text = state.notice ?: "",
+                                color = colors.onSurfaceVariantActions,
+                                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                                modifier = Modifier.padding(end = 4.dp),
+                            )
+                        }
+                        if (state.content != null && !readOnly) {
+                            ZhiIconButton(ZhiIcons.save, "保存文件", onClick = { viewModel.save() })
+                        }
+                        EditorMoreMenu(
+                            enabled = state.content != null,
+                            expanded = menuExpanded,
+                            onExpandedChange = { menuExpanded = it },
+                            wordwrap = wordwrap,
+                            completion = completion,
+                            lineNumbers = lineNumbers,
+                            highlightLine = highlightLine,
+                            charsetName = state.charsetName,
+                            onSearch = { searchVisible = true },
+                            onToggleWordwrap = {
+                                wordwrap = !wordwrap
+                                prefs.edit().putBoolean("wordwrap", wordwrap).apply()
+                                editor?.isWordwrap = wordwrap
+                            },
+                            onToggleCompletion = {
+                                completion = !completion
+                                prefs.edit().putBoolean("completion", completion).apply()
+                                editor?.getComponent(EditorAutoCompletion::class.java)?.setEnabled(completion)
+                            },
+                            onToggleLineNumbers = {
+                                lineNumbers = !lineNumbers
+                                prefs.edit().putBoolean("line_number", lineNumbers).apply()
+                                editor?.setLineNumberEnabled(lineNumbers)
+                            },
+                            onToggleHighlightLine = {
+                                highlightLine = !highlightLine
+                                prefs.edit().putBoolean("highlight_line", highlightLine).apply()
+                                editor?.setHighlightCurrentLine(highlightLine)
+                            },
+                            onCharset = viewModel::reload,
+                        )
                     },
                 )
             }
-
-        }
-    }
-    DisposableEffect(editorRef.value) {
-        val editor = editorRef.value
-        onDispose {
-            editor?.takeUnless { it.isReleased }?.let {
-                runCatching { it.getSearcher().stopSearch() }
-                it.release()
+        },
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+            val content = state.content
+            if (content == null) {
+                EditorPlaceholder(
+                    text = if (state.loading) "正在打开 ${state.fileName}…"
+                    else state.error ?: "无法打开这个文件",
+                )
+            } else {
+                SoraEditor(
+                    modifier = Modifier.fillMaxSize(),
+                    content = content,
+                    isReadOnly = readOnly,
+                    language = language,
+                    scheme = scheme,
+                    wordwrap = wordwrap,
+                    lineNumberEnabled = lineNumbers,
+                    highlightLine = highlightLine,
+                    onTextChange = viewModel::markDirty,
+                    onSearchResult = ::updateMatches,
+                    onEditorCreated = { created ->
+                        editor = created
+                        // 语言/主题是异步加载的；编辑器创建时先把交互设置一次，
+                        // 后续只更新 View 属性，不重新 setText，避免光标和键盘跳动。
+                        created.isWordwrap = wordwrap
+                        created.setLineNumberEnabled(lineNumbers)
+                        created.setHighlightCurrentLine(highlightLine)
+                        created.getComponent(EditorAutoCompletion::class.java).setEnabled(completion)
+                    },
+                )
             }
         }
-    }
-
-    OverlayDialog(show = shownLongTextPrompt == true, onDismissRequest = { longTextPrompt = false }) {
-        DialogShell(title = "超长文本", actions = { PrimaryButton("知道了", { longTextPrompt = false }) }) {
-            Text("文件内容较长，已启用有界预览，只显示已读取的前缀；为避免打开时掉帧，本页不启用语法分析，也不能直接保存此预览。", color = scheme.onBackground)
+    val shownExit = rememberLastNonNull(if (state.exitConfirm) true else null)
+    OverlayDialog(
+        show = state.exitConfirm,
+        onDismissRequest = viewModel::cancelExitConfirm,
+        largeScreen = true,
+        maxWidth = ZhiDialogWidth.Compact,
+        outsideMargin = DialogWideOutsideMargin,
+        insideMargin = DialogWideInsideMargin,
+    ) {
+        if (shownExit != true) return@OverlayDialog
+        DialogShell(
+            title = "保存更改",
+            actions = {
+                SecondaryButton("取消", viewModel::cancelExitConfirm)
+                SecondaryButton("不保存", {
+                    viewModel.discardAndExit()
+                    onExit()
+                }, Modifier.padding(start = 8.dp))
+                PrimaryButton("保存并退出", {
+                    viewModel.save { saved ->
+                        if (saved) {
+                            viewModel.discardAndExit()
+                            onExit()
+                        }
+                    }
+                }, Modifier.padding(start = 8.dp))
+            },
+        ) {
+            Text("「${state.fileName}」有未保存的修改，退出前要保存吗？", color = colors.onSurface)
         }
     }
-    OverlayDialog(show = shownPrompt == true, onDismissRequest = { discardPrompt = false }) {
-        DialogShell(title = "放弃修改", actions = {
-            SecondaryButton(text = "继续编辑", onClick = { discardPrompt = false })
-            SecondaryButton(text = "不保存", onClick = { discardPrompt = false; onCancelEdit(); pendingAction?.invoke(); pendingAction = null })
-            PrimaryButton(text = "保存并退出", onClick = { discardPrompt = false; saveAndExit(); pendingAction = null })
-        }) { Text("文档有未保存的修改，要保存后退出吗？", color = scheme.onBackground) }
+
+    val shownSaving = rememberLastNonNull(if (state.saving) true else null)
+    OverlayDialog(
+        show = state.saving,
+        onDismissRequest = viewModel::cancelSave,
+        largeScreen = true,
+        maxWidth = ZhiDialogWidth.Compact,
+        outsideMargin = DialogWideOutsideMargin,
+        insideMargin = DialogWideInsideMargin,
+    ) {
+        if (shownSaving != true) return@OverlayDialog
+        DialogShell(
+            title = "正在保存",
+            actions = { SecondaryButton("取消", viewModel::cancelSave) },
+        ) { Text("正在写入 ${state.fileName}…", color = colors.onSurface) }
+    }
+
+    val shownSaveError = rememberLastNonNull(state.saveError)
+    OverlayDialog(
+        show = state.saveError != null,
+        onDismissRequest = viewModel::dismissSaveError,
+        largeScreen = true,
+        maxWidth = ZhiDialogWidth.Compact,
+        outsideMargin = DialogWideOutsideMargin,
+        insideMargin = DialogWideInsideMargin,
+    ) {
+        val message = shownSaveError ?: return@OverlayDialog
+        DialogShell(
+            title = "保存失败",
+            actions = { PrimaryButton("知道了", viewModel::dismissSaveError) },
+        ) { Text(message, color = colors.onSurface) }
+    }
     }
 }
 
 @Composable
-private fun EditorSearchPanel(
+private fun EditorPlaceholder(text: String) {
+    val colors = MiuixTheme.colorScheme
+    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        Text(text, color = colors.onSurfaceVariantSummary)
+    }
+}
+
+/** Miuix 更多菜单：仅保留搜索、编辑显示选项和编码二级菜单。 */
+@Composable
+private fun EditorMoreMenu(
+    enabled: Boolean,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    wordwrap: Boolean,
+    completion: Boolean,
+    lineNumbers: Boolean,
+    highlightLine: Boolean,
+    charsetName: String,
+    onSearch: () -> Unit,
+    onToggleWordwrap: () -> Unit,
+    onToggleCompletion: () -> Unit,
+    onToggleLineNumbers: () -> Unit,
+    onToggleHighlightLine: () -> Unit,
+    onCharset: (String) -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    val charsetItems = EditorFileIo.selectableCharsets.map { charset ->
+        DropdownItem(
+            text = charset,
+            selected = charset.equals(charsetName, ignoreCase = true),
+            onClick = {
+                onExpandedChange(false)
+                onCharset(charset)
+            },
+        )
+    }
+    val items = listOf(
+        DropdownItem("搜索", enabled = enabled, onClick = {
+            onExpandedChange(false)
+            onSearch()
+        }),
+        DropdownItem("自动换行", selected = wordwrap, onClick = onToggleWordwrap),
+        DropdownItem("代码补全", selected = completion, onClick = onToggleCompletion),
+        DropdownItem("行号", selected = lineNumbers, onClick = onToggleLineNumbers),
+        DropdownItem("当前行高亮", selected = highlightLine, onClick = onToggleHighlightLine),
+        DropdownItem("编码 $charsetName", children = charsetItems),
+    )
+    OverlayIconCascadingDropdownMenu(
+        entry = DropdownEntry(items = items),
+        onExpandedChange = onExpandedChange,
+        content = { Icon(ZhiIcons.moreVert, "更多操作", tint = colors.onSurface) },
+    )
+}
+
+@Composable
+private fun EditorSearchTopBar(
     query: String,
-    onQueryChange: (String) -> Unit,
+    currentMatch: Int,
+    totalMatches: Int,
+    replaceExpanded: Boolean,
     replaceQuery: String,
-    onReplaceQueryChange: (String) -> Unit,
-    replaceOpen: Boolean,
-    onReplaceOpenChange: (Boolean) -> Unit,
-    regex: Boolean,
+    matchCase: Boolean,
     wholeWord: Boolean,
-    caseSensitive: Boolean,
-    onRegexChange: (Boolean) -> Unit,
-    onWholeWordChange: (Boolean) -> Unit,
-    onCaseSensitiveChange: (Boolean) -> Unit,
-    onClose: () -> Unit,
+    regex: Boolean,
+    replaceEnabled: Boolean,
+    enabled: Boolean,
+    onQueryChange: (String) -> Unit,
+    onToggleReplace: () -> Unit,
+    onReplaceQueryChange: (String) -> Unit,
+    onToggleMatchCase: () -> Unit,
+    onToggleWholeWord: () -> Unit,
+    onToggleRegex: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onReplace: () -> Unit,
     onReplaceAll: () -> Unit,
+    onClose: () -> Unit,
 ) {
-    val scheme = MiuixTheme.colorScheme
-    val menu = remember(regex, wholeWord, caseSensitive) {
-        DropdownEntry(items = listOf(
-            DropdownItem("正则表达式", selected = regex, onClick = { onRegexChange(!regex) }),
-            DropdownItem("全词匹配", selected = wholeWord, onClick = { onWholeWordChange(!wholeWord) }),
-            DropdownItem("区分大小写", selected = caseSensitive, onClick = { onCaseSensitiveChange(!caseSensitive) }),
-            DropdownItem("关闭", onClick = onClose),
-        ))
-    }
-    Column(Modifier.fillMaxWidth().background(scheme.surfaceContainer).padding(horizontal = 8.dp, vertical = 2.dp)) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp, max = 40.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("查找", fontSize = 13.sp, color = scheme.onSurfaceVariantSummary, modifier = Modifier.width(34.dp))
-            ZhiTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                modifier = Modifier.weight(1f).heightIn(min = 34.dp, max = 40.dp),
-                label = "",
-                useLabelAsPlaceholder = true,
-                singleLine = true,
-                insideMargin = DpSize(6.dp, 0.dp),
-                leadingIcon = { Icon(ZhiIcons.search, "搜索", tint = scheme.onSurfaceVariantSummary, modifier = Modifier.size(16.dp)) },
-            )
-            SearchAction("↑", onPrevious)
-            SearchAction("↓", onNext)
-            SearchAction("替换", { onReplaceOpenChange(true) })
-            SearchAction("全部", onReplaceAll)
-            OverlayIconDropdownMenu(menu, minHeight = 34.dp, minWidth = 34.dp) { Icon(ZhiIcons.moreVert, "搜索选项", tint = scheme.onSurfaceVariantSummary, modifier = Modifier.size(18.dp)) }
-            ZhiIconButton(ZhiIcons.close, "关闭搜索", onClose, compact = 34.dp, iconSize = 16.dp)
-        }
-        if (replaceOpen) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 34.dp, max = 38.dp).padding(start = 34.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("替换", fontSize = 13.sp, color = scheme.onSurfaceVariantSummary, modifier = Modifier.width(34.dp))
-                ZhiTextField(value = replaceQuery, onValueChange = onReplaceQueryChange, modifier = Modifier.weight(1f).heightIn(min = 34.dp, max = 38.dp), label = "", singleLine = true, insideMargin = DpSize(6.dp, 0.dp))
-                SearchAction("替换", onReplace)
-                SearchAction("收起", { onReplaceOpenChange(false) })
+    val colors = MiuixTheme.colorScheme
+    Surface(
+        modifier = Modifier.fillMaxWidth().statusBarsPadding(),
+        color = colors.surface,
+        shadowElevation = 2.dp,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)
+                .animateContentSize(),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                ZhiIconButton(ZhiIcons.back, "关闭搜索", onClose, compact = 36.dp)
+                ZhiTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier.weight(1f).heightIn(min = 42.dp, max = 48.dp),
+                    label = "搜索文件内容",
+                    useLabelAsPlaceholder = true,
+                    singleLine = true,
+                    enabled = enabled,
+                    insideMargin = androidx.compose.ui.unit.DpSize(8.dp, 0.dp),
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            ZhiIconButton(ZhiIcons.clear, "清空搜索", onClick = { onQueryChange("") }, compact = 30.dp)
+                        }
+                    },
+                )
+                Text(
+                    text = if (totalMatches > 0) "$currentMatch/$totalMatches" else "无匹配",
+                    color = if (totalMatches > 0) colors.primary else colors.onSurfaceVariantActions,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    modifier = Modifier.padding(horizontal = 5.dp),
+                )
+                EditorTextButton("上一个", enabled && totalMatches > 0, onPrevious)
+                EditorTextButton("下一个", enabled && totalMatches > 0, onNext)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 38.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                EditorSearchOption("区分大小写", matchCase, onToggleMatchCase)
+                EditorSearchOption("全字匹配", wholeWord, onToggleWholeWord)
+                EditorSearchOption("正则表达式", regex, onToggleRegex)
+                Spacer(Modifier.weight(1f))
+                EditorTextButton(if (replaceExpanded) "收起替换" else "替换", enabled, onToggleReplace)
+            }
+            AnimatedVisibility(visible = replaceExpanded, enter = fadeIn(), exit = fadeOut()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 38.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    ZhiTextField(
+                        value = replaceQuery,
+                        onValueChange = onReplaceQueryChange,
+                        modifier = Modifier.weight(1f).heightIn(min = 42.dp, max = 48.dp),
+                        label = "替换为",
+                        useLabelAsPlaceholder = true,
+                        singleLine = true,
+                        enabled = replaceEnabled,
+                    )
+                    EditorTextButton("替换", replaceEnabled && query.isNotEmpty() && totalMatches > 0, onReplace)
+                    EditorTextButton("全部替换", replaceEnabled && query.isNotEmpty(), onReplaceAll)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun SearchAction(label: String, onClick: () -> Unit) {
-    val scheme = MiuixTheme.colorScheme
-    Surface(onClick = onClick, modifier = Modifier.height(34.dp).padding(horizontal = 1.dp), color = Color.Transparent, contentColor = scheme.onSurface, shape = RoundedCornerShape(8.dp)) {
-        Box(Modifier.padding(horizontal = 5.dp), contentAlignment = Alignment.Center) { Text(label, fontSize = 12.sp, color = scheme.onSurface) }
+private fun EditorSearchOption(label: String, checked: Boolean, onToggle: () -> Unit) {
+    Surface(
+        onClick = onToggle,
+        color = if (checked) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.secondaryContainer,
+        contentColor = if (checked) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(14.dp),
+    ) {
+        Text(label, fontSize = MiuixTheme.textStyles.footnote1.fontSize, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
     }
 }
 
-
-private fun isPreviewMarker(file: OpenFile): Boolean =
-    file.content.startsWith("（二进制文件，") || file.content.startsWith("（读取失败")
+@Composable
+private fun EditorTextButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        color = Color.Transparent,
+        contentColor = MiuixTheme.colorScheme.primary,
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Text(
+            label,
+            color = if (enabled) MiuixTheme.colorScheme.primary
+            else MiuixTheme.colorScheme.onSurfaceVariantActions,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+        )
+    }
+}

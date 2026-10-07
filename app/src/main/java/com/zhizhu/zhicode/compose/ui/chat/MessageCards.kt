@@ -18,7 +18,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -141,15 +140,12 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
     // 而这个浮层本身是 OverlayDialog，画在主窗口里，不存在被气泡裁掉的问题。
     var viewing by remember { mutableStateOf<ChatImage?>(null) }
 
-    // 需要可用宽度才能把气泡宽度表达成「上限 = 可用宽 × 比例」。
-    // BoxWithConstraints 是 Compose 布局原语（skill 决策顺序第 4 条），
-    // 比手写 onSizeChanged 更直接，也不会多一次重组。
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val maxBubbleWidth = maxWidth * BubbleMaxWidthFraction
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-            horizontalArrangement = Arrangement.End,
-        ) {
+    // 气泡位于 LazyColumn item 内，不再用 BoxWithConstraints 触发测量期子组合。
+    // widthIn 的固定上限交给父级列表宽度处理，窄屏/宽屏都保持内容自适应。
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.End,
+    ) {
         Card(
             // ⚠️ 必须是 onLongPress，**不要**写回 onClick。
             // 这里曾经是 `onClick = onLongPress`，于是短按一下就弹菜单，
@@ -161,7 +157,7 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
             // 再让内容自己决定实际宽度。
             // 之前是 `fillMaxWidth(0.86f)` —— 那是**强制** 86%，于是像「1」这样的
             // 短消息也会撑成一条几乎整行宽的蓝条。见根部的 BoxWithConstraints。
-            modifier = Modifier.widthIn(max = maxBubbleWidth),
+            modifier = Modifier.widthIn(max = 420.dp),
             cornerRadius = ZhiRadius.floating,
             insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             colors = CardDefaults.defaultColors(
@@ -188,7 +184,6 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
             }
         }
         }
-    }
 
     // 放大查看：浮层挂在气泡之外（OverlayDialog 画在主窗口里）。
     // 放在 BoxWithConstraints 之后而不是里面，是为了不让它参与气泡的宽度测量 ——
@@ -235,7 +230,10 @@ fun AssistantCard(
         insideMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
         // 助手正文使用极轻的容器底，保留阅读连续性，同时与用户气泡形成清晰层级。
         colors = CardDefaults.defaultColors(
-            color = scheme.surfaceContainer.copy(alpha = 0.42f),
+            // 使用当前主题的独立容器层，不再把浅色 surface 以低 alpha 叠在背板上。
+            // 低 alpha 在浅色模式下会把卡片压成发灰的半透明块，深色模式也会
+            // 随背景变化而失去稳定的层次。
+            color = if (ZhiColors.isDark()) scheme.surfaceContainer else ZhiColors.cardSurface(),
             contentColor = scheme.onSurface,
         ),
         pressFeedbackType = PressFeedbackType.None,
@@ -499,6 +497,7 @@ fun ToolBatch(
     onToolAction: (String, String) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
+    val toolById = remember(item.tools) { item.tools.associateBy { it.id } }
     val segments = remember(item.tools) {
         ToolGrouping.group(item.tools.map { it.toGroupingEntry() })
     }
@@ -532,7 +531,7 @@ fun ToolBatch(
         segments.forEach { segment ->
             when (segment) {
                 is ToolGrouping.Segment.Single -> {
-                    val tool = item.tools.firstOrNull { it.id == segment.entry.toolId } ?: return@forEach
+                    val tool = toolById[segment.entry.toolId] ?: return@forEach
                     // ⚠️ 每一行都要 `key`，否则行内的 `remember`（展开态、下拉菜单的
                     // 展开态）是按**位置**归属的：工具是边跑边追加的，新工具插进来之后
                     // 位置会挪，于是"打开的菜单"和"展开的输出"会串到另一行上。
@@ -577,9 +576,7 @@ fun ToolBatch(
                     }
                 }
                 is ToolGrouping.Segment.Group -> {
-                    val members = segment.members.mapNotNull { member ->
-                        item.tools.firstOrNull { it.id == member.toolId }
-                    }
+                    val members = segment.members.mapNotNull { member -> toolById[member.toolId] }
                     if (members.isEmpty()) return@forEach
                     key(segment.key) {
                         ToolGroupCard(

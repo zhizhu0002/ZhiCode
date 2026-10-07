@@ -31,13 +31,13 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 会话历史的持久化。
  *
- * <h3>一次会话就是一个 JSONL 文件</h3>
- * 项目路径先规范化，再按规范化结果分命名空间：
- * {@code ~/.zhicode/projects/<路径键>/<时间>-<随机>.jsonl}。
- * 一行一个 JSON 对象，只追加。选 JSONL 而不是单个大 JSON 的理由有两条：
- * 追加不必重写整个文件；而且它天然可读、可手工修复。
+ * <h3>新会话使用分段 v2，旧会话继续使用 JSONL v1</h3>
+ * 新会话放在 {@code ~/.zhicode/sessions/<id>/}：manifest 是句柄，segments 是长度分帧的追加日志，
+ * blobs 保存大输出/附件，session-index.db 只保存列表索引。旧的
+ * {@code ~/.zhicode/projects/<路径键>/*.jsonl} 不会被删除，读取和删除仍由同一门面兼容。
+ * v2 的 payload 暂时沿用 JSON，外层改成长度帧，便于迁移、断尾恢复和后续格式升级。
  *
- * <h3>流水行与快照行</h3>
+ * <h3>事件帧与快照</h3>
  * <ul>
  *   <li><b>流水行</b>（{@code message} / {@code session_start} / {@code plan_*} 等）只追加，
  *       永不修改。界面渲染的完整对话就是它们。</li>
@@ -67,6 +67,14 @@ public final class SessionStore {
     // ------------------------------------------------------------ 文件与长度
 
     private static final String SESSION_SUFFIX = ".jsonl";
+    private static final String V2_SESSION_DIRECTORY = "sessions";
+    private static final String V2_MANIFEST = "manifest.json";
+    private static final int V2_FORMAT = 2;
+    private static final int V2_SEGMENT_EVENT = 1;
+    private static final int V2_SEGMENT_MAX_BYTES = 1024 * 1024;
+    private static final int LARGE_TEXT_BLOB_THRESHOLD = 8 * 1024;
+    private static final String BLOB_REF = "blob_ref";
+    private static final String BLOB_SIZE = "blob_size";
     private static final String PROJECT_INDEX_FILE = "project.json";
 
     /** 备注长度上限。它只用于列表显示，不需要更长。 */
@@ -264,34 +272,81 @@ public final class SessionStore {
     }
 
     private final File sessionFile;
+    private final boolean v2;
+    private final File sessionDirectory;
+    private final File manifestFile;
+    private SessionSegmentLog segmentLog;
+    private final SessionBlobStore blobStore;
+    private final SessionSnapshotStore snapshotStore;
+    private long nextSequence;
+    private int segmentNumber = 1;
+    private final ArrayList<SessionSegmentLog.Frame> pendingFrames = new ArrayList<>();
+    private long pendingBytes;
+    private long pendingSince;
+    private JSONObject pendingManifestRow;
+    private static final long PENDING_FLUSH_MS = 500L;
+    private static final long PENDING_FLUSH_BYTES = 8L * 1024L;
 
     // ------------------------------------------------------------ 构造与路径
 
     /** 在一个项目下新建一次会话，并写下起始行。 */
     public SessionStore(String projectDirectory) {
         String project = canonicalProject(projectDirectory);
-        File directory = sessionDirectory(project);
-        String stamp = new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
-        sessionFile = new File(directory, stamp + "-" + UUID.randomUUID().toString().substring(0, 8)
-                + SESSION_SUFFIX);
+        sessionDirectory = new File(new File(TermuxConstants.dataDir(), V2_SESSION_DIRECTORY), UUID.randomUUID().toString());
+        manifestFile = new File(sessionDirectory, V2_MANIFEST);
+        sessionFile = manifestFile;
+        v2 = true;
+        segmentLog = new SessionSegmentLog(new File(new File(sessionDirectory, "segments"), "000001.zlog"));
+        blobStore = new SessionBlobStore(sessionDirectory);
+        snapshotStore = new SessionSnapshotStore(sessionDirectory);
         try {
-            appendLine(new JSONObject()
+            AtomicFiles.ensureDirectory(sessionDirectory, "会话目录");
+            long now = System.currentTimeMillis();
+            writeManifest(project, "", now, now, 0);
+            appendV2(new JSONObject()
                     .put(Field.TYPE, RowType.SESSION_START)
                     .put(Field.PROJECT, project)
                     .put(Field.PROJECT_KEY, projectKey(project))
-                    .put(Field.CREATED_AT, System.currentTimeMillis()));
+                    .put(Field.CREATED_AT, now), true);
+            SessionIndex.upsert(new SessionIndex.Entry(manifestFile.getAbsolutePath(), project,
+                    "", "", "", now, now, 0));
         } catch (Exception ignored) {
-            // 起始行写不进去不该让构造失败：后续追加会再建文件，而 summarize()
-            // 对缺失起始行有兜底（项目名留空、创建时间取 mtime）。
+            // The engine keeps its in-memory history if storage is unavailable.
         }
     }
 
     private SessionStore(File existing) {
         sessionFile = existing;
+        v2 = existing != null && existing.getName().equals(V2_MANIFEST);
+        sessionDirectory = v2 ? existing.getParentFile() : null;
+        manifestFile = v2 ? existing : null;
+        segmentLog = v2 ? new SessionSegmentLog(new File(new File(sessionDirectory, "segments"), "000001.zlog")) : null;
+        blobStore = v2 ? new SessionBlobStore(sessionDirectory) : null;
+        snapshotStore = v2 ? new SessionSnapshotStore(sessionDirectory) : null;
+        if (v2) {
+            try {
+                JSONObject manifest = new JSONObject(AtomicFiles.readText(manifestFile));
+                nextSequence = manifest.optLong("next_sequence", 0L);
+                String segment = manifest.optString("segment", "segments/000001.zlog");
+                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(\\d+)\\.zlog").matcher(segment);
+                if (matcher.find()) segmentNumber = Math.max(1, Integer.parseInt(matcher.group(1)));
+                segmentLog = new SessionSegmentLog(new File(sessionDirectory, segment));
+            } catch (Exception ignored) {
+                nextSequence = 0L;
+            }
+        }
     }
 
     public static SessionStore resume(File existing) {
         if (existing == null || !existing.isFile()) throw new IllegalArgumentException("会话文件不存在");
+        if (V2_MANIFEST.equals(existing.getName())) {
+            try {
+                JSONObject manifest = new JSONObject(AtomicFiles.readText(existing));
+                if (manifest.optInt("format", 0) == V2_FORMAT) return new SessionStore(existing);
+            } catch (Exception ignored) {
+                // Fall through to the legacy reader so a damaged v2 manifest is not mistaken for JSONL.
+            }
+        }
         return new SessionStore(existing);
     }
 
@@ -335,8 +390,149 @@ public final class SessionStore {
         return slug + "-" + shortHash(canonical);
     }
 
+    public synchronized void flush() {
+        if (!v2) return;
+        try {
+            flushPendingFrames();
+            flushPendingManifest();
+        } catch (Exception ignored) {
+            // The in-memory engine remains authoritative if disk flush fails.
+        }
+    }
+
     public File getSessionFile() {
         return sessionFile;
+    }
+
+    private void appendV2(JSONObject row) throws Exception {
+        appendV2(row, false);
+    }
+
+    private void appendV2(JSONObject row, boolean critical) throws Exception {
+        if (!v2 || segmentLog == null) return;
+        if (segmentLog.fileLength() + pendingBytes >= V2_SEGMENT_MAX_BYTES) {
+            flushPendingFrames();
+            segmentNumber++;
+            segmentLog = new SessionSegmentLog(new File(new File(sessionDirectory, "segments"),
+                    String.format(Locale.US, "%06d.zlog", segmentNumber)));
+        }
+        JSONObject compact = externalizeLargeFields(row);
+        long sequence = ++nextSequence;
+        pendingFrames.add(new SessionSegmentLog.Frame(V2_SEGMENT_EVENT, sequence,
+                System.currentTimeMillis(), compact));
+        pendingBytes += compact.toString().length();
+        if (pendingSince == 0L) pendingSince = System.currentTimeMillis();
+        pendingManifestRow = row;
+        if (critical || pendingBytes >= PENDING_FLUSH_BYTES
+                || System.currentTimeMillis() - pendingSince >= PENDING_FLUSH_MS) {
+            flushPendingFrames();
+            flushPendingManifest();
+        }
+    }
+
+    private void flushPendingFrames() throws Exception {
+        if (!v2 || segmentLog == null || pendingFrames.isEmpty()) return;
+        segmentLog.appendBatch(new ArrayList<>(pendingFrames));
+        pendingFrames.clear();
+        pendingBytes = 0L;
+        pendingSince = 0L;
+    }
+
+    private void flushPendingManifest() throws Exception {
+        JSONObject row = pendingManifestRow;
+        if (row == null) return;
+        pendingManifestRow = null;
+        updateV2Manifest(row);
+    }
+
+    private void updateV2Manifest(JSONObject row) throws Exception {
+        if (manifestFile == null) return;
+        JSONObject manifest = new JSONObject(AtomicFiles.readText(manifestFile));
+        long now = System.currentTimeMillis();
+        int messageCount = manifest.optInt("message_count", 0);
+        if (RowType.MESSAGE.equals(row.optString(Field.TYPE, ""))) messageCount++;
+        String title = manifest.optString("title", "");
+        if (title.isEmpty() && Role.USER.equals(row.optString(Field.ROLE, ""))) {
+            title = compactTitle(firstHumanText(row.optJSONArray(Field.CONTENT)));
+        }
+        String segment = "segments/" + String.format(Locale.US, "%06d.zlog", segmentNumber);
+        manifest.put("next_sequence", nextSequence).put("updated_at", now)
+                .put("message_count", messageCount).put("segment", segment).put("title", title);
+        AtomicFiles.publishText(manifestFile, manifest.toString());
+        SessionIndex.upsert(new SessionIndex.Entry(manifestFile.getAbsolutePath(),
+                manifest.optString("project", ""), title, manifest.optString("note", ""),
+                manifest.optString("title_override", ""), manifest.optLong("created_at", now),
+                now, messageCount));
+    }
+
+    private JSONObject externalizeLargeFields(JSONObject row) throws Exception {
+        if (row == null || blobStore == null) return row;
+        JSONObject copy = new JSONObject(row.toString());
+        externalizeJsonValue(copy, Field.CONTENT);
+        externalizeJsonValue(copy, Field.PAYLOAD);
+        return copy;
+    }
+
+    private void externalizeJsonValue(JSONObject object, String key) throws Exception {
+        Object value = object.opt(key);
+        if (value == null || JSONObject.NULL.equals(value)) return;
+        byte[] encoded;
+        if (value instanceof JSONArray || value instanceof JSONObject) {
+            encoded = value.toString().getBytes(StandardCharsets.UTF_8);
+        } else {
+            return;
+        }
+        if (encoded.length < LARGE_TEXT_BLOB_THRESHOLD) return;
+        String hash = blobStore.put(encoded);
+        object.put(key, new JSONObject().put(BLOB_REF, hash).put(BLOB_SIZE, encoded.length));
+    }
+
+    private void externalizeString(JSONObject object, String key) throws Exception {
+        Object value = object.opt(key);
+        if (!(value instanceof String)) return;
+        String text = (String) value;
+        if (text.length() < LARGE_TEXT_BLOB_THRESHOLD) return;
+        String hash = blobStore.putText(text);
+        object.put(key, new JSONObject()
+                .put(BLOB_REF, hash)
+                .put(BLOB_SIZE, text.getBytes(StandardCharsets.UTF_8).length));
+    }
+
+    private void restoreLargeFields(JSONObject object, String key) throws Exception {
+        if (!v2 || blobStore == null) return;
+        restoreLargeFieldsV2(object, key, blobStore);
+    }
+
+    private static void restoreLargeFieldsV2(JSONObject object, String key, SessionBlobStore blobs)
+            throws Exception {
+        JSONObject reference = object.optJSONObject(key);
+        if (reference == null) return;
+        String hash = reference.optString(BLOB_REF, "");
+        if (hash.isEmpty()) return;
+        String text = new String(blobs.get(hash), StandardCharsets.UTF_8);
+        if (Field.CONTENT.equals(key)) {
+            object.put(key, new JSONArray(text));
+        } else if (Field.PAYLOAD.equals(key)) {
+            object.put(key, new JSONObject(text));
+        } else {
+            object.put(key, text);
+        }
+    }
+
+    private void writeManifest(String project, String title, long createdAt, long updatedAt,
+                               int messageCount) throws Exception {
+        if (!v2 || manifestFile == null) return;
+        JSONObject manifest = new JSONObject()
+                .put("format", V2_FORMAT)
+                .put("id", sessionDirectory.getName())
+                .put("project", project)
+                .put("title", title == null ? "" : title)
+                .put("created_at", createdAt)
+                .put("updated_at", updatedAt)
+                .put("message_count", Math.max(0, messageCount))
+                .put("next_sequence", nextSequence)
+                .put("segment", "segments/000001.zlog");
+        AtomicFiles.publishText(manifestFile, manifest.toString());
     }
 
     // ------------------------------------------------------------ 写入
@@ -428,13 +624,16 @@ public final class SessionStore {
     /**
      * 记录面向提供方的压缩后上下文。
      *
-     * <p>完整的人类对话仍然留在消息行里；这个快照只影响 {@link #loadMessages}。
+     * <p>完整的人类对话仍然留在消息事件里；这个快照只影响 {@link #loadMessages}，
+     * 同时在 v2 会话目录下写一个原子 checkpoint，供后续恢复路径使用。
      * 落盘前深拷贝一次：调用方之后还会继续改它传进来的那个数组。
      */
     public synchronized void appendContextSnapshot(JSONArray messages) {
         try {
-            appendEvent(RowType.SNAPSHOT, new JSONObject()
-                    .put(Field.MESSAGES, messages == null ? new JSONArray() : copy(messages)));
+            JSONArray snapshot = messages == null ? new JSONArray() : copy(messages);
+            appendEvent(RowType.SNAPSHOT, new JSONObject().put(Field.MESSAGES, snapshot));
+            flush();
+            if (v2 && snapshotStore != null) snapshotStore.write(nextSequence, snapshot);
         } catch (Exception ignored) {
             // 见 appendEvent 的说明。
         }
@@ -447,6 +646,68 @@ public final class SessionStore {
      * 而「改个备注」不是一次对话活动，让它跳到列表顶部会让人困惑。
      * 所以先记下 mtime，写完再恢复。
      */
+    public static File migrateLegacy(File legacyFile) {
+        if (legacyFile == null || !legacyFile.isFile() || !legacyFile.getName().endsWith(SESSION_SUFFIX)) return null;
+        try {
+            SessionSummary source = summarize(legacyFile);
+            SessionStore target = new SessionStore(source.project);
+            JSONArray rows = readRows(legacyFile);
+            int messageCount = 0;
+            for (int i = 0; i < rows.length(); i++) {
+                JSONObject row = rows.optJSONObject(i);
+                if (row == null) continue;
+                if (RowType.SESSION_START.equals(row.optString(Field.TYPE, ""))) continue;
+                if (RowType.MESSAGE.equals(row.optString(Field.TYPE, ""))) messageCount++;
+                target.appendV2(row, true);
+            }
+            target.flush();
+            if (messageCount != source.messageCount) throw new IllegalStateException("legacy message count mismatch");
+            JSONObject manifest = new JSONObject(AtomicFiles.readText(target.manifestFile))
+                    .put("legacy_source", legacyFile.getCanonicalPath())
+                    .put("migration_verified", true)
+                    .put("migration_time", System.currentTimeMillis())
+                    .put("title", source.title)
+                    .put("note", source.note)
+                    .put("title_override", source.titleOverride)
+                    .put("message_count", source.messageCount);
+            AtomicFiles.publishText(target.manifestFile, manifest.toString());
+            // 迁移完成后立刻回读一次，确认 manifest、segment 和 Blob 引用都可恢复。
+            JSONArray restored = loadMessages(target.manifestFile);
+            if (source.messageCount > 0 && restored.length() == 0) {
+                throw new IllegalStateException("migration restore produced empty conversation");
+            }
+            SessionIndex.upsert(new SessionIndex.Entry(target.manifestFile.getAbsolutePath(), source.project,
+                    source.title, source.note, source.titleOverride, source.createdAt,
+                    source.activityModifiedAt, source.messageCount));
+            return target.manifestFile;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    public static boolean cleanupLegacyAfterMigration(File legacyFile) {
+        if (legacyFile == null || !legacyFile.isFile() || !legacyFile.getName().endsWith(SESSION_SUFFIX)) return false;
+        try {
+            List<SessionSummary> summaries = listSessions();
+            String canonical = legacyFile.getCanonicalPath();
+            // A legacy file is eligible only when a verified v2 entry exists with the same project,
+            // title and message count. Never delete based on a filename alone.
+            SessionSummary old = summarize(legacyFile);
+            boolean migrated = false;
+            for (SessionSummary summary : summaries) {
+                if (!summary.file.getName().equals(V2_MANIFEST)) continue;
+                if (summary.project.equals(old.project) && summary.messageCount == old.messageCount) {
+                    migrated = true;
+                    break;
+                }
+            }
+            if (!migrated) return false;
+            return legacyFile.delete();
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     public static void updateSessionMetadata(File file, String note, String titleOverride) throws Exception {
         if (file == null || !file.isFile()) throw new IllegalArgumentException("会话不存在");
         File canonical = file.getCanonicalFile();
@@ -459,9 +720,25 @@ public final class SessionStore {
                 .put(Field.TIMESTAMP, System.currentTimeMillis());
         synchronized (fileLock(canonical)) {
             long modifiedAt = canonical.lastModified();
-            appendLines(canonical, Collections.singletonList(row.toString()), true);
-            canonical.setLastModified(modifiedAt);
-            fsyncDirectory(canonical.getParentFile());
+            if (V2_MANIFEST.equals(canonical.getName())) {
+                SessionStore store = new SessionStore(canonical);
+                store.appendV2(row, true);
+                JSONObject manifest = new JSONObject(AtomicFiles.readText(canonical))
+                        .put("note", metadata.note)
+                        .put("title_override", metadata.titleOverride)
+                        .put("updated_at", modifiedAt);
+                AtomicFiles.publishText(canonical, manifest.toString());
+                SessionIndex.Entry current = currentIndexEntry(canonical);
+                if (current != null) {
+                    SessionIndex.upsert(new SessionIndex.Entry(canonical.getAbsolutePath(), current.project,
+                            current.title, metadata.note, metadata.titleOverride, current.createdAt,
+                            current.updatedAt, current.messageCount));
+                }
+            } else {
+                appendLines(canonical, Collections.singletonList(row.toString()), true);
+                canonical.setLastModified(modifiedAt);
+                fsyncDirectory(canonical.getParentFile());
+            }
         }
     }
 
@@ -484,6 +761,7 @@ public final class SessionStore {
     private static List<JsonLine> scan(File file, boolean strict) throws Exception {
         ArrayList<JsonLine> lines = new ArrayList<>();
         if (file == null || !file.isFile()) return lines;
+        if (V2_MANIFEST.equals(file.getName())) return scanV2(file, -1L);
 
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
@@ -513,6 +791,27 @@ public final class SessionStore {
         return lines;
     }
 
+    private static List<JsonLine> scanV2(File manifest, long afterSequence) throws Exception {
+        ArrayList<JsonLine> lines = new ArrayList<>();
+        File segmentDirectory = new File(manifest.getParentFile(), "segments");
+        File[] segments = segmentDirectory.listFiles((dir, name) -> name.endsWith(".zlog"));
+        if (segments == null) return lines;
+        java.util.Arrays.sort(segments, (a, b) -> a.getName().compareTo(b.getName()));
+        for (File segment : segments) for (JSONObject row : new SessionSegmentLog(segment).readAll()) {
+            long sequence = row.optLong("_sequence", 0L);
+            if (sequence <= afterSequence) continue;
+            long timestamp = row.optLong("_timestamp", 0L);
+            row.put(Field.TIMESTAMP, timestamp);
+            row.remove("_frame_type");
+            row.remove("_sequence");
+            row.remove("_timestamp");
+            restoreLargeFieldsV2(row, Field.CONTENT, new SessionBlobStore(manifest.getParentFile()));
+            restoreLargeFieldsV2(row, Field.PAYLOAD, new SessionBlobStore(manifest.getParentFile()));
+            lines.add(new JsonLine(row.toString(), row, lines.size()));
+        }
+        return lines;
+    }
+
     /** 宽容读取：返回能解出来的行。损坏行被跳过。 */
     public static JSONArray readRows(File file) throws Exception {
         JSONArray rows = new JSONArray();
@@ -531,7 +830,28 @@ public final class SessionStore {
      */
     public static JSONArray loadMessages(File file) throws Exception {
         JSONArray conversation = new JSONArray();
-        for (JsonLine line : scan(file, false)) {
+        List<JsonLine> source;
+        if (file != null && V2_MANIFEST.equals(file.getName())) {
+            long afterSequence = -1L;
+            try {
+                JSONObject snapshot = new SessionSnapshotStore(file.getParentFile()).readLatest();
+                if (snapshot != null) {
+                    long sequence = snapshot.optLong("sequence", -1L);
+                    JSONArray messages = snapshot.optJSONArray(Field.MESSAGES);
+                    if (sequence >= 0L && messages != null) {
+                        afterSequence = sequence;
+                        conversation = copy(messages);
+                    }
+                }
+            } catch (Exception ignored) {
+                afterSequence = -1L;
+                conversation = new JSONArray();
+            }
+            source = scanV2(file, afterSequence);
+        } else {
+            source = scan(file, false);
+        }
+        for (JsonLine line : source) {
             JSONObject row = line.json;
             if (row == null) continue;
 
@@ -594,10 +914,25 @@ public final class SessionStore {
 
     /** 全部会话（各项目目录），按活跃时间倒序。 */
     public static List<SessionSummary> listSessions() {
+        SessionIndex.pruneMissing();
         List<SessionSummary> out = new ArrayList<>();
+        java.util.HashSet<String> paths = new java.util.HashSet<>();
+        for (SessionIndex.Entry entry : SessionIndex.list(null)) {
+            File file = new File(entry.path);
+            if (!file.isFile()) continue;
+            paths.add(file.getAbsolutePath());
+            out.add(new SessionSummary(file, entry.project, entry.title, entry.note,
+                    entry.titleOverride, entry.createdAt, entry.updatedAt, entry.messageCount));
+        }
         File[] projectDirectories = projectsDirectory().listFiles(File::isDirectory);
         if (projectDirectories != null) {
-            for (File directory : projectDirectories) collect(out, directory);
+            for (File directory : projectDirectories) {
+                ArrayList<SessionSummary> legacy = new ArrayList<>();
+                collect(legacy, directory);
+                for (SessionSummary summary : legacy) {
+                    if (paths.add(summary.file.getAbsolutePath())) out.add(summary);
+                }
+            }
         }
         Collections.sort(out, (a, b) -> Long.compare(b.activityModifiedAt, a.activityModifiedAt));
         return out;
@@ -605,10 +940,48 @@ public final class SessionStore {
 
     /** 只列某个项目的会话。用 {@link #sessionDirectory} 取目录，它会顺带建目录、刷新索引。 */
     public static List<SessionSummary> listSessions(String projectDirectory) {
+        SessionIndex.pruneMissing();
+        String project = canonicalProject(projectDirectory);
         List<SessionSummary> out = new ArrayList<>();
-        collect(out, sessionDirectory(projectDirectory));
+        java.util.HashSet<String> paths = new java.util.HashSet<>();
+        for (SessionIndex.Entry entry : SessionIndex.list(project)) {
+            File file = new File(entry.path);
+            if (!file.isFile()) continue;
+            paths.add(file.getAbsolutePath());
+            if (entry.title.isEmpty()) {
+                try {
+                    out.add(summarize(file));
+                    continue;
+                } catch (Exception ignored) {
+                    // Fall back to the lightweight index row.
+                }
+            }
+            out.add(new SessionSummary(file, entry.project, entry.title, entry.note,
+                    entry.titleOverride, entry.createdAt, entry.updatedAt, entry.messageCount));
+        }
+        ArrayList<SessionSummary> legacy = new ArrayList<>();
+        collect(legacy, sessionDirectory(project));
+        for (SessionSummary summary : legacy) {
+            if (paths.add(summary.file.getAbsolutePath())) out.add(summary);
+        }
+        migrateOneLegacy(project);
         Collections.sort(out, (a, b) -> Long.compare(b.modifiedAt, a.modifiedAt));
         return out;
+    }
+
+    private static void migrateOneLegacy(String project) {
+        File directory = sessionDirectory(project);
+        File[] files = directory.listFiles((dir, name) -> name.endsWith(SESSION_SUFFIX));
+        if (files == null) return;
+        for (File file : files) {
+            File marker = new File(file.getAbsolutePath() + ".v2-migrated");
+            if (marker.isFile()) continue;
+            File migrated = migrateLegacy(file);
+            if (migrated != null) {
+                try { AtomicFiles.publishText(marker, "verified"); } catch (Exception ignored) {}
+            }
+            break;
+        }
     }
 
     /** 把一个目录里的每个会话文件读成一行；单个文件读不出来就跳过它，其余照常列出。 */
@@ -617,7 +990,11 @@ public final class SessionStore {
         if (files == null) return;
         for (File file : files) {
             try {
-                out.add(summarize(file));
+                SessionSummary summary = summarize(file);
+                out.add(summary);
+                SessionIndex.upsert(new SessionIndex.Entry(summary.file.getAbsolutePath(), summary.project,
+                        summary.title, summary.note, summary.titleOverride, summary.createdAt,
+                        summary.activityModifiedAt, summary.messageCount));
             } catch (Exception ignored) {
                 // 见方法注释。
             }
@@ -690,15 +1067,23 @@ public final class SessionStore {
     public static boolean deleteSession(File file) {
         if (file == null) return false;
         try {
-            File projects = projectsDirectory().getCanonicalFile();
             File target = file.getCanonicalFile();
+            if (V2_MANIFEST.equals(target.getName())) {
+                File sessions = new File(TermuxConstants.dataDir(), V2_SESSION_DIRECTORY).getCanonicalFile();
+                File parent = target.getParentFile();
+                if (parent == null || !under(sessions, target)) return false;
+                synchronized (fileLock(target)) {
+                    boolean deleted = deleteTree(parent);
+                    if (deleted) SessionIndex.remove(target);
+                    return deleted;
+                }
+            }
+            File projects = projectsDirectory().getCanonicalFile();
             File parent = target.getParentFile();
-
             boolean directChild = parent != null && parent.getParentFile() != null
                     && parent.getParentFile().equals(projects);
             if (!directChild || !under(projects, target)) return false;
             if (!target.getName().endsWith(SESSION_SUFFIX)) return false;
-
             synchronized (fileLock(target)) {
                 return !target.exists() || target.delete();
             }
@@ -1065,6 +1450,10 @@ public final class SessionStore {
     private void appendLine(JSONObject row) throws Exception {
         File target = sessionFile.getCanonicalFile();
         synchronized (fileLock(target)) {
+            if (v2) {
+                appendV2(row, false);
+                return;
+            }
             appendLines(target, Collections.singletonList(row.toString()), false);
         }
     }
@@ -1108,6 +1497,22 @@ public final class SessionStore {
     }
 
     /** fsync 目录，确保目录项变更真正落盘。拿不到 fd 时静默跳过。 */
+    private static SessionIndex.Entry currentIndexEntry(File file) {
+        for (SessionIndex.Entry entry : SessionIndex.list(null)) {
+            if (file.getAbsolutePath().equals(entry.path)) return entry;
+        }
+        return null;
+    }
+
+    private static boolean deleteTree(File directory) {
+        if (directory == null || !directory.exists()) return true;
+        File[] children = directory.listFiles();
+        if (children != null) for (File child : children) if (child.isDirectory()) {
+            if (!deleteTree(child)) return false;
+        } else if (!child.delete()) return false;
+        return directory.delete();
+    }
+
     private static void fsyncDirectory(File directory) {
         if (directory == null) return;
         FileDescriptor descriptor = null;

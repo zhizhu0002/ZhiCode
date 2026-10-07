@@ -231,7 +231,11 @@ fun ZhiSidebar(
                         )
                     }
                 }
-                items(sessions, key = { it.id }) { session ->
+                items(
+                    items = sessions,
+                    key = { it.id },
+                    contentType = { "session-row" },
+                ) { session ->
                     SessionRow(
                         session = session,
                         active = session.id == state.activeSessionId,

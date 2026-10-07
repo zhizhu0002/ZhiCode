@@ -405,7 +405,6 @@ data class FileListOptions(
     val query: String = "",
     val sortKey: FileSortKey = FileSortKey.NAME,
     val descending: Boolean = false,
-    val grid: Boolean = false,
 )
 
 /**
@@ -623,14 +622,18 @@ data class WorkspaceUiState(
      */
     val fileNote: String = "",
     val fileListOptions: FileListOptions = FileListOptions(),
-    val openFile: OpenFile? = null,
     /** 文件面板的根：项目 / HOME / 共享存储。 */
     val fileRoot: FileRoot = FileRoot.HOME,
     /**
-     * 编辑中的正文。**null 表示只读查看**（不是"空文件"）——
-     * 这个区别是刻意的：空文件也必须能进入编辑态去写内容。
+     * 待打开的编辑器目标（绝对路径）。
+     *
+     * 编辑器是独立 Activity（见 `compose/editor/EditorActivity`），所以主界面
+     * **不需要**持有它的正文、脏状态或确认弹窗 —— 那些都在编辑器自己的
+     * `EditorViewModel` 里。这里只留一个"请打开这个文件"的意图：
+     * 界面层观察到它就去 `startActivity`，然后立刻清空（[WorkspaceViewModel.consumePendingEditorOpen]），
+     * 否则重组会重复启动。
      */
-    val fileDraft: String? = null,
+    val pendingEditorOpen: String? = null,
     /** 非空即「新建 / 重命名」表单打开。 */
     val fileNameForm: FileNameForm? = null,
     /** 非空即删除确认打开。 */

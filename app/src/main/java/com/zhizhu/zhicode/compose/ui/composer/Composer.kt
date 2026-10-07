@@ -210,7 +210,9 @@ fun Composer(
                     useLabelAsPlaceholder = true,
                     // 透明容器 + 透明描边：只留外层方角框
                     colors = TextFieldDefaults.textFieldColors(
-                        backgroundColor = scheme.surfaceContainerHighest.copy(alpha = 0.34f),
+                        // 浅色模式下不再用半透明的最高层容器，否则输入框会变成
+                        // 一块偏灰的脏色；使用主题明确提供的输入容器层。
+                        backgroundColor = if (ZhiColors.isDark()) scheme.surfaceContainerHighest else ZhiColors.panelSurface(),
                         labelColor = scheme.onSurfaceVariantSummary,
                         borderColor = Color.Transparent,
                     ),

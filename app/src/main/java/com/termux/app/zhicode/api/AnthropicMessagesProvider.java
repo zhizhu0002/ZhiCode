@@ -10,11 +10,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -91,18 +89,21 @@ public final class AnthropicMessagesProvider implements ModelProvider {
         StreamDecoder decoder = new StreamDecoder(listener);
 
         try {
+            conn.setRequestProperty("x-request-id", request.requestId());
             writeRequestBody(conn, buildRequestBody(config, systemPrompt, messages, tools));
 
             int status = conn.getResponseCode();
+            if (request.exceedsTotalTimeout()) throw new java.net.SocketTimeoutException("request total timeout");
             request.markResponseStarted();
             if (status < 200 || status >= 300) {
                 throw new IllegalStateException(
-                        "ZhiCode API HTTP " + status + ": " + truncate(readAll(conn.getErrorStream())));
+                        "ZhiCode API HTTP " + status + ": "
+                                + truncate(ProviderTransport.readError(conn, MAX_ERROR_CHARS)));
             }
 
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                while (readEvent(reader, decoder)) {
+                while (readEvent(reader, decoder, request)) {
                     // 循环体为空是有意的：readEvent 每调用一次消费一个 data 事件，
                     // 返回 false 表示流结束或解码器要求停止。逻辑都在解码器里。
                 }
@@ -161,10 +162,7 @@ public final class AnthropicMessagesProvider implements ModelProvider {
     }
 
     private static void writeRequestBody(HttpURLConnection conn, JSONObject body) throws IOException {
-        try (BufferedWriter writer = new BufferedWriter(
-                new OutputStreamWriter(conn.getOutputStream(), StandardCharsets.UTF_8))) {
-            writer.write(body.toString());
-        }
+        ProviderTransport.writeJson(conn, body.toString());
     }
 
     // ------------------------------------------------------------ SSE 分帧
@@ -178,12 +176,15 @@ public final class AnthropicMessagesProvider implements ModelProvider {
      *
      * @return 是否应继续读；{@code false} 表示流已结束或解码器要求停止
      */
-    static boolean readEvent(BufferedReader reader, StreamDecoder decoder) throws Exception {
+    static boolean readEvent(BufferedReader reader, StreamDecoder decoder, HttpRequestTracker.Scope request) throws Exception {
         String eventName = null;
         String line;
         while ((line = reader.readLine()) != null) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new InterruptedException("ZhiCode request interrupted");
+            }
+            if (request.exceedsTotalTimeout()) {
+                throw new java.net.SocketTimeoutException("request total timeout");
             }
             if (line.startsWith(EVENT_FIELD)) {
                 // 事件名只在缺少 type 字段时用作回落，所以记住即可，不必立即消费。
@@ -515,16 +516,6 @@ public final class AnthropicMessagesProvider implements ModelProvider {
                 return new JSONObject();
             }
         }
-    }
-
-    private static String readAll(InputStream in) throws Exception {
-        if (in == null) return "";
-        StringBuilder out = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) out.append(line).append('\n');
-        }
-        return out.toString();
     }
 
     private static String truncate(String value) {

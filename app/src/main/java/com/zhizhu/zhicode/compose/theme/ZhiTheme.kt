@@ -216,7 +216,7 @@ object ZhiColors {
     private val DarkCard = Color(0xFF323235)
     private val PanelLight = Color(0xFFF1F1F3)
     private val CardLight = Color(0xFFFAFAFC)
-    private val CardInnerLight = Color(0xFFF0F0F0)
+    private val CardInnerLight = Color(0xFFF7F7F8)
 }
 
 /**

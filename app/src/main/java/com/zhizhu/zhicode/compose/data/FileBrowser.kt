@@ -65,7 +65,14 @@ internal object FileBrowser {
             .toList()
     }
 
-    /** 读取文本文件用于预览。默认 UTF-8；编辑页可传入用户选择的编码。 */
+    /**
+     * 读取文本文件用于预览。默认 UTF-8；编辑页可传入用户选择的编码。
+     *
+     * ⚠️ **编辑器不用它了**：`compose/editor/EditorFileIo` 另有一套更完整的读盘
+     * （BOM 判定 → 严格 UTF-8 → 回退 GBK、尺寸上限、二进制拒绝），因为编辑器要
+     * “按真正识别出的编码写回”，而这里的 `charsetName` 是调用方猜的。
+     * 本函数现在只服务于文件列表侧的只读预演。
+     */
     fun read(path: String, charsetName: String = "UTF-8"): OpenFile {
         val file = File(path)
         val name = file.name

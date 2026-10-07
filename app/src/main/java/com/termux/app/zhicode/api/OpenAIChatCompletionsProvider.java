@@ -11,11 +11,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -82,23 +80,28 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
 
         StreamDecoder decoder = new StreamDecoder(listener);
         try {
+            conn.setRequestProperty("x-request-id", request.requestId());
             writeRequestBody(conn, buildRequestBody(config, systemPrompt, messages, tools));
 
             int status = conn.getResponseCode();
+            if (request.exceedsTotalTimeout()) {
+                throw new java.net.SocketTimeoutException("request total timeout");
+            }
             request.markResponseStarted();
             if (status < 200 || status >= 300) {
                 throw new IllegalStateException(
-                        "OpenAI 兼容 API HTTP " + status + ": " + truncate(readAll(conn.getErrorStream())));
+                        "OpenAI 兼容 API HTTP " + status + ": "
+                                + truncate(ProviderTransport.readError(conn, MAX_ERROR_CHARS)));
             }
 
             if (isStreaming(conn.getContentType())) {
-                readSse(conn.getInputStream(), decoder);
+                readSse(conn.getInputStream(), decoder, request);
                 if (!decoder.terminalEventSeen) {
                     // 这个措辞是契约：引擎按 "stream_read_error" 子串判定可重试。
                     throw new IllegalStateException("stream_read_error: model stream ended before [DONE]");
                 }
             } else {
-                decoder.applyFullResponse(new JSONObject(readAll(conn.getInputStream())));
+                decoder.applyFullResponse(new JSONObject(ProviderTransport.readBody(conn, MAX_ERROR_CHARS)));
             }
         } catch (IOException failure) {
             if (Thread.currentThread().isInterrupted()) throw failure;
@@ -153,10 +156,7 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
     }
 
     private static void writeRequestBody(HttpURLConnection conn, JSONObject body) throws IOException {
-        try (BufferedWriter writer = new BufferedWriter(
-                new OutputStreamWriter(conn.getOutputStream(), StandardCharsets.UTF_8))) {
-            writer.write(body.toString());
-        }
+        ProviderTransport.writeJson(conn, body.toString());
     }
 
     private static JSONObject buildRequestBody(SessionConfig config, String systemPrompt,
@@ -187,12 +187,15 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
 
     // ------------------------------------------------------------ SSE 分帧
 
-    private static void readSse(InputStream in, StreamDecoder decoder) throws Exception {
+    private static void readSse(InputStream in, StreamDecoder decoder, HttpRequestTracker.Scope request) throws Exception {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (Thread.currentThread().isInterrupted()) {
                     throw new InterruptedException("ZhiCode request interrupted");
+                }
+                if (request.exceedsTotalTimeout()) {
+                    throw new java.net.SocketTimeoutException("request total timeout");
                 }
                 // 这个协议只有一个 data: 字段，没有 event: —— 事件类型在 payload 里。
                 if (!line.startsWith(DATA_FIELD)) continue;
@@ -630,16 +633,6 @@ public final class OpenAIChatCompletionsProvider implements ModelProvider {
                 return new JSONObject();
             }
         }
-    }
-
-    private static String readAll(InputStream in) throws Exception {
-        if (in == null) return "";
-        StringBuilder out = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) out.append(line).append('\n');
-        }
-        return out.toString();
     }
 
     private static String truncate(String value) {

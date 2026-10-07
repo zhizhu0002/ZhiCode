@@ -160,13 +160,13 @@ fun SettingsDialog(
                 // 拆开之后只组合可见的那部分，首帧成本随**屏幕高度**增长而不是整页长度。
                 // 各分组的状态都是组内局部的（`SettingsGroup` 只画一张卡），
                 // 所以拆 item 不会打断任何 remember/动画。
-                item(key = "general") { SettingsGroup("通用") { GeneralPage(draft, onChange, onNavigate) } }
-                item(key = "modelService") {
+                item(key = "general", contentType = "settings-group") { SettingsGroup("通用") { GeneralPage(draft, onChange, onNavigate) } }
+                item(key = "modelService", contentType = "settings-group") {
                     SettingsGroup("模型与服务") { ModelServicePage(draft, onChange, onNavigate) }
                 }
-                item(key = "context") { SettingsGroup("上下文与项目") { ContextProjectPage(draft, onChange) } }
-                item(key = "agent") { SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) } }
-                item(key = "extensions") { SettingsGroup("扩展") { ExtensionsPage(onNavigate) } }
+                item(key = "context", contentType = "settings-group") { SettingsGroup("上下文与项目") { ContextProjectPage(draft, onChange) } }
+                item(key = "agent", contentType = "settings-group") { SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) } }
+                item(key = "extensions", contentType = "settings-group") { SettingsGroup("扩展") { ExtensionsPage(onNavigate) } }
             }
             // Miuix 原生滚动条
             VerticalScrollBar(

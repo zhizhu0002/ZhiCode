@@ -94,7 +94,6 @@ fun FilesPane(
     entries: List<FileEntry>,
     onOpen: (FileEntry) -> Unit,
     onNavigate: (String) -> Unit,
-    onUp: () -> Unit = {},
     modifier: Modifier = Modifier,
     emptyNote: String = "",
     root: FileRoot = FileRoot.HOME,
@@ -148,7 +147,6 @@ fun FilesPane(
                 emptyNote = emptyNote,
                 sharedStorageGranted = sharedStorageGranted,
                 onGrantSharedStorage = onGrantSharedStorage,
-                onUp = onUp,
                 listOptions = listOptions,
                 onQueryChange = onQueryChange,
                 onSortChange = onSortChange,
@@ -185,7 +183,6 @@ private fun FileRootPager(
     emptyNote: String,
     sharedStorageGranted: Boolean,
     onGrantSharedStorage: () -> Unit,
-    onUp: () -> Unit,
     listOptions: FileListOptions,
     onQueryChange: (String) -> Unit,
     onSortChange: (FileSortKey, Boolean) -> Unit,
@@ -235,12 +232,13 @@ private fun FileRootPager(
         state = pagerState,
         modifier = modifier,
         userScrollEnabled = false,
+        beyondViewportPageCount = 0,
         flingBehavior = flingBehavior,
         key = { roots[it] },
         pageContent = { page ->
             FileBrowserList(
                 filePath, entries, roots[page], emptyNote, sharedStorageGranted, onGrantSharedStorage,
-                onUp, listOptions, onQueryChange, onSortChange, onToggleSortDirection,
+                listOptions, onQueryChange, onSortChange, onToggleSortDirection,
                 selection, selectionMode, fileClipboardCount, fileClipboardMove, onPasteFiles, onOpen, onNavigate, onNewEntry,
                 onLongPressEntry, onToggleEntry, onSetSelection, onToggleSelectAll, onClearSelection,
             )
@@ -252,7 +250,6 @@ private fun FileRootPager(
 private fun FileBrowserList(
     filePath: String, entries: List<FileEntry>, root: FileRoot, emptyNote: String,
     sharedStorageGranted: Boolean, onGrantSharedStorage: () -> Unit,
-    onUp: () -> Unit,
     listOptions: FileListOptions, onQueryChange: (String) -> Unit,
     onSortChange: (FileSortKey, Boolean) -> Unit, onToggleSortDirection: () -> Unit,
     selection: Set<String>, selectionMode: Boolean,
@@ -271,10 +268,6 @@ private fun FileBrowserList(
     val enterSelection by rememberUpdatedState(onLongPressEntry)
     val allSelected = entries.isNotEmpty() && entries.all { it.path in selection }
     val sortMenuEntries = listOf(
-        DropdownEntry(items = listOf(
-            DropdownItem("网格", selected = listOptions.grid, onClick = { /* 宫格已按当前产品要求停用 */ }),
-            DropdownItem("列表", selected = true, onClick = { /* 当前固定列表 */ }),
-        )),
         DropdownEntry(items = FileSortKey.entries.map { key ->
             DropdownItem(key.label, selected = listOptions.sortKey == key, onClick = { onSortChange(key, listOptions.descending) })
         }),
@@ -309,12 +302,11 @@ private fun FileBrowserList(
                     { ZhiIconButton(ZhiIcons.close, "清除搜索", { onQueryChange("") }, compact = 32.dp, iconSize = 16.dp) }
                 } else null,
             )
+            if (fileClipboardCount > 0) ZhiIconButton(ZhiIcons.paste, if (fileClipboardMove) "粘贴移动的 $fileClipboardCount 项" else "粘贴复制的 $fileClipboardCount 项", onPasteFiles, compact = 40.dp)
+            ZhiIconButton(icon = ZhiIcons.newEntry, description = "新建", onClick = onNewEntry, compact = 40.dp, tint = MiuixTheme.colorScheme.primary)
             OverlayIconDropdownMenu(sortMenuEntries, minHeight = 40.dp, minWidth = 44.dp, collapseOnSelection = true) {
                 Icon(ZhiMaterialIcons.Sort, "排序与显示方式", modifier = Modifier.size(20.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
-            if (fileClipboardCount > 0) ZhiIconButton(ZhiIcons.directory, if (fileClipboardMove) "粘贴移动的 $fileClipboardCount 项" else "粘贴复制的 $fileClipboardCount 项", onPasteFiles, compact = 40.dp)
-            ZhiIconButton(icon = ZhiIcons.newEntry, description = "新建", onClick = onNewEntry, compact = 40.dp, tint = MiuixTheme.colorScheme.primary)
-            ZhiIconButton(ZhiIcons.back, "上一级目录", onUp, compact = 40.dp)
         }
     }
     FilePathBar(filePath, onNavigate)
@@ -390,7 +382,11 @@ private fun FileBrowserList(
                 }
             },
         ) {
-            itemsIndexed(entries, key = { _, entry -> entry.path }) { _, entry ->
+            itemsIndexed(
+                items = entries,
+                key = { _, entry -> entry.path },
+                contentType = { _, entry -> if (entry.directory) "directory" else "file" },
+            ) { _, entry ->
                 FileListRow(entry = entry, onOpen = { if (selectionMode) onToggleEntry(entry) else onOpen(entry) }, selected = entry.path in selection, selectionMode = selectionMode, modifier = Modifier.animateItem())
             }
         }

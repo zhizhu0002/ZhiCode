@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.model.SlashCommand
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -45,7 +46,7 @@ fun SlashPalette(
         cornerRadius = ZhiRadius.card,
         insideMargin = PaddingValues(vertical = 4.dp),
         colors = CardDefaults.defaultColors(
-            color = scheme.surfaceContainerHigh,
+            color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else ZhiColors.cardSurface(),
             contentColor = scheme.onSurface,
         ),
     ) {
@@ -73,7 +74,11 @@ fun SlashPalette(
                 .fillMaxWidth()
                 .heightIn(max = 168.dp),
         ) {
-            items(visible, key = { it.name }) { command ->
+            items(
+                items = visible,
+                key = { it.name },
+                contentType = { "slash-command" },
+            ) { command ->
                 Card(
                     onClick = { onPick(command) },
                     // 打字时命令集一直在收窄：命中的行要**滑上去**，落选的行淡出。
@@ -86,7 +91,7 @@ fun SlashPalette(
                     cornerRadius = ZhiRadius.inner,
                     insideMargin = PaddingValues(horizontal = 8.dp, vertical = 9.dp),
                     colors = CardDefaults.defaultColors(
-                        color = scheme.surfaceContainerHigh,
+                        color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else ZhiColors.cardSurface(),
                         contentColor = scheme.onSurface,
                     ),
                     pressFeedbackType = PressFeedbackType.Sink,

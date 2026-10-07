@@ -74,7 +74,6 @@ import com.zhizhu.zhicode.compose.model.MemoryScope
 import com.zhizhu.zhicode.compose.model.MemoryState
 import com.zhizhu.zhicode.compose.model.ModelProfileTab
 import com.zhizhu.zhicode.compose.model.ModelPickerState
-import com.zhizhu.zhicode.compose.model.OpenFile
 import com.zhizhu.zhicode.compose.model.PermissionMode
 import com.zhizhu.zhicode.compose.model.PermissionRequest
 import com.zhizhu.zhicode.compose.model.QueuedPrompt
@@ -612,15 +611,21 @@ class WorkspaceViewModel(
 
     fun closeTaskList() = _state.update { it.copy(taskListOpen = false) }
 
-    fun onComposerChange(text: String) {        val query = if (text.startsWith("/") && !text.contains(' ') && !text.contains('\n')) text else null
+    fun onComposerChange(text: String) {
+        val query = if (text.startsWith("/") && !text.contains(' ') && !text.contains('\n')) text else null
         _state.update {
             it.copy(
                 composerText = text,
                 slashQuery = query,
                 slashMatches = if (query == null) emptyList()
-                else SLASH_COMMANDS.filter { c -> c.name.startsWith(query.lowercase(Locale.US)) },
+                else slashMatchesFor(query),
             )
         }
+    }
+
+    private fun slashMatchesFor(query: String): List<SlashCommand> {
+        val normalized = query.lowercase(Locale.US)
+        return SLASH_COMMANDS.filter { it.name.startsWith(normalized) }
     }
 
     fun pickSlashCommand(command: SlashCommand) {
@@ -4685,8 +4690,10 @@ class WorkspaceViewModel(
     /** 从磁盘重新读取会话列表（新建/发消息/删除之后调用）。 */
     fun refreshSessions() {
         viewModelScope.launch(Dispatchers.IO) {
-            val sessions = SessionReader.list(_state.value.projectPath)
+            val projectAtStart = _state.value.projectPath
+            val sessions = SessionReader.list(projectAtStart)
             _state.update { state ->
+                if (state.projectPath != projectAtStart) return@update state
                 // 保留"尚未落盘的新会话"这一状态：此刻 activeSessionId 为空且
                 // 列表里还没有对应文件，不能被列表刷新覆盖掉。
                 state.copy(sessions = sessions)
@@ -5323,7 +5330,7 @@ class WorkspaceViewModel(
         // ⚠️ 同时清掉选择：`fileSelection` 存的是**路径**，跨目录之后那些路径
         // 指向的是另一个目录里的东西。留着的话，在 A 目录选中的文件会在 B 目录里
         // 被"删除/附加" —— 而那是另外一批文件。
-        _state.update { it.copy(filePath = path, openFile = null, fileDraft = null, fileSelection = emptySet(), fileSelectionMode = false, fileListOptions = FileListOptions()) }
+        _state.update { it.copy(filePath = path, pendingEditorOpen = null, fileSelection = emptySet(), fileSelectionMode = false, fileListOptions = FileListOptions()) }
         scheduleFileReload()
     }
 
@@ -5340,24 +5347,27 @@ class WorkspaceViewModel(
         navigateTo(parent)
     }
 
+    /**
+     * 点开一条列表项：目录就进去，文件就交给**编辑器那个独立 Activity**。
+     *
+     * 这里只往状态里放一个「待打开路径」，真正 `startActivity` 的是界面层
+     * （`ZhiCodeScreen` 里那个 `rememberLauncherForActivityResult`）：
+     * ViewModel 不该拿 Context 去启动界面，而且启动结果要回调到界面上
+     * 才能决定“回来了要不要刷新文件列表”。
+     */
     fun openFile(entry: FileEntry) {
         if (entry.directory) {
             openDirectory(entry)
             return
         }
-        viewModelScope.launch(Dispatchers.IO) {
-            val file = FileBrowser.read(entry.path)
-            val editable = isEditablePreview(file)
-            _state.update {
-                it.copy(
-                    openFile = file,
-                    // 正常文本打开即进入编辑态；截断、二进制和读失败仍保持只读。
-                    fileDraft = file.takeIf { editable }?.content,
-                    message = if (editable) "已打开 ${entry.name}（可编辑）" else "已打开 ${entry.name}（只读）",
-                )
-            }
-        }
+        requestOpenEditor(entry.path)
     }
+
+    /** 请求把某个文件交给编辑器打开（新建文件后立即打开也走它）。 */
+    fun requestOpenEditor(path: String) = _state.update { it.copy(pendingEditorOpen = path) }
+
+    /** 界面已经拿着这个路径去启动编辑器了，清掉标志，避免重组时重复启动。 */
+    fun consumePendingEditorOpen() = _state.update { it.copy(pendingEditorOpen = null) }
 
     /** 文件面板的根路径（内置 Termux home 不存在时回退到应用私有目录）。 */
     /**
@@ -5380,8 +5390,7 @@ class WorkspaceViewModel(
                     FileRoot.HOME -> TermuxConstants.TERMUX_HOME_DIR_PATH
                     FileRoot.SHARED -> StorageLinks.EXTERNAL_ROOT
                 },
-                openFile = null,
-                fileDraft = null,
+                pendingEditorOpen = null,
                 fileNameForm = null,
                 fileDeletePrompt = null,
                 // 同 navigateTo：跨根之后旧路径完全没有意义。
@@ -5421,10 +5430,6 @@ class WorkspaceViewModel(
         updateFileSort(current.sortKey, !current.descending)
     }
 
-    fun setFileGrid(grid: Boolean) {
-        _state.update { it.copy(fileListOptions = it.fileListOptions.copy(grid = grid)) }
-    }
-
     /**
      * 文件管理器式排序：目录永远在文件之前，正序/倒序只改变每组内部顺序。
      * 不能对完整列表直接调用 reversed()，否则倒序会把文件夹整体翻到文件后面。
@@ -5450,86 +5455,17 @@ class WorkspaceViewModel(
         _state.update { it.copy(sharedStorageGranted = granted) }
     }
 
-    // ---------- 文件：编辑与保存 ----------
-
-    /** 进入编辑态。只对**文本**文件有意义（二进制/读失败的预览不该被保存回去）。 */
-    fun startEditingFile() {
-        val open = _state.value.openFile ?: return
-        if (!isEditablePreview(open)) {
-            _state.update { it.copy(message = "这个文件不能编辑（二进制、读取失败或预览已截断）") }
-            return
-        }
-        _state.update { it.copy(fileDraft = open.content) }
-    }
-
-    fun updateFileDraft(text: String) = _state.update { it.copy(fileDraft = text) }
-
-    /** 重新读取当前文件；编辑页会在调用前处理未保存确认。 */
-    fun reloadOpenFile(charsetName: String? = null) {
-        val open = _state.value.openFile ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            val file = FileBrowser.read(open.path, charsetName ?: open.charsetName)
-            val editable = isEditablePreview(file)
-            _state.update {
-                it.copy(
-                    openFile = file,
-                    fileDraft = file.takeIf { editable }?.content,
-                    message = "已重新加载 ${file.name}",
-                )
-            }
-        }
-    }
-
-    /** 放弃改动。没有这一步的话，误点「编辑」就只能靠保存来退出。 */
-    fun cancelEditingFile() = _state.update {
-        it.copy(fileDraft = null, message = "已放弃改动")
-    }
-
-    /**
-     * 保存编辑中的内容。
-     *
-     * 成功后**重新读一遍**这个文件（而不是把草稿写进 openFile）：读回来的是磁盘上
-     * 真实的样子。写盘可能被截断、可能有编码问题，用草稿冒充成功等于对用户说谎。
-     */
-    fun saveFile(text: String? = null) {
-        val open = _state.value.openFile ?: return
-        val targetPath = open.path
-        val draft = text ?: _state.value.fileDraft ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            val charset = runCatching { java.nio.charset.Charset.forName(open.charsetName) }
-                .getOrDefault(Charsets.UTF_8)
-            val error = FileOps.write(File(targetPath), draft, charset)
-            if (error != null) {
-                _state.update { state ->
-                    if (state.openFile?.path == targetPath) state.copy(message = "保存失败：$error") else state
-                }
-                return@launch
-            }
-            val reread = FileBrowser.read(targetPath, open.charsetName)
-            _state.update { state ->
-                // 保存可能跨过一次返回/重新打开。旧 IO 结果不能覆盖新页面。
-                if (state.openFile?.path == targetPath) {
-                    state.copy(openFile = reread, fileDraft = null, message = "已保存 ${open.name}")
-                } else {
-                    state
-                }
-            }
-            reloadFiles()
-        }
-    }
-
-    /**
-     * 「可编辑」的判据。
-     *
-     * [FileBrowser.read] 对二进制返回的是一句给人看的提示（"（二进制文件，N 字节…）"），
-     * 对读失败返回"（读取失败…）"。把这两句当正文保存回去会把文件**写坏** ——
-     * 所以它们不能进入编辑态。判据是"内容是不是那两句提示"，
-     * 而不是"文件大不大"，因为 4MB 的文本是合法的、80 字节的二进制不是。
-     */
-    private fun isEditablePreview(open: OpenFile): Boolean =
-        !open.truncated &&
-            !open.content.startsWith("（二进制文件，") &&
-            !open.content.startsWith("（读取失败")
+    // ---------- 文件：编辑（已搬到独立 Activity） ----------
+    //
+    // 这里**只剩一个入口**：把「要编辑的路径」放进状态，由界面层去启动
+    // com.zhizhu.zhicode.compose.editor.EditorActivity。
+    //
+    // 原先这一整段（读正文 / markFileDirty / saveFile / reloadOpenFile /
+    // cancelEditingFile / requestCloseFile / saveAndCloseFile / editorContentOf /
+    // isEditablePreview …）都长在主界面的 ViewModel 里，因为编辑器曾经是主界面里的
+    // 一个页面。代价是返回键与输入法可见性要在同一个窗口里和 NavDisplay、对话输入器
+    // 分权 —— 「编辑后返回不弹未保存确认」「键盘时有时无」都出在这里。
+    // 编辑器现在有自己的 ViewModel（EditorViewModel）与自己的窗口，所以这一整段消失。
 
     // ---------- 文件：新建 / 重命名 / 删除 ----------
 
@@ -5601,8 +5537,8 @@ class WorkspaceViewModel(
             } else {
                 reloadFiles()
                 if (form.target == null && created.isFile) {
-                    val opened = FileBrowser.read(created.absolutePath)
-                    _state.update { it.copy(openFile = opened) }
+                    // 「新建了个文件然后还要自己找出来」是一步没必要的手续：直接交给编辑器打开。
+                    requestOpenEditor(created.absolutePath)
                 }
             }
         }
@@ -5641,10 +5577,6 @@ class WorkspaceViewModel(
             _state.update { s ->
                 s.copy(
                     fileDeletePrompt = null,
-                    // 删掉的正是当前打开的文件时要把它关掉，否则面板会一直显示
-                    // 一个已经不存在的文件的正文 —— 再点保存就会把它**建回来**。
-                    openFile = if (s.openFile?.path in removed) null else s.openFile,
-                    fileDraft = if (s.openFile?.path in removed) null else s.fileDraft,
                     // 选中的东西被删掉之后选择模式自然结束（空集合＝不在选择模式）。
                     fileSelection = s.fileSelection - removed,
                     fileSelectionMode = false,
@@ -5655,7 +5587,9 @@ class WorkspaceViewModel(
         }
     }
 
-    fun closeFile() = _state.update { it.copy(openFile = null, fileDraft = null) }
+    // 退出确认与保存都不再在这里：编辑器是独立 Activity，它自己的 EditorViewModel
+    // 持有正文、脏标志与确认弹窗（见 compose/editor/）。主界面只需要在编辑器返回
+    // RESULT_OK 时刷新一次文件列表。
 
     // ---------- 文件：选择模式（长按多选） ----------
 

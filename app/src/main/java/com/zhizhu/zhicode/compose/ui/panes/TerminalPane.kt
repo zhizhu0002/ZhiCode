@@ -410,7 +410,11 @@ private fun TerminalPlaceholder(
                         // 拿它当 key 只是位置别名，不是身份（理由见那边的完整注释）。只挂 animateItem。
                         // 这里本来就没几行，也不会重排，挂上主要是让「清屏 → 重新出 banner」
                         // 这两步不再瞬移。
-                        items(lines.size) { index ->
+                        items(
+                            count = lines.size,
+                            key = { it },
+                            contentType = { "terminal-line" },
+                        ) { index ->
                             val line = lines[index]
                             Text(
                                 text = line.text.ifEmpty { " " },
