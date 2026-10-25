@@ -66,8 +66,6 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.VerticalScrollBar
-import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -455,10 +453,6 @@ private fun TerminalPlaceholder(
                             )
                         }
                     }
-                    VerticalScrollBar(
-                        adapter = rememberScrollBarAdapter(listState),
-                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
-                    )
                 }
             }
             ZhiHorizontalDivider()

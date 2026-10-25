@@ -23,6 +23,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
@@ -45,8 +46,6 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
-import top.yukonga.miuix.kmp.basic.VerticalScrollBar
-import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
@@ -87,14 +86,18 @@ fun ThirdPartyLicensesPage(
     val topAppBarScrollBehavior = MiuixScrollBehavior()
     val listState = rememberLazyListState()
     val barBlurBackdrop = rememberPageBlurBackdrop()
+    // ⚠️ 这里原本写的是 `blurActive = false` —— 等于**主动关掉**了已经建好的模糊背板。
+    // 结果是这一页的顶栏永远是一块实色，与其它页的毛玻璃对不上。
+    // 正确的判断就是"背板有没有建出来"（`rememberPageBlurBackdrop` 在模糊不可用时返回 null）。
+    val blurActive = barBlurBackdrop != null
 
     Scaffold(
         topBar = {
-            PageBlurBar(backdrop = barBlurBackdrop, blurActive = false) {
+            PageBlurBar(backdrop = barBlurBackdrop, blurActive = blurActive) {
                 TopAppBar(
                     title = "第三方组件许可",
                     scrollBehavior = topAppBarScrollBehavior,
-                    color = colorScheme.surface,
+                    color = if (blurActive) Color.Transparent else colorScheme.surface,
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(
@@ -162,13 +165,6 @@ fun ThirdPartyLicensesPage(
                 }
             }
 
-            VerticalScrollBar(
-                adapter = rememberScrollBarAdapter(listState),
-                // ⚠️ 必须是 `fillMaxHeight()`，不能是 `fillMaxSize()`。
-                // 后者把宽度也撑满 → `align(CenterEnd)` 失去参照，滚动条会画到**屏幕中间**。
-                // `SettingsSubPage.kt` 里同一处用的就是 `fillMaxHeight()`。
-                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
-            )
         }
     }
 

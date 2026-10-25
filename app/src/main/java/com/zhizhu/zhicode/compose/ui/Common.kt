@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui
 
+import com.zhizhu.zhicode.compose.data.BottomBarStyle
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
@@ -149,7 +150,18 @@ internal fun FloatingBottomShell(
     // 它不是样式偏好而是**可读性**选择：屏幕小时悬浮内缩会吃掉两侧各 12dp，
     // 而长命令恰好最需要横向空间。
     val floating = LocalThemeSettings.current.floatingBar
-    val shape = RoundedCornerShape(if (floating) ZhiRadius.floating else 0.dp)
+    // iOS 风格：悬浮时把圆角拉到全圆（胶囊），而不是 Miuix 的中等圆角。
+    // 这是两种不同的设计语言 —— iOS 的输入条是一条胶囊，Miuix 是一张卡片。
+    // 只在**真的悬浮**时生效：贴边形态没有"形态"可谈（见 BottomBarStyle 的说明）。
+    val iosStyle = floating &&
+        LocalThemeSettings.current.bottomBarStyleValue == BottomBarStyle.IOS
+    val shape = RoundedCornerShape(
+        when {
+            iosStyle -> 28.dp
+            floating -> ZhiRadius.floating
+            else -> 0.dp
+        },
+    )
     val inset = if (floating) floatingHorizontalInset(wide) else 0.dp
     FloatingToolbar(
         modifier = modifier

@@ -257,7 +257,7 @@ public final class TermuxTerminalPane extends FrameLayout
         for (int i = 0; i < sessions.size(); i++) {
             TerminalSession session = sessions.get(i);
             String name = session.mSessionName == null
-                ? "session " + (i + 1)
+                ? "会话 " + (i + 1)
                 : session.mSessionName;
             rows.add(new SessionInfo(name, session.isRunning(), i == selected));
         }
@@ -633,7 +633,7 @@ public final class TermuxTerminalPane extends FrameLayout
         String text = terminalView.getSelectedText();
         if (text == null || text.isEmpty()) return null;
         clipboard().setPrimaryClip(ClipData.newPlainText("terminal", text));
-        return "Copied";
+        return "已复制";
     }
 
     /** 把剪贴板内容写进当前会话。 */
@@ -658,7 +658,7 @@ public final class TermuxTerminalPane extends FrameLayout
             if (wakeLock != null && wakeLock.isHeld()) {
                 wakeLock.release();
                 notifyStateChanged();
-                return "Wake lock released";
+                return "已释放唤醒锁";
             }
             PowerManager manager =
                 (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
@@ -667,9 +667,9 @@ public final class TermuxTerminalPane extends FrameLayout
                 TermuxConstants.BRAND_SLUG + WAKELOCK_SUFFIX);
             wakeLock.acquire();
             notifyStateChanged();
-            return "Wake lock acquired";
+            return "已获取唤醒锁";
         } catch (Throwable error) {
-            return "Wake lock: " + error.getMessage();
+            return "唤醒锁失败：" + error.getMessage();
         }
     }
 

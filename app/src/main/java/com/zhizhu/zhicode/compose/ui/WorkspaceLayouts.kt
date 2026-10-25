@@ -111,10 +111,17 @@ internal fun CompactWorkspace(
     viewModel: WorkspaceViewModel,
     isDark: Boolean,
     glass: Glass,
+    /**
+     * Pager 状态由**调用方**持有。
+     *
+     * 提到上层是为了让顶栏的标签高亮也能读到它（见 `WorkspaceTabs.pagerPage`）：
+     * 高亮要跟着弹簧动画连续移动，就必须和 Pager 共用一个 `currentPage`，
+     * 而不能等业务状态在动画结束后才更新。
+     */
+    pagerState: PagerState,
     onPageSelected: (WorkspaceTab) -> Unit = {},
 ) {
     val tabs = remember { WorkspaceTab.entries.toList() }
-    val pagerState = rememberPagerState(pageCount = { tabs.size })
     WorkspacePager(
         tabs = tabs,
         pagerState = pagerState,
@@ -218,13 +225,35 @@ internal fun WorkspaceTabs(
     selected: WorkspaceTab,
     onSelect: (WorkspaceTab) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 由 Pager 驱动的当前页。非 null 时**高亮源**换成它，而不是 [selected]。
+     *
+     * ## 为什么需要这个参数
+     *
+     * 模型选择面板（`ModelPickerOverlay`）的做法是：tab 的高亮取
+     * `pagerState.currentPage`，而**不是**业务状态。这两者在弹簧动画期间是不同的：
+     *
+     * - 取业务状态（`state.tab` / `picker.activeProfileIndex`）：那要等 Pager
+     *   **停稳**之后才更新，所以点击 tab 后高亮是"跳"过去的，弹簧动画在没人看；
+     * - 取 `currentPage`：Compose 在弹簧过程中持续更新它，于是高亮**跟着手指/动画
+     *   连续滑过去**，与页面的位移同步。
+     *
+     * 用户要的是后者（「主页 tab 栏切换动画用跟选择模型的 bottomsheet 的 tab 切换逻辑」）。
+     * 业务状态仍然只在 settle 后写回（见 `WorkspacePager` 里那条 `snapshotFlow`），
+     * 两条路各管一件事，不会互相打架。
+     */
+    pagerPage: Int? = null,
 ) {
-    val selectedIndex = tabs.indexOf(selected).coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
+    val fromBusiness = tabs.indexOf(selected).coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
+    val selectedIndex = (pagerPage ?: fromBusiness).coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
     val labels = remember(tabs) { tabs.map { it.label } }
     ZhiSegmentedTabs(
         tabs = labels,
         selectedIndex = selectedIndex,
-        onSelect = { index -> tabs.getOrNull(index)?.takeIf { it != selected }?.let(onSelect) },
+        // 点击时**不**按 `selected` 去重：高亮此时由 Pager 驱动，
+        // 而 Pager 可能还在动。去重会让"动画中点同一个 tab"变成无响应，
+        // 而那时用户的意图恰恰是"别动了，回这一页"。
+        onSelect = { index -> tabs.getOrNull(index)?.let(onSelect) },
         modifier = modifier.fillMaxWidth().height(WorkspaceTabRowHeight),
         matchWidth = true,
     )

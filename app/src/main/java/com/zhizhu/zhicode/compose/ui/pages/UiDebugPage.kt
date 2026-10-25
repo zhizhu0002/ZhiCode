@@ -114,8 +114,6 @@ import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
-import top.yukonga.miuix.kmp.basic.VerticalScrollBar
-import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.CheckboxPreference
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
@@ -241,12 +239,6 @@ fun UiDebugPage(
                 item(key = "chrome") { ChromeSection() }
                 item(key = "state") { StateSnapshotSection(state) }
             }
-            VerticalScrollBar(
-                adapter = rememberScrollBarAdapter(listState),
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .fillMaxHeight(),
-            )
         }
     }
 }

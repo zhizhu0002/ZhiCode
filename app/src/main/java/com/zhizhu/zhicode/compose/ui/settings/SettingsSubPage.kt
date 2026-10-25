@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
@@ -32,14 +33,14 @@ import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.PageFeedbackSlot
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
+import com.zhizhu.zhicode.compose.ui.effects.PageBlurBar
+import com.zhizhu.zhicode.compose.ui.effects.rememberPageBlurBackdrop
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
-import top.yukonga.miuix.kmp.basic.VerticalScrollBar
-import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.nav.core.NavController
 import top.yukonga.miuix.kmp.nav.core.NavDisplay
 import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
@@ -287,22 +288,33 @@ internal fun SettingsSubPage(
 
     Scaffold(
         topBar = {
-            // 与设置主页同款顶栏：Miuix TopAppBar 自带 largeTitle（大标题随滚动折叠），
-            // 对应 rikkahub 二级页的 LargeFlexibleTopAppBar —— 主页与二级页的
-            // 标题层级一致，返回时不会出现「标题突然变小」的断层。
-            TopAppBar(
-                title = title,
-                scrollBehavior = topAppBarScrollBehavior,
-                color = scheme.surface,
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            painter = ZhiIcons.back,
-                            contentDescription = "返回",
-                            tint = scheme.onBackground,
-                        )
-                    }
-                },
+            // 统一模糊：所有二级页的顶栏都走同一套 `PageBlurBar`，与主顶栏、
+            // 关于页、第三方开源页保持一致。
+            //
+            // ⚠️ 之前这里写的是 `color = scheme.surface` —— 一个**不透明**底色，
+            // 于是无论模糊开关是开是关，二级页顶栏看起来都跟别处不一样：
+            // 用户报的「顶栏有的是毛玻璃有的是一块实色」就是这个。
+            // 现在模糊可用时底色取透明（让 textureBlur 的结果透出来），
+            // 不可用时回落到 surface，两条路都不留半透明中间态。
+            val backdrop = rememberPageBlurBackdrop()
+            val blurActive = backdrop != null
+            PageBlurBar(backdrop = backdrop, blurActive = blurActive) {
+                // 与设置主页同款顶栏：Miuix TopAppBar 自带 largeTitle（大标题随滚动折叠），
+                // 对应 rikkahub 二级页的 LargeFlexibleTopAppBar —— 主页与二级页的
+                // 标题层级一致，返回时不会出现「标题突然变小」的断层。
+                TopAppBar(
+                    title = title,
+                    scrollBehavior = topAppBarScrollBehavior,
+                    color = if (blurActive) Color.Transparent else scheme.surface,
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                painter = ZhiIcons.back,
+                                contentDescription = "返回",
+                                tint = scheme.onBackground,
+                            )
+                        }
+                    },
                 actions = {
                     if (action != null && action.second != null) {
                         TextButton(
@@ -313,6 +325,7 @@ internal fun SettingsSubPage(
                     }
                 },
             )
+            }
         },
         // Miuix Scaffold 的原生 FAB 槽位：摆放、间距、insets 都由它负责。
         floatingActionButton = {
@@ -365,12 +378,6 @@ internal fun SettingsSubPage(
                 ) {
                     item(key = "subPageBody", contentType = "settings-subpage-body") { content() }
                 }
-                VerticalScrollBar(
-                    adapter = rememberScrollBarAdapter(listState),
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .fillMaxHeight(),
-                )
                 // 浮层挂在 Scaffold 的 composition 里、LazyColumn 之外 —— 见 overlay 参数的说明。
                 overlay?.invoke()
             }

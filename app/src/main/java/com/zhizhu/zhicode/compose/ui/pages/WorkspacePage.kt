@@ -4,11 +4,24 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import com.zhizhu.zhicode.compose.data.TabBarPosition
+import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.ui.WorkspaceTabs
+import com.zhizhu.zhicode.compose.ui.WorkspaceTabRowHeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.unit.dp
+
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
@@ -72,6 +85,13 @@ internal fun WorkspacePage(
     glassMain: Glass,
 ) {
     val configuration = LocalConfiguration.current
+    val themeSettings = com.zhizhu.zhicode.compose.theme.LocalThemeSettings.current
+    // 窄屏 Pager 状态提到这里：顶栏（标签高亮）与内容（页面滑动）必须共用同一个
+    // `currentPage`，否则高亮只能等动画结束才更新。
+    val compactTabs = remember { WorkspaceTab.entries.toList() }
+    val compactPagerState = androidx.compose.foundation.pager.rememberPagerState(
+        pageCount = { compactTabs.size },
+    )
     Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         floatingToolbar = {
@@ -110,8 +130,17 @@ internal fun WorkspacePage(
                         ZhiFrameTrace.begin("settings:open")
                         viewModel.openSettings()
                     },
-                    tabs = WorkspaceTab.entries,
+                    // 底栏模式下顶栏**不再画**标签行：同一组标签不能同时出现在两处，
+                    // 那会让人分不清哪个是当前的。`null` 就是不渲染这个槽。
+                    tabs = if (themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM) {
+                        null
+                    } else {
+                        WorkspaceTab.entries
+                    },
                     selectedTab = state.tab,
+                    // 让标签高亮跟随 Pager 的弹簧动画（与模型选择面板同一套逻辑）。
+                    // 业务状态仍然只在 Pager 停稳后写回，两条路各管一件事。
+                    pagerPage = compactPagerState.currentPage,
                     onSelectTab = { tab ->
                         ZhiFrameTrace.begin("tab:${tab.name}")
                         // ViewModel 是唯一业务真源；Pager 由 state.tab 反向同步。
@@ -134,7 +163,14 @@ internal fun WorkspacePage(
         // 当时这里有一句指向并不存在的常量的注释，照它做就漏了）。
         Box(
             modifier = Modifier.fillMaxSize().padding(
-                bottom = padding.calculateBottomPadding(),
+                bottom = padding.calculateBottomPadding() +
+                    // 底栏模式下内容要给底部标签栏让位，否则最后一行会被它压住。
+                    // 高度取标签行 + 悬浮时的上下内边距，与上面那块的实际占位一致。
+                    if (!wide && themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM) {
+                        WorkspaceTabRowHeight + if (themeSettings.tabBarFloating) 16.dp else 0.dp
+                    } else {
+                        0.dp
+                    },
             ),
         ) {
             // 整块工作区先录进 glassMain 的背景（抽屉/弹窗的模糊来源）
@@ -154,6 +190,7 @@ internal fun WorkspacePage(
                         viewModel = viewModel,
                         isDark = isDark,
                         glass = glass,
+                        pagerState = compactPagerState,
                         )
                 }
             }
@@ -169,6 +206,41 @@ internal fun WorkspacePage(
                     onDismiss = viewModel::clearMessage,
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp),
                 )
+            }
+
+            // ---- 底部标签栏（窄屏 + 用户选了「底栏」）----
+            //
+            // 只有窄屏才做这个切换：宽屏的标签组在右侧副栏里常驻，挪到底部会离内容太远。
+            // 悬浮形态复用 `FloatingBottomShell`（与输入器同一套玻璃/圆角/内缩逻辑），
+            // 所以两种栏在视觉上是同一族，不会一个毛玻璃一个实色。
+            if (!wide && themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        // 悬浮时给一层额外内缩；贴边时不留，避免多出一圈空。
+                        .padding(
+                            horizontal = if (themeSettings.tabBarFloating) 12.dp else 0.dp,
+                            vertical = if (themeSettings.tabBarFloating) 8.dp else 0.dp,
+                        ),
+                ) {
+                    WorkspaceTabs(
+                        tabs = WorkspaceTab.entries,
+                        selected = state.tab,
+                        pagerPage = compactPagerState.currentPage,
+                        onSelect = { tab ->
+                            ZhiFrameTrace.begin("tab:${tab.name}")
+                            viewModel.selectTab(tab)
+                        },
+                        modifier = if (themeSettings.tabBarFloating) {
+                            Modifier
+                                .clip(RoundedCornerShape(ZhiRadius.floating))
+                                .background(MiuixTheme.colorScheme.surfaceContainer)
+                        } else {
+                            Modifier.background(MiuixTheme.colorScheme.surfaceContainer)
+                        },
+                    )
+                }
             }
 
             // ---- Overlay 系列 ----

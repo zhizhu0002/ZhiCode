@@ -78,8 +78,6 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
-import top.yukonga.miuix.kmp.basic.VerticalScrollBar
-import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.Colors
@@ -402,10 +400,6 @@ fun ThemePage(
                     }
                 }
 
-                VerticalScrollBar(
-                    adapter = rememberScrollBarAdapter(listState),
-                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
-                )
             }
 
             // 操作反馈。原先由 `SettingsSubPage` 提供，这一页改用自有 Scaffold 之后

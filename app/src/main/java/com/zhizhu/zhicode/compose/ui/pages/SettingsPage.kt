@@ -54,9 +54,7 @@ import com.zhizhu.zhicode.compose.ui.settings.SettingsToggle
 import com.zhizhu.zhicode.compose.ui.settings.ShizukuAccessRow
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Scaffold
-import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
-import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
 import top.yukonga.miuix.kmp.basic.TopAppBar
@@ -187,12 +185,6 @@ fun SettingsPage(
                 item(key = "extensions", contentType = "settings-group") { SettingsGroup("扩展") { ExtensionsPage(onNavigate, extensions) } }
             }
             // Miuix 原生滚动条
-            VerticalScrollBar(
-                adapter = rememberScrollBarAdapter(listState),
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .fillMaxHeight(),
-            )
             // 设置页是自动保存，但"保存失败""已切换 API 配置"这类反馈仍然要看得见。
             // 原先这些消息只落在对话页的 MessageBar 上，而在设置页里根本看不到。
             PageFeedbackSlot(modifier = Modifier.align(Alignment.BottomCenter))
