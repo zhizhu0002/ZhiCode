@@ -98,6 +98,12 @@ fun ZhiTopBar(
     tabs: List<WorkspaceTab>? = null,
     onSelectTab: (WorkspaceTab) -> Unit = {},
     selectedTab: WorkspaceTab = state.tab,
+    /**
+     * 当前 Pager 页，用于让标签高亮跟随弹簧动画（见 `WorkspaceTabs.pagerPage`）。
+     *
+     * 为 null 时高亮回到 `selectedTab` 驱动的旧行为。
+     */
+    pagerPage: Int? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
 
@@ -210,6 +216,7 @@ fun ZhiTopBar(
                         tabs = tabs,
                         selected = selectedTab,
                         onSelect = onSelectTab,
+                        pagerPage = pagerPage,
                     )
                 }
                 // 服务中时是 Miuix 不确定进度条；空闲时以分隔线结束顶栏（与可选标签行一起）。

@@ -111,6 +111,10 @@ public final class RiskClassifier {
             case "rootbash":
                 // 这个工具本身就是「以 root 跑」，没有温和的用法。
                 return true;
+            case "shizuku":
+                // shell 身份不是 root，判据与 Bash 同一套（看命令干了什么），
+                // 而不是一律红标 —— 否则「dumpsys 看一眼」和「pm uninstall」会被画成同一件事。
+                return isRiskyCommand(in.optString("command", ""));
             case "delete":
             case "del":
                 // 递归删目录。单文件删除仍走普通确认。
@@ -121,8 +125,6 @@ public final class RiskClassifier {
             case "debug":
             case "zhibug":
                 return isRiskyDebugAction(in.optString("action", ""));
-            case "sandbox":
-                return isRiskySandboxAction(in.optString("action", ""));
             default:
                 return false;
         }
@@ -141,19 +143,6 @@ public final class RiskClassifier {
             case "load_library":
             case "signal":
             case "gc":
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    /** {@code Sandbox} 里会装/删应用、清数据的动作。 */
-    private static boolean isRiskySandboxAction(String action) {
-        switch (action == null ? "" : action.toLowerCase(Locale.US)) {
-            case "install":
-            case "uninstall":
-            case "clear_data":
-            case "stop":
                 return true;
             default:
                 return false;

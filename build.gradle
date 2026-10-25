@@ -5,30 +5,21 @@ plugins {
 }
 
 /*
- * Bcore 用传统 `apply plugin: 'com.android.library'` 应用 Android 库插件，
- * 而**不**在这里写 `id 'com.android.library' version ... apply false`。
+ * 这里曾经还有两个模块：`:Bcore` / `:black-reflection` / `:compiler`
+ * （BlackBox 虚拟 Android 运行时的宿主层，用于「ZhiCode 沙箱」）。
+ * 沙盒功能已整体移除，三个模块与它们的构建脚本一并删除。
  *
- * 原因：plugins {} 块是通过"插件 marker"坐标解析的，需要
- *   com.android.library:com.android.library.gradle.plugin:<ver>
- * 这个空壳 artifact。本机离线缓存里只有 com.android.application 的 marker，
- * 没有 library 的，于是会报 Plugin not found。
+ * 删除时顺带丢掉的两样东西，都只服务于它们，别重新加回来：
  *
- * 但 AGP 本体（com.android.tools.build:gradle:9.1.1）已经因为 application 插件
- * 被放到构建 classpath 上，同一个 jar 里同时包含 application 与 library 两个
- * 插件描述符，所以直接 apply 就能拿到，不依赖任何 marker。
+ * 1. **`com.android.library` 的 `apply plugin:` 变通**。
+ *    当时本机离线缓存里只有 `com.android.application` 的插件 marker，
+ *    没有 library 的，于是 Bcore 用传统 `apply plugin:` 绕过 marker 解析。
+ *    现在没有库模块了，不需要这个技巧。
+ * 2. **`ext.iqNdkVersion`**。
+ *    Bcore 的原版构建脚本引用它做 ndk-build；而本机是 aarch64 + bionic，
+ *    Android NDK 只发布 linux-x86_64 宿主工具链，ndk-build 会直接报
+ *    Unknown host CPU architecture。所以当时就已经绕开了它（改用预编译 .so），
+ *    保留该字段只是为了让原版脚本行不用改。模块没了，字段也就没了。
+ *
+ * 一并移除的还有 jitpack 仓库：唯一使用者是 Bcore 通过 FreeReflection 绕 hidden API 限制。
  */
-
-/*
- * Bcore 的构建脚本按原版引用 rootProject.ext.*，所以这里保留同名变量。
- *
- * iqNdkVersion 在本机是**不可用**的：宿主是 aarch64，而 Android NDK 只发布
- * linux-x86_64 的宿主工具链，ndk-build 会直接报 Unknown host CPU architecture。
- * 因此 Bcore 不再走 ndk-build，而是直接使用同源的预编译 libblackbox.so（见 Bcore/build.gradle）。
- * 保留该字段只是为了让原版的构建脚本行不用改动。
- */
-ext {
-    compileSdkVersion = 37
-    targetSdkVersion = 28
-    minSdk = 24
-    iqNdkVersion = findProperty('IQ_NDK_VERSION') ?: '29.0.13846066'
-}

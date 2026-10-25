@@ -139,8 +139,9 @@ android {
             /*
              * R8：开混淆 + 开资源压缩。
              *
-             * 本工程确实有反射与原生 hook（Bcore / black-reflection / Termux PTY），
-             * 所以规则不能照抄模板，得逐条对着**真实调用点**写 —— 具体理由都在
+             * 本工程确实有反射与原生 hook（Termux PTY、Shizuku 的 AIDL、
+             * 以及 Termux 用户空间里的 ELF），所以规则不能照抄模板，得逐条对着
+             * **真实调用点**写 —— 具体理由都在
              * app/proguard-rules.pro 里，每条规则前面都写了它挡的是什么。
              *
              * useProguard 的等价物（R8 的 full mode）由 AGP 自行决定，这里不瞎设；
@@ -174,8 +175,21 @@ if (configuredApplicationId == null || configuredApplicationId.isEmpty()) {
 }
 
 dependencies {
-    // IQ 沙箱（BlackBox 虚拟 Android 运行时宿主）—— Phase 7
-    implementation project(':Bcore')
+
+    /*
+     * Shizuku（https://github.com/RikkaApps/Shizuku）：无 Root 的 shell 身份。
+     *
+     * api 提供 `rikka.shizuku.Shizuku`（授权申请与状态查询），并**传递依赖**
+     * `dev.rikka.shizuku:aidl` —— 后者才是 `moe.shizuku.server.IShizukuService`
+     * 与 `IRemoteProcess` 的实现类（AIDL 生成的 Stub/Proxy）。
+     * 少了 aidl 这一层，`newProcess` 根本无从调用：api 里的
+     * `ShizukuRemoteProcess` 构造器是包级私有的，只能由 `IRemoteProcess` 构造。
+     *
+     * provider 提供 `rikka.shizuku.ShizukuProvider`：管理端通过它把 shell 服务的
+     * Binder 递给我们，必须在清单里声明同名条目才生效。
+     */
+    implementation 'dev.rikka.shizuku:api:13.1.5'
+    implementation 'dev.rikka.shizuku:provider:13.1.5'
     implementation 'androidx.activity:activity-compose:1.12.0'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4'
     implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.9.4'
@@ -211,6 +225,20 @@ dependencies {
     // LGPL-2.1，许可证与来源见 NOTICE。
     implementation 'io.github.rosemoe:editor:0.24.6'
     implementation 'io.github.rosemoe:language-textmate:0.24.6'
+
+    /*
+     * LaTeX 数学公式渲染。
+     *
+     * `ru.noties:jlatexmath-android` 是 `org.scilab.forge:jlatexmath` 的 Android 移植：
+     * 上游那套是把公式画到 AWT `Graphics2D` 上，而 Android 没有 AWT，所以这个移植
+     * 把绘制换成 `android.graphics.Canvas`，并对外给一个 `Drawable`。
+     *
+     * 为什么用它而不是自写排版引擎：数学排版（上下标、分式、根式、矩阵、括号伸缩）
+     * 是一个规模远大于本项目的东西，自写只能做出"看起来像公式"的残缺版本。
+     *
+     * 许可证见 NOTICE（GPL-2.0 with Classpath exception 的一种，只在 APK 里静态链接）。
+     */
+    implementation 'ru.noties:jlatexmath-android:0.2.0'
 
     // 原版引擎源码里用到了 androidx.annotation 的 @NonNull/@Nullable 等注解，仅编译期需要
     compileOnly 'androidx.annotation:annotation:1.8.1'

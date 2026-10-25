@@ -46,6 +46,7 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiFilledIconButton
+import com.zhizhu.zhicode.compose.ui.effects.selfPressSink
 import com.zhizhu.zhicode.compose.ui.FloatingBottomShell
 import com.zhizhu.zhicode.compose.ui.ZhiPendingImageChip
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
@@ -206,7 +207,7 @@ fun Composer(
                 ZhiTextField(
                     value = state.composerText,
                     onValueChange = onTextChange,
-                    label = "描述任务或向智蛛提问",
+                    label = "描述任务或向 ZhiCode 提问",
                     useLabelAsPlaceholder = true,
                     // 透明容器 + 透明描边：只留外层方角框
                     colors = TextFieldDefaults.textFieldColors(
@@ -455,25 +456,31 @@ fun Composer(
                         size = ComposerActionSize,
                         // 8dp 而不是原来的 6dp：两个键颜色一红一蓝，挨太近会被读成
                         // "一块被劈成两半的控件"，拉开一点才像两个独立按键。
-                        modifier = Modifier.padding(start = 8.dp),
+                        modifier = Modifier.padding(start = 8.dp).selfPressSink(),
                     )
                 }
 
                 // 方形发送键（参考图：上箭头）
-                ZhiFilledIconButton(
-                    description = "发送消息",
-                    glyph = "↑",
-                    glyphSize = 16.sp,
-                    onClick = onSend,
-                    containerColor = scheme.primary,
-                    enabled = state.composerText.isNotBlank(),
-                    // ⚠️ 这两个参数是**成对**的：Common.kt 的文档写着
-                    // 「`square` 为 true 时改成方角（圆角 10dp），发送键即用这个形态」，
-                    // 但这里一直没传 `square` —— 文档与代码互相矛盾了很久。
-                    // 现在让代码追上文档：方角 + 与停止键同一个尺寸。
-                    square = true,
-                    size = ComposerActionSize,
-                )
+                    ZhiFilledIconButton(
+                        description = "发送消息",
+                        // 矢量图标而不是字符 `"↑"`：字符要靠系统字体有这个字形，
+                        // 缺字时渲染成方块；而且不同字体的箭头粗细与按钮里的图标对不上。
+                        icon = ZhiIcons.send,
+                        iconSize = 16.dp,
+                        onClick = onSend,
+                        containerColor = scheme.primary,
+                        enabled = state.composerText.isNotBlank(),
+                        // ⚠️ 这两个参数是**成对**的：Common.kt 的文档写着
+                        // 「`square` 为 true 时改成方角（圆角 10dp），发送键即用这个形态」，
+                        // 但这里一直没传 `square` —— 文档与代码互相矛盾了很久。
+                        // 现在让代码追上文档：方角 + 与停止键同一个尺寸。
+                        square = true,
+                        size = ComposerActionSize,
+                        // 按下时的轻微下沉。Miuix 的 `IconButton` 没有
+                        // `interactionSource` 参数（核过 `iconbutton.md`），所以用自持源的那个，
+                        // 它在 Initial pass 只**观察**按下、不消费事件 —— 不会与按钮自己的点击打架。
+                        modifier = Modifier.selfPressSink(),
+                    )
 
             } // 底排 Row
 

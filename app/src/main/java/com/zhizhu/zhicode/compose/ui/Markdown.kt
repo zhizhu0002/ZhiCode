@@ -3,6 +3,8 @@ package com.zhizhu.zhicode.compose.ui
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.data.Clipboard
+import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
+import com.zhizhu.zhicode.compose.ui.math.LatexRenderer
 
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.drawBehind
@@ -31,6 +33,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 import androidx.compose.ui.text.AnnotatedString
@@ -88,6 +94,13 @@ fun ZhiMarkdown(
      * 只有整段重解析一次，最后那一段的标题/列表/代码块才会拿到正确的块级样式。
      */
     streaming: Boolean = false,
+    /**
+     * 正文字体族。为空时沿用 Compose 默认字体。
+     *
+     * 只作用于**正文与标题**，不作用于代码块：代码块永远是等宽（见下面 `FontFamily.Monospace`
+     * 那几处）—— 用衬线体渲染代码会让对齐彻底失去意义。
+     */
+    bodyFontFamily: FontFamily? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
     val inlineStyles = rememberInlineStyles(bodyFontSize)
@@ -123,6 +136,7 @@ fun ZhiMarkdown(
             MdBlockView(
                 block = block,
                 fontSize = bodyFontSize,
+                bodyFontFamily = bodyFontFamily,
                 fadeTail = streaming && split.tail.isEmpty() && index == blocks.lastIndex,
                 fadeRamp = fadeRamp,
             )
@@ -141,6 +155,7 @@ fun ZhiMarkdown(
                 color = scheme.onSurface,
                 fontSize = bodyFontSize,
                 lineHeight = bodyFontSize * 1.5f,
+                fontFamily = bodyFontFamily,
             )
         }
     }
@@ -234,6 +249,7 @@ private fun splitForStreaming(source: String, streaming: Boolean): MdStreamSplit
 private fun MdBlockView(
     block: MdBlock,
     fontSize: TextUnit,
+    bodyFontFamily: FontFamily? = null,
     fadeTail: Boolean = false,
     fadeRamp: Int = TailFadeMinChars,
 ) {
@@ -252,24 +268,62 @@ private fun MdBlockView(
             },
             fontWeight = FontWeight.Bold,
             lineHeight = (fontSize.value + 6).sp,
+            fontFamily = bodyFontFamily,
             modifier = Modifier.padding(top = 2.dp),
         )
 
-        is MdBlock.Paragraph -> Text(
-            // 段落是在写正文最常见（也是唯一常见）的形状，所以淡入只在这里落点。
-            // 标题/列表/引用/代码块不淡：它们在被写出来的一瞬间本来就是"跳"着出现的
-            // （块级结构变了），给它们加前沿淡入反而看不出差别，只会多付 span 的开销。
-            text = rememberInlineFading(
-                text = block.text,
-                styles = inlineStyles,
-                base = scheme.onSurface,
-                fade = fadeTail,
-                ramp = fadeRamp,
-            ),
-            color = scheme.onSurface,
-            fontSize = fontSize,
-            lineHeight = fontSize * 1.5f,
-        )
+        is MdBlock.Paragraph -> {
+            val latex = LocalThemeSettings.current.latexEnabled
+            // 独立公式：整段就是一个公式时居中单独画。
+            // 不这么做的话，`$$…$$` 会被当作行内公式塞进正文流，居中对齐完全失效。
+            val alone = remember(block.text, latex) {
+                if (latex) com.zhizhu.zhicode.compose.ui.math.aloneDisplayFormula(block.text) else null
+            }
+            if (alone != null) {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    com.zhizhu.zhicode.compose.ui.math.LatexFormula(
+                        latex = alone,
+                        fontSize = (fontSize.value + 1.5f).sp,
+                        modifier = Modifier.padding(vertical = 2.dp),
+                        color = scheme.onSurface,
+                    )
+                }
+            } else {
+                // 行内公式：把 `$…$` 切成图片，用 Compose 的 InlineTextContent 内嵌。
+                // 只有开着 LaTeX 时才切，关闭时走原来的纯文本路径（零开销）。
+                val inlineLatex = remember(block.text, latex) {
+                    if (latex) com.zhizhu.zhicode.compose.ui.math.splitLatex(block.text) else null
+                }
+                val hasFormula = inlineLatex?.any { it is com.zhizhu.zhicode.compose.ui.math.LatexSegment.Formula } == true
+                if (!hasFormula) {
+                    Text(
+                        // 段落是在写正文最常见（也是唯一常见）的形状，所以淡入只在这里落点。
+                        // 标题/列表/引用/代码块不淡：它们在被写出来的一瞬间本来就是"跳"着出现的
+                        // （块级结构变了），给它们加前沿淡入反而看不出差别，只会多付 span 的开销。
+                        text = rememberInlineFading(
+                            text = block.text,
+                            styles = inlineStyles,
+                            base = scheme.onSurface,
+                            fade = fadeTail,
+                            ramp = fadeRamp,
+                        ),
+                        color = scheme.onSurface,
+                        fontSize = fontSize,
+                        lineHeight = fontSize * 1.5f,
+                        // 正文才跟随用户选的字体；代码块永远是等宽（见 `CodeBlock`）。
+                        fontFamily = bodyFontFamily,
+                    )
+                } else {
+                    InlineLatexText(
+                        segments = inlineLatex!!,
+                        styles = inlineStyles,
+                        fontSize = fontSize,
+                        color = scheme.onSurface,
+                        bodyFontFamily = bodyFontFamily,
+                    )
+                }
+            }
+        }
 
         is MdBlock.Bullet -> BulletRow(block, fontSize, inlineStyles)
 
@@ -293,7 +347,7 @@ private fun MdBlockView(
                     .padding(start = 11.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                block.blocks.forEach { inner -> MdBlockView(inner, fontSize) }
+                block.blocks.forEach { inner -> MdBlockView(inner, fontSize, bodyFontFamily) }
             }
         }
 
@@ -353,10 +407,32 @@ private fun BulletRow(block: MdBlock.Bullet, fontSize: TextUnit, styles: InlineS
     }
 }
 
+/**
+ * 代码块。三项显示行为都由 `ThemeSettings` 的开关驱动（见「聊天显示 → 代码显示」）：
+ *
+ * | 开关 | 关闭（默认） | 打开 |
+ * |---|---|---|
+ * | `codeWrap` | 横向滚动，缩进与对齐保持原样 | 软换行，长行折到下一行 |
+ * | `codeCollapse` | 全展开 | 超过 [CodeCollapseLines] 行时先折叠 |
+ * | `codeLineNumbers` | 无行号 | 左侧等宽行号槽 |
+ *
+ * 默认全关是有意的：代码块的第一用途是**看清缩进结构**，而软换行会破坏它；
+ * 行号对"读一段示例"没用，只对"报告第 42 行"有用。要的人自己开。
+ *
+ * ## 行号为什么并进同一段文本
+ *
+ * 另一种写法是左侧一列 `Text`、右侧一列 `Text`。那样在 [codeWrap] 打开时**必然错位** ——
+ * 折行后左右两列的行边界不再对应。把行号作为带样式的字符并进同一段文本，
+ * 等宽字体 + `tnum` 保证列对齐，折行时也只是"续行顶格"，与 `cat -n` 的行为一致。
+ *
+ * 复制按钮给的仍然是**不带行号的原文**（`block.body`）：行号是显示层的装饰，
+ * 不该被粘进别人的编辑器里。
+ */
 @Composable
 private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
     val scheme = MiuixTheme.colorScheme
     val context = LocalContext.current
+    val settings = LocalThemeSettings.current
     // 复制反馈的**本地**状态：点击后把标签换成「已复制」，约 520ms 后复原
     // （时长对齐参考实现 `MarkdownRenderer` 的 `postDelayed(..., 520)`）。
     // 不往 ViewModel 里放：这个状态只影响这一个代码块，而且它随滚动回收，
@@ -367,6 +443,15 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
         delay(CopyFeedbackMs)
         copied = false
     }
+
+    // 折叠状态是**本地**的，且按内容重置：同一个代码块重新渲染时若内容变了
+    // （流式追加），应回到默认折叠状态而不是继承上一份的展开。
+    var expanded by remember(block.body) { mutableStateOf(false) }
+    val lines = remember(block.body) { block.body.lines() }
+    val collapsible = settings.codeCollapse && lines.size > CodeCollapseLines
+    val collapsed = collapsible && !expanded
+    val shownLines = if (collapsed) lines.take(CodeCollapseLines) else lines
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.inner,
@@ -420,19 +505,207 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
                     )
                 }
             }
-            Text(
-                text = block.body,
-                color = scheme.onSurface,
-                fontSize = (fontSize.value - 1).coerceAtLeast(9f).sp,
-                fontFamily = FontFamily.Monospace,
-                lineHeight = (fontSize.value + 4).sp,
-            )
+
+            val bodyText = remember(shownLines, settings.codeLineNumbers, scheme.onSurfaceVariantSummary) {
+                if (settings.codeLineNumbers) {
+                    // 行号宽度按**总行数**的位数算（不是当前显示的行数）：
+                    // 折叠时若按显示行数算，展开那一刻整体会横向跳一下。
+                    val digits = lines.size.toString().length
+                    buildAnnotatedString {
+                        shownLines.forEachIndexed { index, line ->
+                            if (index > 0) append('\n')
+                            val number = (index + 1).toString().padStart(digits)
+                            withStyle(
+                                SpanStyle(color = scheme.onSurfaceVariantSummary.copy(alpha = 0.65f)),
+                            ) {
+                                append(number)
+                            }
+                            append("  ")
+                            append(line)
+                        }
+                    }
+                } else {
+                    AnnotatedString(shownLines.joinToString("\n"))
+                }
+            }
+
+            val codeText: @Composable () -> Unit = {
+                Text(
+                    text = bodyText,
+                    color = scheme.onSurface,
+                    fontSize = (fontSize.value - 1).coerceAtLeast(9f).sp,
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = (fontSize.value + 4).sp,
+                    // 软换行开关：关掉时必须配合外层横向滚动，否则长行会被直接截断。
+                    softWrap = settings.codeWrap,
+                )
+            }
+
+            if (settings.codeWrap) {
+                codeText()
+            } else {
+                // 不换行时给一个横向滚动容器。`rememberScrollState` 按 block 记忆，
+                // 顺序滚动位置在重组之间保留（流式追加时不会跳回最左）。
+                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    codeText()
+                }
+            }
+
+            if (collapsible) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (collapsed) "已折叠 ${lines.size - CodeCollapseLines} 行" else "",
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ZhiSmallPill(
+                        label = if (collapsed) "展开全部（${lines.size} 行）" else "收起",
+                        onClick = { expanded = !expanded },
+                    )
+                }
+            }
         }
     }
 }
 
+/** 折叠时保留的行数。取 12：一屏能放下，又足够看清一段函数或一份配置的开头。 */
+private const val CodeCollapseLines = 12
+
 /** 「已复制」保留多久（参考实现 `MarkdownRenderer` 用的是 520ms）。 */
 private const val CopyFeedbackMs = 520L
+
+/**
+ * 行内公式的段落渲染。
+ *
+ * Compose 的 `Text` 支持把任意 Composable 嵌进文本流（[androidx.compose.foundation.text.InlineTextContent]）：
+ * 文本里留一个占位符，`inlineContent` 表里给出那个占位符对应的组件与尺寸。
+ * 这样公式图片就会像一个大号字符一样参与换行与基线对齐，而不是把整段拆成多个 `Text` ——
+ * 拆开的话换行、两端对齐、行高都会各算各的，读起来是断的。
+ *
+ * ⚠️ 占位符必须用 `\uFFFC`（OBJECT REPLACEMENT CHARACTER）：它是 Unicode 里专门表示
+ * "这里有一个对象"的字符，测量宽度为 0，所以不会在公式两侧多出空隙。
+ */
+@Composable
+private fun InlineLatexText(
+    segments: List<com.zhizhu.zhicode.compose.ui.math.LatexSegment>,
+    styles: InlineStyles,
+    fontSize: TextUnit,
+    color: Color,
+    bodyFontFamily: FontFamily?,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // 先算出每个公式的像素尺寸，再据此建 InlineTextContent。
+    // 尺寸必须在组合期拿到：InlineTextContent 的 placeholder 需要确定宽高。
+    val formulas = remember(segments, fontSize, color) {
+        segments.mapNotNull { segment ->
+            if (segment is com.zhizhu.zhicode.compose.ui.math.LatexSegment.Formula) segment else null
+        }
+    }
+    val sizes = remember(formulas, fontSize, color) {
+        val px = with(density) { fontSize.toPx() }
+        formulas.map { LatexRenderer.measure(context, it.latex, px, color.toArgb()) }
+    }
+
+    val annotated = remember(segments, styles, sizes, color) {
+        buildAnnotatedString {
+            var formulaIndex = 0
+            segments.forEach { segment ->
+                when (segment) {
+                    is com.zhizhu.zhicode.compose.ui.math.LatexSegment.Plain ->
+                        append(inline(segment.text, styles))
+                    is com.zhizhu.zhicode.compose.ui.math.LatexSegment.Formula -> {
+                        val size = sizes.getOrNull(formulaIndex)
+                        if (size == null) {
+                            // 渲染失败：把定界符与源码一起原样显示，用户能看出是哪个宏的问题。
+                            append(if (segment.display) "$$${segment.latex}$$" else "\$${segment.latex}\$")
+                        } else {
+                            appendFormula(id = FormulaIdPrefix + formulaIndex, alternate = segment.latex)
+                        }
+                        formulaIndex += 1
+                    }
+                }
+            }
+        }
+    }
+
+    val inlineContent = HashMap<String, InlineTextContent>()
+    formulas.forEachIndexed { index, formula ->
+        val size = sizes.getOrNull(index) ?: return@forEachIndexed
+        // ⚠️ `Placeholder` 的宽高是 **TextUnit**，不是 `Dp`。
+        // 用 sp 表达是正确的：公式要与正文一起随字号缩放，用绝对 dp 会在改字号后错位。
+        val widthSp = with(density) { size.first.toDp() }.value.sp
+        val heightSp = with(density) { size.second.toDp() }.value.sp
+        inlineContent[FormulaIdPrefix + index] = InlineTextContent(
+            placeholder = Placeholder(
+                width = widthSp,
+                height = heightSp,
+                placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
+            ),
+        ) { _ ->
+            com.zhizhu.zhicode.compose.ui.math.LatexFormula(
+                latex = formula.latex,
+                fontSize = fontSize,
+                color = color,
+            )
+        }
+    }
+
+    Text(
+        text = annotated,
+        color = color,
+        fontSize = fontSize,
+        lineHeight = fontSize * 1.5f,
+        fontFamily = bodyFontFamily,
+        inlineContent = inlineContent,
+    )
+}
+
+/** 行内公式占位符的 id 前缀。带前缀是为了不与未来其它内嵌内容撞号。 */
+private const val FormulaIdPrefix = "latex:"
+
+/**
+ * `AnnotatedString.Builder.appendInlineContent` 的等价实现。
+ *
+ * ## 为什么不直接调那个函数
+ *
+ * 它在当前钉住的 Compose UI 版本（1.12.0）里**不是** `AnnotatedString.Builder` 的成员，
+ * 也不在 `androidx.compose.ui.text.AnnotatedStringKt` 里（反编译核过：那个类只有
+ * `withStyle` / `withLink` / `withAnnotation` 等）。直接调会得到
+ * "Unresolved reference"。
+ *
+ * ## 它本来做的事
+ *
+ * 只有两步，都很简单，所以这里照做而不是换方案：
+ * 1. 在当前长度位置打一条字符串注解，tag 是 foundation 约定的那个常量，
+ *    value 是无障碍朗读用的替代文本；
+ * 2. 追加一个 `\uFFFC`（OBJECT REPLACEMENT CHARACTER）—— 它测量宽度为 0，
+ *    渲染时会被 `inlineContent` 表里对应的 Composable 替换掉。
+ *
+ * tag 字符串必须与 `androidx.compose.foundation.text` 内部用的完全一致，
+ * 否则 `Text` 找不到那个占位符、会把它当普通字符画出一个缺字方块。
+ */
+private fun androidx.compose.ui.text.AnnotatedString.Builder.appendFormula(
+    id: String,
+    alternate: String,
+) {
+    addStringAnnotation(
+        tag = FormulaInlineContentTag,
+        annotation = alternate.ifBlank { id },
+        start = length,
+        end = length,
+    )
+    append('\uFFFC')
+}
+
+/** ⚠️ 字面量必须与 foundation 内部常量逐字一致，不要"顺手改个更好看的名字"。 */
+private const val FormulaInlineContentTag = "androidx.compose.foundation.text.inlineContent"
 
 /**
  * 表格。

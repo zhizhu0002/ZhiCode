@@ -40,12 +40,13 @@
 # 2) 注解要能在运行期读到
 # ---------------------------------------------------------------------------
 #
-# Bcore 的 black-reflection 是**注解驱动**的反射：靠 @BClass / @BMethod(name = "…")
-# 这些运行期注解决定去反射哪个成员。注解属性若在压缩阶段被当成"没人读"丢掉，
-# 反射会静默失效。
+# 本工程的运行期注解消费方现在只剩 Shizuku 的 AIDL 生成物（Stub/Proxy 靠
+# 注解与签名描述符互相识别）。沙盒（Bcore / black-reflection）已整体移除，
+# 它那套 @BClass / @BMethod(name = "…") 的反射入口不存在了。
 #
-# 注意 Bcore 的 consumer 规则里已有一份类似的 keep —— 但那是针对 **Bcore 的类**
-# 写规则名；注解属性是被使用方（就是本模块）保留的，所以这里必须再声明一次。
+# 但这条规则**仍然必须保留**：注解属性一旦在压缩阶段被当成"没人读"丢弃，
+# 任何「靠注解名去反射」的路径都会静默失效 —— 而这类失效不会报错，只会在
+# 运行期返回 null。留着的成本是几 KB，去掉的代价是查不出来的空指针。
 -keepattributes *Annotation*, RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations, AnnotationDefault, Signature, InnerClasses, EnclosingMethod
 
 
@@ -66,9 +67,9 @@
 # 4) 隐藏 API 的引用
 # ---------------------------------------------------------------------------
 #
-# Bcore 要 hook 的本来就是 android.jar 里**不存在**的东西（ActivityThread、
-# ServiceManager、dalvik.system.* 等）。R8 拿编译期 android.jar 当参照，找不到
-# 这些类就会报 "Missing class"，而按 AGP 的默认严格度会直接让构建失败。
+# Termux 用户空间里的 ELF 与 Shizuku 的 AIDL 会引用 android.jar 里**不存在**的东西
+# （ActivityThread、ServiceManager、dalvik.system.* 等）。R8 拿编译期 android.jar
+# 当参照，找不到这些类就会报 "Missing class"，而按 AGP 的默认严格度会直接让构建失败。
 #
 # 这些类在**运行时一定存在**（就是设备上的 framework），所以警告本身是假警报，
 # 用 -dontwarn 关掉是正确做法，而不是用 -keep 去"保住"不存在的东西。
@@ -80,6 +81,31 @@
 -dontwarn sun.**
 -dontwarn org.apache.**
 -dontwarn org.slf4j.**
--dontwarn top.niunaijun.blackbox.**
--dontwarn top.niunaijun.blackreflection.**
--dontwarn top.niunaijun.jnihook.**
+
+
+# ---------------------------------------------------------------------------
+# 5) Shizuku（无 Root 的 shell 身份）
+# ---------------------------------------------------------------------------
+#
+# 这一段是**必须**的，而且理由不是"以防万一"：
+#
+# 1) `moe.shizuku.server.*` 是 AIDL 生成的 Stub/Proxy。我们调用的是
+#    `IShizukuService.Stub.asInterface(binder)`，而它在**对端**（Shizuku 服务进程）
+#    才展开成 onTransact 分派。Binder 的分派靠 `Parcel` 里的接口描述符字符串，
+#    那个字符串是编译期常量、不会被改名 —— 但只要 R8 把 `Stub` 本身裁掉或改名，
+#    我们这侧就没有可用的代理类，`getVersion()`/`newProcess()` 会直接
+#    NoSuchMethodError。这两个类是本工具唯一的执行通路，体积只有几 KB。
+#
+# 2) `rikka.shizuku.ShizukuProvider` 由**系统**按名字实例化（清单里那条 provider），
+#    R8 看不到任何 Java 调用点。AGP 通常会替清单组件自动加 keep，但那条规则
+#    覆盖的是"清单里出现的组件类"，而 provider 内部还会反射回调
+#    `Shizuku.onBinderReceived(...)`，这一层没有任何静态引用。
+#
+# 3) `Shizuku` 自己用反射读隐藏的 `android.os.SystemProperties`（见
+#    `ShizukuSystemProperties`），并在 API 11 之前的版本上走另一条
+#    Parcel 手写路径；这些都只按名字发生，静态分析看不到。
+#
+# 结论：把这两个包整体钉住。它们是第三方库的外壳（不是我们的业务代码），
+# 总量在 30KB 量级，换的是"打开 R8 之后工具仍然可用"。
+-keep class moe.shizuku.** { *; }
+-keep class rikka.shizuku.** { *; }

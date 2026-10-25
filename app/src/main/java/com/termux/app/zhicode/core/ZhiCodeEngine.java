@@ -153,8 +153,6 @@ public final class ZhiCodeEngine {
     private static final long TRANSPORT_RETRY_DELAY_MS = 250L;
     private static final int MIN_CONTEXT_WINDOW_TOKENS = 16_000;
     private static final int DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
-    /** Debug 工具的默认 scope。缺省即沙箱：真机调试必须显式写 host。 */
-    private static final String DEFAULT_DEBUG_SCOPE = "sandbox";
     /** 人类发言的 origin 标记。工具结果也是 user 角色，靠这个字段区分。 */
     private static final String ORIGIN_HUMAN = "human";
     private static final String ORIGIN_INTERNAL = "internal";
@@ -185,6 +183,18 @@ public final class ZhiCodeEngine {
     private static final String SUMMARY_SYSTEM_PROMPT =
             "You are ZhiCode's context compactor. Produce a faithful continuation summary."
                     + " Respond with text only and never call tools.";
+
+    /**
+     * 实际使用的摘要系统提示：用户填过就用他的，空串用默认。
+     *
+     * <p>空串表示"没改过"这条约定与 `model/PromptSlots.kt` 一致 ——
+     * 那里是唯一给出默认文案的地方，这里只是把它取出来。
+     */
+    private static String summarySystemPrompt(SessionConfig config) {
+        String custom = config == null ? "" : config.summaryPrompt;
+        String value = custom == null ? "" : custom.trim();
+        return value.isEmpty() ? SUMMARY_SYSTEM_PROMPT : value;
+    }
 
     /**
      * 可以安全重放的失败码，取值来自 {@link StreamFailure#code}。
@@ -548,8 +558,8 @@ public final class ZhiCodeEngine {
                     .put("effort", current.effort)
                     .put("vision_enabled", current.visionEnabled)
                     .put("permission_mode", current.permissionMode)
-                    .put("sandbox_agent_full_access", current.sandboxAgentFullAccess)
                     .put("root_execution_enabled", current.rootExecutionEnabled)
+                    .put("shizuku_execution_enabled", current.shizukuExecutionEnabled)
                     .put("project", current.projectDirectory)
                     .put("workflow_id", current.workflowId));
         } catch (Exception ignored) {
@@ -1731,6 +1741,10 @@ public final class ZhiCodeEngine {
                     && (executionConfig == null || !executionConfig.rootExecutionEnabled)) {
                 return ToolExecutionResult.error("Root tool is disabled in ZhiCode settings");
             }
+            if ("Shizuku".equals(call.name)
+                    && (executionConfig == null || !executionConfig.shizukuExecutionEnabled)) {
+                return ToolExecutionResult.error("Shizuku tool is disabled in ZhiCode settings");
+            }
             ZhiTool tool = tools.get(call.name);
             if (tool == null) return ToolExecutionResult.error("Unknown tool: " + call.name);
 
@@ -1794,14 +1808,16 @@ public final class ZhiCodeEngine {
     /**
      * 这次调用是否可以免询问地执行。
      *
-     * <p>沙箱全权模式（设置里的 sandboxAgentFullAccess）只对<b>沙箱内的操作</b>免去询问：
-     * 见 {@link #sandboxFullAccessCoversCall}。这一点是安全边界，不是体验优化：
-     * 沙箱里的进程与真机上的进程完全不是一回事。
+     * <p>这里曾经有一条前置分支：沙箱全权模式（`sandboxAgentFullAccess`）对
+     * <b>沙箱内的操作</b>直接放行。那条逻辑随沙箱一起删掉了 —— 它覆盖的对象
+     * （`Sandbox` 工具、`scope=sandbox` 的 `Debug`）已经不存在。
+     *
+     * <p>现在所有免询问的判定都只有一处：[PermissionGate.require] 里的
+     * 「只读/联网不问」「bypass 放行」「acceptEdits/auto 放行写文件」那几条。
+     * 没有第二个入口，也就不会出现"某条路径绕过了用户授权"这种沉默的破口。
      */
     private boolean allowedToRun(ZhiTool tool, ToolCall call, SessionConfig executionConfig,
                                  String effectivePermissionMode) throws InterruptedException {
-        boolean sandboxFullAccess = sandboxFullAccessCoversCall(call, executionConfig, effectivePermissionMode);
-        if (sandboxFullAccess) return true;
         setTaskState(EngineTaskState.WAITING_PERMISSION);
         try {
             return permissionGate.require(effectivePermissionMode, tool, call,
@@ -1809,31 +1825,6 @@ public final class ZhiCodeEngine {
         } finally {
             if (busy.get() && !Thread.currentThread().isInterrupted()) setTaskState(EngineTaskState.TOOL);
         }
-    }
-
-    /**
-     * 沙箱全权是否覆盖这次调用。
-     *
-     * <p>两道排除：
-     * <ul>
-     *   <li>{@code plan} 是只读契约。全权模式也不能绕过它 —— 否则「先给方案再动手」
-     *       就失去了意义，而那正是用户开计划模式的唯一理由；</li>
-     *   <li>scope 为 {@code host} 的 {@code Debug} 动的是这台真手机上的进程，
-     *       它不属于沙箱，必须照常询问。</li>
-     * </ul>
-     */
-    private static boolean sandboxFullAccessCoversCall(ToolCall call, SessionConfig executionConfig,
-                                                       String effectivePermissionMode) {
-        if (executionConfig == null || !executionConfig.sandboxAgentFullAccess) return false;
-        if (!"plan".equals(effectivePermissionMode)) return isSandboxScopedCall(call);
-        return false;
-    }
-
-    /** Sandbox 工具本身，以及 scope 不是 host 的 Debug，才算「沙箱内的操作」。 */
-    private static boolean isSandboxScopedCall(ToolCall call) {
-        if ("Sandbox".equals(call.name)) return true;
-        if (!"Debug".equals(call.name)) return false;
-        return !"host".equalsIgnoreCase(call.input.optString("scope", DEFAULT_DEBUG_SCOPE));
     }
 
     /**
@@ -2259,8 +2250,9 @@ public final class ZhiCodeEngine {
                 if (attempt > 0) {
                     reportStatus("摘要请求超过模型窗口，正在按 API 回合缩减后重试 " + attempt + "/2…");
                 }
-                return provider.createMessage(summaryConfig, SUMMARY_SYSTEM_PROMPT,
-                        ContextCompactor.buildSummaryMessages(plan, customInstructions, attempt),
+                return provider.createMessage(summaryConfig, summarySystemPrompt(summaryConfig),
+                        ContextCompactor.buildSummaryMessages(plan, customInstructions, attempt,
+                                summaryConfig.compactPromptHead),
                         new JSONArray(), SILENT_STREAM);
             } catch (Exception failure) {
                 lastFailure = failure;
@@ -2497,6 +2489,7 @@ public final class ZhiCodeEngine {
         SessionConfig current = config;
         String key = current == null ? "" : current.permissionMode + "\u0000"
                 + current.webSearchEnabled + "\u0000" + current.rootExecutionEnabled
+                + "\u0000" + current.shizukuExecutionEnabled
                 + "\u0000" + (allowedTools == null ? "*" : allowedTools.toString())
                 + "\u0000" + subagentMode;
         if (cachedToolSchemas != null && key.equals(cachedToolSchemasKey)) {
@@ -2524,6 +2517,7 @@ public final class ZhiCodeEngine {
         boolean webTool = "WebSearch".equals(name) || "WebFetch".equals(name);
         if (webTool && current != null && !current.webSearchEnabled) return true;
         if ("Root".equals(name) && (current == null || !current.rootExecutionEnabled)) return true;
+        if ("Shizuku".equals(name) && (current == null || !current.shizukuExecutionEnabled)) return true;
         return !isToolAllowed(name);
     }
 

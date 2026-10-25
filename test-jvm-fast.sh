@@ -35,6 +35,7 @@ MAIN_SOURCES=(
     app/src/main/java/com/termux/app/zhicode/core/StorageLinks.java
     app/src/main/java/com/termux/app/zhicode/core/FileOps.java
     app/src/main/java/com/termux/app/zhicode/model/SessionConfig.java
+    app/src/main/java/com/termux/app/zhicode/core/SystemPromptBuilder.java
     app/src/main/java/com/termux/app/zhicode/tools/WebSearchJson.java
     app/src/main/java/com/termux/app/zhicode/tools/WebSearchTool.java
 )
@@ -59,6 +60,11 @@ MAIN_KT_SOURCES=(
     app/src/main/java/com/zhizhu/zhicode/compose/model/ChatKind.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/ToolGrouping.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/TurnLayout.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/model/ActionBusy.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/model/McpDraft.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/model/PromptSlots.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/model/Licenses.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/theme/ZhiThemeSpec.kt
 )
 
 # 需要编译并运行的测试类（相对 app/src/test/java、点号包名）。
@@ -80,6 +86,13 @@ DEFAULT_TESTS=(
     com.zhizhu.zhicode.compose.model.FileRangeSelectionTest
     com.zhizhu.zhicode.compose.model.ToolGroupingTest
     com.zhizhu.zhicode.compose.model.TurnLayoutTest
+    com.zhizhu.zhicode.compose.model.ActionBusyTest
+    com.zhizhu.zhicode.compose.model.McpFormLogicTest
+    com.zhizhu.zhicode.compose.model.BrandTextTest
+    com.termux.app.zhicode.core.PromptStructureTest
+    com.zhizhu.zhicode.compose.model.PromptSlotsTest
+    com.zhizhu.zhicode.compose.theme.ThemeSpecTest
+    com.zhizhu.zhicode.compose.model.LicensesTest
 )
 
 # 哪些目标是 Kotlin。

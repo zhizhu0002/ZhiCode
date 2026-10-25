@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import top.yukonga.miuix.kmp.basic.PullToRefresh
+import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
@@ -58,9 +60,9 @@ import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.VerticalScrollBar
-import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 /**
  * 对话内容的指纹。
@@ -188,6 +190,8 @@ fun ChatList(
     // 宿主每帧传进来一个新的 lambda 就被重启（重启会丢掉"上次观察到的三元组"）。
     val onLoadOlderState by rememberUpdatedState(onLoadOlder)
     val onLoadLatestState by rememberUpdatedState(onLoadLatest)
+    // 顶部下拉的刷新指示器状态。`remember` 一次即可：它只在内部驱动那圈动画。
+    val pullToRefreshState = rememberPullToRefreshState()
 
     /*
      * 是否跟随最新内容（吸底）。
@@ -251,6 +255,40 @@ fun ChatList(
      * 说明这次变长是**前面**补的，不是来了新消息。见 [ContentStamp.prepend]。
      */
     var lastPrepend by remember { mutableStateOf(state.transcriptPrependRevision) }
+
+    /**
+     * 「该落到底」的待办标记。
+     *
+     * 切会话时置真，**真正贴到底之后**才由观察 `canScrollForward` 的那条 effect 清掉。
+     * 用它而不是"切会话时滚一次"的原因见下面 `collect` 里的长注释：
+     * 切会话那一帧列表还是空的，一次性的滚动会落空且永不重试。
+     */
+    var pendingBottom by remember { mutableStateOf(false) }
+
+    /*
+     * 往前补历史时**视口一动不动**（像聊天软件那样）。
+     *
+     * `LazyColumn` 靠 key 找回第一可见项，前插理论上不该移动视口。但这条路径
+     * 同时还会**从尾部淘汰**（`trimResidentTail`），前插 + 后删一起发生时锚定
+     * 会失准，列表把位置夹到某一项上 —— 表现就是用户报的
+     * 「每次加载信息就会给我弄到最上面」。
+     *
+     * 所以显式还原：记下补之前的第一可见项与偏移，补完之后按
+     * `原下标 + 前插条数` 请求滚动。`requestScrollToItem` 是非挂起的，
+     * 只登记目标、在下次测量里生效，所以这里不会产生可见的跳动。
+     */
+    LaunchedEffect(state.transcriptPrependRevision) {
+        if (state.transcriptPrependRevision == lastPrepend) return@LaunchedEffect
+        lastPrepend = state.transcriptPrependRevision
+        // 先取锚点：此刻列表还是补之前的状态。
+        val anchorIndex = listState.firstVisibleItemIndex
+        val anchorOffset = listState.firstVisibleItemScrollOffset
+        val added = state.transcriptPrependCount
+        if (added <= 0 || anchorIndex == 0) return@LaunchedEffect
+        // 等一帧：新内容要先被 LazyColumn 接收，下标空间才是新的。
+        withFrameNanos { }
+        listState.requestScrollToItem(anchorIndex + added, anchorOffset)
+    }
 
     /*
      * 「回到最新」之后显式落底。
@@ -368,12 +406,47 @@ fun ChatList(
             // 新会话的第一页同样带着一次计数变化。
             val prepended = !switched && stamp.prepend != lastPrepend
             lastPrepend = stamp.prepend
-            if (listState.layoutInfo.totalItemsCount <= 0) return@collect
             // 尾部被淘汰过时也不吸底：那时"最后一条"不是最新消息，
             // 吸过去等于把用户钉在历史中间（而且要回到最新得整份替换，见 jump effect）。
             if (currentState.transcriptHasNewer) return@collect
-            if (switched || (autoFollowState.value && !prepended)) requestScrollToBottom(listState)
+
+            // ---- 切会话：把「落到底」记成**待办**，不是一次性动作 ----
+            //
+            // ⚠️ 这里原来是 `if (totalItemsCount <= 0) return@collect` 之后
+            // `if (switched) requestScrollToBottom()`。两处合起来是一个 bug：
+            //
+            //   切会话那一帧 `transcript` 还是**空的**（消息要异步从库里读），
+            //   于是 `totalItemsCount == 0` → 直接 return，**永不重试**；
+            //   等消息真的填进来时 `switched` 已翻假，`autoFollow` 又因为列表
+            //   停在顶部而判成"用户在看历史"，仍然不吸底。
+            //   结果就是「加载会话，对话流在顶上而不是底下」。
+            //
+            // 改成挂待办标记：还没真正落到底之前，每次内容变化都再试一次。
+            if (switched) pendingBottom = true
+            if (pendingBottom) {
+                if (listState.layoutInfo.totalItemsCount > 0) requestScrollToBottom(listState)
+                // **不在这里清标记**：`requestScrollToItem` 只登记目标，真正生效在
+                // 下一帧测量里。清早了，若那一帧条数又变（消息还在灌），会停在中间。
+                // 由下面那条"已贴底"的 effect 负责清。
+                return@collect
+            }
+
+            if (autoFollowState.value && !prepended) requestScrollToBottom(listState)
         }
+    }
+
+    /*
+     * 待办落底的收尾：真正贴到底之后才清标记。
+     *
+     * 单独一条 effect 观察"是否已贴底"，而不是在登记那一帧清 —— 见上面 pendingBottom 处。
+     */
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            info.totalItemsCount > 0 && !listState.canScrollForward
+        }
+            .distinctUntilChanged()
+            .collect { atBottom -> if (atBottom) pendingBottom = false }
     }
 
     // 输入法弹出/收起时把对话吸回底部：键盘顶起视口后列表可视高度骤变，
@@ -400,15 +473,47 @@ fun ChatList(
     // 对话流切成「块」（一轮助手回合一块）。放在 `LazyColumn` **外面**算：
     // 它的 content lambda 是 `LazyListScope.() -> Unit`，不是 @Composable 上下文，
     // 在里面调 `remember` 编译不过。
-    val blocks = remember(state.transcript) {
+    // ---- 便宜的结构指纹：代替「拿整份列表当 remember 的 key」----
+    //
+    // 原来这里是 `remember(state.transcript) { … }` × 2。key 是 `List<ChatItem>`，
+    // 判等要逐个元素做 `data class` 深比较（含 `body: String` 与
+    // `tools: List<ToolActivity>`）—— 而流式输出每 32ms 就换一次 list，
+    // 于是**每帧**都要在 O(n·m) 个字符上比一遍。n 是消息数、m 是单条正文长度，
+    // 长会话里这一项足以把主线程吃满。
+    //
+    // 现在改成只看「结构有没有变」的廉价指纹：条数、首尾 id、最后一条正文长度、
+    // 最后一条的工具数。流式期间只有最后一项会变，比较是 O(1)。
+    //
+    // ⚠️ 指纹漏判的后果是**界面不更新**，所以它必须覆盖所有会改变渲染结果的变化。
+    // 这里刻意保留了 `lastBodyLength` 与 `toolsCount`：追加 token 与追加工具行
+    // 都会让它们变。而"中间某条被原地替换"只可能来自补页/替换整份 transcript，
+    // 那时 `size` 或 `firstId` 一定会变。
+    // ⚠️ 指纹本身**不能**包在 `remember(state.transcript)` 里 —— 那样比较的还是整份列表，
+    // 等于什么都没省。它每次重组直接算：取首尾元素对 ArrayList 是 O(1)，
+    // 整体是常数时间，远便宜于一次深比较。
+    val transcript = state.transcript
+    val transcriptStamp = TranscriptStamp(
+        size = transcript.size,
+        firstId = transcript.firstOrNull()?.id,
+        lastId = transcript.lastOrNull()?.id,
+        lastBodyLength = transcript.lastOrNull()?.body?.length ?: -1,
+        lastToolCount = transcript.lastOrNull()?.tools?.size ?: -1,
+        // 补页与"回到最新"是两次**原地替换**，条数可能恰好不变 ——
+        // 所以这两个版本号必须进指纹。
+        prepend = state.transcriptPrependRevision,
+        jump = state.transcriptJumpRevision,
+        session = state.activeSessionId,
+        revision = state.transcriptRevision,
+    )
+    val blocks = remember(transcriptStamp) {
         TurnLayout.blocks(
-            state.transcript.map { TurnLayout.Entry(it.id, isUser = it.kind == ChatKind.USER) },
+            transcript.map { TurnLayout.Entry(it.id, isUser = it.kind == ChatKind.USER) },
         )
     }
     // TurnLayout only stores ids. Resolve them through one index instead of scanning the
     // complete transcript once for every member of every block (which becomes quadratic
     // for long sessions).
-    val transcriptById = remember(state.transcript) { state.transcript.associateBy { it.id } }
+    val transcriptById = remember(transcriptStamp) { transcript.associateBy { it.id } }
 
     // 「已经见过」的消息 id —— 用来判断某个成员是**本次新出现的**还是历史。
     //
@@ -446,24 +551,72 @@ fun ChatList(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize().padding(start = 14.dp),
-            contentPadding = PaddingValues(top = topInset, bottom = bottomInset),
-        ) {
-            if (state.transcript.isEmpty()) {
-                item { EmptyState() }
-            }
-            // ---- 顶上还有更早的历史时的占位 -----------------------------------
+        // 顶部下拉加载更早的消息（与「滚到顶自动补」共用同一个回调，
+        // 靠 `transcriptLoadingOlder` 幂等 —— 两条路径不会把同一页读两遍）。
+        //
+        // ⚠️ 0.9.4 的 `PullToRefresh` **没有** `onPullProgress` 与 `refreshThreshold`
+        // 参数（核过 aar 的 javap 输出：main 分支已经加上去了，但本工程钉的是 0.9.4）。
+        // 所以这里只用最稳的那四个参数。
+        PullToRefresh(
+            isRefreshing = state.transcriptLoadingOlder,
+            onRefresh = onLoadOlderState,
+            pullToRefreshState = pullToRefreshState,
+            // 文案里带具体条数：只说"更早的消息"时用户不知道一次补多少。
+            refreshTexts = listOf(
+                "下拉加载更早的 ${com.zhizhu.zhicode.compose.data.SessionReader.PAGE_MESSAGES} 条",
+                "松开加载",
+                "正在加载…",
+            ),
+            // ⚠️ `PullToRefresh` 的 `contentPadding` **不是**给内容留白用的
+            // （它会传给里面的 LazyColumn 吗？不会 —— 核过 0.9.4 的源码：它只做
+            // `RefreshHeader(modifier = Modifier.offset(y = contentPadding.calculateTopPadding()))`,
+            // 也就是**只把刷新指示器整体下移**，内容的高度与位置都不受影响）。
             //
-            // 恢复历史是分页的（见 `SessionReader.PAGE_MESSAGES`）：这一条既是"上面还有"
-            // 的提示，也是"正在取"的反馈 —— 没有它的话，用户滚到顶只会看到内容突然停住，
-            // 像是记录缺了一块。
-            if (state.transcriptHasOlder) {
-                item(key = "older-loader", contentType = "older-loader") {
-                    OlderLoader(loading = state.transcriptLoadingOlder)
+            // 正是靠这个，指示器才不会画在 y=0 被悬浮顶栏整个盖住（用户报的
+            // 「PullToRefresh 怎么被顶栏覆盖了」）。列表自己的顶部留白仍然由
+            // LazyColumn 的 `contentPadding.top` 负责 —— 那是"第一条消息从顶栏下缘起排，
+            // 滚动时从顶栏底下穿过"的实现方式，两处不是同一件事，别合并。
+            contentPadding = PaddingValues(top = topInset),
+        ) {
+            LazyColumn(
+                state = listState,
+                // 两个 Miuix 的滚动行为，与其余九个列表（设置 hub / 各二级页 /
+                // 文件页 / 主题页 …）保持一致：
+                //
+                // · `overScrollVertical()`  跨边界时的阻尼 —— 没有它，滚到顶/底是
+                //   **硬停**，手指继续拖也不动，像撞在墙上；
+                // · `scrollEndHaptic()`     到顶/底时一次轻触感。
+                //
+                // ⚠️ 顶部与 `PullToRefresh` 有潜在手势竞争：下拉补页由它接管，
+                // 而 `overScrollVertical` 也会在 top 越界时介入。实测若出现
+                // 「下拉加载更早」变得不灵敏或指示器抖动，就把 `overScrollVertical()`
+                // 去掉、只留 `scrollEndHaptic()` —— 触感不参与手势判定，零冲突。
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 14.dp)
+                    .overScrollVertical()
+                    .scrollEndHaptic(),
+                contentPadding = PaddingValues(top = topInset, bottom = bottomInset),
+            ) {
+                if (state.transcript.isEmpty()) {
+                    item { EmptyState() }
                 }
-            }
+                // ---- 顶部：还有更早 / 已经到头 ----
+                //
+                // 两种状态都要有一条占位：
+                //  · 还有更早 → `OlderLoader`（提示 + "正在取"）；
+                //  · 已经到头 → `TranscriptStartHint`。
+                // 少了后者时，用户滚到顶会看到这一条**消失** —— 而那与"这一页刚好到头"
+                // 长得一模一样，于是会反复下拉确认。
+                if (state.transcriptHasOlder) {
+                    item(key = "older-loader", contentType = "older-loader") {
+                        OlderLoader(loading = state.transcriptLoadingOlder)
+                    }
+                } else if (state.transcript.isNotEmpty()) {
+                    item(key = "transcript-start", contentType = "transcript-start") {
+                        TranscriptStartHint()
+                    }
+                }
             // ---- 按「块」渲染 -------------------------------------------------
             //
             // 一块 = 一个 `LazyColumn` item：
@@ -494,7 +647,7 @@ fun ChatList(
                 // 默认的淡出会让"被移除的项"在动画期间**继续绘制**，于是当
                 // `newSession()` 把 transcript 一次清空时，那几张还没淡完的卡片
                 // 会和紧接着出现的 `EmptyState()` 叠在一起 —— 表现为卡片与
-                // "想让智蛛做什么？"互相穿透、错位，看起来像渲染 bug。
+                // "想让 ZhiCode 做什么？"互相穿透、错位，看起来像渲染 bug。
                 val memberIds = when (block) {
                     is TurnLayout.Block.Standalone -> listOf(block.id)
                     is TurnLayout.Block.Turn -> block.ids
@@ -622,12 +775,9 @@ fun ChatList(
             item(key = "chat-bottom-spacer", contentType = "chat-spacer") {
                 Box(modifier = Modifier.size(10.dp))
             }
+            }
         }
         // Miuix 滚动条：自动淡入淡出、可拖拽，比自绘指示条更贴近 HyperOS
-        VerticalScrollBar(
-            adapter = rememberScrollBarAdapter(listState),
-            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
-        )
     }
 }
 
@@ -974,3 +1124,51 @@ private fun AnimatedMember(
         content()
     }
 }
+
+/**
+ * 对话流的**结构指纹**：用来替代「拿整份 `List<ChatItem>` 当 `remember` 的 key」。
+ *
+ * ## 它解决的是什么
+ *
+ * `remember(state.transcript)` 看起来是"只在列表变了才重算"，但 Compose 判等用的是
+ * `equals()` —— 对 `List<ChatItem>` 就是**逐元素深比较**，每个元素又含
+ * `body: String` 与 `tools: List<ToolActivity>`。而流式输出每 32ms 就换一次 list，
+ * 于是每帧都要在 O(n·m) 个字符上比一遍。长会话里这一项足以把主线程吃满。
+ *
+ * 这个数据类只有 8 个原始类型/字符串字段，判等是常数时间。
+ *
+ * ## 为什么是这几个字段
+ *
+ * | 字段 | 覆盖的变化 |
+ * | --- | --- |
+ * | [size] | 追加/删除消息 |
+ * | [firstId] / [lastId] | 换会话、整份替换 |
+ * | [lastBodyLength] | 流式追加 token |
+ * | [lastToolCount] | 追加/移除工具行 |
+ * | [prepend] / [jump] | 补页与"回到最新"是**原地替换**，条数可能恰好不变 |
+ * | [session] | 切会话时列表可能长度相同、首尾 id 也相同（同一个会话的两次快照） |
+ * | [revision] | 展开工具/分组/思考、补回输出全文：条数与首尾**都不变**，只有某一条的内容原地变 |
+ *
+ * ⚠️ 漏判的后果是**界面不更新**（而不是崩），所以加字段比省字段安全。
+ * 反过来说，任何时候如果出现"某条消息的内容变了但界面没动"，
+ * 第一个要看的就是这里漏了哪种变化。
+ */
+private data class TranscriptStamp(
+    val size: Int,
+    val firstId: String?,
+    val lastId: String?,
+    val lastBodyLength: Int,
+    val lastToolCount: Int,
+    val prepend: Int,
+    val jump: Int,
+    val session: String,
+    /**
+     * 就地修改计数（[com.zhizhu.zhicode.compose.model.WorkspaceUiState.transcriptRevision]）。
+     *
+     * ⚠️ 这一项是**弹出来的 bug 的修复点**：没有它时，点一个工具卡（展开）不改条数、
+     * 不改首尾 id、不改最后一条的正文长度与工具数（被点的那条往往不是最后一条），
+     * 指纹一模一样 → 下面那份 `id → ChatItem` 索引仍然指向**旧实例**
+     * （`expanded = false`）→ 界面看起来就是「点了没反应」。
+     */
+    val revision: Int,
+)

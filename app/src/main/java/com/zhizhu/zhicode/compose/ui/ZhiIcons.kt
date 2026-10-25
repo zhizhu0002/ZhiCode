@@ -153,11 +153,26 @@ object ZhiIcons {
     /** 附件：裸 `+`。 */
     val attach: Painter @Composable get() = vector(ZhiMaterialIcons.Add)
 
-    /** 发送：纸飞机。 */
-    val send: Painter @Composable get() = vector(ZhiMaterialIcons.Send)
+    /**
+     * 发送：向上的箭头。
+     *
+     * ⚠️ 这一项**曾经是纸飞机**（`Send`）。换掉的理由：本工程的输入器是对话形态，
+     * 送出去的是"说一句话"而不是"发一封邮件"，纸飞机偏后者；而且 `Send` 是斜向字形，
+     * 放在方角按键里重心偏移，看起来比按钮的边还抢眼。
+     *
+     * 现在用 `ArrowUpward`，与输入框里那个 `↑` 字符是同一个语义 —— 但它是**矢量字形**，
+     * 不会因为系统字体缺字而变成方块。
+     */
+    val send: Painter @Composable get() = vector(ZhiMaterialIcons.ArrowUpward)
 
-    /** 停止生成：实心圆角方块。与"暂停"（两条竖杠）不是一件事。 */
-    val stop: Painter @Composable get() = vector(ZhiMaterialIcons.Stop)
+    /**
+     * 停止生成：暂停键（两条竖杠）。
+     *
+     * ⚠️ 这一项**曾经是实心方块**（`Stop`）。方块在这一栏里读起来像"停止播放 / 关闭"，
+     * 而本工程的停止其实是**中断当前回合**：对话与上下文都还在，用户可以接着发。
+     * 暂停键表达的就是这个语义，方块不是。
+     */
+    val stop: Painter @Composable get() = vector(ZhiMaterialIcons.Pause)
 
     /** 向右的小箭头（"查看全部"这类跳转）。与 [expand] 同源，都是同一个 `›`。 */
     val arrowRight: Painter @Composable get() = vector(ZhiMaterialIcons.ChevronRight)
@@ -341,7 +356,7 @@ object ZhiIcons {
         "Write", "Edit", "MultiEdit" -> vector(ZhiMaterialIcons.Edit)
         "Delete" -> vector(ZhiMaterialIcons.Delete)
         "Move" -> vector(ZhiMaterialIcons.DriveFileMove)
-        "Bash", "Root" -> vector(ZhiMaterialIcons.Terminal)
+        "Bash", "Root", "Shizuku" -> vector(ZhiMaterialIcons.Terminal)
         else -> vector(ZhiMaterialIcons.Code)
     }
 }

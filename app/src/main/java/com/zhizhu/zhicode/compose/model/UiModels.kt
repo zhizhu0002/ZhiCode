@@ -231,7 +231,7 @@ enum class PermissionMode(val label: String, val detail: String) {
     ASK("每次询问", "每个工具调用都需要你确认"),
     ACCEPT_EDITS("自动编辑", "自动允许文件编辑，其他调用仍需确认"),
     PLAN("规划", "先产出计划，批准后再执行"),
-    AUTO("自动", "由智蛛判断哪些调用需要确认"),
+    AUTO("自动", "由 ZhiCode 判断哪些调用需要确认"),
     DONT_ASK("不询问", "不再弹出确认，高风险操作仍会提示"),
     BYPASS("跳过权限", "跳过全部权限检查，仅限受信环境"),
 }
@@ -286,6 +286,17 @@ data class PlanApproval(
 )
 
 data class ChoiceOption(val label: String, val detail: String = "", val checked: Boolean = false)
+
+/**
+ * 「自由复制」抽屉的内容。
+ *
+ * [title] 只用于抽屉顶栏（说清复制的是哪一类消息）；
+ * [text] 是**原文**，与 `copyMessage` 写进剪贴板的那一份逐字相同。
+ */
+data class CopySheetState(
+    val title: String,
+    val text: String,
+)
 
 /**
  * 通用选择器的内容。对应原版"选择"窗口。
@@ -612,6 +623,17 @@ data class WorkspaceUiState(
      */
     val transcriptPrependRevision: Int = 0,
     /**
+     * 最近一次"往前补"**插入了几条**。
+     *
+     * `LazyColumn` 靠 key 找回第一可见项，理论上前插不该移动视口。但这条路径同时
+     * 还会**从尾部淘汰**（见 [transcriptHasNewer]），前插 + 后删一起发生时锚定会失准：
+     * 列表会把位置夹到某一项上，表现就是用户报的「加载完信息就跳到最上面」。
+     *
+     * 有确切条数之后，列表可以显式把视口还原到"原来那条 + 补进来的条数"，
+     * 做到像聊天软件那样**补历史时视口一动不动**。
+     */
+    val transcriptPrependCount: Int = 0,
+    /**
      * 常驻窗口的**尾部**（最新那端）被淘汰过，最新消息已经不在内存里了。
      *
      * <p>为什么必须淘汰：恢复历史是分页的，但"往上滚"是**没有上限**的 —— 用户翻完
@@ -631,6 +653,21 @@ data class WorkspaceUiState(
      * （绝不能吸底），两者不能共用一个计数。
      */
     val transcriptJumpRevision: Int = 0,
+    /**
+     * 对话流里**就地改过某一条的内容**的次数（展开工具、展开分组、展开思考、补回全文）。
+     *
+     * <p>为什么需要它：`ChatList` 用一份**廉价结构指纹**（条数 / 首尾 id / 最后一条正文长度 /
+     * 最后一条工具数）当 `remember` 的 key，而不是拿整份 `List<ChatItem>` 去深比较
+     * —— 流式输出每 32ms 换一次 list，深比较会把主线程吃满。
+     *
+     * <p>但"展开某条工具"这类操作**条数不变、首尾不变、正文长度不变**：指纹一模一样，
+     * 于是 `id → ChatItem` 的那份索引仍然指向**旧实例**（`expanded = false`），
+     * 界面表现就是**点工具卡没反应**。这就是用户报的「工具卡无法展开」。
+     *
+     * <p>所以这种"结构不变、内容原地变"的修改必须显式 +1。它只是一个 Int，
+     * 进指纹是 O(1)，不破坏原来的性能意图。
+     */
+    val transcriptRevision: Int = 0,
     val tab: WorkspaceTab = WorkspaceTab.CHAT,
     val composerText: String = "",
     val composerBusy: Boolean = false,
@@ -665,6 +702,21 @@ data class WorkspaceUiState(
     val permissionMode: PermissionMode = PermissionMode.ASK,
     val effort: EffortLevel = EffortLevel.AUTO,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /**
+     * 主题与显示设置（预设、Monet 种子色、AMOLED、四个显示开关、界面缩放）。
+     *
+     * ## 为什么会与 [themeMode] 同时存在
+     *
+     * [themeMode] 是"深浅三态"，被设置页、顶栏循环按钮、编辑器 Activity 等十几处直接读，
+     * 所以它的形状不能动。而 [themeSettings] 是这一轮新增的**整份**主题状态。
+     *
+     * 两者的关系是**单向**的：`themeSettings.mode` 是唯一的真源，
+     * [themeMode] 是它的缓存值 —— 所有会改动深浅的地方（`cycleThemeMode`、
+     * `SettingsDraft.applyTo`、启动时的恢复）都必须**同时**写这两个字段。
+     * 反过来（读 `themeMode` 去推 `themeSettings`）没有意义，那是多一层派生。
+     */
+    val themeSettings: com.zhizhu.zhicode.compose.data.ThemeSettings =
+        com.zhizhu.zhicode.compose.data.ThemeSettings(),
     val profileName: String = "未配置",
     /** 当前 API 配置是否已有密钥。顶栏据此提示"还不能用"，避免发出去才发现报错。 */
     val apiKeyConfigured: Boolean = false,
@@ -692,6 +744,20 @@ data class WorkspaceUiState(
     val permissionRequest: PermissionRequest? = null,
     val planApproval: PlanApproval? = null,
     val choicePicker: ChoicePickerState? = null,
+    /**
+     * 「自由复制」底部抽屉的内容；null 表示关着。
+     *
+     * ## 为什么不能只靠剪贴板
+     *
+     * 长按菜单里的「复制」是把**整条**文本一次性写进剪贴板。但用户真正想要
+     * 往往是一段里的某几行（一条命令、一个报错、一段代码），而气泡里的文本
+     * 又是不可选中的（`Text` 默认不可选，卡片还要接长按手势）。所以单开一个
+     * 抽屉把**原文**摊开，让人自己划词。
+     *
+     * 内容在这里而不是在界面里：菜单回调只能拿到 `ChatItem`，抽屉要显示的那份文本
+     * 与 [WorkspaceViewModel.copyMessage] 必须**同源**，否则会出现"复制的和看到的不一样"。
+     */
+    val copySheet: CopySheetState? = null,
     val attachments: List<Attachment> = emptyList(),
     val terminalLines: List<TerminalLine> = emptyList(),
     val filePath: String = "",
@@ -788,6 +854,38 @@ data class WorkspaceUiState(
     val skills: com.zhizhu.zhicode.compose.model.SkillsState? = null,
     val roleCards: com.zhizhu.zhicode.compose.model.RoleCardsState? = null,
     val memory: com.zhizhu.zhicode.compose.model.MemoryState? = null,
+    /**
+     * 提示词设置页是否打开。
+     *
+     * <p>用**布尔**而不是像 [skills] 那样的载荷对象：这一页要编辑的三份文案就是
+     * `settings.initPrompt` / `summaryPrompt` / `compactPromptHead` 本身，
+     * 没有额外要从磁盘读的东西（与记忆页不同，那里要列文件、要知道每个文件多大）。
+     * 再包一层状态对象，只会多一份要与 settings 同步的副本。
+     */
+    val promptsOpen: Boolean = false,
+    /**
+     * 主题设置整页是否打开。
+     *
+     * <p>与 [promptsOpen] 同理：这一页要的东西全在 [themeSettings] 里，
+     * 没有要读盘或异步加载的载荷，所以一个布尔就够。
+     */
+    val themePageOpen: Boolean = false,
+    /**
+     * 「聊天显示」页（自定义字体 + 正文字号）是否打开。
+     *
+     * <p>与 [themePageOpen] 同一类：页面要的数据全在 [themeSettings] 里，
+     * 没有要读盘或异步加载的载荷，所以一个布尔就够。
+     */
+    val chatDisplayOpen: Boolean = false,
+    /**
+     * 关于页 / 第三方许可页。
+     *
+     * <p>它们是**应用级**页面而不是设置子页：入口在侧栏与设置里各有一个，
+     * 而从侧栏进来时设置页并不开着。所以两个布尔平级放在这里，
+     * 而不是塞进某个设置状态对象里。
+     */
+    val aboutOpen: Boolean = false,
+    val licensesOpen: Boolean = false,
     val modelPicker: com.zhizhu.zhicode.compose.model.ModelPickerState? = null,
     /**
      * 非空即「UI 调试」整页打开（**仅 debug 构建**有入口，见设置页的「扩展」组）。
@@ -858,17 +956,38 @@ data class WorkspaceUiState(
      * 效果不会重放。
      */
     val scrollToBottomToken: Long = 0L,
+    /**
+     * 正在跑的**页面动作**（保存 / 创建 / 删除 / 粘贴 / 测试连接…）的键集合。
+     *
+     * <p>由 ViewModel 的 `runBusy` 统一登记（见 [ActionBusy]）：同一个键在飞时，
+     * 第二次触发会被**静默丢弃**，而不是把同一件事做两遍 —— 双击「粘贴」复制两遍、
+     * 双击「删除」弹出"删除失败"，都是这条规则缺失时的表现。
+     *
+     * <p>界面按 `state.isBusy("skills.save")` 禁用按钮并显示进度。空集合表示什么
+     * 都不在跑，这也是绝大多数时刻的状态。
+     */
+    val inFlight: Set<String> = emptySet(),
+    /**
+     * 「设置 → 扩展」组显示的数量摘要（MCP / 技能 / 角色卡）。
+     *
+     * 由 ViewModel 在打开设置时于 IO 线程统计一次 —— 三个存储都在磁盘上，
+     * 不能在界面里读（见 [ExtensionSummary] 的说明）。
+     */
+    val extensions: ExtensionSummary = ExtensionSummary(),
 ) {
     val activeSession: SessionSummary?
         get() = sessions.firstOrNull { it.id == activeSessionId }
 
     val contextFraction: Float
         get() = if (contextWindow <= 0) 0f else (contextTokens.toFloat() / contextWindow).coerceIn(0f, 1f)
+
+    /** 某个页面动作是否在跑（见 [ActionBusy]）。 */
+    fun isBusy(key: String): Boolean = key in inFlight
 }
 
 /** 与上游原版 IQ Code 一致的斜杠命令表（/help 显示，面板按前缀过滤）。 */
 val SLASH_COMMANDS: List<SlashCommand> = listOf(
-    SlashCommand("/help", "查看全部智蛛指令"),
+    SlashCommand("/help", "查看全部 ZhiCode 指令"),
     SlashCommand("/compact", "模型语义压缩；可追加摘要侧重点"),
     SlashCommand("/context", "查看或设置上下文窗口，例如 /context 1m"),
     SlashCommand("/clear", "清空当前对话并开始新会话"),
@@ -878,23 +997,24 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/effort", "设置推理强度"),
     SlashCommand("/permissions", "设置工具调用权限模式"),
     SlashCommand("/root", "Agent Root：on / off / check"),
+    SlashCommand("/shizuku", "Agent Shizuku（无 Root 的 shell 身份）：on / off / status"),
     SlashCommand("/keepalive", "强制后台保活：on / off / check"),
-    SlashCommand("/mcp", "配置和管理 MCP 服务器"),
+    SlashCommand("/mcp", "配置和管理 MCP 服务器；/mcp list · add · enable · disable · remove <名称>"),
     SlashCommand("/web", "联网搜索设置；也可直接输入 /web 搜索词"),
     SlashCommand("/terminal", "打开内置 Termux 终端"),
-    SlashCommand("/sandbox", "打开 ZhiCode 沙箱；Agent 可安装、运行和调试虚拟 APK"),
+    SlashCommand("/sandbox", "沙盒功能已移除（内置虚拟运行时不再分发）"),
     SlashCommand("/files", "打开项目文件与代码编辑器"),
     SlashCommand("/doctor", "检查 Termux 运行环境"),
     SlashCommand("/repair", "修复中断的 apt/dpkg 状态"),
-    SlashCommand("/skills", "为下一条任务附加本地 Skill"),
+    SlashCommand("/skills", "为下一条任务附加本地 Skill；带名称直接附加，例如 /skills pdf"),
     SlashCommand("/status", "查看模型、项目、上下文、运行时和会话状态"),
     SlashCommand("/stats", "查看当前会话与运行状态"),
     SlashCommand("/usage", "查看当前上下文使用情况"),
-    SlashCommand("/copy", "复制最近一条智蛛回复"),
+    SlashCommand("/copy", "复制最近一条 ZhiCode 回复"),
     SlashCommand("/plan", "进入计划模式；/plan off 退出"),
     SlashCommand("/config", "打开 ZhiCode 设置"),
     SlashCommand("/memory", "打开项目或用户 ZhiCode.md 记忆"),
-    SlashCommand("/init", "让智蛛初始化或完善项目 ZhiCode.md"),
+    SlashCommand("/init", "让 ZhiCode 初始化或完善项目 ZhiCode.md"),
     SlashCommand("/tasks", "查看 Android Agent 的任务与会话文件"),
     SlashCommand("/agents", "管理内置、项目、用户和正在运行的子 Agent"),
     SlashCommand("/cancel", "停止当前正在执行的 Agent 回合"),

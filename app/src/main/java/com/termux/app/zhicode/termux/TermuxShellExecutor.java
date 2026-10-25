@@ -4,7 +4,6 @@ import android.content.Context;
 
 import com.termux.app.zhicode.storage.ZhiMemory;
 import com.termux.shared.termux.TermuxConstants;
-import com.zhizhu.zhicode.sandbox.SandboxShell;
 
 import java.io.BufferedReader;
 import java.io.Closeable;
@@ -451,11 +450,9 @@ public final class TermuxShellExecutor {
         // 让构建工具输出确定性的纯日志。命令本身是普通 bash，可以自己覆盖。
         env.put("CI", "true");
 
-        // 沙箱桥接与运行时的自我标识。
+        // 运行时的自我标识。
         env.put("ZHICODE_APP", "1");
-        env.put("ZHICODE_SANDBOX_BRIDGE_DIR", SandboxShell.bridgeDir(context));
         env.put("ZHICODE_APK_PATH", context.getApplicationInfo().sourceDir);
-        SandboxShell.ensureCliInstalled(context);
         env.put("ZHICODE_TOOL_EXECUTOR", "1");
 
         // Termux 自身的身份变量：包管理脚本与 termux-* 工具会读它们。

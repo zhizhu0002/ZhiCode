@@ -21,7 +21,6 @@ import com.termux.terminal.TerminalSessionClient;
 import com.termux.terminal.TextStyle;
 import com.termux.view.TerminalView;
 import com.termux.view.TerminalViewClient;
-import com.zhizhu.zhicode.sandbox.SandboxShell;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -258,7 +257,7 @@ public final class TermuxTerminalPane extends FrameLayout
         for (int i = 0; i < sessions.size(); i++) {
             TerminalSession session = sessions.get(i);
             String name = session.mSessionName == null
-                ? "session " + (i + 1)
+                ? "会话 " + (i + 1)
                 : session.mSessionName;
             rows.add(new SessionInfo(name, session.isRunning(), i == selected));
         }
@@ -634,7 +633,7 @@ public final class TermuxTerminalPane extends FrameLayout
         String text = terminalView.getSelectedText();
         if (text == null || text.isEmpty()) return null;
         clipboard().setPrimaryClip(ClipData.newPlainText("terminal", text));
-        return "Copied";
+        return "已复制";
     }
 
     /** 把剪贴板内容写进当前会话。 */
@@ -659,7 +658,7 @@ public final class TermuxTerminalPane extends FrameLayout
             if (wakeLock != null && wakeLock.isHeld()) {
                 wakeLock.release();
                 notifyStateChanged();
-                return "Wake lock released";
+                return "已释放唤醒锁";
             }
             PowerManager manager =
                 (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
@@ -668,9 +667,9 @@ public final class TermuxTerminalPane extends FrameLayout
                 TermuxConstants.BRAND_SLUG + WAKELOCK_SUFFIX);
             wakeLock.acquire();
             notifyStateChanged();
-            return "Wake lock acquired";
+            return "已获取唤醒锁";
         } catch (Throwable error) {
-            return "Wake lock: " + error.getMessage();
+            return "唤醒锁失败：" + error.getMessage();
         }
     }
 
@@ -775,7 +774,6 @@ public final class TermuxTerminalPane extends FrameLayout
     }
 
     private String[] environmentArray() {
-        SandboxShell.ensureCliInstalled(getContext());
         Map<String, String> env = new LinkedHashMap<>();
         String prefix = TermuxConstants.TERMUX_PREFIX_DIR_PATH;
         env.put("HOME", TermuxConstants.TERMUX_HOME_DIR_PATH);
@@ -811,7 +809,6 @@ public final class TermuxTerminalPane extends FrameLayout
         env.put("TERMUX__ROOTFS", TermuxConstants.TERMUX_FILES_DIR_PATH);
         env.put("ZHICODE_APP", "1");
         env.put("ZHICODE_TERMINAL_SESSION", "1");
-        env.put("ZHICODE_SANDBOX_BRIDGE_DIR", SandboxShell.bridgeDir(getContext()));
         env.put("ZHICODE_APK_PATH", getContext().getApplicationInfo().sourceDir);
 
         List<String> out = new ArrayList<>();

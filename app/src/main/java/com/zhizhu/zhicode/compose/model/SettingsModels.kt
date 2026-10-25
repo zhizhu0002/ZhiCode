@@ -438,102 +438,6 @@ data class QuotaRow(
     val resetLabel: String,
 )
 
-/** MCP 服务器的连接方式。取值必须与引擎 `McpConfigStore.Server.type` 一致。 */
-enum class McpType(val value: String, val label: String) {
-    STDIO("stdio", "标准输入输出（stdio）"),
-    HTTP("http", "Streamable HTTP"),
-    SSE("sse", "旧版 SSE"),
-    ;
-
-    val needsCommand: Boolean get() = this == STDIO
-}
-
-/** MCP 服务器的作用范围。 */
-enum class McpScope(val value: String, val label: String) {
-    USER("user", "用户级（所有项目）"),
-    PROJECT("project", "项目级（当前项目）"),
-}
-
-/** MCP 配置列表里的一条。[argsText] 是编辑态用的多行文本，展示时不用它。 */
-data class McpServer(
-    val name: String,
-    val type: McpType,
-    val command: String,
-    val url: String,
-    val argCount: Int,
-    val scope: McpScope,
-    val enabled: Boolean,
-) {
-    /** 列表行的副标题：让用户一眼看出这是本地进程还是远端地址。 */
-    val summary: String
-        get() = buildString {
-            append(type.label)
-            if (type.needsCommand) {
-                append(" · ").append(command.ifBlank { "未填命令" })
-                if (argCount > 0) append("（").append(argCount).append(" 个参数）")
-            } else {
-                append(" · ").append(url.ifBlank { "未填地址" })
-            }
-            append(" · ").append(scope.label)
-        }
-}
-
-/**
- * 新增 / 编辑 MCP 服务器的草稿。
- *
- * [argsText] / [envText] / [headersText] 都是**原始文本**而不是解析后的结构：
- * 用户正在打字时 JSON 经常是半截的，边打边解析会把人卡死（刚输入 `{` 就报错）。
- * 所以校验只发生在保存时，见 [envError] / [headersError]。
- */
-data class McpServerDraft(
-    val originalName: String?,
-    val name: String = "",
-    val type: McpType = McpType.STDIO,
-    val command: String = "",
-    val argsText: String = "",
-    val url: String = "",
-    val envText: String = "",
-    val headersText: String = "",
-    val scope: McpScope = McpScope.USER,
-    val enabled: Boolean = true,
-) {
-    val isEditing: Boolean get() = originalName != null
-
-    val nameError: String? get() = if (name.isBlank()) "请填写服务器名称" else null
-
-    val commandError: String?
-        get() = if (type.needsCommand && command.isBlank()) "stdio 服务器必须填写启动命令" else null
-
-    val urlError: String?
-        get() = if (!type.needsCommand && url.isBlank()) "HTTP/SSE 服务器必须填写 URL" else null
-
-    val envError: String? get() = jsonError(envText)
-    val headersError: String? get() = jsonError(headersText)
-
-    val saveable: Boolean
-        get() = nameError == null && commandError == null && urlError == null &&
-            envError == null && headersError == null
-
-    /** 每行一个参数，与引擎侧 `List<String> args` 对应。 */
-    val args: List<String>
-        get() = argsText.lines().map { it.trim() }.filter { it.isNotEmpty() }
-
-    companion object {
-        /**
-         * JSON 校验。
-         *
-         * 空串是合法的（表示"不设置"）；非空但解析失败才报错，
-         * 并把失败原因带出来——只说"格式不对"用户不知道哪不对。
-         */
-        fun jsonError(text: String): String? {
-            val trimmed = text.trim()
-            if (trimmed.isEmpty()) return null
-            return runCatching { org.json.JSONObject(trimmed) }
-                .fold(onSuccess = { null }, onFailure = { "JSON 格式错误：${it.message ?: "无法解析"}" })
-        }
-    }
-}
-
 /**
  * 「测试连接」的结果：一台服务器 + 它提供的工具。
  *
@@ -624,7 +528,29 @@ data class McpConfigState(
     val importError: String? = null,
     /** 载荷还没读完，见 `WorkspaceViewModel.openMcpConfig`。 */
     val loading: Boolean = false,
-)
+    /**
+     * 列表页的筛选词（名称 / 命令 / 地址都参与匹配）。
+     *
+     * 与技能页同一个理由：服务器攒到十几台之后，找某一台要看半天。
+     * 只在列表页有意义，不参与持久化。
+     */
+    val query: String = "",
+) {
+    /** 按 [query] 过滤后的服务器。 */
+    val visibleServers: List<McpServer>
+        get() {
+            if (query.isBlank()) return servers
+            return servers.filter {
+                it.name.contains(query, ignoreCase = true) ||
+                    it.command.contains(query, ignoreCase = true) ||
+                    it.url.contains(query, ignoreCase = true) ||
+                    it.type.label.contains(query, ignoreCase = true)
+            }
+        }
+
+    /** 启用中的台数（列表页顶部汇总用）。 */
+    val enabledCount: Int get() = servers.count { it.enabled }
+}
 
 /** Skill 的作用域。目录约定必须与引擎 `SkillTool` 一致，见 `SkillStore`。 */
 enum class SkillScope(val label: String) {
@@ -718,6 +644,16 @@ data class SkillsState(
 data class SkillDetail(
     val entry: SkillEntry,
     val tree: List<SkillFileNode>,
+    /**
+     * `SKILL.md` 的正文（打开详情时读好的那份）。
+     *
+     * 详情页此前只有文件树：想知道这个技能到底教 Agent 做什么，得先点进编辑器。
+     * 那一步在手机上要跨一次页面栈、还要等文件读盘，回看一份"我到底装了什么"很别扭。
+     * 正文放这里只用于**只读预览**（可复制），编辑仍然走编辑器。
+     *
+     * 读失败时是空串 —— 界面据此显示"读不到正文"而不是一片空白。
+     */
+    val body: String = "",
 )
 
 /**
@@ -824,9 +760,19 @@ data class SkillEditTarget(
      * 提示"名字对不上"，而不是等用户点了保存才报错。
      */
     val nameError: String? = null,
+    /**
+     * 打开编辑器时磁盘上的那份正文（默认等于 [body] = 干净）。
+     *
+     * 只用于判断「有没有未保存的改动」：见 [dirty]。保存成功后 ViewModel 会把这份
+     * 基准同步成新内容，于是界面不会一直以为还有脏数据。
+     */
+    val savedBody: String = body,
 ) {
     /** 内容长度提示用。空内容不算错误，只提示一句。 */
     val empty: Boolean get() = body.isBlank()
+
+    /** 有过未保存的改动（返回 / 关闭前需要确认）。 */
+    val dirty: Boolean get() = body != savedBody
 
     val fileName: String get() = relativePath.substringAfterLast('/')
 
@@ -863,8 +809,20 @@ data class RoleCardEditor(
     val id: String = "",
     val name: String = "",
     val content: String = "",
+    /**
+     * 打开编辑器时那一份**已保存**的名字与内容（默认等于当前值 = 干净）。
+     *
+     * 只用于判断「有没有没保存的改动」：编辑过程中的 `updateRoleCardDraft` 只改
+     * [name] / [content]，于是 `dirty` 自然变真。没有它就只能靠"用户点过保存"
+     * 这类间接信号，而那条信号在保存失败时是错的。
+     */
+    val savedName: String = name,
+    val savedContent: String = content,
 ) {
     val isEditing: Boolean get() = id.isNotBlank()
+
+    /** 与打开时相比有过改动（返回前需要确认）。 */
+    val dirty: Boolean get() = name != savedName || content != savedContent
 
     /** 名称是唯一必填项：内容留空是允许的（等于临时停用这张卡的效果）。 */
     val nameError: String? get() = if (name.isBlank()) "请填写角色名称" else null
@@ -901,9 +859,14 @@ data class MemoryEditor(
     val path: String,
     val body: String,
     val exists: Boolean,
+    /** 打开时磁盘上的正文（默认等于 [body] = 干净）。见 [dirty]。 */
+    val savedBody: String = body,
 ) {
     val title: String get() = if (exists) "编辑 ${scope.label}" else "新建 ${scope.label}"
     val empty: Boolean get() = body.isBlank()
+
+    /** 有过未保存的改动（返回 / 关闭前需要确认）。 */
+    val dirty: Boolean get() = body != savedBody
 }
 
 
@@ -999,8 +962,9 @@ val DEFAULT_API_PROFILES: List<ApiProfile> = emptyList()
  */
 data class AppSettings(
     val visionEnabled: Boolean = true,
-    val sandboxAgentFullAccess: Boolean = false,
     val rootExecutionEnabled: Boolean = false,
+    /** Shizuku 工具开关：以 shell 身份（uid 2000）跑 pm/am/dumpsys 这类系统命令。与 Root 独立。 */
+    val shizukuExecutionEnabled: Boolean = false,
     val forcedKeepAliveEnabled: Boolean = false,
     /** 终端强制字符模式输入（默认关：走正常软件输入法）。见 ApiSettingsStore。 */
     val terminalCharMode: Boolean = false,
@@ -1016,6 +980,15 @@ data class AppSettings(
     /** 自动压缩上限，取值 50..100（百分比）。 */
     val autoCompactPercent: Int = 80,
     val customSystemPrompt: String = "",
+    /**
+     * 可自定义的提示词槽位，三份都遵循「空串 = 用默认」（见 [PromptSlot]）。
+     *
+     * <p>刻意**不**在这里放默认文案：默认值的唯一来源是 [PromptSlot.defaultValue]。
+     * 两份的话，改一处忘另一处就会出现"界面上点恢复默认、引擎用的还是旧的"。
+     */
+    val initPrompt: String = "",
+    val summaryPrompt: String = "",
+    val compactPromptHead: String = "",
     /** API 配置记录（列表 + 当前选用）。列表可以为空 = 还没有配过。 */
     val apiProfiles: List<ApiProfile> = DEFAULT_API_PROFILES,
     val activeProfileId: String = "",
@@ -1098,16 +1071,20 @@ data class SettingsDraft(
     val contextWindow: Int,
     val projectPath: String,
     val customSystemPrompt: String,
+    /** 可自定义的提示词槽位（空串 = 用默认，见 [PromptSlot]）。 */
+    val initPrompt: String,
+    val summaryPrompt: String,
+    val compactPromptHead: String,
     /** 只读展示用：当前 API 记录名 + 模型名（对应参考图的「deepseek · openai-chat · deepseek-flash」）。 */
     val profileName: String,
     val modelLabel: String,
     val visionEnabled: Boolean,
-    val sandboxAgentFullAccess: Boolean,
     val rootExecutionEnabled: Boolean,
     val forcedKeepAliveEnabled: Boolean,
     val terminalCharMode: Boolean,
     val webSearchEnabled: Boolean,
     val webSearchProvider: WebSearchProvider,
+    val shizukuExecutionEnabled: Boolean,
     val webSearchMaxResults: Int,
     val webSearchTimeoutSec: Int,
     val webSearchKeys: Map<WebSearchProvider, String>,
@@ -1127,11 +1104,14 @@ data class SettingsDraft(
                 contextWindow = state.contextWindow,
                 projectPath = state.projectPath,
                 customSystemPrompt = s.customSystemPrompt,
+                initPrompt = s.initPrompt,
+                summaryPrompt = s.summaryPrompt,
+                compactPromptHead = s.compactPromptHead,
                 profileName = state.profileName,
                 modelLabel = state.modelLabel,
                 visionEnabled = s.visionEnabled,
-                sandboxAgentFullAccess = s.sandboxAgentFullAccess,
                 rootExecutionEnabled = s.rootExecutionEnabled,
+                shizukuExecutionEnabled = s.shizukuExecutionEnabled,
                 forcedKeepAliveEnabled = s.forcedKeepAliveEnabled,
                 terminalCharMode = s.terminalCharMode,
                 webSearchEnabled = s.webSearchEnabled,
@@ -1156,14 +1136,18 @@ data class SettingsDraft(
      */
     fun applyTo(state: WorkspaceUiState, keepDraft: Boolean = false): WorkspaceUiState = state.copy(
         themeMode = themeMode,
+        // 深浅是 `themeSettings.mode` 的缓存值（见 WorkspaceUiState.themeSettings 的说明），
+        // 所以写它的时候必须把真源一起写 —— 否则会出现"设置页显示浅色、
+        // 主题栈还在用深色"，而那要下一次重启才能对齐。
+        themeSettings = state.themeSettings.copy(mode = themeMode),
         permissionMode = permissionMode,
         effort = effort,
         contextWindow = contextWindow,
         projectPath = projectPath.ifBlank { state.projectPath },
         settings = AppSettings(
             visionEnabled = visionEnabled,
-            sandboxAgentFullAccess = sandboxAgentFullAccess,
             rootExecutionEnabled = rootExecutionEnabled,
+            shizukuExecutionEnabled = shizukuExecutionEnabled,
             forcedKeepAliveEnabled = forcedKeepAliveEnabled,
             terminalCharMode = terminalCharMode,
             webSearchEnabled = webSearchEnabled,
@@ -1175,7 +1159,38 @@ data class SettingsDraft(
             autoCompact = autoCompact,
             autoCompactPercent = clampCompactPercent(autoCompactPercent),
             customSystemPrompt = customSystemPrompt,
+            initPrompt = initPrompt,
+            summaryPrompt = summaryPrompt,
+            compactPromptHead = compactPromptHead,
         ),
         settingsDraft = if (keepDraft) this else null,
     )
 }
+
+/**
+ * 「设置 → 扩展」那一组要显示的数量摘要。
+ *
+ * ## 为什么需要它
+ *
+ * 扩展组此前是四条纯入口行（MCP / 技能 / 角色卡 / 记忆），一行里没有任何
+ * "我现在装了什么"的信息 —— 想确认某个 MCP 服务器还在不在，得点进去再退出来。
+ * 参考实现（rikkahub）的扩展入口行都带当前值，这里补上同样的信息。
+ *
+ * ## 为什么不是每次重组去读
+ *
+ * 三个存储都在磁盘上（`mcp.json` / 技能目录 walk / `role_cards.json`），
+ * 在界面里读会同时命中"主线程 IO"与"每次重组都读盘"两条禁忌。所以由
+ * `WorkspaceViewModel` 在打开设置时于 IO 线程统计一次，结果落进状态。
+ */
+data class ExtensionSummary(
+    val mcpTotal: Int = 0,
+    val mcpEnabled: Int = 0,
+    /** 已测过且连上的台数；0 表示还没测过任何一台（不是"全挂了"）。 */
+    val mcpConnected: Int = 0,
+    val skillTotal: Int = 0,
+    val projectSkills: Int = 0,
+    val userSkills: Int = 0,
+    val roleCardTotal: Int = 0,
+    /** 是否已经统计过一次（false 时界面显示"正在统计"而不是 0）。 */
+    val loaded: Boolean = false,
+)

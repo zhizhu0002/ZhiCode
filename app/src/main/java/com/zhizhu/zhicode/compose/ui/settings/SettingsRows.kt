@@ -1,12 +1,17 @@
 package com.zhizhu.zhicode.compose.ui.settings
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -15,16 +20,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
+import com.zhizhu.zhicode.compose.ui.effects.pressSink
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.Slider
+import top.yukonga.miuix.kmp.basic.SliderDefaults
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -32,6 +48,7 @@ import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 
 /**
  * 设置页的行式组件，**全部是 `miuix-preference` 组件的薄转发**。
@@ -82,11 +99,19 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  */
 @Composable
 internal fun SettingsGroup(
-    title: String,
+    /**
+     * 分组标题。为 **null 时不画标题行**，只剩卡片本体。
+     *
+     * 用 null 而不是空串表达"没有标题"：空串会让 `SettingsGroupHeader` 画一行
+     * 高度不为零的空标题，卡片上方凭空多出一块留白。
+     */
+    title: String? = null,
     horizontalPadding: Dp = 12.dp,
     content: @Composable () -> Unit,
 ) {
-    SettingsGroupHeader(title, modifier = Modifier.padding(horizontal = horizontalPadding))
+    if (title != null) {
+        SettingsGroupHeader(title, modifier = Modifier.padding(horizontal = horizontalPadding))
+    }
     Card(
         modifier = Modifier.padding(horizontal = horizontalPadding),
         cornerRadius = ZhiRadius.card,
@@ -230,7 +255,21 @@ internal fun SettingsIntField(
     )
 }
 
-/** 布尔开关。转发到 Miuix [SwitchPreference]（整行可点，右侧滑块）。 */
+/**
+ * 布尔开关。转发到 Miuix [SwitchPreference]（右侧滑块）。
+ *
+ * ## 整行是否可点，由 Miuix 决定，本工程不加参数
+ *
+ * 曾经考虑过加一个 `rowClickable` 让整行都能切换。核实之后放弃：
+ * `switchpreference.md` 的变更日志里有一条 **"Remove `onClick` from some composite
+ * components"** —— Miuix 明确把 `onClick` 从 `SwitchPreference` 这类组合组件上**删掉**了。
+ * 它现在只收 `onCheckedChange` 与 `holdDownState`，点击语义由组件内部统一处理。
+ *
+ * 所以这里**不能**再传 `onClick`（参数不存在，传了编译就过不去），
+ * 也不该在行外面套一层 `Modifier.clickable` —— 那会与组件内部的交互源重复，
+ * 得到"点一次切换两次"或按压态错乱。整行点不点得动是库的行为，
+ * 本工程只负责把 `onCheckedChange` 接对。
+ */
 @Composable
 internal fun SettingsToggle(
     title: String,
@@ -243,9 +282,6 @@ internal fun SettingsToggle(
      *
      * 不可用时 Miuix 会把整行压成"点不动"的观感（滑块也会变灰），**不要再自己吞掉点击**
      * 当兜底 —— 那会得到"看着能点、点了没反应"，比一个明显的灰开关更难查。
-     *
-     * 沙箱页用它表达"后端不通"：那时开关值是从 `SandboxPrefs` 回读的已保存值，
-     * 点它只会再失败一次。
      */
     enabled: Boolean = true,
     icon: Painter? = null,
@@ -260,6 +296,195 @@ internal fun SettingsToggle(
         startAction = plateStartAction(icon, plate),
         enabled = enabled,
     )
+}
+
+/**
+ * 数值胶囊：行尾那枚显示当前值的圆角小标签。
+ *
+ * 借鉴 rikkahub 的 `CardGroupValue`，但**形状与配色走 Miuix 语义色**，
+ * 不搬它的 `MaterialTheme.colorScheme.secondaryContainer`（那是 M3 的）。
+ *
+ * ## 为什么必须等宽数字
+ *
+ * 拖动滑块时值一直在变（`85%` → `100%`）。比例数字默认不等宽，`1` 比 `0` 窄，
+ * 于是胶囊会随数值**左右抖**——滑杆的拇指在动、旁边那个数字的宽度也在动，
+ * 两处都在动会显得界面不稳。
+ *
+ * `fontFeatureSettings = "tnum"`（tabular numbers）让每个数字占同样宽度，
+ * 胶囊宽度只随**字符个数**变化（`9%` → `10%` 会变一次，这是对的，也应该变）。
+ *
+ * 单位跟随小数点的写法不在这里处理：调用方给什么字符串就显示什么，
+ * 格式化属于业务（`formatUiScale` 之类），这一层只负责"画一枚值"。
+ */
+@Composable
+internal fun SettingsValuePill(
+    text: String,
+    modifier: Modifier = Modifier,
+    /**
+     * 非 null 时这枚胶囊**可点**（打开精确输入弹窗）。
+     *
+     * 为什么把入口放在值上而不是行尾的 `›`：用户想改数字时，眼睛和手指都已经在
+     * 那个数字上了。行尾箭头意味着「点进去还有一层」，而这里点数字就直接能改。
+     * 不可点时必须传 null —— 一个看着能点却点不动的胶囊比不可点更糟。
+     */
+    onClick: (() -> Unit)? = null,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val source = remember { MutableInteractionSource() }
+    Surface(
+        modifier = modifier
+            .then(
+                if (onClick == null) {
+                    Modifier
+                } else {
+                    Modifier
+                        .clickable(
+                            interactionSource = source,
+                            indication = null,
+                            onClick = onClick,
+                        )
+                        .pressSink(source)
+                }
+            ),
+        shape = CircleShape,
+        color = scheme.secondaryContainer,
+        contentColor = scheme.onSecondaryContainer,
+    ) {
+        Text(
+            text = text,
+            // `tnum` 在 Miuix 的 Text 上通过 TextStyle 的 fontFeatureSettings 传下去。
+            style = androidx.compose.ui.text.TextStyle(
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                fontWeight = FontWeight.Medium,
+                fontFeatureSettings = "tnum",
+            ),
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
+}
+
+/**
+ * 滑杆行：标题在上一行、滑杆在下一行，右侧是当前值胶囊。
+ *
+ * ## 为什么用 `ArrowPreference` 的 `bottomAction`
+ *
+ * Miuix 的 `SliderPreference` 是把滑杆**画在行内**的一条紧凑控件：
+ * 标题、说明、滑杆挤在同一行的垂直空间里，可点面积小、拖动时也容易误触整行。
+ *
+ * 官方给的扩展点是 `bottomAction` 槽位（`BasicComponent` 与 `ArrowPreference` 都有），
+ * 语义正是"标题行下方接一块自定义内容"。ksu-style 的主题页缩放项就是这么写的：
+ * 标题行走 `ArrowPreference`（自带 `›`、整行可点开弹窗），滑杆占据下方整行宽度。
+ *
+ * ## `onClick` 可以是 null
+ *
+ * 主题页那处点标题会打开 `ScaleDialog`（精确输入），所以传 `onClick`；
+ * 但绝大多数滑杆行没有"第二层"，那时给 `null` —— 但 `ArrowPreference` 会**照画箭头**，
+ * 所以无 `onClick` 时改用 `BasicComponent`（没有箭头），避免"有箭头却点不动"。
+ */
+@Composable
+internal fun SettingsSliderRow(
+    title: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    valueText: String,
+    summary: String? = null,
+    steps: Int = 0,
+    showKeyPoints: Boolean = false,
+    keyPoints: List<Float>? = null,
+    magnetThreshold: Float = 0.02f,
+    onClick: (() -> Unit)? = null,
+    holdDownState: Boolean = false,
+    icon: Painter? = null,
+    plate: Color? = null,
+    /**
+     * 非 null 时启用「**松手才生效**」模式。
+     *
+     * 拖动过程中只更新行内临时值（拇指、胶囊数字照常跟手），
+     * `onValueChangeFinished` 才把最终值交给 [commitValue]。
+     *
+     * 为什么需要它：`uiScale` 改的是 `LocalDensity`，也就是**整棵组合树**的密度。
+     * 拖动时每帧都落盘 → 每帧都触发一次全局重组合 + 重新测量 + 写
+     * SharedPreferences（`ThemeStore` 用的是 `commit()`，同步写盘）。
+     * 表现就是拖滑杆发涩、掉帧，而且滑杆自己也在被缩放，拇指会"追不上手指"。
+     * 松手才提交把这一切压成一次。
+     *
+     * [onValueChange] 仍然会被调用（逐帧），所以调用方要保持它是"只改页内状态"的。
+     */
+    commitValue: ((Float) -> Unit)? = null,
+    /** 值胶囊是否可点（打开精确输入）。为 null 时胶囊不可点、也不会有箭头。 */
+    onValueClick: (() -> Unit)? = null,
+    /**
+     * 把浮点值格式化成胶囊文字的**唯一**实现。
+     *
+     * 传了它，拖动中就显示实时值（`valueTextFor(draft)`），而不是停在旧字符串上。
+     * 不传则一直显示 [valueText] —— 那条路只有"不拖动就不会变"的调用方能用。
+     */
+    valueTextFor: ((Float) -> String)? = null,
+) {
+    val scheme = MiuixTheme.colorScheme
+
+    // 拖动中的临时值。null = 没有正在进行的拖动，此时显示外部真值。
+    var draft by remember { mutableStateOf<Float?>(null) }
+    // 外部值变了（比如弹窗精确输入）就丢掉草稿，否则草稿会一直压着真值。
+    LaunchedEffect(value) { draft = null }
+
+    val shown = draft ?: value
+    val endActions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+        SettingsValuePill(
+            text = valueTextFor?.invoke(shown) ?: valueText,
+            onClick = onValueClick,
+        )
+    }
+    val bottom: @Composable () -> Unit = {
+        Slider(
+            value = shown,
+            onValueChange = { next ->
+                if (commitValue != null) {
+                    draft = next
+                    onValueChange(next)
+                } else {
+                    onValueChange(next)
+                }
+            },
+            onValueChangeFinished = {
+                val pending = draft
+                if (commitValue != null && pending != null) commitValue(pending)
+                draft = null
+            },
+            valueRange = valueRange,
+            steps = steps,
+            showKeyPoints = showKeyPoints,
+            keyPoints = keyPoints,
+            magnetThreshold = magnetThreshold,
+            hapticEffect = SliderDefaults.SliderHapticEffect.Step,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+
+    if (onClick != null) {
+        ArrowPreference(
+            title = title,
+            summary = summary,
+            summaryColor = hintColors(warn = false),
+            startAction = plateStartAction(icon, plate),
+            endActions = endActions,
+            bottomAction = bottom,
+            onClick = onClick,
+            holdDownState = holdDownState,
+        )
+    } else {
+        BasicComponent(
+            title = title,
+            titleColor = BasicComponentDefaults.titleColor(color = scheme.onBackground),
+            summary = summary,
+            summaryColor = hintColors(warn = false),
+            startAction = plateStartAction(icon, plate),
+            endActions = endActions,
+            bottomAction = bottom,
+        )
+    }
 }
 
 /**
@@ -318,6 +543,85 @@ internal fun SettingsReadOnly(
             }
         },
     )
+}
+
+/**
+ * 精确输入弹窗：给滑杆行一个"不靠手感"的入口。
+ *
+ * ## 为什么要有它
+ *
+ * 滑杆的取值精度受**像素**限制：区间 80–160 铺在三百多 dp 上，每像素约 0.25%。
+ * 想从 92% 精确地回到 100%，只能靠关键点磁吸碰运气。数字输入把这件事变成确定的。
+ *
+ * ## 校验放在按钮上，而不是边输边纠正
+ *
+ * 输入过程中不打断（不自动夹取、不自动补全）：用户可能正想删掉重打，
+ * 中途夹取会把 `1` 变成 `80`，反而更难输。只让「确定」在越界时不可按，
+ * 并在下面一行说清合法区间。
+ */
+@Composable
+internal fun SettingsNumberDialog(
+    show: Boolean,
+    title: String,
+    initial: Int,
+    range: IntRange,
+    onConfirm: (Int) -> Unit,
+    onDismiss: () -> Unit,
+    suffix: String = "%",
+    summary: String? = null,
+) {
+    // 打开时按当前值重置输入：关掉再打开不该留着上一轮的半截输入。
+    var text by remember(show, initial) { mutableStateOf(initial.toString()) }
+    val parsed = text.trim().toIntOrNull()
+    val valid = parsed != null && parsed in range
+    val scheme = MiuixTheme.colorScheme
+
+    OverlayDialog(
+        show = show,
+        onDismissRequest = onDismiss,
+        largeScreen = true,
+        maxWidth = ZhiDialogWidth.Compact,
+        outsideMargin = DialogWideOutsideMargin,
+        insideMargin = DialogWideInsideMargin,
+    ) {
+        DialogShell(
+            title = title,
+            actions = {
+                SecondaryButton(text = "取消", onClick = onDismiss)
+                PrimaryButton(
+                    text = "确定",
+                    onClick = { parsed?.let { if (it in range) onConfirm(it) } },
+                    enabled = valid,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            },
+        ) {
+            ZhiTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                label = suffix,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            if (summary != null) {
+                Text(
+                    text = summary,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            if (!valid) {
+                // 只在非法时出现：合法时不重复一遍区间，省一行视觉噪音。
+                Text(
+                    text = "请输入 ${range.first}–${range.last} 之间的整数",
+                    color = scheme.error,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
+    }
 }
 
 /**

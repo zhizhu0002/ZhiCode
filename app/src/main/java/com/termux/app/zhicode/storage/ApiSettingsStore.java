@@ -84,13 +84,23 @@ public final class ApiSettingsStore {
         static final String VISION_ENABLED = "vision_enabled";
         static final String EFFORT = "effort";
         static final String CUSTOM_PROMPT = "custom_system_prompt";
+        /**
+         * 可自定义的提示词槽位（见 {@code model/PromptSlots.kt}）。
+         *
+         * <p>三个键都必须**存在即覆盖**：空串表示"用默认"，所以读到空串时不能当成"没配过"
+         * 而回落到旧值 —— 那会让「恢复默认」这个动作在重启后反弹。
+         */
+        static final String INIT_PROMPT = "init_prompt";
+        static final String SUMMARY_PROMPT = "summary_prompt";
+        static final String COMPACT_PROMPT_HEAD = "compact_prompt_head";
         static final String ROLE_CARD = "role_card";
         static final String REASONING_SUMMARY = "reasoning_summary";
         static final String PRESERVE_REASONING = "preserve_reasoning_state";
         static final String TOOL_MODE = "tool_mode";
         static final String PERMISSION_MODE = "permission_mode";
-        static final String SANDBOX_FULL_ACCESS = "sandbox_agent_full_access";
         static final String ROOT_EXECUTION = "root_execution_enabled";
+        /** Shizuku 工具开关。与 Root 分开存：两者的前提条件不同，不能互相隐含。 */
+        static final String SHIZUKU_EXECUTION = "shizuku_execution_enabled";
         static final String FORCED_KEEP_ALIVE = "forced_keep_alive_enabled";
         /** 终端是否强制字符模式输入（见 getTerminalCharMode 的说明）。 */
         static final String TERMINAL_CHAR_MODE = "terminal_char_mode";
@@ -117,6 +127,14 @@ public final class ApiSettingsStore {
         static final String ACTIVE_SEARCH_SERVICE = "active_search_service_id";
         /** 老配置（单个 provider）迁移成服务列表的一次性标记。 */
         static final String SEARCH_MIGRATION = "search_service_migration_v1";
+        /**
+         * 「已经种过两条免费预设」的一次性标记。
+         *
+         * <p>与 {@link #SEARCH_MIGRATION} **分开**：后者管"把老版单 provider 迁过来"，
+         * 前者管"从没配过的人给两条能直接用的"。共用标记会让两件事互相压制 ——
+         * 比如老用户迁完之后，种子逻辑就再也跑不到，但他的迁移结果可能是一条要密钥的服务。
+         */
+        static final String SEARCH_SEED = "search_service_seed_v1";
 
         private Key() {}
     }
@@ -216,14 +234,22 @@ public final class ApiSettingsStore {
                 item(c -> c.preserveReasoningState, (c, v) -> c.preserveReasoningState = (Boolean) v));
         SETTINGS.put(Key.CUSTOM_PROMPT, textItem(c -> c.customSystemPrompt,
                 (c, v) -> c.customSystemPrompt = v, ApiSettingsStore::sanitizePrompt));
+        // 提示词槽位用 textItem 而不是 sanitizePrompt：后者会按"提示词"的规则裁剪，
+        // 而这三项是**用户自己的原话**，多留几个换行不该被吃掉。
+        SETTINGS.put(Key.INIT_PROMPT, textItem(c -> c.initPrompt,
+                (c, v) -> c.initPrompt = v, ApiSettingsStore::trimToEmpty));
+        SETTINGS.put(Key.SUMMARY_PROMPT, textItem(c -> c.summaryPrompt,
+                (c, v) -> c.summaryPrompt = v, ApiSettingsStore::trimToEmpty));
+        SETTINGS.put(Key.COMPACT_PROMPT_HEAD, textItem(c -> c.compactPromptHead,
+                (c, v) -> c.compactPromptHead = v, ApiSettingsStore::trimToEmpty));
         SETTINGS.put(Key.ROLE_CARD, textItem(c -> c.roleCard,
                 (c, v) -> c.roleCard = v, ApiSettingsStore::sanitizePrompt));
         SETTINGS.put(Key.TOOL_MODE, item(c -> c.toolMode, (c, v) -> c.toolMode = (String) v));
         SETTINGS.put(Key.PERMISSION_MODE, item(c -> c.permissionMode, (c, v) -> c.permissionMode = (String) v));
-        SETTINGS.put(Key.SANDBOX_FULL_ACCESS,
-                item(c -> c.sandboxAgentFullAccess, (c, v) -> c.sandboxAgentFullAccess = (Boolean) v));
         SETTINGS.put(Key.ROOT_EXECUTION,
                 item(c -> c.rootExecutionEnabled, (c, v) -> c.rootExecutionEnabled = (Boolean) v));
+        SETTINGS.put(Key.SHIZUKU_EXECUTION,
+                item(c -> c.shizukuExecutionEnabled, (c, v) -> c.shizukuExecutionEnabled = (Boolean) v));
         SETTINGS.put(Key.FORCED_KEEP_ALIVE,
                 item(c -> c.forcedKeepAliveEnabled, (c, v) -> c.forcedKeepAliveEnabled = (Boolean) v));
         SETTINGS.put(Key.PROJECT_DIRECTORY,
@@ -723,6 +749,25 @@ public final class ApiSettingsStore {
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(Key.SEARCH_MIGRATION, true)
+                .apply();
+    }
+
+    /** 见 {@link Key#SEARCH_SEED}。 */
+    public static boolean isSearchSeedDone(Context context) {
+        if (context == null) return true;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        return app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(Key.SEARCH_SEED, false);
+    }
+
+    public static void markSearchSeedDone(Context context) {
+        if (context == null) return;
+        Context app = context.getApplicationContext();
+        if (app == null) app = context;
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(Key.SEARCH_SEED, true)
                 .apply();
     }
 

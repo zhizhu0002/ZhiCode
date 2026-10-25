@@ -70,8 +70,8 @@ public final class ToolRegistry {
             // 命令行与系统交互
             new BashTool(shell, intentBridge),
             new RootBashTool(shell),
+            new ShizukuBashTool(),
             new AndroidIntentTool(intentBridge),
-            new ZhiSandboxTool(context),
             new ZhiDebugTool(context, shell),
             new UiCanvasTool(context),
 

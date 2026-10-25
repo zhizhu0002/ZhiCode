@@ -19,6 +19,7 @@ import com.zhizhu.zhicode.compose.data.McpStore
 import com.zhizhu.zhicode.compose.data.MockWorkspaceRepository
 import com.zhizhu.zhicode.compose.data.ModelCatalogStore
 import com.zhizhu.zhicode.compose.data.SessionReader
+import com.zhizhu.zhicode.compose.data.ThemeStore
 import com.zhizhu.zhicode.compose.data.RoleCardStore
 import com.zhizhu.zhicode.compose.data.MemoryStore
 import com.zhizhu.zhicode.compose.data.SkillImport
@@ -30,6 +31,9 @@ import com.zhizhu.zhicode.compose.engine.EngineOverrides
 import com.zhizhu.zhicode.compose.engine.EnginePlanApproval
 import com.zhizhu.zhicode.compose.engine.ZhiEngineController
 import com.zhizhu.zhicode.compose.engine.ToolText
+// Shizuku 状态查询：斜杠命令与设置页都要报「授权到了哪一步」，
+// 两处读的必须是同一个来源（Shizuku 服务的 Binder），否则显示会互相矛盾。
+import com.zhizhu.zhicode.shizuku.ShizukuBridge
 import com.zhizhu.zhicode.compose.engine.applyEngineOverrides
 import com.zhizhu.zhicode.compose.engine.engineEffortToUi
 import com.zhizhu.zhicode.compose.engine.engineModeToUi
@@ -41,6 +45,7 @@ import com.zhizhu.zhicode.compose.runtime.EnvDoctor
 import com.termux.shared.termux.TermuxConstants
 import com.zhizhu.zhicode.RuntimeInstaller
 import com.zhizhu.zhicode.TermuxTerminalPane
+import com.zhizhu.zhicode.compose.model.ActionBusy
 import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.AttachBrowserState
 import com.zhizhu.zhicode.compose.model.ApiConfigState
@@ -54,6 +59,8 @@ import com.zhizhu.zhicode.compose.model.ChatNavigation
 import com.zhizhu.zhicode.compose.model.ChoiceIntent
 import com.zhizhu.zhicode.compose.model.ChoiceOption
 import com.zhizhu.zhicode.compose.model.ChoicePickerState
+import com.zhizhu.zhicode.compose.model.CopySheetState
+import com.zhizhu.zhicode.compose.model.ExtensionSummary
 import com.zhizhu.zhicode.compose.model.EffortLevel
 import com.zhizhu.zhicode.compose.model.FileDeletePrompt
 import com.zhizhu.zhicode.compose.model.FileEntry
@@ -76,6 +83,7 @@ import com.zhizhu.zhicode.compose.model.ModelProfileTab
 import com.zhizhu.zhicode.compose.model.ModelPickerState
 import com.zhizhu.zhicode.compose.model.PermissionMode
 import com.zhizhu.zhicode.compose.model.PermissionRequest
+import com.zhizhu.zhicode.compose.model.PromptSlot
 import com.zhizhu.zhicode.compose.model.QueuedPrompt
 import com.zhizhu.zhicode.compose.model.PlanApproval
 import com.zhizhu.zhicode.compose.model.RiskLevel
@@ -334,6 +342,43 @@ class WorkspaceViewModel(
 
     val state: StateFlow<WorkspaceUiState> = _state.asStateFlow()
 
+    /**
+     * 页面动作的在飞登记表（见 [ActionBusy]）。
+     *
+     * 与 [_state] 分开：判定互斥时读它（不产生 Snapshot 快照），界面读
+     * `state.inFlight` 那份快照。两者由 [runBusy] 一并维护。
+     */
+    private val actions = ActionBusy()
+
+    /**
+     * 跑一个**有互斥语义**的页面动作。
+     *
+     * - 同一个 [key] 已在跑时直接返回：用户双击保存 / 粘贴 / 删除不会做两遍；
+     * - 动作体在 [Dispatchers.IO] 上跑（保存类动作基本都是文件 IO），
+     *   因此 `_state.update` 也允许在动作体里直接调用（它是线程安全的）；
+     * - 结束（含异常）一定释放登记，不会留下永远转圈的按钮。
+     *
+     * 这不替代取消：用户仍可以用"停止"打断 Agent 回合；它只保证**同一次点击不会被放大成两次**。
+     */
+    private fun runBusy(key: String, block: suspend () -> Unit) {
+        if (!actions.acquire(key)) {
+            if (com.zhizhu.zhicode.compose.BuildConfig.DEBUG) {
+                // 调试构建里留一行：双击被吞掉是**设计**，不是"点了没反应"。
+                android.util.Log.d("ZhiCodeBusy", "skip re-entrant action: $key")
+            }
+            return
+        }
+        _state.update { it.copy(inFlight = actions.snapshot()) }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                block()
+            } finally {
+                actions.release(key)
+                _state.update { it.copy(inFlight = actions.snapshot()) }
+            }
+        }
+    }
+
     init {
         initSessionState()
         autoInstallRuntimeIfStale()
@@ -554,6 +599,11 @@ class WorkspaceViewModel(
         _state.update {
             it.copy(
                 themeMode = theme,
+                // 整份主题设置也在这里读回来：预设 / Monet / 显示开关与深浅住在同一个存储里，
+                // 分两次读会出现「深浅换了、预设没换」的中间态。
+                themeSettings = runCatching { ThemeStore.read(getApplication()) }
+                    .getOrDefault(it.themeSettings)
+                    .let { stored -> stored.copy(mode = theme) },
                 settings = it.settings.copy(
                     webSearchKeys = keys,
                     terminalCharMode = runCatching {
@@ -897,7 +947,11 @@ class WorkspaceViewModel(
         }
     }
 
-    fun closeSkills() = _state.update { it.copy(skills = null) }
+    fun closeSkills() {
+        _state.update { it.copy(skills = null) }
+        // 回到设置主页时刷新「扩展」组的数量：刚从技能页增删过，不刷会显示旧数字。
+        refreshExtensions()
+    }
 
     /** 列表页的筛选词。 */
     fun setSkillQuery(query: String) = _state.update {
@@ -912,6 +966,9 @@ class WorkspaceViewModel(
      */
     fun openSkillDetail(entry: SkillEntry) {
         val s = _state.value
+        // 先推页、后读盘：`listTree` 要 walk 整个技能目录并逐文件取大小，
+        // 正文读取更是一次完整读文件。放在点击那一帧上会看到明显延迟，
+        // 而详情页在数据回来之前已经立起来了（显示"读取中"）。
         _state.update {
             it.copy(
                 skills = it.skills?.copy(
@@ -925,6 +982,24 @@ class WorkspaceViewModel(
                     ),
                 ),
             )
+        }
+        // 详情页的只读预览：`SKILL.md` 的正文。
+        // 之前只有文件树，想知道这个技能教 Agent 做什么得先点进编辑器。
+        viewModelScope.launch(Dispatchers.IO) {
+            val body = SkillStore.read(s.projectPath, entry.scope, entry.name).getOrDefault("")
+            _state.update { state ->
+                val current = state.skills?.detail ?: return@update state
+                // 期间用户可能已经关页或换了另一条技能：只更新同一条。
+                if (current.entry.name != entry.name || current.entry.scope != entry.scope) return@update state
+                state.copy(
+                    skills = state.skills.copy(
+                        detail = current.copy(
+                            body = body,
+                            tree = SkillStore.listTree(state.projectPath, entry.scope, entry.name),
+                        ),
+                    ),
+                )
+            }
         }
     }
 
@@ -1086,10 +1161,10 @@ class WorkspaceViewModel(
      * 那样页面栈会一次加两页（列表→详情→编辑器），视觉上就是"出现一个重复的"
      * （用户报过的现象）。要改内容在详情页点 SKILL.md 即可。
      */
-    fun createSkill() {
+    fun createSkill() = runBusy("skills.create") {
         val s = _state.value
-        val form = s.skills?.createForm ?: return
-        if (!form.saveable) return
+        val form = s.skills?.createForm ?: return@runBusy
+        if (!form.saveable) return@runBusy
         val name = form.name.trim()
         val result = SkillStore.create(s.projectPath, form.scope, name, form.content)
         result.fold(
@@ -1381,12 +1456,12 @@ class WorkspaceViewModel(
      * 踩到的错误（`SkillStore.writeFile` 会拒绝），关掉对话框等于让用户重新输入一遍。
      * 保持打开、把原因显示出来，用户改一行就能再存。
      */
-    fun saveSkill() {
+    fun saveSkill() = runBusy("skills.save") {
         val s = _state.value
-        val editing = s.skills?.editing ?: return
-        if (!editing.saveable) return
+        val editing = s.skills?.editing ?: return@runBusy
+        if (!editing.saveable) return@runBusy
         // 与 saveSkillFile 同理：写的是一整份正文 + 写完重列文件树。
-        viewModelScope.launch(Dispatchers.IO) {
+        run {
             val result = SkillStore.writeFile(
                 s.projectPath, editing.scope, editing.name, editing.relativePath, editing.body,
             )
@@ -1488,7 +1563,10 @@ class WorkspaceViewModel(
         }
     }
 
-    fun closeRoleCards() = _state.update { it.copy(roleCards = null) }
+    fun closeRoleCards() {
+        _state.update { it.copy(roleCards = null) }
+        refreshExtensions()
+    }
 
     fun newRoleCard() = _state.update {
         it.copy(roleCards = it.roleCards?.copy(editor = RoleCardEditor()))
@@ -1519,9 +1597,9 @@ class WorkspaceViewModel(
      * 并把内容灌进引擎配置。分三步做是必须的——只写清单不写 activeId 的话，
      * 用户会看到卡保存成功却没有任何效果。
      */
-    fun saveRoleCard() {
-        val editor = _state.value.roleCards?.editor ?: return
-        if (!editor.saveable) return
+    fun saveRoleCard() = runBusy("roleCards.save") {
+        val editor = _state.value.roleCards?.editor ?: return@runBusy
+        if (!editor.saveable) return@runBusy
         val context = getApplication<android.app.Application>()
         val result = RoleCardStore.upsert(
             context,
@@ -1540,24 +1618,24 @@ class WorkspaceViewModel(
     }
 
     /** 启用一张已存在的卡。 */
-    fun selectRoleCard(card: RoleCard) {
+    fun selectRoleCard(card: RoleCard) = runBusy("roleCards.select") {
         val context = getApplication<android.app.Application>()
         val result = RoleCardStore.save(context, RoleCardStore.list(context), card.id)
         if (result.isFailure) {
             _state.update { it.copy(message = "启用失败：${result.exceptionOrNull()?.message ?: "未知原因"}", messageIsError = true) }
-            return
+            return@runBusy
         }
         roleCardOverride = card.content
         refreshRoleCards(message = "已启用角色卡：${card.name}")
         runCatching { engine.configure(engineOverrides()) }
     }
 
-    fun disableRoleCard() {
+    fun disableRoleCard() = runBusy("roleCards.disable") {
         val context = getApplication<android.app.Application>()
         val result = RoleCardStore.save(context, RoleCardStore.list(context), "")
         if (result.isFailure) {
             _state.update { it.copy(message = "停用失败：${result.exceptionOrNull()?.message ?: "未知原因"}", messageIsError = true) }
-            return
+            return@runBusy
         }
         // 覆盖值置成空串（而不是 null）：null 表示"不覆盖"，那会退回配置里的旧值，
         // 于是"停用"看起来没生效——角色卡还挂在系统提示词里。
@@ -1636,34 +1714,29 @@ class WorkspaceViewModel(
     fun closeMemory() = _state.update { it.copy(memory = null) }
 
     /**
-     * 打开 ZhiCode 沙箱管理界面（`SandboxBoard`）。
+     * 沙盒入口（**已移除功能的占位**）。
      *
-     * 与「环境弹窗」不同，这里**不能**只改本进程的 UI 状态：沙箱引擎整个跑在
-     * `:zhisandbox` 进程里，管理界面通过 `${applicationId}.sandbox.control` 这个同 UID
-     * 私有 provider 与它通信（见 SandboxRpcService）。所以这里必须真的
-     * 启动那个 Activity，而不是弹一个本地的 Compose 面板 —— 后者会得到一个
-     * "永远连不上引擎"的空壳界面。
+     * ## 为什么入口还在、功能没了
      *
-     * ViewModel 手里只有 Application 上下文，从 Application 启动 Activity
-     * 必须带 FLAG_ACTIVITY_NEW_TASK，否则直接抛 AndroidRuntimeException。
-     * 失败时如实上报，不静默吞掉（例如清单里少声明了该 Activity）。
+     * 沙盒（BlackBox 虚拟 Android 运行时 + `:zhisandbox` 控制进程 + `SandboxBoard`
+     * 管理界面）已整体删除：`Bcore` / `black-reflection` / `compiler` 三个 Gradle 模块、
+     * `sandbox` 包、`ZhiSandboxTool`、`SandboxPage` 与清单里的三个组件都不在了。
+     *
+     * 但侧栏那一行与 `/sandbox` 斜杠命令**保留**：直接删掉会让老用户以为"菜单丢了"
+     * 或者以为自己记错了 —— 那比明说"功能已移除"更糟。所以这里只给一条提示。
+     *
+     * ## 为什么提示要说清删了什么
+     *
+     * 「功能已移除」是结论，用户真正想知道的是"我之前装进去的 APK 呢""以后还会有吗"。
+     * 所以文案里点明"虚拟运行时"这个具体的东西，而不是一个含糊的"暂不可用"。
      */
     fun openSandbox() {
-        // 见 hideSidebarForNavigation。这一行尤其明显：沙箱是个**跨进程的 Activity**，
-        // 不收侧栏的话用户回到本应用时看到的还是那层侧栏，会以为"点了根本没打开"。
         hideSidebarForNavigation()
-        val context = getApplication<android.app.Application>()
-        val started = runCatching {
-            context.startActivity(
-                android.content.Intent(context, com.zhizhu.zhicode.sandbox.SandboxBoard::class.java)
-                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        }
-        started.onFailure { error ->
-            appendInfo(
-                "无法打开 ZhiCode 沙箱",
-                "启动沙箱管理界面失败：${error.javaClass.simpleName}: ${error.message ?: "未知原因"}\n\n" +
-                    "沙箱引擎运行在 :zhisandbox 进程，界面必须由系统拉起而无法在本进程内绘制。",
+        _state.update {
+            it.copy(
+                message = "沙盒功能已移除：内置虚拟 Android 运行时（BlackBox）不再随本应用分发。" +
+                    "安装到真机请用 AndroidIntent install_apk。",
+                messageIsError = false,
             )
         }
     }
@@ -1695,9 +1768,9 @@ class WorkspaceViewModel(
         it.copy(memory = it.memory?.copy(editing = null))
     }
 
-    fun saveMemory() {
+    fun saveMemory() = runBusy("memory.save") {
         val state = _state.value
-        val editing = state.memory?.editing ?: return
+        val editing = state.memory?.editing ?: return@runBusy
         val result = MemoryStore.save(state.projectPath, editing.scope, editing.body)
         _state.update {
             it.copy(
@@ -1720,12 +1793,12 @@ class WorkspaceViewModel(
      * - 对话流里放一条可见的 `/init` 用户气泡：这条请求是应用自己发的，
      *   不显示出来的话用户会看到一条自己没写过的消息引发的回复。
      */
-    /** 界面入口：记忆面板里的「让智蛛完善」按钮（`ui/dialogs/MemoryOverlay.kt`）。 */
+    /** 界面入口：记忆面板里的「让 ZhiCode 完善」按钮（`ui/dialogs/MemoryOverlay.kt`）。 */
     fun runInitFromUi() = runInitPrompt()
 
     private fun runInitPrompt() {
         if (engine.isBusy()) {
-            appendInfo("初始化项目说明", "智蛛正在执行任务，请先等待或停止当前任务。")
+            appendInfo("初始化项目说明", "ZhiCode 正在执行任务，请先等待或停止当前任务。")
             return
         }
         runCatching { engine.cancelPlanModeFromUi("/init 使用快速直接模式") }
@@ -1738,7 +1811,86 @@ class WorkspaceViewModel(
                 busySessionIds = it.busySessionIds + it.activeSessionId,
             )
         }
-        startTurn(INIT_INSTRUCTION)
+        startTurn(PromptSlot.INIT.resolve(_state.value.settings.initPrompt))
+    }
+
+    /**
+     * 写入一个提示词槽位（空串 = 恢复默认）。
+     *
+     * <p>三个槽位走同一个入口：它们的语义完全一样（空串=默认），
+     * 各写一个 setter 只会让"恢复默认"这条逻辑出现三份。
+     */
+    fun setPromptSlot(slot: PromptSlot, value: String) {
+        val draft = _state.value.settingsDraft ?: SettingsDraft.from(_state.value)
+        val updated = when (slot) {
+            PromptSlot.INIT -> draft.copy(initPrompt = value)
+            PromptSlot.COMPACT_SYSTEM -> draft.copy(summaryPrompt = value)
+            PromptSlot.COMPACT_HEAD -> draft.copy(compactPromptHead = value)
+        }
+        applySettingsDraft(updated)
+    }
+
+    /** 编辑页里「恢复默认」：把该槽位清成空串。 */
+    fun resetPromptSlot(slot: PromptSlot) = setPromptSlot(slot, "")
+
+    /**
+     * 打开「提示词」整页。
+     *
+     * <p>只置一个布尔：这一页要的三份文案都在 `state.settings` 里，没有要读盘的东西，
+     * 所以不需要像记忆页那样先推页面再异步取载荷。
+     */
+    fun openPrompts() {
+        _state.update { it.copy(settingsOpen = true, sidebarOpen = false, promptsOpen = true) }
+    }
+
+    fun closePrompts() {
+        _state.update { it.copy(promptsOpen = false) }
+    }
+
+    /** 打开主题设置整页（设置 hub 里那一行现在只做入口）。 */
+    fun openThemePage() {
+        _state.update { it.copy(settingsOpen = true, sidebarOpen = false, themePageOpen = true) }
+    }
+
+    fun closeThemePage() {
+        // 关页时兑现主题设置的落盘：滑杆拖动会连续改状态但不写盘
+        // （见 updateThemeSettings 的说明），这里补那一次。
+        persistThemeSettings()
+        _state.update { it.copy(themePageOpen = false) }
+    }
+
+    /** 打开「聊天显示」页（自定义字体 + 正文字号）。同样走设置栈，返回回到设置 hub。 */
+    fun openChatDisplay() {
+        _state.update { it.copy(settingsOpen = true, sidebarOpen = false, chatDisplayOpen = true) }
+    }
+
+    fun closeChatDisplay() {
+        // 与主题页同理：字号滑杆连续改状态，关页时才落盘。
+        persistThemeSettings()
+        _state.update { it.copy(chatDisplayOpen = false) }
+    }
+
+    /**
+     * 打开「关于」。
+     *
+     * 入口有两个（侧栏「更多」组、设置页底部），所以这里**不**顺带打开设置页 ——
+     * 从侧栏进来时它就该是一个独立的整页，返回直接回工作区。
+     */
+    fun openAbout() {
+        _state.update { it.copy(aboutOpen = true, sidebarOpen = false) }
+    }
+    fun closeAbout() {
+        // 从关于页返回时把许可页也收掉：它们是一条链（关于 → 许可），
+        // 只关上面那层的话，返回一次会看到许可页还在。
+        _state.update { it.copy(aboutOpen = false, licensesOpen = false) }
+    }
+
+    fun openLicenses() {
+        _state.update { it.copy(licensesOpen = true) }
+    }
+
+    fun closeLicenses() {
+        _state.update { it.copy(licensesOpen = false) }
     }
 
     fun removeAttachment(id: String) {
@@ -1891,6 +2043,9 @@ class WorkspaceViewModel(
             contextWindow = s.contextWindow,
             projectDirectory = s.projectPath,
             customSystemPrompt = s.settings.customSystemPrompt,
+            initPrompt = s.settings.initPrompt,
+            summaryPrompt = s.settings.summaryPrompt,
+            compactPromptHead = s.settings.compactPromptHead,
             visionEnabled = s.settings.visionEnabled,
             autoCompact = s.settings.autoCompact,
             autoCompactPercent = s.settings.autoCompactPercent,
@@ -1916,7 +2071,7 @@ class WorkspaceViewModel(
                 runCatching { org.json.JSONObject(config.toMap()).toString() }.getOrDefault("")
             } ?: "",
             rootExecutionEnabled = s.settings.rootExecutionEnabled,
-            sandboxAgentFullAccess = s.settings.sandboxAgentFullAccess,
+            shizukuExecutionEnabled = s.settings.shizukuExecutionEnabled,
             forcedKeepAliveEnabled = s.settings.forcedKeepAliveEnabled,
             model = modelOverride,
             roleCard = roleCardOverride,
@@ -2120,7 +2275,7 @@ class WorkspaceViewModel(
                 transcript = s.transcript + ChatItem(
                     id = id,
                     kind = ChatKind.ASSISTANT,
-                    title = "智蛛",
+                    title = "ZhiCode",
                     body = "",
                     streaming = true,
                     processSteps = listOf("开始分析请求"),
@@ -2467,7 +2622,7 @@ class WorkspaceViewModel(
                 choicePicker = ChoicePickerState(
                     title = question.optString("header", "问题"),
                     intent = ChoiceIntent.QUESTION,
-                    prompt = question.optString("question", "智蛛应该怎么做？"),
+                    prompt = question.optString("question", "ZhiCode 应该怎么做？"),
                     options = choices,
                     allowFreeForm = true,
                     freeFormHint = "其他回答…",
@@ -2504,7 +2659,7 @@ class WorkspaceViewModel(
         pendingQuestions = null
         _state.update { it.copy(choicePicker = null) }
         engine.respondQuestion(flow.requestId, JSONObject())
-        appendInfo("已跳过提问", "智蛛的提问被跳过，它会按「未选择」继续。")
+        appendInfo("已跳过提问", "ZhiCode 的提问被跳过，它会按「未选择」继续。")
     }
 
     override fun onEnginePlanApprovalRequest(request: EnginePlanApproval) {
@@ -2766,17 +2921,18 @@ class WorkspaceViewModel(
         "Grep", "Glob", "Search" -> ToolKind.SEARCH
         "Read", "ReadMany", "LS", "List", "Tree", "Stat" -> ToolKind.READ
         "Edit", "MultiEdit", "Write", "Move", "Delete", "Mkdir", "Copy" -> ToolKind.EDIT
-        "Bash", "Root", "BashTool" -> ToolKind.COMMAND
+        "Bash", "Root", "Shizuku", "BashTool" -> ToolKind.COMMAND
         else -> ToolKind.OTHER
     }
 
     private fun subtitleFor(tool: String): String = when (tool) {
-        "Root" -> "高风险：智蛛请求以 Android uid 0 执行系统命令"
-        "Bash" -> "智蛛请求在本地 Termux 环境中执行以下命令"
-        "AndroidIntent" -> "智蛛请求通过 Android 应用进程打开手机 App、网页或系统页面"
-        "Write", "Edit", "MultiEdit" -> "智蛛请求修改项目中的文件"
-        "Delete" -> "智蛛请求删除项目中的文件或目录"
-        else -> "智蛛请求调用工具 $tool"
+        "Root" -> "高风险：ZhiCode 请求以 Android uid 0 执行系统命令"
+        "Shizuku" -> "ZhiCode 请求以 shell 身份（uid 2000）执行 Android 系统命令"
+        "Bash" -> "ZhiCode 请求在本地 Termux 环境中执行以下命令"
+        "AndroidIntent" -> "ZhiCode 请求通过 Android 应用进程打开手机 App、网页或系统页面"
+        "Write", "Edit", "MultiEdit" -> "ZhiCode 请求修改项目中的文件"
+        "Delete" -> "ZhiCode 请求删除项目中的文件或目录"
+        else -> "ZhiCode 请求调用工具 $tool"
     }
 
     // ---------- 斜杠命令 ----------
@@ -2804,7 +2960,12 @@ class WorkspaceViewModel(
             "/model" -> showModelPicker()
             "/cancel" -> stop()
             "/config" -> openSettings()
-            "/mcp" -> openMcpConfig()
+            // `/mcp` 与 IQ Code 0.30.4 的 `handleMcpSlash` 同一套子命令：
+            // 不带参数打开面板，带参数走 list / add / enable / disable / remove。
+            //
+            // 之前这里**吞掉参数**直接开面板 —— 照着文档敲 `/mcp list` 的用户
+            // 只会看到一个面板，不知道自己敲的其实是有效命令。
+            "/mcp" -> handleMcpSlash(arg)
             "/copy" -> copyLatestAssistantReply()
             "/compact" -> compactContext(arg)
 
@@ -2817,7 +2978,8 @@ class WorkspaceViewModel(
             }
 
             "/tasks" -> openTaskList()
-            "/skills" -> openSkills()
+            // 带参数 = 直接附加那个技能（见 handleSkillsSlash）。
+            "/skills" -> handleSkillsSlash(arg)
             "/agents" -> openRoleCards()
             "/memory" -> openMemory()
             "/init" -> runInitPrompt()
@@ -2827,6 +2989,7 @@ class WorkspaceViewModel(
             "/sandbox" -> openSandbox()
 
             "/web" -> handleWebSlash(arg)
+            "/shizuku" -> handleShizukuSlash(arg)
 
             "/context" -> {
                 if (arg.isEmpty()) {
@@ -2978,6 +3141,63 @@ class WorkspaceViewModel(
             )
         }
         // 立刻下发：这一步容易漏，漏了就会"开关看起来变了，但下一轮请求还用旧值"。
+        runCatching { engine.configure(engineOverrides()) }
+    }
+
+    /**
+     * `/shizuku`：Agent Shizuku（无 Root 的 shell 身份）。
+     *
+     * 四种形态与原版的 `handleShizukuSlash` 一致：无参数 → 打开设置里的那一组，
+     * `on` / `off` → 开关（真的落盘并重配引擎），`status` → 报告状态。
+     *
+     * <h3>为什么 status 要同时报两件事</h3>
+     * 「工具开关」与「Shizuku 授权」是**两个独立的前提**：开着工具但没授权，
+     * 模型一调用就会收到一条授权错误；只报其中一个，用户会以为另一半已经好了。
+     */
+    private fun handleShizukuSlash(arg: String) {
+        when {
+            arg.isEmpty() -> {
+                openSettings()
+                _state.update { it.copy(settingsDraft = it.settingsDraft?.copy(category = SettingsCategory.AGENT_SECURITY)) }
+            }
+            arg.equals("on", ignoreCase = true) || arg.equals("enable", ignoreCase = true) ->
+                setShizukuExecution(true)
+            arg.equals("off", ignoreCase = true) || arg.equals("disable", ignoreCase = true) ->
+                setShizukuExecution(false)
+            else -> {
+                val state = ShizukuBridge.state(getApplication())
+                val enabled = _state.value.settings.shizukuExecutionEnabled
+                _state.update {
+                    it.copy(
+                        message = "Shizuku ${ShizukuBridge.stateLabel(getApplication())}"
+                            + if (enabled) "；Agent 可用" else "；Agent 不可用（/shizuku on 开启）",
+                        messageIsError = enabled && state != ShizukuBridge.GRANTED,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * 开关 Shizuku 工具，并**立刻**落盘 + 重配引擎。
+     *
+     * 直接用 [applySettingsDraft]：它既是设置页那套自动保存的入口，
+     * 也就顺带保证了「斜杠命令改的值」与「设置页改的值」走同一条持久化路径 ——
+     * 两条各自写盘的话，后写的那条会把另一条的新值冲掉。
+     */
+    fun setShizukuExecution(enabled: Boolean) {
+        val draft = _state.value.settingsDraft ?: SettingsDraft.from(_state.value)
+        applySettingsDraft(draft.copy(shizukuExecutionEnabled = enabled))
+        val granted = ShizukuBridge.state(getApplication()) == ShizukuBridge.GRANTED
+        _state.update {
+            it.copy(
+                message = when {
+                    !enabled -> "Agent Shizuku 已关闭"
+                    granted -> "Agent Shizuku 已开启（shell 身份已授权）"
+                    else -> "Agent Shizuku 已开启；还需要在 设置 → Agent 与安全 里授权"
+                },
+            )
+        }
         runCatching { engine.configure(engineOverrides()) }
     }
 
@@ -3424,6 +3644,113 @@ class WorkspaceViewModel(
      * 这里的读写是**同步**的：`McpConfigStore` 只读一个本地小 JSON，
      * 没有网络也没有密钥解密，放 IO 线程反而让状态更新顺序更难推理。
      */
+    /**
+     * `/mcp` 的子命令（对齐 IQ Code 0.30.4 的 `handleMcpSlash`）。
+     *
+     * | 命令 | 行为 |
+     * | --- | --- |
+     * | `/mcp` | 打开配置页 |
+     * | `/mcp list` | 在对话流里列出全部服务器（启用状态 / 类型 / 端点 / 作用域） |
+     * | `/mcp add` | 打开配置页并直接进入「添加」表单 |
+     * | `/mcp enable <名称>` / `disable <名称>` | 切换启用状态 |
+     * | `/mcp remove <名称>`（同 `delete`） | 删除那一条 |
+     *
+     * 打错的子命令**不会**变成一句"已执行"：它会列出支持的命令 ——
+     * 与其它斜杠指令的兜底策略一致（不做假回执）。
+     */
+    private fun handleMcpSlash(arg: String) {
+        val a = arg.trim()
+        if (a.isEmpty()) {
+            openMcpConfig()
+            return
+        }
+        val op = a.substringBefore(' ').lowercase(Locale.US)
+        val name = a.substringAfter(' ', "").trim()
+        when (op) {
+            "list", "列表" -> showMcpSummary()
+            "add", "添加" -> {
+                openMcpConfig()
+                // 数据是异步读的：表单的开合状态由 mcpConfig 承载，所以等它落地再开表单。
+                // 用 ready 标志而不是延时猜：读盘慢的机器上延时一定会错。
+                mcpOpenFormWhenReady = true
+            }
+            "enable", "disable" -> {
+                if (name.isEmpty()) {
+                    _state.update { it.copy(message = "用法：/mcp $op <服务器名称>", messageIsError = true) }
+                    return
+                }
+                val target = _state.value.mcpConfig?.servers?.firstOrNull { it.name.equals(name, ignoreCase = true) }
+                    ?: runCatching { McpStore.read().servers.firstOrNull { it.name.equals(name, ignoreCase = true) } }.getOrNull()
+                if (target == null) {
+                    _state.update { it.copy(message = "未找到 MCP 服务器：$name", messageIsError = true) }
+                    return
+                }
+                val wantEnabled = op == "enable"
+                if (target.enabled == wantEnabled) {
+                    _state.update { it.copy(message = "${target.name} 已经是${if (wantEnabled) "启用" else "停用"}状态") }
+                    return
+                }
+                val result = McpStore.setEnabled(target.name, wantEnabled)
+                _state.update {
+                    it.copy(
+                        message = if (result.isSuccess) {
+                            "${if (wantEnabled) "已启用" else "已停用"}：${target.name}"
+                        } else {
+                            "保存失败：${result.exceptionOrNull()?.message ?: "未知原因"}"
+                        },
+                        messageIsError = result.isFailure,
+                    )
+                }
+            }
+            "remove", "delete", "删除" -> {
+                if (name.isEmpty()) {
+                    _state.update { it.copy(message = "用法：/mcp $op <服务器名称>", messageIsError = true) }
+                    return
+                }
+                val result = McpStore.delete(name)
+                _state.update {
+                    it.copy(
+                        message = if (result.isSuccess) "已删除 MCP 服务器：$name"
+                        else "删除失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+                        messageIsError = result.isFailure,
+                    )
+                }
+            }
+            else -> _state.update {
+                it.copy(
+                    message = "/mcp 支持：list、add、enable <名称>、disable <名称>、remove <名称>",
+                    messageIsError = true,
+                )
+            }
+        }
+    }
+
+    /** `/mcp add` 要等异步读盘结束后再打开表单（见 [handleMcpSlash]）。 */
+    private var mcpOpenFormWhenReady = false
+
+    /**
+     * `/mcp list`：把服务器清单写进对话流（与 IQ Code 的 `showMcpSummary` 一样
+     * 落在对话里而不是弹窗里 —— 用户多半是"想看一眼再接着干活"）。
+     */
+    private fun showMcpSummary() {
+        val servers = runCatching { McpStore.read().servers }.getOrDefault(emptyList())
+        val body = buildString {
+            if (servers.isEmpty()) {
+                append("当前没有配置 MCP 服务器。输入 `/mcp` 打开配置页。")
+            } else {
+                servers.forEach { server ->
+                    append(if (server.enabled) "● " else "○ ")
+                    append("**").append(server.name).append("** · `").append(server.type.value).append("`")
+                    append(" · ").append(if (server.scope == com.zhizhu.zhicode.compose.model.McpScope.PROJECT) "项目" else "用户")
+                    append('\n')
+                    append("  `").append(if (server.type.needsCommand) server.command else server.url).append("`")
+                    append("\n\n")
+                }
+            }
+        }
+        appendInfo("MCP 服务器", body.trimEnd())
+    }
+
     fun openMcpConfig() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
@@ -3445,12 +3772,51 @@ class WorkspaceViewModel(
             _state.update { s ->
                 // 读盘期间用户可能已经返回：载荷已置空，结果丢弃。
                 val current = s.mcpConfig ?: return@update s
-                s.copy(mcpConfig = loaded ?: current.copy(loading = false))
+                var next = loaded ?: current.copy(loading = false)
+                // `/mcp add`：读盘完成后直接进「添加」表单（见 handleMcpSlash）。
+                if (mcpOpenFormWhenReady) {
+                    mcpOpenFormWhenReady = false
+                    // 新建表单：`originalName = null` 才表示"新增"（见 McpServerDraft.isEditing）。
+                    next = next.copy(form = McpServerDraft(originalName = null))
+                }
+                s.copy(mcpConfig = next)
             }
         }
     }
 
-    fun closeMcpConfig() = _state.update { it.copy(mcpConfig = null) }
+    fun closeMcpConfig() {
+        _state.update { it.copy(mcpConfig = null) }
+        refreshExtensions()
+    }
+
+    /**
+     * `/skills` 的子命令（对齐 IQ Code 0.30.4 的 `/skills`：
+     * 不带参数列清单，`<名称>` 直接把那份技能附加到下一条消息）。
+     *
+     * 之前这里**吞掉参数**直接开管理器 —— 敲 `/skills pdf` 的用户
+     * 期望的是"把 pdf 这个技能挂上"，而不是打开一个列表再自己找。
+     */
+    private fun handleSkillsSlash(arg: String) {
+        val name = arg.trim()
+        if (name.isEmpty()) {
+            openSkills()
+            return
+        }
+        // 同名的项目级与用户级可以共存：优先项目级（更贴近当前工作目录）。
+        val skills = runCatching { SkillStore.list(_state.value.projectPath) }.getOrDefault(emptyList())
+        val target = skills.firstOrNull { it.name.equals(name, ignoreCase = true) && it.scope == SkillScope.PROJECT }
+            ?: skills.firstOrNull { it.name.equals(name, ignoreCase = true) }
+        if (target == null) {
+            _state.update {
+                it.copy(
+                    message = "未找到技能：$name（输入 /skills 看清单）",
+                    messageIsError = true,
+                )
+            }
+            return
+        }
+        attachSkill(target)
+    }
 
     fun newMcpServer() = _state.update {
         it.copy(mcpConfig = it.mcpConfig?.copy(form = McpServerDraft(originalName = null)))
@@ -3480,43 +3846,57 @@ class WorkspaceViewModel(
         it.copy(mcpConfig = it.mcpConfig?.copy(form = null))
     }
 
-    fun saveMcpServer() {
-        val form = _state.value.mcpConfig?.form ?: return
-        if (!form.saveable) return
+    fun setMcpQuery(query: String) = _state.update {
+        it.copy(mcpConfig = it.mcpConfig?.copy(query = query))
+    }
+
+    fun saveMcpServer() = runBusy("mcp.save") {
+        val form = _state.value.mcpConfig?.form ?: return@runBusy
+        if (!form.saveable) return@runBusy
         val result = McpStore.save(form)
         _state.update {
             it.copy(
-                mcpConfig = McpStore.read(),
+                // 成功时表单要关掉，否则用户会停在"已保存"的表单上再点一次。
+                // 关闭动作在保存成功后做，失败时**保留表单**（内容不能丢）。
+                mcpConfig = McpStore.read().let { fresh ->
+                    if (result.isSuccess) fresh.copy(query = it.mcpConfig?.query.orEmpty()) else fresh
+                },
                 message = if (result.isSuccess) "MCP 配置已保存"
                 else "保存失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+                messageIsError = result.isFailure,
             )
         }
+        refreshExtensions()
     }
 
     /** 启用 / 停用：整行点击触发，等价于原版行尾的「启用/停用」按钮。 */
-    fun toggleMcpServer(server: McpServer) {
+    fun toggleMcpServer(server: McpServer) = runBusy("mcp.toggle") {
         val result = McpStore.setEnabled(server.name, !server.enabled)
         _state.update {
             it.copy(
-                mcpConfig = McpStore.read(),
+                mcpConfig = McpStore.read().copy(query = it.mcpConfig?.query.orEmpty()),
                 message = when {
                     result.isFailure -> "保存失败：${result.exceptionOrNull()?.message ?: "未知原因"}"
                     server.enabled -> "已停用：${server.name}"
                     else -> "已启用：${server.name}"
                 },
+                messageIsError = result.isFailure,
             )
         }
+        refreshExtensions()
     }
 
-    fun deleteMcpServer(server: McpServer) {
+    fun deleteMcpServer(server: McpServer) = runBusy("mcp.delete") {
         val result = McpStore.delete(server.name)
         _state.update {
             it.copy(
-                mcpConfig = McpStore.read(),
+                mcpConfig = McpStore.read().copy(query = it.mcpConfig?.query.orEmpty()),
                 message = if (result.isSuccess) "已删除 MCP 服务器：${server.name}"
                 else "删除失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+                messageIsError = result.isFailure,
             )
         }
+        refreshExtensions()
     }
 
     /**
@@ -3581,6 +3961,57 @@ class WorkspaceViewModel(
     }
 
     /**
+     * 「全部测试」：一次把**所有启用的**服务器都连一遍。
+     *
+     * 与逐台测试的关键差别：引擎的 `mcpStatus()` 本来就是"列全部启用的服务器"，
+     * 所以批量测试**只调用它一次**，而不是循环调 N 次 —— 后者会把每台服务器
+     * 重复启动 N 遍，代价是 N 倍，而且中间结果会互相覆盖。
+     *
+     * 结果整体替换 `status`（而不是并进旧的）：批量测试的语义就是"现在每台分别是什么状态"，
+     * 保留旧值会让停用/已删除的条目继续显示"已连接"。
+     */
+    fun testAllMcpServers() {
+        val config = _state.value.mcpConfig ?: return
+        if (config.servers.none { it.enabled }) {
+            _state.update { it.copy(message = "没有启用中的服务器可测试", messageIsError = true) }
+            return
+        }
+        if (config.testing.isNotEmpty()) return
+        val names = config.servers.filter { it.enabled }.map { it.name }
+        viewModelScope.launch {
+            _state.update { state ->
+                val current = state.mcpConfig ?: return@update state
+                state.copy(mcpConfig = current.copy(testing = names.toSet()))
+            }
+            val result = withContext(Dispatchers.IO) { engine.mcpStatus() }
+            _state.update { state ->
+                val current = state.mcpConfig ?: return@update state
+                result.fold(
+                    onSuccess = { rows ->
+                        val connected = rows.count { it.connected }
+                        state.copy(
+                            mcpConfig = current.copy(
+                                testing = emptySet(),
+                                status = rows.associateBy { it.name },
+                            ),
+                            message = "测试完成：$connected / ${rows.size} 台已连接",
+                            messageIsError = connected < rows.size,
+                        )
+                    },
+                    onFailure = { error ->
+                        state.copy(
+                            mcpConfig = current.copy(testing = emptySet()),
+                            message = "测试失败：${error.message ?: "未知原因"}",
+                            messageIsError = true,
+                        )
+                    },
+                )
+            }
+            refreshExtensions()
+        }
+    }
+
+    /**
      * 打开「从 JSON 导入」对话框。
      */
     fun openMcpImport() = _state.update {
@@ -3601,8 +4032,8 @@ class WorkspaceViewModel(
      * 执行导入。同名**跳过不覆盖**（用户可能已经在本机改过那份配置），
      * 认不出的条目也一并报出来 —— 只说"导入完成"会让用户以为全都进来了。
      */
-    fun importMcpJson() {
-        val text = _state.value.mcpConfig?.importText ?: return
+    fun importMcpJson() = runBusy("mcp.import") {
+        val text = _state.value.mcpConfig?.importText ?: return@runBusy
         val result = McpStore.importJson(text)
         result.fold(
             onSuccess = { imported ->
@@ -3632,6 +4063,7 @@ class WorkspaceViewModel(
                 }
             },
         )
+        if (result.isSuccess) refreshExtensions()
     }
 
     /**
@@ -3747,6 +4179,9 @@ class WorkspaceViewModel(
                 settings = s.settings.copy(
                     visionEnabled = o.visionEnabled ?: s.settings.visionEnabled,
                     customSystemPrompt = o.customSystemPrompt ?: s.settings.customSystemPrompt,
+                    initPrompt = o.initPrompt ?: s.settings.initPrompt,
+                    summaryPrompt = o.summaryPrompt ?: s.settings.summaryPrompt,
+                    compactPromptHead = o.compactPromptHead ?: s.settings.compactPromptHead,
                     autoCompact = o.autoCompact ?: s.settings.autoCompact,
                     autoCompactPercent = o.autoCompactPercent ?: s.settings.autoCompactPercent,
                     webSearchEnabled = o.webSearchEnabled ?: s.settings.webSearchEnabled,
@@ -3754,8 +4189,8 @@ class WorkspaceViewModel(
                     webSearchMaxResults = o.webSearchMaxResults ?: s.settings.webSearchMaxResults,
                     webSearchTimeoutSec = o.webTimeoutSec ?: s.settings.webSearchTimeoutSec,
                     webSearchSearxngUrl = o.webSearchBaseUrl ?: s.settings.webSearchSearxngUrl,
-                    sandboxAgentFullAccess = o.sandboxAgentFullAccess ?: s.settings.sandboxAgentFullAccess,
                     rootExecutionEnabled = o.rootExecutionEnabled ?: s.settings.rootExecutionEnabled,
+                    shizukuExecutionEnabled = o.shizukuExecutionEnabled ?: s.settings.shizukuExecutionEnabled,
                     forcedKeepAliveEnabled = o.forcedKeepAliveEnabled ?: s.settings.forcedKeepAliveEnabled,
                 ),
                 // 设置页若已经开着（正常不会，这一步在启动路径上），草稿也要跟着对齐，
@@ -3767,6 +4202,9 @@ class WorkspaceViewModel(
                         contextWindow = o.contextWindow ?: draft.contextWindow,
                         projectPath = o.projectDirectory?.takeIf { p -> p.isNotBlank() } ?: draft.projectPath,
                         customSystemPrompt = o.customSystemPrompt ?: draft.customSystemPrompt,
+                        initPrompt = o.initPrompt ?: draft.initPrompt,
+                        summaryPrompt = o.summaryPrompt ?: draft.summaryPrompt,
+                        compactPromptHead = o.compactPromptHead ?: draft.compactPromptHead,
                         visionEnabled = o.visionEnabled ?: draft.visionEnabled,
                         autoCompact = o.autoCompact ?: draft.autoCompact,
                         autoCompactPercent = o.autoCompactPercent ?: draft.autoCompactPercent,
@@ -3775,8 +4213,8 @@ class WorkspaceViewModel(
                         webSearchMaxResults = o.webSearchMaxResults ?: draft.webSearchMaxResults,
                         webSearchTimeoutSec = o.webTimeoutSec ?: draft.webSearchTimeoutSec,
                         webSearchSearxngUrl = o.webSearchBaseUrl ?: draft.webSearchSearxngUrl,
-                        sandboxAgentFullAccess = o.sandboxAgentFullAccess ?: draft.sandboxAgentFullAccess,
                         rootExecutionEnabled = o.rootExecutionEnabled ?: draft.rootExecutionEnabled,
+                        shizukuExecutionEnabled = o.shizukuExecutionEnabled ?: draft.shizukuExecutionEnabled,
                         forcedKeepAliveEnabled = o.forcedKeepAliveEnabled ?: draft.forcedKeepAliveEnabled,
                     )
                 },
@@ -4314,8 +4752,8 @@ class WorkspaceViewModel(
 
     fun showMessageActions(item: ChatItem) {
         val options = when (item.kind) {
-            ChatKind.USER -> listOf("复制", "再次发送", "编辑后发送")
-            ChatKind.ASSISTANT, ChatKind.ERROR -> listOf("复制", "重试上一问")
+            ChatKind.USER -> listOf("复制", "自由复制", "再次发送", "编辑后发送")
+            ChatKind.ASSISTANT, ChatKind.ERROR -> listOf("复制", "自由复制", "重试上一问")
             // 工具组这一层只留"复制整组概要"。
             //
             // 这里曾经给第二项是 `if (item.groupCompleted) "已全部完成" else "执行中"` —— 那是
@@ -4323,7 +4761,10 @@ class WorkspaceViewModel(
             // 单个工具该有的动作（复制命令/输出/diff、展开这一条）走那一行自己的
             // `⋯` 菜单（Miuix 下拉菜单 → [applyToolAction]），只有那一行知道
             // 用户点的是哪一条。
-            else -> listOf("复制概要")
+            //
+            // 「自由复制」在这里也有意义：分组里有好几条工具时，想抄其中一条的摘要
+            // 不必先展开它，直接在抽屉里划出来就行。
+            else -> listOf("复制概要", "自由复制")
         }
         // 与 showSessionActions 同理：动作在**选择器回调**里执行，那时拿到的只有选项文案，
         // 不记住来源就会"复制了别的消息"。
@@ -4421,16 +4862,60 @@ class WorkspaceViewModel(
      * 工具组则是把各工具的标题拼起来——复制一个空串对用户毫无用处。
      */
     fun copyMessage(item: ChatItem) {
-        val text = when (item.kind) {
-            ChatKind.ASSISTANT, ChatKind.ERROR -> item.body.ifBlank { item.thinking }
-            // 工具组没有正文，把各工具的展示名与摘要拼起来——复制空串对用户没用。
-            ChatKind.TOOL_GROUP -> item.tools.joinToString("\n") { tool ->
-                listOfNotNull(tool.displayName.takeIf { it.isNotBlank() }, tool.summary.takeIf { it.isNotBlank() })
-                    .joinToString(" · ")
-            }
-            else -> item.body
+        copyText(item.copyText(), "ZhiCode 消息")
+    }
+
+    /**
+     * 一条消息对用户**可见的那份文本**。
+     *
+     * 「复制」与「自由复制」必须取同一份：前者直接写剪贴板，后者摊在抽屉里让人
+     * 自己划词。两处各写一份的话，总有一天会变成"复制的和看到的不一样"，
+     * 而那种偏差在界面上完全看不出来。
+     *
+     * 规则：助手消息取正文（没有正文时退回思考内容），工具组没有正文，
+     * 就把各工具的展示名与摘要拼起来——复制空串对用户没有任何用处。
+     */
+    private fun ChatItem.copyText(): String = when (kind) {
+        ChatKind.ASSISTANT, ChatKind.ERROR -> body.ifBlank { thinking }
+        ChatKind.TOOL_GROUP -> tools.joinToString("\n") { tool ->
+            listOfNotNull(
+                tool.displayName.takeIf { it.isNotBlank() },
+                tool.summary.takeIf { it.isNotBlank() },
+            ).joinToString(" · ")
         }
-        copyText(text, "智蛛消息")
+        else -> body
+    }
+
+    /**
+     * 打开「自由复制」抽屉：把这条消息的原文摊开，让用户自己划词取一段。
+     *
+     * 见 [CopySheetState] 的说明：整条复制（[copyMessage]）解决不了"只要中间那三行"。
+     */
+    fun openFreeCopy(item: ChatItem) {
+        val text = item.copyText()
+        if (text.isBlank()) {
+            _state.update { it.copy(message = "这条消息没有可复制的文本", messageIsError = true) }
+            return
+        }
+        val label = when (item.kind) {
+            ChatKind.USER -> "你的消息"
+            ChatKind.ASSISTANT -> "ZhiCode 回复"
+            ChatKind.ERROR -> "错误信息"
+            ChatKind.TOOL_GROUP -> "工具调用摘要"
+            else -> "消息"
+        }
+        _state.update { it.copy(copySheet = CopySheetState(title = label, text = text)) }
+    }
+
+    fun closeCopySheet() {
+        _state.update { it.copy(copySheet = null) }
+    }
+
+    /** 抽屉里的「复制全部」：复制的是抽屉里摊开的那一份，不是重新再算一遍。 */
+    fun copySheetAll() {
+        val sheet = _state.value.copySheet ?: return
+        copyText(sheet.text, sheet.title)
+        closeCopySheet()
     }
 
     /** `/copy`：复制最近一条助手回复。 */
@@ -4442,7 +4927,7 @@ class WorkspaceViewModel(
             _state.update { it.copy(message = "还没有可复制的回复", messageIsError = true) }
             return
         }
-        copyText(latest.body, "智蛛回复")
+        copyText(latest.body, "ZhiCode 回复")
     }
 
     private fun copyText(text: String, label: String) {
@@ -4463,8 +4948,21 @@ class WorkspaceViewModel(
         // 记住操作对象：动作是在**选择器回调**里执行的，那时只能拿到选项文案，
         // 拿不到是哪条会话 —— 不记住就会出现"删掉了当前会话"这种错删。
         pendingSessionAction = session
-        val options = if (session.note.isEmpty()) listOf("重命名", "编辑备注", "恢复会话", "删除会话")
-        else listOf("重命名", "编辑备注", "清除备注", "恢复会话", "删除会话")
+        // 菜单只留**这一条会话自己的属性/命运**，也就是「重命名」与「删除会话」。
+        //
+        // 「恢复会话」（= 打开它）曾经在这里，已经删掉：点这一行本来就会打开会话，
+        // 同一个目标两条路径只会让人多犹豫一秒。
+        //
+        // 「编辑备注 / 清除备注」留着，因为它**没有别的入口** —— 备注是侧栏搜索
+        // 与行尾「· 备注」标记的来源，删掉这一项等于把那个能力废掉一半。
+        val options = buildList {
+            add("重命名")
+            add("编辑备注")
+            // 「清除备注」只在**确实有备注**时出现：否则它就是一个点了也不会有
+            // 任何变化的菜单项（备注本来已经是空的）。
+            if (session.note.isNotEmpty()) add("清除备注")
+            add("删除会话")
+        }
         _state.update {
             it.copy(
                 choicePicker = ChoicePickerState(
@@ -4619,6 +5117,8 @@ class WorkspaceViewModel(
                     // 用户点下去才知道拿到的是概要而不是某一条的完整输出。
                     "复制概要" -> copyMessage(target)
                     "复制" -> copyMessage(target)
+                    // 抽屉里摊开原文，交给自己划词。
+                    "自由复制" -> openFreeCopy(target)
                     "再次发送" -> {
                         // 复用用户消息的原文重发；工具组这类没有正文的目标不支持。
                         if (target.body.isBlank()) _state.update { it.copy(message = "这条消息没有可重发的内容", messageIsError = true) }
@@ -4645,6 +5145,8 @@ class WorkspaceViewModel(
                 } else when (option.label) {
                     "重命名" -> editSessionTitle(target)
                     "删除会话" -> deleteSession(target.id)
+                    // 「恢复会话」已经不在菜单里（点这一行就会打开）。这一支留着是为了
+                    // 兼容**旧的**待办：选择器是异步的，理论上仍可能带着老选项回来。
                     "恢复会话" -> openSession(target)
                     "编辑备注" -> editSessionNote(target)
                     "清除备注" -> saveSessionNote(target, "")
@@ -4899,6 +5401,10 @@ class WorkspaceViewModel(
                         transcriptLoadingOlder = false,
                         // 让列表知道这次变长是**往前补**的（见 UiModels 里的说明）。
                         transcriptPrependRevision = current.transcriptPrependRevision + 1,
+                        // 前插了几条：列表据此把视口还原到原来那条，做到"不动"。
+                        // 用 kept 与 current 的条数差**不可靠**（尾部同时被淘汰过），
+                        // 所以直接记 page.items.size —— 那正是新插到前面的条数。
+                        transcriptPrependCount = page.items.size,
                     )
                 }
             }
@@ -5178,9 +5684,38 @@ class WorkspaceViewModel(
                 ThemeMode.LIGHT -> ThemeMode.DARK
                 ThemeMode.DARK -> ThemeMode.SYSTEM
             }
-            it.copy(themeMode = next, message = "主题：${next.label}")
+            // 两个字段一起写：`themeSettings` 是真源，`themeMode` 是它的缓存
+            // （见 WorkspaceUiState.themeSettings 的说明）。
+            it.copy(
+                themeMode = next,
+                themeSettings = it.themeSettings.copy(mode = next),
+                message = "主题：${next.label}",
+            )
         }
         persistTheme(next)
+    }
+
+    /**
+     * 改主题设置。
+     *
+     * 只置状态、不立刻落盘：调用方是设置页里的滑杆与开关，拖动一次会触发几十次
+     * 回调，每次都 `commit()` 会把主线程按住。落盘由 [persistThemeSettings] 负责，
+     * 页面关闭时（[flushSettings]）兑现。
+     */
+    fun updateThemeSettings(transform: (com.zhizhu.zhicode.compose.data.ThemeSettings) ->
+        com.zhizhu.zhicode.compose.data.ThemeSettings) {
+        _state.update { s ->
+            val next = transform(s.themeSettings)
+            s.copy(themeMode = next.mode, themeSettings = next)
+        }
+    }
+
+    /** 立刻把主题设置写盘（切主题、关设置页时用）。 */
+    fun persistThemeSettings() {
+        val settings = _state.value.themeSettings
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { ThemeStore.write(getApplication(), settings) }
+        }
     }
 
     // ---------- 内置 Termux 运行环境 ----------
@@ -5353,13 +5888,48 @@ class WorkspaceViewModel(
      *
      * 之后的编辑全部落在 draft 上，「取消」丢弃 draft 即可，不需要回滚任何东西。
      */
-    fun openSettings() = _state.update {
-        it.copy(
-            settingsOpen = true,
-            // 见 hideSidebarForNavigation：点侧栏里的入口要先收起侧栏。
-            sidebarOpen = false,
-            settingsDraft = SettingsDraft.from(it),
-        )
+    fun openSettings() {
+        _state.update {
+            it.copy(
+                settingsOpen = true,
+                // 见 hideSidebarForNavigation：点侧栏里的入口要先收起侧栏。
+                sidebarOpen = false,
+                settingsDraft = SettingsDraft.from(it),
+            )
+        }
+        refreshExtensions()
+    }
+
+    /**
+     * 统计「扩展」组要显示的数量（MCP / 技能 / 角色卡）。
+     *
+     * 三个存储都在磁盘上：`mcp.json` 解析、技能目录 walk、角色卡列表读。
+     * 所以**只能在 IO 线程读一次**，不能在设置页里读（那会变成"每次重组读一次盘"）。
+     * 打开设置时算一次、从扩展页返回时再算一次就够 —— 这些数量不会在页面停留期间变。
+     */
+    fun refreshExtensions() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val projectPath = _state.value.projectPath
+            val summary = ExtensionSummary(
+                mcpTotal = runCatching { McpStore.read().servers.size }.getOrDefault(0),
+                mcpEnabled = runCatching { McpStore.read().servers.count { it.enabled } }.getOrDefault(0),
+                skillTotal = runCatching { SkillStore.list(projectPath).size }.getOrDefault(0),
+                projectSkills = runCatching {
+                    SkillStore.list(projectPath).count { it.scope == com.zhizhu.zhicode.compose.model.SkillScope.PROJECT }
+                }.getOrDefault(0),
+                userSkills = runCatching {
+                    SkillStore.list(projectPath).count { it.scope == com.zhizhu.zhicode.compose.model.SkillScope.USER }
+                }.getOrDefault(0),
+                roleCardTotal = runCatching {
+                    RoleCardStore.list(getApplication()).size
+                }.getOrDefault(0),
+                loaded = true,
+            )
+            _state.update { state ->
+                val connected = state.mcpConfig?.status?.values?.count { it.connected } ?: 0
+                state.copy(extensions = summary.copy(mcpConnected = connected))
+            }
+        }
     }
 
     /**
@@ -5509,6 +6079,9 @@ class WorkspaceViewModel(
     private fun differsOnlyInFreeText(a: SettingsDraft, b: SettingsDraft): Boolean =
         a.copy(
             customSystemPrompt = b.customSystemPrompt,
+            initPrompt = b.initPrompt,
+            summaryPrompt = b.summaryPrompt,
+            compactPromptHead = b.compactPromptHead,
             projectPath = b.projectPath,
             contextWindow = b.contextWindow,
             webSearchMaxResults = b.webSearchMaxResults,
@@ -5592,6 +6165,9 @@ class WorkspaceViewModel(
             // 主题与搜索密钥**不在** SessionConfig 里，configure() 那次落盘罩不到它们，
             // 各自补一次（密钥走加密槽，见 ApiSettingsStore.setWebSearchKey）。
             persistTheme(draft.themeMode)
+            // 主题设置是**另一份**存储（预设 / Monet / 显示开关），一起兑现，
+            // 否则「改了预设就大退」会丢掉这一批改动。
+            persistThemeSettings()
             persistWebSearchKey(draft)
             // 终端输入类型也不在 SessionConfig 里（终端是独立 Activity，不读会话配置）。
             runCatching {
@@ -5608,6 +6184,10 @@ class WorkspaceViewModel(
      */
     private fun persistTheme(mode: ThemeMode) {
         runCatching { ApiSettingsStore.setThemeMode(getApplication(), mode.name.lowercase()) }
+        // 同一份语义住在两处存储里：`theme_mode` 是深浅三态（老键，编辑器 Activity
+        // 与 ZhiThemeMode 都读它），`ThemeStore` 是这一轮新增的整份设置。
+        // 只写一处就会出现「顶栏循环按钮换了深浅、预设页显示的还是旧值」。
+        persistThemeSettings()
     }
 
     /** 持久化**当前选中服务**的密钥（界面只可能改这一个）。 */
@@ -5636,6 +6216,12 @@ class WorkspaceViewModel(
             "searchServices" -> openSearchServices()
             "roleCards" -> openRoleCards()
             "memory" -> openMemory()
+            "prompts" -> openPrompts()
+            "theme" -> openThemePage()
+            "chatDisplay" -> openChatDisplay()
+            // 从设置页进来时设置页仍然开着，于是返回会先回到设置主页 ——
+            // 这正是从设置里点进去的人期望的。
+            "about" -> openAbout()
             "uiDebug" -> openUiDebug()
             else -> Unit
         }
@@ -5657,6 +6243,10 @@ class WorkspaceViewModel(
                         tools = item.tools.map { if (it.id == id) it.copy(expanded = !it.expanded) else it },
                     )
                 },
+                // 结构指纹（条数/首尾/最后一条正文与工具数）都不变，只有内容原地变了 ——
+                // 不 +1 的话 `ChatList` 的 `id → ChatItem` 索引仍然指向旧实例，
+                // 于是点工具卡**没有任何反应**（用户报的「工具卡无法展开」）。
+                transcriptRevision = s.transcriptRevision + 1,
             )
         }
         if (willExpand) loadFullToolOutput(id)
@@ -5696,6 +6286,7 @@ class WorkspaceViewModel(
                             },
                         )
                     },
+                    transcriptRevision = s.transcriptRevision + 1,
                 )
             }
         }
@@ -5720,6 +6311,7 @@ class WorkspaceViewModel(
                         tools = item.tools.map { if (it.id == toolId) it.copy(expanded = expanded) else it },
                     )
                 },
+                transcriptRevision = s.transcriptRevision + 1,
             )
         }
         // 与 toggleToolExpanded 同一条规则：展开时按需取全文。
@@ -5752,6 +6344,7 @@ class WorkspaceViewModel(
                         )
                     }
                 },
+                transcriptRevision = s.transcriptRevision + 1,
             )
         }
     }
@@ -5760,6 +6353,7 @@ class WorkspaceViewModel(
         _state.update { s ->
             s.copy(
                 transcript = s.transcript.map { if (it.id == id) it.copy(thinkingExpanded = !it.thinkingExpanded) else it },
+                transcriptRevision = s.transcriptRevision + 1,
             )
         }
     }
@@ -6134,12 +6728,12 @@ class WorkspaceViewModel(
     }
 
     /** 把暂存的文件粘贴到当前目录；目标冲突逐项保留原文件并反馈。 */
-    fun pasteFilesIntoCurrentDirectory() {
+    fun pasteFilesIntoCurrentDirectory() = runBusy("files.paste") {
         val snapshot = _state.value
         val paths = snapshot.fileClipboard
-        if (paths.isEmpty()) return
+        if (paths.isEmpty()) return@runBusy
         val destination = File(snapshot.filePath)
-        viewModelScope.launch(Dispatchers.IO) {
+        run {
             val failures = mutableListOf<String>()
             val movedPaths = mutableSetOf<String>()
             var completed = 0
@@ -6345,21 +6939,14 @@ class WorkspaceViewModel(
         private const val TEXT_ATTACHMENT_LIMIT = 60_000
 
         /**
-         * `/init` 的指令，逐字取自原版，只改了一处：目标文件名换成 `ZhiCode.md`。
+         * `/init` 的指令**搬走了**。
          *
-         * 全英文是刻意的（原版如此）：这段是要模型执行的指令，
-         * 而它明确要求限制调研范围、禁止起子 Agent，措辞改动会改变实际行为，
-         * 所以不翻译、不改写。
+         * <p>它现在住在 `model/PromptSlots.kt` 的 [PromptSlot.INIT.defaultValue] ——
+         * 因为这一项已经可以在设置里改，默认值必须有**唯一**的来源：
+         * 留一份在这里，用户点「恢复默认」就会恢复成另一份文案。
          *
-         * 目标文件名必须是 `ZhiCode.md`：写别的名字会让界面在另一个文件上找它，
-         * `/init` 看起来就成了「什么都不做」。
+         * <p>调用点是 `PromptSlot.INIT.resolve(state.settings.initPrompt)`。
          */
-        private const val INIT_INSTRUCTION =
-            "This is the built-in fast /init maintenance command. Do not enter plan mode, create tasks, " +
-                "launch subagents, or perform broad repository research. Read only the existing " +
-                "ZhiCode.md/CLAUDE.md/README and primary build manifest or script when present, then directly " +
-                "create or improve ZhiCode.md with concise build, test, architecture, conventions, and " +
-                "repository-specific instructions. Preserve useful existing instructions and run at most " +
-                "one small verification command."
+
     }
 }

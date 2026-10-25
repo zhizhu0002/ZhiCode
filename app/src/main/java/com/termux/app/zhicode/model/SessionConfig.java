@@ -57,6 +57,17 @@ public final class SessionConfig {
 
     /** 用户自己写的高优先级指令。仍然低于代码强制的安全与权限规则。 */
     public String customSystemPrompt = "";
+    /**
+     * `/init` 那一轮的指令。**空串表示用默认**（见 {@code model/PromptSlots.kt}）。
+     *
+     * <p>为什么空串而不是在这里写一份默认文案：默认值会随版本改进，
+     * 预填之后老用户的库里就固化了旧文案，永远拿不到改进。
+     */
+    public String initPrompt = "";
+    /** 上下文压缩时用的系统提示。空串表示用默认。 */
+    public String summaryPrompt = "";
+    /** 上下文压缩请求正文的开场段。空串表示用默认。 */
+    public String compactPromptHead = "";
     /** 角色卡。 */
     public String roleCard = "";
     /** 推理摘要的呈现方式。 */
@@ -83,10 +94,16 @@ public final class SessionConfig {
     public String permissionModeBeforePlan = "default";
     /** 计划流程的当前快照。**整份替换**，所以是 volatile。 */
     public volatile PlanWorkflowState planWorkflowState = PlanWorkflowState.idle();
-    /** 只在沙箱内生效的完全授权。真机/系统进程不在范围内。 */
-    public boolean sandboxAgentFullAccess = true;
     /** 打开 Root 工具入口。命令仍然需要真实的 su 授权。 */
     public boolean rootExecutionEnabled = false;
+    /**
+     * 打开 Shizuku 工具入口：以 shell 身份（uid 2000，Root 启动的 Shizuku 是 0）跑系统命令。
+     *
+     * <p>与 {@link #rootExecutionEnabled} 是**两个独立开关**：它们的能力有交集（都能跑
+     * {@code pm}/{@code am}），但门槛完全不同 —— Root 要设备真的 root 了，
+     * Shizuku 只要用户用 adb 启动过一次它的服务。所以谁都不该隐含另一个。
+     */
+    public boolean shizukuExecutionEnabled = false;
     /** 用户显式开启的常驻前台服务。 */
     public boolean forcedKeepAliveEnabled = false;
 
@@ -165,6 +182,9 @@ public final class SessionConfig {
         copy.effort = effort;
 
         copy.customSystemPrompt = customSystemPrompt;
+        copy.initPrompt = initPrompt;
+        copy.summaryPrompt = summaryPrompt;
+        copy.compactPromptHead = compactPromptHead;
         copy.roleCard = roleCard;
         copy.reasoningSummary = reasoningSummary;
         copy.preserveReasoningState = preserveReasoningState;
@@ -179,8 +199,8 @@ public final class SessionConfig {
         copy.permissionMode = permissionMode;
         copy.permissionModeBeforePlan = permissionModeBeforePlan;
         copy.planWorkflowState = snapshotPlanWorkflowState();
-        copy.sandboxAgentFullAccess = sandboxAgentFullAccess;
         copy.rootExecutionEnabled = rootExecutionEnabled;
+        copy.shizukuExecutionEnabled = shizukuExecutionEnabled;
         copy.forcedKeepAliveEnabled = forcedKeepAliveEnabled;
 
         copy.projectDirectory = projectDirectory;

@@ -216,10 +216,6 @@ public class RiskClassifierTest {
         assertTrue(RiskClassifier.isHighRisk("Debug", action("load_library")));
         assertFalse(RiskClassifier.isHighRisk("Debug", action("process_list")));
         assertFalse(RiskClassifier.isHighRisk("Debug", action("maps")));
-        assertTrue(RiskClassifier.isHighRisk("Sandbox", action("install")));
-        assertTrue(RiskClassifier.isHighRisk("Sandbox", action("uninstall")));
-        assertFalse(RiskClassifier.isHighRisk("Sandbox", action("screenshot")));
-        assertFalse(RiskClassifier.isHighRisk("Sandbox", action("dump_ui")));
     }
 
     private static JSONObject action(String value) {

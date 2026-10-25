@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -49,7 +48,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.TermuxTerminalPane
 import com.zhizhu.zhicode.compose.theme.ZhiColors
-import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -199,7 +197,9 @@ private fun GlyphButton(
     IconButton(
         onClick = onClick,
         backgroundColor = Color.Transparent,
-        cornerRadius = 10.dp,
+        // 方角：终端的工具栏用的是上游 Termux 的语言（平面、直角），
+        // 圆角按钮属于设置页那一套。
+        cornerRadius = 0.dp,
         minHeight = 34.dp,
         minWidth = 34.dp,
     ) {
@@ -259,8 +259,12 @@ internal fun TerminalExtraKeys(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .padding(horizontal = 1.dp)
-                            .clip(RoundedCornerShape(ZhiRadius.inner))
+                            // ⚠️ 上游 Termux 的扩展键是**方角、无间隙**的整块按键。
+                            //
+                            // 这里原本给每个键加了 `RoundedCornerShape` + `padding(horizontal = 1.dp)`，
+                            // 于是看起来像一排 Miuix 的圆角卡片按钮 —— 那是设置页的语言，
+                            // 不是终端的语言。终端是"一块键盘"，键与键之间只靠分隔线区分，
+                            // 圆角和间隙会让连续按方向键时手指落点变得不确定。
                             .background(palette.keyBg)
                             .clickable { onAction(key.action) },
                         contentAlignment = Alignment.Center,

@@ -45,6 +45,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import android.os.SystemClock
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
+import com.zhizhu.zhicode.compose.data.ChatFontLoader
 import com.zhizhu.zhicode.compose.engine.ToolText
 import com.zhizhu.zhicode.compose.model.ToolActions
 import com.zhizhu.zhicode.compose.model.ChatImage
@@ -117,13 +119,13 @@ fun EmptyState() {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "想让智蛛做什么？",
+            text = "想让 ZhiCode 做什么？",
             color = scheme.onBackground,
             fontSize = MiuixTheme.textStyles.title1.fontSize,
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "智蛛可以读取项目、编辑文件、运行命令，并在内置 Termux 环境中验证修改。",
+            text = "ZhiCode 可以读取项目、编辑文件、运行命令，并在内置 Termux 环境中验证修改。",
             color = scheme.onBackgroundVariant,
             fontSize = MiuixTheme.textStyles.body1.fontSize,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp),
@@ -134,22 +136,47 @@ fun EmptyState() {
 /**
  * 列表顶部「上面还有更早的历史」的占位。
  *
- * 恢复一条会话时只读最近若干条消息（见 `SessionReader.PAGE_MESSAGES`），滚到顶会
- * 自动往前补一页。这一条既是提示（上面不是没有内容，而是还没取），也是状态
+ * 恢复一条会话时只读最近 [com.zhizhu.zhicode.compose.data.SessionReader.PAGE_MESSAGES] 条，
+ * 往下有两种补页方式：**顶部下拉**（Miuix `PullToRefresh`，见 `ChatList`）与
+ * **滚到顶自动补**。这一条既是提示（上面不是没有内容，而是还没取），也是状态
  * （正在取），否则用户滚到顶只会看到内容突然停住，像是记录缺了一块。
  */
 @Composable
 fun OlderLoader(loading: Boolean) {
     val scheme = MiuixTheme.colorScheme
+    // 文案里写出**具体条数**：只说"更早的消息"时用户不知道一次补多少，
+    // 也就无法判断"要不要为了找某一条一直往下拉"。
+    val count = com.zhizhu.zhicode.compose.data.SessionReader.PAGE_MESSAGES
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp, end = 14.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = if (loading) "正在加载更早的消息…" else "上面还有更早的消息",
+            text = if (loading) "正在加载更早的 $count 条…" else "下拉或继续上滑，加载更早的 $count 条",
             color = scheme.onBackgroundVariant,
             fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+        )
+    }
+}
+
+/**
+ * 「已经到会话开头」的终点提示。
+ *
+ * 没有它时，用户滚到顶会看到 `OlderLoader` **消失**——而那与「这一页刚好到头」
+ * 长得一模一样，于是会反复下拉确认。一条两行的终点说明比"什么都没有"便宜得多。
+ */
+@Composable
+fun TranscriptStartHint() {
+    val scheme = MiuixTheme.colorScheme
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp, end = 14.dp),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = "已经到会话开头",
+            color = scheme.onBackgroundVariant,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
         )
     }
 }
@@ -264,6 +291,12 @@ fun AssistantCard(
     onLongPress: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
+    // 「聊天显示」页的两项设置在这里落地。放在这一层读一次、往下传：
+    // 逐条消息各自去 Local 里取会让每个气泡都多一次组合局部查找，
+    // 而这一层本来就是每条 AI 消息的唯一入口。
+    val chatSettings = LocalThemeSettings.current
+    val chatFontScale = chatSettings.chatFontScale
+    val chatFontFamily = ChatFontLoader.rememberChatFontFamily(chatSettings)
     var showFullBody by remember(item.id) { mutableStateOf(false) }
     val bodyTooLong = item.body.length > MaxInitialMarkdownChars
     val markdownBody = if (bodyTooLong && !showFullBody) {
@@ -295,17 +328,19 @@ fun AssistantCard(
         ),
         pressFeedbackType = PressFeedbackType.None,
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-        Box(
-            modifier = Modifier
-                .padding(top = 4.dp)
-                .width(2.dp)
-                .height(34.dp)
-                .background(scheme.primary, RoundedCornerShape(1.dp)),
-        )
+        // ⚠️ 这里原本有一条 2dp 宽的**强调色竖条**（`Box(width=2.dp, height=34.dp,
+        // background = scheme.primary)`），用 `Row` 摆在卡片左缘。
+        //
+        // 它的用意是"标出这是助手的回合"，但实际效果是：每出现一次思考过程，
+        // 左侧就会多一条蓝色短竖线 —— 一条回答里思考三轮就有三条，看起来像
+        // 排版错误而不是装饰。而且它固定 34dp 高，与内容高度无关，
+        // 思考面板展开/收起时那条线一动不动，反而更显眼。
+        //
+        // 用户明确要求删掉。删掉之后不需要外层 `Row` 了（原本只为并排放它），
+        // `Column` 直接占满宽度，正文左右留白也随之与其它卡片一致。
         Column(
             modifier = Modifier
-                .weight(1f)
+                .fillMaxWidth()
                 // clip 在 animateContentSize **外侧**：思考面板展开/收起时文字
                 // 按自然高度绘制、被逐帧露出来（详见 ToolGroupCard 的注释）。
                 .clipToBounds()
@@ -345,7 +380,11 @@ fun AssistantCard(
             // （见 settledPrefixLength）：不传的话每 32ms 会重建整篇。
             ZhiMarkdown(
                 source = markdownBody,
-                bodyFontSize = MiuixTheme.textStyles.main.fontSize,
+                // 字号与字体来自「聊天显示」页（`ThemeSettings.chatFontScale` /
+                // `chatFont`）。与「界面缩放」是两条独立的路：那一条改 `LocalDensity`，
+                // 连按钮图标一起变；这一条只改阅读正文。
+                bodyFontSize = MiuixTheme.textStyles.main.fontSize * chatFontScale,
+                bodyFontFamily = chatFontFamily,
                 streaming = item.streaming && !bodyTooLong,
             )
             if (bodyTooLong && !showFullBody) {
@@ -413,7 +452,6 @@ fun AssistantCard(
                     window = item.contextWindow,
                 )
             }
-        }
         }
     }
 }
@@ -1223,9 +1261,36 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
             ) {
                 // 7×7 的圆点：运行中是强调色，等授权时变灰（"停住了"）。
                 // 用 Box + background 而不是字符 ●，理由与状态字形一致：字形依赖字体。
+                //
+                // 运行中额外做**呼吸**（alpha 在 0.45~1 之间往返）。这不是装饰：
+                // 命令安静下来时屏幕上唯一能证明"还活着"的就是它在动 ——
+                // 耗时那一栏每 500ms 才刷新一次，而呼吸是每帧的。
+                //
+                // ⚠️ 呼吸只改 `graphicsLayer.alpha`（绘制期属性），
+                // 不触发重组也不触发布局 —— 这是本组件里唯一一处"持续动画"，
+                // 用错了就会让整条工具行每帧重组。
+                //
+                // 等授权时**不呼吸**而是恒亮：那时"停住了"本身就是要传达的信息，
+                // 让它继续脉动会读成"还在跑，只是没输出"。
+                val dotAlpha = if (activity.awaitingPermission) {
+                    1f
+                } else {
+                    val breath = rememberInfiniteTransition(label = "runningDot")
+                    val value by breath.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 0.45f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(900, easing = SinOutEasing),
+                            repeatMode = RepeatMode.Reverse,
+                        ),
+                        label = "runningDotAlpha",
+                    )
+                    value
+                }
                 Box(
                     modifier = Modifier
                         .size(7.dp)
+                        .graphicsLayer { alpha = dotAlpha }
                         .background(
                             color = if (activity.awaitingPermission) scheme.onSurfaceVariantSummary else scheme.primary,
                             shape = RoundedCornerShape(4.dp),
@@ -1266,6 +1331,11 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
             val body = if (live.isNotEmpty()) live
             else if (activity.awaitingPermission) "等待授权…"
             else "等待程序输出…"
+            // 实时输出区：**只在有内容时**做高度过渡。
+            //
+            // `animateContentSize` 挂在这一层（单条卡片内部），不是整表 ——
+            // 整表上的高度动画会让 LazyColumn 每帧重新测量所有可见项。
+            // 这里的目的只是"输出从 1 行涨到 12 行时不硬跳"。
             Text(
                 text = body,
                 color = scheme.onSurfaceVariantSummary,
@@ -1276,7 +1346,9 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
                 // 用途只是"看见它在动"。
                 maxLines = 12,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 6.dp),
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .animateContentSize(ZhiMotion.sizeSpec),
             )
         }
     }

@@ -8,9 +8,11 @@ import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import com.zhizhu.zhicode.compose.data.ThemeSettings
+import com.zhizhu.zhicode.compose.data.ThemeStore
 import com.zhizhu.zhicode.compose.theme.ZhiAppTheme
 import com.zhizhu.zhicode.compose.theme.ZhiThemeMode
-import com.zhizhu.zhicode.compose.ui.panes.FileEditorScreen
+import com.zhizhu.zhicode.compose.ui.pages.EditorPage
 
 /**
  * 文本编辑器的宿主 Activity。
@@ -72,13 +74,14 @@ class EditorActivity : ComponentActivity() {
 
         onBackPressedDispatcher.addCallback(this) { handleBack() }
 
-        // 主题值只读一次：`stored()` 要走一次 SharedPreferences，放在 lambda 里
-        // 会变成「每次根重组都读一次盘」。
-        val themeMode = ZhiThemeMode.stored(this)
+        // 主题值只读一次：`stored()` 与 `ThemeStore.read` 都要走一次 SharedPreferences，
+        // 放在 lambda 里会变成「每次根重组都读一次盘」。
+        val themeSettings = runCatching { ThemeStore.read(this) }
+            .getOrDefault(ThemeSettings())
         setContent {
             // 与主界面同一个主题栈（ZhiThemeMode 是深浅的唯一判定处）。
-            ZhiAppTheme(mode = themeMode) {
-                FileEditorScreen(viewModel = viewModel, onExit = { finishWithResult() })
+            ZhiAppTheme(theme = themeSettings) {
+                EditorPage(viewModel = viewModel, onExit = { finishWithResult() })
             }
         }
     }
