@@ -1714,34 +1714,29 @@ class WorkspaceViewModel(
     fun closeMemory() = _state.update { it.copy(memory = null) }
 
     /**
-     * 打开 ZhiCode 沙箱管理界面（`SandboxBoard`）。
+     * 沙盒入口（**已移除功能的占位**）。
      *
-     * 与「环境弹窗」不同，这里**不能**只改本进程的 UI 状态：沙箱引擎整个跑在
-     * `:zhisandbox` 进程里，管理界面通过 `${applicationId}.sandbox.control` 这个同 UID
-     * 私有 provider 与它通信（见 SandboxRpcService）。所以这里必须真的
-     * 启动那个 Activity，而不是弹一个本地的 Compose 面板 —— 后者会得到一个
-     * "永远连不上引擎"的空壳界面。
+     * ## 为什么入口还在、功能没了
      *
-     * ViewModel 手里只有 Application 上下文，从 Application 启动 Activity
-     * 必须带 FLAG_ACTIVITY_NEW_TASK，否则直接抛 AndroidRuntimeException。
-     * 失败时如实上报，不静默吞掉（例如清单里少声明了该 Activity）。
+     * 沙盒（BlackBox 虚拟 Android 运行时 + `:zhisandbox` 控制进程 + `SandboxBoard`
+     * 管理界面）已整体删除：`Bcore` / `black-reflection` / `compiler` 三个 Gradle 模块、
+     * `sandbox` 包、`ZhiSandboxTool`、`SandboxPage` 与清单里的三个组件都不在了。
+     *
+     * 但侧栏那一行与 `/sandbox` 斜杠命令**保留**：直接删掉会让老用户以为"菜单丢了"
+     * 或者以为自己记错了 —— 那比明说"功能已移除"更糟。所以这里只给一条提示。
+     *
+     * ## 为什么提示要说清删了什么
+     *
+     * 「功能已移除」是结论，用户真正想知道的是"我之前装进去的 APK 呢""以后还会有吗"。
+     * 所以文案里点明"虚拟运行时"这个具体的东西，而不是一个含糊的"暂不可用"。
      */
     fun openSandbox() {
-        // 见 hideSidebarForNavigation。这一行尤其明显：沙箱是个**跨进程的 Activity**，
-        // 不收侧栏的话用户回到本应用时看到的还是那层侧栏，会以为"点了根本没打开"。
         hideSidebarForNavigation()
-        val context = getApplication<android.app.Application>()
-        val started = runCatching {
-            context.startActivity(
-                android.content.Intent(context, com.zhizhu.zhicode.sandbox.SandboxBoard::class.java)
-                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        }
-        started.onFailure { error ->
-            appendInfo(
-                "无法打开 ZhiCode 沙箱",
-                "启动沙箱管理界面失败：${error.javaClass.simpleName}: ${error.message ?: "未知原因"}\n\n" +
-                    "沙箱引擎运行在 :zhisandbox 进程，界面必须由系统拉起而无法在本进程内绘制。",
+        _state.update {
+            it.copy(
+                message = "沙盒功能已移除：内置虚拟 Android 运行时（BlackBox）不再随本应用分发。" +
+                    "安装到真机请用 AndroidIntent install_apk。",
+                messageIsError = false,
             )
         }
     }
@@ -1862,6 +1857,17 @@ class WorkspaceViewModel(
         // （见 updateThemeSettings 的说明），这里补那一次。
         persistThemeSettings()
         _state.update { it.copy(themePageOpen = false) }
+    }
+
+    /** 打开「聊天显示」页（自定义字体 + 正文字号）。同样走设置栈，返回回到设置 hub。 */
+    fun openChatDisplay() {
+        _state.update { it.copy(settingsOpen = true, sidebarOpen = false, chatDisplayOpen = true) }
+    }
+
+    fun closeChatDisplay() {
+        // 与主题页同理：字号滑杆连续改状态，关页时才落盘。
+        persistThemeSettings()
+        _state.update { it.copy(chatDisplayOpen = false) }
     }
 
     /**
@@ -2066,7 +2072,6 @@ class WorkspaceViewModel(
             } ?: "",
             rootExecutionEnabled = s.settings.rootExecutionEnabled,
             shizukuExecutionEnabled = s.settings.shizukuExecutionEnabled,
-            sandboxAgentFullAccess = s.settings.sandboxAgentFullAccess,
             forcedKeepAliveEnabled = s.settings.forcedKeepAliveEnabled,
             model = modelOverride,
             roleCard = roleCardOverride,
@@ -4184,7 +4189,6 @@ class WorkspaceViewModel(
                     webSearchMaxResults = o.webSearchMaxResults ?: s.settings.webSearchMaxResults,
                     webSearchTimeoutSec = o.webTimeoutSec ?: s.settings.webSearchTimeoutSec,
                     webSearchSearxngUrl = o.webSearchBaseUrl ?: s.settings.webSearchSearxngUrl,
-                    sandboxAgentFullAccess = o.sandboxAgentFullAccess ?: s.settings.sandboxAgentFullAccess,
                     rootExecutionEnabled = o.rootExecutionEnabled ?: s.settings.rootExecutionEnabled,
                     shizukuExecutionEnabled = o.shizukuExecutionEnabled ?: s.settings.shizukuExecutionEnabled,
                     forcedKeepAliveEnabled = o.forcedKeepAliveEnabled ?: s.settings.forcedKeepAliveEnabled,
@@ -4209,7 +4213,6 @@ class WorkspaceViewModel(
                         webSearchMaxResults = o.webSearchMaxResults ?: draft.webSearchMaxResults,
                         webSearchTimeoutSec = o.webTimeoutSec ?: draft.webSearchTimeoutSec,
                         webSearchSearxngUrl = o.webSearchBaseUrl ?: draft.webSearchSearxngUrl,
-                        sandboxAgentFullAccess = o.sandboxAgentFullAccess ?: draft.sandboxAgentFullAccess,
                         rootExecutionEnabled = o.rootExecutionEnabled ?: draft.rootExecutionEnabled,
                         shizukuExecutionEnabled = o.shizukuExecutionEnabled ?: draft.shizukuExecutionEnabled,
                         forcedKeepAliveEnabled = o.forcedKeepAliveEnabled ?: draft.forcedKeepAliveEnabled,
@@ -6211,6 +6214,7 @@ class WorkspaceViewModel(
             "memory" -> openMemory()
             "prompts" -> openPrompts()
             "theme" -> openThemePage()
+            "chatDisplay" -> openChatDisplay()
             // 从设置页进来时设置页仍然开着，于是返回会先回到设置主页 ——
             // 这正是从设置里点进去的人期望的。
             "about" -> openAbout()

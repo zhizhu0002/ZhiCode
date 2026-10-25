@@ -10,7 +10,7 @@ package com.zhizhu.zhicode.compose.model
  *
  * 1. 这个环境是离线的（`--offline` 构建），新插件拉不下来；
  * 2. 它只扫得到**声明在 Gradle 里**的依赖，而本工程最需要声明的几项恰恰不是依赖：
- *    `libtermux.so`、`libblackbox.so`（内含静态链接的 Dobby）、Termux bootstrap 归档、
+ *    `libtermux.so`、Termux bootstrap 归档、
  *    `assets/sora/textmate` 的数据文件、内联进 `ZhiMaterialIcons.kt` 的图标路径；
  * 3. 许可名仍然要人写映射（插件给的是坐标，不是中文可读的许可条款名）。
  *
@@ -47,22 +47,6 @@ val THIRD_PARTY_LICENSES: List<LicenseEntry> = listOf(
             "之后被分批重写。重写不免除 MIT 的署名义务，这份致谢是**自愿**保留的 —— " +
             "归属度量工具一直在拿本工程与原版逐行比对，派生关系本来就是自证的，" +
             "把出处写清楚比含糊过去更诚实。",
-    ),
-    LicenseEntry(
-        name = "BlackBox 虚拟化引擎（Bcore / black-reflection / compiler）",
-        license = "Apache-2.0",
-        version = "—",
-        detail = "Android 虚拟运行时：guest 进程管理、Activity/Service 代理、系统服务 hook。" +
-            "经上游 IQ Code 的副本搬入。本工程对 Bcore 的构建脚本与源码有改动；" +
-            "black-reflection 与 compiler 的源码未改动。逐模块的修改声明在各自目录的 NOTICE 里。",
-    ),
-    LicenseEntry(
-        name = "静态链接在 libblackbox.so 内的 Dobby",
-        license = "Apache-2.0",
-        version = "—",
-        detail = "内联 hook 引擎。它不是一个独立文件，而是被静态链接进 Bcore 的预编译原生库 " +
-            "libblackbox.so，因此不会出现在依赖列表里 —— 只能从二进制内容上认出来。" +
-            "本工程未修改其源码，也未对它做过完整的静态内容审计。",
     ),
     LicenseEntry(
         name = "Termux 终端模拟与视图",

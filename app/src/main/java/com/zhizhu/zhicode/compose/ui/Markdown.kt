@@ -88,6 +88,13 @@ fun ZhiMarkdown(
      * 只有整段重解析一次，最后那一段的标题/列表/代码块才会拿到正确的块级样式。
      */
     streaming: Boolean = false,
+    /**
+     * 正文字体族。为空时沿用 Compose 默认字体。
+     *
+     * 只作用于**正文与标题**，不作用于代码块：代码块永远是等宽（见下面 `FontFamily.Monospace`
+     * 那几处）—— 用衬线体渲染代码会让对齐彻底失去意义。
+     */
+    bodyFontFamily: FontFamily? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
     val inlineStyles = rememberInlineStyles(bodyFontSize)
@@ -123,6 +130,7 @@ fun ZhiMarkdown(
             MdBlockView(
                 block = block,
                 fontSize = bodyFontSize,
+                bodyFontFamily = bodyFontFamily,
                 fadeTail = streaming && split.tail.isEmpty() && index == blocks.lastIndex,
                 fadeRamp = fadeRamp,
             )
@@ -141,6 +149,7 @@ fun ZhiMarkdown(
                 color = scheme.onSurface,
                 fontSize = bodyFontSize,
                 lineHeight = bodyFontSize * 1.5f,
+                fontFamily = bodyFontFamily,
             )
         }
     }
@@ -234,6 +243,7 @@ private fun splitForStreaming(source: String, streaming: Boolean): MdStreamSplit
 private fun MdBlockView(
     block: MdBlock,
     fontSize: TextUnit,
+    bodyFontFamily: FontFamily? = null,
     fadeTail: Boolean = false,
     fadeRamp: Int = TailFadeMinChars,
 ) {
@@ -252,6 +262,7 @@ private fun MdBlockView(
             },
             fontWeight = FontWeight.Bold,
             lineHeight = (fontSize.value + 6).sp,
+            fontFamily = bodyFontFamily,
             modifier = Modifier.padding(top = 2.dp),
         )
 
@@ -269,6 +280,8 @@ private fun MdBlockView(
             color = scheme.onSurface,
             fontSize = fontSize,
             lineHeight = fontSize * 1.5f,
+            // 正文才跟随用户选的字体；代码块永远是等宽（见 `CodeBlock`）。
+            fontFamily = bodyFontFamily,
         )
 
         is MdBlock.Bullet -> BulletRow(block, fontSize, inlineStyles)
@@ -293,7 +306,7 @@ private fun MdBlockView(
                     .padding(start = 11.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                block.blocks.forEach { inner -> MdBlockView(inner, fontSize) }
+                block.blocks.forEach { inner -> MdBlockView(inner, fontSize, bodyFontFamily) }
             }
         }
 

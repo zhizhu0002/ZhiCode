@@ -962,7 +962,6 @@ val DEFAULT_API_PROFILES: List<ApiProfile> = emptyList()
  */
 data class AppSettings(
     val visionEnabled: Boolean = true,
-    val sandboxAgentFullAccess: Boolean = false,
     val rootExecutionEnabled: Boolean = false,
     /** Shizuku 工具开关：以 shell 身份（uid 2000）跑 pm/am/dumpsys 这类系统命令。与 Root 独立。 */
     val shizukuExecutionEnabled: Boolean = false,
@@ -1080,7 +1079,6 @@ data class SettingsDraft(
     val profileName: String,
     val modelLabel: String,
     val visionEnabled: Boolean,
-    val sandboxAgentFullAccess: Boolean,
     val rootExecutionEnabled: Boolean,
     val forcedKeepAliveEnabled: Boolean,
     val terminalCharMode: Boolean,
@@ -1112,7 +1110,6 @@ data class SettingsDraft(
                 profileName = state.profileName,
                 modelLabel = state.modelLabel,
                 visionEnabled = s.visionEnabled,
-                sandboxAgentFullAccess = s.sandboxAgentFullAccess,
                 rootExecutionEnabled = s.rootExecutionEnabled,
                 shizukuExecutionEnabled = s.shizukuExecutionEnabled,
                 forcedKeepAliveEnabled = s.forcedKeepAliveEnabled,
@@ -1149,7 +1146,6 @@ data class SettingsDraft(
         projectPath = projectPath.ifBlank { state.projectPath },
         settings = AppSettings(
             visionEnabled = visionEnabled,
-            sandboxAgentFullAccess = sandboxAgentFullAccess,
             rootExecutionEnabled = rootExecutionEnabled,
             shizukuExecutionEnabled = shizukuExecutionEnabled,
             forcedKeepAliveEnabled = forcedKeepAliveEnabled,

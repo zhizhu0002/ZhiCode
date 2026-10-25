@@ -72,7 +72,6 @@ public final class ToolRegistry {
             new RootBashTool(shell),
             new ShizukuBashTool(),
             new AndroidIntentTool(intentBridge),
-            new ZhiSandboxTool(context),
             new ZhiDebugTool(context, shell),
             new UiCanvasTool(context),
 

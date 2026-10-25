@@ -15,7 +15,7 @@ import org.junit.Test
  * <ol>
  *   <li><b>没有重复条目。</b>上一版同一件事说了三遍（「别声称做了没做的事」），
  *       而重复的条目会被模型当成更强的约束 —— 一条本该次要的规则因此压过了别的。</li>
- *   <li><b>条件段真的有条件。</b>沙箱细则只在全权模式展开、联网段只在联网开着时出现。
+ *   <li><b>条件段真的有条件。</b>联网段只在联网开着时出现。
  *       写反了的话界面上关掉的开关在提示词里照样生效。</li>
  *   <li><b>规模有上限。</b>提示词每轮都要发一次，长度直接换算成钱和延迟；而且越长，
  *       真正重要的那几条越容易被稀释。</li>
@@ -53,29 +53,10 @@ class PromptStructureTest {
             "Tool choice:",
             "Projects, tasks and subagents:",
             "APK installation:",
-            "Sandbox and native debugging:",
             "Permission state:",
         ).forEach { header ->
             assertTrue("缺少分段标题：$header", prompt.contains(header))
         }
-    }
-
-    @Test
-    fun sandboxDetailsOnlyAppearWithFullAccess() {
-        val brief = SystemPromptBuilder.build(config { sandboxAgentFullAccess = false })
-        val full = SystemPromptBuilder.build(config { sandboxAgentFullAccess = true })
-
-        // 关着的时候不该出现任何具体操作名：那些指令会让模型绕开"先问一遍"。
-        assertFalse("关闭全权时仍然出现了 Frida 细则", brief.contains("frida_eval"))
-        assertFalse("关闭全权时仍然出现了 load_library", brief.contains("load_library"))
-        assertTrue("打开全权时缺少 Frida 细则", full.contains("frida_eval"))
-        assertTrue("打开全权时缺少 load_library", full.contains("load_library"))
-
-        // 差值必须足够大，"条件"才不是摆设。
-        assertTrue(
-            "全权与普通的提示长度差只有 ${full.length - brief.length} 字符，条件段没生效",
-            full.length - brief.length > 1000,
-        )
     }
 
     @Test
@@ -130,15 +111,12 @@ class PromptStructureTest {
 
     @Test
     fun defaultPromptStaysWithinBudget() {
-        // 实测（本次重构后）：沙箱关闭 7 029 字符 / 沙箱全权 8 978 字符。
-        // 重构**之前**是 33 条平铺规则、约 1.2 万字符，同一件事说三遍。
-        // 上限取 10 000 是"还留了余量"的硬顶 —— 超过它就该问一句
+        // 沙箱细则（约 2 000 字符）随沙盒一起删除后，提示词只剩一条路径，
+        // 不再有"全权 / 普通"两份长度。上限仍是硬顶：超过它就该问一句
         // 「这一段真的每轮都需要吗」，而不是继续往里加。
-        val brief = SystemPromptBuilder.build(config { sandboxAgentFullAccess = false })
-        val full = SystemPromptBuilder.build(config { sandboxAgentFullAccess = true })
-        assertTrue("提示词长度 ${full.length} 超出上限", full.length < 10_000)
-        assertTrue("提示词长度 ${brief.length} 超出上限", brief.length < 8_000)
+        val prompt = SystemPromptBuilder.build(config())
+        assertTrue("提示词长度 ${prompt.length} 超出上限", prompt.length < 10_000)
         // 也不能缩到把关键约束弄丢：粗粒度下界，防的是"误删一整段"。
-        assertTrue("提示词长度 ${brief.length} 过短，可能漏了整段", brief.length > 5_000)
+        assertTrue("提示词长度 ${prompt.length} 过短，可能漏了整段", prompt.length > 5_000)
     }
 }

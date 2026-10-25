@@ -139,8 +139,9 @@ android {
             /*
              * R8：开混淆 + 开资源压缩。
              *
-             * 本工程确实有反射与原生 hook（Bcore / black-reflection / Termux PTY），
-             * 所以规则不能照抄模板，得逐条对着**真实调用点**写 —— 具体理由都在
+             * 本工程确实有反射与原生 hook（Termux PTY、Shizuku 的 AIDL、
+             * 以及 Termux 用户空间里的 ELF），所以规则不能照抄模板，得逐条对着
+             * **真实调用点**写 —— 具体理由都在
              * app/proguard-rules.pro 里，每条规则前面都写了它挡的是什么。
              *
              * useProguard 的等价物（R8 的 full mode）由 AGP 自行决定，这里不瞎设；
@@ -174,8 +175,6 @@ if (configuredApplicationId == null || configuredApplicationId.isEmpty()) {
 }
 
 dependencies {
-    // IQ 沙箱（BlackBox 虚拟 Android 运行时宿主）—— Phase 7
-    implementation project(':Bcore')
 
     /*
      * Shizuku（https://github.com/RikkaApps/Shizuku）：无 Root 的 shell 身份。

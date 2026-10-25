@@ -10,6 +10,20 @@ import com.zhizhu.zhicode.compose.theme.clampUiScale
 import com.zhizhu.zhicode.compose.theme.presetById
 
 /**
+ * 聊天正文字体族。
+ *
+ * 与 rikkahub 的 `ChatFontFamily` 同名同义，但**去掉了它的 `CUSTOM` 依赖**：
+ * 这里只放枚举，自定义字体的加载（`Typeface.createFromFile`）在 `ChatFontLoader` 里 ——
+ * 枚举要能被非 Android 的调用点（主题落盘、单测）读，不该拖进 `android.graphics`。
+ */
+enum class ChatFontFamily(val label: String) {
+    DEFAULT("默认"),
+    SERIF("衬线"),
+    MONOSPACE("等宽"),
+    CUSTOM("自定义"),
+}
+
+/**
  * 主题与显示相关的全部设置（形状 + 落盘）。
  *
  * ## 为什么单独一个类，而不是继续塞进 `AppSettings`
@@ -62,6 +76,30 @@ data class ThemeSettings(
     val liquidGlass: Boolean = true,
     val edgeSwipeBack: Boolean = true,
     val uiScale: Float = UI_SCALE_DEFAULT,
+    /**
+     * 聊天正文字体族。存枚举的 `name`，与 `paletteStyle` 同一个约定：
+     * 这一层不该依赖 compose 的类型（它还要能被非 Compose 的调用点读）。
+     *
+     * 非法值在读取处回落到 [ChatFontFamily.DEFAULT] —— 老版本写下的名字读不到是常态。
+     */
+    val chatFont: String = ChatFontFamily.DEFAULT.name,
+    /**
+     * 自定义字体的**相对路径**（相对 `filesDir`），为空表示没有导入过。
+     *
+     * 只存相对路径不存绝对路径：绝对路径里的 `filesDir` 在重装后可能变，
+     * 而 `filesDir` 本身是稳定的，相对路径跟着它一起稳定。
+     */
+    val customFontPath: String = "",
+    /** 自定义字体的显示名（导入时从文件名取的），仅用于界面展示。 */
+    val customFontName: String = "",
+    /**
+     * 聊天正文字号比例。
+     *
+     * 与 [uiScale] 是**两件事**，不要合并：
+     * - [uiScale] 改的是整个界面的密度（`LocalDensity`），连按钮、间距、图标一起变；
+     * - 这一项只改**阅读正文**的字号，用户想"字大一点但按钮别变大"时用它。
+     */
+    val chatFontScale: Float = 1.0f,
 ) {
     val preset get() = presetById(presetId)
 
@@ -100,6 +138,20 @@ internal object ThemeStore {
     private const val LIQUID_GLASS = PREFIX + "liquid_glass"
     private const val EDGE_SWIPE = PREFIX + "edge_swipe_back"
     private const val UI_SCALE = PREFIX + "ui_scale"
+    private const val CHAT_FONT = PREFIX + "chat_font"
+    private const val CHAT_FONT_PATH = PREFIX + "chat_font_path"
+    private const val CHAT_FONT_NAME = PREFIX + "chat_font_name"
+    private const val CHAT_FONT_SCALE = PREFIX + "chat_font_scale"
+
+    /** 聊天字号比例的合法区间。与 `UI_SCALE_MIN/MAX` 分开：正文可以拉得比界面密度更开。 */
+    const val CHAT_FONT_SCALE_MIN = 0.8f
+    const val CHAT_FONT_SCALE_MAX = 1.6f
+
+    /** 把任意输入夹进合法区间。NaN / 无限大回落默认值 1.0（而不是夹成某个边界）。 */
+    fun clampChatFontScale(value: Float): Float = when {
+        !value.isFinite() -> 1f
+        else -> value.coerceIn(CHAT_FONT_SCALE_MIN, CHAT_FONT_SCALE_MAX)
+    }
 
     fun read(context: Context): ThemeSettings {
         val prefs = runCatching {
@@ -121,6 +173,11 @@ internal object ThemeStore {
             liquidGlass = prefs.getBoolean(LIQUID_GLASS, true),
             edgeSwipeBack = prefs.getBoolean(EDGE_SWIPE, true),
             uiScale = clampUiScale(prefs.getFloat(UI_SCALE, UI_SCALE_DEFAULT)),
+            chatFont = prefs.getString(CHAT_FONT, "")?.takeIf { it.isNotBlank() }
+                ?: ChatFontFamily.DEFAULT.name,
+            customFontPath = prefs.getString(CHAT_FONT_PATH, "") ?: "",
+            customFontName = prefs.getString(CHAT_FONT_NAME, "") ?: "",
+            chatFontScale = clampChatFontScale(prefs.getFloat(CHAT_FONT_SCALE, 1f)),
         )
     }
 
@@ -149,6 +206,10 @@ internal object ThemeStore {
                 .putBoolean(LIQUID_GLASS, settings.liquidGlass)
                 .putBoolean(EDGE_SWIPE, settings.edgeSwipeBack)
                 .putFloat(UI_SCALE, clampUiScale(settings.uiScale))
+                .putString(CHAT_FONT, settings.chatFont)
+                .putString(CHAT_FONT_PATH, settings.customFontPath)
+                .putString(CHAT_FONT_NAME, settings.customFontName)
+                .putFloat(CHAT_FONT_SCALE, clampChatFontScale(settings.chatFontScale))
                 .commit()
         }
     }

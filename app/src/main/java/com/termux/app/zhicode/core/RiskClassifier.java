@@ -125,8 +125,6 @@ public final class RiskClassifier {
             case "debug":
             case "zhibug":
                 return isRiskyDebugAction(in.optString("action", ""));
-            case "sandbox":
-                return isRiskySandboxAction(in.optString("action", ""));
             default:
                 return false;
         }
@@ -145,19 +143,6 @@ public final class RiskClassifier {
             case "load_library":
             case "signal":
             case "gc":
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    /** {@code Sandbox} 里会装/删应用、清数据的动作。 */
-    private static boolean isRiskySandboxAction(String action) {
-        switch (action == null ? "" : action.toLowerCase(Locale.US)) {
-            case "install":
-            case "uninstall":
-            case "clear_data":
-            case "stop":
                 return true;
             default:
                 return false;

@@ -236,6 +236,14 @@ private fun GeneralPage(
         // 不写「右上角 ☼/☾ 可快速切换」——顶栏早就没有这个快捷键了，
         // 指向不存在入口的说明比没有说明更糟。
     )
+    SettingsEntry(
+        title = "聊天显示",
+        valueText = "字体 · 正文字号",
+        onClick = { onNavigate("chatDisplay") },
+        summary = "自定义聊天正文字体（ttf/otf/ttc）与字号比例；不影响按钮与图标大小",
+        icon = ZhiIcons.chat,
+        plate = SettingsPlateColors.blue,
+    )
     NetworkPage(draft, onChange, onNavigate)
 }
 
@@ -292,16 +300,13 @@ private fun ModelServicePage(
 
 @Composable
 private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
-    SettingsToggle(
-        title = "Agent 沙箱全权调试",
-        checked = draft.sandboxAgentFullAccess,
-        onCheckedChange = { onChange(draft.copy(sandboxAgentFullAccess = it)) },
-        summary = "允许容器内安装、UI 操作与 Frida；不含真机 host 与 Root",
-        warn = true,
-        // 与侧栏「沙箱」同一个箱子字形：同一个东西在两处必须是同一个图标。
-        icon = ZhiIcons.sandbox,
-        plate = SettingsPlateColors.purple,
-    )
+    /*
+     * 这里原本第一项是「Agent 沙箱全权调试」（sandboxAgentFullAccess）：
+     * 允许容器内安装、UI 操作与 Frida，不含真机 host 与 Root。
+     * 沙盒整体移除后这个开关已经没有作用对象 —— 它的语义是"对沙箱内的调用免去询问"，
+     * 而沙箱不存在了，留着它只会变成"点了没反应"的开关（见 ThemePage 顶部
+     * 关于「点了没用的开关比不做更糟」的那条判断）。
+     */
 
     SettingsToggle(
         title = "Agent Root 权限",

@@ -10,6 +10,7 @@ import com.zhizhu.zhicode.compose.ui.pages.AboutPage
 import com.zhizhu.zhicode.compose.ui.pages.MemoryPage
 import com.zhizhu.zhicode.compose.ui.pages.PromptsPage
 import com.zhizhu.zhicode.compose.ui.pages.ThemePage
+import com.zhizhu.zhicode.compose.ui.pages.ChatDisplayPage
 import com.zhizhu.zhicode.compose.ui.pages.ThirdPartyLicensesPage
 import com.zhizhu.zhicode.compose.ui.pages.RoleCardsPage
 import com.zhizhu.zhicode.compose.ui.pages.SkillsPage
@@ -261,6 +262,7 @@ private fun ZhiCodeScreen(
                 state.memory != null -> add(SettingsKey.Memory)
                 state.promptsOpen -> add(SettingsKey.Prompts)
                 state.themePageOpen -> add(SettingsKey.Theme)
+                state.chatDisplayOpen -> add(SettingsKey.ChatDisplay)
             }
         }
     }
@@ -347,6 +349,7 @@ private fun ZhiCodeScreen(
                 live.memory != null -> viewModel.closeMemory()
                 live.promptsOpen -> viewModel.closePrompts()
                 live.themePageOpen -> viewModel.closeThemePage()
+                live.chatDisplayOpen -> viewModel.closeChatDisplay()
                 live.settingsOpen -> viewModel.closeSettings()
             }
         },
@@ -480,6 +483,13 @@ private fun ZhiCodeScreen(
                 onChange = viewModel::updateThemeSettings,
             )
         }
+        entry<SettingsKey.ChatDisplay>(swipeDismiss = swipeBack) {
+            ChatDisplayPage(
+                theme = state.themeSettings,
+                onBack = viewModel::closeChatDisplay,
+                onChange = viewModel::updateThemeSettings,
+            )
+        }
         entry<SettingsKey.Prompts>(swipeDismiss = swipeBack) {
             PromptsPage(
                 initPrompt = state.settings.initPrompt,
@@ -555,4 +565,13 @@ private sealed interface SettingsKey : NavKey {
     data object Memory : SettingsKey
     data object Prompts : SettingsKey
     data object Theme : SettingsKey
+
+    /**
+     * 聊天显示（自定义字体 + 正文字号）。
+     *
+     * 与 [Theme] 分开而不是并进主题页：主题页回答的是"整个应用长什么样"，
+     * 这一页回答的是"聊天正文读起来舒不舒服"。混在一页会让主题页长到要滚三屏，
+     * 而两者的改动目的也不同（一个是调色板，一个是字形与字号）。
+     */
+    data object ChatDisplay : SettingsKey
 }

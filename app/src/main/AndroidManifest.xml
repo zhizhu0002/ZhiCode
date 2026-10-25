@@ -85,7 +85,8 @@
 
         <!--
           与上游实现对齐：把 AndroidX Startup 自动并进来的这两个组件摘掉。
-          上游把它们列为**沙箱进程隔离的必要条件**（见 app/tests/SandboxProcessIsolationStructureTest）。
+          上游把它们列为**沙箱进程隔离的必要条件**（沙箱已移除，但这两条留着的理由
+          与沙箱无关，见下 —— 那套隔离结论只是当初发现它们的起因）。
 
           InitializationProvider 是个 ContentProvider，而 ContentProvider 的创建时机在
           `Application.attachBaseContext` 之后、`Application.onCreate` **之前**。
@@ -207,41 +208,6 @@
         <!-- 后台保活（用户显式开启） -->
         <service
             android:name="com.zhizhu.zhicode.background.KeepAliveService"
-            android:exported="false"
-            android:stopWithTask="false" />
-
-        <!--
-          ZhiCode 沙箱（BlackBox 虚拟 Android 运行时宿主）—— Phase 7。
-
-          这三项是**宿主自己**的声明；Bcore 库自带的清单（DaemonService、
-          SystemCallProvider、ProxyVpnService、LauncherActivity，以及 :p0..:p49 的
-          四组 Proxy* 组件）会在依赖合并时自动并进来，不需要在这里重复写。
-
-          SandboxRpcService 必须跑在 :zhisandbox 进程：
-          它是主进程与沙箱引擎之间**同 UID 的私有 RPC** 通道，
-          沙箱真正的高层控制面（安装/启动/停止 guest）全在这个进程里，
-          不能放主进程，否则一个原生 hook 崩溃会把编辑器/Agent 一起带走。
-        -->
-        <provider
-            android:name="com.zhizhu.zhicode.sandbox.SandboxRpcService"
-            android:authorities="${applicationId}.sandbox.control"
-            android:exported="false"
-            android:process=":zhisandbox" />
-
-        <!-- 沙箱管理界面。它本身留在主进程（不设 android:process），只通过上面的 provider 发指令 -->
-        <activity
-            android:name="com.zhizhu.zhicode.sandbox.SandboxBoard"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
-            android:exported="false"
-            android:screenOrientation="unspecified"
-            android:windowSoftInputMode="adjustResize" />
-
-        <!--
-          调试 guest 期间的前台保活。guest Activity 会盖住主界面，
-          没有它主进程会被系统回收，Agent/工具链会随之中断。
-        -->
-        <service
-            android:name="com.zhizhu.zhicode.sandbox.SandboxKeeper"
             android:exported="false"
             android:stopWithTask="false" />
 

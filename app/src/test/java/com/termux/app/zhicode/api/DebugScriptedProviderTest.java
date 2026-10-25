@@ -42,7 +42,7 @@ public final class DebugScriptedProviderTest {
     private static final Set<String> WRITE_TOOLS = new HashSet<>(Arrays.asList(
             "Write", "Edit", "MultiEdit", "Copy", "Move", "Mkdir", "Delete",
             "Bash", "RootBash", "TermuxRepair", "EnterWorktree", "ExitWorktree",
-            "AndroidIntent", "Sandbox", "UiCanvas", "Debug", "Agent"));
+            "AndroidIntent", "UiCanvas", "Debug", "Agent"));
 
     // ------------------------------------------------------------------ 清单
 

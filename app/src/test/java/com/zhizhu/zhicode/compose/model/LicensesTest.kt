@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -65,12 +66,25 @@ class LicensesTest {
     @Test
     fun theListCoversTheItemsThatAreEasyToForget() {
         val names = THIRD_PARTY_LICENSES.map { it.name }
-        // 这三项最容易被漏掉：它们不是 Gradle 依赖、不在依赖列表里，
-        // 只存在于二进制或数据文件里。
-        listOf("静态链接在 libblackbox.so 内的 Dobby", "Termux 用户空间（bootstrap 归档）", "Material Symbols 图标")
+        // 这两项最容易被漏掉：它们不是 Gradle 依赖，只存在于归档或数据文件里。
+        listOf("Termux 用户空间（bootstrap 归档）", "Material Symbols 图标")
             .forEach { assertTrue("清单缺少易漏项：$it", names.contains(it)) }
         // 自身许可也在这一页里（用户点进来会以为只有第三方）。
         assertTrue(names.any { it.contains("ZhiCode 自身") })
+    }
+
+    @Test
+    fun theRemovedSandboxEngineIsNotListed() {
+        // 沙盒（Bcore / black-reflection / compiler + 静态链接的 Dobby）已整体移除，
+        // 不再分发 → 不再有署名义务。清单里继续列着它们反而是在声明"我分发了这个"。
+        //
+        // 这条断言防的是"删了代码但忘了删清单"：那种漏法不会编译失败，
+        // 只会在发布物里留下一段与事实不符的法律声明。
+        val names = THIRD_PARTY_LICENSES.map { it.name }
+        listOf("BlackBox 虚拟化引擎（Bcore / black-reflection / compiler）", "静态链接在 libblackbox.so 内的 Dobby")
+            .forEach {
+                assertFalse("沙盒已移除，清单里不该再有：$it", names.contains(it))
+            }
     }
 
     @Test

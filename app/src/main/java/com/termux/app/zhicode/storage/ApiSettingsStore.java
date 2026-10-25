@@ -98,7 +98,6 @@ public final class ApiSettingsStore {
         static final String PRESERVE_REASONING = "preserve_reasoning_state";
         static final String TOOL_MODE = "tool_mode";
         static final String PERMISSION_MODE = "permission_mode";
-        static final String SANDBOX_FULL_ACCESS = "sandbox_agent_full_access";
         static final String ROOT_EXECUTION = "root_execution_enabled";
         /** Shizuku 工具开关。与 Root 分开存：两者的前提条件不同，不能互相隐含。 */
         static final String SHIZUKU_EXECUTION = "shizuku_execution_enabled";
@@ -247,8 +246,6 @@ public final class ApiSettingsStore {
                 (c, v) -> c.roleCard = v, ApiSettingsStore::sanitizePrompt));
         SETTINGS.put(Key.TOOL_MODE, item(c -> c.toolMode, (c, v) -> c.toolMode = (String) v));
         SETTINGS.put(Key.PERMISSION_MODE, item(c -> c.permissionMode, (c, v) -> c.permissionMode = (String) v));
-        SETTINGS.put(Key.SANDBOX_FULL_ACCESS,
-                item(c -> c.sandboxAgentFullAccess, (c, v) -> c.sandboxAgentFullAccess = (Boolean) v));
         SETTINGS.put(Key.ROOT_EXECUTION,
                 item(c -> c.rootExecutionEnabled, (c, v) -> c.rootExecutionEnabled = (Boolean) v));
         SETTINGS.put(Key.SHIZUKU_EXECUTION,

@@ -201,6 +201,24 @@ internal object ZhiMaterialIcons {
     /** 上游 `Stop`（materialsymbolsrounded / fill1）。 */
     val Stop: ImageVector by lazy { material("Stop", "M240-320v-320q0-33 23.5-56.5T320-720h320q33 0 56.5 23.5T720-640v320q0 33-23.5 56.5T640-240H320q-33 0-56.5-23.5T240-320Z") }
 
+    /**
+     * 上游 `ArrowUpward`（materialsymbolsrounded / fill1）。
+     *
+     * 发送键用它而不是 `Send`（纸飞机）：本工程的输入器是**对话**形态，
+     * 送出去的是"说一句话"而不是"发一封邮件"，纸飞机的隐喻偏向后者。
+     * 而且 `Send` 是斜向的，放在方角按键里重心偏、视觉上比按钮的边更抢眼。
+     */
+    val ArrowUpward: ImageVector by lazy { material("ArrowUpward", "M460-200v-493L255-488q-11 11-27.5 11T200-488q-11-11-11-28t11-28l252-252q6-6 13-8.5t15-2.5q8 0 15 2.5t13 8.5l252 252q11 11 11 27.5T760-488q-11 11-28 11t-28-11L500-693v493q0 17-11.5 28.5T460-160q-17 0-28.5-11.5T420-200Z") }
+
+    /**
+     * 上游 `Pause`（materialsymbolsrounded / fill1）。
+     *
+     * 「停止当前任务」用它而不是实心方块 `Stop`：方块在这一栏里读起来像
+     * "停止播放/关闭"，而暂停键表达的是"先停一下"——本工程的停止其实是
+     * **中断当前回合**，对话与上下文都还在，用户可以接着发。
+     */
+    val Pause: ImageVector by lazy { material("Pause", "M300-680q25 0 42.5 17.5T360-620v280q0 25-17.5 42.5T300-280q-25 0-42.5-17.5T240-340v-280q0-25 17.5-42.5T300-680Zm360 0q25 0 42.5 17.5T720-620v280q0 25-17.5 42.5T660-280q-25 0-42.5-17.5T600-340v-280q0-25 17.5-42.5T660-680Z") }
+
     /** 上游 `ChevronRight`（materialsymbolsrounded / fill1）。 */
     val ChevronRight: ImageVector by lazy { material("ChevronRight", "M504-480 348-636q-11-11-11-28t11-28q11-11 28-11t28 11l184 184q6 6 8.5 13t2.5 15q0 8-2.5 15t-8.5 13L404-268q-11 11-28 11t-28-11q-11-11-11-28t11-28l156-156Z") }
 

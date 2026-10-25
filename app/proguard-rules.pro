@@ -40,12 +40,13 @@
 # 2) 注解要能在运行期读到
 # ---------------------------------------------------------------------------
 #
-# Bcore 的 black-reflection 是**注解驱动**的反射：靠 @BClass / @BMethod(name = "…")
-# 这些运行期注解决定去反射哪个成员。注解属性若在压缩阶段被当成"没人读"丢掉，
-# 反射会静默失效。
+# 本工程的运行期注解消费方现在只剩 Shizuku 的 AIDL 生成物（Stub/Proxy 靠
+# 注解与签名描述符互相识别）。沙盒（Bcore / black-reflection）已整体移除，
+# 它那套 @BClass / @BMethod(name = "…") 的反射入口不存在了。
 #
-# 注意 Bcore 的 consumer 规则里已有一份类似的 keep —— 但那是针对 **Bcore 的类**
-# 写规则名；注解属性是被使用方（就是本模块）保留的，所以这里必须再声明一次。
+# 但这条规则**仍然必须保留**：注解属性一旦在压缩阶段被当成"没人读"丢弃，
+# 任何「靠注解名去反射」的路径都会静默失效 —— 而这类失效不会报错，只会在
+# 运行期返回 null。留着的成本是几 KB，去掉的代价是查不出来的空指针。
 -keepattributes *Annotation*, RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations, AnnotationDefault, Signature, InnerClasses, EnclosingMethod
 
 
@@ -66,9 +67,9 @@
 # 4) 隐藏 API 的引用
 # ---------------------------------------------------------------------------
 #
-# Bcore 要 hook 的本来就是 android.jar 里**不存在**的东西（ActivityThread、
-# ServiceManager、dalvik.system.* 等）。R8 拿编译期 android.jar 当参照，找不到
-# 这些类就会报 "Missing class"，而按 AGP 的默认严格度会直接让构建失败。
+# Termux 用户空间里的 ELF 与 Shizuku 的 AIDL 会引用 android.jar 里**不存在**的东西
+# （ActivityThread、ServiceManager、dalvik.system.* 等）。R8 拿编译期 android.jar
+# 当参照，找不到这些类就会报 "Missing class"，而按 AGP 的默认严格度会直接让构建失败。
 #
 # 这些类在**运行时一定存在**（就是设备上的 framework），所以警告本身是假警报，
 # 用 -dontwarn 关掉是正确做法，而不是用 -keep 去"保住"不存在的东西。
@@ -80,9 +81,6 @@
 -dontwarn sun.**
 -dontwarn org.apache.**
 -dontwarn org.slf4j.**
--dontwarn top.niunaijun.blackbox.**
--dontwarn top.niunaijun.blackreflection.**
--dontwarn top.niunaijun.jnihook.**
 
 
 # ---------------------------------------------------------------------------

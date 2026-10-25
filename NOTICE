@@ -9,7 +9,6 @@ ZhiCode（ZhiCode）第三方组件声明
 本文件的每一条都给出**来源 + 许可 + 对应文件 + 核实方式**，不按印象填写。
 判断依据、复核命令与**尚未闭合的缺口**集中在 docs/licensing.md。
 
-
 1. IQ Code — MIT（致谢）
 --------------------------------------------------------------------------------
 
@@ -28,84 +27,9 @@ LICENSE 与 docs/licensing.md 里都记有「原作者已明确许可本工程�
 
 当前残留行数请**以 `bash tools/provenance.sh` 的输出为准**（它会归一化包名与品牌后逐行比对，
 并把每一次扣减的依据写进 build/provenance-protocol-strings.txt）。本文件不抄会漂移的数字。
-
-
-2. BlackBox 虚拟化引擎（Bcore / black-reflection / compiler）— Apache-2.0
---------------------------------------------------------------------------------
-
-来源 : https://github.com/ALEX5402/NewBlackbox（BlackBox 血统）
-       本工程的这一份是**经上游 IQ Code 的副本**搬过来的：
-       ALEX5402/NewBlackbox ──(IQ Code 的 vendor 副本)──▶ IQ Code ──(本工程整棵复制)──▶ 本仓库
-       搬入提交：f849e14「Phase 7a: 移植 Bcore/black-reflection/compiler 三个模块并接入沙箱宿主」。
-       更上游的原始仓库 FBlackBox/BlackBox 今天仍在，但源码与许可文件已被作者移除
-       （/license 端点返回 404），因此再往上一层当时是什么许可已无从查证。
-       见 docs/licensing.md 第 5.4 节。
-许可 : Apache License 2.0
-许可原文: THIRD-PARTY-LICENSES/Apache-2.0.txt
-          以及各模块目录下的 LICENSE（Bcore/、black-reflection/、compiler/）
-
-对应目录 :
-  Bcore/            Android 虚拟运行时（guest 进程管理、Activity/Service 代理、系统服务 hook）
-  black-reflection/ 反射与注解处理
-  compiler/         编译期注解处理
-
-上游仓库只带 LICENSE，没有 NOTICE 文件，因此没有需要原样保留的 NOTICE。
-
-按 Apache-2.0 第 4 条，我们声明：**本工程对这些模块的构建脚本有改动，对 Bcore 的源码有改动；
-black-reflection 与 compiler 的源码未改动**（后者已与今天的上游 main 逐文件核对，内容一致）。
-
-逐模块的修改清单（这是 Apache-2.0 第 4(b) 条要求的那份声明）：
-
-  ▸ Bcore/NOTICE            —— 列出本工程自己的改动、vendoring 时带来的改动、
-                               与上游今天的差异（**归属不明**的那部分）以及预编译原生库的现状
-  ▸ black-reflection/NOTICE —— 声明未修改，并给出可重跑的核对方式
-  ▸ compiler/NOTICE         —— 同上
-
-⚠️ **两件尚未履行 / 尚未关闭的事**（详见 Bcore/NOTICE 与 docs/licensing.md 第 9 节）：
-
-  1. Apache-2.0 第 4(b) 条要求「修改过的**文件**携带显眼声明」，而目前只有模块级 NOTICE
-     的汇总声明，被修改的文件本身没有声明头（实测：Bcore/src/main/java 下 499 个 Java
-     文件里，带 Apache 声明头的为 0 个）。
-  2. 本工程没有钉住 vendoring 时的上游 revision，因此「与上游今天 main 的差异里，
-     哪些是上游自己的演进、哪些是 IQ Code 当时的改动」**无法逐文件归因**；
-     同时 Bcore 的预编译原生库 `jniLibs/arm64-v8a/libblackbox.so` 是一枚
-     **未经完整内容审计的二进制产物**（本仓库不含它的构建过程）。目前只核出了其中一项内容，
-     见下面的 2.1。
-
-
-2.1 静态链接在 libblackbox.so 内的 Dobby — Apache-2.0
---------------------------------------------------------------------------------
-
-来源 : https://github.com/jmpews/Dobby（内联 hook 引擎）
-许可 : Apache License 2.0
-许可原文: THIRD-PARTY-LICENSES/Apache-2.0.txt
-
-**它不是一个独立文件**，而是**被静态链接进** Bcore 的预编译原生库：
-
-  Bcore/src/main/jniLibs/arm64-v8a/libblackbox.so（343,624 字节，AARCH64 ELF）
-
-因此它不会出现在 `gradle` 依赖列表里，也不会以文件形式躺在仓库里 ——
-只能从二进制内容上认出来。核对方式（可重跑）：
-
-```bash
-tr -c '[:print:]' '\n' < Bcore/src/main/jniLibs/arm64-v8a/libblackbox.so \
-  | grep -aiE 'dobby' | sort -u
-# → 命中一组 Dobby 的源码路径与符号，例如：
-#     /Users/runner/work/Dobby/Dobby/source/MemoryAllocator/MemoryArena.cc
-#     /Users/runner/work/Dobby/Dobby/source/InterceptRouting/...
-#     Dobby / DobbyHook / DobbySymbolResolver
-```
-
-（路径里的 `/Users/runner/work/...` 说明这枚 Dobby 是在某个 CI 的 macOS runner 上编译的，
-进一步印证它是**随该 .so 一起被 vendoring 进来的构建产物**，而不是本工程现场编的。）
-
-按 Apache-2.0 第 4 条，我们在此声明：
-
-  · **本工程没有修改 Dobby 的源码**（没有它的源码副本，也没有它的构建配方）；
-  · **未改动其许可与版权声明** —— 它的许可文本随本仓库的 THIRD-PARTY-LICENSES/Apache-2.0.txt 一并提供；
-  · 本工程**未对它做过完整的静态内容审计**：除本项之外，该 .so 里是否还含其它第三方组件
-    目前未知（见 docs/licensing.md 第 5.4 节与第 9 节）。
-
+<!-- 原第 2 节「BlackBox 虚拟化引擎」与第 2.1 节「libblackbox.so 内的 Dobby」已随沙盒功能整体移除：
+     Bcore / black-reflection / compiler 三个模块、libblackbox.so 与它静态链接的 Dobby 都不再分发，
+     因此不再有署名义务。若将来恢复该功能，这两节必须一并恢复（内容见 git 历史）。 -->
 
 3. Termux 终端模拟与视图 — Apache-2.0
 --------------------------------------------------------------------------------
@@ -135,7 +59,6 @@ tr -c '[:print:]' '\n' < Bcore/src/main/jniLibs/arm64-v8a/libblackbox.so \
 这一点决定了本工程不必整体转为 GPL。判定依据（导出符号 → 上游文件 → 例外条款）
 见 docs/licensing.md 第 7.3 节，可重跑。
 
-
 4. termux-shared · TermuxConstants — MIT
 --------------------------------------------------------------------------------
 
@@ -152,7 +75,6 @@ tr -c '[:print:]' '\n' < Bcore/src/main/jniLibs/arm64-v8a/libblackbox.so \
 该文件在 ZhiCode 中是**整体重写**的：原版把应用私有目录的绝对路径写成 static final 常量，
 会被 javac 内联且绑死包名；现在全部路径在运行期由应用的 BuildConfig.APPLICATION_ID 派生。
 保留这个类名与调用点，是因为它们遍布全工程。
-
 
 5. Termux 用户空间（bootstrap 归档）— 各程序各自的许可
 --------------------------------------------------------------------------------
@@ -186,7 +108,6 @@ tr -c '[:print:]' '\n' < Bcore/src/main/jniLibs/arm64-v8a/libblackbox.so \
 使用者要拿到这些程序的源码，出处是 termux-packages 与上方的构建配方。
 **发行时请确认该源码对接收者可得。**
 
-
 6. 通过 Gradle 依赖引入的组件 — 随构件分发
 --------------------------------------------------------------------------------
 
@@ -204,7 +125,6 @@ tr -c '[:print:]' '\n' < Bcore/src/main/jniLibs/arm64-v8a/libblackbox.so \
 
 以及在构建期由 AGP 自动并入的 AndroidX / Jetpack Compose 运行时构件。
 以上（除已注明的 LGPL 项）均为 Apache-2.0 或其兼容许可。
-
 
 7. Material Symbols 图标（路径数据内联进源码）— Apache-2.0
 --------------------------------------------------------------------------------
@@ -239,7 +159,6 @@ tr -c '[:print:]' '\n' < Bcore/src/main/jniLibs/arm64-v8a/libblackbox.so \
   · 未改动上游的许可与版权声明（上游该目录下没有 NOTICE 文件，
     按 Apache-2.0 第 4 条在此声明这一点）。
 
-
 8. MaterialFiles 交互参考 — GPL-3.0（未复制源码）
 --------------------------------------------------------------------------------
 
@@ -251,7 +170,6 @@ tr -c '[:print:]' '\n' < Bcore/src/main/jniLibs/arm64-v8a/libblackbox.so \
 本工程**未复制**它的 Kotlin、Java、XML、资源或类名；编辑页是基于本工程
 现有 Compose/Miuix 与 Rosemoe Sora CodeEditor 的独立实现。
 因此本项是设计参考，不是随发行物链接或内嵌的 MaterialFiles 第三方代码。
-
 
 9. Rosemoe Sora Editor — LGPL-2.1
 --------------------------------------------------------------------------------
@@ -268,7 +186,6 @@ tr -c '[:print:]' '\n' < Bcore/src/main/jniLibs/arm64-v8a/libblackbox.so \
 ⚠️ LGPL 通常还涉及「允许使用者替换为修改后的库版本」这一条。**本工程尚未评估这一点**，
 现状记录在 docs/licensing.md 第 6.2 节与第 9 节的开放项里。
 
-
 10. TextMate 语法、语言配置与主题 — MIT / Apache-2.0
 --------------------------------------------------------------------------------
 
@@ -282,7 +199,6 @@ vscode-kotlin、vscode-logfile-highlighter、YAML-Syntax-Highlighter 等上游�
 逐项清单、已核实的版权行、已知的本地修改、以及**未核实项**与核实命令，
 见 app/src/main/assets/sora/textmate/NOTICE.md —— 那份文件是这一节的细则，请连它一起读。
 
-
 11. ZhiCode 自己的代码
 --------------------------------------------------------------------------------
 
@@ -295,7 +211,6 @@ ZhiCode 自身的代码（Compose 界面层、沙箱宿主层、引擎与工具�
 （`app/tests/LicenseNoticeStructureTest.java`）盯着它们与其中的关键表述，
 **它已随 `app/tests/` 整套删除**。删掉许可文件不会导致编译或运行失败，
 所以发行前必须**人工清点**这三者是否齐全、内容是否与代码一致。
-
 
 --------------------------------------------------------------------------------
 附：本文件与相关文件的分工

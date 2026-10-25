@@ -860,6 +860,13 @@ data class WorkspaceUiState(
      */
     val themePageOpen: Boolean = false,
     /**
+     * 「聊天显示」页（自定义字体 + 正文字号）是否打开。
+     *
+     * <p>与 [themePageOpen] 同一类：页面要的数据全在 [themeSettings] 里，
+     * 没有要读盘或异步加载的载荷，所以一个布尔就够。
+     */
+    val chatDisplayOpen: Boolean = false,
+    /**
      * 关于页 / 第三方许可页。
      *
      * <p>它们是**应用级**页面而不是设置子页：入口在侧栏与设置里各有一个，
@@ -984,7 +991,7 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/mcp", "配置和管理 MCP 服务器；/mcp list · add · enable · disable · remove <名称>"),
     SlashCommand("/web", "联网搜索设置；也可直接输入 /web 搜索词"),
     SlashCommand("/terminal", "打开内置 Termux 终端"),
-    SlashCommand("/sandbox", "打开 ZhiCode 沙箱；Agent 可安装、运行和调试虚拟 APK"),
+    SlashCommand("/sandbox", "沙盒功能已移除（内置虚拟运行时不再分发）"),
     SlashCommand("/files", "打开项目文件与代码编辑器"),
     SlashCommand("/doctor", "检查 Termux 运行环境"),
     SlashCommand("/repair", "修复中断的 apt/dpkg 状态"),

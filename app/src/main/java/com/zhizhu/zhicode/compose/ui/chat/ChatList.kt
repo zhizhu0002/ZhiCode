@@ -63,6 +63,8 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.VerticalScrollBar
 import top.yukonga.miuix.kmp.basic.rememberScrollBarAdapter
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 /**
  * 对话内容的指纹。
@@ -511,7 +513,22 @@ fun ChatList(
         ) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().padding(start = 14.dp),
+                // 两个 Miuix 的滚动行为，与其余九个列表（设置 hub / 各二级页 /
+                // 文件页 / 主题页 …）保持一致：
+                //
+                // · `overScrollVertical()`  跨边界时的阻尼 —— 没有它，滚到顶/底是
+                //   **硬停**，手指继续拖也不动，像撞在墙上；
+                // · `scrollEndHaptic()`     到顶/底时一次轻触感。
+                //
+                // ⚠️ 顶部与 `PullToRefresh` 有潜在手势竞争：下拉补页由它接管，
+                // 而 `overScrollVertical` 也会在 top 越界时介入。实测若出现
+                // 「下拉加载更早」变得不灵敏或指示器抖动，就把 `overScrollVertical()`
+                // 去掉、只留 `scrollEndHaptic()` —— 触感不参与手势判定，零冲突。
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 14.dp)
+                    .overScrollVertical()
+                    .scrollEndHaptic(),
                 contentPadding = PaddingValues(top = topInset, bottom = bottomInset),
             ) {
                 if (state.transcript.isEmpty()) {

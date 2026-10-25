@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -15,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiColors
@@ -25,6 +27,8 @@ import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.Slider
+import top.yukonga.miuix.kmp.basic.SliderDefaults
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -230,7 +234,21 @@ internal fun SettingsIntField(
     )
 }
 
-/** 布尔开关。转发到 Miuix [SwitchPreference]（整行可点，右侧滑块）。 */
+/**
+ * 布尔开关。转发到 Miuix [SwitchPreference]（右侧滑块）。
+ *
+ * ## 整行是否可点，由 Miuix 决定，本工程不加参数
+ *
+ * 曾经考虑过加一个 `rowClickable` 让整行都能切换。核实之后放弃：
+ * `switchpreference.md` 的变更日志里有一条 **"Remove `onClick` from some composite
+ * components"** —— Miuix 明确把 `onClick` 从 `SwitchPreference` 这类组合组件上**删掉**了。
+ * 它现在只收 `onCheckedChange` 与 `holdDownState`，点击语义由组件内部统一处理。
+ *
+ * 所以这里**不能**再传 `onClick`（参数不存在，传了编译就过不去），
+ * 也不该在行外面套一层 `Modifier.clickable` —— 那会与组件内部的交互源重复，
+ * 得到"点一次切换两次"或按压态错乱。整行点不点得动是库的行为，
+ * 本工程只负责把 `onCheckedChange` 接对。
+ */
 @Composable
 internal fun SettingsToggle(
     title: String,
@@ -243,9 +261,6 @@ internal fun SettingsToggle(
      *
      * 不可用时 Miuix 会把整行压成"点不动"的观感（滑块也会变灰），**不要再自己吞掉点击**
      * 当兜底 —— 那会得到"看着能点、点了没反应"，比一个明显的灰开关更难查。
-     *
-     * 沙箱页用它表达"后端不通"：那时开关值是从 `SandboxPrefs` 回读的已保存值，
-     * 点它只会再失败一次。
      */
     enabled: Boolean = true,
     icon: Painter? = null,
@@ -260,6 +275,127 @@ internal fun SettingsToggle(
         startAction = plateStartAction(icon, plate),
         enabled = enabled,
     )
+}
+
+/**
+ * 数值胶囊：行尾那枚显示当前值的圆角小标签。
+ *
+ * 借鉴 rikkahub 的 `CardGroupValue`，但**形状与配色走 Miuix 语义色**，
+ * 不搬它的 `MaterialTheme.colorScheme.secondaryContainer`（那是 M3 的）。
+ *
+ * ## 为什么必须等宽数字
+ *
+ * 拖动滑块时值一直在变（`85%` → `100%`）。比例数字默认不等宽，`1` 比 `0` 窄，
+ * 于是胶囊会随数值**左右抖**——滑杆的拇指在动、旁边那个数字的宽度也在动，
+ * 两处都在动会显得界面不稳。
+ *
+ * `fontFeatureSettings = "tnum"`（tabular numbers）让每个数字占同样宽度，
+ * 胶囊宽度只随**字符个数**变化（`9%` → `10%` 会变一次，这是对的，也应该变）。
+ *
+ * 单位跟随小数点的写法不在这里处理：调用方给什么字符串就显示什么，
+ * 格式化属于业务（`formatUiScale` 之类），这一层只负责"画一枚值"。
+ */
+@Composable
+internal fun SettingsValuePill(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MiuixTheme.colorScheme
+    Surface(
+        modifier = modifier,
+        shape = CircleShape,
+        color = scheme.secondaryContainer,
+        contentColor = scheme.onSecondaryContainer,
+    ) {
+        Text(
+            text = text,
+            // `tnum` 在 Miuix 的 Text 上通过 TextStyle 的 fontFeatureSettings 传下去。
+            style = androidx.compose.ui.text.TextStyle(
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                fontWeight = FontWeight.Medium,
+                fontFeatureSettings = "tnum",
+            ),
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
+}
+
+/**
+ * 滑杆行：标题在上一行、滑杆在下一行，右侧是当前值胶囊。
+ *
+ * ## 为什么用 `ArrowPreference` 的 `bottomAction`
+ *
+ * Miuix 的 `SliderPreference` 是把滑杆**画在行内**的一条紧凑控件：
+ * 标题、说明、滑杆挤在同一行的垂直空间里，可点面积小、拖动时也容易误触整行。
+ *
+ * 官方给的扩展点是 `bottomAction` 槽位（`BasicComponent` 与 `ArrowPreference` 都有），
+ * 语义正是"标题行下方接一块自定义内容"。ksu-style 的主题页缩放项就是这么写的：
+ * 标题行走 `ArrowPreference`（自带 `›`、整行可点开弹窗），滑杆占据下方整行宽度。
+ *
+ * ## `onClick` 可以是 null
+ *
+ * 主题页那处点标题会打开 `ScaleDialog`（精确输入），所以传 `onClick`；
+ * 但绝大多数滑杆行没有"第二层"，那时给 `null` —— 但 `ArrowPreference` 会**照画箭头**，
+ * 所以无 `onClick` 时改用 `BasicComponent`（没有箭头），避免"有箭头却点不动"。
+ */
+@Composable
+internal fun SettingsSliderRow(
+    title: String,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    valueText: String,
+    summary: String? = null,
+    steps: Int = 0,
+    showKeyPoints: Boolean = false,
+    keyPoints: List<Float>? = null,
+    magnetThreshold: Float = 0.02f,
+    onClick: (() -> Unit)? = null,
+    holdDownState: Boolean = false,
+    icon: Painter? = null,
+    plate: Color? = null,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val endActions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+        SettingsValuePill(text = valueText)
+    }
+    val bottom: @Composable () -> Unit = {
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            steps = steps,
+            showKeyPoints = showKeyPoints,
+            keyPoints = keyPoints,
+            magnetThreshold = magnetThreshold,
+            hapticEffect = SliderDefaults.SliderHapticEffect.Step,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+
+    if (onClick != null) {
+        ArrowPreference(
+            title = title,
+            summary = summary,
+            summaryColor = hintColors(warn = false),
+            startAction = plateStartAction(icon, plate),
+            endActions = endActions,
+            bottomAction = bottom,
+            onClick = onClick,
+            holdDownState = holdDownState,
+        )
+    } else {
+        BasicComponent(
+            title = title,
+            titleColor = BasicComponentDefaults.titleColor(color = scheme.onBackground),
+            summary = summary,
+            summaryColor = hintColors(warn = false),
+            startAction = plateStartAction(icon, plate),
+            endActions = endActions,
+            bottomAction = bottom,
+        )
+    }
 }
 
 /**

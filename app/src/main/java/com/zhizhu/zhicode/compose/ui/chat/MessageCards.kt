@@ -45,6 +45,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import android.os.SystemClock
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
+import com.zhizhu.zhicode.compose.data.ChatFontLoader
 import com.zhizhu.zhicode.compose.engine.ToolText
 import com.zhizhu.zhicode.compose.model.ToolActions
 import com.zhizhu.zhicode.compose.model.ChatImage
@@ -289,6 +291,12 @@ fun AssistantCard(
     onLongPress: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
+    // 「聊天显示」页的两项设置在这里落地。放在这一层读一次、往下传：
+    // 逐条消息各自去 Local 里取会让每个气泡都多一次组合局部查找，
+    // 而这一层本来就是每条 AI 消息的唯一入口。
+    val chatSettings = LocalThemeSettings.current
+    val chatFontScale = chatSettings.chatFontScale
+    val chatFontFamily = ChatFontLoader.rememberChatFontFamily(chatSettings)
     var showFullBody by remember(item.id) { mutableStateOf(false) }
     val bodyTooLong = item.body.length > MaxInitialMarkdownChars
     val markdownBody = if (bodyTooLong && !showFullBody) {
@@ -370,7 +378,11 @@ fun AssistantCard(
             // （见 settledPrefixLength）：不传的话每 32ms 会重建整篇。
             ZhiMarkdown(
                 source = markdownBody,
-                bodyFontSize = MiuixTheme.textStyles.main.fontSize,
+                // 字号与字体来自「聊天显示」页（`ThemeSettings.chatFontScale` /
+                // `chatFont`）。与「界面缩放」是两条独立的路：那一条改 `LocalDensity`，
+                // 连按钮图标一起变；这一条只改阅读正文。
+                bodyFontSize = MiuixTheme.textStyles.main.fontSize * chatFontScale,
+                bodyFontFamily = chatFontFamily,
                 streaming = item.streaming && !bodyTooLong,
             )
             if (bodyTooLong && !showFullBody) {

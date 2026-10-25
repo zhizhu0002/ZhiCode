@@ -21,17 +21,17 @@ import com.termux.app.zhicode.model.SessionConfig;
  *       succeeded / Never claim a file was changed），「一次只干一件事」与「别顺手加需求」
  *       也在两条里各说了一遍。重复不只是浪费 token —— 模型会把重复的条目当成更强的约束，
  *       于是行为被一条本该是次要的规则带偏。</li>
- *   <li><b>噪音。</b>沙箱与 Frida 的细则占了近一半篇幅，而绝大多数会话一次都用不到。
- *       提示词越长，真正重要的那几条越容易被稀释。</li>
+ *   <li><b>噪音。</b>曾经有沙箱与 Frida 的细则占了近一半篇幅，而绝大多数会话一次都用不到。
+ *       提示词越长，真正重要的那几条越容易被稀释。沙箱功能已移除，那一段随之删除。</li>
  *   <li><b>没有层次。</b>平铺的列表看不出「哪几条是硬约束、哪几条是风格偏好」。</li>
  * </ul>
  *
- * <p>现在分成七段（工作方式 / 真实性与验证 / 工具选择 / 项目·任务·子代理 / 联网 /
- * APK 安装 / 沙箱与原生调试），并且：
+ * <p>现在分段（工作方式 / 真实性与验证 / 工具选择 / 项目·任务·子代理 / 联网 /
+ * APK 安装），并且：
  * <ul>
  *   <li>语义重复的条目合并成一条更短的说法；</li>
- *   <li><b>沙箱细则只在 {@code sandboxAgentFullAccess} 打开时展开</b> —— 关着的时候
- *       模型需要知道的只是「有这两个工具，但每次都要用户确认」，那一段只有两行；</li>
+ *   <li><b>沙箱细则整段已删除</b> —— 那一节原本按 {@code sandboxAgentFullAccess}
+ *       在「两行版」与「Frida 全细则」之间切换，现在两者都不存在了；</li>
  *   <li>Root 与 Shell 身份各自二选一，不出现「有 Shizuku 就等于有 root」这类错误暗示。</li>
  * </ul>
  *
@@ -75,8 +75,7 @@ public final class SystemPromptBuilder {
             + "as the visible Terminal tab).\n"
             + "- Inspect repository state: GitStatus (overview); Bash for git mutations, tests and builds.\n"
             + "- Open a URL, another app or an Android system screen: AndroidIntent.\n"
-            + "- Run and debug an APK without installing it on the phone: Sandbox; inspect that guest "
-            + "process with Debug.\n"
+            + "- Inspect a real-phone process: Debug (scope=host, needs Agent Root).\n"
             + "- Customize the running UI without rebuilding: ui_canvas.\n"
             + "- Research current public information: WebSearch then WebFetch.\n";
 
@@ -188,68 +187,23 @@ public final class SystemPromptBuilder {
     };
 
     /**
-     * APK 安装：**逐字保留**上一版的措辞。
+     * APK 安装。**只剩真机一条路径** —— 沙箱已移除。
      *
-     * <p>这里是行为契约而不只是说明：两个目标（真机 / 沙箱）与两个选项文案在界面里
-     * 也各有一份，措辞一变，模型给用户看的选择就和按钮对不上。
+     * <p>这里原本是"两个目标（真机 / 沙箱）"的契约，还要求模型在目标不明时
+     * 用 AskUserQuestion 让用户在两者间选。沙箱删掉之后那个问题没有第二个选项了，
+     * 继续问只会得到一次无意义的确认，所以整段收成一句明确指令：
+     * **装到这台手机上，且走 Android 的安装器**。
+     *
+     * <p>措辞仍然固定：界面与文档里对同一条行为的描述必须一致，
+     * 模型给用户看的话和真实发生的事不能有偏差。
      */
     private static final String[] APK_INSTALL = {
-        "APK installation has two distinct targets: the real phone and ZhiCode 沙箱. Never silently choose "
-            + "the real phone and never install to both. If the user explicitly says 本机/真机/手机/system/host, "
-            + "use the real-phone path. If they explicitly say 沙箱/容器/virtual/ZhiCode 沙箱, use Sandbox "
-            + "action=install. If the target is ambiguous, call AskUserQuestion before installing and offer "
-            + "exactly two choices: `ZhiCode 沙箱（隔离运行，推荐用于测试/调试）` and `本机 Android` .",
-        "For a real-phone APK install: first verify the APK exists. When Agent Root is enabled and the "
-            + "user selected the real phone, prefer Root with Android `pm install -r` (and report the actual "
-            + "result). When Root is disabled or unavailable, use AndroidIntent operation=install_apk so "
-            + "Android's package installer handles it. Never use Root to install an APK into ZhiCode 沙箱.",
+        "APK installation targets this phone only; the embedded virtual runtime was removed and there is "
+            + "no sandbox target any more.",
+        "Verify the APK exists first. When Agent Root is enabled, prefer Root with Android `pm install -r` "
+            + "and report the actual result. Otherwise use AndroidIntent operation=install_apk so Android's "
+            + "package installer handles the install, permission prompt and result.",
     };
-
-    /** 沙箱**关**着全权时的两行版：告诉它工具有、但每次要确认，不给任何操作细节。 */
-    private static final String[] SANDBOX_BRIEF = {
-        "Sandbox runs an APK inside the embedded virtual Android runtime and Debug inspects that guest "
-            + "process. Each call needs the user's confirmation in this mode, so state what you are about to "
-            + "do before you do it.",
-        "Install then launch a guest with Sandbox. Never treat the embedded runtime as a security boundary "
-            + "for untrusted apps, and never install a guest APK on the real phone without asking.",
-    };
-
-    /**
-     * 沙箱**全权**时的细则：用户已经预先授权这一范围内的操作，所以这里给的是
-     * 「怎么做才对」，而不是「先问」。
-     *
-     * <p>这一段最长，也正因如此它必须是有条件的：绝大多数会话根本用不到 Frida。
-     */
-    private static final String[] SANDBOX_FULL = {
-        "Sandbox install -> launch -> dump_ui/screenshot/debug_snapshot. The screenshot path uses the Guest "
-            + "Window compositor (PixelCopy) first, so SurfaceView/OpenGL/Vulkan/video layers are captured "
-            + "when Android allows it; capture_method tells you whether PixelCopy succeeded or the View.draw "
-            + "fallback ran. Never claim a secure/DRM surface was captured when Android reported a "
-            + "protected-surface failure. Prefer click_node/long_click_node/set_text for native View nodes, "
-            + "tap/swipe/input_text when coordinate input fits better, and back for navigation. Dump the UI "
-            + "again after a transition because node paths change.",
-        "A launched guest may sit in front of ZhiCode while the agent keeps running: MainActivity.onPause is "
-            + "not task cancellation. The guest window has an injected control bar for the human, and a "
-            + "foreground guard keeps the agent process alive.",
-        "Native debugging goes through Debug with scope=sandbox and the exact package. Start from "
-            + "process_list, then modules/maps/threads/thread_dump. memory_read and memory_write go through "
-            + "the in-process Frida safety channel; /proc/self/mem and raw Unsafe copying are intentionally "
-            + "disabled because Android 15 returns EACCES or hard-crashes a racing guest.",
-        "For live instrumentation use the embedded Frida path: frida_runtime_status -> frida_install only "
-            + "when missing -> frida_load for the exact package and PID -> frida_modules/ranges/read/write/"
-            + "scan/protect/patch/export. frida_eval runs JavaScript inside that guest and may use Process, "
-            + "Module, Memory, Interceptor, Stalker, Thread, DebugSymbol, NativeFunction and ptr. Prefer "
-            + "frida_scan (or await IQ.scan in a script) over Memory.scanSync: it is bounded and asynchronous, "
-            + "so inspect complete/stop_reason/errors because mapping changes can produce partial results. "
-            + "The bundled Frida 17 runtime does not ship frida-java-bridge: do not assume Java.perform "
-            + "exists. Use frida_auto_attach enabled=true for startup-time hooks, then restart the guest.",
-        "load_library loads a .so from ZhiCode private storage into the selected guest PID. Re-read "
-            + "modules/maps afterwards because addresses change between launches, and never reuse a stale "
-            + "base address or guess a PID.",
-        "Debug scope=host is a separate rooted path for an explicitly identified real-phone process. It "
-            + "requires Agent Root and never injects libraries into unrelated Android or system processes.",
-    };
-
     // ------------------------------------------------------------ 拼装
 
     /**
@@ -294,7 +248,6 @@ public final class SystemPromptBuilder {
             + config.rootExecutionEnabled + '\u0000'
             + config.shizukuExecutionEnabled + '\u0000'
             + config.webSearchEnabled + '\u0000'
-            + config.sandboxAgentFullAccess + '\u0000'
             + config.customSystemPrompt + '\u0000'
             + config.roleCard + '\u0000'
             + suffix;
@@ -321,8 +274,6 @@ public final class SystemPromptBuilder {
         section(prompt, "Projects, tasks and subagents", SEC_PROJECT_TASKS);
         if (config.webSearchEnabled) section(prompt, "Web research", SEC_WEB);
         section(prompt, "APK installation", APK_INSTALL);
-        section(prompt, "Sandbox and native debugging",
-            config.sandboxAgentFullAccess ? SANDBOX_FULL : SANDBOX_BRIEF);
 
         prompt.append(customInstructions(config));
         prompt.append(roleCard(config));

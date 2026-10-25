@@ -67,7 +67,6 @@ internal data class EngineOverrides(
     val rootExecutionEnabled: Boolean? = null,
     /** Shizuku 工具开关。与 Root 独立：它的前提是「用过 adb 启动过 Shizuku」，不是「设备 root」。 */
     val shizukuExecutionEnabled: Boolean? = null,
-    val sandboxAgentFullAccess: Boolean? = null,
     val forcedKeepAliveEnabled: Boolean? = null,
 )
 
@@ -260,7 +259,7 @@ internal class ZhiEngineController(
         config.autoCompact.toString(), config.contextWindowTokens.toString(),
         config.webSearchEnabled.toString(), config.webSearchProvider,
         config.webSearchMaxResults.toString(), config.webTimeoutMs.toString(),
-        config.rootExecutionEnabled.toString(), config.sandboxAgentFullAccess.toString(),
+        config.rootExecutionEnabled.toString(),
         config.shizukuExecutionEnabled.toString(),
         config.forcedKeepAliveEnabled.toString(), config.workflowId,
     ).joinToString("\u0000")
@@ -984,7 +983,6 @@ internal fun applyEngineOverrides(config: SessionConfig, o: EngineOverrides) {
     o.webSearchServiceConfig?.let { config.webSearchServiceConfig = it }
     o.rootExecutionEnabled?.let { config.rootExecutionEnabled = it }
     o.shizukuExecutionEnabled?.let { config.shizukuExecutionEnabled = it }
-    o.sandboxAgentFullAccess?.let { config.sandboxAgentFullAccess = it }
     o.forcedKeepAliveEnabled?.let { config.forcedKeepAliveEnabled = it }
     o.roleCard?.let { config.roleCard = it }
 }
@@ -1027,7 +1025,6 @@ internal fun readEngineSettings(store: ApiSettingsStore): EngineOverrides? =
             webSearchServiceConfig = config.webSearchServiceConfig,
             rootExecutionEnabled = config.rootExecutionEnabled,
             shizukuExecutionEnabled = config.shizukuExecutionEnabled,
-            sandboxAgentFullAccess = config.sandboxAgentFullAccess,
             forcedKeepAliveEnabled = config.forcedKeepAliveEnabled,
         )
     }

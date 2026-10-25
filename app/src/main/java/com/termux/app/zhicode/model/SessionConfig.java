@@ -94,8 +94,6 @@ public final class SessionConfig {
     public String permissionModeBeforePlan = "default";
     /** 计划流程的当前快照。**整份替换**，所以是 volatile。 */
     public volatile PlanWorkflowState planWorkflowState = PlanWorkflowState.idle();
-    /** 只在沙箱内生效的完全授权。真机/系统进程不在范围内。 */
-    public boolean sandboxAgentFullAccess = true;
     /** 打开 Root 工具入口。命令仍然需要真实的 su 授权。 */
     public boolean rootExecutionEnabled = false;
     /**
@@ -201,7 +199,6 @@ public final class SessionConfig {
         copy.permissionMode = permissionMode;
         copy.permissionModeBeforePlan = permissionModeBeforePlan;
         copy.planWorkflowState = snapshotPlanWorkflowState();
-        copy.sandboxAgentFullAccess = sandboxAgentFullAccess;
         copy.rootExecutionEnabled = rootExecutionEnabled;
         copy.shizukuExecutionEnabled = shizukuExecutionEnabled;
         copy.forcedKeepAliveEnabled = forcedKeepAliveEnabled;
