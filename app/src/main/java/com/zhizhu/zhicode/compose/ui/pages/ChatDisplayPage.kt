@@ -37,6 +37,7 @@ import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPlateColors
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSliderRow
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
+import com.zhizhu.zhicode.compose.ui.settings.SettingsToggle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -202,7 +203,11 @@ fun ChatDisplayPage(
                 summary = "只改聊天正文；按钮与图标的大小由「界面缩放」控制，两者互不影响",
                 value = theme.chatFontScale,
                 valueText = "${(theme.chatFontScale * 100).toInt()}%",
-                onValueChange = { scale ->
+                valueTextFor = { "${(it * 100).toInt()}%" },
+                // 拖动中不落盘：字号比例要重排整段 Markdown（含代码块与公式位图），
+                // 逐帧落盘会让滑杆发涩。行内草稿负责跟手显示。
+                onValueChange = { },
+                commitValue = { scale ->
                     onChange { it.copy(chatFontScale = ThemeStore.clampChatFontScale(scale)) }
                 },
                 valueRange = ThemeStore.CHAT_FONT_SCALE_MIN..ThemeStore.CHAT_FONT_SCALE_MAX,
@@ -215,6 +220,47 @@ fun ChatDisplayPage(
                 magnetThreshold = 0.01f,
                 icon = ZhiIcons.tune,
                 plate = SettingsPlateColors.orange,
+            )
+        }
+
+        // ---- 数学公式 ----
+        SettingsGroup("数学公式") {
+            SettingsToggle(
+                title = "启用 LaTeX 渲染",
+                checked = theme.latexEnabled,
+                onCheckedChange = { enabled -> onChange { it.copy(latexEnabled = enabled) } },
+                summary = "识别 $…$、$$…$$、\\(…\\)、\\[…\\] 并用 LaTeX 语法渲染；" +
+                    "关闭时完全跳过解析，没有任何开销",
+                icon = ZhiIcons.tune,
+                plate = SettingsPlateColors.purple,
+            )
+        }
+
+        // ---- 代码显示 ----
+        SettingsGroup("代码显示") {
+            SettingsToggle(
+                title = "代码块自动换行",
+                checked = theme.codeWrap,
+                onCheckedChange = { enabled -> onChange { it.copy(codeWrap = enabled) } },
+                summary = "关闭时横向滚动，保留缩进结构；打开时长行折到下一行",
+                icon = ZhiIcons.file,
+                plate = SettingsPlateColors.blue,
+            )
+            SettingsToggle(
+                title = "代码块自动折叠",
+                checked = theme.codeCollapse,
+                onCheckedChange = { enabled -> onChange { it.copy(codeCollapse = enabled) } },
+                summary = "超过 12 行时先折叠，底部给「展开全部」",
+                icon = ZhiIcons.collapse,
+                plate = SettingsPlateColors.green,
+            )
+            SettingsToggle(
+                title = "显示行号",
+                checked = theme.codeLineNumbers,
+                onCheckedChange = { enabled -> onChange { it.copy(codeLineNumbers = enabled) } },
+                summary = "在代码块左侧显示行号；复制时不会带上行号",
+                icon = ZhiIcons.file,
+                plate = SettingsPlateColors.gray,
             )
         }
 

@@ -226,6 +226,20 @@ dependencies {
     implementation 'io.github.rosemoe:editor:0.24.6'
     implementation 'io.github.rosemoe:language-textmate:0.24.6'
 
+    /*
+     * LaTeX 数学公式渲染。
+     *
+     * `ru.noties:jlatexmath-android` 是 `org.scilab.forge:jlatexmath` 的 Android 移植：
+     * 上游那套是把公式画到 AWT `Graphics2D` 上，而 Android 没有 AWT，所以这个移植
+     * 把绘制换成 `android.graphics.Canvas`，并对外给一个 `Drawable`。
+     *
+     * 为什么用它而不是自写排版引擎：数学排版（上下标、分式、根式、矩阵、括号伸缩）
+     * 是一个规模远大于本项目的东西，自写只能做出"看起来像公式"的残缺版本。
+     *
+     * 许可证见 NOTICE（GPL-2.0 with Classpath exception 的一种，只在 APK 里静态链接）。
+     */
+    implementation 'ru.noties:jlatexmath-android:0.2.0'
+
     // 原版引擎源码里用到了 androidx.annotation 的 @NonNull/@Nullable 等注解，仅编译期需要
     compileOnly 'androidx.annotation:annotation:1.8.1'
 
