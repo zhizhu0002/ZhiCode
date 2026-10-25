@@ -256,6 +256,40 @@ fun ChatList(
      */
     var lastPrepend by remember { mutableStateOf(state.transcriptPrependRevision) }
 
+    /**
+     * 「该落到底」的待办标记。
+     *
+     * 切会话时置真，**真正贴到底之后**才由观察 `canScrollForward` 的那条 effect 清掉。
+     * 用它而不是"切会话时滚一次"的原因见下面 `collect` 里的长注释：
+     * 切会话那一帧列表还是空的，一次性的滚动会落空且永不重试。
+     */
+    var pendingBottom by remember { mutableStateOf(false) }
+
+    /*
+     * 往前补历史时**视口一动不动**（像聊天软件那样）。
+     *
+     * `LazyColumn` 靠 key 找回第一可见项，前插理论上不该移动视口。但这条路径
+     * 同时还会**从尾部淘汰**（`trimResidentTail`），前插 + 后删一起发生时锚定
+     * 会失准，列表把位置夹到某一项上 —— 表现就是用户报的
+     * 「每次加载信息就会给我弄到最上面」。
+     *
+     * 所以显式还原：记下补之前的第一可见项与偏移，补完之后按
+     * `原下标 + 前插条数` 请求滚动。`requestScrollToItem` 是非挂起的，
+     * 只登记目标、在下次测量里生效，所以这里不会产生可见的跳动。
+     */
+    LaunchedEffect(state.transcriptPrependRevision) {
+        if (state.transcriptPrependRevision == lastPrepend) return@LaunchedEffect
+        lastPrepend = state.transcriptPrependRevision
+        // 先取锚点：此刻列表还是补之前的状态。
+        val anchorIndex = listState.firstVisibleItemIndex
+        val anchorOffset = listState.firstVisibleItemScrollOffset
+        val added = state.transcriptPrependCount
+        if (added <= 0 || anchorIndex == 0) return@LaunchedEffect
+        // 等一帧：新内容要先被 LazyColumn 接收，下标空间才是新的。
+        withFrameNanos { }
+        listState.requestScrollToItem(anchorIndex + added, anchorOffset)
+    }
+
     /*
      * 「回到最新」之后显式落底。
      *
@@ -372,12 +406,47 @@ fun ChatList(
             // 新会话的第一页同样带着一次计数变化。
             val prepended = !switched && stamp.prepend != lastPrepend
             lastPrepend = stamp.prepend
-            if (listState.layoutInfo.totalItemsCount <= 0) return@collect
             // 尾部被淘汰过时也不吸底：那时"最后一条"不是最新消息，
             // 吸过去等于把用户钉在历史中间（而且要回到最新得整份替换，见 jump effect）。
             if (currentState.transcriptHasNewer) return@collect
-            if (switched || (autoFollowState.value && !prepended)) requestScrollToBottom(listState)
+
+            // ---- 切会话：把「落到底」记成**待办**，不是一次性动作 ----
+            //
+            // ⚠️ 这里原来是 `if (totalItemsCount <= 0) return@collect` 之后
+            // `if (switched) requestScrollToBottom()`。两处合起来是一个 bug：
+            //
+            //   切会话那一帧 `transcript` 还是**空的**（消息要异步从库里读），
+            //   于是 `totalItemsCount == 0` → 直接 return，**永不重试**；
+            //   等消息真的填进来时 `switched` 已翻假，`autoFollow` 又因为列表
+            //   停在顶部而判成"用户在看历史"，仍然不吸底。
+            //   结果就是「加载会话，对话流在顶上而不是底下」。
+            //
+            // 改成挂待办标记：还没真正落到底之前，每次内容变化都再试一次。
+            if (switched) pendingBottom = true
+            if (pendingBottom) {
+                if (listState.layoutInfo.totalItemsCount > 0) requestScrollToBottom(listState)
+                // **不在这里清标记**：`requestScrollToItem` 只登记目标，真正生效在
+                // 下一帧测量里。清早了，若那一帧条数又变（消息还在灌），会停在中间。
+                // 由下面那条"已贴底"的 effect 负责清。
+                return@collect
+            }
+
+            if (autoFollowState.value && !prepended) requestScrollToBottom(listState)
         }
+    }
+
+    /*
+     * 待办落底的收尾：真正贴到底之后才清标记。
+     *
+     * 单独一条 effect 观察"是否已贴底"，而不是在登记那一帧清 —— 见上面 pendingBottom 处。
+     */
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            info.totalItemsCount > 0 && !listState.canScrollForward
+        }
+            .distinctUntilChanged()
+            .collect { atBottom -> if (atBottom) pendingBottom = false }
     }
 
     // 输入法弹出/收起时把对话吸回底部：键盘顶起视口后列表可视高度骤变，

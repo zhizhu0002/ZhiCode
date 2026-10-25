@@ -40,6 +40,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.Animatable
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -262,6 +264,33 @@ private fun AboutContent(
     var versionCodeProgress by remember { mutableFloatStateOf(0f) }
     var initialLogoAreaY by remember { mutableFloatStateOf(0f) }
 
+    /*
+     * 入场动画。
+     *
+     * ## 为什么自己做一个
+     *
+     * 整页的推入/弹出由 `NavDisplay` 的 `NavTransitions.MiuixDefault` 负责，
+     * 但那一层只在**页面之间**成立。用户报的「进入关于页面没有动画」指的是：
+     * 这一页自己的元素是"啪"一下全出现的 —— hero 图标、应用名、版本号、
+     * 下面那两张卡，在同一帧里全部就位。
+     *
+     * ## 尺寸
+     *
+     * 位移 18dp、缩放从 0.94 到 1、透明度 0→1，用 `ZhiMotion` 里那两条
+     * 抄自 Miuix 的弹簧令牌（与设置页 FAB、弹窗进出同一节奏）。
+     * 位移不要更大：再大就会与 NavDisplay 的推入位移叠加，看起来像被拖了两次。
+     *
+     * ## 只跑一次
+     *
+     * `Animatable` + `LaunchedEffect(Unit)`：这一页重新进入组合（比如从第三方
+     * 许可返回）时会**再跑一次** —— 那是想要的，返回也是一次入场。
+     */
+    val enter = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        enter.animateTo(1f, animationSpec = ZhiMotion.scaleEnterSpec)
+    }
+    val enterProgress = enter.value
+
     LaunchedEffect(lazyListState) {
         snapshotFlow { lazyListState.firstVisibleItemScrollOffset }
             .onEach { offset ->
@@ -320,6 +349,15 @@ private fun AboutContent(
                     start = logoPadding.calculateStartPadding(layoutDirection),
                     end = logoPadding.calculateEndPadding(layoutDirection),
                 )
+                // 入场：透明度 + 轻微缩放与上浮。放在 padding **之后**，
+                // 于是缩放围绕内容自身中心、而不是整块留白的中心。
+                .graphicsLayer {
+                    alpha = enterProgress
+                    val s = 0.94f + 0.06f * enterProgress
+                    scaleX = s
+                    scaleY = s
+                    translationY = (1f - enterProgress) * 18.dp.toPx()
+                }
                 .onSizeChanged { size ->
                     with(density) { logoHeightDp = size.height.toDp() }
                 },
@@ -480,7 +518,16 @@ private fun AboutContent(
                     }
 
                     Card(
-                        modifier = Modifier.padding(horizontal = 12.dp),
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            // 卡片比 hero 稍晚、幅度稍小地进入：两块错开不到 1/4 个
+                            // 弹簧周期，读起来是"一起浮现"而不是"排着队出现"。
+                            // 用同一个 `enterProgress` 做二次曲线，避免再造一个动画。
+                            .graphicsLayer {
+                                val delayed = ((enterProgress - 0.18f) / 0.82f).coerceIn(0f, 1f)
+                                alpha = delayed
+                                translationY = (1f - delayed) * 12.dp.toPx()
+                            },
                         // ⚠️ 第二个参数是 **contentColor**，不是"再一个背景色"。
                         // example 写的是 `Color.Transparent` —— 那时卡上挂着 textureBlur，
                         // 内容确实要透出去；这一版没有 blur 了，再传 Transparent 会让卡里

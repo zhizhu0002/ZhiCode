@@ -328,17 +328,19 @@ fun AssistantCard(
         ),
         pressFeedbackType = PressFeedbackType.None,
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-        Box(
-            modifier = Modifier
-                .padding(top = 4.dp)
-                .width(2.dp)
-                .height(34.dp)
-                .background(scheme.primary, RoundedCornerShape(1.dp)),
-        )
+        // ⚠️ 这里原本有一条 2dp 宽的**强调色竖条**（`Box(width=2.dp, height=34.dp,
+        // background = scheme.primary)`），用 `Row` 摆在卡片左缘。
+        //
+        // 它的用意是"标出这是助手的回合"，但实际效果是：每出现一次思考过程，
+        // 左侧就会多一条蓝色短竖线 —— 一条回答里思考三轮就有三条，看起来像
+        // 排版错误而不是装饰。而且它固定 34dp 高，与内容高度无关，
+        // 思考面板展开/收起时那条线一动不动，反而更显眼。
+        //
+        // 用户明确要求删掉。删掉之后不需要外层 `Row` 了（原本只为并排放它），
+        // `Column` 直接占满宽度，正文左右留白也随之与其它卡片一致。
         Column(
             modifier = Modifier
-                .weight(1f)
+                .fillMaxWidth()
                 // clip 在 animateContentSize **外侧**：思考面板展开/收起时文字
                 // 按自然高度绘制、被逐帧露出来（详见 ToolGroupCard 的注释）。
                 .clipToBounds()
@@ -450,7 +452,6 @@ fun AssistantCard(
                     window = item.contextWindow,
                 )
             }
-        }
         }
     }
 }

@@ -10,9 +10,19 @@ import androidx.compose.runtime.remember
 import com.zhizhu.zhicode.compose.data.TabBarPosition
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.WorkspaceTabs
+import top.yukonga.miuix.kmp.basic.Surface
 import com.zhizhu.zhicode.compose.ui.WorkspaceTabRowHeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Color
+import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.ui.effects.pressSink
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -165,9 +175,11 @@ internal fun WorkspacePage(
             modifier = Modifier.fillMaxSize().padding(
                 bottom = padding.calculateBottomPadding() +
                     // 底栏模式下内容要给底部标签栏让位，否则最后一行会被它压住。
-                    // 高度取标签行 + 悬浮时的上下内边距，与上面那块的实际占位一致。
+                    // 数值与上面浮条的实际占位逐步对应：
+                    //   标签行 45dp + 浮条内 padding 上下各 4dp + 浮条外 6dp×2。
+                    // 贴边形态没有那两圈 padding，所以只让 45dp。
                     if (!wide && themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM) {
-                        WorkspaceTabRowHeight + if (themeSettings.tabBarFloating) 16.dp else 0.dp
+                        WorkspaceTabRowHeight + if (themeSettings.tabBarFloating) 20.dp else 0.dp
                     } else {
                         0.dp
                     },
@@ -210,36 +222,80 @@ internal fun WorkspacePage(
 
             // ---- 底部标签栏（窄屏 + 用户选了「底栏」）----
             //
-            // 只有窄屏才做这个切换：宽屏的标签组在右侧副栏里常驻，挪到底部会离内容太远。
-            // 悬浮形态复用 `FloatingBottomShell`（与输入器同一套玻璃/圆角/内缩逻辑），
-            // 所以两种栏在视觉上是同一族，不会一个毛玻璃一个实色。
+            // 形态**照文件页的选中工具栏**（`FileSelectionToolbar`）：一条独立的
+            // 悬浮胶囊，玻璃底 + 1dp 高光描边 + 阴影，左右 18dp 内缩。
+            //
+            // ⚠️ 上一版这里是"把标签栏搬到底部再叠一层实心色块"：
+            //   · 用 `background(surfaceContainer)` 直接填 —— 于是它是一块**不透明**
+            //     的方块，与周围毛玻璃的输入器完全不是一族；
+            //   · 没有任何位移，位置正好压在输入器上 —— 两者重叠，看起来像
+            //     "输入器上面多了一排按钮"。
+            // 现在改成真正的浮条：`ActiveSurface` 负责玻璃与描边，
+            // `AnimatedVisibility` 负责滑入，位置由它在内容之上单独占一层。
             if (!wide && themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        // 悬浮时给一层额外内缩；贴边时不留，避免多出一圈空。
-                        .padding(
-                            horizontal = if (themeSettings.tabBarFloating) 12.dp else 0.dp,
-                            vertical = if (themeSettings.tabBarFloating) 8.dp else 0.dp,
-                        ),
+                AnimatedVisibility(
+                    visible = true,
+                    enter = slideInVertically { it } + fadeIn(),
+                    exit = slideOutVertically { it } + fadeOut(),
+                    modifier = Modifier.align(Alignment.BottomCenter),
                 ) {
-                    WorkspaceTabs(
-                        tabs = WorkspaceTab.entries,
-                        selected = state.tab,
-                        pagerPage = compactPagerState.currentPage,
-                        onSelect = { tab ->
-                            ZhiFrameTrace.begin("tab:${tab.name}")
-                            viewModel.selectTab(tab)
-                        },
-                        modifier = if (themeSettings.tabBarFloating) {
-                            Modifier
-                                .clip(RoundedCornerShape(ZhiRadius.floating))
-                                .background(MiuixTheme.colorScheme.surfaceContainer)
+                    val floating = themeSettings.tabBarFloating
+                    val shape = RoundedCornerShape(if (floating) 28.dp else 0.dp)
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                horizontal = if (floating) 18.dp else 0.dp,
+                                vertical = if (floating) 6.dp else 0.dp,
+                            )
+                            .then(
+                                if (floating) {
+                                    glassMain.blur(Modifier, shape, radius = 20f)
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .then(
+                                if (floating) {
+                                    Modifier.border(
+                                        width = 1.dp,
+                                        color = if (ZhiColors.isDark()) {
+                                            Color.White.copy(alpha = 0.10f)
+                                        } else {
+                                            Color.White.copy(alpha = 0.62f)
+                                        },
+                                        shape = shape,
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            ),
+                        shape = shape,
+                        color = if (floating) {
+                            glassMain.surfaceColor(
+                                if (ZhiColors.isDark()) {
+                                    MiuixTheme.colorScheme.surfaceContainer
+                                } else {
+                                    ZhiColors.panelSurface()
+                                },
+                            )
                         } else {
-                            Modifier.background(MiuixTheme.colorScheme.surfaceContainer)
+                            MiuixTheme.colorScheme.surfaceContainer
                         },
-                    )
+                        contentColor = MiuixTheme.colorScheme.onSurface,
+                        shadowElevation = if (floating) 12.dp else 0.dp,
+                    ) {
+                        WorkspaceTabs(
+                            tabs = WorkspaceTab.entries,
+                            selected = state.tab,
+                            pagerPage = compactPagerState.currentPage,
+                            onSelect = { tab ->
+                                ZhiFrameTrace.begin("tab:${tab.name}")
+                                viewModel.selectTab(tab)
+                            },
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                        )
+                    }
                 }
             }
 

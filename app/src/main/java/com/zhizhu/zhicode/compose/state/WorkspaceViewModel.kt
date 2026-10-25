@@ -5401,6 +5401,10 @@ class WorkspaceViewModel(
                         transcriptLoadingOlder = false,
                         // 让列表知道这次变长是**往前补**的（见 UiModels 里的说明）。
                         transcriptPrependRevision = current.transcriptPrependRevision + 1,
+                        // 前插了几条：列表据此把视口还原到原来那条，做到"不动"。
+                        // 用 kept 与 current 的条数差**不可靠**（尾部同时被淘汰过），
+                        // 所以直接记 page.items.size —— 那正是新插到前面的条数。
+                        transcriptPrependCount = page.items.size,
                     )
                 }
             }

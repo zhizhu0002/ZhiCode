@@ -99,11 +99,19 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
  */
 @Composable
 internal fun SettingsGroup(
-    title: String,
+    /**
+     * 分组标题。为 **null 时不画标题行**，只剩卡片本体。
+     *
+     * 用 null 而不是空串表达"没有标题"：空串会让 `SettingsGroupHeader` 画一行
+     * 高度不为零的空标题，卡片上方凭空多出一块留白。
+     */
+    title: String? = null,
     horizontalPadding: Dp = 12.dp,
     content: @Composable () -> Unit,
 ) {
-    SettingsGroupHeader(title, modifier = Modifier.padding(horizontal = horizontalPadding))
+    if (title != null) {
+        SettingsGroupHeader(title, modifier = Modifier.padding(horizontal = horizontalPadding))
+    }
     Card(
         modifier = Modifier.padding(horizontal = horizontalPadding),
         cornerRadius = ZhiRadius.card,

@@ -128,7 +128,15 @@ fun SettingsPage(
     if (draft == null) return
 
     val scheme = MiuixTheme.colorScheme
-    val listState = rememberLazyListState()
+    // ⚠️ 必须用 `rememberSaveable`，不能是 `rememberLazyListState()`。
+    //
+    // 设置页是 `NavDisplay` 的一个 entry：进「关于」再返回，这个 entry 会**重建**，
+    // 普通 `remember` 里的滚动位置随之丢失 —— 表现就是"从关于返回，设置回到最顶上"。
+    // `LazyListState.Saver` 是 Compose 官方为这个场景提供的：它把
+    // （首项下标, 首项偏移）写进 saveable 状态，重建时原样恢复。
+    val listState = androidx.compose.runtime.saveable.rememberSaveable(
+        saver = androidx.compose.foundation.lazy.LazyListState.Saver,
+    ) { androidx.compose.foundation.lazy.LazyListState() }
     val topAppBarScrollBehavior = MiuixScrollBehavior()
 
     Scaffold(
@@ -183,6 +191,12 @@ fun SettingsPage(
                 item(key = "context", contentType = "settings-group") { SettingsGroup("上下文与项目") { ContextProjectPage(draft, onChange, onNavigate) } }
                 item(key = "agent", contentType = "settings-group") { SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) } }
                 item(key = "extensions", contentType = "settings-group") { SettingsGroup("扩展") { ExtensionsPage(onNavigate, extensions) } }
+                // 「关于」单独成组：它是**元信息**（版本/源码/许可），
+                // 与上面那些"能配置 / 能增删"的扩展项不是同一类。
+                // 混在一起时用户找不到它 —— 它看起来像又一个扩展入口。
+                item(key = "meta", contentType = "settings-group") {
+                    SettingsGroup { MetaPage(onNavigate) }
+                }
             }
             // Miuix 原生滚动条
             // 设置页是自动保存，但"保存失败""已切换 API 配置"这类反馈仍然要看得见。
@@ -193,6 +207,40 @@ fun SettingsPage(
 }
 
 // ------------------------------------------------------------------ 各分类页
+
+/**
+ * 元信息分组：关于 + 记忆文件。
+ *
+ * ## 为什么单独一张卡
+ *
+ * 这两项与「扩展」里那些（MCP / Skill / 角色卡）**性质不同**：那些是"能配置、
+ * 能增删的扩展能力"，而这两项是"这个应用是什么、它怎么记住事"。
+ * 混在一起时用户在扩展里找「关于」会连看几遍都找不到 —— 它读起来像又一个扩展入口。
+ *
+ * 单独成组之后它在视觉上是**最后一张卡**，位置本身就是"这一页的收尾"。
+ *
+ * ## 为什么没有标题
+ *
+ * 一行入口 + 一张无标题卡，就是这一组的全部。给两个小入口配一个"其它"标题会
+ * 多出一行只在重复自己意思的文字（`SettingsGroup` 支持 `title = null`）。
+ */
+@Composable
+private fun MetaPage(onNavigate: (String) -> Unit) {
+    SettingsIconEntry(
+        title = "关于 ZhiCode",
+        summary = "其他",
+        icon = ZhiIcons.info,
+        plate = SettingsPlateColors.gray,
+        onClick = { onNavigate("about") },
+    )
+    SettingsIconEntry(
+        title = "记忆文件 · ZhiCode.md",
+        summary = "项目级与用户级说明文件",
+        icon = ZhiIcons.file,
+        plate = SettingsPlateColors.orange,
+        onClick = { onNavigate("memory") },
+    )
+}
 
 /** 主题模式的显示文案对齐参考图的「夜间模式 / 白天模式」。 */
 private fun themeLabel(mode: ThemeMode): String = when (mode) {
@@ -259,12 +307,16 @@ private fun ModelServicePage(
         plate = SettingsPlateColors.blue,
     )
 
-    SettingsChoice(
+    // 布尔项用开关，不用下拉菜单。
+    //
+    // 之前这里是 `SettingsChoice`（两个选项的下拉），点开还要再选一次 ——
+    // 一个只有"开/关"两种状态的设置，多出两层点击是纯粹的负担，
+    // 而且行尾显示的是「开启（发送图片给模型）」这种长句，比开关本身更占地方。
+    SettingsToggle(
         title = "视觉图片输入（Vision）",
-        options = listOf("开启（发送图片给模型）", "关闭（仅保留本地预览）"),
-        selectedIndex = if (draft.visionEnabled) 0 else 1,
-        onSelect = { onChange(draft.copy(visionEnabled = it == 0)) },
-        summary = "模型不支持 vision 时请关闭",
+        checked = draft.visionEnabled,
+        onCheckedChange = { enabled -> onChange(draft.copy(visionEnabled = enabled)) },
+        summary = "发送图片给模型；模型不支持 vision 时请关闭",
         // 与输入器里"图片附件"同一个照片字形。
         icon = ZhiIcons.image,
         plate = SettingsPlateColors.purple,
@@ -606,22 +658,8 @@ private fun ExtensionsPage(onNavigate: (String) -> Unit, extensions: ExtensionSu
         plate = SettingsPlateColors.green,
         onClick = { onNavigate("roleCards") },
     )
-    // 「关于」现在有真实内容了（版本 / 源码 / 许可证 / 第三方组件许可），
-    // 所以把它加回来 —— 之前删掉的理由是"点了没反应的空壳不如没有"。
-    SettingsIconEntry(
-        title = "关于 ZhiCode",
-        summary = "版本、源码、许可证与第三方组件许可",
-        icon = ZhiIcons.info,
-        plate = SettingsPlateColors.gray,
-        onClick = { onNavigate("about") },
-    )
-    SettingsIconEntry(
-        title = "记忆文件 · ZhiCode.md",
-        summary = "项目级与用户级说明文件",
-        icon = ZhiIcons.file,
-        plate = SettingsPlateColors.orange,
-        onClick = { onNavigate("memory") },
-    )
+    // 「关于」与「记忆文件」已移到独立的 `MetaPage`（见下），
+    // 它们不是"扩展"，留在这一组里会被当成又一个扩展入口。
 
     // 仅 debug 构建：把工程真正在用的组件按类别铺开（含对话流/任务卡/输入器），
     // 用来复现"看起来不对"这类问题 —— 详见 ui/debug/UiDebugPage.kt。
