@@ -1,5 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.settings
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -7,7 +9,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,11 +21,19 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
+import com.zhizhu.zhicode.compose.ui.effects.pressSink
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -36,6 +48,7 @@ import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.OverlaySpinnerPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 
 /**
  * 设置页的行式组件，**全部是 `miuix-preference` 组件的薄转发**。
@@ -299,10 +312,32 @@ internal fun SettingsToggle(
 internal fun SettingsValuePill(
     text: String,
     modifier: Modifier = Modifier,
+    /**
+     * 非 null 时这枚胶囊**可点**（打开精确输入弹窗）。
+     *
+     * 为什么把入口放在值上而不是行尾的 `›`：用户想改数字时，眼睛和手指都已经在
+     * 那个数字上了。行尾箭头意味着「点进去还有一层」，而这里点数字就直接能改。
+     * 不可点时必须传 null —— 一个看着能点却点不动的胶囊比不可点更糟。
+     */
+    onClick: (() -> Unit)? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
+    val source = remember { MutableInteractionSource() }
     Surface(
-        modifier = modifier,
+        modifier = modifier
+            .then(
+                if (onClick == null) {
+                    Modifier
+                } else {
+                    Modifier
+                        .clickable(
+                            interactionSource = source,
+                            indication = null,
+                            onClick = onClick,
+                        )
+                        .pressSink(source)
+                }
+            ),
         shape = CircleShape,
         color = scheme.secondaryContainer,
         contentColor = scheme.onSecondaryContainer,
@@ -355,15 +390,61 @@ internal fun SettingsSliderRow(
     holdDownState: Boolean = false,
     icon: Painter? = null,
     plate: Color? = null,
+    /**
+     * 非 null 时启用「**松手才生效**」模式。
+     *
+     * 拖动过程中只更新行内临时值（拇指、胶囊数字照常跟手），
+     * `onValueChangeFinished` 才把最终值交给 [commitValue]。
+     *
+     * 为什么需要它：`uiScale` 改的是 `LocalDensity`，也就是**整棵组合树**的密度。
+     * 拖动时每帧都落盘 → 每帧都触发一次全局重组合 + 重新测量 + 写
+     * SharedPreferences（`ThemeStore` 用的是 `commit()`，同步写盘）。
+     * 表现就是拖滑杆发涩、掉帧，而且滑杆自己也在被缩放，拇指会"追不上手指"。
+     * 松手才提交把这一切压成一次。
+     *
+     * [onValueChange] 仍然会被调用（逐帧），所以调用方要保持它是"只改页内状态"的。
+     */
+    commitValue: ((Float) -> Unit)? = null,
+    /** 值胶囊是否可点（打开精确输入）。为 null 时胶囊不可点、也不会有箭头。 */
+    onValueClick: (() -> Unit)? = null,
+    /**
+     * 把浮点值格式化成胶囊文字的**唯一**实现。
+     *
+     * 传了它，拖动中就显示实时值（`valueTextFor(draft)`），而不是停在旧字符串上。
+     * 不传则一直显示 [valueText] —— 那条路只有"不拖动就不会变"的调用方能用。
+     */
+    valueTextFor: ((Float) -> String)? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
+
+    // 拖动中的临时值。null = 没有正在进行的拖动，此时显示外部真值。
+    var draft by remember { mutableStateOf<Float?>(null) }
+    // 外部值变了（比如弹窗精确输入）就丢掉草稿，否则草稿会一直压着真值。
+    LaunchedEffect(value) { draft = null }
+
+    val shown = draft ?: value
     val endActions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
-        SettingsValuePill(text = valueText)
+        SettingsValuePill(
+            text = valueTextFor?.invoke(shown) ?: valueText,
+            onClick = onValueClick,
+        )
     }
     val bottom: @Composable () -> Unit = {
         Slider(
-            value = value,
-            onValueChange = onValueChange,
+            value = shown,
+            onValueChange = { next ->
+                if (commitValue != null) {
+                    draft = next
+                    onValueChange(next)
+                } else {
+                    onValueChange(next)
+                }
+            },
+            onValueChangeFinished = {
+                val pending = draft
+                if (commitValue != null && pending != null) commitValue(pending)
+                draft = null
+            },
             valueRange = valueRange,
             steps = steps,
             showKeyPoints = showKeyPoints,
@@ -454,6 +535,85 @@ internal fun SettingsReadOnly(
             }
         },
     )
+}
+
+/**
+ * 精确输入弹窗：给滑杆行一个"不靠手感"的入口。
+ *
+ * ## 为什么要有它
+ *
+ * 滑杆的取值精度受**像素**限制：区间 80–160 铺在三百多 dp 上，每像素约 0.25%。
+ * 想从 92% 精确地回到 100%，只能靠关键点磁吸碰运气。数字输入把这件事变成确定的。
+ *
+ * ## 校验放在按钮上，而不是边输边纠正
+ *
+ * 输入过程中不打断（不自动夹取、不自动补全）：用户可能正想删掉重打，
+ * 中途夹取会把 `1` 变成 `80`，反而更难输。只让「确定」在越界时不可按，
+ * 并在下面一行说清合法区间。
+ */
+@Composable
+internal fun SettingsNumberDialog(
+    show: Boolean,
+    title: String,
+    initial: Int,
+    range: IntRange,
+    onConfirm: (Int) -> Unit,
+    onDismiss: () -> Unit,
+    suffix: String = "%",
+    summary: String? = null,
+) {
+    // 打开时按当前值重置输入：关掉再打开不该留着上一轮的半截输入。
+    var text by remember(show, initial) { mutableStateOf(initial.toString()) }
+    val parsed = text.trim().toIntOrNull()
+    val valid = parsed != null && parsed in range
+    val scheme = MiuixTheme.colorScheme
+
+    OverlayDialog(
+        show = show,
+        onDismissRequest = onDismiss,
+        largeScreen = true,
+        maxWidth = ZhiDialogWidth.Compact,
+        outsideMargin = DialogWideOutsideMargin,
+        insideMargin = DialogWideInsideMargin,
+    ) {
+        DialogShell(
+            title = title,
+            actions = {
+                SecondaryButton(text = "取消", onClick = onDismiss)
+                PrimaryButton(
+                    text = "确定",
+                    onClick = { parsed?.let { if (it in range) onConfirm(it) } },
+                    enabled = valid,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            },
+        ) {
+            ZhiTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                label = suffix,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            if (summary != null) {
+                Text(
+                    text = summary,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            if (!valid) {
+                // 只在非法时出现：合法时不重复一遍区间，省一行视觉噪音。
+                Text(
+                    text = "请输入 ${range.first}–${range.last} 之间的整数",
+                    color = scheme.error,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
+    }
 }
 
 /**

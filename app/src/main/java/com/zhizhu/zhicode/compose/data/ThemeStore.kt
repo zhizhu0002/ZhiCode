@@ -24,6 +24,31 @@ enum class ChatFontFamily(val label: String) {
 }
 
 /**
+ * 主页标签栏（对话 / 终端 / 文件）摆在屏幕哪一侧。
+ *
+ * 单手握持时拇指够不到顶栏，所以底栏是很多人的实际偏好；但宽屏与平板下顶栏更省空间。
+ * 两者都是真实需求，所以做成可选，而不是替用户决定。
+ */
+enum class TabBarPosition(val label: String) {
+    TOP("顶栏"),
+    BOTTOM("底栏"),
+}
+
+/**
+ * 底部悬浮栏的形态。
+ *
+ * - [DEFAULT]：Miuix 的浮动卡片（当前形态）。
+ * - [IOS]：iOS 那种**单条**胶囊，输入器与发送键内联在同一个圆角壳里。
+ *
+ * 只在 [ThemeSettings.floatingBar] 打开时有意义 —— 不悬浮时就没有"形态"可谈，
+ * 那时两种取值都画成满宽贴边。
+ */
+enum class BottomBarStyle(val label: String) {
+    DEFAULT("默认"),
+    IOS("iOS 风格"),
+}
+
+/**
  * 主题与显示相关的全部设置（形状 + 落盘）。
  *
  * ## 为什么单独一个类，而不是继续塞进 `AppSettings`
@@ -47,9 +72,14 @@ enum class ChatFontFamily(val label: String) {
  * | [amoled] | 深色时背板与面板压成纯黑 |
  * | [blurEnabled] | `rememberGlass()` 关闭时**连 layerBackdrop 都不建** |
  * | [floatingBar] | `FloatingBottomShell` 关闭时满宽、去圆角与阴影 |
- * | [liquidGlass] | `Glass.surfaceColor` 的透明度与描边高光 |
+ * | [liquidGlass] | `Glass.surfaceColor` 的透明度与描边高光；经 [ThemeSettings.liquidGlassEffective] 受 [floatingBar] 门控 |
  * | [edgeSwipeBack] | `AppScaffold` 里 `entry(swipeDismiss = …)` |
  * | [uiScale] | `LocalDensity` 缩放 |
+ * | [tabBarPosition] | `AppScaffold` 把标签栏摆顶部或底部 |
+ * | [tabBarFloating] | 底栏形态下是否走悬浮胶囊容器 |
+ * | [bottomBarStyle] | 底部悬浮栏的两种形态（Miuix 卡片 / iOS 单条胶囊） |
+ * | [latexEnabled] | `ZhiMarkdown` 是否解析 `$…$` 等公式定界符 |
+ * | [codeWrap] / [codeCollapse] / [codeLineNumbers] | `Markdown.CodeBlock` |
  *
  * ⚠️ 刻意**没有**「预测性返回手势」开关：Miuix 的 `NavDisplay` 把 predictive back
  * 做成了内置能力且没有关闭 API（核过 `NavDisplay.kt` 455–560 行），
@@ -100,6 +130,33 @@ data class ThemeSettings(
      * - 这一项只改**阅读正文**的字号，用户想"字大一点但按钮别变大"时用它。
      */
     val chatFontScale: Float = 1.0f,
+    // ---- 标签栏 ----
+    /**
+     * 主页标签栏位置。存枚举的 `name`，与 [chatFont] 同一约定（这一层不依赖 Compose）。
+     *
+     * 非法值在读取处回落到 [TabBarPosition.TOP] —— 老版本写下的名字读不到是常态。
+     */
+    val tabBarPosition: String = TabBarPosition.TOP.name,
+    /** 底栏形态下是否悬浮。顶栏形态下这一项没有意义（顶栏永远贴边）。 */
+    val tabBarFloating: Boolean = true,
+    // ---- 底部悬浮栏形态 ----
+    /** [BottomBarStyle] 的 `name`。只在 [floatingBar] 打开时生效。 */
+    val bottomBarStyle: String = BottomBarStyle.DEFAULT.name,
+    // ---- 聊天正文 ----
+    /**
+     * 是否用 LaTeX 渲染数学公式（`$…$` / `$$…$$` / `\(…\)` / `\[…\]`）。
+     *
+     * 默认**关闭**：解析与位图渲染都有成本，而绝大多数对话里没有公式。
+     * 关闭时完全跳过解析，零开销 —— 不是在渲染后隐藏。
+     */
+    val latexEnabled: Boolean = false,
+    // ---- 代码显示 ----
+    /** 代码块长行是否自动换行。关闭时横向滚动（保持缩进对齐）。 */
+    val codeWrap: Boolean = false,
+    /** 代码块是否默认折叠（超过阈值行数时只显示前若干行）。 */
+    val codeCollapse: Boolean = false,
+    /** 代码块是否显示行号。 */
+    val codeLineNumbers: Boolean = false,
 ) {
     val preset get() = presetById(presetId)
 
@@ -113,6 +170,31 @@ data class ThemeSettings(
 
     /** 纯黑只看深色模式：浅色下把背板压成黑色等于整屏不可读。 */
     val darkBackdropArgb: Long? get() = if (amoled) 0xFF000000L else preset.darkBackdropArgb
+
+    /**
+     * [tabBarPosition] 的枚举视图。
+     *
+     * 非法值（老版本写下的、被外部改坏的）回落到 [TabBarPosition.TOP]：
+     * 顶栏是本工程一直以来的形态，回落它等于"什么都没变"，比抛异常或猜测都安全。
+     */
+    val tabBarPositionValue: TabBarPosition
+        get() = TabBarPosition.entries.firstOrNull { it.name == tabBarPosition }
+            ?: TabBarPosition.TOP
+
+    /** [bottomBarStyle] 的枚举视图，非法值回落 [BottomBarStyle.DEFAULT]。 */
+    val bottomBarStyleValue: BottomBarStyle
+        get() = BottomBarStyle.entries.firstOrNull { it.name == bottomBarStyle }
+            ?: BottomBarStyle.DEFAULT
+
+    /**
+     * 液态玻璃是否**真的**生效。
+     *
+     * 这是一个纯派生判断：液态玻璃描述的是"悬浮层更透"，而没有悬浮层时它就无所指。
+     * 之前只在主题页把开关**隐藏**了，底层 `Glass.surfaceColor` 仍然照着 [liquidGlass]
+     * 算 —— 于是"开关关了但效果还在"这种最难查的状态就出现了。
+     * 这里把门控收进数据层，调用方只读这一个值。
+     */
+    val liquidGlassEffective: Boolean get() = liquidGlass && floatingBar
 }
 
 /**
@@ -142,6 +224,14 @@ internal object ThemeStore {
     private const val CHAT_FONT_PATH = PREFIX + "chat_font_path"
     private const val CHAT_FONT_NAME = PREFIX + "chat_font_name"
     private const val CHAT_FONT_SCALE = PREFIX + "chat_font_scale"
+    // 新增键一律带前缀，与上面保持同一族命名：单看一个键名就能认出它属于主题。
+    private const val TAB_BAR_POSITION = PREFIX + "tab_bar_position"
+    private const val TAB_BAR_FLOATING = PREFIX + "tab_bar_floating"
+    private const val BOTTOM_BAR_STYLE = PREFIX + "bottom_bar_style"
+    private const val LATEX = PREFIX + "latex"
+    private const val CODE_WRAP = PREFIX + "code_wrap"
+    private const val CODE_COLLAPSE = PREFIX + "code_collapse"
+    private const val CODE_LINE_NUMBERS = PREFIX + "code_line_numbers"
 
     /** 聊天字号比例的合法区间。与 `UI_SCALE_MIN/MAX` 分开：正文可以拉得比界面密度更开。 */
     const val CHAT_FONT_SCALE_MIN = 0.8f
@@ -178,6 +268,15 @@ internal object ThemeStore {
             customFontPath = prefs.getString(CHAT_FONT_PATH, "") ?: "",
             customFontName = prefs.getString(CHAT_FONT_NAME, "") ?: "",
             chatFontScale = clampChatFontScale(prefs.getFloat(CHAT_FONT_SCALE, 1f)),
+            tabBarPosition = prefs.getString(TAB_BAR_POSITION, "")?.takeIf { it.isNotBlank() }
+                ?: TabBarPosition.TOP.name,
+            tabBarFloating = prefs.getBoolean(TAB_BAR_FLOATING, true),
+            bottomBarStyle = prefs.getString(BOTTOM_BAR_STYLE, "")?.takeIf { it.isNotBlank() }
+                ?: BottomBarStyle.DEFAULT.name,
+            latexEnabled = prefs.getBoolean(LATEX, false),
+            codeWrap = prefs.getBoolean(CODE_WRAP, false),
+            codeCollapse = prefs.getBoolean(CODE_COLLAPSE, false),
+            codeLineNumbers = prefs.getBoolean(CODE_LINE_NUMBERS, false),
         )
     }
 
@@ -210,6 +309,13 @@ internal object ThemeStore {
                 .putString(CHAT_FONT_PATH, settings.customFontPath)
                 .putString(CHAT_FONT_NAME, settings.customFontName)
                 .putFloat(CHAT_FONT_SCALE, clampChatFontScale(settings.chatFontScale))
+                .putString(TAB_BAR_POSITION, settings.tabBarPositionValue.name)
+                .putBoolean(TAB_BAR_FLOATING, settings.tabBarFloating)
+                .putString(BOTTOM_BAR_STYLE, settings.bottomBarStyleValue.name)
+                .putBoolean(LATEX, settings.latexEnabled)
+                .putBoolean(CODE_WRAP, settings.codeWrap)
+                .putBoolean(CODE_COLLAPSE, settings.codeCollapse)
+                .putBoolean(CODE_LINE_NUMBERS, settings.codeLineNumbers)
                 .commit()
         }
     }

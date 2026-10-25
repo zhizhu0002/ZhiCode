@@ -39,7 +39,12 @@ fun rememberGlass(): Glass {
     // 那不只是"少画一层"，而是整条 RuntimeShader 采样路径都不再被走到 ——
     // 这是本页四个显示开关里最值钱的一个（虚化每帧都要重采样一张全屏贴图）。
     val enabled = LocalThemeSettings.current.blurEnabled
-    val liquid = LocalThemeSettings.current.liquidGlass
+    // ⚠️ 读 `liquidGlassEffective` 而不是 `liquidGlass`。
+    //
+    // 液态玻璃描述的是"悬浮层更透"，没有悬浮层时它无所指。之前只在主题页把那个开关
+    // **隐藏**了，这里仍读原始字段 —— 于是「悬浮底栏关了、液态玻璃也没得点，
+    // 但底栏以外的玻璃面板照样是透的」。门控收进数据层，这一处只认结果。
+    val liquid = LocalThemeSettings.current.liquidGlassEffective
     val supported = remember { isRuntimeShaderSupported() && enabled }
     // 关键：不支持时**连 layerBackdrop 都不创建**。
     // 只在 Modifier 上做恒等替换还不够 —— 光是把 blur 的代码路径执行到，
