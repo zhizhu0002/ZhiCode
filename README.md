@@ -1,3 +1,11 @@
+<div align="center">
+
+> ⚠️ **重要提示：本项目目前处于快速迭代与实验阶段。**
+>
+> 项目中的大部分代码、界面改造与文档由 AI Agent 协作完成，尚未经过充分的人工审查与长期稳定性验证。项目可能存在未发现的功能错误、崩溃、兼容性问题或数据风险，**不建议直接用于生产环境**。使用前请备份重要数据，并在提交问题或使用新功能前自行检查与验证。
+
+</div>
+
 # ZhiCode — Android 上的编码 Agent
 
 一个跑在 Android 手机上的**编码 Agent 工作区**：Kotlin + Jetpack Compose 界面（[Miuix](https://github.com/compose-miuix-ui/miuix) 原生主题），
