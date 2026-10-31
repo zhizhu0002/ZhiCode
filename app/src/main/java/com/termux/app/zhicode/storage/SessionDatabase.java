@@ -522,6 +522,17 @@ final class SessionDatabase {
      *
      * @return 实际删除的文件数
      */
+    /** SQLite 自检结果；异常会直接交给诊断调用方。 */
+    String integrityCheck() {
+        Cursor cursor = null;
+        try {
+            cursor = database.rawQuery("PRAGMA integrity_check", null);
+            return cursor.moveToFirst() ? cursor.getString(0) : "no result";
+        } finally {
+            if (cursor != null) cursor.close();
+        }
+    }
+
     int pruneOrphanBlobs() {
         synchronized (LOCK) {
             long cutoff = System.currentTimeMillis() - ORPHAN_GRACE_MS;

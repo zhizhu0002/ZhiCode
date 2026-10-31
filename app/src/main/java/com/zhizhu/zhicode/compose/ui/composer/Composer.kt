@@ -233,7 +233,54 @@ fun Composer(
                         .onFocusChanged { onFocusChanged(it.isFocused) },
                 )
 
+                /*
+                 * 暂停键：**只在会话运行时出现**，位置在发送键左边（即输入框右侧）。
+                 *
+                 * 进入/退出用 `AnimatedVisibility` + 横向收缩：
+                 * `expandHorizontally` / `shrinkHorizontally` 用的是 `ZhiMotion.sizeSpec`
+                 * （与"展开/收起替换区""折叠卡片"同一条曲线），于是它出现时
+                 * 输入框是**平滑变窄**，而不是被瞬移挤掉一截。
+                 *
+                 * 淡入淡出叠在收缩之上：纯宽度变化在 36dp 这种小尺寸上不容易被察觉，
+                 * 叠一层透明度才读得出"一个控件出现了"。
+                 *
+                 * 可见性取 `composerBusy || stopping`：停止指令发出后引擎还要收尾
+                 * （子进程等 pid 与超时，可能到分钟级），这段时间它必须留着 ——
+                 * 那是用户唯一能重发中断的入口。
+                 */
+                AnimatedVisibility(
+                    visible = state.composerBusy || state.stopping,
+                    enter = fadeIn(ZhiMotion.fadeInSpec) + expandHorizontally(ZhiMotion.sizeSpec),
+                    exit = fadeOut(ZhiMotion.fadeOutSpec) + shrinkHorizontally(ZhiMotion.sizeSpec),
+                ) {
+                    ZhiFilledIconButton(
+                        icon = ZhiIcons.stop,
+                        description = if (state.stopping) {
+                            "停止指令已发出，再次点击会重发中断"
+                        } else {
+                            "立即停止当前任务"
+                        },
+                        onClick = onStop,
+                        containerColor = scheme.error,
+                        contentColor = scheme.onError,
+                        square = true,
+                        iconSize = 12.dp,
+                        size = ComposerActionSize,
+                        modifier = Modifier.padding(start = 6.dp, bottom = 2.dp).selfPressSink(),
+                    )
+                }
 
+                ZhiFilledIconButton(
+                    description = "发送消息",
+                    icon = ZhiIcons.send,
+                    iconSize = 16.dp,
+                    onClick = onSend,
+                    containerColor = scheme.primary,
+                    enabled = state.composerText.isNotBlank(),
+                    square = true,
+                    size = ComposerActionSize,
+                    modifier = Modifier.padding(start = 6.dp, bottom = 2.dp).selfPressSink(),
+                )
             }
 
             // ---- 主体调试模式：输入行下方的 Markdown 实时预览 ----
@@ -423,65 +470,14 @@ fun Composer(
                 )
 
                 Spacer(modifier = Modifier.width(8.dp))
-                // 停止键在任务运行时滑入，位置就在发送键左边
-                //
-                // 可见性看的是 `composerBusy || stopping`：停止指令发出后引擎还在收尾
-                // （Bash 子进程要等 pid 与超时，最长能到分钟级），那一整段时间里
-                // 这个键必须**留着**——它是用户唯一能重发中断的入口。
-                // 只看 composerBusy 的话它会在按下的同一帧消失（见 UiModels.stopping）。
-                AnimatedVisibility(
-
-                    visible = state.composerBusy || state.stopping,
-                    enter = fadeIn(ZhiMotion.fadeInSpec) + expandHorizontally(ZhiMotion.sizeSpec) +
-                        scaleIn(initialScale = 0.7f, animationSpec = ZhiMotion.scaleEnterSpec),
-                    exit = fadeOut(ZhiMotion.fadeOutSpec) + shrinkHorizontally(ZhiMotion.sizeSpec) +
-                        scaleOut(targetScale = 0.7f, animationSpec = ZhiMotion.scaleExitSpec),
-                ) {
-                    ZhiFilledIconButton(
-                        icon = ZhiIcons.stop,
-                        description = if (state.stopping) {
-                            "停止指令已发出，再次点击会重发中断"
-                        } else {
-                            "立即停止当前任务"
-                        },
-                        onClick = onStop,
-                        // 走主题的 error 语义色而不是写死的红：浅色模式会自动换成暗红，
-                        // 前景也必须是 onError，否则浅色下红底白字对比度不足。
-                        containerColor = MiuixTheme.colorScheme.error,
-                        contentColor = MiuixTheme.colorScheme.onError,
-                        // 与发送键同尺寸同方角：两个键在同一个 ActionBar 位置上互换，
-                        // 一个圆一个方、一个大一个小，切换时会看到形状在跳。
-                        square = true,
-                        iconSize = 12.dp,
-                        size = ComposerActionSize,
-                        // 8dp 而不是原来的 6dp：两个键颜色一红一蓝，挨太近会被读成
-                        // "一块被劈成两半的控件"，拉开一点才像两个独立按键。
-                        modifier = Modifier.padding(start = 8.dp).selfPressSink(),
-                    )
-                }
-
-                // 方形发送键（参考图：上箭头）
-                    ZhiFilledIconButton(
-                        description = "发送消息",
-                        // 矢量图标而不是字符 `"↑"`：字符要靠系统字体有这个字形，
-                        // 缺字时渲染成方块；而且不同字体的箭头粗细与按钮里的图标对不上。
-                        icon = ZhiIcons.send,
-                        iconSize = 16.dp,
-                        onClick = onSend,
-                        containerColor = scheme.primary,
-                        enabled = state.composerText.isNotBlank(),
-                        // ⚠️ 这两个参数是**成对**的：Common.kt 的文档写着
-                        // 「`square` 为 true 时改成方角（圆角 10dp），发送键即用这个形态」，
-                        // 但这里一直没传 `square` —— 文档与代码互相矛盾了很久。
-                        // 现在让代码追上文档：方角 + 与停止键同一个尺寸。
-                        square = true,
-                        size = ComposerActionSize,
-                        // 按下时的轻微下沉。Miuix 的 `IconButton` 没有
-                        // `interactionSource` 参数（核过 `iconbutton.md`），所以用自持源的那个，
-                        // 它在 Initial pass 只**观察**按下、不消费事件 —— 不会与按钮自己的点击打架。
-                        modifier = Modifier.selfPressSink(),
-                    )
-
+                /*
+                 * 暂停键与发送键**已移到输入框右侧**（见上方输入行）。
+                 *
+                 * 为什么搬：这一排本来是「+ · 权限 · 推理 · 模型 · 停止 · 发送」六件，
+                 * 在 360dp 上模型名被压成「deepse」这种词中被切的样子。
+                 * 把两个动作键挪到输入行之后，这一排只剩三个 chip，
+                 * 模型名有足够宽度完整显示，动作键也回到了"贴着输入位置"的语义上。
+                 */
             } // 底排 Row
 
             } // 悬浮面板内容 Column

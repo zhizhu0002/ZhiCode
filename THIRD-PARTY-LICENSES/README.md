@@ -6,7 +6,7 @@
 
 | 文件 | 覆盖什么 | 能不能改 |
 | --- | --- | --- |
-| `Apache-2.0.txt` | BlackBox 虚拟化引擎（`Bcore/`、`black-reflection/`、`compiler/`）、Termux 终端模拟与视图（`com/termux/terminal/`、`com/termux/view/`、`libtermux.so`）、Material Symbols 图标路径数据 | ❌ **一个字节都不能改**（Apache-2.0 第 4 条要求随附许可证副本；改动它的文本会破坏「这是原文」这个前提） |
+| `Apache-2.0.txt` | Termux 终端模拟与视图（`com/termux/terminal/`、`com/termux/view/`、`libtermux.so`）、Material Symbols 图标路径数据、Miuix 官方 LiquidGlassNavigationBar 示例适配（含 AndroidLiquidGlass Lens） | ❌ **一个字节都不能改**（Apache-2.0 第 4 条要求随附许可证副本；改动它的文本会破坏「这是原文」这个前提） |
 | `MIT.txt` | 本工程自己代码的 MIT 全文（与根目录 `LICENSE` 的条款部分相同，另在开头注明了覆盖面），同时也是 `termux-shared` 里 `TermuxConstants.java` 所用的那份 MIT 文本 | ❌ 条款部分不能改；只允许在**开头以分节形式**补充「这份文件覆盖哪些组件」的说明（当前就是这样做的） |
 | `IQ-Code-MIT.txt` | 上游 IQ Code 的 MIT 原文（`Copyright (c) 2026 IQge`） | ❌ **逐字保留，不得改写** —— 版权行与条款都是 MIT 要求随附的内容 |
 

@@ -455,13 +455,14 @@ public final class SessionStore {
         return project;
     }
 
-    /** 立即提交攒下的行。 */
-    public synchronized void flush() {
-        try {
-            commitPending();
-        } catch (Exception ignored) {
-            // 内存里的历史仍然是权威；提交失败只影响「下次能不能恢复」。
-        }
+    /**
+     * 立即提交攒下的行。
+     *
+     * @return {@code true} 表示这次没有待写内容或已经完整提交；{@code false} 表示待写批次
+     *         仍然保留在内存里，调用方可以稍后重试。
+     */
+    public synchronized boolean flush() {
+        return commitPending();
     }
 
     /** 是否已有这次会话。 */
@@ -555,7 +556,7 @@ public final class SessionStore {
     public synchronized void appendContextSnapshot(JSONArray messages) {
         try {
             JSONArray snapshot = messages == null ? new JSONArray() : copy(messages);
-            commitPending();
+            if (!commitPending()) return;
             long seq = nextSeq;
             byte[] encoded = BinaryValueCodec.encodeArray(snapshot);
             int encodedLength = encoded.length;
@@ -580,8 +581,9 @@ public final class SessionStore {
                         values.put(C_BLOB_SIZE, encodedLength);
                         SessionDatabase.get().registerBlob(blobRef, encodedLength);
                     }
-                    db.insertWithOnConflict(SessionDatabase.TABLE_SNAPSHOTS, null, values,
+                    long snapshotRow = db.insertWithOnConflict(SessionDatabase.TABLE_SNAPSHOTS, null, values,
                             SQLiteDatabase.CONFLICT_REPLACE);
+                    if (snapshotRow < 0L) throw new IllegalStateException("会话上下文快照写入失败");
                     SessionDatabase.get().addBlobRef(db, sessionId, blobRef);
                     pruneSnapshots(db);
                     db.setTransactionSuccessful();
@@ -630,17 +632,11 @@ public final class SessionStore {
      * <p>顺序是刻意的：**先算出全部 Blob 与编码**（会写文件系统），**再开事务**。
      * 反过来的话，一个长事务会一直持着写锁去写文件，而并发读取要等到它结束。
      */
-    private void commitPending() {
-        if (pending.isEmpty()) return;
+    private boolean commitPending() {
+        if (pending.isEmpty()) return true;
         ArrayList<PendingRow> batch = new ArrayList<>(pending);
-        pending.clear();
-        pendingBytes = 0L;
-        pendingSince = 0L;
         boolean touchesActivity = pendingTouchesActivity;
-        pendingTouchesActivity = false;
         String titleCandidate = pendingTitleCandidate;
-        pendingTitleCandidate = "";
-
         ArrayList<PreparedRow> prepared = new ArrayList<>(batch.size());
         try {
             long seq = nextSeq;
@@ -651,32 +647,41 @@ public final class SessionStore {
                 prepared.add(item);
             }
 
+            long count = messageCount + appendedMessages;
             synchronized (SessionDatabase.lock()) {
                 SQLiteDatabase db = SessionDatabase.get().db();
                 db.beginTransaction();
                 try {
                     for (PreparedRow item : prepared) insertRow(db, item);
                     long now = System.currentTimeMillis();
-                    long count = messageCount + appendedMessages;
                     ContentValues values = new ContentValues();
                     values.put(C_NEXT_SEQ, seq);
                     if (touchesActivity) values.put(C_UPDATED_AT, now);
                     values.put(C_MESSAGE_COUNT, count);
                     if (!titleCandidate.isEmpty()) values.put(C_TITLE, compactTitle(titleCandidate));
                     if (!workflowId.isEmpty()) values.put(C_WORKFLOW_ID, workflowId);
-                    db.update(SessionDatabase.TABLE_SESSIONS, values, C_ID + " = ?",
+                    int updated = db.update(SessionDatabase.TABLE_SESSIONS, values, C_ID + " = ?",
                             new String[]{sessionId});
+                    if (updated != 1) throw new IOException("会话摘要更新失败：" + updated);
                     db.setTransactionSuccessful();
-                    nextSeq = seq;
-                    messageCount = count;
                 } finally {
                     db.endTransaction();
                 }
             }
-        } catch (Exception ignored) {
-            // 编码或提交失败：这批行丢失，但下一次写入仍然继续。
-            // 会话是「用户的对话记录」，不是账本 —— 因一次磁盘错误把整个回合带崩更糟。
-            logIfOom(ignored);
+
+            // 只有 endTransaction() 成功返回后，才推进内存游标并移除待写批次。
+            nextSeq = seq;
+            messageCount = count;
+            pending.subList(0, batch.size()).clear();
+            pendingBytes = 0L;
+            pendingSince = 0L;
+            pendingTouchesActivity = false;
+            pendingTitleCandidate = "";
+            return true;
+        } catch (Exception failure) {
+            // 失败时保留 pending 与其元数据；后续 flush 可以在同一 seq 上安全重试。
+            logIfOom(failure);
+            return false;
         }
     }
 
@@ -792,14 +797,16 @@ public final class SessionStore {
             values.put(C_PAYLOAD_BLOB_REF, item.payloadBlobRef);
             values.put(C_PAYLOAD_BLOB_SIZE, item.payloadBlobSize);
         }
-        db.insertWithOnConflict(SessionDatabase.TABLE_EVENTS, null, values,
+        long eventRow = db.insertWithOnConflict(SessionDatabase.TABLE_EVENTS, null, values,
                 SQLiteDatabase.CONFLICT_REPLACE);
+        if (eventRow < 0L) throw new IllegalStateException("会话事件写入失败");
         // 归属必须与引用写进**同一个事务**：分开写的话，中途失败会留下
         // "有引用、没归属"的行 —— 那个 Blob 会因为"没人认领"被回收掉（见 pruneOrphanBlobs）。
         SessionDatabase.get().addBlobRef(db, sessionId, item.payloadBlobRef);
         for (ContentValues block : item.blocks) {
-            db.insertWithOnConflict(SessionDatabase.TABLE_BLOCKS, null, block,
+            long blockRow = db.insertWithOnConflict(SessionDatabase.TABLE_BLOCKS, null, block,
                     SQLiteDatabase.CONFLICT_REPLACE);
+            if (blockRow < 0L) throw new IllegalStateException("会话内容块写入失败");
             SessionDatabase.get().addBlobRef(db, sessionId, block.getAsString(C_BLOB_REF));
         }
     }
@@ -874,6 +881,97 @@ public final class SessionStore {
         }
         mergeAdjacentRoles(conversation);
         return conversation;
+    }
+
+    /**
+     * 给模型恢复上下文：从最新压缩快照开始，只读取快照之后最近的完整 API 回合。
+     * 原始会话行仍完整保留，界面继续使用独立的分页读取路径。
+     */
+    public static JSONArray loadModelMessages(String sessionId, int maxRecentMessages) {
+        JSONObject snapshot = latestSnapshot(sessionId);
+        if (snapshot == null) return loadMessages(sessionId);
+        long snapshotSeq = snapshot.optLong(C_SEQ, -1L);
+        JSONArray conversation = snapshot.optJSONArray(Field.MESSAGES);
+        if (snapshotSeq < 0L || conversation == null) return loadMessages(sessionId);
+
+        long afterSeq = snapshotSeq;
+        try {
+            long[] recent = recentMessageSeqs(sessionId, snapshotSeq, Math.max(1, maxRecentMessages) + 1);
+            if (recent.length > Math.max(1, maxRecentMessages)) {
+                long floor = alignToTurnStart(SessionDatabase.get().db(), sessionId,
+                        recent[Math.max(1, maxRecentMessages) - 1]);
+                long requestStart = latestUserRequestSeq(sessionId, snapshotSeq, floor);
+                if (requestStart >= 0L) floor = requestStart;
+                afterSeq = Math.max(snapshotSeq, floor - 1L);
+            }
+        } catch (Exception ignored) {
+            // 窗口定位失败时，尽量使用快照之后的尾部，不回读已被快照替代的前缀。
+            afterSeq = snapshotSeq;
+        }
+
+        for (Row row : loadRows(sessionId, afterSeq, true)) {
+            JSONObject value = row.json;
+            if (value == null) continue;
+            String type = value.optString(Field.TYPE, "");
+            if (RowType.SNAPSHOT.equals(type)) {
+                JSONObject payload = value.optJSONObject(Field.PAYLOAD);
+                JSONArray prior = payload == null ? null : payload.optJSONArray(Field.MESSAGES);
+                if (prior != null) conversation = prior;
+            } else if (RowType.MESSAGE.equals(type)) {
+                JSONArray content = value.optJSONArray(Field.CONTENT);
+                if (content == null) continue;
+                try {
+                    conversation.put(new JSONObject()
+                            .put(Field.ROLE, value.optString(Field.ROLE, Role.USER))
+                            .put(Field.CONTENT, content));
+                } catch (Exception ignored) {
+                    // 单条拼接失败不应破坏同一页内其余历史。
+                }
+            }
+        }
+        mergeAdjacentRoles(conversation);
+        ZhiMemory.log("modelContextRestore session=" + sessionId + " messages=" + conversation.length()
+                + " recentLimit=" + Math.max(1, maxRecentMessages) + " snapshotSeq=" + snapshotSeq);
+        return conversation;
+    }
+
+    private static long[] recentMessageSeqs(String sessionId, long afterSeq, int limit) {
+        ArrayList<Long> values = new ArrayList<>();
+        Cursor cursor = null;
+        try {
+            cursor = SessionDatabase.get().db().rawQuery(
+                    "SELECT " + C_SEQ + " FROM " + SessionDatabase.TABLE_EVENTS
+                            + " WHERE " + C_SESSION_ID + " = ? AND " + C_KIND + " = ? AND " + C_SEQ + " > ?"
+                            + " ORDER BY " + C_SEQ + " DESC LIMIT ?",
+                    new String[]{sessionId, KIND_MESSAGE, String.valueOf(afterSeq), String.valueOf(Math.max(1, limit))});
+            while (cursor.moveToNext()) values.add(cursor.getLong(0));
+        } finally {
+            if (cursor != null) cursor.close();
+        }
+        long[] result = new long[values.size()];
+        for (int i = 0; i < values.size(); i++) result[i] = values.get(i);
+        return result;
+    }
+
+    /** 从窗口下界向前找最近的人类输入，确保模型上下文不从工具回复中间开始。 */
+    private static long latestUserRequestSeq(String sessionId, long afterSeq, long beforeOrAtSeq) {
+        Cursor cursor = null;
+        try {
+            cursor = SessionDatabase.get().db().rawQuery(
+                    "SELECT e." + C_SEQ + " FROM " + SessionDatabase.TABLE_EVENTS + " e"
+                            + " WHERE e." + C_SESSION_ID + " = ? AND e." + C_KIND + " = ?"
+                            + " AND e." + C_ROLE + " = ? AND e." + C_SEQ + " > ? AND e." + C_SEQ + " <= ?"
+                            + " AND EXISTS (SELECT 1 FROM " + SessionDatabase.TABLE_BLOCKS + " b"
+                            + " WHERE b." + C_SESSION_ID + " = e." + C_SESSION_ID
+                            + " AND b." + C_MESSAGE_SEQ + " = e." + C_SEQ
+                            + " AND b." + C_KIND + " IN (?, ?))"
+                            + " ORDER BY e." + C_SEQ + " DESC LIMIT 1",
+                    new String[]{sessionId, KIND_MESSAGE, Role.USER, String.valueOf(afterSeq),
+                            String.valueOf(beforeOrAtSeq), String.valueOf(BLOCK_TEXT), String.valueOf(BLOCK_IMAGE)});
+            return cursor.moveToFirst() ? cursor.getLong(0) : -1L;
+        } finally {
+            if (cursor != null) cursor.close();
+        }
     }
 
     private static JSONArray rows(String sessionId, long afterSeq) {
@@ -2377,10 +2475,35 @@ public final class SessionStore {
             out.put("blob_refs", scalar(db, "SELECT COUNT(*) FROM " + SessionDatabase.TABLE_BLOB_REFS));
             out.put("migrated", SessionDatabase.get().countMigrationRecords("imported"));
             out.put("migration_failures", SessionDatabase.get().countMigrationRecords("failed"));
+            out.put("integrity_check", SessionDatabase.get().integrityCheck());
+            out.put("session_count_mismatches", scalar(db,
+                    "SELECT COUNT(*) FROM " + SessionDatabase.TABLE_SESSIONS + " s WHERE s.message_count != "
+                            + "(SELECT COUNT(*) FROM " + SessionDatabase.TABLE_EVENTS + " e WHERE e.session_id = s.id AND e.kind = 'message')"));
+            out.put("sequence_mismatches", scalar(db,
+                    "SELECT COUNT(*) FROM " + SessionDatabase.TABLE_SESSIONS + " s WHERE s.next_seq < "
+                            + "COALESCE((SELECT MAX(e.seq) FROM " + SessionDatabase.TABLE_EVENTS + " e WHERE e.session_id = s.id), 0)"));
+            out.put("blob_missing_files", missingBlobFileCount(db));
         } catch (Exception ignored) {
             // 诊断信息拿不到时返回已有的部分。
         }
         return out;
+    }
+
+    private static long missingBlobFileCount(SQLiteDatabase db) {
+        Cursor cursor = null;
+        long missing = 0L;
+        try {
+            cursor = db.query(SessionDatabase.TABLE_BLOBS, new String[]{"hash"},
+                    null, null, null, null, null);
+            while (cursor.moveToNext()) {
+                if (!BlobStore.shared().exists(cursor.getString(0))) missing++;
+            }
+        } catch (Exception ignored) {
+            return -1L;
+        } finally {
+            if (cursor != null) cursor.close();
+        }
+        return missing;
     }
 
     /**

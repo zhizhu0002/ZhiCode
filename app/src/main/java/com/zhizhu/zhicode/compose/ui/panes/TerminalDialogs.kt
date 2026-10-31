@@ -74,6 +74,7 @@ internal fun TerminalQuickActionsDialog(
         show = show,
         onDismissRequest = onDismiss,
         maxWidth = ZhiDialogWidth.Compact,
+        largeScreen = true,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {
@@ -114,6 +115,7 @@ internal fun TerminalRenameDialog(
         show = show,
         onDismissRequest = onDismiss,
         maxWidth = ZhiDialogWidth.Compact,
+        largeScreen = true,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
     ) {

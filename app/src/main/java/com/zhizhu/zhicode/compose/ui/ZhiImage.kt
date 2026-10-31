@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -330,7 +331,7 @@ internal fun ZhiImageThumb(
         modifier = modifier
             .width(width)
             .height(height)
-            .clip(RoundedCornerShape(ZhiRadius.inner))
+            .clip(ZhiSquircle(ZhiRadius.inner))
             .background(scheme.surfaceContainerHigh)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,

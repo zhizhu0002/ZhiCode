@@ -69,11 +69,11 @@ enum class BottomBarStyle(val label: String) {
  * | --- | --- |
  * | [mode] | `ZhiThemeMode.resolve` → `LocalZhiDark` |
  * | [dynamicColor] + [presetId] + [seedArgb] | `ZhiAppTheme` 走 `ThemeController` 的 Monet 模式 |
- * | [amoled] | 深色时背板与面板压成纯黑 |
  * | [blurEnabled] | `rememberGlass()` 关闭时**连 layerBackdrop 都不建** |
  * | [floatingBar] | `FloatingBottomShell` 关闭时满宽、去圆角与阴影 |
  * | [liquidGlass] | `Glass.surfaceColor` 的透明度与描边高光；经 [ThemeSettings.liquidGlassEffective] 受 [floatingBar] 门控 |
  * | [edgeSwipeBack] | `AppScaffold` 里 `entry(swipeDismiss = …)` |
+ * | [predictiveBack] | `AppScaffold` 是否挂 `WindowNavigationEventBridge()` |
  * | [uiScale] | `LocalDensity` 缩放 |
  * | [tabBarPosition] | `AppScaffold` 把标签栏摆顶部或底部 |
  * | [tabBarFloating] | 底栏形态下是否走悬浮胶囊容器 |
@@ -81,9 +81,16 @@ enum class BottomBarStyle(val label: String) {
  * | [latexEnabled] | `ZhiMarkdown` 是否解析 `$…$` 等公式定界符 |
  * | [codeWrap] / [codeCollapse] / [codeLineNumbers] | `Markdown.CodeBlock` |
  *
- * ⚠️ 刻意**没有**「预测性返回手势」开关：Miuix 的 `NavDisplay` 把 predictive back
- * 做成了内置能力且没有关闭 API（核过 `NavDisplay.kt` 455–560 行），
- * 做成开关就是一个点了没用的假开关 —— 那是这个代码库反复警告过的反模式。
+ * ⚠️ 「预测性返回手势」（[predictiveBack]）在 Miuix 里是**可关**的，但关的方式不是给
+ * `NavDisplay` 传参 —— 它没有这个参数。真正的开关在**窗口层**：
+ * `top.yukonga.miuix.kmp.nav.gesture.WindowNavigationEventBridge()` 这个 composable
+ * 才把系统 `OnBackInvokedDispatcher` 的 back-started / back-progressed 事件
+ * 接到 miuix 的 `NavigationEventDispatcher` 上；不挂它，`NavDisplay` 内部的
+ * `PredictiveBackHandler` 永远收不到"手势进行中"，返回就退化为"抬手即触发"。
+ *
+ * 所以这个开关是真的：开 → 挂桥、拖动时预览上一页；关 → 不挂桥、返回立即生效。
+ * （早前这里写着"刻意没有这个开关"，理由是当时以为 Miuix 没有关闭 API ——
+ * 结论没错，但漏了桥这一层。）
  */
 data class ThemeSettings(
     val mode: ThemeMode = ThemeMode.SYSTEM,
@@ -100,11 +107,17 @@ data class ThemeSettings(
      */
     val paletteStyle: String = "TonalSpot",
     val colorSpec: String = "Spec2021",
-    val amoled: Boolean = false,
     val blurEnabled: Boolean = true,
     val floatingBar: Boolean = true,
     val liquidGlass: Boolean = true,
     val edgeSwipeBack: Boolean = true,
+    /**
+     * 预测性返回手势：返回手势**拖动过程中**预览上一页（跟手位移 + 松手回弹）。
+     *
+     * 关闭后返回照常可用，只是抬手才生效、没有预览动画 —— 这正是
+     * `WindowNavigationEventBridge()` 挂不挂的差别（见类头注释）。
+     */
+    val predictiveBack: Boolean = true,
     val uiScale: Float = UI_SCALE_DEFAULT,
     /**
      * 聊天正文字体族。存枚举的 `name`，与 `paletteStyle` 同一个约定：
@@ -139,6 +152,8 @@ data class ThemeSettings(
     val tabBarPosition: String = TabBarPosition.TOP.name,
     /** 底栏形态下是否悬浮。顶栏形态下这一项没有意义（顶栏永远贴边）。 */
     val tabBarFloating: Boolean = true,
+    /** 底部悬浮导航栏的玻璃模糊；仅在 tabBarFloating 与主题 blurEnabled 开启时生效。 */
+    val floatingNavBlur: Boolean = true,
     // ---- 底部悬浮栏形态 ----
     /** [BottomBarStyle] 的 `name`。只在 [floatingBar] 打开时生效。 */
     val bottomBarStyle: String = BottomBarStyle.DEFAULT.name,
@@ -169,7 +184,7 @@ data class ThemeSettings(
     val seedArgb: Long get() = customSeedArgb ?: preset.seedArgb
 
     /** 纯黑只看深色模式：浅色下把背板压成黑色等于整屏不可读。 */
-    val darkBackdropArgb: Long? get() = if (amoled) 0xFF000000L else preset.darkBackdropArgb
+    val darkBackdropArgb: Long? get() = preset.darkBackdropArgb
 
     /**
      * [tabBarPosition] 的枚举视图。
@@ -189,7 +204,7 @@ data class ThemeSettings(
     /**
      * 液态玻璃是否**真的**生效。
      *
-     * 这是一个纯派生判断：液态玻璃描述的是"悬浮层更透"，而没有悬浮层时它就无所指。
+     * 这是一个纯派生判断：液态玻璃描述的是"悬浮层更透"，没有悬浮层时它无所指。
      * 之前只在主题页把开关**隐藏**了，底层 `Glass.surfaceColor` 仍然照着 [liquidGlass]
      * 算 —— 于是"开关关了但效果还在"这种最难查的状态就出现了。
      * 这里把门控收进数据层，调用方只读这一个值。
@@ -214,11 +229,11 @@ internal object ThemeStore {
     private const val CUSTOM_SEED = PREFIX + "custom_seed_argb"
     private const val PALETTE = PREFIX + "palette_style"
     private const val SPEC = PREFIX + "color_spec"
-    private const val AMOLED = PREFIX + "amoled"
     private const val BLUR = PREFIX + "blur_enabled"
     private const val FLOATING_BAR = PREFIX + "floating_bar"
     private const val LIQUID_GLASS = PREFIX + "liquid_glass"
     private const val EDGE_SWIPE = PREFIX + "edge_swipe_back"
+    private const val PREDICTIVE_BACK = PREFIX + "predictive_back"
     private const val UI_SCALE = PREFIX + "ui_scale"
     private const val CHAT_FONT = PREFIX + "chat_font"
     private const val CHAT_FONT_PATH = PREFIX + "chat_font_path"
@@ -227,6 +242,7 @@ internal object ThemeStore {
     // 新增键一律带前缀，与上面保持同一族命名：单看一个键名就能认出它属于主题。
     private const val TAB_BAR_POSITION = PREFIX + "tab_bar_position"
     private const val TAB_BAR_FLOATING = PREFIX + "tab_bar_floating"
+    private const val FLOATING_NAV_BLUR = PREFIX + "floating_nav_blur"
     private const val BOTTOM_BAR_STYLE = PREFIX + "bottom_bar_style"
     private const val LATEX = PREFIX + "latex"
     private const val CODE_WRAP = PREFIX + "code_wrap"
@@ -257,11 +273,11 @@ internal object ThemeStore {
             customSeedArgb = prefs.getLong(CUSTOM_SEED, 0L).takeIf { it != 0L },
             paletteStyle = prefs.getString(PALETTE, "")?.takeIf { it.isNotBlank() } ?: "TonalSpot",
             colorSpec = prefs.getString(SPEC, "")?.takeIf { it.isNotBlank() } ?: "Spec2021",
-            amoled = prefs.getBoolean(AMOLED, false),
             blurEnabled = prefs.getBoolean(BLUR, true),
             floatingBar = prefs.getBoolean(FLOATING_BAR, true),
             liquidGlass = prefs.getBoolean(LIQUID_GLASS, true),
             edgeSwipeBack = prefs.getBoolean(EDGE_SWIPE, true),
+            predictiveBack = prefs.getBoolean(PREDICTIVE_BACK, true),
             uiScale = clampUiScale(prefs.getFloat(UI_SCALE, UI_SCALE_DEFAULT)),
             chatFont = prefs.getString(CHAT_FONT, "")?.takeIf { it.isNotBlank() }
                 ?: ChatFontFamily.DEFAULT.name,
@@ -271,6 +287,7 @@ internal object ThemeStore {
             tabBarPosition = prefs.getString(TAB_BAR_POSITION, "")?.takeIf { it.isNotBlank() }
                 ?: TabBarPosition.TOP.name,
             tabBarFloating = prefs.getBoolean(TAB_BAR_FLOATING, true),
+            floatingNavBlur = prefs.getBoolean(FLOATING_NAV_BLUR, true),
             bottomBarStyle = prefs.getString(BOTTOM_BAR_STYLE, "")?.takeIf { it.isNotBlank() }
                 ?: BottomBarStyle.DEFAULT.name,
             latexEnabled = prefs.getBoolean(LATEX, false),
@@ -299,11 +316,11 @@ internal object ThemeStore {
                 .putLong(CUSTOM_SEED, settings.customSeedArgb ?: 0L)
                 .putString(PALETTE, settings.paletteStyle)
                 .putString(SPEC, settings.colorSpec)
-                .putBoolean(AMOLED, settings.amoled)
                 .putBoolean(BLUR, settings.blurEnabled)
                 .putBoolean(FLOATING_BAR, settings.floatingBar)
                 .putBoolean(LIQUID_GLASS, settings.liquidGlass)
                 .putBoolean(EDGE_SWIPE, settings.edgeSwipeBack)
+                .putBoolean(PREDICTIVE_BACK, settings.predictiveBack)
                 .putFloat(UI_SCALE, clampUiScale(settings.uiScale))
                 .putString(CHAT_FONT, settings.chatFont)
                 .putString(CHAT_FONT_PATH, settings.customFontPath)
@@ -311,6 +328,7 @@ internal object ThemeStore {
                 .putFloat(CHAT_FONT_SCALE, clampChatFontScale(settings.chatFontScale))
                 .putString(TAB_BAR_POSITION, settings.tabBarPositionValue.name)
                 .putBoolean(TAB_BAR_FLOATING, settings.tabBarFloating)
+                .putBoolean(FLOATING_NAV_BLUR, settings.floatingNavBlur)
                 .putString(BOTTOM_BAR_STYLE, settings.bottomBarStyleValue.name)
                 .putBoolean(LATEX, settings.latexEnabled)
                 .putBoolean(CODE_WRAP, settings.codeWrap)

@@ -5,10 +5,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.state.ToggleableState
+import top.yukonga.miuix.kmp.basic.Checkbox
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -19,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -142,14 +146,58 @@ internal fun FileListRow(
     }
     if (selectionMode) {
         // 选择模式使用官方 Miuix preference 行：整行与复选框共享同一个语义动作。
-        ZhiCheckboxPreference(
-            title = entry.name,
-            summary = info.ifEmpty { null },
-            checked = selected,
-            onCheckedChange = { onOpen() },
-            modifier = modifier.fillMaxWidth(),
-            startAction = entryIcon,
-        )
+        /*
+         * 选择模式**不用** `ZhiCheckboxPreference`。
+         *
+         * 原因：它的勾选圈是 Miuix `Checkbox`，内部 `requiredSize(26.dp)` 且排在调用方
+         * modifier 之后 —— 外部 `size()` 压不动，只能 `graphicsLayer` 缩放；而
+         * `CheckboxPreference` 不暴露勾选圈自己的 modifier，若缩放整行会把标题一起缩掉。
+         *
+         * 所以这里自绘同样的一行：图标 + 标题/副标题 + 缩小的勾选圈。
+         * 缩放只改**绘制**（26dp 布局占位仍在），因此在 Row 里用负的 end padding
+         * 把多出来的那一截收回来，行尾才不会空一块。
+         */
+        Card(
+            onClick = onOpen,
+            modifier = modifier.fillMaxWidth().heightIn(min = FileRowMinHeight),
+            cornerRadius = ZhiRadius.inner,
+            insideMargin = PaddingValues(horizontal = FileRowSidePadding, vertical = 10.dp),
+            colors = CardDefaults.defaultColors(color = Color.Transparent, contentColor = scheme.onSurface),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.padding(end = 12.dp)) { entryIcon() }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(entry.name, color = scheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (info.isNotEmpty()) {
+                        Text(
+                            info,
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                // ⚠️ 这里曾经是 `Modifier.padding(end = (-6).dp)` —— **负 padding 会崩**：
+                // `IllegalArgumentException: Padding must be non-negative`。
+                // 因为只在 `selectionMode` 分支里，所以平时看不出来；一长按进入多选
+                // 就必崩（用户报的"长按文件进文件编辑崩溃"）。
+                //
+                // 想要的效果是"把 checkbox 往右挪一点、抵消 Miuix Checkbox 自带的
+                // 内部留白"。负 padding 不是能做到这件事的 API，`offset` 才是：
+                // 它只改摆放、不参与尺寸测量，也不会撞上非负校验。
+                Box(modifier = Modifier.offset(x = 6.dp)) {
+                    Checkbox(
+                        state = if (selected) ToggleableState.On else ToggleableState.Off,
+                        onClick = { onOpen() },
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = 0.78f
+                            scaleY = 0.78f
+                        },
+                    )
+                }
+            }
+        }
     } else {
         Card(
             onClick = onOpen,

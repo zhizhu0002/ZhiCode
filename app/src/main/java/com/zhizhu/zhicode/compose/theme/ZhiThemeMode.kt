@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose.theme
 
 import android.app.Activity
+import android.os.Build
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.res.Configuration
@@ -97,14 +98,18 @@ object ZhiThemeMode {
     fun appliedTo(activity: Activity, dark: Boolean) {
         activity.window.statusBarColor = Color.TRANSPARENT
         activity.window.navigationBarColor = Color.TRANSPARENT
+        // Android 10+ otherwise inserts an opaque contrast scrim behind the gesture area.
+        // That scrim is especially visible below the floating glass bar and looks like a
+        // second, black NavigationBar. The app already supplies its own themed surface.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            activity.window.isNavigationBarContrastEnforced = false
+        }
         WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
             isAppearanceLightStatusBars = !dark
             isAppearanceLightNavigationBars = !dark
-            // 只改图标明暗，**不**隐藏状态栏：用户明确要求「把状态栏显示出来」。
-            // 这一行同时把旧版（Fullscreen 主题留下的）隐藏状态复位。
-            show(WindowInsetsControllerCompat.BEHAVIOR_DEFAULT)
         }
     }
+
 
     /**
      * 在界面里跟着深浅实时应用系统栏。

@@ -19,20 +19,6 @@ import top.yukonga.miuix.kmp.theme.lightColorScheme
 val LocalZhiDark = compositionLocalOf { false }
 
 /**
- * 是否启用 AMOLED 纯黑（只有深色模式下有意义）。
- *
- * ## 为什么单独一个 CompositionLocal
- *
- * 它与 [LocalZhiDark] 是**两个独立信号**：深浅决定"用哪一支色阶"，
- * 纯黑决定"这一支里最深的那两档要不要压到 #000000"。合成一个的话，
- * 关掉 AMOLED 会让所有读深浅的地方一起重组 —— 而那些地方绝大多数并不关心纯黑。
- *
- * 提供一个带默认值的 Local，而不是把参数一路传下去：层级色是**函数**（`ZhiColors.backdrop()`），
- * 给每个调用点加参数等于要改 200 多处。
- */
-val LocalAmoled = compositionLocalOf { false }
-
-/**
  * 全局统一圆角。
  *
  * 之前每个文件各自写 `RoundedCornerShape(7.dp/8.dp/9.dp/11.dp/13.dp/16.dp…)`，
@@ -47,27 +33,36 @@ val LocalAmoled = compositionLocalOf { false }
  * 写死半径在高度变化时就不再是正圆了。
  */
 object ZhiRadius {
-    val floating = 20.dp
+    val floating = MochiBaseline.cornerLargeIncreased
 
     /**
-     * 文字按钮（`Button` / `TextButton`）。
+     * 文字按钮（`Button` / `TextButton`）—— 12dp，等于 Mochi 的 `medium`。
      *
-     * **不能**沿用 [floating]（20dp）：Miuix 按钮的标准高度是
-     * `ButtonDefaults.MinHeight` = **40dp**，20dp 半径恰好等于高度的一半，
-     * 于是按钮圆成一个**胶囊**。Miuix 自己给按钮的圆角是
-     * `ButtonDefaults.CornerRadius` = **16dp**（16/40 = 0.4），是不顶满的圆角矩形。
+     * 不能沿用 [floating]（20dp）：按钮高度 48dp 时 20dp 半径已接近半高、偏胶囊；
+     * 12 / 48 = 0.25 是不顶满的圆角矩形。
      *
-     * 注：[floating] 给**面板/卡片**用（顶栏下半圆角、悬浮输入器、悬浮任务卡）没问题，
-     * 那些容器高度远大于 40dp，20dp 不到半高。
-     *
-     * 图标按钮不用这个值：Miuix `IconButtonDefaults.CornerRadius` = 40dp 配
-     * MinHeight 40dp，也就是**正圆**，见 `ZhiFilledIconButton`。
+     * 图标按钮不用这个值：图标按钮是正圆，见 `ZhiFilledIconButton`。
      */
-    val button = 12.dp
+    val button = MochiBaseline.cornerMedium
 
-    val card = 14.dp
-    val inner = 10.dp
-    val square = 4.dp
+    /**
+     * 卡片、面板、弹窗、列表行 —— **28dp**，等于 Mochi 的 `extraLarge`。
+     *
+     * 改版前是 14dp。按 Mochi 设计规范，卡片与面板的圆角就是 `shapes.extraLarge`
+     * = 28dp；14dp 在它的九档里**根本不存在**，属于本工程自己造的一档。
+     */
+    val card = MochiBaseline.cornerExtraLarge
+
+    /**
+     * 卡片内部再嵌一层的小块 —— **12dp**。
+     *
+     * 这个值不是挑出来的，是**同心公式算出来的**：
+     * `card 28 − 内容内边距 16 = 12`，恰好落在 Mochi 的 `medium` 档上。
+     * 改 [card] 或改内边距时，这里要跟着重算（见 [MochiBaseline.concentric]）。
+     */
+    val inner = MochiBaseline.concentric(MochiBaseline.cornerExtraLarge, MochiBaseline.rowTextInset)
+
+    val square = MochiBaseline.cornerExtraSmall
 
     /**
      * 输入器底部「发送 / 停止」这类 30dp 小方键的圆角。
@@ -86,12 +81,74 @@ object ZhiRadius {
      * 是按钮变小之后必须跟着换档。写死一个绝对值给两种尺寸用，必然有一边不对 ——
      * 这也是为什么它值得单独一个 token，而不是继续复用 [inner] 或 [square]。
      */
-    val actionKey = 8.dp
+    val actionKey = MochiBaseline.cornerSmall
+}
+
+/**
+ * 间距与触控热区令牌（对齐 Miuix / HyperOS 的自适应设计基准）。
+ *
+ * ## 为什么单独一个对象，而不是继续散在 `padding(horizontal = 12.dp)` 里
+ *
+ * 改版前页面级水平边距是 **12dp 与 16dp 混用**（设置页 16、关于页 12、
+ * 许可页 18…）。同一个应用里三种页面边距，翻页时左右边缘会"跳"——
+ * 这是最容易被看出来、又最容易被归因成"没对齐"的一类问题。
+ *
+ * HYPEROS 的自适应设计基准给手机单手场景的防误触边距是 **16px**（≈16dp），
+ * 所以页面级统一取 16dp，折叠屏/平板再按 [pageMarginWide] 放宽。
+ *
+ * ## 边界：这**不是**组件内部内边距的替代品
+ *
+ * Miuix 的 `Card` / `Preference` / `BasicComponent` 内部有自己的 padding，
+ * 规范明确要求**不要**去覆盖它们。所以本对象只管"页面与屏幕边缘之间"、
+ * "页面内一级区块之间"这两类间距；卡片内部的 12dp 不动。
+ */
+object ZhiSpacing {
+
+    /** 页面级水平边距（手机单手场景）。 */
+    val pageMargin = 16.dp
+
+    /** 页面级水平边距（折叠屏 / 平板，双手持或平放）。 */
+    val pageMarginWide = 24.dp
+
+    /**
+     * 最小触控热区边长（Android 无障碍规范 48dp）。
+     *
+     * Miuix `IconButtonDefaults` 实测是 `MinWidth = MinHeight = 40dp` ——
+     * 也就是**库的默认值本身就不满足 48dp**。所以凡是本工程自己接的
+     * 图标按钮 / 行内可点区域，都要显式抬到这个值，而不是依赖库默认。
+     */
+    val minTouchTarget = 48.dp
+
+    /**
+     * 密集工具行里的触控热区下限。
+     *
+     * 顶栏总高 48dp，里面再塞 48dp 的按钮盒会把图标挤到贴边；这里退一档到 40dp
+     * （与 Miuix 默认一致）。这一档**只允许**出现在高度受限的栏内，
+     * 且必须与相邻可点元素保持 ≥8dp 间距。
+     */
+    val compactTouchTarget = 40.dp
+
+    /** 相邻可点元素之间的最小间距（规范要求 ≥8dp，否则会误触）。 */
+    val touchGap = 8.dp
+
+    /** 页面内一级区块之间的距离。 */
+    val sectionGap = 12.dp
+
+    /** 行与行之间、以及行内元素之间的距离。 */
+    val rowGap = 8.dp
 }
 
 /** 布局尺度常量，取自上游原版 IQ Code 的 dp() 用量。 */
 object Dimens {
-    val screenPadding = 12.dp
+    /**
+     * 页面级水平边距。
+     *
+     * 值转发自 [ZhiSpacing.pageMargin]（16dp）：旧值 12dp 是上游原版的用量，
+     * 按设计基准（手机单手防误触 16dp）抬了一档。留着这个别名是因为它被当作
+     * "页面边距"读了很多年，改名反而会让调用点对不上号。
+     */
+    val screenPadding = ZhiSpacing.pageMargin
+
     val topBarHeight = 48.dp
 
     // 圆角统一走 ZhiRadius，这里只保留别名的转发，避免两份数字各改各的
@@ -179,17 +236,25 @@ object ZhiColors {
      */
     @Composable
     fun backdrop(): Color = when {
-        // AMOLED：背板就是纯黑。OLED 屏上这一档的功耗差别是实打实的，
-        // 而它只在深色下生效 —— 浅色下压成黑等于整屏不可读。
-        isDark() && LocalAmoled.current -> Color.Black
+        // Miuix 的普通深色背板不是纯黑；Sheet、页面缝隙和模糊背板
+        // 都依赖这一层与 surface/container 拉开层级。
         isDark() -> DarkBackdrop
         else -> PanelLight
     }
 
-    /** 侧栏 / 面板底色：深色柔黑、浅色柔白。AMOLED 下与背板同为纯黑。 */
+    /**
+     * 侧栏 / 二级页面（设置、MCP、技能…）的底色。
+     *
+     * 深色下用 [PanelDark]（`#1C1C1E`）而**不是**纯黑 —— 这是 Miuix 的层级规矩：
+     * 背板（[backdrop]）最暗、面板亮一档、卡片再亮一档。三级拉开了，
+     * 分组边界才会自然出现。
+     *
+     * ⚠️ 曾经这里被改成 `Color.Black`，结果是设置页、MCP 页这类二级页面整块发黑，
+     * 与顶部 `SmallTopAppBar` 的 `surface` 之间出现一道明显断层，卡片也闷在背景里。
+     * 纯黑只用于 **AMOLED**（见 [backdrop]）与**侧栏抽屉**这种刻意的产品选择。
+     */
     @Composable
     fun panelSurface(): Color = when {
-        isDark() && LocalAmoled.current -> Color.Black
         isDark() -> PanelDark
         else -> Color.White
     }
@@ -202,9 +267,6 @@ object ZhiColors {
      */
     @Composable
     fun cardSurface(): Color = when {
-        // 纯黑主题里卡片不能也压成 0：那样分组边界彻底消失（卡片与背板同色）。
-        // 留一档几乎看不出但测得出的 0xFF0E0E0E，边界靠圆角与阴影仍在。
-        isDark() && LocalAmoled.current -> AmoledCard
         isDark() -> DarkCard
         else -> CardLight
     }
@@ -214,6 +276,25 @@ object ZhiColors {
     fun cardInnerSurface(): Color =
         if (isDark()) MiuixTheme.colorScheme.surfaceContainerHighest else CardInnerLight
 
+    // ------------------------------------------------------- 行首图标底色（Plate）
+    //
+    // 设置页每一行的行首是一块彩色方块（借小米「设置」的观感，见
+    // `ui/settings/SettingsIconPlate.kt`）。这六个值原来写在那**UI 文件**里，
+    // 是当时唯一一处"主题色散落在组件里"的地方 —— 按规范，字面色值只应存在于
+    // 主题层，调用方只认语义名。
+    //
+    // ⚠️ 深浅色共用一套：彩色方块在深色底上本来就是亮点，小米也这么做。
+    // ⚠️ 新增颜色必须与白色字形的对比度 ≥3:1（方块里的字形是纯白）。
+    //
+    // 它们是**常量**而不是 `@Composable` 函数（与上面的层级色不同）：plate 色不随
+    // 深浅变化，所以不需要读 CompositionLocal；写成常量才能在非组合上下文
+    // （数据类默认值、预览）里直接用。
+    val plateBlue = Color(0xFF3182FF)
+    val plateGreen = Color(0xFF1B9C48)
+    val plateOrange = Color(0xFFD97500)
+    val plateRed = Color(0xFFF2453D)
+    val platePurple = Color(0xFF7A5AF8)
+    val plateGray = Color(0xFF8A9099)
     /**
      * **终端井**：工具输出、diff、运行中的实时输出都画在它上面。
      *
@@ -241,12 +322,29 @@ object ZhiColors {
     private val TerminalDark = Color(0xFF0A0B0C)
     private val TerminalLight = Color(0xFFE7E5DE)
 
-    private val DarkBackdrop = Color(0xFF28282A)
-    private val PanelDark = Color(0xFF1C1C1E)
-    private val DarkCard = Color(0xFF323235)
+    /*
+     * 深色三级色阶 —— 数值全部取自 Miuix `darkColorScheme`（
+     * `miuix-ui/.../theme/Colors.kt:451`），不是自己调的。
+     *
+     * | 层 | Miuix 槽位 | 值 |
+     * | --- | --- | --- |
+     * | 页面背板 | `surface`（`Scaffold.containerColor` 的默认值） | **纯黑 `#000000`** |
+     * | 面板（侧栏 / 二级页底） | `background` | `#242424` |
+     * | 卡片 / 分组 | `surfaceContainerHighest` | `#2D2D2D` |
+     *
+     * ⚠️ 这里曾经把背板写成 `#28282A`、把面板压到 `#1C1C1E`，理由是"纯黑太像
+     * AMOLED"。但 Miuix 的深色页面**本来就是纯黑**：`Scaffold` 不给
+     * `containerColor` 时用 `colorScheme.surface`，而深色 `surface = Color.Black`。
+     * 真正的层级感来自"纯黑页面 + `#242424` 卡片"，而不是把页面提亮 ——
+     * 把页面提亮到 `#28282A` 之后，页面与卡片只差一档，反而糊成一片。
+     *
+     * 浮层不受影响：`BottomSheetDefaults.backgroundColor()` 与
+     * `OverlayDialog` 取的是 `background`（`#242424`），不是 `surface`。
+     */
+    private val DarkBackdrop = Color.Black
+    private val PanelDark = Color(0xFF242424)
+    private val DarkCard = Color(0xFF2D2D2D)
 
-    /** AMOLED 下的卡片底：比纯黑亮一丝，让分组边界还能被看见。 */
-    private val AmoledCard = Color(0xFF0E0E0E)
 
     /**
      * 浅色中性阶。

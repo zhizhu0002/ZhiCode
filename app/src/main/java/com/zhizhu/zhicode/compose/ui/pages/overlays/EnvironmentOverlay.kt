@@ -16,6 +16,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -53,10 +57,28 @@ fun EnvironmentOverlay(
     onCopy: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
+    var lastVisibleReport by remember { mutableStateOf(report) }
+    var lastVisibleMessage by remember { mutableStateOf(message) }
+    var lastVisibleReady by remember { mutableStateOf(runtimeReady) }
+    var lastVisibleInstalling by remember { mutableStateOf(installing) }
+    var lastVisibleProgress by remember { mutableStateOf(progress) }
+    if (open) {
+        lastVisibleReport = report
+        lastVisibleMessage = message
+        lastVisibleReady = runtimeReady
+        lastVisibleInstalling = installing
+        lastVisibleProgress = progress
+    }
+    val displayedReport = if (open) report else lastVisibleReport
+    val displayedMessage = if (open) message else lastVisibleMessage
+    val displayedReady = if (open) runtimeReady else lastVisibleReady
+    val displayedInstalling = if (open) installing else lastVisibleInstalling
+    val displayedProgress = if (open) progress else lastVisibleProgress
 
     OverlayDialog(
         show = open,
         onDismissRequest = onDismiss,
+        largeScreen = true,
         maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
@@ -86,27 +108,27 @@ fun EnvironmentOverlay(
             prompt = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = if (runtimeReady) "内置 Termux 环境：已就绪" else "内置 Termux 环境：未安装",
-                        color = if (runtimeReady) scheme.primary else scheme.onSurfaceVariantSummary,
+                        text = if (displayedReady) "内置 Termux 环境：已就绪" else "内置 Termux 环境：未安装",
+                        color = if (displayedReady) scheme.primary else scheme.onSurfaceVariantSummary,
                         fontSize = MiuixTheme.textStyles.body1.fontSize,
                     )
-                    if (installing) {
+                    if (displayedInstalling) {
                         LinearProgressIndicator(
-                            progress = (progress.coerceIn(0, 100)) / 100f,
+                            progress = (displayedProgress.coerceIn(0, 100)) / 100f,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 8.dp)
                                 .height(6.dp),
                         )
                         Text(
-                            text = if (message.isBlank()) "$progress%" else "$progress% · $message",
+                            text = if (displayedMessage.isBlank()) "$displayedProgress%" else "$displayedProgress% · $displayedMessage",
                             color = scheme.onSurfaceVariantSummary,
                             fontSize = MiuixTheme.textStyles.body2.fontSize,
                             modifier = Modifier.padding(top = 6.dp),
                         )
-                    } else if (message.isNotBlank()) {
+                    } else if (displayedMessage.isNotBlank()) {
                         Text(
-                            text = message,
+                            text = displayedMessage,
                             color = scheme.onSurfaceVariantSummary,
                             fontSize = MiuixTheme.textStyles.body2.fontSize,
                             modifier = Modifier.padding(top = 6.dp),
@@ -121,13 +143,13 @@ fun EnvironmentOverlay(
                     cornerRadius = ZhiRadius.button,
                 )
                 Row(modifier = Modifier.padding(start = 8.dp)) {
-                    if (runtimeReady) {
+                    if (displayedReady) {
                         SecondaryButton(text = "重新初始化", onClick = onInstall)
                     } else {
                         PrimaryButton(
-                            text = if (installing) "安装中…" else "初始化环境",
+                            text = if (displayedInstalling) "安装中…" else "初始化环境",
                             onClick = onInstall,
-                            enabled = !installing,
+                            enabled = !displayedInstalling,
                         )
                     }
                 }
@@ -154,7 +176,7 @@ fun EnvironmentOverlay(
                         cornerRadius = ZhiRadius.button,
                         modifier = Modifier.padding(start = 8.dp),
                     )
-                    if (runtimeReady) {
+                    if (displayedReady) {
                         TextButton(
                             text = "修复",
                             onClick = onRepair,
@@ -164,7 +186,7 @@ fun EnvironmentOverlay(
                     }
                 }
                 Text(
-                    text = report.ifBlank { "（无内容，点「重新检测」）" },
+                    text = displayedReport.ifBlank { "（无内容，点「重新检测」）" },
                     color = scheme.onBackground,
                     fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     fontFamily = FontFamily.Monospace,

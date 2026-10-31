@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!--
+        ZhiCode icon language:
+        keep the reference image's blue light planes and layered hexagon silhouette;
+        only the inner mark is specialized for an AI coding workspace.
+    -->
+    <!-- Soft diagonal light planes from the reference artwork. -->
+    <path
+        android:fillColor="#35B4FF"
+        android:alpha="0.32"
+        android:pathData="M0,0 L54,0 L108,31 L108,48 L72,28 L0,72 Z" />
+    <path
+        android:fillColor="#1647C7"
+        android:alpha="0.25"
+        android:pathData="M0,42 L26,27 L54,43 L30,57 L0,76 Z" />
+    <path
+        android:fillColor="#0B35A9"
+        android:alpha="0.22"
+        android:pathData="M108,62 L78,80 L108,108 Z" />
+
+    <!-- The original dark-blue dimensional hexagonal ring. -->
+    <path
+        android:fillColor="#2E559F"
+        android:pathData="M54,20 L84,37.3 L84,70.7 L54,88 L24,70.7 L24,37.3 Z" />
+    <!-- Original pale hexagonal core, intentionally left spacious and calm. -->
+    <path
+        android:fillColor="#EAF3FF"
+        android:pathData="M54,31 L73.5,42.25 L73.5,64.75 L54,76 L34.5,64.75 L34.5,42.25 Z" />
+
+    <!--
+        ZhiCode functional mark: a minimal terminal prompt inside the original core.
+        The blue mark stays small so the reference image's hexagon remains dominant.
+    -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M43,48 L50,54 L43,60"
+        android:strokeColor="#2868D8"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M55,61 L64,61"
+        android:strokeColor="#2868D8"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round" />
+</vector>

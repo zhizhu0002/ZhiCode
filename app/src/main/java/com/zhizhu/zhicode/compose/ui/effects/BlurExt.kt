@@ -4,8 +4,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
+import com.zhizhu.zhicode.compose.theme.LocalZhiDark
+import com.zhizhu.zhicode.compose.theme.ZhiGlass
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurColors
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
@@ -64,10 +67,14 @@ fun PageBlurBar(
             Modifier.textureBlur(
                 backdrop = backdrop,
                 shape = RectangleShape,
-                blurRadius = 25f,
+                blurRadius = ZhiGlass.FloatingBlur,
                 colors = BlurColors(
                     blendColors = listOf(
-                        BlendColorEntry(color = MiuixTheme.colorScheme.surface.copy(0.87f)),
+                        BlendColorEntry(
+                            color = MiuixTheme.colorScheme.surface.copy(
+                                if (LocalZhiDark.current) ZhiGlass.TopBarAlpha else 0.78f,
+                            ),
+                        ),
                     ),
                 ),
             )

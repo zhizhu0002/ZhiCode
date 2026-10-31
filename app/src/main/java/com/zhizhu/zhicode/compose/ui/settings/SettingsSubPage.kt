@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -50,6 +51,7 @@ import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
 import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
 import top.yukonga.miuix.kmp.nav.transition.NavTransitions
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 /**
@@ -273,6 +275,7 @@ internal fun SettingsSubPage(
     val scheme = MiuixTheme.colorScheme
     val listState = rememberLazyListState()
     val topAppBarScrollBehavior = MiuixScrollBehavior()
+    val backdrop = rememberPageBlurBackdrop()
 
     // FAB 的收放判定。`previousOffset` 刻意放在 derivedStateOf 外面（每次求值时更新），
     // 这跟参考实现的写法一致：它比较的是"这一次求值"与"上一次求值"的滚动量之差。
@@ -296,7 +299,6 @@ internal fun SettingsSubPage(
             // 用户报的「顶栏有的是毛玻璃有的是一块实色」就是这个。
             // 现在模糊可用时底色取透明（让 textureBlur 的结果透出来），
             // 不可用时回落到 surface，两条路都不留半透明中间态。
-            val backdrop = rememberPageBlurBackdrop()
             val blurActive = backdrop != null
             PageBlurBar(backdrop = backdrop, blurActive = blurActive) {
                 // 与设置主页同款顶栏：Miuix TopAppBar 自带 largeTitle（大标题随滚动折叠），
@@ -349,7 +351,16 @@ internal fun SettingsSubPage(
     ) { padding ->
         // 竖向三段：固定 header（顶栏之下、不随内容滚）/ 滚动区 / 浮层。
         // 滚动区用 weight(1f) 吃掉剩余高度，header 有多高都不会把列表挤没。
-        Column(modifier = Modifier.fillMaxSize()) {
+        //
+        // ⚠️ `imePadding()` 不能省：`MainActivity` 调了 `enableEdgeToEdge()`
+        // （= `setDecorFitsSystemWindows(false)`），DecorView 不再消费系统 inset，
+        // 系统那套"把窗口缩小让出键盘"也随之失效 —— **全应用只有几处自己接了键盘**。
+        // 这一页里有 MCP 表单、技能编辑、API 配置等大量输入框，不接的话
+        // 键盘一弹就把正在编辑的字段整个盖住。
+        //
+        // 加在**整页**而不是滚动区：顶栏保持不动，页面可用高度被压到键盘上沿，
+        // 于是列表自己在剩余空间里滚，聚焦的字段会被 Compose 自动带进可视区。
+        Column(modifier = Modifier.fillMaxSize().imePadding()) {
             if (header != null) {
                 Box(
                     modifier = Modifier
@@ -359,7 +370,11 @@ internal fun SettingsSubPage(
                         .padding(top = padding.calculateTopPadding()),
                 ) { header() }
             }
-            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            Box(
+                modifier = Modifier.fillMaxWidth().weight(1f).then(
+                    if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier,
+                ),
+            ) {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier

@@ -1,6 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
-import com.zhizhu.zhicode.compose.theme.ZhiRow
+import com.zhizhu.zhicode.compose.theme.MochiBaseline
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -63,6 +63,8 @@ fun PaneHeader(
     actionDescription: String? = null,
     onAction: (() -> Unit)? = null,
     subtitle: String? = null,
+    /** 可选的最左侧动作（终端会话抽屉入口）。 */
+    leadingAction: (@Composable RowScope.() -> Unit)? = null,
     /**
      * 行尾的多个动作。与 [actionIcon] 互斥使用（同时给会并排显示两个）。
      * 接收 `RowScope` 是为了让调用方能自己排间距。
@@ -72,9 +74,18 @@ fun PaneHeader(
     val scheme = MiuixTheme.colorScheme
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(ZhiRow.height).padding(horizontal = ZhiSpace.m),
+            // 面板头不跟列表行走同一个 token：列表行是 52dp（Mochi iOS 26 基准），
+            // 而面板头是**栏**，栏高应受顶栏 48dp 的量级约束，否则一屏里两条横栏
+            // 高度差 4dp 反而更显眼。这里取 Mochi 的 controlHeight。
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(MochiBaseline.controlHeight)
+                .padding(horizontal = ZhiSpace.m),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (leadingAction != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, content = leadingAction)
+            }
             Text(
                 text = title,
                 color = scheme.onBackground,

@@ -4,6 +4,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.background
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
@@ -137,8 +139,6 @@ fun ZhiSidebar(
     onSandbox: () -> Unit,
     onRuntime: () -> Unit,
     onSettings: () -> Unit,
-    /** 「关于」入口（与设置页底部那一项同一个目标）。 */
-    onAbout: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -269,10 +269,6 @@ fun ZhiSidebar(
                     onClick = onRuntime,
                 )
                 SidebarRow(label = "设置", icon = ZhiIcons.settings, onClick = onSettings)
-                // 「关于」放在导航组的最后：它是**只读信息**，不是工作入口。
-                // 与设置页底部那一项是同一个目标（两处入口是刻意的：侧栏是导航，
-                // 设置页是"我在找设置时顺手会看到"）。
-                SidebarRow(label = "关于 ZhiCode", icon = ZhiIcons.info, onClick = onAbout)
             }
         }
     }
@@ -429,8 +425,29 @@ private fun SessionRowInner(
     val trailing = "${session.updatedAtLabel} · ${session.messageCount} 条" +
         if (session.note.isNotEmpty()) " · 备注" else ""
     Card(
-        onClick = onOpen,
-        onLongPress = onActions,
+        // ⚠️⚠️ 长按**必须**走 Miuix `Card` 自己的 `onClick` / `onLongPress` 参数，
+        // 任何挂在 `modifier` 上的手势都会失效。这是「长按会话列表不显示下拉菜单」
+        // 的真正原因，两次错误尝试记录在这里，别再走一遍：
+        //
+        //   1. `pointerInput + detectTapGestures(onTap, onLongPress)` —— 无效；
+        //   2. `modifier.combinedClickable(onClick, onLongClick)` —— 同样无效。
+        //
+        // 为什么都无效：`Card.kt:119` 内部把 `Modifier.combinedClickable(...)`
+        // 挂在**内容 Column** 上（`Modifier.then(clickableModifier).padding(...)`），
+        // 而我们传的 `modifier` 是加在**外层 BasicCard** 上。Compose 的指针事件在
+        // Main pass 里**子节点优先**，所以内层那个 combinedClickable 先拿到按下、
+        // 判决为"点击"，外层永远等不到长按所需的持续按压。
+        //
+        // 探针实测过：`showSessionActions` 从未被调用（`pickerAnchor=null` 恒定），
+        // 用户长按很多次也毫无反应 —— 与"子节点抢占手势"完全吻合。
+        //
+        // 走原生参数后，Card 内部那唯一一个 combinedClickable 同时声明了
+        // tap 与 long-press，不存在竞争。
+        onClick = { onOpen() },
+        onLongPress = {
+            com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note("row/longPress ${session.id}")
+            onActions()
+        },
         modifier = Modifier.fillMaxWidth(),
         // 圆角 12dp（文档默认是 `CardDefaults.CornerRadius` = 16dp）。
         // 密集列表里 16dp 会让相邻两行看起来各是一个大方块，"列表"的连续感没了；
@@ -454,6 +471,8 @@ private fun SessionRowInner(
                         .align(Alignment.CenterStart)
                         .width(3.dp)
                         .height(20.dp)
+                        // 3dp 宽的选中指示条：尺寸远小于 squircle 有意义的下限，
+                        // 保持圆弧（同 MessageCards 的状态圆点）。
                         .clip(RoundedCornerShape(2.dp))
                         .background(scheme.primary),
                 )

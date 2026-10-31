@@ -17,6 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -203,7 +204,7 @@ fun JumpToLatest(onJumpToLatest: () -> Unit) {
             onClick = onJumpToLatest,
             color = scheme.surfaceContainerHigh,
             contentColor = scheme.primary,
-            shape = RoundedCornerShape(ZhiRadius.inner),
+            shape = ZhiSquircle(ZhiRadius.inner),
         ) {
             Text(
                 text = "回到最新",
@@ -245,8 +246,8 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
             cornerRadius = ZhiRadius.floating,
             insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             colors = CardDefaults.defaultColors(
-                color = scheme.primary,
-                contentColor = scheme.onPrimary,
+                color = scheme.primaryContainer,
+                contentColor = scheme.onPrimaryContainer,
             ),
             // ⚠️ 必须是 None，理由与 AssistantCard 完全相同：
             // 这张卡只有**长按**才有动作，而 Sink 是「按下即缩放」，
@@ -323,7 +324,7 @@ fun AssistantCard(
             // 使用当前主题的独立容器层，不再把浅色 surface 以低 alpha 叠在背板上。
             // 低 alpha 在浅色模式下会把卡片压成发灰的半透明块，深色模式也会
             // 随背景变化而失去稳定的层次。
-            color = if (ZhiColors.isDark()) scheme.surfaceContainer else ZhiColors.cardSurface(),
+            color = ZhiColors.cardSurface(),
             contentColor = scheme.onSurface,
         ),
         pressFeedbackType = PressFeedbackType.None,
@@ -486,41 +487,47 @@ private fun ContextFooter(tokens: Int, window: Int) {
 @Composable
 private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
-    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
-        // 表头点击走 Miuix Surface(onClick)，不再手写 Modifier.clickable
-        Surface(
-            onClick = onToggle,
-            color = Color.Transparent,
-            contentColor = scheme.primary,
-        ) {
-                Row(
-                    modifier = Modifier.padding(vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        painter = if (item.thinkingExpanded) ZhiIcons.collapse else ZhiIcons.expand,
-                        contentDescription = if (item.thinkingExpanded) "折叠思考过程" else "展开思考过程",
-                        tint = scheme.primary,
-                        modifier = Modifier.size(13.dp),
-                    )
-                    Text(
-                        text = "思考过程" + (if (item.streaming) " · 进行中" else ""),
-                        color = scheme.primary,
-                        fontSize = MiuixTheme.textStyles.body2.fontSize,
-                        modifier = Modifier.padding(start = 5.dp),
-                    )
-                }
+    // 点击区域覆盖**整块**面板（表头 + 展开后的正文 + 折叠时的一行摘要），
+    // 而不是只包住表头那 13dp 图标与几个字 —— 后者实测"点正文没反应"，
+    // 因为展开后的文字是普通 Text，不吃点击事件。
+    //
+    // 用 Miuix `Surface(onClick)` 而不是手写 `Modifier.clickable`：它自带与其余
+    // Miuix 控件一致的按压表现（水波纹半径与高亮色都跟着色板走）。
+    // 内层不再嵌套任何可点击元素，所以事件不会被吞掉。
+    Surface(
+        onClick = onToggle,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+        color = Color.Transparent,
+        contentColor = scheme.onSurface,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier.padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    painter = if (item.thinkingExpanded) ZhiIcons.collapse else ZhiIcons.expand,
+                    contentDescription = if (item.thinkingExpanded) "折叠思考过程" else "展开思考过程",
+                    tint = scheme.primary,
+                    modifier = Modifier.size(13.dp),
+                )
+                Text(
+                    text = "思考过程" + (if (item.streaming) " · 进行中" else ""),
+                    color = scheme.primary,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    modifier = Modifier.padding(start = 5.dp),
+                )
             }
-        // 展开/收起只改变内容高度，不再交叉淡化两份文本；旧内容会从顶部
-        // 逐帧收回，新内容也从同一条边缘展开，和工具组保持同一交互模型。
-        AnimatedContent(
-            targetState = item.thinkingExpanded,
-            transitionSpec = {
-                expandVertically(animationSpec = ZhiMotion.sizeSpec, expandFrom = Alignment.Top) togetherWith
-                    shrinkVertically(animationSpec = ZhiMotion.sizeSpec, shrinkTowards = Alignment.Top)
-            },
-            label = "thinking-panel",
-        ) { expanded ->
+            // 展开/收起只改变内容高度，不再交叉淡化两份文本；旧内容会从顶部
+            // 逐帧收回，新内容也从同一条边缘展开，和工具组保持同一交互模型。
+            AnimatedContent(
+                targetState = item.thinkingExpanded,
+                transitionSpec = {
+                    expandVertically(animationSpec = ZhiMotion.sizeSpec, expandFrom = Alignment.Top) togetherWith
+                        shrinkVertically(animationSpec = ZhiMotion.sizeSpec, shrinkTowards = Alignment.Top)
+                },
+                label = "thinking-panel",
+            ) { expanded ->
             if (expanded) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     if (item.processSteps.isNotEmpty()) {
@@ -552,6 +559,7 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                     modifier = Modifier.padding(start = 6.dp),
                 )
             }
+        }
         }
     }
 }
@@ -1293,6 +1301,8 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
                         .graphicsLayer { alpha = dotAlpha }
                         .background(
                             color = if (activity.awaitingPermission) scheme.onSurfaceVariantSummary else scheme.primary,
+                            // 7dp 的状态圆点：直径小于 10dp 时 G2 与圆弧在屏幕上无法分辨，
+                            // 而每个 squircle 都要开一次离屏层。这里保持圆弧是有意的。
                             shape = RoundedCornerShape(4.dp),
                         ),
                 )

@@ -276,7 +276,7 @@ final class SessionArchive {
                 }
                 // 其它类型：不认识的类型一律跳过，不猜。
             }
-            store.flush();
+            if (!store.flush()) throw new IOException("导入会话仍有未提交内容");
 
             SessionStore.applyImportedMetadata(sessionId,
                     header.optString("title", ""), header.optString("note", ""),

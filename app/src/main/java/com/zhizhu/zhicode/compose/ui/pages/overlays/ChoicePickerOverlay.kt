@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontFamily
@@ -148,6 +149,7 @@ fun ChoicePickerOverlay(
     OverlayDialog(
         show = picker != null,
         onDismissRequest = onDismiss,
+        largeScreen = true,
         maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
@@ -263,6 +265,22 @@ fun ChoicePickerOverlay(
                             Checkbox(
                                 state = if (checked) ToggleableState.On else ToggleableState.Off,
                                 onClick = toggle,
+                                /*
+                                 * 缩小到 0.78（26dp → 约 20dp）。
+                                 *
+                                 * Miuix 0.9.4 的 `Checkbox` 内部是 `requiredSize(26.dp)`，
+                                 * 且**排在调用方 modifier 之后** —— `Modifier.size()` 会被它覆盖，
+                                 * 压不动。`graphicsLayer` 改的是绘制变换，不受 requiredSize 约束，
+                                 * 是唯一能从外部缩小的手段。
+                                 *
+                                 * ⚠️ 缩放只改**绘制**，不改布局占位：这行的行高仍按 26dp 算。
+                                 * 这是有意的 —— 行高由整行文案撑起，不需要为 checkbox 再调；
+                                 * 若把布局也缩到 20dp，行内垂直居中会偏移。
+                                 */
+                                modifier = Modifier.graphicsLayer {
+                                    scaleX = 0.78f
+                                    scaleY = 0.78f
+                                },
                             )
                         },
                         onClick = toggle,

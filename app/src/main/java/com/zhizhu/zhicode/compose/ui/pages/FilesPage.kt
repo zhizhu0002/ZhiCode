@@ -1,11 +1,16 @@
 package com.zhizhu.zhicode.compose.ui.pages
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
@@ -15,6 +20,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -25,6 +31,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
@@ -63,7 +71,9 @@ import com.zhizhu.zhicode.compose.model.FileRoot
 import com.zhizhu.zhicode.compose.model.FileListOptions
 import com.zhizhu.zhicode.compose.model.FileSortKey
 import com.zhizhu.zhicode.compose.model.fileRangeSelection
+import com.zhizhu.zhicode.compose.theme.MochiBaseline
 import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -139,7 +149,14 @@ fun FilesPage(
     val effectiveSelectionMode = selectionMode || selection.isNotEmpty()
     BackHandler(active && effectiveSelectionMode, onClearSelection)
     Surface(modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
-        Column(Modifier.fillMaxSize()) {
+        // ⚠️ `imePadding()` 不能省：`MainActivity` 关掉了系统窗口 resizing
+        // （`enableEdgeToEdge()` → `setDecorFitsSystemWindows(false)`），
+        // 键盘高度只能由应用自己接。这一页顶部有搜索框，不接的话键盘一弹
+        // 就把搜索框和下面几行文件一起盖住。
+        //
+        // 加在**面板根容器**上：这样根切换栏、搜索框、文件列表整体被压到键盘上沿，
+        // 而不是只压缩列表 —— 否则搜索框会停在原地、列表却在它下面变矮，看着像断层。
+        Column(Modifier.fillMaxSize().imePadding()) {
             var pagerRoot by remember { mutableStateOf(root) }
             LaunchedEffect(root) { pagerRoot = root }
             FileRootSwitcher(pagerRoot, { selected ->
@@ -268,7 +285,12 @@ private fun FileBrowserList(
 ) {
     Column(Modifier.fillMaxSize()) {
         val listState = rememberLazyListState()
+        // 底部悬浮导航跟着文件列表滚动一起走（与对话页同一份实现）。
+        com.zhizhu.zhicode.compose.ui.reportNavBarScroll(listState)
         val scope = rememberCoroutineScope()
+        // 悬浮胶囊遮住的高度：列表要用**滚动内边距**让开它（而不是布局让位），
+        // 否则最底下一行永远滑不出胶囊之外。
+        val floatingNavInset = com.zhizhu.zhicode.compose.ui.LocalFloatingNavInset.current
     val currentEntries by rememberUpdatedState(entries)
     val currentSelection by rememberUpdatedState(selection)
     val currentMode by rememberUpdatedState(selectionMode)
@@ -285,7 +307,31 @@ private fun FileBrowserList(
         )),
     )
     Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = FileRowSidePadding), verticalAlignment = Alignment.CenterVertically) {
-        if (selectionMode) {
+        /*
+         * 长按进入多选时，这一行要从"搜索框 + 新建 + 排序"整块换成"关闭 + 已选择 + 全选"。
+         *
+         * 改版前是裸 `if (selectionMode) … else …` —— 两套控件在**同一帧**里互换，
+         * 看上去就是"长按下去，工具栏啪地闪了一下"。这里用 AnimatedContent 让两态
+         * 交叉溶解并带一点位移，方向跟着状态走（进多选向左、退出向右），
+         * 于是"我进入了另一个模式"这件事有了可读的运动方向。
+         *
+         * 为什么用 `SizeTransform(clip = false)`：行高固定 64dp，两态内部高度一致，
+         * 不需要裁剪；开着 clip 反而会在切换瞬间把描边切掉一条边。
+         */
+        AnimatedContent(
+            targetState = selectionMode,
+            transitionSpec = {
+                val forward = targetState
+                val spec = (fadeIn(ZhiMotion.fadeInSpec) + slideInHorizontally(ZhiMotion.enterSpec) { w -> if (forward) w / 6 else -w / 6 })
+                    .togetherWith(
+                        fadeOut(ZhiMotion.fadeOutSpec) + slideOutHorizontally(ZhiMotion.exitSpec) { w -> if (forward) -w / 6 else w / 6 },
+                    )
+                spec.using(SizeTransform(clip = false))
+            },
+            label = "filesToolbar",
+        ) { inSelection ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (inSelection) {
             ZhiIconButton(ZhiIcons.close, "退出选择", onClearSelection, compact = 40.dp)
             Text("已选择 ${selection.size} 项", fontSize = MiuixTheme.textStyles.main.fontSize, modifier = Modifier.weight(1f))
             ZhiIconButton(
@@ -316,6 +362,8 @@ private fun FileBrowserList(
                 Icon(ZhiMaterialIcons.Sort, "排序与显示方式", modifier = Modifier.size(20.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
         }
+            }
+        }
     }
     FilePathBar(filePath, onNavigate)
     if (root == FileRoot.SHARED && !sharedStorageGranted) {
@@ -329,7 +377,7 @@ private fun FileBrowserList(
         Box(Modifier.fillMaxWidth().weight(1f)) {
             LazyColumn(
             state = listState,
-            contentPadding = PaddingValues(bottom = if (selectionMode) 96.dp else 16.dp),
+            contentPadding = PaddingValues(bottom = (if (selectionMode) 96.dp else 16.dp) + floatingNavInset),
             modifier = Modifier.fillMaxSize().pointerInput(filePath) {
                 fun indexAt(y: Float): Int = listState.layoutInfo.visibleItemsInfo.firstOrNull { y >= it.offset && y < it.offset + it.size }?.index ?: -1
                 awaitEachGesture {
@@ -409,6 +457,8 @@ internal fun FileSelectionToolbar(
     onAttach: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit,
     onCopy: () -> Unit, onMove: () -> Unit, clipboardCount: Int, clipboardMove: Boolean, onPaste: () -> Unit,
     onSelectAll: () -> Unit, onDismiss: () -> Unit,
+    /** 由调用方给的定位（底部让位）。淡入淡出也由调用方管 —— 它和胶囊共用同一个槽位。 */
+    modifier: Modifier = Modifier,
 ) {
     val clipboard = LocalClipboardManager.current
     var details by remember { mutableStateOf<List<FileEntry>?>(null) }
@@ -421,9 +471,11 @@ internal fun FileSelectionToolbar(
     ))
     AnimatedVisibility(visible, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
         Surface(
-            modifier = Modifier
-                .padding(horizontal = 18.dp, vertical = 6.dp)
-                .then(glass.blur(Modifier, RoundedCornerShape(28.dp), radius = 20f))
+            modifier = modifier
+                // 横向内缩与悬浮胶囊同源（`floatingHorizontalInset`），两块边缘才能对齐。
+                // 以前是写死的 18dp，比胶囊的 12dp 窄一圈，看上去就是“没对齐”。
+                .padding(horizontal = com.zhizhu.zhicode.compose.ui.floatingHorizontalInset(wide = false), vertical = 6.dp)
+                .then(glass.blur(Modifier, ZhiSquircle(ZhiRadius.card), radius = 20f))
                 .border(
                     width = 1.dp,
                     color = if (ZhiColors.isDark()) {
@@ -431,9 +483,9 @@ internal fun FileSelectionToolbar(
                     } else {
                         Color.White.copy(alpha = 0.62f)
                     },
-                    shape = RoundedCornerShape(28.dp),
+                    shape = ZhiSquircle(ZhiRadius.card),
                 ),
-            shape = RoundedCornerShape(28.dp),
+            shape = ZhiSquircle(ZhiRadius.card),
             color = glass.surfaceColor(
                 if (ZhiColors.isDark()) MiuixTheme.colorScheme.surfaceContainer
                 else ZhiColors.panelSurface(),
@@ -475,7 +527,7 @@ private fun FileToolbarAction(icon: ImageVector, label: String, onClick: () -> U
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier.height(42.dp).padding(horizontal = 2.dp),
-        shape = RoundedCornerShape(18.dp),
+        shape = ZhiSquircle(MochiBaseline.cornerLarge),
         color = Color.Transparent,
         contentColor = content,
     ) {

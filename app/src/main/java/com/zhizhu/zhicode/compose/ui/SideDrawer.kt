@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -35,7 +36,6 @@ internal fun ZhiSideDrawer(
     open: Boolean,
     onClose: () -> Unit,
     width: Dp,
-    glass: Glass,
     content: @Composable () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -76,15 +76,14 @@ internal fun ZhiSideDrawer(
             Surface(
                 modifier = Modifier
                     .width(width.coerceAtMost(320.dp))
-                    .fillMaxHeight()
-                    .then(
-                        glass.blur(
-                            Modifier,
-                            RoundedCornerShape(topEnd = ZhiRadius.floating, bottomEnd = ZhiRadius.floating),
-                            radius = 20f,
-                        ),
-                    ),
-                color = glass.surfaceColor(scheme.surfaceContainer),
+                    .fillMaxHeight(),
+                // Miuix semantic overlay surface; no independent glass sampling/tint.
+                color = scheme.background,
+                // 这是本工程**唯一**保留圆弧圆角的悬浮面板：抽屉只有右侧两个角是圆的
+                // （左侧贴屏幕边），而 `miuix-squircle` 的 Path API 只提供四角同半径的
+                // 轮廓。为两个角单独实现一条非对称 squircle path 的收益远小于代价
+                // （角部曲率差异在 20dp 半径、且一半被屏幕边缘裁掉时几乎看不出），
+                // 所以这里按规范允许的"明确理由例外"保留 RoundedCornerShape。
                 shape = RoundedCornerShape(topEnd = ZhiRadius.floating, bottomEnd = ZhiRadius.floating),
             ) {
                 // ⚠️ 内边距只能加在**内容**上，不能加在面板的 `Surface` 上。
@@ -95,8 +94,39 @@ internal fun ZhiSideDrawer(
                 //
                 // 加在 `Surface` 上的话，面板底色会跟着缩进去：抽屉滑入时状态栏那一条
                 // 会露出后面的工作区。所以底色铺满、内容让位。
-                Box(modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars)) {
-                    content()
+                // ⚠️⚠️ 这里**必须**再套一个 `Scaffold`，否则抽屉里的长按菜单画不出来。
+                //
+                // 机制：Miuix 的弹层（`OverlayDropdownPopup` / `OverlayDialog` …）并不自己
+                // 绘制，而是把一个 `PopupState` 注册进 **`LocalPopupStates`** 这个列表，
+                // 真正的绘制由某个 `Scaffold` 的 `popupHost: @Composable () -> Unit =
+                // { MiuixPopupHost() }` 负责（见 `Scaffold.kt:108` 的
+                // `LocalPopupStates provides popupStates`）。
+                //
+                // 而侧栏抽屉是 `WorkspacePage` 里 `Scaffold` **之后**的兄弟节点 ——
+                // 这棵子树里**没有任何 Scaffold**，所以：
+                //  · `renderInRootScaffold = true` → 菜单注册进最外层 Scaffold 的宿主，
+                //    但那里在抽屉**下层**，被抽屉整块盖住（看不见）；
+                //  · `renderInRootScaffold = false` → 读 `LocalPopupStates`，
+                //    而这里是 `staticCompositionLocalOf` 的**默认空列表**，注册进去
+                //    没有任何宿主认领（同样看不见）。
+                // 两种写法都"点了没反应"，这正是用户反复报的那个 bug。
+                //
+                // 套一个 Scaffold 之后，`LocalPopupStates` 由它提供、`MiuixPopupHost`
+                // 也在抽屉内部绘制 —— 菜单落在抽屉这一层，层级正确。
+                //
+                // `containerColor = Transparent`：抽屉自己的底色由外层 `Surface` 画，
+                // 这里只是借 Scaffold 的**弹层宿主**，不能再加一层不透明底。
+                top.yukonga.miuix.kmp.basic.Scaffold(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    popupHost = {
+                        com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note("drawer/popupHost rendered")
+                        top.yukonga.miuix.kmp.utils.MiuixPopupUtils.MiuixPopupHost()
+                    },
+                ) { _ ->
+                    com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note("drawer/scaffold content")
+                    Box(modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars)) {
+                        content()
+                    }
                 }
             }
         }

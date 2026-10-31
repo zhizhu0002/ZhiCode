@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -168,8 +169,35 @@ internal fun ChatPage(
             state.uiDebugOpen || state.environmentOpen
         val settledImeLiftPx = if (liftByFullScreenOverlay) 0 else imeMotion.settledLiftPx
 
+        // 悬浮胶囊的让位量。提前取到这里，因为 `bottomInset` 与下面那一列的
+        // `padding(bottom = settleBar)` 必须用**同一个值**（见 bottomInset 的说明）。
+        val settleBar = com.zhizhu.zhicode.compose.ui.LocalFloatingNavInset.current
+        // 悬浮栏隐藏进度（补间后的显示值）。只在**绘制阶段**读它，不参与布局。
+        val navBarProgressState = com.zhizhu.zhicode.compose.ui.LocalNavBarProgress.current
+
         val bottomInset = with(density) {
-            ((floatingContentHeightPx + settledImeLiftPx).toDp() + FloatingBottomGap)
+            // 悬浮胶囊（`LocalFloatingNavInset`）现在**不让布局**了 —— 内容铺到屏幕底边，
+            // 所以输入器必须自己让开它，并且列表留白里也要算上它，否则最后一条消息
+            // 会停在胶囊底下。非悬浮模式这个值是 0，行为与以前一致。
+            //
+            // ⚠️⚠️ 这里**必须**再加上 `settleBar`。这是一个实测出来的真实漏算：
+            //
+            // 下面那一列用的是 `padding(bottom = settleBar)`，而 `onSizeChanged`
+            // 挂在这个 `padding` **之后** —— 它量到的是**内容尺寸**，padding 不计入。
+            // 于是 `floatingContentHeightPx` 少了 `settleBar` 那一段。
+            //
+            // 实测（探针打印）：`floatingContentHeightPx` = 664px，而悬浮列的顶边在
+            // 1511px、底边在 2175px、窗口底 2400px —— 列的真实占位是 1511→2400
+            // （889px），留白却只按 664px + gap 算。差额 225px 恰好等于 `settleBar`
+            // （80dp × 2.75 ≈ 220px）。
+            //
+            // 后果就是用户反复报的「消息被任务卡覆盖」：列表按偏小的留白贴底，
+            // 最后几条停在 1511px 以下、被悬浮层盖住 —— 截图上「帧耗时」消息卡
+            // 的第二行被「任务进度」上沿切掉，就是这个差额。
+            //
+            // 原先这里的注释写着"输入器那一列已经把这个 inset 算进自己的高度"，
+            // 那个判断是错的，别再据此把 `settleBar` 删掉。
+            ((floatingContentHeightPx + settledImeLiftPx).toDp() + settleBar + FloatingBottomGap)
                 .coerceAtLeast(MinFloatingInset)
         }
 
@@ -249,6 +277,29 @@ internal fun ChatPage(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
+                // 悬浮栏隐藏时，这一列（任务卡 + 输入器）**向下填满胶囊腾出的空间**。
+                //
+                // ⚠️ 位移量 = `settleBar`（= 胶囊让位量），**不是**它加上自身高度。
+                // 曾经写成 `(FloatingNavBarHeight + settleBar) * progress`，
+                // 于是胶囊藏好时输入器被推出屏幕、底部留下一条残片 —— 用户截图看得很清楚。
+                //
+                // 为什么 `settleBar` 就够：这一列本来靠 `padding(bottom = settleBar)`
+                // 坐在胶囊**上方**。胶囊滑走后，把这块内边距"视觉上抵消掉"，
+                // 内容就正好贴到屏幕底部，不多不少。
+                //
+                // ⚠️ 必须是 `graphicsLayer`（绘制阶段）而不是 `padding`/`offset`：
+                // 布局变化会改这一列的测量高度，进而改 `floatingContentHeightPx`
+                // → 改列表 `bottomInset` → 改列表滚动位置 → 又写回进度，形成回路，
+                // 表现就是"下滑时弹一下"。
+                .graphicsLayer {
+                    val progress = navBarProgressState.value
+                    if (progress > 0f) translationY = settleBar.toPx() * progress
+                }
+                // 悬浮胶囊的高度由这一列自己让开：内容层现在铺到屏幕底边，
+                // 所以这里必须留出胶囊的位置，否则输入器会被胶囊压住。
+                // 放在 `offset{}` / `onSizeChanged` **左边**，让量到的高度含这一截 ——
+                // 列表留白正是照着这个高度算的。
+                .padding(bottom = settleBar)
                 // ## 输入法抬起：为什么是 `offset { }` 而不是 `padding(bottom = …)`
                 //
                 // 先把"必须自己接"这件事说清楚，因为这决定了下面为什么不能用现成机制：
@@ -287,7 +338,12 @@ internal fun ChatPage(
                 // 换成 `padding` 时，让给键盘的那段会被算进**节点尺寸**，于是这里报的高度
                 // 含 IME、每帧都变 → 上面的 bottomInset 每帧变 → ChatList 每帧重组。
                 // `offset` 只改摆放、不参与尺寸，所以量出来只剩内容，尺寸稳定。
-                .onSizeChanged { floatingContentHeightPx = it.height },
+                .onSizeChanged {
+                    // 曾在 DEBUG 下顺带写 `nav-probe chat-floating` 日志，用来核对
+                    // "内容让位高度 = 底部栏实际高度"。结论已确认，探针删除：
+                    // 它每次尺寸变化都执行，而尺寸在键盘/悬浮栏动画期间频繁变化。
+                    floatingContentHeightPx = it.height
+                },
         ) {
             AnimatedVisibility(
                 visible = floating,
@@ -473,11 +529,27 @@ internal fun ZhiAnchoredMenuHost(
     viewModel: WorkspaceViewModel,
     anchorId: String,
     fingerOffset: DpOffset?,
+    /**
+     * 弹层渲染到哪个宿主。
+     *
+     * ⚠️ 侧栏必须传 `false`。侧栏抽屉是 `Scaffold` **之后**的兄弟节点、叠在它上面，
+     * 而 `renderInRootScaffold = true` 会把菜单注册进**最外层 Scaffold** 的 popupHost ——
+     * 菜单其实弹了，却被抽屉整块盖住，表现就是「长按会话没反应」。
+     * 传 `false` 时走离调用点最近的局部宿主，层级正确。
+     *
+     * 对话流保持默认 `true`：那里没有被兄弟节点覆盖的问题，走根宿主能在整屏定位。
+     */
+    renderInRootScaffold: Boolean = true,
 ) {
     val picker = state.choicePicker
     // 菜单从手指位置长出来，而退场动画期间 choicePicker 已经是 null —— 不兜住的话，
     // 面板会在退场那几帧里弹回条目左上角再消失。
     val shownPicker = rememberLastNonNull(picker) ?: return
+    com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note(
+        "session-menu/host anchor=$anchorId pickerAnchor=${picker?.anchorId}" +
+            " actionMenu=${picker?.isActionMenu} shownAnchor=${shownPicker.anchorId}" +
+            " shownMenu=${shownPicker.isActionMenu}",
+    )
     val open = picker != null && picker.isActionMenu && picker.anchorId == anchorId
     if (!shownPicker.isActionMenu || shownPicker.anchorId != anchorId) return
     ZhiAnchoredActionMenu(
@@ -488,5 +560,6 @@ internal fun ZhiAnchoredMenuHost(
         onDismiss = viewModel::dismissChoicePicker,
         // 非空时面板从**手指那一点**长出来；为空则退回贴条目锚定。
         fingerOffset = fingerOffset,
+        renderInRootScaffold = renderInRootScaffold,
     )
 }

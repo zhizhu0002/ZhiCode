@@ -221,7 +221,7 @@ final class LegacySessionImporter {
                 if (row == null) continue;
                 appendLegacyRow(store, row);
             }
-            store.flush();
+            if (!store.flush()) throw new IOException("旧会话仍有未提交内容");
 
             SessionStore.applyImportedMetadata(sessionId,
                     header.optString("title", ""), header.optString("note", ""),

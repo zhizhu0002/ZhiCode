@@ -207,6 +207,51 @@ dependencies {
     implementation 'top.yukonga.miuix.kmp:miuix-blur-android:0.9.4'
 
     /*
+     * Mochi（麻薯）—— https://github.com/feice11/mochi-compose
+     *
+     * Jetpack Compose 组件库（iOS 26 式列表/菜单、MD3 Expressive 配色、G2 连续圆角），
+     * Apache-2.0，发布在 Maven Central，不需要额外仓库。
+     *
+     * 门槛与工程对照：
+     *  - compileSdk ≥ 36 → 本工程 37 ✔
+     *  - Kotlin ≥ 2.3    → 本工程 2.4.0 ✔
+     *  - minSdk 23       → 本工程 24 ✔
+     *
+     * ⚠️ 它**不依赖 material3**，但运行时**必须**有 `com.kyant.backdrop.*`
+     * （`Backdrop` / `LayerBackdrop` / `effects.lens` / `highlight.Highlight` /
+     * `shadow.Shadow, InnerShadow` / `drawBackdrop`，已从 classes.jar 反编译核实），
+     * 而 POM 里那一项是 `io.github.kyant0:backdrop:1.0.6`、scope 为 **runtime**
+     * —— 也就是说版本完全由消费方这边决定，见下一段。
+     *
+     * 图标（mochi-icons）/ Nothing 外观（mochi-nothing）/ iOS 外观（mochi-ios）
+     * 是各自独立的 artifact，用到再加，别一次不全带进来。
+     */
+    implementation 'io.github.feice11:mochi-compose:0.2.0'
+
+    /*
+     * AndroidLiquidGlass（Kyant0）—— https://github.com/Kyant0/AndroidLiquidGlass
+     *
+     * 发布坐标就是 `io.github.kyant0:backdrop`：液态玻璃的取样/折射/高光/内外阴影
+     * 基础设施（不含现成组件，组件要自己按 app 模块里的示例拼）。
+     *
+     * 为什么**显式**写这一行，而不是靠上面 Mochi 的传递依赖：
+     *  - Mochi 声明的是 1.0.6，本工程用最新的 2.0.1，不写就会是「谁先被解析算谁的」；
+     *  - 它要求 CMP 1.12.0 / kotlin-stdlib 2.4.10，版本抬升会同时影响 compose 的落版，
+     *    必须是一处可检查的显式意图（构建后用 `:app:dependencies` 核对实际落版）。
+     *
+     * ⚠️ 跨大版本风险（尚未触发，因为下面还没有任何调用点）：Mochi 是按 backdrop 1.0.6
+     * 编译的，将来一旦启用它的玻璃组件（`MochiGlassTabBar` / `MochiGlassSurface` /
+     * `MochiSheet` 等），2.0.1 若改了方法签名就会是 `NoSuchMethodError`。
+     * 真出问题时的回退手段（不是现在的默认行为）：
+     *   configurations.all { resolutionStrategy.force 'io.github.kyant0:backdrop:1.0.6' }
+     *
+     * 另外：`ui/effects/Lens.kt`、`Vibrancy.kt` 是 AndroidLiquidGlass 的**移植**
+     * （跑在 miuix-blur 的 BackdropEffectScope 上），与这里的 backdrop 是两条独立管线。
+     * 现有悬浮栏继续走前者，不要为了"统一"把两者混起来。
+     */
+    implementation 'io.github.kyant0:backdrop:2.0.1'
+
+    /*
      * 基线配置文件（app/src/main/baseline-prof.txt）的**装机器**。
      *
      * 它现在会由 activity-compose 间接带进来，所以包体与行为上"不写也能用" ——

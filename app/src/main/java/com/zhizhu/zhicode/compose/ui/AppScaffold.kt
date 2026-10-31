@@ -59,6 +59,7 @@ import top.yukonga.miuix.kmp.nav.core.navBackStackOf
 import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
 import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
 import top.yukonga.miuix.kmp.nav.transition.NavTransitions
+import top.yukonga.miuix.kmp.nav.gesture.WindowNavigationEventBridge
 
 /**
  * 取（或创建）主 ViewModel。
@@ -91,6 +92,10 @@ fun ZhiCodeApp(viewModel: WorkspaceViewModel = rememberWorkspaceViewModel()) {
     // 主题栈只有一处（theme/ZhiAppTheme.kt）：编辑器那个独立 Activity 用的是同一个，
     // 所以"应用内切主题后两屏颜色不一致"这类问题不会再出现。
     ZhiAppTheme(theme = state.themeSettings) {
+        // Miuix NavDisplay 的 predictive back 需要窗口桥把 Android
+        // NavigationEvent 转发到 compose dispatcher；这是一个真正的运行时开关，
+        // 不是给 NavDisplay 传一个不存在的参数。
+        if (state.themeSettings.predictiveBack) WindowNavigationEventBridge()
         // 这里**不再**挂常开的帧泵。
         //
         // 原来这里是 `ZhiFrameTraceHost()`，内部是

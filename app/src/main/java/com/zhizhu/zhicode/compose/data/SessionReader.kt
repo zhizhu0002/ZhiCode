@@ -491,6 +491,11 @@ internal object SessionReader {
             append('\n')
             append("旧格式已导入 ").append(stats.optLong("migrated")).append(" 条")
             append(" · 失败 ").append(stats.optLong("migration_failures")).append(" 条")
+            append('\n')
+            append("数据库检查：").append(stats.optString("integrity_check", "未知"))
+            append(" · 计数偏差 ").append(stats.optLong("session_count_mismatches"))
+            append(" · 序号偏差 ").append(stats.optLong("sequence_mismatches"))
+            append(" · 缺失大内容 ").append(stats.optLong("blob_missing_files"))
         }
     }
 

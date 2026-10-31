@@ -142,3 +142,64 @@ Miuix 下拉菜单 + 一个**只观察不消费**的指针修饰符拿手指位�
 ⚠️ 观察器一旦**消费**事件，就会顶掉点击与无障碍语义。**这条同样没有自动化断言**
 （原 `AnchoredMenuStructureTest` 已删）—— 改这个修饰符时，请手动确认卡片的点击、长按
 与无障碍语义都还在。
+
+---
+
+## 7. 设计基准核对表（视觉对齐的唯一判据）
+
+本节是**任务 #1046 的遗留项**，此前一直是 in_progress。所有几何数值现在由
+`theme/Baseline.kt` 的 `MochiBaseline` 单一提供，其余对象（`ZhiRadius` /
+`ZhiSpacing` / `ZhiRow` / `MochiMetrics`）只做转发。
+
+### 圆角九档（来源：Mochi `MochiShapes` 官方文档，**不是**反编译推断）
+
+| 档位 | 值 | 本工程语义名 |
+| --- | --- | --- |
+| extraSmall | 4dp | `ZhiRadius.square` |
+| small | 8dp | `ZhiRadius.actionKey` |
+| medium | 12dp | `ZhiRadius.button` |
+| large | 16dp | `MochiBaseline.cornerLarge` |
+| largeIncreased | 20dp | `ZhiRadius.floating` |
+| **extraLarge** | **28dp** | `ZhiRadius.card` |
+| extraLargeIncreased | 32dp | `MochiBaseline.cornerExtraLargeIncreased` |
+| extraExtraLarge | 48dp | `MochiBaseline.cornerExtraExtraLarge` |
+| full | 胶囊 | `MochiCapsule` / `CircleShape` |
+
+> ⚠️ 曾经从 `MochiShapes` 构造器字节码反推出一组 8/12/16/16/20/28/32/64，
+> **那是错的**。以官方文档表格为准。
+
+### 同心公式
+
+```
+内层圆角 = 外层圆角 − 内边距
+card 28 − rowTextInset 16 = 12  （恰好 = medium）
+```
+
+代码里用 `MochiBaseline.concentric(outer, padding)` 计算，不要手写数字。
+
+### 行高与控件高度
+
+| 项 | 值 | 来源 | 适用范围 |
+| --- | --- | --- | --- |
+| 列表行 | 52dp | Mochi iOS 26（正文 + 上下各 15dp） | **仅本工程自绘的行** |
+| 紧凑行 | 44dp | 同上，次级信息 | 同上 |
+| 按钮/输入框 | 48dp | Mochi `MochiButtonDefaults.Height` | 自定义按钮 |
+| 最小热区 | 48dp | Android 无障碍 | 全部可点元素 |
+| 紧凑热区 | 40dp | 栏内高度受限场景 | 顶栏内按钮 |
+
+### 六条**有意保留圆弧**的例外（改之前先读）
+
+| 位置 | 原因 |
+| --- | --- |
+| `ui/effects/SquircleShape.kt` 的回退分支 | squircle 关闭时的等价实现本体，不能改成 squircle |
+| 所有 `drawBackdrop + lens` 的玻璃表面 | Backdrop 文档要求 `lens` 的 `shape` 必须是 `CornerBasedShape`；`ZhiSquircle` 返回 `Outline.Generic`，换掉会**静默失去折射**（`Lens.kt` 里 `shape as? CornerBasedShape ?: return null`） |
+| `ui/SideDrawer.kt` 的抽屉 | 非对称角（只有右侧两角圆），`miuix-squircle` 的 Path API 只支持四角同半径 |
+| `ui/pages/ThemePage.kt` 里 3–9dp 的预览装饰 | 尺寸远小于 squircle 有意义的下限，肉眼无差且每个都要开离屏 GPU 层 |
+| `ui/Sidebar.kt` 3dp 指示条、`MessageCards.kt` 7dp 状态点 | 同上 |
+| 所有 `CircleShape` | 真圆本来就是正圆，Mochi 规范也允许 |
+
+### Miuix 内部行高**不可**覆盖
+
+`BasicComponent` / `Preference` 的行高由 `TextStyles` 撑起。规范明确要求**不要**覆盖
+库的内部 padding —— 强行塞固定高度会在系统字号调大时把文字裁掉。所以「行高 52dp」
+只对自绘行生效，设置页那类行走不到，这一点不假装做到。

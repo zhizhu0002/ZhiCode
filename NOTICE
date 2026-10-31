@@ -171,7 +171,28 @@ LICENSE 与 docs/licensing.md 里都记有「原作者已明确许可本工程�
 现有 Compose/Miuix 与 Rosemoe Sora CodeEditor 的独立实现。
 因此本项是设计参考，不是随发行物链接或内嵌的 MaterialFiles 第三方代码。
 
-9. Rosemoe Sora Editor — LGPL-2.1
+9. 液态玻璃导航栏适配组件 — Apache-2.0
+--------------------------------------------------------------------------------
+
+来源 : https://github.com/wxxsfxyzm/compose-miuix-ui/tree/main/example
+       example/shared/src/commonMain/kotlin/component/liquid/LiquidGlassNavigationBar.kt
+       以及 component/animation/DampedDragAnimation.kt、InteractiveHighlight.kt
+       Lens / Vibrancy 适配基于 https://github.com/Kyant0/AndroidLiquidGlass
+许可 : Apache License 2.0
+许可原文: THIRD-PARTY-LICENSES/Apache-2.0.txt（已随 Miuix 依赖附带）
+
+对应文件 :
+  app/src/main/java/com/zhizhu/zhicode/compose/ui/LiquidWorkspaceBar.kt
+  app/src/main/java/com/zhizhu/zhicode/compose/ui/effects/CombinedBackdrop.kt
+  app/src/main/java/com/zhizhu/zhicode/compose/ui/effects/InnerShadow.kt
+  app/src/main/java/com/zhizhu/zhicode/compose/ui/effects/Lens.kt
+  app/src/main/java/com/zhizhu/zhicode/compose/ui/effects/Vibrancy.kt
+
+LiquidWorkspaceBar 按官方 Miuix LiquidGlassNavigationBar 的层次与交互改写，并保留来源注释；
+四个 effects 辅助文件由官方示例适配。它们与 GPL-3.0 的 KSU Style 实现不同：KSU 仅作
+视觉/行为参考，未复制其代码。构建依赖仍为 NOTICE 第 6 节所列 Miuix 0.9.4。
+
+10. Rosemoe Sora Editor — LGPL-2.1
 --------------------------------------------------------------------------------
 
 来源 : https://github.com/Rosemoe/sora-editor
@@ -199,7 +220,7 @@ vscode-kotlin、vscode-logfile-highlighter、YAML-Syntax-Highlighter 等上游�
 逐项清单、已核实的版权行、已知的本地修改、以及**未核实项**与核实命令，
 见 app/src/main/assets/sora/textmate/NOTICE.md —— 那份文件是这一节的细则，请连它一起读。
 
-11. ZhiCode 自己的代码
+12. ZhiCode 自己的代码
 --------------------------------------------------------------------------------
 
 ZhiCode 自身的代码（Compose 界面层、沙箱宿主层、引擎与工具集、诊断与安全边界等）

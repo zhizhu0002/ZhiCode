@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -38,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -52,6 +54,8 @@ import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
+import com.zhizhu.zhicode.compose.ui.LocalImeMotion
+import androidx.compose.ui.unit.IntOffset
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
@@ -157,19 +161,10 @@ internal fun toast(context: Context, message: String?) {
  */
 @Composable
 internal fun RowScope.TerminalHeaderActions(
-    onMenu: () -> Unit,
     onKeyboard: () -> Unit,
     onMore: () -> Unit,
 ) {
     val palette = chrome()
-    ZhiIconButton(
-        icon = ZhiIcons.menu,
-        description = "会话列表",
-        onClick = onMenu,
-        tint = palette.text,
-        compact = 30.dp,
-        iconSize = 16.dp,
-    )
     GlyphButton(glyph = "⌨", color = palette.text, onClick = onKeyboard)
     ZhiIconButton(
         icon = ZhiIcons.moreVert,
@@ -225,12 +220,39 @@ internal fun TerminalExtraKeys(
 ) {
     if (state.extraKeys.isEmpty()) return
     val palette = chrome()
+    // 悬浮胶囊浮在屏幕最底部，而扩展键是终端面板的最后一行 —— 不让开就会被压住
+    // （ESC / TAB / PGUP 全都点不到，用户截图里就是这样）。
+    // 用**高度**而不是 padding：扩展键自己的背景是一整块 bar 色，让出来的那一段
+    // 必须也是同一块颜色，否则底边会多出一条别的色的缝。
+    val navInset = com.zhizhu.zhicode.compose.ui.LocalFloatingNavInset.current
     val landscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val imeMotion = LocalImeMotion.current
+    // 悬浮栏隐藏进度（补间后的显示值）。只在绘制阶段读，不参与布局。
+    val navBarProgressState = com.zhizhu.zhicode.compose.ui.LocalNavBarProgress.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (landscape) 68.dp else 82.dp)
+            // TerminalPage 的根容器在 edge-to-edge 下不会自动 resize；
+            // 直接读布局阶段的 IME 位移，让扩展键与终端工具栏一起上移。
+            .offset { IntOffset(0, -imeMotion.currentLiftPx) }
+            // 悬浮栏隐藏时，这块扩展键栏**向下填满胶囊腾出的空间**。
+            //
+            // ⚠️ 位移量 = `navInset`（= 胶囊让位量），**不是**自身高度 + navInset。
+            // 曾经写成 `(heightPx + navInset) * progress`，于是整块键栏沉出屏幕，
+            // 底部只剩一条空的 bar 色带 —— 用户截图里就是这个。
+            //
+            // 为什么 `navInset` 就够：这块的 `height` 里本来就含 `+ navInset`
+            // （让开胶囊那段）。胶囊滑走后把 `navInset` 平移下去，键位正好补到屏幕底边。
+            //
+            // 用 `graphicsLayer`（绘制阶段）而不是改 `height`/`padding`（布局阶段）：
+            // 布局变化会改终端内容区高度、触发重新测量，甚至反向影响滚动位置 ——
+            // 那正是"下滑时弹一下"的来源。绘制阶段位移对布局零影响。
+            .graphicsLayer {
+                val progress = navBarProgressState.value
+                if (progress > 0f) translationY = navInset.toPx() * progress
+            }
+            .height((if (landscape) 68.dp else 82.dp) + navInset)
             .background(palette.bar)
             // V3：bar 与终端内容区同为纯黑贴在一起边界感弱，加一条顶部
             // 分隔线（与 drawer 同用的 divider 色）划清两块区域。
@@ -240,7 +262,9 @@ internal fun TerminalExtraKeys(
                     size = Size(size.width, 1.dp.toPx()),
                 )
             }
-            .padding(horizontal = 3.dp, vertical = 2.dp),
+            // 底部那段让位必须落在**内边距**上：两行键是 weight(1f) 平分的，
+            // 要是只加高度不加内边距，让出来的空间会被两行键直接吃掉（键变得巨高）。
+            .padding(start = 3.dp, end = 3.dp, top = 2.dp, bottom = 2.dp + navInset),
     ) {
         state.extraKeys.forEach { keys ->
             Row(

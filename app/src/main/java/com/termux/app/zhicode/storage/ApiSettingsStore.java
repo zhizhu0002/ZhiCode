@@ -102,6 +102,7 @@ public final class ApiSettingsStore {
         /** Shizuku 工具开关。与 Root 分开存：两者的前提条件不同，不能互相隐含。 */
         static final String SHIZUKU_EXECUTION = "shizuku_execution_enabled";
         static final String FORCED_KEEP_ALIVE = "forced_keep_alive_enabled";
+        static final String MAX_CONCURRENT_SUBAGENTS = "max_concurrent_subagents";
         /** 终端是否强制字符模式输入（见 getTerminalCharMode 的说明）。 */
         static final String TERMINAL_CHAR_MODE = "terminal_char_mode";
         static final String PROJECT_DIRECTORY = "project_directory";
@@ -252,6 +253,9 @@ public final class ApiSettingsStore {
                 item(c -> c.shizukuExecutionEnabled, (c, v) -> c.shizukuExecutionEnabled = (Boolean) v));
         SETTINGS.put(Key.FORCED_KEEP_ALIVE,
                 item(c -> c.forcedKeepAliveEnabled, (c, v) -> c.forcedKeepAliveEnabled = (Boolean) v));
+        SETTINGS.put(Key.MAX_CONCURRENT_SUBAGENTS,
+                item(c -> c.maxConcurrentSubagents,
+                        (c, v) -> c.maxConcurrentSubagents = Math.max(1, Math.min(8, (Integer) v))));
         SETTINGS.put(Key.PROJECT_DIRECTORY,
                 item(c -> c.projectDirectory, (c, v) -> c.projectDirectory = (String) v));
         SETTINGS.put(Key.MAX_TOKENS, item(c -> c.maxTokens, (c, v) -> c.maxTokens = (Integer) v));

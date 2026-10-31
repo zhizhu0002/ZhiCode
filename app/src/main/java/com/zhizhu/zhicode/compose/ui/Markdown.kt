@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
@@ -724,7 +725,7 @@ private fun MdTableView(table: MdBlock.Table, fontSize: TextUnit, styles: Inline
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .background(scheme.surfaceContainerHighest, RoundedCornerShape(ZhiRadius.inner))
+            .background(scheme.surfaceContainerHighest, ZhiSquircle(ZhiRadius.inner))
             .padding(horizontal = 2.dp),
     ) {
         Column(Modifier.widthIn(min = (cols * 116).dp)) {

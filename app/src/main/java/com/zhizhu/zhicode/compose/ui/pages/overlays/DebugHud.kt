@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -170,7 +171,7 @@ private fun ExpandedHud(
 ) {
     val scheme = MiuixTheme.colorScheme
     val listState = rememberLazyListState()
-    val shape = RoundedCornerShape(ZhiRadius.floating)
+    val shape = ZhiSquircle(ZhiRadius.floating)
 
     FloatingToolbar(
         modifier = modifier

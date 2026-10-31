@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -535,7 +536,7 @@ internal fun SettingsReadOnly(
             {
                 Surface(
                     modifier = Modifier.size(24.dp),
-                    shape = RoundedCornerShape(ZhiRadius.inner),
+                    shape = ZhiSquircle(ZhiRadius.inner),
                     color = it,
                     contentColor = scheme.onBackground,
                     content = {},

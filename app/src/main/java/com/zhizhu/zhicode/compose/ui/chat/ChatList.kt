@@ -213,6 +213,16 @@ fun ChatList(
     // 长驻 effect 读取 State 的最新值，不能冻结首次组合时的 Boolean。
     val autoFollowState = rememberAutoFollow(listState, forceFollowToken = state.scrollToBottomToken)
 
+    // 底部悬浮导航「跟着对话流滚动一起走」。
+    //
+    // 这是**主驱动**：滚多少、胶囊就退多少；滚动停住、它就停在原处。
+    // `reportNavBarScroll` 把滚动像素增量累加进进度，所以动画与滚动是同一件事
+    // （不是"滚动触发一次 tween"）。三屏都用同一份实现。
+    //
+    // 手势那条（`WorkspacePage.navBarHideOnVerticalDrag`）保留，只用来补
+    // "这一屏根本不能滚"的情况，两者写同一个进度值、方向一致，不会打架。
+    com.zhizhu.zhicode.compose.ui.reportNavBarScroll(listState)
+
     /*
      * 发消息 → 立刻滚到底（并恢复跟随）。
      *
@@ -255,6 +265,11 @@ fun ChatList(
      * 说明这次变长是**前面**补的，不是来了新消息。见 [ContentStamp.prepend]。
      */
     var lastPrepend by remember { mutableStateOf(state.transcriptPrependRevision) }
+    // 记录触发“加载更早消息”前的视口锚点；必须在 ViewModel 异步更新状态之前保存。
+    // 用稳定的 block key 锚定，而不是把 transcript 消息数当 LazyColumn 下标。
+    // 一个回合可能包含多条消息，前插条数与实际新增 item 数并不相等。
+    var prependAnchorKey by remember { mutableStateOf<Any?>(null) }
+    var prependAnchorOffset by remember { mutableStateOf(0) }
 
     /**
      * 「该落到底」的待办标记。
@@ -280,14 +295,12 @@ fun ChatList(
     LaunchedEffect(state.transcriptPrependRevision) {
         if (state.transcriptPrependRevision == lastPrepend) return@LaunchedEffect
         lastPrepend = state.transcriptPrependRevision
-        // 先取锚点：此刻列表还是补之前的状态。
-        val anchorIndex = listState.firstVisibleItemIndex
-        val anchorOffset = listState.firstVisibleItemScrollOffset
-        val added = state.transcriptPrependCount
-        if (added <= 0 || anchorIndex == 0) return@LaunchedEffect
-        // 等一帧：新内容要先被 LazyColumn 接收，下标空间才是新的。
+        // 等一帧：新内容要先被 LazyColumn 接收，才能用稳定 key 找回旧锚点。
         withFrameNanos { }
-        listState.requestScrollToItem(anchorIndex + added, anchorOffset)
+        val key = prependAnchorKey ?: return@LaunchedEffect
+        val anchor = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }
+            ?: return@LaunchedEffect
+        listState.requestScrollToItem(anchor.index, prependAnchorOffset)
     }
 
     /*
@@ -347,6 +360,10 @@ fun ChatList(
                     return@collect
                 }
                 loadedAtTop = true
+                val anchor = listState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.index > 0 }
+                prependAnchorKey = anchor?.key
+                prependAnchorOffset = anchor?.offset ?: 0
                 onLoadOlderState()
             }
     }
@@ -373,6 +390,9 @@ fun ChatList(
      * 会互相打断，反而更抖。
      */
     var handledImeGeneration by remember { mutableStateOf(imeOpenGeneration) }
+
+    // 键盘触发的吸底单独处理；内容观察不能放在这里，否则未聚焦输入框时会提前 return，
+    // 导致加载消息和流式输出都失去自动滚动。
     LaunchedEffect(listState, imeOpenGeneration, composerFocused) {
         // autoFollow 是键盘打开前的用户意图快照：只有本来就在底部才吸底，
         // 键盘缩短 viewport 后不能再用 canScrollForward 反推，否则会把真正贴底误判成历史位置。
@@ -384,6 +404,10 @@ fun ChatList(
             withFrameNanos { }
             listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
         }
+    }
+
+    // 内容观察器必须常驻：加载会话、前插历史、流式输出都在这里处理。
+    LaunchedEffect(listState) {
         snapshotFlow {
             val s = currentState
             val last = s.transcript.lastOrNull()
@@ -435,6 +459,37 @@ fun ChatList(
         }
     }
 
+    /*
+     * 底部留白变化后重新贴底。
+     *
+     * 留白（[bottomInset]）不是常量：任务进度卡出现/消失、输入器长高、悬浮胶囊切换
+     * 都会让它变。而 LazyColumn 在 `contentPadding` 变化后**只重新测量、不重新贴底**：
+     * 滚动位置按"第一条可见项"保持，留白变大就等于把最后几条往下推、推到悬浮层底下。
+     *
+     * 实测现象（截图为证）：任务进度卡浮起后，最后一条「帧耗时」消息的第二行被它的
+     * 上沿切掉。内容观察器救不了这种情况 —— 留白变化**不在** [ContentStamp] 里，
+     * 内容没变就不会触发吸底。
+     *
+     * ## 为什么是「多帧重试」而不是只滚一次
+     *
+     * 留白与测量在**同一帧**变化：`scrollToItem` 一次之后，紧随的那次测量会按
+     * 旧位置重新摆放，把刚滚到的位置又推回去一点；卡片有自己的进场动画
+     * （`AnimatedVisibility` + `slideInVertically`），高度是在几帧里长到位的。
+     * 所以要在动画期间连续校正，`canScrollForward` 为假就提前收工。
+     *
+     * 只在用户本来就在跟随最新内容时做（[autoFollowState]）：否则会把人从正在
+     * 读的历史里拽走 —— 那是本文件里反复强调过的、绝不能破坏的行为。
+     */
+    LaunchedEffect(listState, bottomInset) {
+        if (!autoFollowState.value) return@LaunchedEffect
+        repeat(4) {
+            withFrameNanos { }
+            val total = listState.layoutInfo.totalItemsCount
+            if (total <= 0) return@LaunchedEffect
+            if (!listState.canScrollForward) return@LaunchedEffect
+            listState.scrollToItem(total - 1)
+        }
+    }
     /*
      * 待办落底的收尾：真正贴到底之后才清标记。
      *
@@ -692,11 +747,19 @@ fun ChatList(
                                 // 本次新出现的成员播一次「淡入 + 轻微上移」；历史成员原样直出。
                                 AnimatedMember(
                                     animate = remember(item.id) {
-                                        val fresh = seenIds.add(item.id)
-                                        // 探针：新消息应当 fresh=true。全是 false 就说明
-                                        // 判据又退回"按组合生命周期算新的"了。
-                                        ZhiFrameTrace.note("seen/item " + item.id + " fresh=" + fresh)
-                                        fresh
+                                        // 新出现的成员播一次「淡入 + 轻微上移」；历史成员原样直出。
+                                        //
+                                        // 这里曾经有一句 `ZhiFrameTrace.note("seen/item …")` 探针，
+                                        // 每次组合都执行一次（实测一条对话里 268 次）。它当初是为了
+                                        // 确认"新消息判据没退回按组合生命周期算"，那个结论早就验证过，
+                                        // 而它带来的开销是实打实的：每次都拼字符串 + `Log.i`（debug 下
+                                        // 真走 logcat IPC）+ 往写盘线程提交一个任务。
+                                        //
+                                        // 实测数据：`downToClick` 中位数 70ms、峰值 1116ms，而
+                                        // `fromClick` 只有 7~14ms、帧均 9~12ms —— 说明渲染与组合都不慢，
+                                        // 慢的是"手指按下到系统判定为点击"这一段主线程排队。这类常驻
+                                        // 探针正是排队来源之一，所以删掉。
+                                        seenIds.add(item.id)
                                     },
                                 ) {
                                 Box(modifier = Modifier.fillMaxWidth().then(finger.modifier)) {
@@ -1019,9 +1082,9 @@ private fun seenIdsFor(
         seenSeededSession = sessionId
         seenMessageIds = HashSet()
         seenMessageIds.addAll(transcript.map { it.id })
-        // 探针：正常一次会话只会看到一行。若这里反复刷，说明会话 id 在抖动
-        // （那会让每条消息都被当成"新的"而集体淡入，是另一种病）。
-        ZhiFrameTrace.note("seen/seed session=" + sessionId + " n=" + transcript.size)
+        // 这里曾有一行 `ZhiFrameTrace.note("seen/seed …")` 探针。结论早已确认
+        // （正常一次会话只打一行），而它在**切会话时**会做一次字符串拼接 + 写盘任务，
+        // 属于纯开销，已删除。
     }
     return seenMessageIds
 }

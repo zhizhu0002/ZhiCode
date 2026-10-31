@@ -68,6 +68,7 @@ internal data class EngineOverrides(
     /** Shizuku 工具开关。与 Root 独立：它的前提是「用过 adb 启动过 Shizuku」，不是「设备 root」。 */
     val shizukuExecutionEnabled: Boolean? = null,
     val forcedKeepAliveEnabled: Boolean? = null,
+    val maxConcurrentSubagents: Int? = null,
 )
 
 /**
@@ -261,7 +262,7 @@ internal class ZhiEngineController(
         config.webSearchMaxResults.toString(), config.webTimeoutMs.toString(),
         config.rootExecutionEnabled.toString(),
         config.shizukuExecutionEnabled.toString(),
-        config.forcedKeepAliveEnabled.toString(), config.workflowId,
+        config.forcedKeepAliveEnabled.toString(), config.maxConcurrentSubagents.toString(), config.workflowId,
     ).joinToString("\u0000")
 
     fun isBusy(): Boolean = engine?.isBusy ?: false
@@ -984,6 +985,7 @@ internal fun applyEngineOverrides(config: SessionConfig, o: EngineOverrides) {
     o.rootExecutionEnabled?.let { config.rootExecutionEnabled = it }
     o.shizukuExecutionEnabled?.let { config.shizukuExecutionEnabled = it }
     o.forcedKeepAliveEnabled?.let { config.forcedKeepAliveEnabled = it }
+    o.maxConcurrentSubagents?.let { config.maxConcurrentSubagents = it.coerceIn(1, 8) }
     o.roleCard?.let { config.roleCard = it }
 }
 
@@ -1026,5 +1028,6 @@ internal fun readEngineSettings(store: ApiSettingsStore): EngineOverrides? =
             rootExecutionEnabled = config.rootExecutionEnabled,
             shizukuExecutionEnabled = config.shizukuExecutionEnabled,
             forcedKeepAliveEnabled = config.forcedKeepAliveEnabled,
+            maxConcurrentSubagents = config.maxConcurrentSubagents.coerceIn(1, 8),
         )
     }

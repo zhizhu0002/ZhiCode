@@ -12,10 +12,18 @@
  */
 package com.zhizhu.zhicode.compose.ui.pages
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,11 +31,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
+import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,6 +58,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zhizhu.zhicode.compose.editor.EditorFileIo
 import com.zhizhu.zhicode.compose.editor.EditorViewModel
 import com.zhizhu.zhicode.compose.theme.LocalZhiDark
+import com.zhizhu.zhicode.compose.theme.MochiBaseline
+import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.FloatingBottomShell
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.ui.rememberGlass
@@ -51,6 +68,8 @@ import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
+import com.zhizhu.zhicode.compose.ui.effects.PageBlurBar
+import com.zhizhu.zhicode.compose.ui.effects.rememberPageBlurBackdrop
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
@@ -78,6 +97,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TooltipBox
 import top.yukonga.miuix.kmp.menu.OverlayIconCascadingDropdownMenu
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private const val EDITOR_PREFS = "zl2_editor"
@@ -90,6 +110,7 @@ internal fun EditorPage(viewModel: EditorViewModel, onExit: () -> Unit) {
     val dark = LocalZhiDark.current
     val colors = MiuixTheme.colorScheme
     val glass = rememberGlass()
+    val pageBackdrop = rememberPageBlurBackdrop()
     val prefs = remember(context) {
         context.getSharedPreferences(EDITOR_PREFS, android.content.Context.MODE_PRIVATE)
     }
@@ -119,6 +140,24 @@ internal fun EditorPage(viewModel: EditorViewModel, onExit: () -> Unit) {
     LaunchedEffect(state.fileName, dark) {
         language = SoraEditorHost.languageFor(context, state.fileName)
         scheme = withContext(Dispatchers.IO) { SoraEditorHost.colorScheme(context, dark) }
+    }
+
+    /*
+     * 保存结果用**系统 Toast** 呈现，不再自绘浮层。
+     *
+     * 为什么不用自绘：这段提示曾经塞在顶栏的 `actions` 槽里，而 `SmallTopAppBar`
+     * 会按 actions 的固有宽度给标题区让位 —— 提示一出现，文件名就被挤到左边、
+     * 与右侧按钮之间空出一大段（用户报的"名字和文本内容中间有个很大的空隙"）。
+     * 挪成浮层也只是把问题挪了个位置：它仍要参与某一层的测量。
+     * 系统 Toast 完全在应用布局之外，不参与任何测量，是这类瞬时反馈的合适载体。
+     *
+     * `notice` 每次保存都会被重新赋值（含 `null`），所以用 `state.notice` 作为
+     * LaunchedEffect 的 key —— 重复保存同一文案也会重新触发一次 Toast。
+     */
+    LaunchedEffect(state.notice) {
+        state.notice?.let { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
     }
 
     fun searcher(): EditorSearcher? = editor
@@ -185,63 +224,96 @@ internal fun EditorPage(viewModel: EditorViewModel, onExit: () -> Unit) {
     Scaffold(
         modifier = Modifier.fillMaxSize().imePadding(),
         topBar = {
-            SmallTopAppBar(
-                    title = if (state.dirty) "• ${state.fileName}" else state.fileName,
-                    titleColor = colors.onSurface,
-                    color = colors.surface,
-                    defaultWindowInsetsPadding = true,
-                    navigationIcon = {
-                        ZhiIconButton(ZhiIcons.back, "返回文件列表", onClick = requestExit)
-                    },
-                    actions = {
-                        if (state.notice != null) {
-                            Text(
-                                text = state.notice ?: "",
-                                color = colors.onSurfaceVariantActions,
-                                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                                modifier = Modifier.padding(end = 4.dp),
-                            )
-                        }
-                        if (state.content != null && !readOnly) {
-                            ZhiIconButton(ZhiIcons.save, "保存文件", onClick = { viewModel.save() })
-                        }
-                        EditorMoreMenu(
-                            enabled = state.content != null,
-                            expanded = menuExpanded,
-                            onExpandedChange = { menuExpanded = it },
-                            wordwrap = wordwrap,
-                            completion = completion,
-                            lineNumbers = lineNumbers,
-                            highlightLine = highlightLine,
-                            charsetName = state.charsetName,
-                            onSearch = { searchVisible = true },
-                            onToggleWordwrap = {
-                                wordwrap = !wordwrap
-                                prefs.edit().putBoolean("wordwrap", wordwrap).apply()
-                                editor?.isWordwrap = wordwrap
-                            },
-                            onToggleCompletion = {
-                                completion = !completion
-                                prefs.edit().putBoolean("completion", completion).apply()
-                                editor?.getComponent(EditorAutoCompletion::class.java)?.setEnabled(completion)
-                            },
-                            onToggleLineNumbers = {
-                                lineNumbers = !lineNumbers
-                                prefs.edit().putBoolean("line_number", lineNumbers).apply()
-                                editor?.setLineNumberEnabled(lineNumbers)
-                            },
-                            onToggleHighlightLine = {
-                                highlightLine = !highlightLine
-                                prefs.edit().putBoolean("highlight_line", highlightLine).apply()
-                                editor?.setHighlightCurrentLine(highlightLine)
-                            },
-                            onCharset = viewModel::reload,
-                        )
-                    },
+            PageBlurBar(backdrop = pageBackdrop, blurActive = pageBackdrop != null) {
+            /*
+             * ⚠️ 这里**不用** `SmallTopAppBar`，是刻意的。
+             *
+             * Miuix 的 `SmallTopAppBar` 把标题**水平居中**（`SmallTopAppBar` 只有
+             * `titlePadding` / `navigationIconPadding` / `actionIconPadding` 三个
+             * 数值参数，**没有**标题对齐参数）。作为应用名居中没问题 —— 主界面
+             * 「ZhiCode」就是这样，看着正常。
+             *
+             * 但编辑器顶栏左边是「返回」、右边是两个图标，中间只有一串文件名。
+             * 标题一旦居中，返回箭头与文件名之间就会空出一大段（实测约屏宽的 30%），
+             * 用户报的「名字和文本内容中间有个很大的空隙」就是它。
+             *
+             * 所以这里自绘一行：**标题紧跟在返回按钮后面**，剩下的横向空间全给标题，
+             * 长文件名在右侧按钮之前自然省略。高度与内边距仍取 Miuix 官方默认值
+             * （`SmallTopAppBarCenterHeight` 50dp、导航图标起始 16dp、操作图标末尾 16dp），
+             * 因此除对齐方式外与官方栏完全一致。
+             *
+             * 状态栏 inset 由 `defaultWindowInsetsPadding = true` 交给官方栏处理；
+             * 自绘后必须自己补 `statusBarsPadding()`，否则内容会钻到状态栏底下。
+             */
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(if (pageBackdrop != null) Color.Transparent else colors.surface)
+                    .statusBarsPadding()
+                    .height(MiuixTopBarCenterHeight)
+                    .padding(start = MiuixTopBarNavPadding, end = MiuixTopBarActionPadding),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ZhiIconButton(ZhiIcons.back, "返回文件列表", onClick = requestExit)
+
+                Text(
+                    text = if (state.dirty) "• ${state.fileName}" else state.fileName,
+                    color = colors.onSurface,
+                    fontSize = MiuixTheme.textStyles.title4.fontSize,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    // `weight(1f)` 吃掉返回按钮与右侧图标之间的全部空间：
+                    // 标题因此紧贴返回按钮，空隙只来自这行 `titleGap`。
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = MiuixTopBarTitleGap),
                 )
+
+                if (state.content != null && !readOnly) {
+                    ZhiIconButton(ZhiIcons.save, "保存文件", onClick = { viewModel.save() })
+                }
+                EditorMoreMenu(
+                    enabled = state.content != null,
+                    expanded = menuExpanded,
+                    onExpandedChange = { menuExpanded = it },
+                    wordwrap = wordwrap,
+                    completion = completion,
+                    lineNumbers = lineNumbers,
+                    highlightLine = highlightLine,
+                    charsetName = state.charsetName,
+                    onSearch = { searchVisible = true },
+                    onToggleWordwrap = {
+                        wordwrap = !wordwrap
+                        prefs.edit().putBoolean("wordwrap", wordwrap).apply()
+                        editor?.isWordwrap = wordwrap
+                    },
+                    onToggleCompletion = {
+                        completion = !completion
+                        prefs.edit().putBoolean("completion", completion).apply()
+                        editor?.getComponent(EditorAutoCompletion::class.java)?.setEnabled(completion)
+                    },
+                    onToggleLineNumbers = {
+                        lineNumbers = !lineNumbers
+                        prefs.edit().putBoolean("line_number", lineNumbers).apply()
+                        editor?.setLineNumberEnabled(lineNumbers)
+                    },
+                    onToggleHighlightLine = {
+                        highlightLine = !highlightLine
+                        prefs.edit().putBoolean("highlight_line", highlightLine).apply()
+                        editor?.setHighlightCurrentLine(highlightLine)
+                    },
+                    onCharset = viewModel::reload,
+                )
+            }
+            }
         },
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
+        Box(
+            modifier = Modifier.fillMaxSize()
+                .padding(top = padding.calculateTopPadding())
+                .then(if (pageBackdrop != null) Modifier.layerBackdrop(pageBackdrop) else Modifier),
+        ) {
             val content = state.content
             if (content == null) {
                 EditorPlaceholder(
@@ -271,12 +343,25 @@ internal fun EditorPage(viewModel: EditorViewModel, onExit: () -> Unit) {
                     },
                 )
             }
-            if (searchVisible) {
+            /*
+             * 搜索栏进出场。
+             *
+             * 改版前是裸 `if (searchVisible)` —— 搜索栏在**一帧**内就出现在编辑器上方，
+             * 没有位移也没有淡入，读起来像"闪了一下"而不是"打开了一个东西"。
+             *
+             * 方向：它是从顶部压下来的浮层，所以用垂直位移（从自身高度之上落下），
+             * 不做缩放、不做水平滑入 —— 那两种会让人误以为它是从侧面来的。
+             * 时长与曲线走 `ZhiMotion`，与全项目其他浮层同一套手感。
+             */
+            AnimatedVisibility(
+                visible = searchVisible,
+                enter = slideInVertically(ZhiMotion.enterSpec) { -it } + fadeIn(ZhiMotion.fadeInSpec),
+                exit = slideOutVertically(ZhiMotion.exitSpec) { -it } + fadeOut(ZhiMotion.fadeOutSpec),
+                modifier = Modifier.align(Alignment.TopCenter),
+            ) {
                 EditorSearchTopBar(
                     glass = glass,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 8.dp),
+                    modifier = Modifier.padding(top = 8.dp),
                     query = searchQuery,
                     currentMatch = currentMatch,
                     totalMatches = totalMatches,
@@ -317,6 +402,7 @@ internal fun EditorPage(viewModel: EditorViewModel, onExit: () -> Unit) {
                 )
             }
         }
+
     val shownExit = rememberLastNonNull(if (state.exitConfirm) true else null)
     OverlayDialog(
         show = state.exitConfirm,
@@ -472,11 +558,22 @@ private fun EditorSearchTopBar(
         verticalPadding = 0.dp,
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp)
-                .animateContentSize(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            /*
+             * 第一行：返回 · 输入框 · 匹配计数 · 上一个 · 下一个
+             *
+             * 改版前这一行还塞了「匹配计数 + 上一个 + 下一个」三块文字按钮，
+             * 360dp 宽下输入框被压到只剩半截，「上一个/下一个」被挤出屏幕边缘 ——
+             * 截图里就是这个样子。现在上/下改成**图标按钮**（固定 34dp），
+             * 计数用 `AnimatedContent` 单独占一小格，输入框吃剩余宽度。
+             */
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 ZhiIconButton(ZhiIcons.back, "关闭搜索", onClose, compact = 36.dp)
                 ZhiTextField(
                     value = query,
@@ -493,29 +590,73 @@ private fun EditorSearchTopBar(
                         }
                     },
                 )
-                Text(
-                    text = if (totalMatches > 0) "$currentMatch/$totalMatches" else "无匹配",
-                    color = if (totalMatches > 0) colors.primary else colors.onSurfaceVariantActions,
-                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                    modifier = Modifier.padding(horizontal = 5.dp),
-                )
-                EditorTextButton("上一个", enabled && totalMatches > 0, onPrevious)
-                EditorTextButton("下一个", enabled && totalMatches > 0, onNext)
+                /*
+                 * 匹配计数：数字变化时**滚动替换**而不是瞬跳。
+                 *
+                 * 用 `AnimatedContent` 按整数 key 做交叉淡入 + 轻微垂直位移，
+                 * 于是「3/17」→「4/17」是一次有方向的翻动。宽度固定（`widthIn`）
+                 * 避免"无匹配"与"12/345"之间来回改变行宽、把旁边的按钮推来推去。
+                 */
+                Box(modifier = Modifier.widthIn(min = 46.dp), contentAlignment = Alignment.Center) {
+                    AnimatedContent(
+                        targetState = if (totalMatches > 0) "$currentMatch/$totalMatches" else "无匹配",
+                        transitionSpec = {
+                            (fadeIn(ZhiMotion.fadeInSpec) + slideInVertically(ZhiMotion.enterSpec) { it / 3 })
+                                .togetherWith(fadeOut(ZhiMotion.fadeOutSpec) + slideOutVertically(ZhiMotion.exitSpec) { -it / 3 })
+                                .using(SizeTransform(clip = false))
+                        },
+                        label = "matchCount",
+                    ) { text ->
+                        Text(
+                            text = text,
+                            color = if (totalMatches > 0) colors.primary else colors.onSurfaceVariantActions,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                }
+                ZhiIconButton(ZhiIcons.collapse, "上一个匹配", onPrevious, compact = 34.dp)
+                ZhiIconButton(ZhiIcons.expand, "下一个匹配", onNext, compact = 34.dp)
             }
+
+            /*
+             * 第二行：三个选项 chip + 替换开关。
+             *
+             * 改版前「收起替换」是四个字的文字按钮，挤到右边缘后**折成两行**。
+             * 现在开关本身也变成 chip 样式（与左边三个同一套视觉），文字缩短为
+             * 「替换」，并且整行 `softWrap = false`，窄屏下只会把 chip 压窄、不会换行。
+             */
             Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 38.dp),
+                modifier = Modifier.fillMaxWidth().padding(start = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                EditorSearchOption("区分大小写", matchCase, onToggleMatchCase)
-                EditorSearchOption("全字匹配", wholeWord, onToggleWholeWord)
-                EditorSearchOption("正则表达式", regex, onToggleRegex)
+                EditorSearchOption("区分大小写", matchCase, enabled, onToggleMatchCase)
+                EditorSearchOption("全字匹配", wholeWord, enabled, onToggleWholeWord)
+                EditorSearchOption("正则", regex, enabled, onToggleRegex)
                 Spacer(Modifier.weight(1f))
-                EditorTextButton(if (replaceExpanded) "收起替换" else "替换", enabled, onToggleReplace)
+                EditorSearchOption(
+                    label = if (replaceExpanded) "收起" else "替换",
+                    checked = replaceExpanded,
+                    enabled = replaceEnabled,
+                    onToggle = onToggleReplace,
+                    accent = true,
+                )
             }
-            AnimatedVisibility(visible = replaceExpanded, enter = fadeIn(), exit = fadeOut()) {
+
+            /*
+             * 替换区：展开/收起走项目统一的 `ZhiMotion.sizeSpec`
+             * （与聊天卡片、设置子页同一套"展开/收起"曲线），
+             * 不再用裸 `fadeIn()/fadeOut()` —— 那种只有透明度、高度是瞬变的。
+             */
+            AnimatedVisibility(
+                visible = replaceExpanded,
+                enter = expandVertically(ZhiMotion.sizeSpec, expandFrom = Alignment.Top) + fadeIn(ZhiMotion.fadeInSpec),
+                exit = shrinkVertically(ZhiMotion.sizeSpec, shrinkTowards = Alignment.Top) + fadeOut(ZhiMotion.fadeOutSpec),
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(start = 38.dp),
+                    modifier = Modifier.fillMaxWidth().padding(start = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
@@ -536,15 +677,68 @@ private fun EditorSearchTopBar(
     }
 }
 
+/**
+ * 搜索选项 chip。
+ *
+ * ## 为什么选中态要自己插值
+ *
+ * 改版前是 `color = if (checked) primary else secondaryContainer` —— 点一下颜色瞬变。
+ * 三个 chip 并排时，瞬变会让人分不清"我点的是哪一个"（尤其快速连点时多个颜色一起跳）。
+ * 现在底色、前景色都用 `animateColorAsState(ZhiMotion.colorSpec)` 过渡，
+ * 于是点击是一次可追踪的变色，而不是闪烁。
+ *
+ * ## 为什么文字强制单行
+ *
+ * 窄屏（360dp）下「区分大小写」这类四字标签在 Row 里会被压到折行，
+ * 折行后行高变化会把下面的替换区整体推移。这里 `maxLines = 1` + `softWrap = false`，
+ * 空间不够时宁可被父级裁掉边缘，也不改变行高。
+ *
+ * @param accent 选中时用主色填充（替换开关用它，与三个筛选 chip 区分开）
+ */
 @Composable
-private fun EditorSearchOption(label: String, checked: Boolean, onToggle: () -> Unit) {
+private fun EditorSearchOption(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+    accent: Boolean = false,
+) {
+    val colors = MiuixTheme.colorScheme
+    val active = checked && enabled
+    val fill by animateColorAsState(
+        targetValue = when {
+            !enabled -> colors.surfaceContainer
+            checked && accent -> colors.primary
+            checked -> colors.primary
+            else -> colors.secondaryContainer
+        },
+        animationSpec = ZhiMotion.colorSpec,
+        label = "optionFill",
+    )
+    val ink by animateColorAsState(
+        targetValue = when {
+            !enabled -> colors.onSurfaceVariantActions
+            checked -> colors.onPrimary
+            else -> colors.onSecondaryContainer
+        },
+        animationSpec = ZhiMotion.colorSpec,
+        label = "optionInk",
+    )
     Surface(
         onClick = onToggle,
-        color = if (checked) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.secondaryContainer,
-        contentColor = if (checked) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.onSecondaryContainer,
-        shape = RoundedCornerShape(14.dp),
+        enabled = enabled,
+        color = fill,
+        contentColor = ink,
+        shape = ZhiSquircle(ZhiRadius.button),
     ) {
-        Text(label, fontSize = MiuixTheme.textStyles.footnote1.fontSize, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+        Text(
+            text = label,
+            color = ink,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+        )
     }
 }
 
@@ -555,7 +749,7 @@ private fun EditorTextButton(label: String, enabled: Boolean, onClick: () -> Uni
         enabled = enabled,
         color = Color.Transparent,
         contentColor = MiuixTheme.colorScheme.primary,
-        shape = RoundedCornerShape(16.dp),
+        shape = ZhiSquircle(MochiBaseline.cornerLarge),
     ) {
         Text(
             label,
@@ -566,3 +760,20 @@ private fun EditorTextButton(label: String, enabled: Boolean, onClick: () -> Uni
         )
     }
 }
+
+/*
+ * 编辑器自绘顶栏的尺寸常量。
+ *
+ * 数值取自 Miuix `TopAppBarDefaults` 的公开默认值（见 `.miuix-docs/md/topappbar.md`）：
+ * `SmallTopAppBarCenterHeight` 50dp、`NavigationIconPadding` 16dp、`ActionIconPadding` 16dp。
+ * 抄成本地常量而不是引用库的 `TopAppBarDefaults`，是因为自绘的行不参与库的布局，
+ * 引用后反而与库的内部绑定；将来要统一调整时只有这一处。
+ *
+ * `MiuixTopBarTitleGap` 是唯一**不属于** Miuix 的值：官方栏用 26dp 的 `titlePadding`
+ * 把标题推向中间，而这里要的是"紧贴返回按钮"，26dp 会重新造出空隙。取 4dp ——
+ * 既让字形与图标之间留出呼吸，又明确属于同一组。
+ */
+private val MiuixTopBarCenterHeight = 50.dp
+private val MiuixTopBarNavPadding = 16.dp
+private val MiuixTopBarActionPadding = 16.dp
+private val MiuixTopBarTitleGap = 4.dp

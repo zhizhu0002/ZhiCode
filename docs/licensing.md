@@ -30,7 +30,7 @@
 | 链接进进程的原生库 | `app/src/main/jniLibs/arm64-v8a/libtermux.so` | Apache-2.0 | [`NOTICE`](../NOTICE) 第 3 节 + 第 7.3 节的符号核对 |
 | 预编译用户空间归档 | `app/src/main/assets/bootstrap-aarch64.zip` | **各程序各自的许可**（含 GPL-3.0） | [`NOTICE`](../NOTICE) 第 5 节 + 第 7.2 节的包清单核对 |
 | Gradle 依赖 | Miuix（Apache-2.0）、Sora Editor（LGPL-2.1）、AndroidX | 随构件分发 | [`NOTICE`](../NOTICE) 第 6、9 节 |
-| 数据文件 | Material Symbols 路径、TextMate 语法与主题 | Apache-2.0 / MIT | [`NOTICE`](../NOTICE) 第 7 节 与 `app/src/main/assets/sora/textmate/NOTICE.md` |
+| 数据文件/适配源码 | Material Symbols 路径、TextMate 语法与主题、Miuix 液态玻璃导航栏适配 | Apache-2.0 / MIT | [`NOTICE`](../NOTICE) 第 7、9 节 与 `app/src/main/assets/sora/textmate/NOTICE.md` |
 
 ---
 
@@ -91,8 +91,20 @@ MIT 只有一条实质性条件（与 <https://choosealicense.com/licenses/mit/>
 | BlackBox 虚拟化引擎（`Bcore/`、`black-reflection/`、`compiler/`） | 来源 <https://github.com/ALEX5402/NewBlackbox> |
 | Termux 终端模拟与视图 | `com/termux/terminal/`、`com/termux/view/`；来源 termux-app 的 `terminal-emulator` / `terminal-view` |
 | Material Symbols 图标路径数据 | `compose/ui/ZhiMaterialIcons.kt`（生成物） |
+| Miuix LiquidGlassNavigationBar / AndroidLiquidGlass 适配 | `LiquidWorkspaceBar.kt`、`ui/effects/{CombinedBackdrop,InnerShadow,Lens,Vibrancy}.kt` |
 
-### 5.2 Apache-2.0 第 4 条要求什么（原文摘要）
+### 5.2 本工程改写/适配的 Apache-2.0 文件
+
+悬浮导航栏的液态玻璃实现依据 Miuix 官方仓库示例：
+<https://github.com/wxxsfxyzm/compose-miuix-ui/tree/main/example>，具体为
+`LiquidGlassNavigationBar.kt`、`DampedDragAnimation.kt`、`InteractiveHighlight.kt`。
+`Lens` / `Vibrancy` / `CombinedBackdrop` / `InnerShadow` 辅助实现也沿用该示例中带有的
+Apache-2.0 来源声明（Lens/Vibrancy/CombinedBackdrop/InnerShadow 标注适配自
+<https://github.com/Kyant0/AndroidLiquidGlass>）。源码对应路径与修改说明见 [`NOTICE`](../NOTICE) 第 9 节。
+
+`projects/ksu-style` 以 GPL-3.0 发布，仅供视觉和行为参考；本工程没有把它的 GPL 实现代码复制进来。
+
+### 5.3 Apache-2.0 第 4 条要求什么（原文摘要）
 
 > 4. Redistribution … provided that You meet the following conditions:
 > (a) You must give any other recipients of the Work or Derivative Works a copy of this License; and
@@ -105,7 +117,7 @@ MIT 只有一条实质性条件（与 <https://choosealicense.com/licenses/mit/>
 （原文见 <https://www.apache.org/licenses/LICENSE-2.0>，仓库内副本为
 [`THIRD-PARTY-LICENSES/Apache-2.0.txt`](../THIRD-PARTY-LICENSES/Apache-2.0.txt)。）
 
-### 5.3 我们怎么履行，以及**还没履行的部分**
+### 5.4 我们怎么履行，以及**还没履行的部分**
 
 | 条件 | 现状 |
 | --- | --- |

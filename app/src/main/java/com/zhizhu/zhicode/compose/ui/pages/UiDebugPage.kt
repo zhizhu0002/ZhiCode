@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,6 +67,8 @@ import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIconDropdownMenu
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.effects.PageBlurBar
+import com.zhizhu.zhicode.compose.ui.effects.rememberPageBlurBackdrop
 import com.zhizhu.zhicode.compose.ui.ZhiIndeterminateBar
 import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
 import com.zhizhu.zhicode.compose.ui.ZhiSectionLabel
@@ -122,6 +125,7 @@ import top.yukonga.miuix.kmp.preference.RadioButtonPreference
 import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 /**
@@ -181,14 +185,16 @@ fun UiDebugPage(
     val scheme = MiuixTheme.colorScheme
     val listState = rememberLazyListState()
     val topAppBarScrollBehavior = MiuixScrollBehavior()
+    val pageBackdrop = rememberPageBlurBackdrop()
 
     Scaffold(
         topBar = {
+            PageBlurBar(backdrop = pageBackdrop, blurActive = pageBackdrop != null) {
             TopAppBar(
                 title = "UI 调试",
                 largeTitle = "UI 调试",
                 scrollBehavior = topAppBarScrollBehavior,
-                color = scheme.surface,
+                color = if (pageBackdrop != null) Color.Transparent else scheme.surface,
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
@@ -203,9 +209,14 @@ fun UiDebugPage(
                     TextButton(text = "重置", onClick = { viewModel.requestUiDebugReset() })
                 },
             )
+            }
         },
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier.fillMaxSize().then(
+                if (pageBackdrop != null) Modifier.layerBackdrop(pageBackdrop) else Modifier,
+            ),
+        ) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -233,6 +244,7 @@ fun UiDebugPage(
                 item(key = "palette") { PaletteSection() }
                 item(key = "typography") { TypographySection() }
                 item(key = "radiusIcons") { RadiusAndIconSection() }
+                item(key = "mochi") { MochiCompareSection() }
                 item(key = "basics") { MiuixBasicsSection() }
                 item(key = "preference") { PreferenceSection() }
                 item(key = "appRows") { AppSettingsRowsSection() }
@@ -301,7 +313,7 @@ private fun StorageSection(
 
 /** 每个调试分区的标题：沿用设置页的组标题（SmallTitle），保持同一层级语言。 */
 @Composable
-private fun DebugSection(title: String, subtitle: String? = null, content: @Composable ColumnScope.() -> Unit) {
+internal fun DebugSection(title: String, subtitle: String? = null, content: @Composable ColumnScope.() -> Unit) {
     val scheme = MiuixTheme.colorScheme
     SettingsGroup(title) {
         Column {
@@ -1023,7 +1035,7 @@ private fun SwatchGrid(tokens: List<Pair<String, Color>>) {
                     Column(modifier = Modifier.weight(1f)) {
                         Surface(
                             modifier = Modifier.fillMaxWidth().height(40.dp),
-                            shape = RoundedCornerShape(ZhiRadius.inner),
+                            shape = ZhiSquircle(ZhiRadius.inner),
                             color = color,
                             contentColor = scheme.onBackground,
                             content = {},
@@ -1169,7 +1181,7 @@ private fun RadiusAndIconSection() {
             radii.forEach { (_, radius) ->
                 Surface(
                     modifier = Modifier.weight(1f).height(44.dp),
-                    shape = RoundedCornerShape(radius),
+                    shape = ZhiSquircle(radius),
                     color = scheme.surfaceContainerHigh,
                     contentColor = scheme.onBackground,
                     content = {},
@@ -2185,7 +2197,7 @@ private fun DebugImageBubble(
                     .fillMaxWidth()
                     // 点一下切换比例：验证不同宽高比下的圆角/裁切是否正常
                     .aspectRatio(if (image.expanded) 1f else 4f / 3f)
-                    .clip(RoundedCornerShape(ZhiRadius.inner))
+                    .clip(ZhiSquircle(ZhiRadius.inner))
                     .background(
                         Brush.verticalGradient(
                             listOf(

@@ -30,6 +30,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.COMPACT_PERCENT_MAX
 import com.zhizhu.zhicode.compose.model.COMPACT_PERCENT_MIN
+import com.zhizhu.zhicode.compose.model.MAX_CONCURRENT_SUBAGENTS
+import com.zhizhu.zhicode.compose.model.MIN_CONCURRENT_SUBAGENTS
 import com.zhizhu.zhicode.compose.model.EffortLevel
 import com.zhizhu.zhicode.compose.model.ExtensionSummary
 import com.zhizhu.zhicode.compose.model.PermissionMode
@@ -43,6 +45,8 @@ import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import com.zhizhu.zhicode.compose.model.parseTokenCount
 import com.zhizhu.zhicode.compose.ui.PageFeedbackSlot
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.effects.PageBlurBar
+import com.zhizhu.zhicode.compose.ui.effects.rememberPageBlurBackdrop
 import com.zhizhu.zhicode.compose.ui.settings.SettingsChoice
 import com.zhizhu.zhicode.compose.ui.settings.SettingsEntry
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
@@ -62,6 +66,7 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.blur.layerBackdrop
 
 /**
  * ZhiCode 设置页：标题 + 返回 / 分组设置行。
@@ -138,16 +143,18 @@ fun SettingsPage(
         saver = androidx.compose.foundation.lazy.LazyListState.Saver,
     ) { androidx.compose.foundation.lazy.LazyListState() }
     val topAppBarScrollBehavior = MiuixScrollBehavior()
+    val pageBackdrop = rememberPageBlurBackdrop()
 
     Scaffold(
         topBar = {
+            PageBlurBar(backdrop = pageBackdrop, blurActive = pageBackdrop != null) {
             // rikkahub 用 LargeFlexibleTopAppBar（大标题 + 滚动折叠）；
             // Miuix 对应组件 = TopAppBar（自带 largeTitle 折叠行为）。
             TopAppBar(
                 title = "设置",
                 largeTitle = "设置",
                 scrollBehavior = topAppBarScrollBehavior,
-                color = scheme.surface,
+                color = if (pageBackdrop != null) Color.Transparent else scheme.surface,
                 navigationIcon = {
                     // 官方 BackNavigationIcon 同款：原生 IconButton + 左箭头。
                     // 字形走 ZhiIcons（Material Symbols），与整页其余图标同源。
@@ -160,9 +167,14 @@ fun SettingsPage(
                     }
                 },
             )
+            }
         },
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier.fillMaxSize().then(
+                if (pageBackdrop != null) Modifier.layerBackdrop(pageBackdrop) else Modifier,
+            ),
+        ) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -351,6 +363,18 @@ private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) ->
      * 而沙箱不存在了，留着它只会变成"点了没反应"的开关（见 ThemePage 顶部
      * 关于「点了没用的开关比不做更糟」的那条判断）。
      */
+
+    SettingsIntField(
+        title = "子 Agent 最大并发数",
+        value = draft.maxConcurrentSubagents,
+        min = MIN_CONCURRENT_SUBAGENTS,
+        max = MAX_CONCURRENT_SUBAGENTS,
+        parse = { it.trim().toIntOrNull() },
+        onValueChange = { onChange(draft.copy(maxConcurrentSubagents = it)) },
+        summary = "同时运行的子 Agent 上限（${MIN_CONCURRENT_SUBAGENTS}–${MAX_CONCURRENT_SUBAGENTS}）；超过上限的新调用会提示上限并需稍后重试",
+        icon = ZhiIcons.tune,
+        plate = SettingsPlateColors.purple,
+    )
 
     SettingsToggle(
         title = "Agent Root 权限",

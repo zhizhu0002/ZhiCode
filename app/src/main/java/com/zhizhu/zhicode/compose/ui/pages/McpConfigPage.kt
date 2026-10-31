@@ -1,9 +1,5 @@
 package com.zhizhu.zhicode.compose.ui.pages
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,13 +12,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.Modifier
@@ -45,12 +48,14 @@ import com.zhizhu.zhicode.compose.ui.ZhiFieldError
 import com.zhizhu.zhicode.compose.ui.ZhiFloatingActionButton
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
-import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSegmentedTabs
 import com.zhizhu.zhicode.compose.ui.ZhiLoadingIndicator
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.TopBarTabRowPadding
+import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
+import top.yukonga.miuix.kmp.utils.springAnimateToPage
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
@@ -217,6 +222,19 @@ fun McpConfigPage(
             // 有的返回 40 个。排在一页里，那 40 个会把「启用 / 作用范围 / URL」
             // 这些每次都要改的字段推到几十屏之前。
             var tab by rememberSaveable { mutableIntStateOf(0) }
+            val tabs = remember { MCP_FORM_TABS }
+            val pagerState = rememberPagerState(pageCount = { tabs.size })
+            val pagerScope = rememberCoroutineScope()
+            val currentTab by rememberUpdatedState(tab)
+            LaunchedEffect(pagerState, currentTab) {
+                if (pagerState.currentPage != currentTab) pagerState.springAnimateToPage(currentTab)
+            }
+            LaunchedEffect(pagerState) {
+                snapshotFlow { pagerState.currentPage to pagerState.isScrollInProgress }
+                    .collect { (page, scrolling) ->
+                        if (!scrolling && page in tabs.indices && page != currentTab) tab = page
+                    }
+            }
             SettingsSubPage(
                 title = if (draft.isEditing) "编辑 MCP 服务器" else "添加 MCP 服务器",
                 onBack = requestCancelForm,
@@ -236,9 +254,9 @@ fun McpConfigPage(
                         contentAlignment = Alignment.Center,
                     ) {
                         ZhiSegmentedTabs(
-                            tabs = MCP_FORM_TABS,
-                            selectedIndex = tab,
-                            onSelect = { tab = it },
+                            tabs = tabs,
+                            selectedIndex = pagerState.currentPage,
+                            onSelect = { index -> pagerScope.launch { pagerState.springAnimateToPage(index) } },
                             modifier = Modifier.fillMaxWidth(),
                             matchWidth = true,
                         )
@@ -257,15 +275,18 @@ fun McpConfigPage(
                     }
                 },
             ) {
-                // TAB 内容之间淡变：不包的话切到「工具」是一整块啪地换掉
-                // （TAB 栏本身留在 header 槽位不动，只换它下面这块）。
-                // 与 ModelPickerOverlay 的模型列表同一写法与同一条曲线。
-                AnimatedContent(
-                    targetState = tab,
-                    transitionSpec = {
-                        fadeIn(ZhiMotion.fadeInSpec) togetherWith fadeOut(ZhiMotion.fadeOutSpec)
-                    },
-                    label = "mcpFormTab",
+                // 内容直接由 Pager 跟随 TAB 弹簧切换，页面位移与顶栏高亮同源；
+                // 不再额外叠 AnimatedContent 淡变，避免两套动画互相竞争。
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxWidth(),
+                    userScrollEnabled = false,
+                    beyondViewportPageCount = 0,
+                    flingBehavior = PagerDefaults.flingBehavior(
+                        state = pagerState,
+                        snapAnimationSpec = PagerNavigationSpringSpec,
+                    ),
+                    key = { tabs[it] },
                 ) { tabIndex ->
                     if (tabIndex == 0) {
                         McpConnectionForm(draft = draft, onChange = onDraftChange)

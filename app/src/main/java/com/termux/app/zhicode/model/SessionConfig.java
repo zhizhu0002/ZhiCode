@@ -106,6 +106,8 @@ public final class SessionConfig {
     public boolean shizukuExecutionEnabled = false;
     /** 用户显式开启的常驻前台服务。 */
     public boolean forcedKeepAliveEnabled = false;
+    /** 主引擎可同时运行的子 Agent 上限，范围 1–8。 */
+    public int maxConcurrentSubagents = 4;
 
     // ------------------------------------------------------------ 工作目录
 
@@ -202,6 +204,7 @@ public final class SessionConfig {
         copy.rootExecutionEnabled = rootExecutionEnabled;
         copy.shizukuExecutionEnabled = shizukuExecutionEnabled;
         copy.forcedKeepAliveEnabled = forcedKeepAliveEnabled;
+        copy.maxConcurrentSubagents = maxConcurrentSubagents;
 
         copy.projectDirectory = projectDirectory;
         copy.worktreeOriginalDirectory = worktreeOriginalDirectory;

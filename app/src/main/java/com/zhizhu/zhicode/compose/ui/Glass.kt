@@ -8,6 +8,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.theme.ZhiGlass
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
@@ -45,7 +46,9 @@ fun rememberGlass(): Glass {
     // **隐藏**了，这里仍读原始字段 —— 于是「悬浮底栏关了、液态玻璃也没得点，
     // 但底栏以外的玻璃面板照样是透的」。门控收进数据层，这一处只认结果。
     val liquid = LocalThemeSettings.current.liquidGlassEffective
-    val supported = remember { isRuntimeShaderSupported() && enabled }
+    // The blur setting is user-toggleable at runtime. Do not freeze its initial value in an
+    // unkeyed remember: a false first composition would leave every Glass backdrop disabled.
+    val supported = remember(enabled) { isRuntimeShaderSupported() && enabled }
     // 关键：不支持时**连 layerBackdrop 都不创建**。
     // 只在 Modifier 上做恒等替换还不够 —— 光是把 blur 的代码路径执行到，
     // 在 API < 33 上就可能因为 RuntimeShader 缺失而崩。
@@ -67,6 +70,24 @@ fun rememberGlass(): Glass {
     }
 }
 
+/**
+ * 一个「没有背板」的 [Glass]：所有方法都是恒等变换。
+ *
+ * ## 为什么需要它
+ *
+ * `layerBackdrop` 把一棵子树录进一张图层，`textureBlur` 再去采样那张图层。
+ * **如果采样的节点正好位于被录制的子树内部**，HWUI 就得到一个自引用的
+ * RenderNode —— `RenderNode::prepareTreeImpl` 递归到 RenderThread 栈溢出
+ * （实测崩溃日志：`Cause: stack pointer is not in a rw map; likely due to
+ * stack overflow`，`prepareTreeImpl` / `SkiaDisplayList::prepareListAndChildren`
+ * 重复几百层）。
+ *
+ * 所以凡是「已经处在某个 capture 内部、又需要一块不透明面板」的地方
+ * （宽屏顶栏、调试浮层、文件选择工具条等），必须显式用 [NoGlass] 切断采样，
+ * 而不是把外层的 [Glass] 继续往下传。
+ */
+internal val NoGlass: Glass = Glass(null, false, false)
+
 /** 由 [rememberGlass] 创建，集中承载门控逻辑。 */
 class Glass internal constructor(
     internal val backdrop: LayerBackdrop?,
@@ -83,11 +104,12 @@ class Glass internal constructor(
     val supported: Boolean get() = backdrop != null
 
     /** 加在被模糊层压住的内容上：把它的绘制录进 layer。 */
+    /** Capture only the content owner; consumers are always siblings outside this modifier. */
     fun capture(modifier: Modifier): Modifier =
         if (backdrop != null) modifier.layerBackdrop(backdrop) else modifier
 
     /** 加在悬浮层上：对已捕获的背景做高斯模糊。 */
-    fun blur(modifier: Modifier, shape: Shape, radius: Float = 24f): Modifier =
+    fun blur(modifier: Modifier, shape: Shape, radius: Float = ZhiGlass.FloatingBlur): Modifier =
         if (backdrop != null) {
             modifier.textureBlur(backdrop = backdrop, shape = shape, blurRadius = radius)
         } else {

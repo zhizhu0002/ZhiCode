@@ -34,7 +34,7 @@ import top.yukonga.miuix.kmp.theme.lightColorScheme
  *
  * 1. 先算深浅（[ZhiThemeMode.rememberCurrentDark] —— 全局唯一的判定处）；
  * 2. 再算色板（[rememberZhiColors]，Monet 那条路要在这里生成种子色板）；
- * 3. `CompositionLocalProvider(LocalZhiDark, LocalAmoled, LocalThemeSettings, LocalDensity)`。
+ * 3. `CompositionLocalProvider(LocalZhiDark, LocalThemeSettings, LocalDensity)`。
  *    **必须早于任何 `ZhiColors` 取值**：那些层级色靠这两个 Local 判断深浅与纯黑，
  *    读早了会拿到默认值（浅色、非纯黑），于是深色模式下背板被设成浅灰、弹窗整片发白；
  * 4. 最后 `MiuixTheme`。`background` 被换成 [ZhiColors.backdrop]：Miuix 浅色方案里
@@ -57,7 +57,6 @@ fun ZhiAppTheme(theme: ThemeSettings, content: @Composable () -> Unit) {
 
     CompositionLocalProvider(
         LocalZhiDark provides isDark,
-        LocalAmoled provides theme.amoled,
         LocalThemeSettings provides theme,
         // 界面缩放：只改密度，不改布局代码。`fontScale` 必须原样带过去 ——
         // 否则用户系统的「字体大小」设置会在应用里失效。
@@ -69,7 +68,7 @@ fun ZhiAppTheme(theme: ThemeSettings, content: @Composable () -> Unit) {
         // `CompositionLocalProvider` **之前**，于是色板函数里的
         // `ZhiColors.backdrop()` 读到的是 Provider **外层**的值：
         //   · `LocalZhiDark` → 默认 `false`；
-        //   · `LocalAmoled` → 默认 `false`。
+        //   · 历史遗留的 AMOLED 信号已移除（Miuix 用不到纯黑）。
         // 结果：**深色模式下整个主题的 `background` 是浅色背板 `#F1F1F3`**，
         // 而面板/卡片（它们读的是 Provider 内的正确值）是深色 —— 板块之间的缝、
         // 顶栏透出的底色、页面切换时露出的那一层全是浅灰；AMOLED 开关同样完全无效
@@ -78,8 +77,12 @@ fun ZhiAppTheme(theme: ThemeSettings, content: @Composable () -> Unit) {
         MiuixTheme(
             colors = rememberZhiColors(theme, isDark),
             textStyles = zhiTextStyles(),
-            content = content,
-        )
+        ) {
+            // 麻薯（Mochi）主题再包一层，位置在这里是**有讲究的**：见 MochiSkin.kt
+            // 文件头的说明。一句话：现有调用点读 MiuixTheme 的不动，Mochi 组件读到的是
+            // 同一套种子色 / 深浅判定 / G2 圆角，两套组件混排时不会各按各的默认值排版。
+            ZhiMochiTheme(theme, content)
+        }
     }
 }
 
@@ -116,6 +119,9 @@ val LocalThemeSettings = androidx.compose.runtime.compositionLocalOf { ThemeSett
  * 但我们还要在**它之上**覆写 `background` 与中性色，而 controller 那条路没有
  * "再覆写一层"的出口。所以这里只借 controller 的 `currentColors()` 拿到生成结果，再自己 copy。
  */
+/** 高亮强调色底上的文字色：近黑而非纯黑（纯黑压在饱和色上会显脏）。 */
+private val OnBrightSeed = Color(0xFF141414)
+
 @Composable
 private fun rememberZhiColors(theme: ThemeSettings, isDark: Boolean): Colors {
     val backdrop = ZhiColors.backdrop()
@@ -127,11 +133,34 @@ private fun rememberZhiColors(theme: ThemeSettings, isDark: Boolean): Colors {
             val base = if (isDark) darkColorScheme() else lightColorScheme().zhiLightNeutrals()
             val seed = Color(theme.seedArgb)
             // 亮色种子（暖阳橙 / 樱花粉）配白字会糊，按亮度换深色字。
-            val onSeed = if (seed.luminance() > 0.45f) Color(0xFF141414) else Color.White
+            // 用命名常量而不是字面量：它是"高亮底上近乎纯黑的字"，与纯黑不同
+            // （纯黑压在饱和色上会显得脏），这个区别值得有个名字。
+            val onSeed = if (seed.luminance() > 0.45f) OnBrightSeed else Color.White
             val container = if (isDark) lerp(seed, Color.Black, 0.62f) else lerp(seed, Color.White, 0.78f)
             val onContainer = if (isDark) lerp(seed, Color.White, 0.55f) else lerp(seed, Color.Black, 0.45f)
             base.copy(
-                background = backdrop,
+                /*
+                 * ⚠️ `background` **不要**覆盖成页面背板。
+                 *
+                 * 它曾经写成 `background = backdrop`（图省事，想让整页与背板同色）。
+                 * 但 Miuix 把 `background` 用作**抬升面板**的底色：
+                 *  · `BottomSheetDefaults.backgroundColor()` = `colorScheme.background`
+                 *  · `DialogDefaults.backgroundColor` 同上（见 `ui/pages/overlays/PermissionOverlay.kt` 的注释）
+                 *  · `ui/SideDrawer.kt` 抽屉直接取 `scheme.background`
+                 *
+                 * 于是背板一旦改成纯黑（Miuix 规范的页面色），底部弹层、对话框、
+                 * 侧抽屉全跟着变纯黑，与页面糊成一片 —— 用户报的
+                 * 「dialog 和抽屉变成纯黑色」就是这个覆盖造成的回归。
+                 *
+                 * 正确分工：页面背板用 `surface`（纯黑）与 `ZhiColors.backdrop()`，
+                 * `background` 留给 Miuix 自己的 `#242424`（浅色为白）。
+                 *
+                 * ⚠️ `surface` 同样**不要覆写**：它恰恰是页面背板
+                 * （`Scaffold.containerColor` 的默认值），Miuix 深色下就是
+                 * `Color.Black`。一度把它抬到 `#242424`，只会让页面与卡片
+                 * 只差一档、整体发灰，却完全解决不了浮层的问题。
+                 */
+                surface = base.surface,
                 primary = seed,
                 onPrimary = onSeed,
                 primaryVariant = seed,
@@ -167,7 +196,9 @@ private fun rememberZhiColors(theme: ThemeSettings, isDark: Boolean): Colors {
         // Monet 的浅色板用它自己的中性色（带种子色的灰）——**不要**再套
         // `zhiLightNeutrals()`：那套灰是为"固定色板"调的，叠在生成色板上
         // 会让强调色与容器色对不上（生成算法保证的是它自己那一套对比度）。
-        generated.copy(background = backdrop)
+        // 同上面固定色板分支：`background` 不覆盖（它服务于底部弹层 / 对话框 / 抽屉），
+        // 页面背板由 `ZhiColors.backdrop()` 与 `surface` 负责。
+        generated
     }
 }
 

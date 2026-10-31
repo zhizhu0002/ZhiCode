@@ -93,6 +93,7 @@ import com.zhizhu.zhicode.compose.model.RoleCardsState
 import com.zhizhu.zhicode.compose.model.SLASH_COMMANDS
 import com.zhizhu.zhicode.compose.model.SessionSummary
 import com.zhizhu.zhicode.compose.model.SettingsCategory
+import com.zhizhu.zhicode.compose.model.DEFAULT_MAX_CONCURRENT_SUBAGENTS
 import com.zhizhu.zhicode.compose.model.SkillCreateDraft
 import com.zhizhu.zhicode.compose.model.SkillDetail
 import com.zhizhu.zhicode.compose.model.SkillEditTarget
@@ -596,6 +597,9 @@ class WorkspaceViewModel(
                 }.getOrDefault("")
             }
             .filterValues { it.isNotBlank() }
+        val maxConcurrentSubagents = runCatching {
+            ApiSettingsStore(getApplication()).load().maxConcurrentSubagents
+        }.getOrDefault(DEFAULT_MAX_CONCURRENT_SUBAGENTS)
         _state.update {
             it.copy(
                 themeMode = theme,
@@ -609,9 +613,11 @@ class WorkspaceViewModel(
                     terminalCharMode = runCatching {
                         ApiSettingsStore.getTerminalCharMode(getApplication())
                     }.getOrDefault(false),
+                    maxConcurrentSubagents = maxConcurrentSubagents,
                 ),
                 settingsDraft = it.settingsDraft?.copy(
                     themeMode = theme,
+                    maxConcurrentSubagents = maxConcurrentSubagents,
                     webSearchKeys = keys,
                     terminalCharMode = runCatching {
                         ApiSettingsStore.getTerminalCharMode(getApplication())
@@ -2073,6 +2079,7 @@ class WorkspaceViewModel(
             rootExecutionEnabled = s.settings.rootExecutionEnabled,
             shizukuExecutionEnabled = s.settings.shizukuExecutionEnabled,
             forcedKeepAliveEnabled = s.settings.forcedKeepAliveEnabled,
+            maxConcurrentSubagents = s.settings.maxConcurrentSubagents,
             model = modelOverride,
             roleCard = roleCardOverride,
         )
@@ -4192,6 +4199,7 @@ class WorkspaceViewModel(
                     rootExecutionEnabled = o.rootExecutionEnabled ?: s.settings.rootExecutionEnabled,
                     shizukuExecutionEnabled = o.shizukuExecutionEnabled ?: s.settings.shizukuExecutionEnabled,
                     forcedKeepAliveEnabled = o.forcedKeepAliveEnabled ?: s.settings.forcedKeepAliveEnabled,
+                    maxConcurrentSubagents = o.maxConcurrentSubagents ?: s.settings.maxConcurrentSubagents,
                 ),
                 // 设置页若已经开着（正常不会，这一步在启动路径上），草稿也要跟着对齐，
                 // 否则页面显示的是旧值、点一下又把它写回去。
@@ -4216,6 +4224,7 @@ class WorkspaceViewModel(
                         rootExecutionEnabled = o.rootExecutionEnabled ?: draft.rootExecutionEnabled,
                         shizukuExecutionEnabled = o.shizukuExecutionEnabled ?: draft.shizukuExecutionEnabled,
                         forcedKeepAliveEnabled = o.forcedKeepAliveEnabled ?: draft.forcedKeepAliveEnabled,
+                        maxConcurrentSubagents = o.maxConcurrentSubagents ?: draft.maxConcurrentSubagents,
                     )
                 },
             )
@@ -4945,6 +4954,9 @@ class WorkspaceViewModel(
     }
 
     fun showSessionActions(session: SessionSummary) {
+        com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note(
+            "session-menu/open id=${session.id} title=${session.title}",
+        )
         // 记住操作对象：动作是在**选择器回调**里执行的，那时只能拿到选项文案，
         // 拿不到是哪条会话 —— 不记住就会出现"删掉了当前会话"这种错删。
         pendingSessionAction = session
@@ -4955,14 +4967,7 @@ class WorkspaceViewModel(
         //
         // 「编辑备注 / 清除备注」留着，因为它**没有别的入口** —— 备注是侧栏搜索
         // 与行尾「· 备注」标记的来源，删掉这一项等于把那个能力废掉一半。
-        val options = buildList {
-            add("重命名")
-            add("编辑备注")
-            // 「清除备注」只在**确实有备注**时出现：否则它就是一个点了也不会有
-            // 任何变化的菜单项（备注本来已经是空的）。
-            if (session.note.isNotEmpty()) add("清除备注")
-            add("删除会话")
-        }
+        val options = listOf("重命名", "删除会话")
         _state.update {
             it.copy(
                 choicePicker = ChoicePickerState(
@@ -4997,6 +5002,7 @@ class WorkspaceViewModel(
 
     /** 打开重命名：同样只靠自由输入提交，输入框预填当前标题。 */
     private fun editSessionTitle(session: SessionSummary) {
+        com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note("session-menu/editTitle in")
         pendingSessionAction = session
         _state.update {
             it.copy(
@@ -5138,13 +5144,26 @@ class WorkspaceViewModel(
             ChoiceIntent.SESSION_ACTION -> {
                 val target = pendingSessionAction
                 pendingSessionAction = null
+                // ⚠️ **不要在这里关闭侧栏**。用户明确要求「跳到任何窗口或页面时，
+                // 侧栏都不要关闭」—— 收起侧栏会打断"在列表里连着处理几条会话"的节奏。
+                //
+                // 对话框盖不住侧栏的问题要在**层级**上解决（见 `ZhiOverlayHost`
+                // 的挂载位置），不能靠"先关掉挡路的东西"来回避。
                 _state.update { it.copy(choicePicker = null) }
                 if (target == null) {
                     // 拿不到操作对象就什么都不做。宁可无反应，也不能猜一条会话删掉。
                     _state.update { it.copy(message = "找不到目标会话，操作已取消") }
                 } else when (option.label) {
-                    "重命名" -> editSessionTitle(target)
-                    "删除会话" -> deleteSession(target.id)
+                    "重命名" -> {
+                        com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note("session-menu/pick 重命名")
+                        editSessionTitle(target)
+                    }
+                    // ⚠️ 不再直接删：先弹二次确认（用户要求「删除会话也要加个 dialog」）。
+                    // 原来这一行是 `deleteSession(target.id)`，误触即不可恢复。
+                    "删除会话" -> {
+                        com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note("session-menu/pick 删除会话")
+                        confirmDeleteSession(target)
+                    }
                     // 「恢复会话」已经不在菜单里（点这一行就会打开）。这一支留着是为了
                     // 兼容**旧的**待办：选择器是异步的，理论上仍可能带着老选项回来。
                     "恢复会话" -> openSession(target)
@@ -5160,6 +5179,14 @@ class WorkspaceViewModel(
             ChoiceIntent.SESSION_RENAME -> {
                 // 同上：重命名也只靠自由输入提交，这里只是穷尽性兜底。
                 _state.update { it.copy(choicePicker = null) }
+            }
+            // 删除确认的同理兜底：真正的执行在 `onSubmit`（选中第二层唯一的选项）。
+            // 保留这个分支是因为 `when` 必须穷尽，且将来若改成按钮式确认会用到。
+            ChoiceIntent.SESSION_DELETE_CONFIRM -> {
+                val target = pendingSessionAction
+                pendingSessionAction = null
+                _state.update { it.copy(choicePicker = null) }
+                if (target != null) doDeleteSession(target.id)
             }
             ChoiceIntent.QUESTION -> {
                 // 提问流程正常走 onSubmitSelection / dismissChoicePicker；
@@ -5488,6 +5515,39 @@ class WorkspaceViewModel(
         // 淘汰就白做了。600 个引用的复制本身可以忽略。
         return Trimmed(ArrayList(items.subList(0, maxResidentItems)), true)
     }
+
+    /**
+     * 弹出「删除会话」的**二次确认**。
+     *
+     * 用户要求「删除会话也要加个 dialog，确认是否删除」——原来选中菜单项就直接
+     * 调 [doDeleteSession]，误触即不可恢复。
+     *
+     * 形态复用通用选择器（`ChoicePickerState`）：一个选项「确认删除」+ 取消按钮。
+     * 不用自由文本框、不设 `anchorId`（走居中对话框而不是贴行下拉菜单 ——
+     * 下拉菜单是"选一个动作"，而确认是"要不要执行"，两者不该长得一样）。
+     */
+    private fun confirmDeleteSession(session: SessionSummary) {
+        pendingSessionAction = session
+        _state.update {
+            it.copy(
+                choicePicker = ChoicePickerState(
+                    title = "删除会话",
+                    intent = ChoiceIntent.SESSION_DELETE_CONFIRM,
+                    prompt = "「${session.title}」会被永久删除，包含 ${session.messageCount} 条消息。" +
+                        "这个操作无法撤销。",
+                    options = listOf(ChoiceOption("确认删除")),
+                ),
+            )
+        }
+    }
+
+    /**
+     * 真正执行删除（不可撤销）。
+     *
+     * ⚠️ 分离于 [confirmDeleteSession]：确认框只负责"问"，这里负责"做"。
+     * 混在一起的话，任何一次误调确认函数都会连带删掉数据。
+     */
+    private fun doDeleteSession(id: String) = deleteSession(id)
 
     /**
      * 删除会话。
@@ -6169,6 +6229,7 @@ class WorkspaceViewModel(
             // 否则「改了预设就大退」会丢掉这一批改动。
             persistThemeSettings()
             persistWebSearchKey(draft)
+            // 子 Agent 并发上限属于会话全局配置，已通过 applyEngineOverrides + saveDurable 落盘。
             // 终端输入类型也不在 SessionConfig 里（终端是独立 Activity，不读会话配置）。
             runCatching {
                 ApiSettingsStore.setTerminalCharMode(getApplication(), draft.terminalCharMode)

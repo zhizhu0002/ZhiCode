@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +32,7 @@ import com.zhizhu.zhicode.compose.data.ChatFontLoader
 import com.zhizhu.zhicode.compose.data.ThemeSettings
 import com.zhizhu.zhicode.compose.data.ThemeStore
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.theme.ZhiSpacing
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.settings.SettingsEntry
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
@@ -272,7 +274,7 @@ fun ChatDisplayPage(
             modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 6.dp),
         )
         Card(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpacing.pageMargin),
             cornerRadius = ZhiRadius.card,
             colors = CardDefaults.defaultColors(MiuixTheme.colorScheme.surfaceContainer),
         ) {
@@ -317,7 +319,7 @@ private fun FontChoice(
     val scheme = MiuixTheme.colorScheme
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(ZhiRadius.inner))
+            .clip(ZhiSquircle(ZhiRadius.inner))
             .background(if (selected) scheme.secondaryContainer else scheme.surfaceContainerHigh)
             .padding(vertical = 8.dp)
             .then(

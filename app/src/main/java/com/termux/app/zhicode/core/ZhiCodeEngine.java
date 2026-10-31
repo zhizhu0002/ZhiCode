@@ -400,6 +400,7 @@ public final class ZhiCodeEngine {
             }
         }
         this.config = next;
+        if (subagents != null) subagents.setMaxConcurrentSubagents(next.maxConcurrentSubagents);
         cachedSystemPrompt = null;
         cachedSystemPromptKey = null;
         cachedToolSchemas = null;
@@ -675,7 +676,8 @@ public final class ZhiCodeEngine {
         executingTool = false;
         executingModelRequest = false;
 
-        JSONArray restored = SessionStore.loadMessages(sessionId);
+        // 模型长期上下文从最新压缩快照恢复，再附加最近若干完整回合；没有快照的旧会话安全回退全量。
+        JSONArray restored = SessionStore.loadModelMessages(sessionId, 200);
         synchronized (messageLock) {
             clearMessagesLocked();
             for (int i = 0; i < restored.length(); i++) messages.put(restored.getJSONObject(i));

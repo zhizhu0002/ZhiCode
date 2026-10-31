@@ -129,10 +129,12 @@ fun PlanApprovalOverlay(
     // 同 PermissionOverlay：退场时 `plan` 已经是 null，内容得靠「最后一次非空」兜住。
     val shownPlan = rememberLastNonNull(plan)
     var feedback by remember(shownPlan) { mutableStateOf("") }
+    val shownFeedback by androidx.compose.runtime.rememberUpdatedState(feedback)
 
     OverlayDialog(
         show = plan != null,
         onDismissRequest = onRevise,
+        largeScreen = true,
         maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
@@ -160,7 +162,7 @@ fun PlanApprovalOverlay(
             // 反馈输入框不随计划正文滚动，固定在底板下方
             footer = {
                 ZhiTextField(
-                    value = feedback,
+                    value = shownFeedback,
                     onValueChange = { feedback = it },
                     label = "继续规划时填写反馈（可选）",
                     useLabelAsPlaceholder = true,

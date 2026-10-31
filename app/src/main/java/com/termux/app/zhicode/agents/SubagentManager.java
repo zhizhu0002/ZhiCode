@@ -132,6 +132,9 @@ public final class SubagentManager {
     private final ModelProvider providerOverride;
     private final PermissionRelay permissionRelay;
     private final QuestionRelay questionRelay;
+    private final Object permitLock = new Object();
+    private volatile int maxConcurrentSubagents = 4;
+    private int activeCount = 0;
 
     private final ExecutorService executor = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, THREAD_NAME_PREFIX);
@@ -162,6 +165,11 @@ public final class SubagentManager {
      */
     public JSONArray apiSchemas() {
         return SubagentToolSchemas.apiSchemas();
+    }
+
+    /** Update the live task limit; already running tasks are not cancelled. */
+    public void setMaxConcurrentSubagents(int requested) {
+        maxConcurrentSubagents = Math.max(1, Math.min(8, requested));
     }
 
     public ToolExecutionResult execute(SessionConfig parent, String parentEffectiveMode, ToolCall call)
@@ -218,6 +226,14 @@ public final class SubagentManager {
                 ? input.optBoolean("run_in_background", false)
                 : definition.background;
 
+        synchronized (permitLock) {
+            if (activeCount >= maxConcurrentSubagents) {
+                return ToolExecutionResult.error("子 Agent 并发数已达上限（" + maxConcurrentSubagents
+                        + "）。请等待已有任务完成后重试。");
+            }
+            activeCount++;
+        }
+
         String id = UUID.randomUUID().toString().substring(0, TASK_ID_CHARS);
         String description = input.optString("description", definition.name).trim();
         if (description.isEmpty()) description = definition.name;
@@ -228,8 +244,23 @@ public final class SubagentManager {
 
         final String finalCwd = cwd;
         final String finalIsolation = isolation;
-        task.future = executor.submit(() ->
-                runTask(parent, parentEffectiveMode, input, definition, task, prompt, finalCwd, finalIsolation));
+        try {
+            task.future = executor.submit(() -> {
+                try {
+                    runTask(parent, parentEffectiveMode, input, definition, task, prompt, finalCwd, finalIsolation);
+                } finally {
+                    synchronized (permitLock) {
+                        activeCount = Math.max(0, activeCount - 1);
+                    }
+                }
+            });
+        } catch (RuntimeException rejected) {
+            synchronized (permitLock) {
+                activeCount = Math.max(0, activeCount - 1);
+            }
+            tasks.remove(id);
+            return ToolExecutionResult.error("无法启动子 Agent：" + rejected.getMessage());
+        }
 
         if (background) {
             return ToolExecutionResult.ok("Background agent started.\ntask_id: " + id

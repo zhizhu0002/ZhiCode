@@ -124,11 +124,10 @@ fun ZhiTopBar(
                         blendColors = listOf(
                             BlendColorEntry(
                                 color = if (ZhiColors.isDark()) {
-                                    scheme.surface.copy(alpha = 0.8f)
+                                    scheme.surface.copy(alpha = ZhiGlass.TopBarAlpha)
                                 } else {
-                                    // 不透明白会把 textureBlur 的结果盖住；浅色顶栏也要
-                                    // 留出玻璃透光，才能看到下方内容滚过顶栏的轮廓。
-                                    Color.White.copy(alpha = 0.72f)
+                                    // 与所有整页顶栏共用同一层级；浅色透明度略高以保持干净白底。
+                                    Color.White.copy(alpha = 0.78f)
                                 },
                             ),
                         ),
@@ -143,6 +142,7 @@ fun ZhiTopBar(
         modifier = Modifier,
         title = "ZhiCode",
         color = if (blurActive) Color.Transparent else scheme.surfaceContainer,
+        // 与底部 FloatingBottomShell 共用 Glass 的透明度、模糊半径和边缘策略。
         defaultWindowInsetsPadding = false,
         navigationIcon = {
             if (!wide) {

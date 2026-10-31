@@ -1,28 +1,57 @@
 package com.zhizhu.zhicode.compose.ui.pages
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
-import com.zhizhu.zhicode.compose.data.TabBarPosition
-import com.zhizhu.zhicode.compose.theme.ZhiRadius
-import com.zhizhu.zhicode.compose.ui.WorkspaceTabs
-import top.yukonga.miuix.kmp.basic.Surface
-import com.zhizhu.zhicode.compose.ui.WorkspaceTabRowHeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.background
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import top.yukonga.miuix.kmp.basic.NavigationBar
+import top.yukonga.miuix.kmp.basic.NavigationBarItem
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import com.zhizhu.zhicode.compose.data.TabBarPosition
+import com.zhizhu.zhicode.compose.ui.WorkspaceTabs
+import com.zhizhu.zhicode.compose.ui.LiquidWorkspaceBar
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
+import top.yukonga.miuix.kmp.basic.Surface
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Color
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.effects.pressSink
+import com.zhizhu.zhicode.compose.ui.effects.PageBlurBar
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,12 +60,24 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.CompactWorkspace
+import com.zhizhu.zhicode.compose.ui.FloatingNavBarGap
+import com.zhizhu.zhicode.compose.ui.FloatingNavBarHeight
+import com.zhizhu.zhicode.compose.ui.FloatingNavContentGap
 import com.zhizhu.zhicode.compose.ui.Glass
+import com.zhizhu.zhicode.compose.ui.LocalNavBarProgress
+import com.zhizhu.zhicode.compose.ui.LocalNavBarTarget
+import com.zhizhu.zhicode.compose.ui.LocalNavBarScrollTick
+import com.zhizhu.zhicode.compose.ui.LocalNavBarTravelPx
+import com.zhizhu.zhicode.compose.ui.LocalFloatingNavInset
 import com.zhizhu.zhicode.compose.ui.PageFeedback
 import com.zhizhu.zhicode.compose.ui.TopBarInsetCompact
 import com.zhizhu.zhicode.compose.ui.TopBarState
@@ -102,25 +143,170 @@ internal fun WorkspacePage(
     val compactPagerState = androidx.compose.foundation.pager.rememberPagerState(
         pageCount = { compactTabs.size },
     )
-    Box(modifier = Modifier.fillMaxSize()) {
-    Scaffold(
-        floatingToolbar = {
-            com.zhizhu.zhicode.compose.ui.pages.FileSelectionToolbar(
-                visible = !wide && (state.fileSelectionMode || state.fileSelection.isNotEmpty()),
-                entries = state.fileEntries,
-                selection = state.fileSelection,
-                glass = glassMain,
-                onAttach = viewModel::attachSelectedEntries,
-                onRename = viewModel::renameSelectedEntry,
-                onDelete = viewModel::deleteSelectedEntries,
-                onCopy = viewModel::copySelectedEntries,
-                onMove = viewModel::moveSelectedEntries,
-                clipboardCount = state.fileClipboard.size,
-                clipboardMove = state.fileClipboardMove,
-                onPaste = viewModel::pasteFilesIntoCurrentDirectory,
-                onSelectAll = viewModel::toggleSelectAllFiles,
-                onDismiss = viewModel::clearFileSelection,
+    val showBottomNavigation = !wide && themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM
+    val floatingNavigationBlur = showBottomNavigation && themeSettings.tabBarFloating &&
+        themeSettings.blurEnabled && themeSettings.floatingNavBlur && glassMain.supported
+    // 底栏的模糊源必须**只**来自 `glassMain` 的层级捕获，而底栏本身位于
+    // Scaffold 的 bottomBar 槽 —— 它是内容节点的**兄弟**，不是子节点。
+    // 这条「内容录制 / 底栏采样」的单向关系就是 KSU 的 BlurredBar 结构；
+    // 反向（底栏被自己录进去）会让 HWUI 得到自引用 RenderNode 并栈溢出。
+    val pageNavigationBackdrop = glassMain.backdrop
+    val floatingNavigationBackdrop = glassMain.backdrop.takeIf { floatingNavigationBlur }
+    // 悬浮胶囊在底部**实际遮住**的高度：胶囊 + 与系统导航栏之间的缝 + 导航栏 inset。
+    //
+    // ⚠️ 这只是"被遮住多少"，不是"内容要让出多少布局高度"。
+    // 胶囊是浮层，内容必须一路铺到屏幕底边（KSU 那种卡片从胶囊下穿过的观感）；
+    // 各页拿这个值当**滚动内边距**用，于是"最后一行能滑到胶囊上方"和
+    // "底部不再空出一条背景色带"同时成立。以前这里给内容加布局底部 padding，
+    // 结果就是胶囊底下留出一整条纯背景色 —— 那正是用户反复说的"黑色区域"。
+    val navigationBarBottomInsetDp = WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)
+        .asPaddingValues().calculateBottomPadding()
+    val floatingNavigationAvoidance = FloatingNavBarHeight + FloatingNavBarGap +
+        navigationBarBottomInsetDp
+    /*
+     * 键盘是否可见（含动画过程）。
+     *
+     * ⚠️ 取 `imeVisible` 而不是 `settledLiftPx > 0`：后者要等键盘动画**结束**才翻转，
+     * 于是动画期间让位量还是旧值，扩展键栏 / 输入器与键盘之间会裂开一条缝（用户截图）。
+     * `imeVisible` 在动画开始那一刻就翻真，且每次开合只变两次，可以安全在组合期读。
+     */
+    val imeOpen = com.zhizhu.zhicode.compose.ui.LocalImeMotion.current.imeVisible
+    /*
+     * 供各页当作滚动留白的值；非悬浮模式**或键盘可见时为 0**。
+     *
+     * ⚠️ 键盘弹起时必须归 0：悬浮胶囊在最底部，键盘弹出后它要么被键盘整个盖住、
+     * 要么被抬出可视区 —— 两种情况都不需要再给内容留出它的高度。若仍然留着，
+     * 键盘上方就会多出一整块空白（用户截图里终端扩展键栏与键盘之间、
+     * 输入器与键盘之间那条大缝）。
+     */
+    val floatingNavInset = if (showBottomNavigation && themeSettings.tabBarFloating && !imeOpen) {
+        floatingNavigationAvoidance + FloatingNavContentGap
+    } else {
+        0.dp
+    }
+    /*
+     * 胶囊隐藏进度。
+     *
+     * 分两层，缺一不可：
+     *  · [navBarHideTarget] 是**目标**，由滚动与手势直接写（可能一次跳几像素，
+     *    甚至因为列表重置而跳一大段 —— 那部分已在 `reportNavBarScroll` 里挡掉）；
+     *  · [navBarHideProgress] 是**显示值**，用一条短 tween 追目标。
+     *
+     * 为什么要追一次：用户要求「滑动幅度就算很小也要有动画」。
+     * 直接用目标值的话，一像素的滚动就是一像素的位移，看起来是硬跳、没有过渡；
+     * 追一条 120ms 的曲线之后，极小的滚动也会走出一段平滑位移。
+     * 时长刻意取很短 —— 它是"补间"而不是"动画"，太长就跟不上手指了。
+     */
+    val navBarHideTarget = remember { mutableFloatStateOf(0f) }
+    // 列表滚动计数器：手势靠它判断"这一下归列表管"，避免同一段位移被算两次。
+    // ⚠️ 用 `IntArray(1)` 而不是 `mutableStateOf(0)`：这个计数器由滚动**逐像素**自增，
+    // 用 State 会每次都走一遍快照写入/失效分发；而它只在手势回调里被读（不进组合），
+    // 普通容器就够，省掉这部分开销。
+    val navBarScrollTick = remember { IntArray(1) }
+    /*
+     * 隐藏进度的**平滑层**。
+     *
+     * ⚠️⚠️ 这里曾经是 `animateFloatAsState(targetValue = navBarHideTarget.floatValue)`。
+     * 那是**上滑卡顿的主因**：`animateFloatAsState` 的 `targetValue` 在**组合期**读，
+     * 而 target 由滚动逐像素写入 —— 于是"滚动每一像素 → 整个 WorkspacePage 重组一次"。
+     * 一屏里它下面是对话列表、顶栏、悬浮层三大块，全部跟着白重组。
+     *
+     * 现在改成 `Animatable` + 协程里追目标：
+     *  · target 变化**不进组合**（只在 flow 里被读）；
+     *  · 动画值通过 [Animatable.asState] 暴露出去，消费方**在绘制阶段**读
+     *    （`graphicsLayer { }` / `offset { }`）；
+     *  · 结果是：滚动期间 WorkspacePage 一次都不重组，只有绘制属性在变。
+     *
+     * 时长 120ms 取短的用意是"补间"而不是"动画"：太长会跟不上手指。
+     */
+    val navBarProgressAnim = remember { Animatable(0f) }
+    LaunchedEffect(navBarProgressAnim) {
+        snapshotFlow { navBarHideTarget.floatValue }.collect { target ->
+            navBarProgressAnim.animateTo(
+                targetValue = target,
+                animationSpec = tween(durationMillis = 120, easing = LinearOutSlowInEasing),
             )
+        }
+    }
+    val navBarHideProgressState = navBarProgressAnim.asState()
+
+    val workspaceBottomAvoidance = floatingNavInset
+    /*
+     * 非对话面板的反馈条要跟着胶囊一起下沉。
+     *
+     * ⚠️ 这里**不在组合期算 Dp**。以前写的是
+     * `workspaceBottomAvoidance * (1f - navBarHideProgress)`，那会在组合期读进度，
+     * 每像素滚动都把这一层（连同页面）重组一次。改成在 `offset { }` 里读
+     * （布局阶段，且只失效布局、不重组），见下面 `PageFeedback` 处。
+     */
+    // Overlay components are modal and must remain above the bottom navigation; hide the
+    // Scaffold bar while one is open rather than allowing it to cover sheet/dialog actions.
+    val anchoredActionMenu = state.choicePicker?.isActionMenu == true
+    val modalOverlayOpen = state.permissionRequest != null || state.planApproval != null ||
+        (state.choicePicker != null && !anchoredActionMenu) || state.copySheet != null ||
+        state.attachPickerOpen || state.taskListOpen || state.environmentOpen ||
+        state.modelPicker != null || state.fileNameForm != null || state.fileDeletePrompt != null
+    // Edge-to-edge makes the transparent system navigation area part of the app window.
+    // Paint the page backdrop at the root so that the floating bar's safe-area gap is
+    // themed background, never the window's default black surface.
+    Box(modifier = Modifier.fillMaxSize().background(ZhiColors.backdrop())) {
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        bottomBar = {
+            // This is the KSU mounting point: the bar is a Scaffold child, not a
+            // z-indexed child of the captured workspace. Scaffold measures it once and
+            // passes that exact height to the content lambda.
+            if (showBottomNavigation && !themeSettings.tabBarFloating && !modalOverlayOpen) {
+                Box(
+                    // 这里曾挂 `onGloballyPositioned { ZhiFrameTrace.note("nav-probe …") }`，
+                    // 用来核对"导航栏实际位置与内容让位是否一致"。它每次布局变化都执行，
+                    // 而悬浮/底栏在动画期间逐帧位移 → 日志里出现 893 次 `nav-probe`。
+                    // 结论早已确认，探针删除；详见 ChatList.kt 同类注释与实测数据。
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                PageBlurBar(backdrop = pageNavigationBackdrop) {
+                        NavigationBar(
+                            modifier = Modifier.align(Alignment.BottomCenter),
+                            // KSU 的做法：有可采样的背板时底栏底色必须是**透明**的，
+                            // 否则不透明的 surface 会把刚做好的模糊整个盖住
+                            // （表现就是"固定底栏切换后模糊没了/背板变透明"）。
+                            color = if (pageNavigationBackdrop != null) {
+                                Color.Transparent
+                            } else {
+                                MiuixTheme.colorScheme.surface
+                            },
+                        ) {
+                            WorkspaceTab.entries.forEach { tab ->
+                                val icon = when (tab) {
+                                    WorkspaceTab.CHAT -> com.zhizhu.zhicode.compose.ui.ZhiMaterialIcons.ChatBubble
+                                    WorkspaceTab.TERMINAL -> com.zhizhu.zhicode.compose.ui.ZhiMaterialIcons.Terminal
+                                    WorkspaceTab.FILES -> com.zhizhu.zhicode.compose.ui.ZhiMaterialIcons.Folder
+                                }
+                                NavigationBarItem(
+                                    modifier = Modifier.weight(1f),
+                                    icon = icon,
+                                    label = tab.label,
+                                    selected = state.tab == tab,
+                                    onClick = {
+                                        ZhiFrameTrace.begin("tab:${tab.name}")
+                                        viewModel.selectTab(tab)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        // Miuix Scaffold defaults to `colorScheme.surface`. That opaque surface used to
+        // show through the transparent outer area of the floating bar as a full-width
+        // black strip. The page backdrop must be the Scaffold's own container, not only
+        // a parent behind it.
+        containerColor = ZhiColors.backdrop(),
+        floatingToolbar = {
+            // 文件选择工具栏**不在这里**挂：它和悬浮胶囊要共用屏幕底部同一个槽位，
+            // 而 Scaffold 的 floatingToolbar 槽位落在胶囊下面 —— 两样同挂就会叠在一起
+            // （用户截图里工具栏被胶囊压住一半）。两者现在都在根层的同一个 Box 里过渡。
         },
         topBar = {
             if (wide) {
@@ -160,6 +346,9 @@ internal fun WorkspacePage(
             }
         },
     ) { padding ->
+        // KSU's Scaffold passes the measured bottomBar height to content. This is the
+        // app bar reservation (capsule + its single navigation inset), not a second
+        // system-bar padding. Without it the bar is merely painted over every pane.
         // 顶栏 blur 需要内容从它**底下滚过**才有东西可采样：
         // 去掉 padding.top，让内容 Box 从 y=0 铺满，各面板自己在头部留白。
         //
@@ -172,21 +361,77 @@ internal fun WorkspacePage(
         // **新加面板时最容易漏的就是这一步**（文件面板就这么被盖过一次，
         // 当时这里有一句指向并不存在的常量的注释，照它做就漏了）。
         Box(
-            modifier = Modifier.fillMaxSize().padding(
-                bottom = padding.calculateBottomPadding() +
-                    // 底栏模式下内容要给底部标签栏让位，否则最后一行会被它压住。
-                    // 数值与上面浮条的实际占位逐步对应：
-                    //   标签行 45dp + 浮条内 padding 上下各 4dp + 浮条外 6dp×2。
-                    // 贴边形态没有那两圈 padding，所以只让 45dp。
-                    if (!wide && themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM) {
-                        WorkspaceTabRowHeight + if (themeSettings.tabBarFloating) 20.dp else 0.dp
+            modifier = Modifier
+                .fillMaxSize()
+                .then(glassMain.capture(Modifier))
+                .padding(
+                    bottom = if (showBottomNavigation && !modalOverlayOpen) {
+                        if (themeSettings.tabBarFloating) {
+                            // 悬浮胶囊：**不让位**。内容铺到屏幕最底边（含导航栏那一段），
+                            // 胶囊浮在它上面。让位交给各页的滚动内边距（LocalFloatingNavInset）。
+                            0.dp
+                        } else padding.calculateBottomPadding()
                     } else {
-                        0.dp
+                        padding.calculateBottomPadding() +
+                            WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                                .only(WindowInsetsSides.Bottom)
+                                .asPaddingValues()
+                                .calculateBottomPadding()
                     },
-            ),
+                ),
         ) {
-            // 整块工作区先录进 glassMain 的背景（抽屉/弹窗的模糊来源）
-            Box(modifier = Modifier.fillMaxSize().then(glassMain.capture(Modifier))) {
+            // 各页从这里取「胶囊遮住多高」，当作**滚动内边距**。别改回布局 padding：
+            // 布局让位会在胶囊底下留出一条纯背景色带（用户报的就是这个）。
+            //
+            // ⚠️ 这里提供的是**稳定**的 [floatingNavInset]，不是动画值。
+            //
+            // 曾经写成 `provides animatedWorkspaceBottomAvoidance`（想让列表留白
+            // 也随动画收窄），结果是**回路**：
+            //   进度变 → 留白变 → LazyColumn contentPadding 变 → 重新测量
+            //   → firstVisibleItemScrollOffset 变 → reportNavBarScroll 又写进度 → …
+            // 表现就是用户报的「偶尔下滑或上滑，组件都会弹一下」，到底部越界时最重
+            // （那时候 `overScrollVertical` 的阻尼也在动，两个扰动叠加）。
+            //
+            // 现在分工明确：留白稳定 → 不参与回路；悬浮层**只在绘制阶段位移**
+            // （见 `LocalNavBarProgress` 的消费方），所以"组件跟着滑下去"的观感仍然存在。
+            // ⚠️ 同一段位移不能既从这里出去、又在页内各自 `graphicsLayer` 一次，
+            // 那会变成两倍 —— 位移只由页内那一处负责。
+            //
+            // ⚠️⚠️ `LocalNavBarProgress` / `LocalNavBarTarget` / `LocalNavBarTravelPx`
+            // 必须**和留白一起**提供在这一层：各页（对话 / 终端 / 文件）是这里的内容子树，
+            // 只在别处提供的话它们读到的是 `compositionLocalOf` 的**默认实例**，
+            // 写进去没有任何人读（这个坑已经踩过一次：`LocalNavBarScrollHidden`
+            // 曾经只提供给悬浮栏槽位，导致「下滑隐藏」在页面上从未生效过）。
+            CompositionLocalProvider(
+                LocalFloatingNavInset provides floatingNavInset,
+                LocalNavBarProgress provides navBarHideProgressState,
+                LocalNavBarTarget provides navBarHideTarget,
+                LocalNavBarScrollTick provides navBarScrollTick,
+                LocalNavBarTravelPx provides with(LocalDensity.current) {
+                    (FloatingNavBarHeight + FloatingNavBarGap +
+                        navigationBarBottomInsetDp + NavBarShadowRoom).toPx()
+                },
+            ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // 三屏共用的隐藏手势。挂在内容区**外层**，所以对话 / 终端 /
+                    // 文件都生效，且**不依赖列表能不能滚** —— 会话很短、终端没输出、
+                    // 目录里只有几个文件时，`LazyListState` 的 offset 根本不会变。
+                    //
+                    // 主驱动是列表滚动（见各页的 `reportNavBarScroll`），
+                    // 手势只用来补"这一屏根本不能滚"的情况。
+                    .navBarHideOnVerticalDrag(
+                        progress = navBarHideTarget,
+                        scrollTick = navBarScrollTick,
+                        // 移出量：与 `graphicsLayer` 里的算式**必须一致**，
+                        // 否则"拖到底"和"藏到底"会差一截。
+                        exitPx = with(LocalDensity.current) {
+                            (FloatingNavBarHeight + FloatingNavBarGap +
+                                navigationBarBottomInsetDp + NavBarShadowRoom).toPx()
+                        },
+                    ),
+            ) {
                 if (wide) {
                     // 宽屏的顶栏在右侧内容区内部（与常驻侧栏并列），见 WideWorkspace
                     WideWorkspace(
@@ -197,14 +442,17 @@ internal fun WorkspacePage(
                         glassMain = glassMain,
                     )
                 } else {
-                    CompactWorkspace(
-                        state = state,
-                        viewModel = viewModel,
-                        isDark = isDark,
-                        glass = glass,
-                        pagerState = compactPagerState,
+                    Box {
+                        CompactWorkspace(
+                            state = state,
+                            viewModel = viewModel,
+                            isDark = isDark,
+                            glass = glass,
+                            pagerState = compactPagerState,
                         )
+                    }
                 }
+            }
             }
 
             // ---- 非对话面板的反馈条 ----
@@ -216,93 +464,75 @@ internal fun WorkspacePage(
                     message = state.message,
                     isError = state.messageIsError,
                     onDismiss = viewModel::clearMessage,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        // 8dp 的固定底距走 padding（组合期常量，不随滚动变）；
+                        // 随进度变化的那一段走 `offset { }` —— 布局阶段求值，
+                        // 滚动时不触发重组（见上面 `workspaceBottomAvoidance` 的说明）。
+                        .padding(bottom = 8.dp)
+                        .offset {
+                            val hidden = workspaceBottomAvoidance.toPx() *
+                                navBarHideProgressState.value
+                            IntOffset(0, hidden.toInt())
+                        },
                 )
             }
 
-            // ---- 底部标签栏（窄屏 + 用户选了「底栏」）----
+            // ---- 侧边栏抽屉（窄屏）----
             //
-            // 形态**照文件页的选中工具栏**（`FileSelectionToolbar`）：一条独立的
-            // 悬浮胶囊，玻璃底 + 1dp 高光描边 + 阴影，左右 18dp 内缩。
+            // ⚠️⚠️ 抽屉**必须待在 Scaffold 的 content 里**，不能像以前那样挂在
+            // Scaffold 之后的兄弟位置。这是「长按会话菜单/对话框点不出来」的根因：
             //
-            // ⚠️ 上一版这里是"把标签栏搬到底部再叠一层实心色块"：
-            //   · 用 `background(surfaceContainer)` 直接填 —— 于是它是一块**不透明**
-            //     的方块，与周围毛玻璃的输入器完全不是一族；
-            //   · 没有任何位移，位置正好压在输入器上 —— 两者重叠，看起来像
-            //     "输入器上面多了一排按钮"。
-            // 现在改成真正的浮条：`ActiveSurface` 负责玻璃与描边，
-            // `AnimatedVisibility` 负责滑入，位置由它在内容之上单独占一层。
-            if (!wide && themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM) {
-                AnimatedVisibility(
-                    visible = true,
-                    enter = slideInVertically { it } + fadeIn(),
-                    exit = slideOutVertically { it } + fadeOut(),
-                    modifier = Modifier.align(Alignment.BottomCenter),
+            // Miuix 的弹层（`OverlayDropdownPopup` / `OverlayDialog`）不自己绘制，
+            // 而是把状态注册进 `LocalPopupStates` / `LocalDialogStates`，再由
+            // `Scaffold` 的 `popupHost` 统一画出来。而 `ScaffoldLayout` 把 popup
+            // 放在**最后** `place`（`Scaffold.kt:374`）—— 它只能盖住 **Scaffold 内部**的内容。
+            //
+            // 抽屉原先在 Scaffold 之外，等于永久压在弹层上面：
+            //  · 长按会话 → 菜单注册成功、也被 popupHost 画了，但被抽屉挡住 → "没反应"；
+            //  · 点菜单项 → 对话框同样被挡 → 只看到侧栏动了，看不到对话框。
+            //
+            // 移进来之后，抽屉是普通内容、弹层在它之上，两个问题一起解决。
+            // 放在工作区 UI **之后**，所以它仍然盖住对话/终端/文件三屏。
+            if (!wide) {
+                ZhiSideDrawer(
+                    open = state.sidebarOpen,
+                    onClose = viewModel::closeSidebar,
+                    // 宽度上限 300dp：抽屉是"导航"，不是工作区 —— 铺到 320dp/82% 时
+                    // 它一打开就把后面的对话流整个盖住，用户反馈「侧栏有点太宽泛了」。
+                    // 比例 0.76 兜住小屏：360dp 的机器上是 274dp，不至于挤掉 24dp 图标。
+                    width = (configuration.screenWidthDp * 0.76f).dp.coerceAtMost(300.dp),
                 ) {
-                    val floating = themeSettings.tabBarFloating
-                    val shape = RoundedCornerShape(if (floating) 28.dp else 0.dp)
-                    Surface(
+                    ZhiSidebarHost(
+                        state = state,
+                        viewModel = viewModel,
+                        // ⚠️ 必须让开 Scaffold 的**顶栏高度**。
+                        //
+                        // 抽屉现在是 Scaffold content 里的普通内容，而 Miuix 的
+                        // `ScaffoldLayout` 把 topBar 画在 content **上面**（body 先
+                        // `place(0,0)`、顶栏随后叠上去）。所以 content 内 y=0 的东西
+                        // 会被顶栏盖住 —— 用户截图里「新会话」那一条正好被压没。
+                        //
+                        // 用 `TopBarInsetCompact`（顶栏 + Tab 行的实测高度，与
+                        // `WorkspaceLayouts` 给各面板让位用的是同一个值），
+                        // 加在**内容**上：抽屉面板底色仍铺到屏幕顶边，只是第一行不钻到顶栏底下。
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(
-                                horizontal = if (floating) 18.dp else 0.dp,
-                                vertical = if (floating) 6.dp else 0.dp,
-                            )
-                            .then(
-                                if (floating) {
-                                    glassMain.blur(Modifier, shape, radius = 20f)
-                                } else {
-                                    Modifier
-                                }
-                            )
-                            .then(
-                                if (floating) {
-                                    Modifier.border(
-                                        width = 1.dp,
-                                        color = if (ZhiColors.isDark()) {
-                                            Color.White.copy(alpha = 0.10f)
-                                        } else {
-                                            Color.White.copy(alpha = 0.62f)
-                                        },
-                                        shape = shape,
-                                    )
-                                } else {
-                                    Modifier
-                                }
-                            ),
-                        shape = shape,
-                        color = if (floating) {
-                            glassMain.surfaceColor(
-                                if (ZhiColors.isDark()) {
-                                    MiuixTheme.colorScheme.surfaceContainer
-                                } else {
-                                    ZhiColors.panelSurface()
-                                },
-                            )
-                        } else {
-                            MiuixTheme.colorScheme.surfaceContainer
-                        },
-                        contentColor = MiuixTheme.colorScheme.onSurface,
-                        shadowElevation = if (floating) 12.dp else 0.dp,
-                    ) {
-                        WorkspaceTabs(
-                            tabs = WorkspaceTab.entries,
-                            selected = state.tab,
-                            pagerPage = compactPagerState.currentPage,
-                            onSelect = { tab ->
-                                ZhiFrameTrace.begin("tab:${tab.name}")
-                                viewModel.selectTab(tab)
-                            },
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                        )
-                    }
+                            .fillMaxHeight()
+                            .padding(top = com.zhizhu.zhicode.compose.ui.TopBarInsetCompact),
+                    )
                 }
             }
 
             // ---- Overlay 系列 ----
             // 弹窗挂载与模态模糊背景在 OverlayHost.kt。
-            // 必须仍处于 Scaffold 内容里才能找到 popupHost。
+            //
+            // 它必须留在 `Scaffold` 的 content 里：`OverlayDialog` → `DialogLayout`
+            // 不自己绘制，而是把状态注册进 `LocalDialogStates` / `LocalPopupStates`
+            // （`MiuixPopupUtils.kt:184-188`），再由**某个 Scaffold 的 `popupHost`**
+            // 负责画。这两个 local 是 `staticCompositionLocalOf`、默认值都是**空列表**，
+            // 在 Scaffold 之外注册等于没有宿主，对话框永远不会出现。
             ZhiOverlayHost(state = state, viewModel = viewModel, glassMain = glassMain)
+
 
             // ---- 全局调试浮层（debug 构建的 UI 调试页里打开）----
             // 画在最后 = 压在所有东西之上，但只在自己那块矩形里响应手势，
@@ -315,7 +545,8 @@ internal fun WorkspacePage(
                 ZhiDebugHud(
                     state = state,
                     viewModel = viewModel,
-                    glass = glassMain,
+                    // 调试 HUD 在 glassMain.capture 子树内部，禁止它反向采样父背板。
+                    glass = com.zhizhu.zhicode.compose.ui.NoGlass,
                     // 让出顶栏（含 Tab 行）的高度，否则药丸会被模糊顶栏压住。
                     topInset = TopBarInsetCompact,
                 )
@@ -323,23 +554,190 @@ internal fun WorkspacePage(
         }
     }
 
-    // ---- 侧边栏抽屉（窄屏，画在 Scaffold 之上）----
-    if (!wide) {
-        ZhiSideDrawer(
-            open = state.sidebarOpen,
-            onClose = viewModel::closeSidebar,
-            // 宽度上限 300dp：抽屉是"导航"，不是工作区 —— 铺到 320dp/82% 时
-            // 它一打开就把后面的对话流整个盖住，用户反馈「侧栏有点太宽泛了」。
-            // 比例 0.76 兜住小屏：360dp 的机器上是 274dp，不至于挤掉 24dp 图标。
-            width = (configuration.screenWidthDp * 0.76f).dp.coerceAtMost(300.dp),
-            glass = glassMain,
+    // ---- 悬浮底栏槽位（窄屏；独立于 Scaffold，避免产生全宽黑色占位层）----
+    //
+    // 这个槽位里可能出现**两块**东西：悬浮导航胶囊，和文件选择工具栏。
+    // 它们不能同时出现 —— 两者的宽度、位置、圆角语言都一样，叠在一起就是一团。
+    // 所以按"选择模式"切换，并让它们走同一组滑入/滑出动画：
+    // 胶囊向下退、工具栏从下方升起来，看起来像是同一块东西换了个内容。
+    val fileSelectionActive = !wide &&
+        (state.fileSelectionMode || state.fileSelection.isNotEmpty()) && !modalOverlayOpen
+    val floatingNavSlotAvailable = !wide &&
+        themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM &&
+        themeSettings.tabBarFloating && !modalOverlayOpen
+    val showFloatingNav = floatingNavSlotAvailable && !fileSelectionActive
+    // 选择工具栏与底栏形态**无关**：顶栏模式、固定底栏模式下它照样要出来。
+    // 只有"窄屏 + 没开模态浮层"是硬条件（宽屏用侧栏与行内动作，不需要它）。
+    if (floatingNavSlotAvailable || fileSelectionActive) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.BottomCenter,
         ) {
-            ZhiSidebarHost(
-                state = state,
-                viewModel = viewModel,
-                modifier = Modifier.fillMaxHeight(),
-            )
+            // 这里曾有 `density` / `reservedPx` / `navInsetPx` 三个局部量，
+            // 只服务于上面那个已删除的 `nav-probe` 探针。一并删掉，
+            // 免得留下"看起来有用、其实没人读"的值。
+            AnimatedVisibility(
+                visible = showFloatingNav,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
+            ) {
+                LiquidWorkspaceBar(
+                    selected = state.tab,
+                    onSelect = { tab ->
+                        ZhiFrameTrace.begin("tab:${tab.name}")
+                        viewModel.selectTab(tab)
+                    },
+                    backdrop = floatingNavigationBackdrop,
+                    blurEnabled = floatingNavigationBackdrop != null,
+                    modifier = Modifier
+                        // 下滑隐藏：胶囊整体滑出屏幕底部（`graphicsLayer` 平移而不是
+                        // 改变布局高度 —— 改高度会让下方的 `Shapes`/阴影每帧重新测量，
+                        // 滚动时直接掉帧）。
+                        //
+                        // ⚠️⚠️ 两处曾经写错，都会让"隐藏"看起来像坏了：
+                        //
+                        // 1. **没有动画**。原来是 `translationY = if (hidden) exit else 0f`，
+                        //    硬跳变 —— 胶囊是"啪"地消失/出现。现在走
+                        //    `animateFloatAsState`，时长与曲线取 [ZhiMotion] 里
+                        //    "退出"那条（与底栏收起、面板退出同一族）。
+                        //
+                        // 2. **移出量少了阴影**。原来只算 `高度 + 间隙 + 系统栏`，
+                        //    正好把 Body 送到屏幕外，但 `LiquidWorkspaceBar` 上挂着
+                        //    `dropShadow(radius = 10.dp)` —— 阴影是从边缘向外扩散的，
+                        //    本体移出去之后它还剩一截露在屏幕里，用户看到的就是
+                        //    "没藏好，还是漏出来一点"。这里补 [NavBarShadowRoom]。
+                        .graphicsLayer {
+                            val exit = (FloatingNavBarHeight + FloatingNavBarGap +
+                                navigationBarBottomInsetDp + NavBarShadowRoom).toPx()
+                            // 只在**绘制阶段**读进度：滚动期间这一层不重组。
+                            translationY = exit * navBarHideProgressState.value
+                        },
+                )
+            }
+            AnimatedVisibility(
+                visible = fileSelectionActive,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
+            ) {
+                FileSelectionToolbar(
+                    visible = true,
+                    entries = state.fileEntries,
+                    selection = state.fileSelection,
+                    glass = glassMain,
+                    onAttach = viewModel::attachSelectedEntries,
+                    onRename = viewModel::renameSelectedEntry,
+                    onDelete = viewModel::deleteSelectedEntries,
+                    onCopy = viewModel::copySelectedEntries,
+                    onMove = viewModel::moveSelectedEntries,
+                    clipboardCount = state.fileClipboard.size,
+                    clipboardMove = state.fileClipboardMove,
+                    onPaste = viewModel::pasteFilesIntoCurrentDirectory,
+                    onSelectAll = viewModel::toggleSelectAllFiles,
+                    onDismiss = viewModel::clearFileSelection,
+                    // 与胶囊同一个底距：工具栏比胶囊矮，底边对齐即可，
+                    // 两块切换时不会上下跳一截。
+                    modifier = Modifier.padding(bottom = FloatingNavBarGap + navigationBarBottomInsetDp),
+                )
+            }
         }
     }
+    }
+}
+
+/**
+ * 胶囊隐藏时额外多移出的距离，用来把**阴影**也一起送出屏幕。
+ *
+ * `LiquidWorkspaceBar` 上挂的是 `dropShadow(radius = 10.dp)` —— 阴影是从胶囊边缘
+ * **向外扩散**的，所以胶囊本体移出屏幕之后，它还剩下最多 10dp 的模糊边露在屏幕里。
+ * 只算 `高度 + 间隙 + 系统栏` 会正好把本体送到边缘、把阴影留在里面，看起来就是
+ * "没藏好，还是漏出来一点"。
+ *
+ * 取 24dp 而不是 10dp：`dropShadow` 的 `radius` 与最终模糊半径不是一比一
+ * （Skia 会按 sigma 展开约 2~3 倍），留一倍余量才不会在窄屏或高缩放下又露出头发丝。
+ */
+private val NavBarShadowRoom = 24.dp
+
+/**
+ * 手势驱动的"隐藏 / 唤出"底部悬浮栏。
+ *
+ * ## 为什么不能只靠列表滚动
+ *
+ * 原来的唯一驱动是 `reportNavBarScroll`，它观察 `LazyListState` 的
+ * `firstVisibleItemIndex / ScrollOffset`。这在"内容多到能滚"时很准，但三种很常见的
+ * 情况里它**永远不会触发**：
+ *
+ *  · 会话很短，一屏放得下 → offset 恒为 0；
+ *  · 终端还没输出、目录里只有几个文件 → 同上传动为 0；
+ *  · 内容顶部被 overscroll 阻尼吃掉时，手指在动而 offset 不动。
+ *
+ * 用户的话是"即使再不可滑动的地方也要加上这个"。
+ *
+ * ## 为什么在 `Initial` 段观察而不消费
+ *
+ * `PointerEventPass.Initial` 是**分发的最早一段**，这里只读 `change.position`，
+ * **从不调用 `consume()`**。所以：
+ *  · 列表照常滚动、pager 照常横滑、长按菜单照常触发；
+ *  · 我们只是"旁听"手指的竖直方向。
+ *
+ * 只旁听不消费是这里唯一可行的做法 —— 若在父层用 `detectVerticalDragGestures`
+ * 去抢手势，对话流就再也滚不动了。
+ *
+ * ## 方向
+ *
+ * **手指向下移动 → 隐藏；手指向上移动 → 唤出。**
+ *
+ * 这是按用户的手感要求定的（"把出入逻辑反过来"）。注意它**与列表回滚的方向相反**：
+ * 列表滚动那条驱动已停用，所以两者不会打架。
+ *
+ * ## 抬手不回弹
+ *
+ * 用户要求「抬手时保留当前动画进度」：手指抬起来，胶囊就停在那个位置，
+ * 既不补齐到端点、也不退回原位。下一次按下从当前位置继续累计
+ * （`startProgress` 记的就是抬手时的值）——所以整体读起来是
+ * "用手把这块东西推走/拽回来"，而不是"划一下触发开关"。
+ */
+private fun Modifier.navBarHideOnVerticalDrag(
+    progress: androidx.compose.runtime.MutableFloatState,
+    exitPx: Float,
+    scrollTick: IntArray,
+): Modifier = this.pointerInput(exitPx) {
+    awaitPointerEventScope {
+        val safety = exitPx.coerceAtLeast(1f)
+        var startProgress = 0f
+        var anchorY = Float.NaN
+        // 按下时的滚动计数。按住期间若它变了，说明列表在滚、这一下归列表管。
+        var tickAtPress = 0
+        while (true) {
+            val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+            val change = event.changes.firstOrNull() ?: continue
+
+            if (change.pressed) {
+                val y = change.position.y
+                if (anchorY.isNaN()) {
+                    anchorY = y
+                    startProgress = progress.floatValue
+                    tickAtPress = scrollTick[0]
+                } else {
+                    // ⚠️ **列表优先**：本轮按住期间列表已经滚过了，就完全不碰进度。
+                    // 否则同一段手指位移会被列表和手势各加一次，
+                    // 胶囊走两倍距离 —— 用户看到的就是"抬起再滑会弹一下"。
+                    //
+                    // 让路时仍要更新锚点：等列表停下来，手势从那一刻的位置继续，
+                    // 不会把让路期间攒下的位移一次性补上。
+                    val listMoved = scrollTick[0] != tickAtPress
+                    if (listMoved) {
+                        anchorY = y
+                        startProgress = progress.floatValue
+                    } else {
+                        // 手指向下 → 隐藏（进度增大），每一像素都反映到进度上。
+                        val delta = (y - anchorY) / safety
+                        progress.floatValue = (startProgress + delta).coerceIn(0f, 1f)
+                    }
+                }
+            } else if (!anchorY.isNaN()) {
+                // 抬手：保留当前进度，不回弹、不补齐。
+                anchorY = Float.NaN
+            }
+        }
     }
 }

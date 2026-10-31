@@ -4,6 +4,7 @@ import com.zhizhu.zhicode.compose.data.BottomBarStyle
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.theme.ZhiSpacing
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
 
 import androidx.compose.animation.animateColorAsState
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.foundation.border
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
@@ -116,7 +118,8 @@ private val PillHeight = 24.dp
  *
  * [wide] 是横屏/大屏档，比手机竖屏多留一段边距。
  */
-internal fun floatingHorizontalInset(wide: Boolean): Dp = if (wide) 24.dp else 12.dp
+internal fun floatingHorizontalInset(wide: Boolean): Dp =
+    if (wide) ZhiSpacing.pageMarginWide else ZhiSpacing.pageMargin
 
 /**
  * 底部悬浮层**共用的外壳**：任务卡、反馈条、输入器都从这一个组件出。
@@ -155,7 +158,11 @@ internal fun FloatingBottomShell(
     // 只在**真的悬浮**时生效：贴边形态没有"形态"可谈（见 BottomBarStyle 的说明）。
     val iosStyle = floating &&
         LocalThemeSettings.current.bottomBarStyleValue == BottomBarStyle.IOS
-    val shape = RoundedCornerShape(
+    // 圆角走 squircle（连续曲率），与 Miuix 自带的卡片、以及这里的三块悬浮层
+    // 保持同一种轮廓语言。同一个 `shape` 对象会同时喂给
+    // `textureBlur(shape=…)`、`border(shape=…)` 与 `FloatingToolbar` 的底色 ——
+    // 所以必须是**同一个实例**，否则角上会出现两套轮廓的重影。
+    val shape = ZhiSquircle(
         when {
             iosStyle -> 28.dp
             floating -> ZhiRadius.floating
@@ -169,7 +176,7 @@ internal fun FloatingBottomShell(
             .padding(vertical = verticalPadding)
             // 横向内缩在**布局层**，卡片贴住布局框 —— 与之前发送栏一致。
             .padding(horizontal = inset)
-            .then(if (floating) glass.blur(Modifier, shape, radius = 24f) else Modifier)
+            .then(if (floating) glass.blur(Modifier, shape) else Modifier)
             // 玻璃边缘的高光 + 阴影共同给出悬浮层与背景的距离；浅色不能只靠
             // 白色底，因为那会回到"一块平白卡片"，也正是 blur 看不见的原因。
             .then(
@@ -227,6 +234,13 @@ fun ZhiIconButton(
             modifier = modifier,
             enabled = enabled,
             backgroundColor = background,
+            // 触控热区兜底（规范 48dp）。Miuix 自己的 `IconButtonDefaults` 是 40dp ——
+            // 库默认值不满足无障碍规范，所以要在这里显式抬。
+            //
+            // `defaultMinSize` 会被**父约束夹住**：放进 36/40dp 高的行里时会自动
+            // 退到该行能给出的最大高度，不会把行撑破。所以无需在每个调用点分支。
+            minWidth = ZhiSpacing.minTouchTarget,
+            minHeight = ZhiSpacing.minTouchTarget,
             content = content,
         )
     } else {
@@ -236,8 +250,10 @@ fun ZhiIconButton(
             enabled = enabled,
             backgroundColor = background,
             cornerRadius = compact / 2,
-            minHeight = compact,
-            minWidth = compact,
+            // 视觉仍是 `compact` 方形，但触控盒至少 48dp —— 同样受父约束夹取：
+            // 顶栏 48dp 能容下，30dp 的密集工具行会退到行高。
+            minHeight = if (compact > ZhiSpacing.minTouchTarget) compact else ZhiSpacing.minTouchTarget,
+            minWidth = if (compact > ZhiSpacing.minTouchTarget) compact else ZhiSpacing.minTouchTarget,
             content = content,
         )
     }
@@ -591,20 +607,26 @@ fun ZhiSegmentedTabs(
     // TabRow 自己拥有横向懒列表；把 state 稳定地留在 wrapper 内，避免每次上层
     // 流式状态变化都重建横向滚动位置，也让选中项自动保持在可见区。
     val tabListState = rememberLazyListState()
-    TabRowWithContour(
-        tabs = tabs,
-        selectedTabIndex = safeSelectedIndex,
-        onTabSelected = { index ->
-            if (index in tabs.indices && index != safeSelectedIndex) {
-                selectTab.value(index)
-            }
-        },
-        modifier = modifier,
-        listState = tabListState,
-        itemSpacing = 4.dp,
-        minWidth = if (matchWidth) 0.dp else TabRowDefaults.TabRowWithContourMinWidth,
-        maxWidth = if (matchWidth) TabsMatchWidthLimit else TabRowDefaults.TabRowWithContourMaxWidth,
-    )
+    // Apply the caller's width constraint outside the Miuix row. TabRowWithContour
+    // starts with fillMaxWidth internally; passing `width(160.dp)` directly to it
+    // can therefore let the internal fill win and consume the whole SettingsGroup row,
+    // leaving the label with a one-glyph column (the NavigationBar screenshot bug).
+    Box(modifier = modifier) {
+        TabRowWithContour(
+            tabs = tabs,
+            selectedTabIndex = safeSelectedIndex,
+            onTabSelected = { index ->
+                if (index in tabs.indices && index != safeSelectedIndex) {
+                    selectTab.value(index)
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            listState = tabListState,
+            itemSpacing = 4.dp,
+            minWidth = if (matchWidth) 0.dp else TabRowDefaults.TabRowWithContourMinWidth,
+            maxWidth = if (matchWidth) TabsMatchWidthLimit else TabRowDefaults.TabRowWithContourMaxWidth,
+        )
+    }
 }
 
 /**
@@ -1100,6 +1122,24 @@ fun ZhiAnchoredActionMenu(
     modifier: Modifier = Modifier,
     /** 手指位置（相对被长按的那一项）。为空则退回「贴条目锚定」。 */
     fingerOffset: DpOffset? = null,
+    /**
+     * 弹层渲染到哪个宿主。
+     *
+     * ⚠️ 默认 `true`（= 最外层 Scaffold）在**侧栏抽屉里是错的**，这是用户报
+     * 「长按会话列表不显示下拉菜单」的真正原因：
+     *
+     * `renderInRootScaffold = true` 会把弹层注册进**最外层 Scaffold 的 popupHost**
+     * （`Scaffold.kt` 的 `popupHost: @Composable () -> Unit = { MiuixPopupHost() }`）。
+     * 而侧栏抽屉（`ZhiSideDrawer`）是 `WorkspacePage` 里 Scaffold **之后**的兄弟节点、
+     * 由 `AnimatedVisibility` 叠上去的 —— 它绘制在 Scaffold 之上，于是弹层明明
+     * "打开了"，却被抽屉整块盖住，看起来就是"长按没反应"。
+     *
+     * 传 `false` 时弹层走**局部** `LocalPopupStates`（离调用点最近的那个宿主），
+     * 在这个子树内部完成绘制，层级正确。
+     *
+     * 对话流里长按消息**不受影响**：那里没有覆盖在上层的兄弟节点，走根宿主是对的。
+     */
+    renderInRootScaffold: Boolean = true,
 ) {
     if (labels.isEmpty()) return
     // 每次重组重建即可：OverlayDropdownPopup 内部用 rememberUpdatedState(entries)
@@ -1126,7 +1166,7 @@ fun ZhiAnchoredActionMenu(
             onDismissFinished = {},
             maxHeight = null,
             dropdownColors = DropdownDefaults.dropdownColors(),
-            renderInRootScaffold = true,
+            renderInRootScaffold = renderInRootScaffold,
             collapseOnSelection = true,
         )
     }
@@ -1232,7 +1272,7 @@ fun ZhiNoticeBar(
     Surface(
         modifier = modifier.fillMaxWidth(),
         // 见上面「几何」那段：通知条比卡片矮，圆角跟着小一档。
-        shape = RoundedCornerShape(ZhiRadius.inner),
+        shape = ZhiSquircle(ZhiRadius.inner),
         color = when (tone) {
             ZhiNoticeTone.ERROR -> scheme.errorContainer
             // 琥珀在主题里没有对应的容器色，用「琥珀按低透明度铺在表面色上」——

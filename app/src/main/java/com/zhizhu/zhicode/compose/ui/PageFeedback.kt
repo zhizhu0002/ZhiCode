@@ -7,9 +7,11 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -21,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.theme.ZhiSpacing
 import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
@@ -81,12 +84,17 @@ fun PageFeedback(
     ) {
         val text = shown ?: return@AnimatedVisibility
         Box(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = ZhiSpacing.pageMargin, vertical = 8.dp),
             contentAlignment = Alignment.BottomCenter,
         ) {
             Surface(
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onDismiss),
-                shape = RoundedCornerShape(ZhiRadius.card),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onDismiss)
+                    // 整条都是"点一下关掉"的触控目标，抬到 48dp 下限
+                    // （单行文案 + 10dp 内边距只有约 41dp）。
+                    .defaultMinSize(minHeight = ZhiSpacing.minTouchTarget),
+                shape = ZhiSquircle(ZhiRadius.card),
                 color = if (shownError) scheme.errorContainer else scheme.surfaceContainerHigh,
                 contentColor = if (shownError) scheme.error else scheme.onSurface,
                 shadowElevation = 8.dp,

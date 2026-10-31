@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.TermuxTerminalPane
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIndeterminateBar
 import com.zhizhu.zhicode.compose.ui.ZhiUsageBar
 import com.zhizhu.zhicode.compose.ui.chat.rememberAutoFollow
@@ -235,9 +236,18 @@ private fun RealTerminalPane(
             PaneHeader(
                 title = "终端",
                 subtitle = state.title.ifBlank { projectName },
+                leadingAction = {
+                    ZhiIconButton(
+                        icon = ZhiIcons.menu,
+                        description = "会话列表",
+                        onClick = { drawerOpen = true },
+                        tint = MiuixTheme.colorScheme.onSurface,
+                        compact = 30.dp,
+                        iconSize = 16.dp,
+                    )
+                },
                 actions = {
                     TerminalHeaderActions(
-                        onMenu = { drawerOpen = true },
                         onKeyboard = { pane.toggleKeyboard() },
                         onMore = { quickActionsOpen = true },
                     )

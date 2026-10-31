@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.unit.dp
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.squircle.squircleBackground
+import com.zhizhu.zhicode.compose.theme.ZhiColors
 
 /**
  * 设置行的行首图标块：**彩色圆角方块 + 白字形**。
@@ -75,17 +76,21 @@ internal object SettingsPlate {
  * 色相跟着小米设置页走（WLAN 蓝、移动网络绿、显示与亮度橙、通知红、
  * 个性化紫、更多设置灰），明度按 [SettingsPlate] 的说明往回收。
  *
+ * ⚠️ **值已收进主题层**（`ZhiColors.plate*`）：字面色值只允许出现在 `theme/`，
+ * 组件里只认语义名。这里保留这层转发是为了让调用点读起来仍是"六种 plate 色"，
+ * 而不是一堆 `ZhiColors.plateXxx()`。
+ *
  * ⚠️ 新增颜色必须同时满足两件事，否则 `SettingsIconPlateTest` 会失败：
  * 一是与白色的对比度 ≥3:1；二是这一页里**不能有两个 (字形, 底色) 完全相同的行**
  * （并排出现两个一模一样的块，会让人以为它们是同一个设置）。
  */
 internal object SettingsPlateColors {
-    val blue = Color(0xFF3182FF)
-    val green = Color(0xFF1B9C48)
-    val orange = Color(0xFFD97500)
-    val red = Color(0xFFF2453D)
-    val purple = Color(0xFF7A5AF8)
-    val gray = Color(0xFF8A9099)
+    val blue = ZhiColors.plateBlue
+    val green = ZhiColors.plateGreen
+    val orange = ZhiColors.plateOrange
+    val red = ZhiColors.plateRed
+    val purple = ZhiColors.platePurple
+    val gray = ZhiColors.plateGray
 }
 
 /**

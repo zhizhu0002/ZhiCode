@@ -52,7 +52,8 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
  * outsideMargin 12dp / insideMargin 24dp。调用点继续引用这两个名字，
  * 守卫（LayoutConsistencyTest）的"字面量禁用"断言不变。
  */
-internal val DialogWideOutsideMargin = DpSize(12.dp, 12.dp)
+// 标准弹窗上下留白收紧一点；横向仍保留官方 12dp，避免手机屏上窗口显得过窄。
+internal val DialogWideOutsideMargin = DpSize(12.dp, 8.dp)
 internal val DialogWideInsideMargin = DpSize(24.dp, 24.dp)
 
 /**
@@ -73,7 +74,7 @@ internal object ZhiDialogWidth {
  * 贴底弹窗（Sheet 档）的外边距：横向贴边、纵向正常 —— 窄屏长列表弹窗
  * （技能/模型/文件选择）用这档，观感是"从底部升起的抽屉"。
  */
-internal val DialogSheetOutsideMargin = DpSize(0.dp, 12.dp)
+internal val DialogSheetOutsideMargin = DpSize(0.dp, 8.dp)
 
 /**
  * 弹窗内容的外壳：左对齐标题 + 固定说明 + 中间内容区 + 底部固定按钮区。
@@ -147,6 +148,9 @@ internal fun DialogShell(
             Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { prompt() }
         }
 
+        // The OverlayDialog window uses Miuix `background` as its sheet/dialog
+        // backplate. Keep this shell transparent: a black Surface here would replace
+        // the dialog's themed window and make every dialog look like a black slab.
         // 中间区域吃掉"剩余高度"（weight(fill = false)），并内部滚动。
         //
         // 这里**不能**写死 `heightIn(max = ...)`：弹窗总高还要加上标题、

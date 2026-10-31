@@ -966,6 +966,8 @@ data class AppSettings(
     /** Shizuku 工具开关：以 shell 身份（uid 2000）跑 pm/am/dumpsys 这类系统命令。与 Root 独立。 */
     val shizukuExecutionEnabled: Boolean = false,
     val forcedKeepAliveEnabled: Boolean = false,
+    /** 主引擎可同时运行的子 Agent 上限；范围 1–8。 */
+    val maxConcurrentSubagents: Int = DEFAULT_MAX_CONCURRENT_SUBAGENTS,
     /** 终端强制字符模式输入（默认关：走正常软件输入法）。见 ApiSettingsStore。 */
     val terminalCharMode: Boolean = false,
     val webSearchEnabled: Boolean = true,
@@ -993,6 +995,11 @@ data class AppSettings(
     val apiProfiles: List<ApiProfile> = DEFAULT_API_PROFILES,
     val activeProfileId: String = "",
 )
+
+const val DEFAULT_MAX_CONCURRENT_SUBAGENTS = 4
+const val MIN_CONCURRENT_SUBAGENTS = 1
+const val MAX_CONCURRENT_SUBAGENTS = 8
+fun clampConcurrentSubagents(value: Int): Int = value.coerceIn(MIN_CONCURRENT_SUBAGENTS, MAX_CONCURRENT_SUBAGENTS)
 
 /** 结果数合法区间。原版为 1–10；应用户要求放宽到 50（密钥制服务扛得住这个量）。 */
 const val WEB_RESULTS_MIN = 1
@@ -1081,6 +1088,7 @@ data class SettingsDraft(
     val visionEnabled: Boolean,
     val rootExecutionEnabled: Boolean,
     val forcedKeepAliveEnabled: Boolean,
+    val maxConcurrentSubagents: Int,
     val terminalCharMode: Boolean,
     val webSearchEnabled: Boolean,
     val webSearchProvider: WebSearchProvider,
@@ -1113,6 +1121,7 @@ data class SettingsDraft(
                 rootExecutionEnabled = s.rootExecutionEnabled,
                 shizukuExecutionEnabled = s.shizukuExecutionEnabled,
                 forcedKeepAliveEnabled = s.forcedKeepAliveEnabled,
+                maxConcurrentSubagents = clampConcurrentSubagents(s.maxConcurrentSubagents),
                 terminalCharMode = s.terminalCharMode,
                 webSearchEnabled = s.webSearchEnabled,
                 webSearchProvider = s.webSearchProvider,
@@ -1149,6 +1158,7 @@ data class SettingsDraft(
             rootExecutionEnabled = rootExecutionEnabled,
             shizukuExecutionEnabled = shizukuExecutionEnabled,
             forcedKeepAliveEnabled = forcedKeepAliveEnabled,
+            maxConcurrentSubagents = clampConcurrentSubagents(maxConcurrentSubagents),
             terminalCharMode = terminalCharMode,
             webSearchEnabled = webSearchEnabled,
             webSearchProvider = webSearchProvider,

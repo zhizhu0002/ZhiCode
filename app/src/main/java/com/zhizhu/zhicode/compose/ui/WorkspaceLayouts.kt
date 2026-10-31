@@ -32,8 +32,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.zhizhu.zhicode.compose.data.TabBarPosition
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
+import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.pages.ChatPage
 import com.zhizhu.zhicode.compose.ui.pages.FilesPage
@@ -62,7 +64,10 @@ internal fun WideWorkspace(
             ZhiTopBar(
                 state = TopBarState.from(state),
                 wide = true,
-                glass = glassMain,
+                // WideWorkspace 本身处于 glassMain.capture 的子树里；让这个
+                // TopBar 再采样 glassMain 会构成自引用 RenderNode。固定为 Miuix
+                // 不透明 Surface，窄屏顶栏仍在 capture 外保留独立玻璃。
+                glass = NoGlass,
                 onOpenSidebar = viewModel::openSidebar,
                 onContextClick = {
                     viewModel.onComposerChange("/usage")
@@ -315,7 +320,15 @@ private fun topBarWindowInset(): Dp =
     }
 
 internal val TopBarInsetCompact: Dp
-    @Composable get() = TopBarInset + WorkspaceTabRowHeight + 1.dp + topBarWindowInset()
+    @Composable get() {
+        // Bottom-tab mode removes the tab row from ZhiTopBar. Do not keep reserving
+        // that 45dp in terminal/files/chat: it creates the conspicuous empty band
+        // immediately below the header seen in the user's screenshots.
+        val hasTopTabs = LocalThemeSettings.current.tabBarPositionValue == TabBarPosition.TOP
+        return TopBarInset +
+            (if (hasTopTabs) WorkspaceTabRowHeight + 1.dp else 0.dp) +
+            topBarWindowInset()
+    }
 
 @Composable
 private fun PaneHost(
@@ -405,14 +418,15 @@ internal fun ZhiSidebarHost(
         onSessionActions = viewModel::showSessionActions,
         // 长按会话的动作菜单：由侧栏里那一条会话自己渲染（从手指位置长出来）
         anchoredMenu = { anchorId, fingerOffset ->
-            ZhiAnchoredMenuHost(state, viewModel, anchorId, fingerOffset)
+            // 侧栏抽屉内部自有一个 Scaffold（见 `ZhiSideDrawer`），所以用**局部**宿主，
+            // 菜单才落在抽屉这一层。传 true 会注册进最外层 Scaffold，被抽屉盖住。
+            ZhiAnchoredMenuHost(state, viewModel, anchorId, fingerOffset, renderInRootScaffold = false)
         },
         onSandbox = { viewModel.openSandbox() },
         // 「运行环境」行现在是真实探测结果 + 真实的安装/自检窗口，
         // 不再是把 /doctor 当普通消息发出去（那样只会得到一句 Mock 回复）。
         onRuntime = viewModel::openEnvironment,
         onSettings = viewModel::openSettings,
-        onAbout = viewModel::openAbout,
         modifier = modifier,
     )
 }

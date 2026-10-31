@@ -66,6 +66,8 @@
         android:name=".ZhiCodeApplication"
         android:allowBackup="false"
         android:label="ZhiCode"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true"
