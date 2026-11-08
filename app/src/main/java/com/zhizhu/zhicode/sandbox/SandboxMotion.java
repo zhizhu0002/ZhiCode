@@ -87,4 +87,59 @@ final class SandboxMotion {
                 .setInterpolator(emphasized())
                 .start();
     }
+
+    /**
+     * 淡出并向 (toDx, toDy) 位移，**结束后**把 view 置 GONE 并复位。
+     *
+     * <p>补这个方法之前，收起是 `setVisibility(GONE)` 硬切 —— 展开有动画、收起没有，
+     * 用户看到的是"点一下它突然没了"。两条曲线必须同档，否则一开一合节奏对不上。
+     *
+     * <p>为什么要复位 alpha / translation：`fadeSlideIn` 从 (fromDx, 0) 淡入，
+     * 若收起后不复位，下一次展开会从"上一次结束的位置"开始叠加位移，
+     * 反复开关就会让整条慢慢飘走。
+     *
+     * @param endAction 动画结束（或时长为 0 时立即）执行，通常是设 GONE。
+     */
+    static void fadeSlideOut(View view, float toDx, float toDy, long normal, Runnable endAction) {
+        if (view == null) return;
+        Context context = view.getContext();
+        long duration = durationFor(context, normal);
+        if (duration <= 0L) {
+            view.setAlpha(1f);
+            view.setTranslationX(0f);
+            view.setTranslationY(0f);
+            if (endAction != null) endAction.run();
+            return;
+        }
+        view.animate()
+                .alpha(0f)
+                .translationX(toDx)
+                .translationY(toDy)
+                .setDuration(duration)
+                .setInterpolator(emphasized())
+                .withEndAction(() -> {
+                    view.setAlpha(1f);
+                    view.setTranslationX(0f);
+                    view.setTranslationY(0f);
+                    if (endAction != null) endAction.run();
+                })
+                .start();
+    }
+
+    /**
+     * 把一次拖动夹进父容器的可见范围。
+     *
+     * <p>没有这一步时，球可以被拖到屏幕外，**松手就再也点不到** ——
+     * 而它偏偏是这个沙箱里唯一的退出/停止入口，等于把人锁在 guest 里。
+     *
+     * <p>夹的是 `translation`（相对初始布局位置），所以边界要用父容器尺寸
+     * 减去自身的初始位置与尺寸，而不是直接拿屏幕宽高。
+     */
+    static float clampDrag(float base, float delta, float viewSize, float parentSize, float margin) {
+        float max = parentSize - viewSize - margin;
+        float wanted = base + delta;
+        if (wanted < margin) return margin - base;
+        if (wanted > max) return max - base;
+        return delta;
+    }
 }

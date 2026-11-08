@@ -146,6 +146,38 @@ public final class SandboxControlProvider extends ContentProvider {
                 else for (ApplicationInfo ai : ZhiSandboxEngine.installedApplications()) appendProcesses(rows, ai.packageName);
                 return o.put("processes", rows);
             }
+            /*
+             * 诊断快照。**必须在 :iqsandbox 里读**，不能在主进程读：
+             * 事件流里 attach/create 阶段的行、BlackBox 自己写的 startup-stage.txt、
+             * 以及 logcat，只有这个进程看到的才是"引擎真实经历了什么"。
+             * 主进程读到的是一份不含引擎启动痕迹的日志，看起来像"什么都没发生"。
+             */
+            case "debug_snapshot":
+                /*
+                 * 界面会要一个更小的上限：全量 42 万字符交给 Compose 排版会卡一秒。
+                 * 缺省仍给全量，Debug 工具的调用方（Agent）需要完整日志。
+                 *
+                 * `include_logcat` 默认 false —— 读 logcat 要起子进程并等它 dump 完，
+                 * 是这一整条路上最慢的一步，而它恰恰是最不缺的一段。
+                 */
+                return o.put("snapshot", SandboxDebugLog.snapshot(
+                        context,
+                        in.optInt("max_chars", 0) > 0 ? in.optInt("max_chars") : 420_000,
+                        in.optBoolean("include_logcat", false)));
+            case "clear_debug":
+                SandboxDebugLog.clear();
+                return o.put("cleared", true);
+            /*
+             * 应用图标。图标必须在**引擎进程**里解析：只有这里拿得到 guest 的
+             * 真实 sourceDir（主进程读到的是 BlackBox 虚拟化后的路径）。
+             * 结果落盘成 PNG，主界面只负责按路径读文件。
+             */
+            case "app_icons":
+                return o.put("icons", ZhiSandboxEngine.exportIcons());
+            case "frida_status":
+                return o.put("frida", ZhiSandboxEngine.fridaStatus());
+            case "frida_install":
+                return o.put("frida", ZhiSandboxEngine.fridaInstall());
             default: throw new IllegalArgumentException("未知 IQSandbox RPC action: " + action);
         }
     }

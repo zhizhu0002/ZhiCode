@@ -205,7 +205,6 @@ public final class SandboxAgentBridge {
      */
     private static void walk(View v,String path,JSONArray out,int depth,boolean fullTree,int[] counter)throws Exception{
         if(v==null||depth>40||out.length()>1800)return;
-        if(SandboxFloatingController.OVERLAY_TAG.equals(v.getTag()))return;
         int[] xy=new int[2]; v.getLocationOnScreen(xy);
         CharSequence desc=v.getContentDescription();
         CharSequence text=v instanceof TextView?((TextView)v).getText():null;
@@ -273,7 +272,7 @@ public final class SandboxAgentBridge {
     private static final class CaptureSession {
         private final Activity activity;private final Context context;private final String id,pkg;private final long deadline;
         private final Handler main=new Handler(Looper.getMainLooper());private final AtomicBoolean completed=new AtomicBoolean(),overlayRestored=new AtomicBoolean();
-        private View root,overlay;private int oldOverlayVisibility=View.VISIBLE;private HandlerThread pixelThread;
+        private View root;private HandlerThread pixelThread;
         private final Runnable timeout=()->fail(new IllegalStateException("截图内部超时；Guest 窗口可能已暂停或失效"),"timeout","确认 guest 已启动并在前台（Sandbox status → launch → inspect）");
 
         /** 截图前取的 UI 快照；null 表示调用方没要。 */
@@ -296,8 +295,12 @@ public final class SandboxAgentBridge {
                 if(w<=0||h<=0)throw new IllegalStateException("窗口尚未完成布局");
                 long remaining=deadline-SystemClock.uptimeMillis();if(remaining<=250L)throw new IllegalStateException("截图请求已过期");
                 main.postDelayed(timeout,Math.max(100L,remaining-200L));
-                overlay=root.findViewWithTag(SandboxFloatingController.OVERLAY_TAG);oldOverlayVisibility=overlay==null?View.VISIBLE:overlay.getVisibility();
-                if(overlay!=null)overlay.setVisibility(View.INVISIBLE);
+                /*
+                 * 悬浮条**不在**这棵树里：它是独立的系统级窗口
+                 * （`TYPE_APPLICATION_OVERLAY`），PixelCopy 拍的是本 Activity 的
+                 * 窗口，天然拍不到它 —— 所以这里不再需要"临时隐藏"那一步。
+                 * 早先它挂在 DecoView 上时确实要藏，见那版的历史注释。
+                 */
                 root.postOnAnimation(this::captureFrame);
             }catch(Throwable e){fail(e,"start");}
         }
@@ -370,9 +373,8 @@ public final class SandboxAgentBridge {
         private boolean activityUsable(){return screenshotActivityReady(activity,pkg);}
         private boolean expired(){return SystemClock.uptimeMillis()>=deadline;}
         private void restoreOverlay(){
-            if(!overlayRestored.compareAndSet(false,true))return;
-            Runnable restore=()->{try{if(overlay!=null)overlay.setVisibility(oldOverlayVisibility);}catch(Throwable e){SandboxDebugLog.event("截图桥恢复浮层失败: "+id+" / "+e);}};
-            if(Looper.myLooper()==Looper.getMainLooper())restore.run();else main.post(restore);
+            // 悬浮条已改成独立的系统级窗口，不在 guest 的视图树里；
+            // PixelCopy 拍的又是本 Activity 的窗口 —— 没有需要恢复的东西了。
         }
         private void stopPixelThread(){HandlerThread thread=pixelThread;pixelThread=null;if(thread!=null)thread.quitSafely();}
         private void fail(Throwable error,String stage){fail(error,stage,null);}

@@ -4,9 +4,15 @@ import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.Drawable;
 import android.app.ActivityManager;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.lang.ref.WeakReference;
 import java.util.Collections;
 import java.util.List;
@@ -17,6 +23,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+
+import org.json.JSONObject;
 
 import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.app.BActivityThread;
@@ -107,6 +115,15 @@ public final class ZhiSandboxEngine {
                 }
                 @Override public void onActivityPaused(Activity activity){
                     Activity current=resumedActivity.get(); if(current==activity){resumedActivity=new WeakReference<>(null);resumedPackage="";}
+                    /*
+                     * ⚠️ 系统级悬浮窗**不归任何 Activity 管**：不在这里摘的话，
+                     * guest 退到后台之后浮层仍然盖在**别的应用**上面 ——
+                     * 用户切到微信会看到一条「日志/返回/停止」压在最上层。
+                     *
+                     * 挂在 pause 而不是 stop：pause 已经足够（此时界面已不可见），
+                     * 而 stop 在部分 ROM 上会被拖到几百毫秒后，期间浮层还在。
+                     */
+                    SandboxFloatingController.detach(activity);
                 }
             });
             BlackBoxCore.get().doCreate();
@@ -197,6 +214,98 @@ public final class ZhiSandboxEngine {
     }
     public static InstallResult install(File apk){ensureReady();return BlackBoxCore.get().installPackageAsUser(apk,USER_ID);}
     public static List<ApplicationInfo> installedApplications(){ensureReady();List<ApplicationInfo> r=BlackBoxCore.get().getInstalledApplications(0,USER_ID);return r==null? Collections.emptyList():r;}
+
+    /**
+     * 把每个已装应用的图标导出成 PNG，返回「包名 → 文件路径」。
+     *
+     * <h3>为什么要落盘，而不是直接回 Bitmap</h3>
+     * 这条通道是 `ContentResolver.call` + JSON，塞不进去 Bitmap。而主界面进程
+     * 也**不该去解析 guest 的 APK**：那要拿到 guest 的 `sourceDir`，而那个路径是
+     * BlackBox 虚拟化出来的，在主进程里未必对得上。
+     *
+     * 所以在引擎进程（这里）解析一次、导出成 PNG，主界面只管读文件。
+     *
+     * <h3>为什么用真实的 PackageManager，而不是 BlackBox 的</h3>
+     * APK 文件本身是**真实存在**的（同 UID，宿主读得到），只是它没有"被系统安装"。
+     * `getPackageArchiveInfo` 恰好就是为这种「读一个 APK 文件的清单」设计的；
+     * 而 `loadIcon` 需要 `sourceDir` / `publicSourceDir` 指向那个真实文件才能
+     * 从 APK 里取图标 —— 这两步要手动设，见下面的注释。
+     */
+    public static JSONObject exportIcons(){
+        JSONObject out=new JSONObject();
+        try{
+            ensureReady();
+            Context ctx=appContext;
+            if(ctx==null)throw new IllegalStateException("沙箱 Context 尚未就绪");
+            File dir=new File(new File(ctx.getFilesDir(),"sandbox"),"icons");
+            if(!dir.isDirectory()&&!dir.mkdirs()&&!dir.isDirectory())
+                throw new IllegalStateException("无法创建图标缓存目录: "+dir);
+            PackageManager pm=ctx.getPackageManager();
+            for(ApplicationInfo installed:installedApplications()){
+                String pkg=installed==null?null:installed.packageName;
+                if(pkg==null||pkg.isEmpty())continue;
+                try{
+                    String source=installed.sourceDir!=null?installed.sourceDir:installed.publicSourceDir;
+                    if(source==null||source.isEmpty())continue;
+                    File apk=new File(source);
+                    if(!apk.isFile())continue;
+                    File png=new File(dir,pkg+".png");
+                    File meta=new File(dir,pkg+".stamp");
+                    /*
+                     * 文件没变就复用已有 PNG。用 mtime+size 当指纹：
+                     * `lastUpdateTime` 在虚拟安装这条路上不总是被填上，
+                     * 而文件自己的时间戳一定对。
+                     */
+                    long stamp=apk.lastModified()*31L+apk.length();
+                    if(png.isFile()&&meta.isFile()&&Long.toString(stamp).equals(readSmallText(meta))){
+                        out.put(pkg,png.getAbsolutePath());
+                        continue;
+                    }
+                    android.content.pm.PackageInfo packed=pm.getPackageArchiveInfo(source,0);
+                    if(packed==null||packed.applicationInfo==null)continue;
+                    ApplicationInfo info=packed.applicationInfo;
+                    // 关键两步：不设它们，loadIcon 会按"已安装的包"去找资源，
+                    // 而它并没有被系统安装 —— 结果是拿到一个默认的绿色机器人。
+                    info.sourceDir=source;
+                    info.publicSourceDir=source;
+                    Drawable icon=info.loadIcon(pm);
+                    if(icon==null)continue;
+                    int size=Math.max(96,Math.min(256,Math.round(
+                            ctx.getResources().getDisplayMetrics().density*48f)));
+                    Bitmap bitmap=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888);
+                    Canvas canvas=new Canvas(bitmap);
+                    icon.setBounds(0,0,size,size);
+                    icon.draw(canvas);
+                    File tmp=new File(dir,pkg+".png.tmp");
+                    try(FileOutputStream fo=new FileOutputStream(tmp)){
+                        bitmap.compress(Bitmap.CompressFormat.PNG,100,fo);
+                    }
+                    if(!tmp.renameTo(png)){tmp.delete();continue;}
+                    writeSmallText(meta,Long.toString(stamp));
+                    out.put(pkg,png.getAbsolutePath());
+                }catch(Throwable ignored){
+                    // 单个应用拿不到图标不算失败：界面回落到首字母方块。
+                }
+            }
+        }catch(Throwable ignored){
+            // 整体失败也返回空表 —— 图标是锦上添花，不该让列表加载失败。
+        }
+        return out;
+    }
+
+    private static String readSmallText(File file){
+        try(FileInputStream in=new FileInputStream(file)){
+            byte[] data=new byte[(int)Math.min(file.length(),256)];
+            int n=in.read(data);
+            return n<=0?"":new String(data,0,n,"UTF-8").trim();
+        }catch(Throwable e){return "";}
+    }
+
+    private static void writeSmallText(File file,String text)throws Exception{
+        try(FileOutputStream out=new FileOutputStream(file)){
+            out.write(text.getBytes("UTF-8"));
+        }
+    }
     public static List<ActivityManager.RunningAppProcessInfo> runningProcesses(String pkg){
         ensureReady();
         if(pkg==null||pkg.trim().isEmpty())return Collections.emptyList();
@@ -250,6 +359,41 @@ public final class ZhiSandboxEngine {
     public static void uninstall(String pkg){ensureReady();BlackBoxCore.get().uninstallPackageAsUser(pkg,USER_ID);Context c=appContext;if(c!=null)SandboxGuardService.stop(c);}
     public static boolean hasAllFilesAccess(){ensureReady();return BlackBoxCore.get().hasAllFilesAccess();}
     public static void requestAllFilesAccess(Activity a){ensureReady();BlackBoxCore.get().requestAllFilesAccess(a);}
+
+    /**
+     * Frida Gadget 状态。
+     *
+     * <p>这条与 {@link #fridaInstall()} 原先**根本没有接线**：
+     * `FridaRuntimeManager.install()` 写好了却零调用点，而 `SandboxProcessDebug`
+     * 与 `ZhiDebugTool` 的报错文案却在教人「先执行 Debug action=frida_install」——
+     * 那个 action 不存在，照做只会收到「未知进程调试动作」。
+     */
+    public static JSONObject fridaStatus(){
+        ensureReady();
+        Context c=appContext;
+        try{return FridaRuntimeManager.status(c);}
+        catch(Exception e){throw new IllegalStateException("读取 Frida 状态失败: "+e.getMessage(),e);}
+    }
+
+    /**
+     * 下载并安装 Frida Gadget（官方 arm64 release，SHA-256 钉死）。
+     *
+     * <p>下载要走内置 Termux 的 `curl` + `xz`，所以这里惰性建一个
+     * {@link com.termux.app.zhicode.termux.TermuxShellExecutor}。
+     * 不放在 Application 里：绝大多数用户永远不装 Frida，
+     * 为它常驻一个 shell 执行器不值得。
+     */
+    public static JSONObject fridaInstall(){
+        ensureReady();
+        Context c=appContext;
+        if(c==null)throw new IllegalStateException("沙箱 Context 尚未就绪");
+        try{
+            return FridaRuntimeManager.install(c,
+                    new com.termux.app.zhicode.termux.TermuxShellExecutor(c),null);
+        }catch(Exception e){
+            throw new IllegalStateException("安装 Frida Gadget 失败: "+e.getMessage(),e);
+        }
+    }
     public static Activity resumedActivity(){return resumedActivity.get();}
     public static String resumedPackage(){return resumedPackage;}
     static Context hostContext(){return appContext;}

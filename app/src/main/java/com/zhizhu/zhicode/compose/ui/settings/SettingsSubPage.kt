@@ -283,12 +283,29 @@ internal fun SettingsSubPage(
      * `contentPadding`，固定内容没有那层 padding，只能自己补。
      */
     header: (@Composable () -> Unit)? = null,
+    /**
+     * 顶栏要不要走模糊采样。
+     *
+     * <p>默认 true（本工程其余二级页的行为）。**唯一置 false 的是沙箱页**，
+     * 理由是那一页的刷新频率与别的页面不是一个量级，而 [PageBlurBar] 采样的是
+     * **内容层**：内容一脏，背板就要重采一次。
+     *
+     * <p>沙箱页每次点按钮都改 `inFlight`／`notice`，而且有一条每 2 秒跑一次的
+     * 轮询在换 `apps` 列表 —— 两者都会让内容层变脏。于是顶栏每隔一小会儿就要
+     * 重新采样一次，采样那一帧它会掉成纯色，看起来就是"点了按钮，上方整块没了"。
+     * 关掉之后顶栏回落为不透明 [MiuixTheme.colorScheme].surface（与模糊不可用时
+     * 同一条分支），闪屏在结构上不可能再发生。
+     *
+     * <p>代价只是这一页顶栏没有毛玻璃 —— 而它是本工程里唯一一页"内容在持续
+     * 自我刷新"的页面，模糊本来也是最先在这儿崩掉的。
+     */
+    blurTopBar: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
     val listState = rememberLazyListState()
     val topAppBarScrollBehavior = MiuixScrollBehavior()
-    val backdrop = rememberPageBlurBackdrop()
+    val backdrop = rememberPageBlurBackdrop().takeIf { blurTopBar }
 
     // FAB 的收放判定。`previousOffset` 刻意放在 derivedStateOf 外面（每次求值时更新），
     // 这跟参考实现的写法一致：它比较的是"这一次求值"与"上一次求值"的滚动量之差。

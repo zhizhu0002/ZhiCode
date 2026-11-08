@@ -41,7 +41,9 @@ DeployedCode:deployed_code
 Build:build
 Add:add
 Send:send
+ArrowUpward:arrow_upward
 Stop:stop
+Pause:pause
 ChevronRight:chevron_right
 ExpandMore:expand_more
 Close:close
@@ -79,7 +81,16 @@ Compress:compress
 Keyboard:keyboard
 Hub:hub
 Layers:layers
-Code:code"
+Code:code
+PlayArrow:play_arrow
+StopCircle:stop_circle
+ExpandLess:expand_less
+BugReport:bug_report
+Memory:memory
+CleaningServices:cleaning_services
+DeleteSweep:delete_sweep
+Apps:apps
+PowerSettingsNew:power_settings_new"
 
 # 校验：Kotlin 名不许重名，上游名不许重名
 for col in 1 2; do

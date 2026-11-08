@@ -147,11 +147,31 @@ final class ZhiSandboxTool implements ZhiTool {
                     String pkg = requirePackage(in);
                     return describe(host("uninstall", new JSONObject().put("package", pkg)), "已从沙箱卸载: " + pkg);
                 }
-                case "debug_snapshot":
-                    return ToolExecutionResult.ok(com.zhizhu.zhicode.sandbox.SandboxDebugLog.snapshot(context));
-                case "clear_debug":
-                    com.zhizhu.zhicode.sandbox.SandboxDebugLog.clear();
-                    return ToolExecutionResult.ok("沙箱调试日志已清空");
+                case "debug_snapshot": {
+                    /*
+                     * 必须在 `:iqsandbox` 里读。事件流里 attach/create 阶段的行、
+                     * BlackBox 自己写的 startup-stage.txt、以及 guest 的 logcat，
+                     * 只有那个进程看得到 —— 在主进程读到的是一份不含引擎启动痕迹
+                     * 的日志，看起来像"什么都没发生"，而 Agent 会据此给出错误结论。
+                     *
+                     * 引擎不可达时退回本地快照，并在文案里点明视角差异。
+                     */
+                    JSONObject r = host("debug_snapshot", new JSONObject());
+                    if (r.optBoolean("ok", false)) {
+                        String snapshot = r.optString("snapshot", "");
+                        if (!snapshot.isEmpty()) return ToolExecutionResult.ok(snapshot);
+                    }
+                    return ToolExecutionResult.ok(
+                            "（引擎进程不可达，以下是主进程视角，可能不含 attach/create 记录）\n"
+                                    + errorText(r) + "\n\n"
+                                    + com.zhizhu.zhicode.sandbox.SandboxDebugLog.snapshot(context));
+                }
+                case "clear_debug": {
+                    JSONObject r = host("clear_debug", new JSONObject());
+                    return r.optBoolean("ok", false)
+                            ? ToolExecutionResult.ok("沙箱调试日志已清空")
+                            : ToolExecutionResult.error(errorText(r));
+                }
                 default:
                     return control(action, in);
             }

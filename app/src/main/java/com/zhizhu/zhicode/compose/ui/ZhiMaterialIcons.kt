@@ -103,7 +103,9 @@ import androidx.compose.ui.unit.dp
  * | [Build] | `build` | `symbols/web/build/materialsymbolsrounded/build_fill1_24px.svg` |
  * | [Add] | `add` | `symbols/web/add/materialsymbolsrounded/add_fill1_24px.svg` |
  * | [Send] | `send` | `symbols/web/send/materialsymbolsrounded/send_fill1_24px.svg` |
+ * | [ArrowUpward] | `arrow_upward` | `symbols/web/arrow_upward/materialsymbolsrounded/arrow_upward_fill1_24px.svg` |
  * | [Stop] | `stop` | `symbols/web/stop/materialsymbolsrounded/stop_fill1_24px.svg` |
+ * | [Pause] | `pause` | `symbols/web/pause/materialsymbolsrounded/pause_fill1_24px.svg` |
  * | [ChevronRight] | `chevron_right` | `symbols/web/chevron_right/materialsymbolsrounded/chevron_right_fill1_24px.svg` |
  * | [ExpandMore] | `expand_more` | `symbols/web/expand_more/materialsymbolsrounded/expand_more_fill1_24px.svg` |
  * | [Close] | `close` | `symbols/web/close/materialsymbolsrounded/close_fill1_24px.svg` |
@@ -142,6 +144,15 @@ import androidx.compose.ui.unit.dp
  * | [Hub] | `hub` | `symbols/web/hub/materialsymbolsrounded/hub_fill1_24px.svg` |
  * | [Layers] | `layers` | `symbols/web/layers/materialsymbolsrounded/layers_fill1_24px.svg` |
  * | [Code] | `code` | `symbols/web/code/materialsymbolsrounded/code_fill1_24px.svg` |
+ * | [PlayArrow] | `play_arrow` | `symbols/web/play_arrow/materialsymbolsrounded/play_arrow_fill1_24px.svg` |
+ * | [StopCircle] | `stop_circle` | `symbols/web/stop_circle/materialsymbolsrounded/stop_circle_fill1_24px.svg` |
+ * | [ExpandLess] | `expand_less` | `symbols/web/expand_less/materialsymbolsrounded/expand_less_fill1_24px.svg` |
+ * | [BugReport] | `bug_report` | `symbols/web/bug_report/materialsymbolsrounded/bug_report_fill1_24px.svg` |
+ * | [Memory] | `memory` | `symbols/web/memory/materialsymbolsrounded/memory_fill1_24px.svg` |
+ * | [CleaningServices] | `cleaning_services` | `symbols/web/cleaning_services/materialsymbolsrounded/cleaning_services_fill1_24px.svg` |
+ * | [DeleteSweep] | `delete_sweep` | `symbols/web/delete_sweep/materialsymbolsrounded/delete_sweep_fill1_24px.svg` |
+ * | [Apps] | `apps` | `symbols/web/apps/materialsymbolsrounded/apps_fill1_24px.svg` |
+ * | [PowerSettingsNew] | `power_settings_new` | `symbols/web/power_settings_new/materialsymbolsrounded/power_settings_new_fill1_24px.svg` |
  *
  * 取用日期：见 git 首次提交本文件的时间；重新取用请跑 `bash tools/material-symbols-fetch.sh`。
  */
@@ -198,26 +209,14 @@ internal object ZhiMaterialIcons {
     /** 上游 `Send`（materialsymbolsrounded / fill1）。 */
     val Send: ImageVector by lazy { material("Send", "M176-183q-20 8-38-3.5T120-220v-180l320-80-320-80v-180q0-22 18-33.5t38-3.5l616 260q25 11 25 37t-25 37L176-183Z") }
 
+    /** 上游 `ArrowUpward`（materialsymbolsrounded / fill1）。 */
+    val ArrowUpward: ImageVector by lazy { material("ArrowUpward", "M440-647 244-451q-12 12-28 11.5T188-452q-11-12-11.5-28t11.5-28l264-264q6-6 13-8.5t15-2.5q8 0 15 2.5t13 8.5l264 264q11 11 11 27.5T772-452q-12 12-28.5 12T715-452L520-647v447q0 17-11.5 28.5T480-160q-17 0-28.5-11.5T440-200v-447Z") }
+
     /** 上游 `Stop`（materialsymbolsrounded / fill1）。 */
     val Stop: ImageVector by lazy { material("Stop", "M240-320v-320q0-33 23.5-56.5T320-720h320q33 0 56.5 23.5T720-640v320q0 33-23.5 56.5T640-240H320q-33 0-56.5-23.5T240-320Z") }
 
-    /**
-     * 上游 `ArrowUpward`（materialsymbolsrounded / fill1）。
-     *
-     * 发送键用它而不是 `Send`（纸飞机）：本工程的输入器是**对话**形态，
-     * 送出去的是"说一句话"而不是"发一封邮件"，纸飞机的隐喻偏向后者。
-     * 而且 `Send` 是斜向的，放在方角按键里重心偏、视觉上比按钮的边更抢眼。
-     */
-    val ArrowUpward: ImageVector by lazy { material("ArrowUpward", "M460-200v-493L255-488q-11 11-27.5 11T200-488q-11-11-11-28t11-28l252-252q6-6 13-8.5t15-2.5q8 0 15 2.5t13 8.5l252 252q11 11 11 27.5T760-488q-11 11-28 11t-28-11L500-693v493q0 17-11.5 28.5T460-160q-17 0-28.5-11.5T420-200Z") }
-
-    /**
-     * 上游 `Pause`（materialsymbolsrounded / fill1）。
-     *
-     * 「停止当前任务」用它而不是实心方块 `Stop`：方块在这一栏里读起来像
-     * "停止播放/关闭"，而暂停键表达的是"先停一下"——本工程的停止其实是
-     * **中断当前回合**，对话与上下文都还在，用户可以接着发。
-     */
-    val Pause: ImageVector by lazy { material("Pause", "M300-680q25 0 42.5 17.5T360-620v280q0 25-17.5 42.5T300-280q-25 0-42.5-17.5T240-340v-280q0-25 17.5-42.5T300-680Zm360 0q25 0 42.5 17.5T720-620v280q0 25-17.5 42.5T660-280q-25 0-42.5-17.5T600-340v-280q0-25 17.5-42.5T660-680Z") }
+    /** 上游 `Pause`（materialsymbolsrounded / fill1）。 */
+    val Pause: ImageVector by lazy { material("Pause", "M640-200q-33 0-56.5-23.5T560-280v-400q0-33 23.5-56.5T640-760q33 0 56.5 23.5T720-680v400q0 33-23.5 56.5T640-200Zm-320 0q-33 0-56.5-23.5T240-280v-400q0-33 23.5-56.5T320-760q33 0 56.5 23.5T400-680v400q0 33-23.5 56.5T320-200Z") }
 
     /** 上游 `ChevronRight`（materialsymbolsrounded / fill1）。 */
     val ChevronRight: ImageVector by lazy { material("ChevronRight", "M504-480 348-636q-11-11-11-28t11-28q11-11 28-11t28 11l184 184q6 6 8.5 13t2.5 15q0 8-2.5 15t-8.5 13L404-268q-11 11-28 11t-28-11q-11-11-11-28t11-28l156-156Z") }
@@ -332,6 +331,33 @@ internal object ZhiMaterialIcons {
 
     /** 上游 `Code`（materialsymbolsrounded / fill1）。 */
     val Code: ImageVector by lazy { material("Code", "m193-479 155 155q11 11 11 28t-11 28q-11 11-28 11t-28-11L108-452q-6-6-8.5-13T97-480q0-8 2.5-15t8.5-13l184-184q12-12 28.5-12t28.5 12q12 12 12 28.5T349-635L193-479Zm574-2L612-636q-11-11-11-28t11-28q11-11 28-11t28 11l184 184q6 6 8.5 13t2.5 15q0 8-2.5 15t-8.5 13L668-268q-12 12-28 11.5T612-269q-12-12-12-28.5t12-28.5l155-155Z") }
+
+    /** 上游 `PlayArrow`（materialsymbolsrounded / fill1）。 */
+    val PlayArrow: ImageVector by lazy { material("PlayArrow", "M320-273v-414q0-17 12-28.5t28-11.5q5 0 10.5 1.5T381-721l326 207q9 6 13.5 15t4.5 19q0 10-4.5 19T707-446L381-239q-5 3-10.5 4.5T360-233q-16 0-28-11.5T320-273Z") }
+
+    /** 上游 `StopCircle`（materialsymbolsrounded / fill1）。 */
+    val StopCircle: ImageVector by lazy { material("StopCircle", "M360-320h240q17 0 28.5-11.5T640-360v-240q0-17-11.5-28.5T600-640H360q-17 0-28.5 11.5T320-600v240q0 17 11.5 28.5T360-320ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z") }
+
+    /** 上游 `ExpandLess`（materialsymbolsrounded / fill1）。 */
+    val ExpandLess: ImageVector by lazy { material("ExpandLess", "M480-529 324-373q-11 11-28 11t-28-11q-11-11-11-28t11-28l184-184q6-6 13-8.5t15-2.5q8 0 15 2.5t13 8.5l184 184q11 11 11 28t-11 28q-11 11-28 11t-28-11L480-529Z") }
+
+    /** 上游 `BugReport`（materialsymbolsrounded / fill1）。 */
+    val BugReport: ImageVector by lazy { material("BugReport", "M480-120q-65 0-120.5-32T272-240h-72q-17 0-28.5-11.5T160-280q0-17 11.5-28.5T200-320h44q-3-20-3.5-40t-.5-40h-40q-17 0-28.5-11.5T160-440q0-17 11.5-28.5T200-480h40q0-20 .5-40t3.5-40h-44q-17 0-28.5-11.5T160-600q0-17 11.5-28.5T200-640h72q14-23 31.5-43t40.5-35l-37-38q-11-11-11-27.5t12-28.5q11-11 28-11t28 11l58 58q28-9 57-9t57 9l60-59q11-11 27.5-11t28.5 12q11 11 11 28t-11 28l-38 38q23 15 41.5 34.5T688-640h72q17 0 28.5 11.5T800-600q0 17-11.5 28.5T760-560h-44q3 20 3.5 40t.5 40h40q17 0 28.5 11.5T800-440q0 17-11.5 28.5T760-400h-40q0 20-.5 40t-3.5 40h44q17 0 28.5 11.5T800-280q0 17-11.5 28.5T760-240h-72q-32 56-87.5 88T480-120Zm-40-200h80q17 0 28.5-11.5T560-360q0-17-11.5-28.5T520-400h-80q-17 0-28.5 11.5T400-360q0 17 11.5 28.5T440-320Zm0-160h80q17 0 28.5-11.5T560-520q0-17-11.5-28.5T520-560h-80q-17 0-28.5 11.5T400-520q0 17 11.5 28.5T440-480Z") }
+
+    /** 上游 `Memory`（materialsymbolsrounded / fill1）。 */
+    val Memory: ImageVector by lazy { material("Memory", "M360-400v-160q0-17 11.5-28.5T400-600h160q17 0 28.5 11.5T600-560v160q0 17-11.5 28.5T560-360H400q-17 0-28.5-11.5T360-400Zm0 240v-40h-80q-33 0-56.5-23.5T200-280v-80h-40q-17 0-28.5-11.5T120-400q0-17 11.5-28.5T160-440h40v-80h-40q-17 0-28.5-11.5T120-560q0-17 11.5-28.5T160-600h40v-80q0-33 23.5-56.5T280-760h80v-40q0-17 11.5-28.5T400-840q17 0 28.5 11.5T440-800v40h80v-40q0-17 11.5-28.5T560-840q17 0 28.5 11.5T600-800v40h80q33 0 56.5 23.5T760-680v80h40q17 0 28.5 11.5T840-560q0 17-11.5 28.5T800-520h-40v80h40q17 0 28.5 11.5T840-400q0 17-11.5 28.5T800-360h-40v80q0 33-23.5 56.5T680-200h-80v40q0 17-11.5 28.5T560-120q-17 0-28.5-11.5T520-160v-40h-80v40q0 17-11.5 28.5T400-120q-17 0-28.5-11.5T360-160Zm320-120v-400H280v400h400Z") }
+
+    /** 上游 `CleaningServices`（materialsymbolsrounded / fill1）。 */
+    val CleaningServices: ImageVector by lazy { material("CleaningServices", "M200-40q-33 0-56.5-23.5T120-120v-200q0-83 58.5-141.5T320-520h40v-320q0-33 23.5-56.5T440-920h80q33 0 56.5 23.5T600-840v320h40q83 0 141.5 58.5T840-320v200q0 33-23.5 56.5T760-40H200Zm0-80h80v-120q0-17 11.5-28.5T320-280q17 0 28.5 11.5T360-240v120h80v-120q0-17 11.5-28.5T480-280q17 0 28.5 11.5T520-240v120h80v-120q0-17 11.5-28.5T640-280q17 0 28.5 11.5T680-240v120h80v-200q0-50-35-85t-85-35H320q-50 0-85 35t-35 85v200Z") }
+
+    /** 上游 `DeleteSweep`（materialsymbolsrounded / fill1）。 */
+    val DeleteSweep: ImageVector by lazy { material("DeleteSweep", "M200-200q-33 0-56.5-23.5T120-280v-360q-17 0-28.5-11.5T80-680q0-17 11.5-28.5T120-720h120v-20q0-17 11.5-28.5T280-780h80q17 0 28.5 11.5T400-740v20h120q17 0 28.5 11.5T560-680q0 17-11.5 28.5T520-640v360q0 33-23.5 56.5T440-200H200Zm440-40q-17 0-28.5-11.5T600-280q0-17 11.5-28.5T640-320h80q17 0 28.5 11.5T760-280q0 17-11.5 28.5T720-240h-80Zm0-160q-17 0-28.5-11.5T600-440q0-17 11.5-28.5T640-480h160q17 0 28.5 11.5T840-440q0 17-11.5 28.5T800-400H640Zm0-160q-17 0-28.5-11.5T600-600q0-17 11.5-28.5T640-640h200q17 0 28.5 11.5T880-600q0 17-11.5 28.5T840-560H640Z") }
+
+    /** 上游 `Apps`（materialsymbolsrounded / fill1）。 */
+    val Apps: ImageVector by lazy { material("Apps", "M240-160q-33 0-56.5-23.5T160-240q0-33 23.5-56.5T240-320q33 0 56.5 23.5T320-240q0 33-23.5 56.5T240-160Zm240 0q-33 0-56.5-23.5T400-240q0-33 23.5-56.5T480-320q33 0 56.5 23.5T560-240q0 33-23.5 56.5T480-160Zm240 0q-33 0-56.5-23.5T640-240q0-33 23.5-56.5T720-320q33 0 56.5 23.5T800-240q0 33-23.5 56.5T720-160ZM240-400q-33 0-56.5-23.5T160-480q0-33 23.5-56.5T240-560q33 0 56.5 23.5T320-480q0 33-23.5 56.5T240-400Zm240 0q-33 0-56.5-23.5T400-480q0-33 23.5-56.5T480-560q33 0 56.5 23.5T560-480q0 33-23.5 56.5T480-400Zm240 0q-33 0-56.5-23.5T640-480q0-33 23.5-56.5T720-560q33 0 56.5 23.5T800-480q0 33-23.5 56.5T720-400ZM240-640q-33 0-56.5-23.5T160-720q0-33 23.5-56.5T240-800q33 0 56.5 23.5T320-720q0 33-23.5 56.5T240-640Zm240 0q-33 0-56.5-23.5T400-720q0-33 23.5-56.5T480-800q33 0 56.5 23.5T560-720q0 33-23.5 56.5T480-640Zm240 0q-33 0-56.5-23.5T640-720q0-33 23.5-56.5T720-800q33 0 56.5 23.5T800-720q0 33-23.5 56.5T720-640Z") }
+
+    /** 上游 `PowerSettingsNew`（materialsymbolsrounded / fill1）。 */
+    val PowerSettingsNew: ImageVector by lazy { material("PowerSettingsNew", "M440-480v-320q0-17 11.5-28.5T480-840q17 0 28.5 11.5T520-800v320q0 17-11.5 28.5T480-440q-17 0-28.5-11.5T440-480Zm40 360q-74 0-139.5-28.5T226-226q-49-49-77.5-114.5T120-480q0-69 25-131t70-112q12-14 29.5-14.5T275-725q11 11 10 27.5T273-668q-35 38-54 86t-19 102q0 116 82 198t198 82q117 0 198.5-82T760-480q0-54-18.5-102T688-668q-12-13-13-29.5t10-27.5q13-13 31-12.5t30 14.5q45 50 69.5 112T840-480q0 74-28.5 139.5t-77 114.5q-48.5 49-114 77.5T480-120Z") }
 }
 
 /**

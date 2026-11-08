@@ -84,8 +84,10 @@ public final class ZhiDebugTool implements ZhiTool {
     public String description() {
         return "Inspect a process. scope=sandbox (default) targets an IQ Sandbox guest: "
                 + "process_list / process_info / maps / modules / threads / memory_read / memory_write / "
-                + "load_library / thread_dump / gc / frida_status / frida_load / frida_command / frida_events. "
+                + "load_library / thread_dump / gc / frida_install / frida_status / frida_load / "
+                + "frida_command / frida_events. "
                 + "No Root needed — the agent code runs inside the guest process itself. "
+                + "frida_install / frida_status act on host private storage and need no running guest. "
                 + "scope=host targets a real-phone process and requires Agent Root (read-only subset).";
     }
 
@@ -102,7 +104,8 @@ public final class ZhiDebugTool implements ZhiTool {
                     "\"sandbox\" (default) for an IQ Sandbox guest, or \"host\" for a real-phone process (needs Agent Root)."));
             properties.put("action", ToolSchemas.string(
                     "sandbox: process_list, process_info, maps, modules, threads, memory_read, memory_write, "
-                            + "load_library, thread_dump, gc, frida_status, frida_load, frida_command, frida_events. "
+                            + "load_library, thread_dump, gc, frida_install, frida_status, frida_load, "
+                            + "frida_command, frida_events. "
                             + "host: process_list, process_info, maps, modules, threads, thread_dump, signal"));
             properties.put("package", ToolSchemas.string("Guest package (sandbox) or Android package (host) used for PID resolution."));
             properties.put("pid", ToolSchemas.integer("Concrete process id.", 1));
@@ -170,6 +173,23 @@ public final class ZhiDebugTool implements ZhiTool {
      */
     private ToolExecutionResult sandbox(String action, JSONObject in) throws Exception {
         String pkg = in.optString("package", "").trim();
+
+        /*
+         * Frida Gadget 的**安装**不作用于任何 guest 进程 —— 它落在宿主私有目录
+         * (`filesDir/sandbox/frida/`)，供之后每个 guest 各自 dlopen。所以它必须走
+         * provider（`:iqsandbox`），不能走那条"定向广播给持有 Activity 的 guest"
+         * 的通道：没有 guest 在跑时那条通道永远没人应答。
+         *
+         * 这条 action 原先**根本不存在**，而 `SandboxProcessDebug` /
+         * `SandboxFridaBridge` 的报错文案却在教人「先执行 Debug action=frida_install」——
+         * 照做只会收到「未知进程调试动作: proc_frida_install」。现在补上。
+         */
+        if ("frida_install".equals(action) || "frida_status".equals(action)) {
+            JSONObject r = com.zhizhu.zhicode.sandbox.SandboxHostClient.call(
+                    context, action, new JSONObject());
+            if (!r.optBoolean("ok", false)) return ToolExecutionResult.error(sandboxError(r));
+            return ToolExecutionResult.ok(r.toString(2));
+        }
 
         if ("process_list".equals(action)) {
             JSONObject payload = new JSONObject();

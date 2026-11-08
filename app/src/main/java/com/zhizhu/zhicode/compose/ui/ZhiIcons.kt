@@ -197,6 +197,51 @@ object ZhiIcons {
     val expand: Painter @Composable get() = vector(ZhiMaterialIcons.ChevronRight)
     val collapse: Painter @Composable get() = vector(ZhiMaterialIcons.ExpandMore)
 
+    /**
+     * **向上**的折叠箭头（`⌃`）—— 写着「收起」的那个按钮用它。
+     *
+     * ⚠️ 与 [collapse] 的区别是**方向语义**，不是形状偏好：
+     * [collapse] 是"往下展开更多内容"（表头折叠态），而这里是"内容已经展开、
+     * 点了把它收上去"。两者在沙箱卡片上并排出现 ——
+     * 一个按钮写着「收起进程信息」却配 `⌄`（向下），方向是反的。
+     */
+    val collapseUp: Painter @Composable get() = vector(ZhiMaterialIcons.ExpandLess)
+
+    // ── 沙箱动作专用（语义 ≠ 通用那一档）────────────────────────────────────
+
+    /**
+     * 启动一个虚拟应用。
+     *
+     * ⚠️ **不能**复用 [send]（`ArrowUpward`）。那是"把消息发出去"的语义，
+     * 挂在"运行 APK"上等于说"把这个应用发上去" —— 沙箱页最初就是这么写的，
+     * 于是那一排按钮的图标与操作完全对不上（用户的原话：「图标风格不统一」）。
+     */
+    val play: Painter @Composable get() = vector(ZhiMaterialIcons.PlayArrow)
+
+    /**
+     * 强制停止一个虚拟应用（进程被结束，不是"暂停一会儿"）。
+     *
+     * ⚠️ **不能**复用 [stop]（`Pause` 两条竖杠）。那是聊天里的"中断当前回合"
+     * —— 回合结束后还能接着发。而这里是把 guest 进程**杀掉**，是不可逆的。
+     * 圆框里的实心方块 `StopCircle` 才是系统里表达"终止"的字形。
+     */
+    val forceStop: Painter @Composable get() = vector(ZhiMaterialIcons.StopCircle)
+
+    /** 清空一个应用的数据（对应"清扫"，不是"删除记录"）。 */
+    val clearData: Painter @Composable get() = vector(ZhiMaterialIcons.CleaningServices)
+
+    /** 从沙箱卸载一个应用（把它连同数据一起移走）。 */
+    val uninstall: Painter @Composable get() = vector(ZhiMaterialIcons.DeleteSweep)
+
+    /** 进程 / 内存基址。 */
+    val memory: Painter @Composable get() = vector(ZhiMaterialIcons.Memory)
+
+    /** 动态调试（Frida / hook）。 */
+    val debug: Painter @Composable get() = vector(ZhiMaterialIcons.BugReport)
+
+    /** 沙箱里已安装的应用集合。 */
+    val apps: Painter @Composable get() = vector(ZhiMaterialIcons.Apps)
+
     val refresh: Painter @Composable get() = vector(ZhiMaterialIcons.Refresh)
     val info: Painter @Composable get() = vector(ZhiMaterialIcons.Info)
 

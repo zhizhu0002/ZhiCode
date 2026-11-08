@@ -17,6 +17,7 @@ import com.zhizhu.zhicode.compose.ui.ImeMotionState
 import com.zhizhu.zhicode.compose.ui.LocalImeMotion
 import com.zhizhu.zhicode.compose.ui.ZhiCodeApp
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
+import com.zhizhu.zhicode.sandbox.SandboxThemeBridge
 import com.termux.app.zhicode.tools.AndroidIntentBridge
 
 /**
@@ -176,12 +177,18 @@ class MainActivity : ComponentActivity() {
      * 的推导，以及为什么不能各 Activity 各写一份）。这里只负责「什么时候调用」。
      */
     private fun applyStatusBarAppearance() {
-        ZhiThemeMode.appliedTo(
-            this,
-            ZhiThemeMode.resolve(
-                viewModel.state.value.themeMode,
-                ZhiThemeMode.systemDark(this),
-            ),
+        val dark = ZhiThemeMode.resolve(
+            viewModel.state.value.themeMode,
+            ZhiThemeMode.systemDark(this),
         )
+        ZhiThemeMode.appliedTo(this, dark)
+        /*
+         * 顺手把深浅告诉沙箱。
+         *
+         * guest 进程的 SharedPreferences 被 BlackBox 虚拟化，读不到这里的主题设置，
+         * 所以悬浮条必须由**宿主**喂这份值。挂在 onResume 上是因为用户可能刚在
+         * 设置页改了深浅；`publishThemeDark` 内部值没变就不写盘。
+         */
+        runCatching { SandboxThemeBridge.publishThemeDark(this, dark) }
     }
 }
