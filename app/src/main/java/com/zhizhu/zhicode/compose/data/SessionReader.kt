@@ -334,6 +334,38 @@ internal object SessionReader {
                         }
                     }
                 }
+                /*
+                 * 上下文压缩检查点。
+                 *
+                 * 引擎在做 `/compact`（或自动压缩）时会往库里写一行
+                 * `context_compaction`（见 `SessionStore.java` 里的 COMPACTION 常量），
+                 * 但这里原先只认 `message` 与 `task_snapshot` —— 于是**读过一次历史的人
+                 * 完全看不出中间发生过压缩**：上下文条的数字突然变小、模型"忘了"前面的事，
+                 * 而界面上没有任何解释。
+                 *
+                 * 现在把它渲染成一条 INFO 卡片，说明"这里发生过什么"。
+                 *
+                 * ⚠️ 纯读取，不写库、不改表结构。载荷字段在不同版本里可能缺失，
+                 * 所以全部按可选处理 —— 缺字段时仍然给出一条不带细节的提示，
+                 * 这比默默跳过有用。
+                 */
+                "context_compaction" -> {
+                    val payload = row.optJSONObject("payload")
+                    val kept = payload?.optInt("kept_messages", -1) ?: -1
+                    val automatic = payload?.optBoolean("automatic", false) == true
+                    items.add(
+                        ChatItem(
+                            id = id("c", rowSeq),
+                            kind = ChatKind.INFO,
+                            title = "上下文压缩",
+                            body = buildString {
+                                append(if (automatic) "自动压缩了较早的上下文。" else "手动压缩了较早的上下文。")
+                                if (kept >= 0) append("保留最近 ").append(kept).append(" 条。")
+                                append("此前的详细对话已被摘要替代。")
+                            },
+                        ),
+                    )
+                }
                 "tool_diff" -> {
                     // 增删行数单独落在事件里，工具结果本身不带。先收集，等结果行到达时用。
                     val payload = row.optJSONObject("payload") ?: continue
@@ -443,6 +475,21 @@ internal object SessionReader {
 
     fun delete(sessionId: String): Boolean =
         runCatching { SessionStore.deleteSession(sessionId) }.getOrDefault(false)
+
+    /**
+     * 删除一条历史消息（界面上那一条）。
+     *
+     * 走 `SessionStore.deleteMessageById` —— 它按消息 id 后缀的行号定位，
+     * 不依赖内容哈希（见那个方法的说明：编辑过内容的消息哈希已经变了，
+     * 用哈希匹配会拒绝删除）。
+     *
+     * 返回失败原因而不是布尔：删除失败常见原因是"这条已经不存在了"，
+     * 用户需要知道是哪种情况，而不是笼统的"删除失败"。
+     */
+    fun deleteMessage(sessionId: String, chatItemId: String): Result<Unit> = runCatching {
+        val removed = SessionStore.deleteMessageById(sessionId, chatItemId)
+        if (removed <= 0) throw IllegalStateException("这条消息在库里已经不存在了")
+    }
 
     /** 备注 / 标题覆盖。空字符串表示清除该项。 */
     fun updateMetadata(sessionId: String, note: String, titleOverride: String): Boolean =

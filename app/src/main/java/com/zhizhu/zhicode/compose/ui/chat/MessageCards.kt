@@ -135,6 +135,34 @@ fun EmptyState() {
 }
 
 /**
+ * 会话正在载入时的占位。
+ *
+ * 与 [EmptyState] 的区别只在文案与"有没有进度感"：此时列表里还没有任何消息，
+ * 用户需要知道"内容在路上"，而不是"这条会话是空的"。所以这里不写
+ * 「想让 ZhiCode 做什么？」（那会引导用户重新输入），而是明确说正在读。
+ */
+@Composable
+fun TranscriptLoadingState() {
+    val scheme = MiuixTheme.colorScheme
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 82.dp, bottom = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "正在载入会话…",
+            color = scheme.onBackgroundVariant,
+            fontSize = MiuixTheme.textStyles.title2.fontSize,
+        )
+        Text(
+            text = "内容较多时需要几秒。正在读取最近的若干条消息。",
+            color = scheme.onSurfaceVariantSummary,
+            fontSize = MiuixTheme.textStyles.body1.fontSize,
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp),
+        )
+    }
+}
+
+/**
  * 列表顶部「上面还有更早的历史」的占位。
  *
  * 恢复一条会话时只读最近 [com.zhizhu.zhicode.compose.data.SessionReader.PAGE_MESSAGES] 条，
@@ -441,6 +469,46 @@ fun AssistantCard(
                         .padding(top = 1.dp)
                         .graphicsLayer { alpha = cursorAlpha.value },
                 )
+            }
+            /*
+             * 元信息行：耗时 · 改动文件。
+             *
+             * 只在**这一轮已经结束**时出现（流式期间耗时还在涨，显示出来是噪音）。
+             * `elapsedMs < 0` 表示未知（历史消息读不回来），那时整行都不画 ——
+             * 编一个"看起来合理"的耗时比不显示更糟。
+             */
+            val hasMeta = !item.streaming && (item.elapsedMs >= 0 || item.editedFiles.isNotEmpty())
+            if (hasMeta) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (item.elapsedMs >= 0) {
+                        Text(
+                            text = formatElapsed(item.elapsedMs),
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                    if (item.editedFiles.isNotEmpty()) {
+                        Text(
+                            text = if (item.elapsedMs >= 0) " · " else "",
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
+                        )
+                        Text(
+                            // 只列前几个 + 计数：一屏里改二十个文件时，
+                            // 把它们全写出来会把卡片撑得很长。
+                            text = "改了 " + item.editedFiles.take(2).joinToString("、") +
+                                if (item.editedFiles.size > 2) " 等 ${item.editedFiles.size} 个文件" else "",
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
                 // 上下文页脚随高度出现/收回，不让文字单独淡入淡出。
             AnimatedVisibility(
@@ -1629,3 +1697,20 @@ fun InfoCard(item: ChatItem) {
 // 而 `ToolText.formatElapsed` 早就是那一份了，只是没人调用它（于是两版截图对不上秒数格式）。
 // 耗时显示统一走 `ToolText.formatElapsed`，不再留第二份实现。
 
+
+/**
+ * 把毫秒数格式化成"1.2s" / "3m 4s" 这种人读的短串。
+ *
+ * 只保留一位小数：耗时精确到毫秒没有意义（模型调用的抖动远大于此），
+ * 而多出来的位数会让元信息行显眼到抢戏。
+ */
+private fun formatElapsed(ms: Long): String = when {
+    ms < 1000 -> "${ms}ms"
+    ms < 60_000 -> String.format(java.util.Locale.US, "%.1fs", ms / 1000.0)
+    else -> {
+        val totalSeconds = ms / 1000
+        val m = totalSeconds / 60
+        val s = totalSeconds % 60
+        "${m}m ${s}s"
+    }
+}

@@ -211,6 +211,21 @@ data class ChatItem(
      * 现在图片成为消息**自己**的一部分，发送那一刻就在，恢复历史时还在。
      */
     val images: List<ChatImage> = emptyList(),
+    /**
+     * 这一轮里被改过的文件（相对项目根的路径）。
+     *
+     * 只在助手消息上，从本轮的工具调用里回收：`Edit` / `Write` / `MultiEdit`
+     * 的入参里带路径。作用是让消息卡片底部能写「修改 3 个文件」并点开看清单 ——
+     * 否则用户翻历史时只能靠回忆"上次到底动了哪些文件"。
+     */
+    val editedFiles: List<String> = emptyList(),
+    /**
+     * 本轮从提问到完成的耗时（毫秒，0 = 未知）。
+     *
+     * 写在**这一轮最后一条助手消息**上（见 `onEngineTurnComplete`）：
+     * 一个回合里助手可能产出多条消息，只有最后一条才代表"整轮结束"。
+     */
+    val elapsedMs: Long = 0L,
 )
 
 data class SessionSummary(
@@ -408,6 +423,14 @@ enum class ChoiceIntent {
      * "现在是在确认删除"，不会把确认当成菜单项再走一遍分派。
      */
     SESSION_DELETE_CONFIRM,
+
+    /**
+     * 删除**单条消息**的二次确认。
+     *
+     * 与 [SESSION_DELETE_CONFIRM] 同理单独成一个意图：删一条消息是不可撤销的，
+     * 而且菜单里「删除」紧挨着「复制」，误触概率比删整个会话还高。
+     */
+    MESSAGE_DELETE_CONFIRM,
 }
 
 /**
@@ -424,6 +447,61 @@ data class FileEntry(
     val directory: Boolean,
     val size: Long = 0L,
     val modifiedAt: Long = 0L,
+)
+
+/**
+ * 导出面板（底部抽屉）的内容。
+ *
+ * [items] 是这次要导的消息：从消息菜单进来就是那一条，多选进来就是勾选的那些。
+ */
+data class ExportSheetState(
+    val title: String,
+    val items: List<ChatItem>,
+    /** 导出内容里带不带思考过程。默认带 —— 它本来就是对话的一部分。 */
+    val includeReasoning: Boolean = true,
+    /** 图片里把思考块**展开**画出来（否则只画一个「思考」标记）。 */
+    val expandReasoning: Boolean = false,
+    /**
+     * 这条面板是从**单条消息**打开的（而不是多选）。
+     *
+     * 用它决定要不要显示「选择更多消息…」入口：从多选进来时已经在选了，
+     * 再给一个入口只会让人以为选择状态丢了。
+     */
+    val singleSource: Boolean = false,
+    /** 单条来源时记住是哪一条，供「选择更多消息…」进入多选时打底。 */
+    val seedId: String? = null,
+)
+
+/** 导出的目标格式。 */
+enum class ExportKind { MARKDOWN, IMAGE }
+
+/**
+ * 一次待落盘的导出。
+ *
+ * ## 为什么走 SAF 而不是系统分享
+ *
+ * 之前是 `ACTION_SEND` + androidx FileProvider + 分享面板。在这台设备上反复失败：
+ * provider authority 冲突、URI 授权丢失、MIUI 面板解析不了自研 URI —— 每一环都
+ * 可能断，而且断在哪一环从报错里看不出来。
+ *
+ * `ACTION_CREATE_DOCUMENT` 恰好相反：**系统弹文件管理器并自己授权**，我们只负责
+ * `contentResolver.openOutputStream(uri).write(...)`。那是 ContentResolver 最基本
+ * 的用法，不需要任何权限声明，也不经过分享面板。
+ */
+data class ExportPayload(
+    /** 每次导出唯一。界面拿它当 effect 的 key（清空请求不会让它变）。 */
+    val nonce: Int,
+    val kind: ExportKind,
+    val mimeType: String,
+    /** 文件管理器里的默认文件名，例如 `chat-export-2026-11-01_1230.md`。 */
+    val suggestedName: String,
+    /** [ExportKind.MARKDOWN] 用：已经拼好的全文。 */
+    val markdown: String = "",
+    /** [ExportKind.IMAGE] 用：要画进图里的消息。 */
+    val items: List<ChatItem> = emptyList(),
+    val title: String = "",
+    val includeReasoning: Boolean = true,
+    val expandReasoning: Boolean = false,
 )
 
 data class OpenFile(
@@ -636,6 +714,51 @@ data class WorkspaceUiState(
     val transcriptOldestSeq: Long = -1L,
     /** 正在补更早的一页。 */
     val transcriptLoadingOlder: Boolean = false,
+    /**
+     * 正在**首次**加载这条会话的消息。
+     *
+     * 与 [transcriptLoadingOlder] 分开：那个是"往上补历史"，这个是"整份还没到"。
+     * 混用会出现「刚点开会话，先闪一行『正在加载更早的消息』」的怪相 ——
+     * 两个阶段的占位文案和位置都不一样。
+     */
+    val transcriptLoading: Boolean = false,
+    /**
+     * 往输入器里**外部写入**文本的版本号。
+     *
+     * 为什么需要它：`composerText` 是单向的（界面按它灌进 `TextFieldState`，
+     * 用户打字不回写），所以"再插一次同样的文本"时字段值连续相同，
+     * 界面上的 `LaunchedEffect(composerText)` 不会重启，插入就丢了
+     * （实测：连点两次同一个斜杠命令，第二次没反应）。
+     * 每次外部写入 +1，界面按版本号触发。
+     */
+    val composerTextEpoch: Int = 0,
+    /**
+     * `@` 文件补全的查询串（null = 没在补全）。
+     *
+     * 与 `composerText` 分开，是为了**不在每次按键时重写整份状态** ——
+     * 这个类里装着整份 transcript，每按一个字都 `copy()` 会让 `ChatList` 跟着重组。
+     */
+    val fileQuery: String? = null,
+    /** `@` 补全的候选路径。 */
+    val fileQueryMatches: List<String> = emptyList(),
+    /**
+     * 对话流的**多选模式**。
+     *
+     * 进入方式：消息菜单里选「导出」后可以再点「选择更多消息…」，或直接长按拖动。
+     * 开启后每条消息左侧出现勾选框，顶部换成「已选 N 条 / 全选 / 取消 / 导出」。
+     */
+    val multiSelectMode: Boolean = false,
+    /** 多选模式下已勾选的消息 id。 */
+    val multiSelectedIds: Set<String> = emptySet(),
+    /** 导出面板内容（null = 关闭）。 */
+    val exportSheet: ExportSheetState? = null,
+    /**
+     * 待落盘的导出内容。
+     *
+     * 状态层只**准备**内容（拼 Markdown / 收集消息），落盘由界面层用 SAF 做 ——
+     * `ACTION_CREATE_DOCUMENT` 必须由界面发起，且需要真实 Activity。
+     */
+    val pendingExport: ExportPayload? = null,
     /**
      * 往前补过多少页。每补一页 +1。
      *
@@ -908,6 +1031,8 @@ data class WorkspaceUiState(
      */
     val aboutOpen: Boolean = false,
     val licensesOpen: Boolean = false,
+    /** 隐私政策整页打开。入口在关于页里，与「第三方开源项目」并列。 */
+    val privacyOpen: Boolean = false,
     val modelPicker: com.zhizhu.zhicode.compose.model.ModelPickerState? = null,
     /**
      * 非空即「UI 调试」整页打开（**仅 debug 构建**有入口，见设置页的「扩展」组）。
@@ -1024,7 +1149,7 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/mcp", "配置和管理 MCP 服务器；/mcp list · add · enable · disable · remove <名称>"),
     SlashCommand("/web", "联网搜索设置；也可直接输入 /web 搜索词"),
     SlashCommand("/terminal", "打开内置 Termux 终端"),
-    SlashCommand("/sandbox", "沙盒功能已移除（内置虚拟运行时不再分发）"),
+    SlashCommand("/sandbox", "打开沙箱：虚拟安卓运行环境，可安装/运行/调试 APK"),
     SlashCommand("/files", "打开项目文件与代码编辑器"),
     SlashCommand("/doctor", "检查 Termux 运行环境"),
     SlashCommand("/repair", "修复中断的 apt/dpkg 状态"),

@@ -1,5 +1,32 @@
 package com.zhizhu.zhicode.compose.ui.chat
 
+import kotlinx.coroutines.coroutineScope
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+import com.zhizhu.zhicode.compose.model.blockRangeSelection
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import androidx.compose.ui.unit.toSize
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.clickable
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInVertically
+import top.yukonga.miuix.kmp.basic.Surface
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -98,6 +125,31 @@ private fun requestScrollToBottom(listState: androidx.compose.foundation.lazy.La
     if (total > 0) listState.requestScrollToItem(total - 1)
 }
 
+/**
+ * 判定「内容是否还有没露出来的部分」。
+ *
+ * ## ⚠️ 为什么**不**像 rikkahub 那样再扣一次输入器高度
+ *
+ * 参考实现（rikkahub `ChatList.kt:263-270`）的算法是：
+ * `末项底边 <= viewportEndOffset - 输入器高度 - 8`。
+ *
+ * 但那是**针对它的布局**：它的输入器是浮在列表上的 overlay，而列表的
+ * `contentPadding` 里**没有**为它留地方 —— 所以它必须在判据里手工扣。
+ *
+ * 我们的布局不一样：`LazyColumn` 的 `contentPadding.bottom = bottomInset`，
+ * 而 `bottomInset` 正是输入器/任务卡/悬浮胶囊的实测高度（见 `ChatPage` 里
+ * 那段带实测数据的注释）。也就是说，滚到底时 `LazyColumn` **已经**把最后一项
+ * 摆在"悬浮层上沿"，`canScrollForward` 为假就是"全部内容都露出来了"。
+ *
+ * 照抄那个减法会**重复扣减**：等于要求"内容末端再往上抬一整个输入器的高度"，
+ * 而这个条件在滚到底之后永远不成立 —— 表现就是「回到底部」按钮点完不消失，
+ * 形成死锁。这个 bug 在实测中出现过（截图确认），别再改回去。
+ *
+ * 所以这里直接用 `canScrollForward`：它由 `contentPadding` 参与计算，
+ * 已经是准确的。
+ */
+private fun androidx.compose.foundation.lazy.LazyListState.hasHiddenContent(): Boolean = canScrollForward
+
 @Composable
 fun ChatList(
     state: WorkspaceUiState,
@@ -121,6 +173,21 @@ fun ChatList(
      * 不需要手指位置，也不需要把菜单状态放进 ViewModel。
      */
     onToolAction: (ChatItem, String, String) -> Unit,
+    /** 多选模式下切换某条消息的勾选状态。 */
+    onToggleSelect: (String) -> Unit,
+    /**
+     * 多选模式下**一次性替换**整个选中集合（拖动对选用）。
+     *
+     * 与 [onToggleSelect] 分开：拖动是"从起点到当前手指"的区间整体重算，
+     * 用 toggle 会变成反复加减、最终状态取决于调用次数，完全不可控。
+     */
+    onRangeSelect: (Set<String>) -> Unit,
+    /** 多选模式下取消整次选择。 */
+    onCancelSelect: () -> Unit,
+    /** 多选模式下导出并分享已勾选的消息。 */
+    onExportSelect: () -> Unit,
+    /** 全选 / 取消全选。 */
+    onToggleSelectAll: () -> Unit,
     /**
      * 长按动作菜单的宿主插槽。在**每一项自己的布局里**调用，菜单就会贴那一项弹出
      * （见 `ZhiAnchoredActionMenu`）。
@@ -185,6 +252,8 @@ fun ChatList(
 ) {
     ZhiFrameTrace.countRecompose("ChatList")
     val listState = rememberLazyListState()
+    // 拖动对选的边缘自动滚动要用它起协程（见 LazyColumn 的 pointerInput）。
+    val scope = rememberCoroutineScope()
     val currentState by rememberUpdatedState(state)
     // 分页回调也走 rememberUpdatedState：那个长驻的 snapshotFlow effect 不该因为
     // 宿主每帧传进来一个新的 lambda 就被重启（重启会丢掉"上次观察到的三元组"）。
@@ -211,7 +280,7 @@ fun ChatList(
      * `requestScrollToItem`，它不走挂起滚动、也不占滚动互斥锁，不会把它置真。
      */
     // 长驻 effect 读取 State 的最新值，不能冻结首次组合时的 Boolean。
-    val autoFollowState = rememberAutoFollow(listState, forceFollowToken = state.scrollToBottomToken)
+    val autoFollowState = rememberAutoFollowHandle(listState, forceFollowToken = state.scrollToBottomToken)
 
     // 底部悬浮导航「跟着对话流滚动一起走」。
     //
@@ -345,6 +414,35 @@ fun ChatList(
      * 正是这一轮要消灭的东西。
      */
     var loadedAtTop by remember { mutableStateOf(false) }
+
+    /*
+     * 补一页更早的历史，**先记下视口锚点**。
+     *
+     * ⚠️ 这个函数是两条入口的共用路径，别让任何一条绕过它。
+     *
+     * 之前下拉刷新那条（`PullToRefresh` 的 `onRefresh`）直接调了 `onLoadOlder`，
+     * 没有记录 `prependAnchorKey/Offset`。后果分两种，都很难查：
+     *
+     *   · 从来没滚到过顶 → 锚点是 null → 补完后不还原，交给 `LazyColumn`
+     *     按 key 自己夹位置。多数情况下能对，但前插 + 尾部淘汰同时发生时就会漂；
+     *   · 之前滚到过顶 → 锚点是**上一次的陈旧值** → 补完后
+     *     `requestScrollToItem(旧下标, 旧偏移)` 把视口拽到与当前内容无关的位置。
+     *
+     * 用户看到的现象就是「下拉加载更早的消息，列表乱跳」，而滚到顶自动补那条
+     * 却正常 —— 因为只有它记了锚点。
+     *
+     * 锚点取「第一个 index > 0 的可见项」：index 0 是那条 `OlderLoader`
+     * 占位，前插后它会被顶走，用它当锚点等于没锚。
+     */
+    val loadOlderWithAnchor: () -> Unit = remember(listState) {
+        {
+            val anchor = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index > 0 }
+            prependAnchorKey = anchor?.key
+            prependAnchorOffset = anchor?.offset ?: 0
+            onLoadOlderState()
+        }
+    }
+
     LaunchedEffect(listState) {
         snapshotFlow {
             listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
@@ -360,11 +458,7 @@ fun ChatList(
                     return@collect
                 }
                 loadedAtTop = true
-                val anchor = listState.layoutInfo.visibleItemsInfo
-                    .firstOrNull { it.index > 0 }
-                prependAnchorKey = anchor?.key
-                prependAnchorOffset = anchor?.offset ?: 0
-                onLoadOlderState()
+                loadOlderWithAnchor()
             }
     }
 
@@ -389,22 +483,24 @@ fun ChatList(
      * 日志输出时不用 `animateScrollToItem`：内容连续增长时每一步都起动画
      * 会互相打断，反而更抖。
      */
-    var handledImeGeneration by remember { mutableStateOf(imeOpenGeneration) }
-
-    // 键盘触发的吸底单独处理；内容观察不能放在这里，否则未聚焦输入框时会提前 return，
-    // 导致加载消息和流式输出都失去自动滚动。
-    LaunchedEffect(listState, imeOpenGeneration, composerFocused) {
-        // autoFollow 是键盘打开前的用户意图快照：只有本来就在底部才吸底，
-        // 键盘缩短 viewport 后不能再用 canScrollForward 反推，否则会把真正贴底误判成历史位置。
-        if (!composerFocused || imeOpenGeneration <= handledImeGeneration) return@LaunchedEffect
-        handledImeGeneration = imeOpenGeneration
-        if (autoFollowState.value) {
-            snapshotFlow { listState.layoutInfo.totalItemsCount to listState.layoutInfo.viewportEndOffset }
-                .first { (count, viewport) -> count > 0 && viewport > 0 }
-            withFrameNanos { }
-            listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
-        }
-    }
+    /*
+     * 键盘跟随：**逐帧增量**补偿，不是"弹完再跳一下"。
+     *
+     * 这里原本是「IME 打开代数变了 → 等一帧 → `scrollToItem(最后一条)`」，两个毛病：
+     *
+     *  · 等待那一帧时键盘还在长，落点已经过时；
+     *  · `scrollToItem` 是瞬间定位，所以表现为内容先被顶掉、再"啪"地弹回来。
+     *
+     * 现在交给 [ImeLazyListAutoScroller]：记上一次的键盘高度，每次变化就
+     * `scrollBy(增量)`。键盘长多少、列表就让多少，中间是连续的。
+     *
+     * ⚠️ `composerFocused` 这个守卫必须留着：`WindowInsets.ime` 是**窗口级**的，
+     * 侧栏抽屉的搜索框弹键盘时它一样会变，那种情况下对话流不该跟着动。
+     * 顺带说明为什么 `imeOpenGeneration` 参数还在：`ChatPage` 用它做
+     * "这次键盘是不是输入器提起来的"的代数记账，本文件不再需要它驱动滚动，
+     * 但仍保留参数以免调用点改动 —— 真正生效的是下面的 `enabled`。
+     */
+    ImeLazyListAutoScroller(listState = listState, enabled = composerFocused)
 
     // 内容观察器必须常驻：加载会话、前插历史、流式输出都在这里处理。
     LaunchedEffect(listState) {
@@ -455,7 +551,77 @@ fun ChatList(
                 return@collect
             }
 
-            if (autoFollowState.value && !prepended) requestScrollToBottom(listState)
+            if (autoFollowState.state.value && !prepended) requestScrollToBottom(listState)
+        }
+    }
+
+    /*
+     * 布局驱动的贴底校正 —— 补上「内容指纹漏判」的那一类漂移。
+     *
+     * ## 上面那条指纹 effect 漏了什么
+     *
+     * [ContentStamp] 只看**数据**：条数、末条正文/思考长度、工具数、会话、状态。
+     * 但列表会**因为非数据原因变高或移位**：
+     *
+     *  · Markdown 异步渲染完成（代码块高亮、表格、公式）比纯文本高出一截；
+     *  · 图片/附件解码完成后从占位高度换成真实高度；
+     *  · 折叠面板、工具输出的行高变化；
+     *  · `bottomInset` 本身变化（任务卡出现、输入器长高）。
+     *
+     * 这些都不改指纹，所以上面那条 effect **一次都不会触发**。结果就是：流式输出
+     * 到一半时最后一段被顶到悬浮层底下，用户得自己往下滑一下才看得到 ——
+     * 也就是"跟随断了"，但不是逻辑错，是没人去校正。
+     *
+     * ## 为什么用 `visibleItemsInfo` 而不是把更多字段塞进指纹
+     *
+     * 往指纹里加字段是在**猜**哪些变化会让布局动；而 `visibleItemsInfo` 是布局结果的
+     * 直接产物 —— 只要布局真的变了它就发射，不需要枚举原因。参考实现
+     * （rikkahub `ChatList.kt:302-314`）也是观察它。
+     *
+     * ## 为什么判据是「跟随中且不在底部」而不是 rikkahub 那句 `isAtBottom()`
+     *
+     * rikkahub 的写法是「只有**已经**贴底才滚」，靠每次布局重发请求来收敛。
+     * 那有个前提：相邻两次布局之间内容增长不能超过它的 8px 余量，否则一帧之内
+     * 就不再贴底、跟随会自己断掉。这里改用我们已有的 [autoFollowState]（用户
+     * 意图，带滞回、拖动期间暂停），它本来就是为这件事设计的：
+     *
+     *   · `autoFollow == true`  = 用户想看最新内容；
+     *   · `!isScrollInProgress` = 手指/惯性没在动，不跟他抢。
+     *
+     * 于是「内容长高把他顶出去了」这种情况会被**拉回来**（这是对的，他本来在跟随），
+     * 而"他主动往上翻"时 `autoFollow` 已经是 false，不会被拽回。
+     *
+     * ## 不会死循环
+     *
+     * 每次布局最多发一次请求，`requestScrollToItem` 非挂起、只登记目标。
+     * 滚到位之后 `isAtBottom` 变真，就不再发。内容持续增长时确实是每帧一次，
+     * 但那正是"跟随"该有的行为（与上面那条指纹 effect 同频，且请求是幂等的）。
+     */
+    /*
+     * 「下面还有没露出来的内容吗」——给悬浮的"回到底部"按钮用。
+     *
+     * 用 `derivedStateOf` 而不是直接在组合里读：`canScrollForward` 背后的
+     * `layoutInfo` 在滚动时**每个像素**都变，直接读会让整个 ChatList 每帧重组。
+     * `derivedStateOf` 只在**结果布尔值**翻转时才让读它的地方失效，
+     * 也就是"从能看到底变成看不到底"那一次。
+     */
+    val atBottom by remember {
+        derivedStateOf { !listState.hasHiddenContent() }
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            listState.hasHiddenContent() to listState.isScrollInProgress
+        }.collect { (hidden, scrolling) ->
+            if (!hidden || scrolling) return@collect
+            // 用户没打算跟随最新内容（在翻历史）—— 绝不拽他。
+            if (!autoFollowState.state.value) return@collect
+            // 尾部被淘汰时"最后一条"不是最新消息，滚动只会停在历史中间。
+            // 那条路径由 transcriptJumpRevision 的 effect 负责（整份替换后落底）。
+            if (currentState.transcriptHasNewer) return@collect
+            // 前插那一帧不动：视口由 transcriptPrependRevision 的 effect 显式还原。
+            if (currentState.transcriptLoadingOlder) return@collect
+            if (listState.layoutInfo.totalItemsCount <= 0) return@collect
+            requestScrollToBottom(listState)
         }
     }
 
@@ -481,7 +647,7 @@ fun ChatList(
      * 读的历史里拽走 —— 那是本文件里反复强调过的、绝不能破坏的行为。
      */
     LaunchedEffect(listState, bottomInset) {
-        if (!autoFollowState.value) return@LaunchedEffect
+        if (!autoFollowState.state.value) return@LaunchedEffect
         repeat(4) {
             withFrameNanos { }
             val total = listState.layoutInfo.totalItemsCount
@@ -614,7 +780,7 @@ fun ChatList(
         // 所以这里只用最稳的那四个参数。
         PullToRefresh(
             isRefreshing = state.transcriptLoadingOlder,
-            onRefresh = onLoadOlderState,
+            onRefresh = loadOlderWithAnchor,
             pullToRefreshState = pullToRefreshState,
             // 文案里带具体条数：只说"更早的消息"时用户不知道一次补多少。
             refreshTexts = listOf(
@@ -650,11 +816,146 @@ fun ChatList(
                     .fillMaxSize()
                     .padding(start = 14.dp)
                     .overScrollVertical()
-                    .scrollEndHaptic(),
+                    .scrollEndHaptic()
+                    /*
+                     * 拖动对选（多选模式专用）。
+                     *
+                     * ## 为什么用 `detectDragGesturesAfterLongPress`
+                     *
+                     * 前两版是手写的 `awaitEachGesture`（先 Initial pass、后改 Main pass），
+                     * 两次都有同一个毛病：**它和列表滚动抢手势**。手写版本要在长按超时
+                     * 之前逐帧盯着指针判断"有没有超过 touchSlop"，这段观察期本身就与
+                     * `LazyColumn` 的滚动识别重叠 —— 手指稍一停顿就被判成长按，
+                     * 表现是「想滚动却勾上了几条」。
+                     *
+                     * 这个官方手势识别器专为"长按后拖动"设计，行为正好是我们要的：
+                     * **长按成立之前它一个事件都不消费**，滚动完全归列表；
+                     * 长按成立之后才接管，并自动消费后续的 `change`。
+                     * 不用我们自己判断 pass、也不用自己等超时。
+                     *
+                     * ⚠️ `pointerInput` 的 key 带 `multiSelectMode`：
+                     * 关掉多选后这个手势节点要**被丢弃重建**，否则它会一直挂在链路上
+                     * 吃掉长按事件（消息菜单就再也弹不出来了）。
+                     *
+                     * ⚠️ 也**只有**多选模式里才装：普通模式下长按要留给消息菜单。
+                     */
+                    .pointerInput(state.multiSelectMode, blocks) {
+                        if (!state.multiSelectMode) return@pointerInput
+                        // 块 → 成员 id。手势里要用它把一个块下标翻译成"要选哪些消息"。
+                        val blockIds = blocks.map { block ->
+                            when (block) {
+                                is TurnLayout.Block.Standalone -> listOf(block.id)
+                                is TurnLayout.Block.Turn -> block.ids
+                            }
+                        }
+                        fun indexAt(y: Float): Int = listState.layoutInfo.visibleItemsInfo
+                            .firstOrNull { y >= it.offset && y < it.offset + it.size }?.index ?: -1
+
+                        /*
+                         * 这几个是**普通变量**，不是 State：它们只在手势协程内部读写，
+                         * 放 State 会让每一帧拖动都触发一遍 ChatList 重组。
+                         */
+                        var anchor = -1
+                        var base: Set<String> = emptySet()
+                        var selecting = false
+                        var lastY = 0f
+                        var dragging = false
+
+                        /*
+                         * 边缘自动滚动：拖到列表上下 48dp 以内时按距离加速滚动，
+                         * 滚出来的回合继续纳入区间。
+                         *
+                         * 常驻一条协程（只在 `dragging` 为真时干活），而不是在
+                         * `onDrag` 里启动 —— 后者每帧都会重启，反而滚不匀。
+                         *
+                         * ⚠️ `pointerInput` 的块是 suspend 但**不是** CoroutineScope，
+                         * 所以要 `coroutineScope { }` 包一层才能 `launch`。
+                         */
+                        coroutineScope {
+                        val scroller = launch {
+                            val edge = 48.dp.toPx()
+                            while (true) {
+                                if (dragging && anchor >= 0) {
+                                    val height = listState.layoutInfo.viewportEndOffset.toFloat()
+                                    val delta = when {
+                                        lastY < edge ->
+                                            -((edge - lastY) / edge).coerceIn(0f, 1f) * 12.dp.toPx()
+                                        lastY > height - edge ->
+                                            ((lastY - height + edge) / edge).coerceIn(0f, 1f) * 12.dp.toPx()
+                                        else -> 0f
+                                    }
+                                    if (delta != 0f) {
+                                        listState.scrollBy(delta)
+                                        val visible = listState.layoutInfo.visibleItemsInfo
+                                        val end = indexAt(lastY).takeIf { it >= 0 }
+                                            ?: (if (delta < 0f) visible.firstOrNull()?.index
+                                                else visible.lastOrNull()?.index)
+                                        if (end != null) {
+                                            onRangeSelect(
+                                                blockRangeSelection(blockIds, anchor, end, base, selecting),
+                                            )
+                                        }
+                                    }
+                                }
+                                delay(16)
+                            }
+                        }
+                        try {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { offset ->
+                                    lastY = offset.y
+                                    val hit = indexAt(offset.y)
+                                    if (hit < 0 || hit >= blockIds.size) {
+                                        anchor = -1
+                                        dragging = false
+                                    } else {
+                                        anchor = hit
+                                        // 起点未选中 = 这次拖动是"选中"；已选中 = "取消"。
+                                        // 与文件管理器一致：从哪儿开始就能反向取消。
+                                        base = state.multiSelectedIds
+                                        selecting = blockIds[hit].none { it in base }
+                                        dragging = true
+                                        // 先划上起点那一块，给用户立即反馈。
+                                        onRangeSelect(
+                                            blockRangeSelection(blockIds, hit, hit, base, selecting),
+                                        )
+                                    }
+                                },
+                                onDrag = { change, _ ->
+                                    if (anchor >= 0) {
+                                        lastY = change.position.y
+                                        change.consume()
+                                        val end = indexAt(change.position.y)
+                                        if (end >= 0) {
+                                            onRangeSelect(
+                                                blockRangeSelection(blockIds, anchor, end, base, selecting),
+                                            )
+                                        }
+                                    }
+                                },
+                                onDragEnd = {
+                                    anchor = -1
+                                    dragging = false
+                                },
+                                onDragCancel = {
+                                    anchor = -1
+                                    dragging = false
+                                },
+                            )
+                        } finally {
+                            scroller.cancel()
+                        }
+                        }
+                    },
                 contentPadding = PaddingValues(top = topInset, bottom = bottomInset),
             ) {
                 if (state.transcript.isEmpty()) {
-                    item { EmptyState() }
+                    // 三态而不是两态：空列表可能是「新会话」也可能是「正在载入」。
+                    // 混在一起的话，点开一条长会话会先看到"想让 ZhiCode 做什么？"
+                    // 再过一会儿突然被内容填满 —— 用户以为是空会话，差点重新输入。
+                    item(key = "empty-or-loading") {
+                        if (state.transcriptLoading) TranscriptLoadingState() else EmptyState()
+                    }
                 }
                 // ---- 顶部：还有更早 / 已经到头 ----
                 //
@@ -763,10 +1064,45 @@ fun ChatList(
                                     },
                                 ) {
                                 Box(modifier = Modifier.fillMaxWidth().then(finger.modifier)) {
+                                    /*
+                                     * 多选模式下，每个成员左侧多一个勾选框，整行点击切换勾选，
+                                     * 长按菜单**让位**（那时点按语义已经变成"选/不选"，
+                                     * 再弹菜单会让人以为选错了）。
+                                     *
+                                     * 用 `Row` 而不是给卡片加 padding：勾选框要独立于卡片左缘，
+                                     * 而卡片自己是满宽的 —— 加 padding 会把卡片挤窄，视觉上跟
+                                     * 非多选模式不一样。
+                                     */
+                                    val selecting = state.multiSelectMode
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .then(
+                                                /*
+                                                 * 多选模式下**整行可点**（切换勾选）。
+                                                 *
+                                                 * 只让那个小方框可点是不够的：消息卡很高，
+                                                 * 用户会自然地想"点这条消息就选中它"，结果点正文
+                                                 * 毫无反应 —— 看起来像多选坏了。
+                                                 */
+                                                if (selecting) {
+                                                    Modifier.clickable { onToggleSelect(item.id) }
+                                                } else {
+                                                    Modifier
+                                                },
+                                            ),
+                                        verticalAlignment = Alignment.Top,
+                                    ) {
+                                        if (selecting) {
+                                            SelectionCheckbox(
+                                                checked = item.id in state.multiSelectedIds,
+                                                onToggle = { onToggleSelect(item.id) },
+                                            )
+                                        }
                                     // ⚠️ 调试条与消息卡必须放进**同一个 Column** 里，不能并列在
                                     // 上面那个 Box 下：Box 的子项是**叠放**而不是竖排，
                                     // 直接并列会让调试条被卡片盖住。
-                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                    Column(modifier = Modifier.weight(1f)) {
                                     // ---- 主体调试模式：就地加料（不改下面任何卡片的渲染） ----
                                     if (debugMode) {
                                         MessageDebugStrip(item)
@@ -778,18 +1114,24 @@ fun ChatList(
                                     // 覆盖回展开 —— 这是刻意的：调试模式就是"全都摊开"的视图，
                                     // 想看折叠后的样子就把它关掉）。
                                     val shown = if (debugMode) item.fullyExpanded() else item
-                                    when (shown.kind) {
-                                        ChatKind.USER -> UserBubble(shown) {
+                                    // 多选模式下长按不弹菜单：点按已经是"选/不选"，
+                                    // 再弹出动作菜单会让人以为选错了目标。
+                                    // 长按这里**什么都不做**（而不是再切换一次）：
+                                    // 长按通常伴随手指微动，重复切换会让勾选"跳来跳去"。
+                                    val longPress = if (selecting) {
+                                        { }
+                                    } else {
+                                        {
                                             fingerOffset = finger.offset()
                                             onMessageActions(item)
                                         }
+                                    }
+                                    when (shown.kind) {
+                                        ChatKind.USER -> UserBubble(shown, longPress)
                                         ChatKind.ASSISTANT -> AssistantCard(
                                             item = shown,
                                             onToggleThinking = { onToggleThinking(item.id) },
-                                            onLongPress = {
-                                                fingerOffset = finger.offset()
-                                                onMessageActions(item)
-                                            },
+                                            onLongPress = longPress,
                                         )
                                         ChatKind.TOOL_GROUP -> ToolBatch(
                                             item = shown,
@@ -807,6 +1149,7 @@ fun ChatList(
                                         ChatKind.INFO -> InfoCard(shown)
                                     }
                                     } // Column（调试条 + 消息卡，竖排）
+                                    } // Row（多选勾选框 + Column）
                                     // 菜单挂在**成员自己的 Box** 里，并用手指位置作偏移 ——
                                     // 于是它从手指那一点长出来，且坐标空间与手指追踪同源。
                                     anchoredMenu(item.id, fingerOffset)
@@ -841,6 +1184,109 @@ fun ChatList(
             }
         }
         // Miuix 滚动条：自动淡入淡出、可拖拽，比自绘指示条更贴近 HyperOS
+
+        /*
+         * 多选模式的顶部操作条。
+         *
+         * 放在顶部而不是底部：底部那一块已经被输入器、任务卡、悬浮胶囊占满了，
+         * 再塞一条会和它们抢位置。而多选是"俯视整个对话挑几条"的动作，
+         * 眼睛本来就在往上扫。
+         *
+         * 贴 `topInset` 下沿：那个值就是顶栏让出来的高度（见 ChatPage 的传参），
+         * 于是这条正好落在顶栏下面，不遮住它。
+         */
+        AnimatedVisibility(
+            visible = state.multiSelectMode,
+            enter = fadeIn(ZhiMotion.fadeInSpec) + slideInVertically(ZhiMotion.enterSpec) { -it },
+            exit = fadeOut(ZhiMotion.fadeOutSpec) + slideOutVertically(ZhiMotion.exitSpec) { -it },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = topInset + 6.dp, start = 14.dp, end = 14.dp)
+                /*
+                 * ⚠️ 必须吃掉这一块上的所有点击。
+                 *
+                 * 这条操作条是叠在 `LazyColumn` **之上**的（同一个 Box 的后画子项），
+                 * 而列表那边挂着多选专用的 `pointerInput`（拖动手势，走 Initial pass）。
+                 * 不给操作条加这层拦截的话，点「导出」「图片」时事件会**同时**传到列表上，
+                 * 于是"点一下导出，顺手又勾上了底下那条消息" —— 实测过，一次点击
+                 * 把已选从 7 变成 8。
+                 */
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                ),
+        ) {
+            SelectionBar(
+                count = state.multiSelectedIds.size,
+                total = state.transcript.size,
+                onToggleAll = onToggleSelectAll,
+                onCancel = onCancelSelect,
+                onExport = onExportSelect,
+            )
+        }
+
+        /*
+         * 悬浮的「回到底部」。
+         *
+         * 上面那个 `JumpToLatest` 是**列表末尾的一项**，只有滚到末尾才看得见 ——
+         * 而"用户正卡在中间、想回到最新"恰恰是看不到它的时候。所以这里补一个
+         * 常驻的悬浮入口。
+         *
+         * 显示条件只有「不在底部」：`atBottom` 是 `derivedStateOf`，滚动时不会让
+         * 这一层每帧重组，只在翻转时失效。
+         *
+         * 两种语义分开处理：
+         *  · 尾部被淘汰（`transcriptHasNewer`）→ 必须整份替换，走 `onLoadLatest`；
+         *  · 只是往上翻了 → 本地滚到底即可，顺手恢复跟随（否则下一条回复又不跟了）。
+         *
+         * 位置：`bottomInset` 已经把输入器/任务卡/悬浮胶囊的占位算好了
+         * （见 ChatPage 里那段实测注释），所以贴它往上抬 8dp 就正好落在它们上沿。
+         */
+        AnimatedVisibility(
+            visible = !atBottom && state.transcript.isNotEmpty(),
+            enter = fadeIn(ZhiMotion.fadeInSpec) + scaleIn(ZhiMotion.scaleEnterSpec, initialScale = 0.85f),
+            exit = fadeOut(ZhiMotion.fadeOutSpec) + scaleOut(ZhiMotion.scaleExitSpec, targetScale = 0.85f),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 18.dp, bottom = bottomInset + 8.dp),
+        ) {
+            ScrollToBottomPill(
+                onClick = {
+                    if (currentState.transcriptHasNewer) {
+                        onLoadLatestState()
+                    } else {
+                        autoFollowState.rearm()
+                        requestScrollToBottom(listState)
+                    }
+                },
+            )
+        }
+    }
+}
+
+/**
+ * 悬浮的「回到底部」胶囊。
+ *
+ * 与列表末尾那个 [JumpToLatest] 用同一套视觉语言（Miuix `Surface` + 主题色），
+ * 但文案不同：那个是「回到最新」（会**替换整份 transcript**），这个可能只是
+ * 「回到底部」（本地滚动）。两者语义不同，文案就不能一样。
+ */
+@Composable
+private fun ScrollToBottomPill(onClick: () -> Unit) {
+    val scheme = MiuixTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        color = scheme.surfaceContainerHigh,
+        contentColor = scheme.primary,
+        shape = com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle(ZhiRadius.inner),
+    ) {
+        Text(
+            text = "回到底部",
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
     }
 }
 
@@ -1235,3 +1681,96 @@ private data class TranscriptStamp(
      */
     val revision: Int,
 )
+
+/**
+ * 多选模式下每条消息左侧的勾选框。
+ *
+ * 只画框、不接手势：点击由整行负责（见 ChatList 里那层 Row 的说明）。
+ * 这样点消息正文也能切换勾选，而不是必须精确点到那个小方块。
+ */
+@Composable
+private fun SelectionCheckbox(checked: Boolean, onToggle: () -> Unit) {
+    val scheme = MiuixTheme.colorScheme
+    Box(
+        modifier = Modifier
+            .padding(start = 2.dp, top = 14.dp, end = 4.dp)
+            .size(22.dp)
+            .clickable(onClick = onToggle),
+        contentAlignment = Alignment.Center,
+    ) {
+        // 用 Miuix Checkbox，与输入器底排、选择器里的行首控件同一套视觉。
+        // 26dp 是库里的固定尺寸，这里缩到 0.84 让它不把消息卡挤得太窄。
+        top.yukonga.miuix.kmp.basic.Checkbox(
+            state = if (checked) androidx.compose.ui.state.ToggleableState.On
+            else androidx.compose.ui.state.ToggleableState.Off,
+            onClick = onToggle,
+            modifier = Modifier.graphicsLayer {
+                val s = 0.84f
+                scaleX = s
+                scaleY = s
+            },
+        )
+    }
+}
+
+/**
+ * 多选模式的顶部操作条。
+ *
+ * 三个元素：已选计数、取消、导出。导出在没有勾选时置灰 —— 点了没反应比置灰更困惑。
+ */
+@Composable
+private fun SelectionBar(
+    count: Int,
+    total: Int,
+    onToggleAll: () -> Unit,
+    onCancel: () -> Unit,
+    onExport: () -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    Surface(
+        color = scheme.surfaceContainerHigh,
+        contentColor = scheme.onSurface,
+        shape = com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle(ZhiRadius.card),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (count == 0) "选择要导出的消息" else "已选 $count / $total 条",
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+            )
+            // 全选 / 取消全选：同一个入口来回切。
+            // 放在「取消」左边，避免抢「导出」的视觉权重 ——
+            // 它是个辅助动作，不是这一步的目的。
+            Text(
+                text = if (total > 0 && count >= total) "取消全选" else "全选",
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                modifier = Modifier
+                    .clickable(enabled = total > 0, onClick = onToggleAll)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+            Text(
+                text = "取消",
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                modifier = Modifier
+                    .clickable(onClick = onCancel)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+            Text(
+                text = "导出",
+                // 没勾选时用禁用色而不是隐藏：用户要知道"这一步可以做，只是还没满足条件"。
+                color = if (count == 0) scheme.onSurfaceVariantSummary else scheme.primary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clickable(enabled = count > 0, onClick = onExport)
+                    .padding(start = 8.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            )
+        }
+    }
+}

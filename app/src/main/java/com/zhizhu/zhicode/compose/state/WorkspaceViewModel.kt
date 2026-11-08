@@ -1,5 +1,8 @@
 package com.zhizhu.zhicode.compose.state
 
+import com.zhizhu.zhicode.compose.model.ExportPayload
+import com.zhizhu.zhicode.compose.model.ExportKind
+import com.zhizhu.zhicode.compose.model.ExportSheetState
 import android.net.Uri
 import android.app.Application
 import android.content.ClipData
@@ -11,6 +14,7 @@ import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zhizhu.zhicode.compose.data.ApiConfigStore
+import com.zhizhu.zhicode.background.KeepAliveService
 import com.zhizhu.zhicode.compose.data.AttachmentReader
 import com.zhizhu.zhicode.compose.data.Clipboard
 import com.zhizhu.zhicode.compose.data.DebugApiProfile
@@ -118,6 +122,7 @@ import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
+import com.zhizhu.zhicode.sandbox.SandboxDashboardActivity
 import com.termux.app.zhicode.core.FileOps
 import com.termux.app.zhicode.core.PlanApprovalGate
 import com.termux.app.zhicode.core.StorageLinks
@@ -126,6 +131,7 @@ import com.termux.app.zhicode.storage.SessionStore
 import com.termux.app.zhicode.storage.ZhiMemory
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
@@ -233,6 +239,11 @@ class WorkspaceViewModel(
      * 为 null 表示"当前没有归属待判定的回合"，此时不拦截。
      */
     private var turnSessionId: String? = null
+    /** 这一轮的起点（`elapsedRealtime`）。0 = 当前没有进行中的回合。 */
+    private var turnStartedAtElapsedMs: Long = 0L
+
+    /** 导出请求序号（见 `ExportPayload.nonce`）。 */
+    private var exportNonce: Int = 0
 
     /**
      * 正在进行的「提问」流程。
@@ -699,15 +710,68 @@ class WorkspaceViewModel(
 
     fun closeTaskList() = _state.update { it.copy(taskListOpen = false) }
 
-    fun onComposerChange(text: String) {
-        val query = if (text.startsWith("/") && !text.contains(' ') && !text.contains('\n')) text else null
+    /**
+     * 输入框里出现/消失斜杠查询时由界面调用。
+     *
+     * ⚠️ 它**不再**接收整段文字，也**不再**写 `composerText`。
+     *
+     * 文字归界面层（`ComposerTextState`）所有，这样按键不会让
+     * `WorkspaceUiState`（内含整份 transcript）换实例，也就不会连带整个对话流重组。
+     * 状态层这里只需要知道"要不要显示斜杠面板、匹配到哪些命令"。
+     *
+     * `null` = 当前文字不是斜杠查询（不以 `/` 开头，或已经打了空格）。
+     */
+    /**
+     * 输入框里出现/消失 `@` 文件引用查询时由界面调用。
+     *
+     * `query` 是 `@` **之后**的那一段（不含 `@` 本身）。匹配源是当前目录的
+     * [WorkspaceUiState.fileEntries] —— 见 `fileQuery` 字段里对边界的说明。
+     *
+     * 与 [onSlashQueryChanged] 互斥使用：界面侧只会有一个处于活动状态。
+     */
+    fun onFileQueryChanged(query: String?) {
+        if (query == null) {
+            _state.update {
+                if (it.fileQuery == null) it
+                else it.copy(fileQuery = null, fileQueryMatches = emptyList())
+            }
+            return
+        }
+        val needle = query.lowercase(Locale.US)
+        val matches = _state.value.fileEntries
+            .asSequence()
+            .filter { it.name.isNotBlank() }
+            .filter { needle.isEmpty() || it.name.lowercase(Locale.US).contains(needle) }
+            // 目录排在前面：引用一个目录比引用某个具体文件更常见（"看看这个目录"）。
+            .sortedWith(compareByDescending<com.zhizhu.zhicode.compose.model.FileEntry> { it.directory })
+            .map { it.name + if (it.directory) "/" else "" }
+            .take(8)
+            .toList()
         _state.update {
-            it.copy(
-                composerText = text,
+            if (it.fileQuery == query && it.fileQueryMatches == matches) it
+            else it.copy(fileQuery = query, fileQueryMatches = matches)
+        }
+    }
+
+    fun onSlashQueryChanged(query: String?) {
+        _state.update {
+            if (it.slashQuery == query) it
+            else it.copy(
                 slashQuery = query,
-                slashMatches = if (query == null) emptyList()
-                else slashMatchesFor(query),
+                slashMatches = if (query == null) emptyList() else slashMatchesFor(query),
             )
+        }
+    }
+
+    /**
+     * 外部动作往输入框里写字（编辑后发送、恢复草稿、引用、命令补全…）。
+     *
+     * `composerTextEpoch` 必须一起 +1：界面按"版本号变了"单向灌入，
+     * 见 `WorkspaceUiState.composerTextEpoch` 的说明。
+     */
+    fun requestComposerText(text: String) {
+        _state.update {
+            it.copy(composerText = text, composerTextEpoch = it.composerTextEpoch + 1)
         }
     }
 
@@ -718,7 +782,7 @@ class WorkspaceViewModel(
 
     fun pickSlashCommand(command: SlashCommand) {
         _state.update {
-            it.copy(composerText = command.name + " ", slashQuery = null, slashMatches = emptyList())
+            it.copy(composerText = command.name + " ", composerTextEpoch = it.composerTextEpoch + 1, slashQuery = null, slashMatches = emptyList())
         }
     }
 
@@ -1720,30 +1784,45 @@ class WorkspaceViewModel(
     fun closeMemory() = _state.update { it.copy(memory = null) }
 
     /**
-     * 沙盒入口（**已移除功能的占位**）。
+     * 打开 IQ 沙箱管理页。
      *
-     * ## 为什么入口还在、功能没了
+     * ## 为什么是跨进程的 Activity，而不是主界面里的一页
      *
-     * 沙盒（BlackBox 虚拟 Android 运行时 + `:zhisandbox` 控制进程 + `SandboxBoard`
-     * 管理界面）已整体删除：`Bcore` / `black-reflection` / `compiler` 三个 Gradle 模块、
-     * `sandbox` 包、`ZhiSandboxTool`、`SandboxPage` 与清单里的三个组件都不在了。
+     * 沙盒引擎（BlackBox）**只在 `:iqsandbox` / `:black` / `:pN` 进程里加载**
+     * （判定见 `SandboxProcessRole.shouldAttachBlackBox`）。管理页本身在主进程，
+     * 它只是通过 `SandboxHostClient`（ContentProvider）与
+     * `SandboxAgentBridge`（定向广播）发号施令。
      *
-     * 但侧栏那一行与 `/sandbox` 斜杠命令**保留**：直接删掉会让老用户以为"菜单丢了"
-     * 或者以为自己记错了 —— 那比明说"功能已移除"更糟。所以这里只给一条提示。
+     * 把这一屏放进主界面的 `NavDisplay` 会有两个后果：
+     * 1. **返回栈里混进虚拟应用** —— guest Activity 是另一个进程的窗口，
+     *    返回键该回到哪一页没有人能讲清；
+     * 2. 主界面的 `Scaffold` 会把这一屏和对话、终端挤在同一个窗口里，
+     *    而沙盒页需要独占一次「导入 APK」的 `OpenDocument` 结果回调。
      *
-     * ## 为什么提示要说清删了什么
+     * 独立 Activity 之后，返回键只有一个主人，文件选择器的结果也只有一个接收者。
      *
-     * 「功能已移除」是结论，用户真正想知道的是"我之前装进去的 APK 呢""以后还会有吗"。
-     * 所以文案里点明"虚拟运行时"这个具体的东西，而不是一个含糊的"暂不可用"。
+     * ## 为什么必须带 NEW_TASK
+     *
+     * ViewModel 手里只有 `Application` 上下文（见 `WorkspaceViewModelFactory`），
+     * 非 Activity 上下文启动 Activity 必须带这个标志，否则直接
+     * `AndroidRuntimeException: Calling startActivity() from outside of an
+     * Activity context requires the FLAG_ACTIVITY_NEW_TASK flag`。
      */
     fun openSandbox() {
         hideSidebarForNavigation()
-        _state.update {
-            it.copy(
-                message = "沙盒功能已移除：内置虚拟 Android 运行时（BlackBox）不再随本应用分发。" +
-                    "安装到真机请用 AndroidIntent install_apk。",
-                messageIsError = false,
+        val context: android.content.Context = getApplication()
+        runCatching {
+            context.startActivity(
+                SandboxDashboardActivity.intent(context)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
             )
+        }.onFailure { error ->
+            _state.update {
+                it.copy(
+                    message = "打不开沙箱：${error.message ?: error.javaClass.simpleName}",
+                    messageIsError = true,
+                )
+            }
         }
     }
 
@@ -1886,9 +1965,9 @@ class WorkspaceViewModel(
         _state.update { it.copy(aboutOpen = true, sidebarOpen = false) }
     }
     fun closeAbout() {
-        // 从关于页返回时把许可页也收掉：它们是一条链（关于 → 许可），
-        // 只关上面那层的话，返回一次会看到许可页还在。
-        _state.update { it.copy(aboutOpen = false, licensesOpen = false) }
+        // 从关于页返回时把许可页、隐私页也收掉：它们是一条链（关于 → 许可 / 隐私），
+        // 只关上面那层的话，返回一次会看到下层还在。
+        _state.update { it.copy(aboutOpen = false, licensesOpen = false, privacyOpen = false) }
     }
 
     fun openLicenses() {
@@ -1899,6 +1978,14 @@ class WorkspaceViewModel(
         _state.update { it.copy(licensesOpen = false) }
     }
 
+    fun openPrivacy() {
+        _state.update { it.copy(privacyOpen = true) }
+    }
+
+    fun closePrivacy() {
+        _state.update { it.copy(privacyOpen = false) }
+    }
+
     fun removeAttachment(id: String) {
         attachmentPayloads.remove(id)
         _state.update { s -> s.copy(attachments = s.attachments.filterNot { it.id == id }) }
@@ -1906,12 +1993,143 @@ class WorkspaceViewModel(
 
     // ---------- 发送 / 停止 ----------
 
-    fun send() {
+    /**
+     * 从输入框的**当前文字**发送。
+     *
+     * 之所以要这个方法：文字现在归界面层（`ComposerTextState`）所有，状态层里的
+     * `composerText` 只是"最后一次外部写入的值"，**不代表用户刚打的内容**。
+     * 发送语义必须用界面那一份，否则会出现"打完一句话点发送，发出去的是上一次的内容"。
+     *
+     * 做法：先把文字灌进状态层（走 `requestComposerText`，于是 epoch +1、
+     * 界面那边不会被打断 —— 它随后会自己 `clear()`），再走原来的 [send]。
+     * 这样斜杠命令、预输入、附件等所有既有分支都复用同一套逻辑，不需要第二份实现。
+     */
+    fun sendFromComposerText(textState: com.zhizhu.zhicode.compose.ui.composer.ComposerTextState) {
+        val text = textState.text()
+        if (text.isBlank()) return
+        requestComposerText(text)
+        // 界面侧可以先清空：`send()` 读的是状态层刚写进去的值。
+        // 清空同时让斜杠面板收起（下一行）。
+        textState.clear()
+        _state.update { it.copy(slashQuery = null, slashMatches = emptyList()) }
+        send()
+    }
+
+    /**
+     * 从输入框发送，并**等待回复**（普通点按发送键）。
+     */
+    /**
+     * 从队列里删掉一条预输入。
+     *
+     * 同时把那条**已经进了对话流的用户气泡**也移除：预输入的实现是
+     * "气泡立刻进 transcript + 文字排队等引擎"（见 `sendInternal` 的预输入分支），
+     * 所以取消排队时如果只清队列，列表里会留下一条永远不会有回复的孤零零的气泡。
+     *
+     * ⚠️ 这里**不**动库：那条气泡还没落盘（引擎在把预输入并入对话时才写），
+     * 所以只需要改内存里的 transcript 与队列。
+     */
+    fun removeQueuedPrompt(chatItemId: String) {
+        _state.update { s ->
+            val remaining = s.pendingInputs.filterNot { it.chatItemId == chatItemId }
+            s.copy(
+                pendingInputs = remaining,
+                // 队列空了就把工作状态清掉，否则会一直挂着「已预输入…」。
+                workingStatus = if (remaining.isEmpty()) null else s.workingStatus,
+                transcript = if (remaining.size == s.pendingInputs.size) {
+                    s.transcript
+                } else {
+                    s.transcript.filterNot { it.id == chatItemId }
+                },
+                transcriptRevision = if (remaining.size == s.pendingInputs.size) {
+                    s.transcriptRevision
+                } else {
+                    s.transcriptRevision + 1
+                },
+                message = "已取消这条排队消息",
+            )
+        }
+    }
+
+    /**
+     * 把队列里的一条取回输入框（编辑后重新发送）。
+     *
+     * 与 [removeQueuedPrompt] 同样的清理，只是多一步把文字写回输入框。
+     */
+    fun editQueuedPrompt(chatItemId: String) {
+        val queued = _state.value.pendingInputs.firstOrNull { it.chatItemId == chatItemId } ?: return
+        removeQueuedPrompt(chatItemId)
+        _state.update {
+            it.copy(
+                composerText = queued.text,
+                composerTextEpoch = it.composerTextEpoch + 1,
+                message = "已取回输入框，可修改后重新发送",
+            )
+        }
+    }
+
+    fun send() = sendInternal(waitForReply = true)
+
+    /**
+     * 只把消息发进对话流，**不让模型回复**（长按发送键）。
+     *
+     * 用途：把自己的一条说明/占位先记进会话（例如"接下来我要手动改这个文件"），
+     * 不想因此触发一次模型往返。用户气泡照常进列表、落盘照常，只是不发 `startTurn`。
+     *
+     * ⚠️ 斜杠命令不适用：那些命令本身就是动作，无所谓"等不等回复"，
+     * 所以这里和其它分支一样直接走 `send()`，共享同一条实现。
+     */
+    fun sendWithoutReply() = sendInternal(waitForReply = false)
+
+    /**
+     * 长按发送键的入口：从界面持有的文字发送，**不**触发模型。
+     *
+     * 与 [sendFromComposerText] 同一套准备动作（灌进状态层 → 清空输入框），
+     * 区别只在最后调的是 [sendWithoutReply]。
+     */
+    fun sendWithoutReplyFromComposerText(
+        textState: com.zhizhu.zhicode.compose.ui.composer.ComposerTextState,
+    ) {
+        val text = textState.text()
+        if (text.isBlank()) return
+        requestComposerText(text)
+        textState.clear()
+        _state.update { it.copy(slashQuery = null, slashMatches = emptyList()) }
+        sendWithoutReply()
+    }
+
+    private fun sendInternal(waitForReply: Boolean) {
         val text = _state.value.composerText.trim()
         if (text.isEmpty()) return
         if (text.startsWith("/")) {
-            _state.update { it.copy(composerText = "", slashQuery = null, slashMatches = emptyList()) }
+            _state.update { it.copy(composerText = "", composerTextEpoch = it.composerTextEpoch + 1, slashQuery = null, slashMatches = emptyList()) }
             runSlashCommand(text)
+            return
+        }
+        /*
+         * 「只发不回复」在引擎忙的时候**没有意义**：那时本来就不发 startTurn，
+         * 走预输入分支才是对的（用户还是想让内容排上队）。所以只在不忙时特判。
+         */
+        if (!waitForReply && !engine.isBusy()) {
+            val userItem = ChatItem(
+                id = nextId("u"),
+                kind = ChatKind.USER,
+                title = "你",
+                body = text,
+                // 与下面两条分支同理：附件必须在 clearAttachments() 之前取。
+                images = currentImages(),
+            )
+            clearAttachments()
+            _state.update {
+                it.copy(
+                    composerText = "",
+                    composerTextEpoch = it.composerTextEpoch + 1,
+                    slashQuery = null,
+                    slashMatches = emptyList(),
+                    transcript = it.transcript + userItem,
+                    message = "已发送（不等待回复）",
+                    scrollToBottomToken = it.scrollToBottomToken + 1,
+                )
+            }
             return
         }
         if (engine.isBusy()) {
@@ -1947,6 +2165,7 @@ class WorkspaceViewModel(
                 val queue = s.pendingInputs + QueuedPrompt(userItem.id, text)
                 s.copy(
                     composerText = "",
+                    composerTextEpoch = s.composerTextEpoch + 1,
                     slashQuery = null,
                     slashMatches = emptyList(),
                     transcript = s.transcript + userItem,
@@ -1968,6 +2187,7 @@ class WorkspaceViewModel(
                     s.copy(
                         pendingInputs = s.pendingInputs.filterNot { q -> q.chatItemId == userItem.id },
                         composerText = text,
+                        composerTextEpoch = s.composerTextEpoch + 1,
                         message = "上一回合刚好结束，消息未能入队，已放回输入框",
                     )
                 }
@@ -1988,6 +2208,7 @@ class WorkspaceViewModel(
         _state.update {
             it.copy(
                 composerText = "",
+                composerTextEpoch = it.composerTextEpoch + 1,
                 slashQuery = null,
                 slashMatches = emptyList(),
                 transcript = it.transcript + userItem,
@@ -2012,6 +2233,8 @@ class WorkspaceViewModel(
         // 记下这一轮属于哪个会话。放在这里而不是各调用点：`startTurn` 是**唯一漏斗**
         // （普通消息与 /init 都走它），只需维护一处；错误迟到时靠它判断该不该落地。
         turnSessionId = _state.value.activeSessionId
+        // 这一轮的起点，用于在回合结束时算出耗时（见 onEngineTurnComplete）。
+        turnStartedAtElapsedMs = android.os.SystemClock.elapsedRealtime()
         val configured = runCatching { engine.configure(engineOverrides()) }
         if (configured.isFailure) {
             // 配置阶段就失败（例如 SharedPreferences 损坏）时不要静默：
@@ -2141,6 +2364,7 @@ class WorkspaceViewModel(
                 },
                 permissionRequest = null,
                 composerText = if (restored.isNotEmpty()) restored else it.composerText,
+                composerTextEpoch = it.composerTextEpoch + 1,
                 pendingInputs = emptyList(),
                 message = when {
                     firstAttempt && it.pendingInputs.isNotEmpty() ->
@@ -2541,6 +2765,53 @@ class WorkspaceViewModel(
         }
         appendProcessStep("工具完成：$name")
 
+        /*
+         * 收集"这一轮改了哪些文件"，写到最后一条助手消息上（元信息行用）。
+         *
+         * 判据是**工具真的产生了改动**，而不是看工具名白名单：
+         *  · `diff` 非空  → 引擎明确报了改动（写文件类工具都走这条）；
+         *  · `addedLines/deletedLines > 0` → 同上，另一个信号。
+         *
+         * 用白名单去猜工具名会漏掉自定义工具，而这两个信号来自引擎本身。
+         * 文件名从 liveTools 里那一份的 summary 取 —— 它在 `onEngineToolUse`
+         * 时已经生成好（形如 `写 src/A.kt`），不需要在这里再解析一次参数。
+         */
+        val changedFile = runCatching {
+            if (diff.isNotBlank() || addedLines > 0 || deletedLines > 0) {
+                // ⚠️ 不能用上面那个 `live`：它在方法开头就被 `liveTools.remove(id)`
+                // 取走了，这里拿到的是 null。改从 transcript 里那一份取 summary
+                // （`onEngineToolUse` 时已经生成好，形如 `写 src/A.kt`）。
+                val summary = _state.value.transcript
+                    .asSequence()
+                    .filter { it.kind == ChatKind.TOOL_GROUP }
+                    .flatMap { it.tools.asSequence() }
+                    .firstOrNull { it.id == id }
+                    ?.summary
+                    ?.trim()
+                    .orEmpty()
+                // summary 可能带着动词前缀，取最后一段更像路径的部分。
+                summary.substringAfterLast(' ').ifBlank { null }
+            } else null
+        }.getOrNull()
+        if (changedFile != null) {
+            _state.update { s ->
+                val index = s.transcript.indexOfLast { it.kind == ChatKind.ASSISTANT }
+                if (index < 0) s
+                else s.copy(
+                    transcript = s.transcript.toMutableList().also { list ->
+                        val item = list[index]
+                        if (changedFile in item.editedFiles) {
+                            // 同一个文件被改多次时只记一次。
+                        } else {
+                            list[index] = item.copy(
+                                editedFiles = (item.editedFiles + changedFile).distinct(),
+                            )
+                        }
+                    },
+                    transcriptRevision = s.transcriptRevision + 1,
+                )
+            }
+        }
     }
 
     override fun onEngineToolBatchCompleted(toolIds: List<String>) {
@@ -2740,6 +3011,11 @@ class WorkspaceViewModel(
         // 这里取消看门狗，所以"等一下就好"那条兜底路径不会再多说一句话。
         resetStopTracking()
         val cancelled = "cancelled".equals(stopReason, ignoreCase = true)
+        // 这一轮的耗时：只在**确有起点**时算，否则不写（保持 -1 = 未知）。
+        val elapsed = turnStartedAtElapsedMs.takeIf { it > 0L }
+            ?.let { android.os.SystemClock.elapsedRealtime() - it }
+            ?: -1L
+        turnStartedAtElapsedMs = 0L
         _state.update { s ->
             s.copy(
                 // 只有"我们确实在等停止"且引擎报的是取消，才可以说已停止。
@@ -2754,6 +3030,20 @@ class WorkspaceViewModel(
                 },
                 message = if (cancelled && s.stopping) "已停止当前任务" else s.message,
                 messageIsError = if (cancelled && s.stopping) false else s.messageIsError,
+                // 把耗时写到**这一轮最后一条助手消息**上。
+                //
+                // 为什么是"最后一条助手消息"而不是新造一条：元信息属于那条回复本身，
+                // 单独一条消息会在对话流里多出一个空卡片。
+                transcript = if (elapsed > 0) {
+                    val index = s.transcript.indexOfLast { it.kind == ChatKind.ASSISTANT }
+                    if (index < 0) s.transcript
+                    else s.transcript.toMutableList().also { list ->
+                        list[index] = list[index].copy(elapsedMs = elapsed)
+                    }
+                } else {
+                    s.transcript
+                },
+                transcriptRevision = if (elapsed > 0) s.transcriptRevision + 1 else s.transcriptRevision,
             )
         }
         // 第一轮结束后会话才真正落库（引擎在 sendPrompt 里创建 SessionStore），
@@ -2997,6 +3287,11 @@ class WorkspaceViewModel(
 
             "/web" -> handleWebSlash(arg)
             "/shizuku" -> handleShizukuSlash(arg)
+            // 这两个原先都**没有路由**，会掉进下面的"指令尚未移植"兜底卡片，
+            // 而 `SLASH_COMMANDS` 里却明明白白列着它们 —— 用户照着敲只会看到
+            // 一句"尚未移植"。保活开关从前也因此是哑的（服务从未被启动）。
+            "/keepalive" -> handleKeepAliveSlash(arg)
+            "/root" -> handleRootSlash(arg)
 
             "/context" -> {
                 if (arg.isEmpty()) {
@@ -3088,6 +3383,297 @@ class WorkspaceViewModel(
      *
      * @param from 被点的那条消息。为空时退回"最后一条用户消息"（正常不会发生）。
      */
+    /**
+     * 删除一条历史消息 —— 先二次确认。
+     *
+     * 删除是不可逆的：库里那一行连同它的大内容块一起没了，没有回收站。
+     * 所以和「删除会话」一样走确认对话框（[ChoiceIntent.MESSAGE_DELETE_CONFIRM]），
+     * 目标 id 记在 `anchorId` 上，确认回调里才真正执行。
+     */
+    private fun confirmDeleteTranscriptMessage(item: ChatItem) {
+        _state.update {
+            it.copy(
+                choicePicker = ChoicePickerState(
+                    title = "删除这条消息",
+                    intent = ChoiceIntent.MESSAGE_DELETE_CONFIRM,
+                    // 锚在那条消息旁边：用户能看清自己要删的是哪一条。
+                    anchorId = item.id,
+                    prompt = "删除后这条消息的内容会从会话记录里移除，且无法撤销。",
+                    options = listOf(ChoiceOption("确认删除")),
+                    submitLabel = "删除",
+                    cancelLabel = "取消",
+                ),
+            )
+        }
+    }
+
+    /**
+     * 真正删除一条消息：落库 → 从界面移除 → 让引擎重读历史。
+     *
+     * ⚠️ 最后那一步不能省。引擎在 `resumeConversation` 时把整条会话的上下文读进内存，
+     * 删除只改了库。不重读的话，用户删掉了这条、模型下一轮**还能看见它**，
+     * 于是会出现"我已经删了，它怎么还在引用"。
+     */
+    private fun deleteTranscriptMessage(item: ChatItem,
+    ) {
+        val sessionId = _state.value.activeSessionId
+        if (sessionId.isEmpty()) return
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                SessionReader.deleteMessage(sessionId, item.id)
+            }
+            result.onSuccess {
+                _state.update { s ->
+                    s.copy(
+                        transcript = s.transcript.filterNot { it.id == item.id },
+                        // 就地修改：条数与首尾 id 可能都不变，只有内容少了。
+                        // 不加这一项，下面的指纹会认为"什么都没变"，界面不更新。
+                        transcriptRevision = s.transcriptRevision + 1,
+                        message = "已删除这条消息",
+                    )
+                }
+                // 让引擎的内存历史与库对齐。失败不致命：下一轮 sendPrompt 用的是
+                // 界面这一份 transcript，只是模型可能多看见一条已删的消息。
+                withContext(Dispatchers.IO) {
+                    runCatching { engine.resumeConversation(sessionId) }
+                }
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(
+                        message = "删除失败：" + (error.message ?: "未知原因"),
+                        messageIsError = true,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * 从消息菜单进入导出：先打开导出面板让人选格式与选项。
+     *
+     * 面板里点了格式之后，落盘由界面层用 SAF 做（见 `ExportPayload` 的说明）。
+     */
+    private fun shareTranscriptMessage(item: ChatItem) {
+        _state.update {
+            it.copy(
+                exportSheet = ExportSheetState(
+                    title = if (item.kind == ChatKind.USER) "导出这条提问" else "导出这条回复",
+                    items = listOf(item),
+                    singleSource = true,
+                    seedId = item.id,
+                ),
+            )
+        }
+    }
+
+    // ---------- 导出面板（照 rikkahub 的 ChatExportSheet）----------
+
+    /** 打开导出面板（多选导出走这里）。 */
+    fun openExportSheet() {
+        val snapshot = _state.value
+        val selected = snapshot.transcript.filter { it.id in snapshot.multiSelectedIds }
+        if (selected.isEmpty()) {
+            _state.update { it.copy(message = "还没有勾选任何消息", messageIsError = true) }
+            return
+        }
+        _state.update {
+            it.copy(
+                exportSheet = ExportSheetState(
+                    title = "导出 ${selected.size} 条消息",
+                    items = selected,
+                ),
+            )
+        }
+    }
+
+    fun dismissExportSheet() = _state.update { it.copy(exportSheet = null) }
+
+    /**
+     * 面板里点「选择更多消息」：关掉面板，进入多选并预先勾上那一条。
+     *
+     * 预先勾上是必要的 —— 用户是从那条消息进来的，让他进去后再点一次同一条
+     * 才叫"选中"，等于把刚才的意图丢掉。
+     */
+    fun exportSelectMore() {
+        val seed = _state.value.exportSheet?.seedId ?: return
+        _state.update { it.copy(exportSheet = null) }
+        beginMultiSelect(seed)
+    }
+
+    fun setExportIncludeReasoning(include: Boolean) {
+        _state.update { s -> s.copy(exportSheet = s.exportSheet?.copy(includeReasoning = include)) }
+    }
+
+    fun setExportExpandReasoning(expand: Boolean) {
+        _state.update { s -> s.copy(exportSheet = s.exportSheet?.copy(expandReasoning = expand)) }
+    }
+
+    /**
+     * 面板里点「导出为 Markdown」。
+     *
+     * 只**准备内容**，不写盘：落盘交给界面用 SAF（系统文件管理器）做。
+     * 见 `ExportPayload` 的说明 —— 分享那条路（FileProvider + 分享面板）
+     * 在这台设备上反复失败，SAF 反过来由系统授权，链路短得多。
+     *
+     * ⚠️ 注释里**不能**出现「斜杠紧跟星号」。Kotlin 的块注释是**可嵌套**的，
+     * 那个序列会开启一层新注释，把后面的源码整块吃掉 —— 编译器报的是
+     * 最后一行 `Unclosed comment`，离真正原因很远。
+     */
+    fun exportSheetAsMarkdown() {
+        val sheet = _state.value.exportSheet ?: return
+        val markdown = buildString {
+            append("# ").append(sheet.title).append("\n\n")
+            append("*Exported on ").append(clockLabel()).append("*\n\n")
+            sheet.items.forEach { item ->
+                append(buildMessageMarkdown(item, sheet.includeReasoning)).append("\n---\n\n")
+            }
+        }
+        _state.update {
+            it.copy(
+                exportSheet = null,
+                pendingExport = ExportPayload(
+                    nonce = ++exportNonce,
+                    kind = ExportKind.MARKDOWN,
+                    mimeType = "text/markdown",
+                    suggestedName = exportSuggestedName("md"),
+                    markdown = markdown,
+                    title = sheet.title,
+                    includeReasoning = sheet.includeReasoning,
+                ),
+            )
+        }
+        cancelMultiSelect()
+    }
+
+    /** 面板里点「导出为图片」：只准备数据，渲染与落盘交给界面（SAF）。 */
+    fun exportSheetAsImage() {
+        val sheet = _state.value.exportSheet ?: return
+        val capped = sheet.items.take(MaxImageExportItems)
+        _state.update {
+            it.copy(
+                exportSheet = null,
+                pendingExport = ExportPayload(
+                    nonce = ++exportNonce,
+                    kind = ExportKind.IMAGE,
+                    mimeType = "image/png",
+                    suggestedName = exportSuggestedName("png"),
+                    items = capped,
+                    title = sheet.title,
+                    includeReasoning = sheet.includeReasoning,
+                    expandReasoning = sheet.expandReasoning,
+                ),
+                message = if (sheet.items.size > capped.size) {
+                    "只导出前 ${capped.size} 条（图片一次最多 $MaxImageExportItems 条）"
+                } else {
+                    "正在准备图片…"
+                },
+            )
+        }
+        cancelMultiSelect()
+    }
+
+    /** 界面落盘完成后清空请求。 */
+    fun clearPendingExport() = _state.update { it.copy(pendingExport = null) }
+
+    /** 与 rikkahub 一致的导出文件名：`chat-export-yyyy-MM-dd_HH-mm-ss.ext`。 */
+    private fun exportSuggestedName(extension: String): String {
+        val stamp = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", java.util.Locale.US)
+            .format(java.util.Date())
+        return "chat-export-$stamp.$extension"
+    }
+    /**
+     * 进入多选模式，并把触发它的那条消息预先勾上。
+     *
+     * 预先勾上是主流做法：用户点「导出 → 选择更多消息」时心里已经有"从这条开始"的意图，
+     * 再让他点一次同一条是多余的一步。
+     */
+    fun beginMultiSelect(anchorId: String) {
+        _state.update {
+            it.copy(
+                multiSelectMode = true,
+                multiSelectedIds = if (anchorId.isEmpty()) emptySet() else setOf(anchorId),
+                choicePicker = null,
+            )
+        }
+    }
+
+    fun toggleMultiSelect(id: String) {
+        _state.update {
+            val next = if (id in it.multiSelectedIds) it.multiSelectedIds - id else it.multiSelectedIds + id
+            it.copy(multiSelectedIds = next)
+        }
+    }
+
+    /**
+     * 拖动对选：**整段替换**选中集合。
+     *
+     * 与 [toggleMultiSelect] 的区别：拖动每一帧都会重算"从起点到当前手指"的区间，
+     * 用 toggle 会变成按帧反复加减，最终结果取决于调用次数 —— 完全不可控。
+     * 这里直接覆盖，所以无论划得多快，结果都只取决于最后那次区间。
+     */
+    fun setMultiSelectRange(ids: Set<String>) {
+        _state.update { if (it.multiSelectedIds == ids) it else it.copy(multiSelectedIds = ids) }
+    }
+
+    /** 界面落盘完成后清空请求。 */
+
+    /**
+     * 界面层发生、但需要显示成"应用提示条"的错误（例如图片导出失败）。
+     *
+     * 这些失败发生在 Compose 的 effect 里，ViewModel 看不到；又不能直接弹 Toast
+     * （本项目统一的反馈入口是那条提示条），所以开一个窄入口让界面回报。
+     */
+    fun showMessage(text: String, isError: Boolean = false) {
+        _state.update { it.copy(message = text, messageIsError = isError) }
+    }
+
+    fun cancelMultiSelect() {
+        _state.update { it.copy(multiSelectMode = false, multiSelectedIds = emptySet()) }
+    }
+
+    /**
+     * 全选 / 取消全选。
+     *
+     * 同一个入口来回切，是因为这两个动作互斥且都只作用于"当前列表全部"：
+     * 分成两个函数会让界面还得自己判断该显示哪个，而判断逻辑早晚会和状态跑偏。
+     *
+     * 只取 `transcript` 里实际存在的 id —— 被删除的消息不该留在选中集合里。
+     */
+    fun toggleSelectAll() {
+        _state.update {
+            val all = it.transcript.map { item -> item.id }.toSet()
+            if (all.isEmpty()) return@update it
+            val allSelected = all.all { id -> id in it.multiSelectedIds }
+            it.copy(multiSelectedIds = if (allSelected) emptySet() else all)
+        }
+    }
+
+    /** 界面消费完分享请求后清空（见 `ShareLauncher`）。 */
+
+    /** 一条消息的 Markdown 表示：正文 + 思考（折叠成引用块）+ 工具调用摘要。 */
+    private fun buildMessageMarkdown(item: ChatItem, includeReasoning: Boolean = true): String = buildString {
+        append("# ").append(if (item.kind == ChatKind.USER) "用户" else "ZhiCode").append("\n\n")
+        if (item.body.isNotBlank()) {
+            append(item.body).append("\n")
+        }
+        // 思考过程按开关决定带不带：它常常比正文长好几倍，
+        // 分享给别人看结论时不该强制塞进去。
+        if (includeReasoning && item.thinking.isNotBlank()) {
+            append("\n> **思考过程**\n")
+            item.thinking.lineSequence().forEach { line -> append("> ").append(line).append("\n") }
+        }
+        if (item.tools.isNotEmpty()) {
+            append("\n## 工具调用\n")
+            item.tools.forEach { tool ->
+                append("\n### ").append(tool.displayName).append("\n\n")
+                if (tool.summary.isNotBlank()) append("`").append(tool.summary).append("`\n\n")
+                if (tool.output.isNotBlank()) {
+                    append("```\n").append(tool.output.take(4000)).append("\n```\n")
+                }
+            }
+        }
+    }
+
     private fun retryLastUserPrompt(from: ChatItem?) {
         // 定位逻辑在纯逻辑层（`ChatNavigation.previousUserPrompt`，有单测）：
         // 这里只负责把对话流翻译成它需要的最小输入。
@@ -3106,7 +3692,7 @@ class WorkspaceViewModel(
             _state.update { it.copy(message = "这条消息之前没有可重试的问题", messageIsError = true) }
             return
         }
-        _state.update { it.copy(composerText = previous) }
+        _state.update { it.copy(composerText = previous, composerTextEpoch = it.composerTextEpoch + 1) }
         send()
     }
 
@@ -3338,7 +3924,7 @@ class WorkspaceViewModel(
         // 带了目标就当成一条普通提示词发出去：计划模式下引擎只会产出计划，不会执行。
         // 「问目标」这一步由引擎自己用「选择」窗口发起（等提问门控接线后生效）。
         if (arg.isNotEmpty()) {
-            _state.update { it.copy(composerText = arg) }
+            _state.update { it.copy(composerText = arg, composerTextEpoch = it.composerTextEpoch + 1) }
             send()
         }
     }
@@ -4761,8 +5347,19 @@ class WorkspaceViewModel(
 
     fun showMessageActions(item: ChatItem) {
         val options = when (item.kind) {
-            ChatKind.USER -> listOf("复制", "自由复制", "再次发送", "编辑后发送")
-            ChatKind.ASSISTANT, ChatKind.ERROR -> listOf("复制", "自由复制", "重试上一问")
+            // 用户消息：删除是明确需求（发错、打错又不想改）。
+            ChatKind.USER -> listOf("复制", "自由复制", "再次发送", "编辑后发送", "导出", "删除")
+            // 助手消息：补上「导出」与「删除」。
+            //
+            // 「重新生成」取代原来的「重试上一问」：动作本身没变（都是
+            // `retryLastUserPrompt(锚点)`，往前找到上一条用户消息再发一次），
+            // 但对着一句回复点「重新生成」比点「重试上一问」更符合直觉。
+            //
+            // 这里原来有「分享」与「多选」两项，其实都通向同一个导出面板：
+            // 一个按单条导、一个先进勾选态。合成「导出」一项，面板里再给
+            // 「选择更多消息」的入口 —— 菜单少一项，路径还更短。
+            ChatKind.ASSISTANT, ChatKind.ERROR ->
+                listOf("复制", "自由复制", "重新生成", "导出", "删除")
             // 工具组这一层只留"复制整组概要"。
             //
             // 这里曾经给第二项是 `if (item.groupCompleted) "已全部完成" else "执行中"` —— 那是
@@ -4954,9 +5551,6 @@ class WorkspaceViewModel(
     }
 
     fun showSessionActions(session: SessionSummary) {
-        com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note(
-            "session-menu/open id=${session.id} title=${session.title}",
-        )
         // 记住操作对象：动作是在**选择器回调**里执行的，那时只能拿到选项文案，
         // 拿不到是哪条会话 —— 不记住就会出现"删掉了当前会话"这种错删。
         pendingSessionAction = session
@@ -5002,7 +5596,6 @@ class WorkspaceViewModel(
 
     /** 打开重命名：同样只靠自由输入提交，输入框预填当前标题。 */
     private fun editSessionTitle(session: SessionSummary) {
-        com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note("session-menu/editTitle in")
         pendingSessionAction = session
         _state.update {
             it.copy(
@@ -5051,11 +5644,54 @@ class WorkspaceViewModel(
         }
     }
 
+    /**
+     * 用户主动关闭当前选择器（「取消」按钮 / 点空白 / 返回键）。
+     *
+     * 与 [dismissChoicePicker] 的区别很重要：那个是**动画结束**时的通知，
+     * 可能晚于新状态写入；这个是用户明确的取消动作，必须无条件关闭。
+     */
+    fun closeChoicePicker() {
+        if (_state.value.choicePicker?.intent == ChoiceIntent.QUESTION) {
+            cancelQuestions()
+            return
+        }
+        pendingSessionAction = null
+        _state.update { it.copy(choicePicker = null) }
+    }
+
     fun dismissChoicePicker() {
         // 提问流程的「取消」必须把空答案回执给引擎，否则引擎会一直等
         // （`QuestionGate.ask` 的闩锁要等 30 分钟才超时）。
         if (_state.value.choicePicker?.intent == ChoiceIntent.QUESTION) {
             cancelQuestions()
+            return
+        }
+        /*
+         * ⚠️⚠️ 只清「仍是同一个选择器」的情况。
+         *
+         * 这个回调来自两处：用户主动取消，**以及**收起动画结束后的
+         * `onDismissRequest`。后者是异步的 —— 当用户在长按菜单里选「重命名」时，
+         * 菜单开始收起，而收起动画播完时 `choicePicker` 已经是新的
+         * `SESSION_RENAME`（`editSessionTitle` 刚写进去）。
+         * 无条件清空就会把它一起清掉，表现为「点重命名没有任何反应」。
+         *
+         * 实测日志（修复前）：
+         *   intent=SESSION_ACTION → intent=SESSION_RENAME → intent=null
+         * 最后那次 null 就是收起动画的 dismiss 覆盖掉的。
+         *
+         * 现在的做法：只有在**不是**这两个"菜单选完要接着弹对话框"的意图时才清。
+         */
+        val current = _state.value.choicePicker?.intent
+        if (current == ChoiceIntent.SESSION_RENAME ||
+            current == ChoiceIntent.SESSION_DELETE_CONFIRM ||
+            current == ChoiceIntent.MESSAGE_DELETE_CONFIRM
+        ) {
+            return
+        }
+        // 同上一条：`beginMultiSelect` 已经主动关了菜单并进入多选，
+        // 收起动画这次迟到的 dismiss 不能把刚打开的多选模式一起清掉
+        // （实测症状：点完菜单项后菜单关了，但一个勾选框都不出现）。
+        if (_state.value.multiSelectMode && current == null) {
             return
         }
         _state.update { it.copy(choicePicker = null) }
@@ -5129,12 +5765,14 @@ class WorkspaceViewModel(
                         // 复用用户消息的原文重发；工具组这类没有正文的目标不支持。
                         if (target.body.isBlank()) _state.update { it.copy(message = "这条消息没有可重发的内容", messageIsError = true) }
                         else {
-                            _state.update { it.copy(composerText = target.body) }
+                            _state.update { it.copy(composerText = target.body, composerTextEpoch = it.composerTextEpoch + 1) }
                             send()
                         }
                     }
-                    "编辑后发送" -> _state.update { it.copy(composerText = target.body, message = "已放回输入框，可编辑后发送") }
-                    "重试上一问" -> retryLastUserPrompt(target)
+                    "编辑后发送" -> _state.update { it.copy(composerText = target.body, composerTextEpoch = it.composerTextEpoch + 1, message = "已放回输入框，可编辑后发送") }
+                    "重试上一问", "重新生成" -> retryLastUserPrompt(target)
+                    "分享", "导出" -> shareTranscriptMessage(target)
+                    "删除" -> confirmDeleteTranscriptMessage(target)
                     else -> _state.update { it.copy(message = "不支持的操作：${option.label}") }
                 }
             }
@@ -5154,14 +5792,10 @@ class WorkspaceViewModel(
                     // 拿不到操作对象就什么都不做。宁可无反应，也不能猜一条会话删掉。
                     _state.update { it.copy(message = "找不到目标会话，操作已取消") }
                 } else when (option.label) {
-                    "重命名" -> {
-                        com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note("session-menu/pick 重命名")
-                        editSessionTitle(target)
-                    }
+                    "重命名" -> editSessionTitle(target)
                     // ⚠️ 不再直接删：先弹二次确认（用户要求「删除会话也要加个 dialog」）。
                     // 原来这一行是 `deleteSession(target.id)`，误触即不可恢复。
                     "删除会话" -> {
-                        com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note("session-menu/pick 删除会话")
                         confirmDeleteSession(target)
                     }
                     // 「恢复会话」已经不在菜单里（点这一行就会打开）。这一支留着是为了
@@ -5193,6 +5827,23 @@ class WorkspaceViewModel(
                 // 单选回调真落到这里时按「跳过本步」处理，不要静默什么都不做。
                 advanceQuestion(null)
             }
+            /*
+             * 删除某条历史消息的确认。
+             *
+             * 目标从 `anchorId` 里取（这份选择器锚在那条消息旁），而不是像会话删除
+             * 那样用 `pendingSessionAction` —— 消息的 id 本身就是自足的定位信息，
+             * 多存一个字段反而会和"列表已经变了"打架。
+             */
+            ChoiceIntent.MESSAGE_DELETE_CONFIRM -> {
+                val targetId = picker.anchorId
+                _state.update { it.copy(choicePicker = null) }
+                val target = _state.value.transcript.firstOrNull { it.id == targetId }
+                if (target == null) {
+                    _state.update { it.copy(message = "这条消息已经不在对话里了") }
+                } else {
+                    deleteTranscriptMessage(target)
+                }
+            }
             // 通用选择器：没有任何附加语义，选中只意味着"用户做了选择"。
             // 这里**不能**再打印"已执行 xxx（Mock）"——那会让人以为某个动作发生了。
             // 附件也不再走这里：它已经有真正的系统图片选择器（attachImage）。
@@ -5203,7 +5854,7 @@ class WorkspaceViewModel(
             // 计划正文由引擎产出（不再由界面拼），所以这里只是把它发出去。
             ChoiceIntent.PLAN_GOAL -> {
                 val goal = if (option.detail.isNotEmpty()) "${option.label} —— ${option.detail}" else option.label
-                _state.update { it.copy(choicePicker = null, composerText = goal) }
+                _state.update { it.copy(choicePicker = null, composerText = goal, composerTextEpoch = it.composerTextEpoch + 1) }
                 send()
             }
         }
@@ -5240,7 +5891,7 @@ class WorkspaceViewModel(
             return
         }
         if (picker.intent == ChoiceIntent.PLAN_GOAL) {
-            _state.update { it.copy(choicePicker = null, composerText = trimmed) }
+            _state.update { it.copy(choicePicker = null, composerText = trimmed, composerTextEpoch = it.composerTextEpoch + 1) }
             send()
             return
         }
@@ -5248,6 +5899,7 @@ class WorkspaceViewModel(
             it.copy(
                 choicePicker = null,
                 composerText = trimmed,
+                composerTextEpoch = it.composerTextEpoch + 1,
                 slashQuery = null,
                 slashMatches = emptyList(),
                 message = null,
@@ -5333,24 +5985,66 @@ class WorkspaceViewModel(
         // 见 newSession()：换会话时停止流程一并作废。
         resetStopTracking()
 
-        _state.update { it.copy(sidebarOpen = false, tab = WorkspaceTab.CHAT, workingStatus = "正在载入会话…") }
+        _state.update {
+            it.copy(
+                sidebarOpen = false,
+                tab = WorkspaceTab.CHAT,
+                workingStatus = "正在载入会话…",
+                // 见 `transcriptLoading` 的说明：置真之后对话流显示"载入中"占位，
+                // 而不是那条"想让 ZhiCode 做什么？"的空会话提示。
+                transcriptLoading = true,
+                // 旧会话的内容**立刻清掉**。否则新会话的消息到达之前，
+                // 屏幕上还挂着上一条会话的对话 —— 那比空白更令人困惑
+                // （用户会以为切错了会话，或者以为消息串了）。
+                transcript = emptyList(),
+                transcriptHasOlder = false,
+                transcriptHasNewer = false,
+                transcriptLoadingOlder = false,
+            )
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val startedAt = android.os.SystemClock.elapsedRealtime()
             // 只读**最近一页**（`SessionReader.PAGE_MESSAGES` 条）＋完整任务清单。
             // 早先这里是「一次读完整条会话」—— 一次长会话的内容块是几十 MB 量级，
             // 真机上"打开一万条的长会话直接崩"就是这一步。往前翻页见 loadOlderTranscript。
-            val page = SessionReader.openPage(session.id)
+            //
+            // ⚠️ 读库与引擎恢复**并行**跑：两者互不依赖（resume 只需要 `engine.configure`
+            // 先完成，而那一步在下面这个 async 之外）。原来是串行，等于把两次 IO 的
+            // 等待时间相加 —— 长会话上能差出几百毫秒。
+            val pageDeferred = async { SessionReader.openPage(session.id) }
+            val engineDeferred = async<Result<Unit>> {
+                // 引擎必须先配置好才有 config 可用，否则 resumeConversation 不会恢复项目/工作流。
+                runCatching {
+                    engine.configure(engineOverrides())
+                    engine.resumeConversation(session.id)
+                }
+            }
+            /*
+             * 读库失败必须自己接住并清掉 [WorkspaceUiState.transcriptLoading]。
+             *
+             * 不接的后果：`openPage` 抛异常 → `await()` 把异常抛穿这个协程 →
+             * `transcriptLoading` 永远停在 true → 对话流**永久**显示"载入中"占位，
+             * 用户再怎么点都看不到内容，而且没有任何提示。那比直接报错糟得多。
+             */
+            val page = runCatching { pageDeferred.await() }.getOrElse { error ->
+                engineDeferred.cancel()
+                _state.update {
+                    it.copy(
+                        transcriptLoading = false,
+                        workingStatus = null,
+                        message = "会话载入失败：" + (error.message ?: "未知原因"),
+                        messageIsError = true,
+                    )
+                }
+                return@launch
+            }
             ZhiMemory.log(
                 "openPage session=" + session.id +
                     " n=" + page.items.size +
                     " hasOlder=" + page.hasMore +
                     " ms=" + (android.os.SystemClock.elapsedRealtime() - startedAt),
             )
-            // 引擎必须先配置好才有 config 可用，否则 resumeConversation 不会恢复项目/工作流。
-            val resumed = runCatching {
-                engine.configure(engineOverrides())
-                engine.resumeConversation(session.id)
-            }
+            val resumed = engineDeferred.await()
             val footprint = engine.memoryFootprint()
             ZhiMemory.log(
                 "resumeConversation session=" + session.id +
@@ -5376,6 +6070,7 @@ class WorkspaceViewModel(
                     stopping = false,
                     composerBusy = false,
                     workingStatus = null,
+                    transcriptLoading = false,
                     message = resumed.exceptionOrNull()?.let { error ->
                         "会话历史已显示，但引擎恢复失败：" + (error.message ?: "未知原因")
                     },
@@ -6116,6 +6811,17 @@ class WorkspaceViewModel(
     fun applySettingsDraft(draft: SettingsDraft) {
         val previous = _state.value.settingsDraft
         _state.update { draft.applyTo(it, keepDraft = true) }
+        /*
+         * 「强制后台保活」必须**立刻**落到真正的服务上。
+         *
+         * 这个开关原先只写进 SessionConfig 下发给引擎，而 `KeepAliveService`
+         * 从没有任何调用点 —— 于是开关点了、值也落了盘，但前台服务从未启动，
+         * 表现就是「这个功能没做」。这里按「值变了才动」触发，
+         * 避免每改一个别的设置就 start/stop 一次服务。
+         */
+        if (previous == null || previous.forcedKeepAliveEnabled != draft.forcedKeepAliveEnabled) {
+            syncKeepAlive(draft.forcedKeepAliveEnabled)
+        }
         // 离散改动（开关 / 下拉 / 步进）立刻落盘；只有**自由文本**才去抖。
         //
         // ⚠️ 去抖这一条是必须的，而且是在修一个我自己引入的卡顿：
@@ -6125,6 +6831,114 @@ class WorkspaceViewModel(
         // 用户的原话正是「卡顿更加多了」。
         val typingOnly = previous != null && differsOnlyInFreeText(previous, draft)
         scheduleSettingsPersist(debounce = typingOnly)
+    }
+
+    /**
+     * 把「强制后台保活」开关同步到真正的服务。
+     *
+     * <p>root 参数取自当前设置：带了才会让服务去调 `RootKeepAliveController`
+     * 加强系统后台策略（电池白名单 + appops）。不带时服务会主动 `revoke`，
+     * 撤掉上一次的加强 —— 这是"用户关掉了 Agent Root"时必须做的事。
+     */
+    private fun syncKeepAlive(enabled: Boolean) {
+        val context = getApplication<Application>()
+        if (enabled) {
+            KeepAliveService.start(context, _state.value.settings.rootExecutionEnabled)
+        } else {
+            KeepAliveService.stop(context)
+        }
+    }
+
+    /**
+     * 回到前台时按**当前状态**补一次保活。
+     *
+     * <p>两类场景需要它：
+     * <ul>
+     *   <li>应用被杀后重启：保活开关是持久化的，服务要跟着恢复；</li>
+     *   <li>用户从常驻通知里点了「停止保活」：那条路径会把设置写回 false，
+     *       下次回到前台要以磁盘上的真实值为准。</li>
+     * </ul>
+     *
+     * <p>只在为真时启动、为假时**什么都不做** —— 每次回到前台都去 stop 一次，
+     * 会在用户手动停掉之后又发出一条 startForegroundService，白白闪一下通知。
+     */
+    fun resumeKeepAliveIfEnabled() {
+        if (_state.value.settings.forcedKeepAliveEnabled) {
+            syncKeepAlive(true)
+        }
+    }
+
+    /**
+     * `/keepalive on|off|check` —— 与 IQ-Code-Android 的 `handleKeepAliveSlash` 同一套取值。
+     */
+    private fun handleKeepAliveSlash(arg: String) {
+        when (arg.lowercase(Locale.US)) {
+            "on", "enable" -> {
+                updateKeepAliveSetting(true)
+                _state.update {
+                    it.copy(message = "强制后台保活已开启；Root 可用时会自动强化系统后台策略")
+                }
+            }
+
+            "off", "disable", "revoke" -> {
+                updateKeepAliveSetting(false)
+                _state.update { it.copy(message = "强制后台保活已关闭") }
+            }
+
+            else -> {
+                val on = _state.value.settings.forcedKeepAliveEnabled
+                _state.update {
+                    it.copy(
+                        message = if (on) {
+                            "强制后台保活：已开启"
+                        } else {
+                            "强制后台保活：未开启；使用 /keepalive on 开启"
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    /** 改写保活开关：走草稿 → 状态 → 服务 → 落盘这条同一条链路，避免两条真源。 */
+    private fun updateKeepAliveSetting(enabled: Boolean) {
+        val draft = _state.value.settingsDraft ?: SettingsDraft.from(_state.value)
+        applySettingsDraft(draft.copy(forcedKeepAliveEnabled = enabled))
+    }
+
+    /**
+     * `/root on|off|check` —— Agent Root 开关。
+     *
+     * <p>保活依赖它：关掉 root 时如果保活开着，要**重新下发一次**
+     * `KeepAliveService.start(context, false)`，让服务撤掉之前加的
+     * 电池白名单与 appops 放宽（参考实现就是这么做的）。
+     */
+    private fun handleRootSlash(arg: String) {
+        val current = _state.value.settings.rootExecutionEnabled
+        when (arg.lowercase(Locale.US)) {
+            "on", "enable" -> {
+                updateRootSetting(true)
+                _state.update { it.copy(message = "Agent Root 已开启") }
+            }
+
+            "off", "disable" -> {
+                updateRootSetting(false)
+                _state.update { it.copy(message = "Agent Root 已关闭") }
+            }
+
+            else -> {
+                _state.update {
+                    it.copy(message = if (current) "Agent Root：已开启" else "Agent Root：未开启；使用 /root on 开启")
+                }
+            }
+        }
+    }
+
+    private fun updateRootSetting(enabled: Boolean) {
+        val draft = _state.value.settingsDraft ?: SettingsDraft.from(_state.value)
+        applySettingsDraft(draft.copy(rootExecutionEnabled = enabled))
+        // root 期望值变了，保活那边的加强/撤回也要跟着重算。
+        if (_state.value.settings.forcedKeepAliveEnabled) syncKeepAlive(true)
     }
 
     /**
@@ -6998,6 +7812,14 @@ class WorkspaceViewModel(
 
         /** 文本附件（技能）拼进提示词的长度上限，与原版一致。 */
         private const val TEXT_ATTACHMENT_LIMIT = 60_000
+
+        /**
+         * 图片导出一次最多几条。
+         *
+         * `BitmapComposer` 在主线程做测量与布局，且导出图是一张**单幅 PNG** ——
+         * 条数再多会两头受罪：主线程明显卡顿，而超高的图片也会被解码方拒绝。
+         */
+        private const val MaxImageExportItems = 50
 
         /**
          * `/init` 的指令**搬走了**。

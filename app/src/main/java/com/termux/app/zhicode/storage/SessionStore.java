@@ -1892,6 +1892,104 @@ public final class SessionStore {
         rewrite(sessionId, target, "", true);
     }
 
+    /**
+     * 按**界面上的消息 id** 删除一条历史消息。
+     *
+     * <p>为什么需要它，而不是复用 {@link #deleteMessage(String, MessageReference)}：
+     * 那个入口的匹配条件是「messageId + contentHash 都相等」，contentHash 是内容指纹 ——
+     * 一旦这条消息在别处被编辑过（或者恢复历史时做过截断处理），哈希就对不上，
+     * 抛「要修改的历史消息已变化，请重新打开会话」。
+     *
+     * <p>而界面上要删的恰恰就是**那一行**：它的 id 形如 {@code session-a-123} /
+     * {@code session-u-123} / {@code session-g-123}（见 SessionReader 的 id()），
+     * 后缀就是行号 seq。所以这里直接用 seq 定位，比按内容哈希更准也更稳。
+     *
+     * <p>仍然校验前缀与角色是否一致：{@code a}/{@code u} 是 assistant/user 行，
+     * {@code g} 是同一行里的工具组（它不是一个独立行，所以删 {@code g} 等于删那一行）。
+     * 校验可以挡住"界面拿了一个陈旧的 id 来删别的行"。
+     *
+     * <p>⚠️ 删除必须在事务里同时清 {@code TABLE_BLOCKS} 与 {@code TABLE_EVENTS}，
+     * 否则会留下孤儿大内容。这里照 {@link #rewrite} 的删除分支用同一套 SQL，
+     * 之后同样失效目标之后的派生数据并重建 blob 引用。
+     *
+     * @return 实际删除的行数（1 = 成功，0 = 没找到）
+     */
+    public static int deleteMessageById(String sessionId, String chatItemId) throws Exception {
+        if (isBlank(sessionId) || isBlank(chatItemId)) {
+            throw new IllegalArgumentException("无效的会话消息");
+        }
+        // 形如 session-<prefix>-<seq>，从右往左取最后两段。
+        int lastDash = chatItemId.lastIndexOf('-');
+        int prevDash = lastDash > 0 ? chatItemId.lastIndexOf('-', lastDash - 1) : -1;
+        if (prevDash < 0 || lastDash <= prevDash + 1) {
+            throw new IllegalArgumentException("无法识别的消息标识：" + chatItemId);
+        }
+        String prefix = chatItemId.substring(prevDash + 1, lastDash);
+        long seq;
+        try {
+            seq = Long.parseLong(chatItemId.substring(lastDash + 1));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("无法识别的消息标识：" + chatItemId);
+        }
+        if (!"a".equals(prefix) && !"u".equals(prefix) && !"g".equals(prefix)) {
+            throw new IllegalArgumentException("无法识别的消息标识：" + chatItemId);
+        }
+
+        synchronized (SessionDatabase.lock()) {
+            SQLiteDatabase db = SessionDatabase.get().db();
+            List<Row> rows = loadRows(sessionId, -1L, true);
+
+            JSONObject targetRow = null;
+            for (Row row : rows) {
+                if (row.seq != seq || row.json == null) continue;
+                if (!RowType.MESSAGE.equals(row.json.optString(Field.TYPE, ""))) continue;
+                targetRow = row.json;
+                break;
+            }
+            if (targetRow == null) return 0;
+
+            // 前缀与真实角色必须一致，否则说明界面拿错了 id。
+            String role = targetRow.optString(Field.ROLE, "");
+            String expectedPrefix = "assistant".equals(role) ? "a" : "u";
+            // g（工具组）与 a 同属 assistant 行，允许。
+            if (!expectedPrefix.equals(prefix) && !("g".equals(prefix) && "a".equals(expectedPrefix))) {
+                throw new IllegalStateException("消息标识与内容不一致，删除已取消");
+            }
+
+            db.beginTransaction();
+            try {
+                db.delete(SessionDatabase.TABLE_BLOCKS,
+                        C_SESSION_ID + " = ? AND " + C_MESSAGE_SEQ + " = ?",
+                        new String[]{sessionId, String.valueOf(seq)});
+                db.delete(SessionDatabase.TABLE_EVENTS,
+                        C_SESSION_ID + " = ? AND " + C_SEQ + " = ?",
+                        new String[]{sessionId, String.valueOf(seq)});
+
+                // 目标之后的派生数据一律失效（与 rewrite 一致）。
+                db.delete(SessionDatabase.TABLE_SNAPSHOTS,
+                        C_SESSION_ID + " = ? AND " + C_SEQ + " > ?",
+                        new String[]{sessionId, String.valueOf(seq)});
+                for (Row row : rows) {
+                    if (row.seq <= seq || row.json == null) continue;
+                    if (!isContextEvent(row.json.optString(Field.TYPE, ""))) continue;
+                    db.delete(SessionDatabase.TABLE_EVENTS,
+                            C_SESSION_ID + " = ? AND " + C_SEQ + " = ?",
+                            new String[]{sessionId, String.valueOf(row.seq)});
+                }
+
+                long count = countMessages(db, sessionId);
+                ContentValues values = new ContentValues();
+                values.put(C_MESSAGE_COUNT, count);
+                db.update(SessionDatabase.TABLE_SESSIONS, values, C_ID + " = ?", new String[]{sessionId});
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+        }
+        SessionDatabase.get().rebuildBlobRefs(sessionId);
+        return 1;
+    }
+
     /** 空内容写进去等于把这条消息删了，却在界面上显示成一条空消息 —— 所以直接拒绝。 */
     private static String requireText(String value, String message) {
         String trimmed = orEmpty(value).trim();
