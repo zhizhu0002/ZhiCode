@@ -28,6 +28,8 @@ import com.zhizhu.zhicode.compose.data.RoleCardStore
 import com.zhizhu.zhicode.compose.data.MemoryStore
 import com.zhizhu.zhicode.compose.data.SkillImport
 import com.zhizhu.zhicode.compose.data.SkillStore
+import com.zhizhu.zhicode.compose.data.UpdateChecker
+import com.zhizhu.zhicode.compose.data.VersionCompare
 import com.zhizhu.zhicode.compose.data.WorkspacePaths
 import com.zhizhu.zhicode.compose.data.WorkspaceRepository
 import com.zhizhu.zhicode.compose.engine.EngineEvents
@@ -121,6 +123,8 @@ import com.zhizhu.zhicode.compose.model.ToolActions
 import com.zhizhu.zhicode.compose.model.ToolKind
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
+import com.zhizhu.zhicode.compose.model.UpdatePhase
+import com.zhizhu.zhicode.compose.model.UpdateReleaseInfo
 import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import com.zhizhu.zhicode.sandbox.SandboxDashboardActivity
@@ -1978,12 +1982,313 @@ class WorkspaceViewModel(
      */
     fun openAbout() {
         _state.update { it.copy(aboutOpen = true, sidebarOpen = false) }
+        // 关于页要决定「有新版本 x.y.z」那一行显不显示，而这只有在真的查过之后才知道。
+        // 在这里触发一次检查（不是进更新页才查）：否则从设置进关于页时，
+        // 那一行永远不出现 —— 用户看到的是"没有更新"，而其实是"还没查过"。
+        //
+        // 同一个 `UpdateUiState` 被更新页复用，所以随后点进更新页时不会重复请求
+        // （见 checkForUpdates 的 `hasChecked` 判据）。
+        checkForUpdatesIfStale()
     }
     fun closeAbout() {
-        // 从关于页返回时把许可页、隐私页也收掉：它们是一条链（关于 → 许可 / 隐私），
-        // 只关上面那层的话，返回一次会看到下层还在。
-        _state.update { it.copy(aboutOpen = false, licensesOpen = false, privacyOpen = false) }
+        // 从关于页返回时把许可页、隐私页、更新页也收掉：它们是一条链
+        // （关于 → 许可 / 隐私 / 更新），只关上面那层的话，返回一次会看到下层还在。
+        _state.update {
+            it.copy(
+                aboutOpen = false,
+                licensesOpen = false,
+                privacyOpen = false,
+                updatePageOpen = false,
+            )
+        }
     }
+
+    // ---------- 检查更新 ----------
+
+    /**
+     * 打开「检查更新」页。
+     *
+     * 入口有两个：关于页 Hero 里那个大 ZhiCode 字（**常驻** —— 就算没有新版本，
+     * 用户也该能进来看当前版本的更新内容），以及关于页底部那一行
+     * （只在真有新版本时出现）。
+     */
+    fun openUpdate() {
+        _state.update { it.copy(updatePageOpen = true) }
+        // 进页面时自动查一次（若还没查过）。这样"打开就该看到状态"，
+        // 而不是让用户先点一下「检查更新」才有东西看。
+        checkForUpdatesIfStale()
+    }
+
+    fun closeUpdate() {
+        _state.update { it.copy(updatePageOpen = false) }
+    }
+
+    /**
+     * 检查更新（用户主动点，或 [openUpdate] / [openAbout] 自动触发）。
+     *
+     * ## 为什么"没查过才自动查"而不是每次进页都查
+     *
+     * 每次进页都请求 GitHub 会让"打开关于页"这个纯本地动作**依赖网络** ——
+     * 断网时页面会卡一下再显示一句错误。而 GitHub 的匿名 API 有速率限制
+     * （每小时 60 次），反复进进出出很容易把它耗光，那时用户看到的是
+     * "检查更新失败"，原因却只是"你自己刚才点了太多次"。
+     *
+     * 所以自动查只在 [UpdateUiState.hasChecked] 为假时发生；
+     * 用户想再查一次就点「检查更新」那个按钮，[force] = true。
+     */
+    fun checkForUpdates(force: Boolean = true) {
+        runBusy(ACTION_CHECK_UPDATE) {
+            val current = _state.value.update
+            if (!force && current.hasChecked) return@runBusy
+            if (current.phase == UpdatePhase.Checking) return@runBusy
+
+            _state.update {
+                it.copy(update = it.update.copy(phase = UpdatePhase.Checking, error = null))
+            }
+            checkUpdateCancellation = UpdateChecker.Cancellation { false }
+            val outcome = runCatching {
+                UpdateChecker.fetch(checkUpdateCancellation ?: UpdateChecker.Cancellation { false })
+            }
+            checkUpdateCancellation = null
+
+            _state.update { s ->
+                val root = outcome.getOrNull()
+                when {
+                    outcome.isFailure -> s.copy(
+                        update = s.update.copy(
+                            phase = UpdatePhase.Failed,
+                            error = outcome.exceptionOrNull()?.message ?: "检查更新失败",
+                            hasChecked = true,
+                        ),
+                    )
+                    // 仓库还没有发布过 Release。**不是错误**，也不能说成"已是最新"：
+                    // 那样上游发布之后这句话仍然成立，用户会以为检查坏了。
+                    root.isNullOrEmpty() -> s.copy(
+                        update = s.update.copy(
+                            phase = UpdatePhase.NoReleases,
+                            release = null,
+                            error = null,
+                            hasChecked = true,
+                        ),
+                    )
+                    else -> {
+                        val newest = pickNewest(root)
+                        val info = newest?.let(::toReleaseInfo)
+                        // tag 可能是 `v0.3.0`，`VersionCompare` 自己会去掉 `v` 前缀。
+                        val hasNewer = newest != null && VersionCompare.isNewer(
+                            newest.tag,
+                            com.zhizhu.zhicode.compose.BuildConfig.VERSION_NAME,
+                        )
+                        s.copy(
+                            update = s.update.copy(
+                                phase = if (hasNewer) UpdatePhase.Available else UpdatePhase.UpToDate,
+                                release = info.takeIf { hasNewer },
+                                error = null,
+                                hasChecked = true,
+                                downloadPercent = 0,
+                                downloadedBytes = 0L,
+                                totalBytes = 0L,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /** [openAbout] / [openUpdate] 的自动检查：只在还没查过时发生。 */
+    private fun checkForUpdatesIfStale() {
+        if (_state.value.update.hasChecked) return
+        checkForUpdates(force = false)
+    }
+
+    /**
+     * 挑出"最新的"那条 release。
+     *
+     * ## 为什么不直接取列表第一条
+     *
+     * GitHub 的 `/releases` **按创建时间倒序、而不是按版本号**。打了新 tag
+     * 但把旧版本的 release 重新编辑一次，顺序就会变。所以这里按**版本号**
+     * 比一遍 —— 这是唯一能保证"挑出来的确实是最新版本"的判据。
+     *
+     * 版本号解析不了的那些条目被跳过（`VersionCompare` 对非法输入返回 false），
+     * 而不是当成 0 参与比较。
+     */
+    private fun pickNewest(releases: List<UpdateChecker.Release>): UpdateChecker.Release? =
+        releases.filter { !it.prerelease }.maxWithOrNull { a, b ->
+            if (VersionCompare.isNewer(a.tag, b.tag)) 1 else -1
+        } ?: releases.firstOrNull()
+
+    private fun toReleaseInfo(release: UpdateChecker.Release) = UpdateReleaseInfo(
+        tag = release.tag,
+        name = release.name,
+        publishedAt = release.publishedAt,
+        body = release.body,
+        prerelease = release.prerelease,
+        pageUrl = release.pageUrl,
+        apkUrl = release.apkUrl,
+        apkName = release.apkName,
+        apkSize = release.apkSize,
+    )
+
+    /**
+     * 下载安装包。
+     *
+     * 落到 `cacheDir/update/` 下 —— 那个根**已经**在 `ZhiFileProvider` 的白名单里
+     * （见 `ZhiFileProvider.java` 的"允许分享的三个根"），所以下载完可以直接换成
+     * `content://` 交给系统安装器，不需要额外开目录、也不需要申请存储权限。
+     */
+    fun downloadUpdate() {
+        runBusy(ACTION_DOWNLOAD_UPDATE) {
+            val release = _state.value.update.release ?: return@runBusy
+            val url = release.apkUrl ?: return@runBusy
+            val target = updateApkFile(release)
+
+            // 同一个 tag、体积又对得上，就不重复下 —— 用户点了取消再点下载、
+            // 或者退出重进，都不该把同一份几百 MB 的文件重下一遍。
+            if (target.isFile && release.apkSize > 0 && target.length() == release.apkSize) {
+                _state.update {
+                    it.copy(
+                        update = it.update.copy(
+                            phase = UpdatePhase.Available,
+                            downloadPercent = 100,
+                            downloadedBytes = target.length(),
+                            totalBytes = target.length(),
+                            error = null,
+                        ),
+                    )
+                }
+                return@runBusy
+            }
+
+            _state.update {
+                it.copy(
+                    update = it.update.copy(
+                        phase = UpdatePhase.Downloading,
+                        downloadPercent = 0,
+                        downloadedBytes = 0L,
+                        totalBytes = release.apkSize,
+                        error = null,
+                    ),
+                )
+            }
+
+            downloadUpdateCancellation = UpdateChecker.Cancellation { downloadCancelled }
+            val outcome = runCatching {
+                UpdateChecker.downloadApk(
+                    url = url,
+                    target = target,
+                    onProgress = { done, total ->
+                        _state.update { s ->
+                            val percent = if (total > 0) ((done * 100) / total).toInt() else 0
+                            s.copy(
+                                update = s.update.copy(
+                                    downloadedBytes = done,
+                                    totalBytes = total,
+                                    downloadPercent = percent.coerceIn(0, 100),
+                                ),
+                            )
+                        }
+                    },
+                    cancellation = downloadUpdateCancellation
+                        ?: UpdateChecker.Cancellation { false },
+                )
+            }
+            downloadUpdateCancellation = null
+            downloadCancelled = false
+
+            _state.update { s ->
+                if (outcome.isSuccess) {
+                    s.copy(
+                        update = s.update.copy(
+                            phase = UpdatePhase.Available,
+                            downloadPercent = 100,
+                            downloadedBytes = target.length(),
+                            totalBytes = target.length(),
+                            error = null,
+                        ),
+                        // 不再自己弹安装器：交给页面在用户按下「安装」时调
+                        // `installDownloadedUpdate()`。下载完就跳系统安装器太突然。
+                        message = "安装包已下载",
+                    )
+                } else {
+                    s.copy(
+                        update = s.update.copy(
+                            phase = UpdatePhase.Available,
+                            error = outcome.exceptionOrNull()?.message ?: "下载失败",
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    /** 取消正在进行的下载（或检查）。 */
+    fun cancelUpdateDownload() {
+        downloadCancelled = true
+        checkUpdateCancellation = null
+        downloadUpdateCancellation = null
+    }
+
+    /**
+     * 把已下载的安装包交给系统安装器。
+     *
+     * 走 `AndroidIntentBridge.installApkFile` —— 它内部就是"安装 APK"那个工具的
+     * 同一段实现（`ZhiFileProvider` 换 URI → 未授权先进「未知来源」授权页 →
+     * 启动系统安装器），而 `MainActivity.onResume` 会在用户授权返回后
+     * 自动续装。自己再写一遍这段流程只会让两边慢慢长歪。
+     */
+    fun installDownloadedUpdate() {
+        val release = _state.value.update.release ?: return
+        val apk = updateApkFile(release)
+        if (!apk.isFile) {
+            _state.update { it.copy(message = "安装包不存在，请重新下载", messageIsError = true) }
+            return
+        }
+        val result = runCatching {
+            com.termux.app.zhicode.tools.AndroidIntentBridge(getApplication())
+                .installApkFile(apk)
+        }
+        val failure = result.exceptionOrNull()?.message
+        val toolError = result.getOrNull()?.takeIf { it.isError }?.content
+        val error = failure ?: toolError
+        if (error != null) {
+            _state.update { it.copy(message = "无法启动安装：$error", messageIsError = true) }
+        }
+    }
+
+    /**
+     * 安装包在缓存里的落点。
+     *
+     * 文件名带上 tag 并做一次消毒：tag 来自远端，可能含 `/` 或 `..`。
+     * 直接拼进路径等于给了一个任意路径写入的口子。
+     */
+    private fun updateApkFile(release: UpdateReleaseInfo): File {
+        val safeTag = release.tag.replace(Regex("[^A-Za-z0-9._-]"), "_").take(64)
+        val dir = File(getApplication<android.app.Application>().cacheDir, "update")
+        val name = release.apkName
+            ?.substringAfterLast('/')
+            ?.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            ?.takeIf { it.endsWith(".apk", ignoreCase = true) }
+            ?: "zhicode-$safeTag.apk"
+        return File(dir, "${safeTag}-$name")
+    }
+
+    /** 检查更新的在飞登记键。与下载分开：两者可以同时登记，互不吞掉。 */
+    private val ACTION_CHECK_UPDATE = "update.check"
+    private val ACTION_DOWNLOAD_UPDATE = "update.download"
+
+    /** 非空表示有一次检查请求在飞（取消时置空，但仍要保留一个可查询的取消源）。 */
+    @Volatile
+    private var checkUpdateCancellation: UpdateChecker.Cancellation? = null
+
+    /** 非空表示有一次下载在飞。 */
+    @Volatile
+    private var downloadUpdateCancellation: UpdateChecker.Cancellation? = null
+
+    /** 用户是否按下了「取消下载」。重置时机见 [downloadUpdate] 的收尾。 */
+    @Volatile
+    private var downloadCancelled = false
 
     fun openLicenses() {
         _state.update { it.copy(licensesOpen = true) }

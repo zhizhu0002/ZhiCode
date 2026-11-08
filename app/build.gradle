@@ -97,6 +97,24 @@ android {
     lint { abortOnError false; checkReleaseBuilds false }
 
     /*
+     * 单元测试的工作目录固定为**工程根**。
+     *
+     * 不设它时，Gradle 用的是模块目录（`app/`），于是 `BrandTextTest` 里那句
+     * `File("app/src/main/java")` 被解析成 `app/app/src/main/java`、
+     * `LicensesTest` 的 `File("NOTICE")` 变成 `app/NOTICE` —— 4 条测试因此失败，
+     * 报的却是"找不到源码目录 / 找不到 NOTICE"这种看起来像工程坏了的信息。
+     *
+     * 那几条测试的路径是**相对工程根**写的（`test-jvm-fast.sh` 也是先
+     * `cd "$PROJECT_ROOT"` 再跑），所以这里对齐根目录才是对的；
+     * 反过来把测试改成相对 `app/` 会让快路径那一套失效。
+     */
+    testOptions {
+        unitTests.all {
+            workingDir = rootProject.projectDir
+        }
+    }
+
+    /*
      * Release 签名。只在密钥库可用时声明 —— 见文件开头那段说明。
      *
      * ## 为什么是 v2，以及为什么关掉 v1

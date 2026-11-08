@@ -63,6 +63,13 @@ MAIN_KT_SOURCES=(
     app/src/main/java/com/zhizhu/zhicode/compose/model/ActionBusy.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/McpDraft.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/PromptSlots.kt
+    # 仓库坐标：`PROJECT_URL` / `REPO_SLUG` 搬到了这里，而 `Licenses.kt` 与
+    # `LicensesTest` 都在用它们 —— 少了这一行，下面编 `Licenses.kt` 会报
+    # "unresolved reference 'PROJECT_URL'"。
+    app/src/main/java/com/zhizhu/zhicode/compose/model/ProjectRepo.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/model/ChangeLog.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/data/VersionCompare.kt
+    app/src/main/java/com/zhizhu/zhicode/compose/data/ReleaseNotes.kt
     app/src/main/java/com/zhizhu/zhicode/compose/model/Licenses.kt
     app/src/main/java/com/zhizhu/zhicode/compose/theme/ZhiThemeSpec.kt
 )
@@ -93,6 +100,11 @@ DEFAULT_TESTS=(
     com.zhizhu.zhicode.compose.model.PromptSlotsTest
     com.zhizhu.zhicode.compose.theme.ThemeSpecTest
     com.zhizhu.zhicode.compose.model.LicensesTest
+    # 「检查更新」的纯逻辑：版本比较、更新内容分流、本地版本说明。
+    # 三者都不碰 Android，所以能进这条快路径（这正是它们被写成纯函数的原因）。
+    com.zhizhu.zhicode.compose.data.VersionCompareTest
+    com.zhizhu.zhicode.compose.data.ReleaseNotesTest
+    com.zhizhu.zhicode.compose.model.ChangeLogTest
 )
 
 # 哪些目标是 Kotlin。

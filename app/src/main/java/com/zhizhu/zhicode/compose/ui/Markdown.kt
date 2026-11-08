@@ -2,6 +2,7 @@ package com.zhizhu.zhicode.compose.ui
 
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.data.Clipboard
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.ui.math.LatexRenderer
@@ -352,12 +353,13 @@ private fun MdBlockView(
             }
         }
 
-        MdBlock.Rule -> Box(
+        // `---` 水平分割线。走 Miuix 的 Divider（不再手搓 `Box + background`）：
+        // 手搓那条 `height(1.dp).background(...)` 在 3x 屏上是 3px，
+        // 比系统自带的线粗一截；Divider 的 `Thickness` 才是 HyperOS 那一档。
+        MdBlock.Rule -> ZhiHorizontalDivider(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 2.dp)
-                .height(1.dp)
-                .background(scheme.dividerLine),
+                .padding(vertical = 2.dp),
         )
 
         is MdBlock.Code -> CodeBlock(block, fontSize)
@@ -736,9 +738,7 @@ private fun MdTableView(table: MdBlock.Table, fontSize: TextUnit, styles: Inline
                 styles = styles,
                 header = true,
             )
-            Box(
-                modifier = Modifier.fillMaxWidth().height(1.dp).background(scheme.dividerLine),
-            )
+            ZhiHorizontalDivider(modifier = Modifier.fillMaxWidth())
             table.rows.forEachIndexed { index, row ->
                 TableRow(
                     cells = row,
@@ -748,9 +748,12 @@ private fun MdTableView(table: MdBlock.Table, fontSize: TextUnit, styles: Inline
                     header = false,
                 )
                 if (index != table.rows.lastIndex) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().height(1.dp)
-                            .background(scheme.dividerLine.copy(alpha = 0.5f)),
+                    // 行间线用更淡的一档：表头线是结构分隔，行间线只是视觉引导，
+                    // 同色同粗会让表格看起来被切成一格一格。`theme.dividerLine` 的
+                    // 半透明版本与 Miuix 自己的次级线观感一致。
+                    ZhiHorizontalDivider(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = scheme.dividerLine.copy(alpha = 0.5f),
                     )
                 }
             }

@@ -108,7 +108,24 @@ class LicensesTest {
     @Test
     fun projectUrlPointsAtAConcreteRepository() {
         assertTrue(PROJECT_URL.startsWith("https://"))
-        assertTrue(PROJECT_URL.endsWith("IQ-Code-Android"))
+        // ⚠️ 断言的是**本工程自己的仓库**（zhizhu0002/ZhiCode），不是上游 IQ Code。
+        // 这两个地址在这个工程里一直同时存在：PROJECT_URL 是发布源，
+        // THIRD_PARTY_LICENSES 第一条的 homepage 是对上游 iqisge-gif 的署名。
+        // 之前这里断言 endsWith("IQ-Code-Android")，把两者混成了一个。
+        assertTrue(
+            "PROJECT_URL 应指向本工程仓库：$PROJECT_URL",
+            PROJECT_URL.endsWith("zhizhu0002/ZhiCode"),
+        )
         assertEquals("MIT", OWN_LICENSE)
+    }
+
+    @Test
+    fun repoSlugAndUrlsAgreeWithEachOther() {
+        // 三个常量都由 REPO_SLUG 派生；这条防的是「改了 owner/repo 但漏改派生值」——
+        // 那种不一致会让更新检查去问另一个仓库要 tag（进而拿别人的版本号比大小）。
+        assertTrue("REPO_SLUG 必须是 owner/repo：$REPO_SLUG", REPO_SLUG.split("/").size == 2)
+        assertEquals("https://github.com/$REPO_SLUG", PROJECT_URL)
+        assertEquals("https://api.github.com/repos/$REPO_SLUG/releases", RELEASES_API_URL)
+        assertTrue(RELEASES_PAGE_URL.startsWith(PROJECT_URL))
     }
 }

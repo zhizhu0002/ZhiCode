@@ -13,6 +13,7 @@ import com.zhizhu.zhicode.compose.ui.pages.PromptsPage
 import com.zhizhu.zhicode.compose.ui.pages.ThemePage
 import com.zhizhu.zhicode.compose.ui.pages.ChatDisplayPage
 import com.zhizhu.zhicode.compose.ui.pages.ThirdPartyLicensesPage
+import com.zhizhu.zhicode.compose.ui.pages.UpdatePage
 import com.zhizhu.zhicode.compose.ui.pages.RoleCardsPage
 import com.zhizhu.zhicode.compose.ui.pages.SkillsPage
 import com.zhizhu.zhicode.compose.ui.pages.SettingsPage
@@ -284,6 +285,7 @@ private fun ZhiCodeScreen(
             add(AppKey.About)
             if (state.licensesOpen) add(AppKey.Licenses)
             if (state.privacyOpen) add(AppKey.Privacy)
+            if (state.updatePageOpen) add(AppKey.Update)
         }
     }
     LaunchedEffect(desiredStack) {
@@ -359,6 +361,7 @@ private fun ZhiCodeScreen(
             val live = viewModel.state.value
             when {
                 live.uiDebugOpen -> viewModel.closeUiDebug()
+                live.updatePageOpen -> viewModel.closeUpdate()
                 live.privacyOpen -> viewModel.closePrivacy()
                 live.licensesOpen -> viewModel.closeLicenses()
                 live.aboutOpen -> viewModel.closeAbout()
@@ -526,6 +529,18 @@ private fun ZhiCodeScreen(
                 onBack = viewModel::closeAbout,
                 onOpenLicenses = viewModel::openLicenses,
                 onOpenPrivacy = viewModel::openPrivacy,
+                onOpenUpdate = viewModel::openUpdate,
+                update = state.update,
+            )
+        }
+        entry<AppKey.Update>(swipeDismiss = swipeBack) {
+            UpdatePage(
+                state = state.update,
+                onBack = viewModel::closeUpdate,
+                onCheck = { viewModel.checkForUpdates() },
+                onDownload = viewModel::downloadUpdate,
+                onCancelDownload = viewModel::cancelUpdateDownload,
+                onInstall = viewModel::installDownloadedUpdate,
             )
         }
         entry<AppKey.Licenses>(swipeDismiss = swipeBack) {
@@ -580,6 +595,15 @@ private sealed interface AppKey : NavKey {
 
     /** 隐私政策。与 [Licenses] 平级：都从关于页进，压在关于之上。 */
     data object Privacy : AppKey
+
+    /**
+     * 「检查更新」。
+     *
+     * <p>与 [Licenses] / [Privacy] 一样是「关于」的子页，所以串在
+     * `aboutOpen` 分支里。入口有两个：关于页 Hero 里那个大 ZhiCode 字（常驻），
+     * 以及关于页卡片里的「有新版本 x.y.z」那一行（只在真有新版本时出现）。
+     */
+    data object Update : AppKey
 }
 
 /** 设置相关页面：hub 与各二级页。 */

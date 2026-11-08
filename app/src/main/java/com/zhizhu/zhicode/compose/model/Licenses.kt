@@ -260,8 +260,14 @@ val THIRD_PARTY_LICENSES: List<LicenseEntry> = listOf(
 /** 本工程自身的许可（「关于」页那一行显示它）。 */
 const val OWN_LICENSE = "MIT"
 
-/** 项目主页。关于页的「查看源码」与许可页的「完整声明」都指向仓库而不是某次构建的产物。 */
-const val PROJECT_URL = "https://github.com/iqisge-gif/IQ-Code-Android"
+/*
+ * `PROJECT_URL` 已搬到 `model/ProjectRepo.kt`。
+ *
+ * 它原来就在这一行，和 `THIRD_PARTY_LICENSES` 摆在一起 —— 只有「关于页的外链」
+ * 一个使用者时那样没问题。现在「检查更新」也要用它派生 API 地址与 owner/repo，
+ * 两处各写一份迟早会指向不同仓库（比如界面指向 A、更新检查指向 B），
+ * 所以收成一处。见 `ProjectRepo.kt` 头部关于「与 IQ Code 那一项的区别」的说明。
+ */
 
 /** 赞助页（爱发电）。关于页「应用」分组里的「赞助」指向这里。 */
 const val DONATE_URL = "https://afdian.com/a/zhizhu0001"

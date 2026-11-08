@@ -1,5 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.pages
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -38,14 +40,17 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.BuildConfig
 import com.zhizhu.zhicode.compose.model.DONATE_URL
 import com.zhizhu.zhicode.compose.model.OWN_LICENSE
 import com.zhizhu.zhicode.compose.model.PROJECT_URL
+import com.zhizhu.zhicode.compose.model.UpdatePhase
+import com.zhizhu.zhicode.compose.model.UpdateUiState
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.theme.LocalZhiDark
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -73,6 +78,7 @@ import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import androidx.compose.ui.graphics.BlendMode as ComposeBlendMode
 
@@ -101,6 +107,8 @@ fun AboutPage(
     onBack: () -> Unit,
     onOpenLicenses: () -> Unit,
     onOpenPrivacy: () -> Unit,
+    onOpenUpdate: () -> Unit,
+    update: UpdateUiState,
 ) {
     val uriHandler = LocalUriHandler.current
     val openUri: (String) -> Unit = { url -> runCatching { uriHandler.openUri(url) } }
@@ -166,6 +174,8 @@ fun AboutPage(
                 openUri = openUri,
                 onOpenLicenses = onOpenLicenses,
                 onOpenPrivacy = onOpenPrivacy,
+                onOpenUpdate = onOpenUpdate,
+                update = update,
             )
         }
     }
@@ -182,10 +192,20 @@ private fun AboutContent(
     openUri: (String) -> Unit,
     onOpenLicenses: () -> Unit,
     onOpenPrivacy: () -> Unit,
+    onOpenUpdate: () -> Unit,
+    update: UpdateUiState,
 ) {
     val density = LocalDensity.current
 
     val backdrop = rememberLayerBackdrop()
+
+    /**
+     * Hero 那块透明点击层的交互源。
+     *
+     * 只为传 `indication = null`（不要涟漪）—— 涟漪会让整片 Hero 看起来像按钮，
+     * 而那里的语义是"点背景上的名字可以进检查更新"。见 `logoSpacer` 的注释。
+     */
+    val brandInteraction = remember { MutableInteractionSource() }
 
     val isInDark = LocalZhiDark.current
     val effectBackground = remember(enableBlur) {
@@ -329,6 +349,21 @@ private fun AboutContent(
             // 图标已去掉（用户要求删掉那张矢量图）：只剩名字与版本号，
             // 两者都居中 —— 名字原来没写 textAlign，单行时齐左，与下面的
             // 版本号对不齐，看起来像错位。
+            //
+            // ⚠️ 这里**故意没有** `clickable`。
+            //
+            // 「点这个字进检查更新页」的点击目标在下面 `LazyColumn` 的
+            // `logoSpacer` 上，不在这里。原因是层级，不是写法：
+            // `BgEffectBackground` 的 content 里，这个 `Column` 与 `LazyColumn`
+            // 是**兄弟**，而 `LazyColumn` 后组合 → 画在上面；Compose 的命中测试
+            // 按 z 序反向走，`LazyColumn` 是滚动容器、自带 pointer input，
+            // 指头落在它边界内就被它接住，命中链在那里终止，
+            // **根本不会问到下面这个 `Column`**。
+            //
+            // 而 `LazyColumn` 是 fillMaxSize，它的第一项 `logoSpacer` 又刻意做成
+            // 与 Hero 等高 —— 于是"ZhiCode 这几个字"所在的整块区域实际归属于
+            // 那个透明占位项。曾经在这里挂过 `clickable`，实测点不动，
+            // 正是因为它是**被遮挡的那个节点**。
             Text(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -359,7 +394,11 @@ private fun AboutContent(
                 text = "ZhiCode",
                 color = colorScheme.onBackground,
                 fontWeight = FontWeight.Bold,
-                fontSize = 35.sp,
+                // 字号走字阶里最大的一档（`title1` = 32sp），不硬写 sp。
+                // 原来这里是写死的 35.sp —— 那比 Miuix 最大的槽位还大 3sp，
+                // 是整套字阶之外的例外：字阶统一调整时它必然被漏掉，
+                // 而"官方组件 + 自己的字"正是本工程偏离 Miuix 规范的原因。
+                fontSize = MiuixTheme.textStyles.title1.fontSize,
                 textAlign = TextAlign.Center,
             )
             Text(
@@ -376,7 +415,7 @@ private fun AboutContent(
                     },
                 color = colorScheme.onSurfaceVariantSummary,
                 text = BuildConfig.VERSION_NAME,
-                fontSize = 14.sp,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
                 textAlign = TextAlign.Center,
             )
         }
@@ -391,6 +430,18 @@ private fun AboutContent(
             overscrollEffect = null,
         ) {
             // 与 Logo 等高的透明占位：让内容从 Logo 下方开始，同时给视差留长度。
+            //
+            // ⚠️ 它同时是「点 Hero 进检查更新页」的**点击目标**，这不是巧合：
+            // 它本来就覆盖着上面那一整块 Hero（名字 + 版本号），而且它在
+            // `LazyColumn` 里、位于上面那个 `Column` **之上**，所以只有它
+            // 能真正接到触摸（原因见上面 `Text` 那段注释）。
+            //
+            // 把点击挂在这里而不是给 `Text` 挂 `clickable`，是为了修掉
+            // "点了没反应"：位置不变、观感不变，只是换到了命中链真正经过的节点上。
+            //
+            // 无涟漪（`indication = null`）：这一块是背景，出涟漪会让人以为
+            // 整片区域是一个按钮。语义上仍是个可点目标，所以补了
+            // `contentDescription` —— 否则读屏用户完全不知道这里有入口。
             item(key = "logoSpacer") {
                 Box(
                     Modifier
@@ -399,6 +450,12 @@ private fun AboutContent(
                             logoHeightDp + 52.dp + logoPadding.calculateTopPadding() -
                                 scrollPadding.calculateTopPadding() + 126.dp,
                         )
+                        .clickable(
+                            interactionSource = brandInteraction,
+                            indication = null,
+                            onClick = onOpenUpdate,
+                        )
+                        .semantics { contentDescription = "检查更新" }
                         .onSizeChanged { size -> onLogoHeightChanged(size.height) }
                         .onGloballyPositioned { coordinates ->
                             logoAreaY = coordinates.positionInWindow().y + coordinates.size.height
@@ -421,6 +478,28 @@ private fun AboutContent(
                 ) {
                     AboutGlassCard(enableBlur, backdrop, blendColors) {
                         SettingsReadOnly(title = "版本", valueText = BuildConfig.VERSION_NAME)
+                        /*
+                         * 「有新版本 x.y.z」只在**真检测到**新版本时出现。
+                         *
+                         * 三个状态要分清：
+                         *  · `Available` → 显示这一行（用户能马上看到有新版并点进去）；
+                         *  · `UpToDate` / `NoReleases` / `Idle` → **不显示**。
+                         *    显示一个"已是最新"的行会让这张卡多一条永远不变的信息，
+                         *    而那一句更适合放在更新页里（那里有完整语境）。
+                         *    至于"还没查过"（Idle）更不能显示 —— 那时我们并不知道。
+                         *
+                         * 检查在 `openAbout()` 里触发（不是进了这一页才发请求），
+                         * 所以这里读到的是已经落地的结果。
+                         */
+                        val newer = update.release
+                        if (update.phase == UpdatePhase.Available && newer != null) {
+                            SettingsEntry(
+                                title = "有新版本 ${newer.tag}",
+                                valueText = "",
+                                summary = "点此查看更新内容并下载",
+                                onClick = onOpenUpdate,
+                            )
+                        }
                         SettingsEntry(
                             title = "GitHub 开源页面",
                             valueText = "",

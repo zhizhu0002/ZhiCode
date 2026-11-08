@@ -220,6 +220,29 @@ public final class AndroidIntentBridge {
     }
 
     /**
+     * 安装一个本地 APK 文件 —— 供界面（「检查更新」页）直接调用。
+     *
+     * <h3>为什么复用它而不是另写一份</h3>
+     * {@link #installApk(Intent)} 那段三步流程（FileProvider 换 URI → 未授权先进
+     * 「安装未知应用」授权页并记下待续 → 启动系统安装器）是**安全敏感**的：
+     * 授权页那条分支还依赖 {@link #PENDING_APK_INSTALL} 与
+     * {@link #resumePendingApkInstall(Context)} 这一对状态。复制一份出来，
+     * 两份迟早会漂移 —— 而漂移的表现是「从工具装能成功、从更新页装装不动」
+     * 这种只在一半路径上出现的问题。
+     *
+     * <p>所以这里只做"把 File 包成 Intent"，剩下的全交给上面那一份实现。
+     * 返回值与工具那侧同构：调用方看 {@link ToolExecutionResult#isError} 与
+     * {@link ToolExecutionResult#content}。
+     */
+    public ToolExecutionResult installApkFile(File apk) {
+        if (apk == null) return ToolExecutionResult.error("安装 APK 必须给出文件");
+        if (!apk.isFile()) return ToolExecutionResult.error("APK 不存在：" + apk.getAbsolutePath());
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(Uri.fromFile(apk), APK_MIME);
+        return installApk(intent);
+    }
+
+    /**
      * 把 {@code file:} 或裸路径变成我们 FileProvider 的 content URI；
      * 已经是我们的 content URI 时先自检一次。其它 scheme 原样返回（系统会拒绝，
      * 但那时的错误信息是系统给的，比我们猜一个更有用）。

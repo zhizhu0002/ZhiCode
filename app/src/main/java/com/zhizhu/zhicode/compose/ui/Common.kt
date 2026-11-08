@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.DividerDefaults
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
@@ -1255,20 +1256,41 @@ fun ZhiAnchoredActionMenu(
  * 顺带它就能被纯 JVM 单测覆盖（`FileFormatTest`，挂在 test-jvm-fast 快路径里）。
  */
 
-/** 横向分隔线。转发到 Miuix [HorizontalDivider]（默认 0.75dp 的 HyperOS 细分线）。 */
+/**
+ * 横向分隔线。转发到 Miuix [HorizontalDivider]（默认 0.75dp 的 HyperOS 细分线）。
+ *
+ * @param thickness 线宽。默认 [DividerDefaults.Thickness]（0.75dp）。
+ *   传 `Dp.Hairline` 可以得到**恒定一个物理像素**的线 ——
+ *   3x 屏上 0.75dp 是 2.25px，会显得比系统自带的线粗一点。
+ *   参考图（小米「系统更新」那条线）就是发丝级，所以那个位置用 `Hairline`。
+ * @param color 线的颜色。默认走主题的 `dividerLine`；
+ *   要更淡的（表格行间线）传 `scheme.dividerLine.copy(alpha = 0.5f)`。
+ */
 @Composable
-fun ZhiHorizontalDivider(modifier: Modifier = Modifier, color: Color = Color.Unspecified) {
+fun ZhiHorizontalDivider(
+    modifier: Modifier = Modifier,
+    thickness: Dp = DividerDefaults.Thickness,
+    color: Color = Color.Unspecified,
+) {
     if (color == Color.Unspecified) {
-        HorizontalDivider(modifier = modifier)
+        HorizontalDivider(modifier = modifier, thickness = thickness)
     } else {
-        HorizontalDivider(modifier = modifier, color = color)
+        HorizontalDivider(modifier = modifier, thickness = thickness, color = color)
     }
 }
 
-/** 纵向分隔线。转发到 Miuix [VerticalDivider]。 */
+/** 纵向分隔线。转发到 Miuix [VerticalDivider]。参数含义同 [ZhiHorizontalDivider]。 */
 @Composable
-fun ZhiVerticalDivider(modifier: Modifier = Modifier) {
-    VerticalDivider(modifier = modifier)
+fun ZhiVerticalDivider(
+    modifier: Modifier = Modifier,
+    thickness: Dp = DividerDefaults.Thickness,
+    color: Color = Color.Unspecified,
+) {
+    if (color == Color.Unspecified) {
+        VerticalDivider(modifier = modifier, thickness = thickness)
+    } else {
+        VerticalDivider(modifier = modifier, thickness = thickness, color = color)
+    }
 }
 
 /**

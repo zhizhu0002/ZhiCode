@@ -1076,6 +1076,19 @@ data class WorkspaceUiState(
     val licensesOpen: Boolean = false,
     /** 隐私政策整页打开。入口在关于页里，与「第三方开源项目」并列。 */
     val privacyOpen: Boolean = false,
+    /**
+     * 「检查更新」整页是否打开。
+     *
+     * <p>入口有两个：关于页里那一行（只在真有新版本时出现），以及关于页 Hero 里
+     * 那个大 ZhiCode 字（常驻，没有新版本也能进去看当前版本的更新内容）。
+     * 与 [aboutOpen] 同一条链，所以 `closeAbout()` 会把它一起收掉。
+     */
+    val updatePageOpen: Boolean = false,
+    /**
+     * 检查更新的状态。**与 [updatePageOpen] 分开**：关于页要用它的
+     * `phase == Available` 判断"要不要显示那一行"，那时更新页还没打开。
+     */
+    val update: UpdateUiState = UpdateUiState(),
     val modelPicker: com.zhizhu.zhicode.compose.model.ModelPickerState? = null,
     /**
      * 非空即「UI 调试」整页打开（**仅 debug 构建**有入口，见设置页的「扩展」组）。
@@ -1209,4 +1222,84 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/agents", "管理内置、项目、用户和正在运行的子 Agent"),
     SlashCommand("/cancel", "停止当前正在执行的 Agent 回合"),
     SlashCommand("/runtime", "打开内置 Termux 运行环境控制"),
+)
+
+/**
+ * 「检查更新」的状态机。
+ *
+ * ## 为什么是密封枚举而不是几个布尔
+ *
+ * "检查中"、"已是最新"、"有新版本"、"上游还没发布"、"失败了"是**互斥**的，
+ * 用三个布尔表达会立刻出现"检查中 且 已是最新"这种不可能的组合，
+ * 而界面得自己写规则决定听谁的。密封枚举让非法状态无法表示。
+ *
+ * ## 为什么有 [NoReleases] 而不是把它并进 [UpToDate]
+ *
+ * 本仓库的 GitHub **确实还没有任何 Release**（`GET /releases` 返回 `[]`），
+ * 所以这是用户最可能看到的状态。它和"已是最新"是两件事：前者表示
+ * "没有可比的远端版本"，后者表示"比过了，没有更新的"。混成一句
+ * "已经是最新版本"会在上游发布之后仍然显示它 —— 用户会以为检查坏了。
+ */
+sealed interface UpdatePhase {
+    /** 还没检查过（刚打开页面、还没触发）。 */
+    data object Idle : UpdatePhase
+
+    /** 正在请求 GitHub。 */
+    data object Checking : UpdatePhase
+
+    /** 检查过了，没有更新的版本。 */
+    data object UpToDate : UpdatePhase
+
+    /** 上游还没有发布任何 Release（不是错误，是事实）。 */
+    data object NoReleases : UpdatePhase
+
+    /** 有更新的版本，[UpdateUiState.release] 非空。 */
+    data object Available : UpdatePhase
+
+    /** 正在下载安装包。 */
+    data object Downloading : UpdatePhase
+
+    /** 检查或下载失败，[UpdateUiState.error] 是给用户看的原因。 */
+    data object Failed : UpdatePhase
+}
+
+/**
+ * 更新页 / 关于页共用的更新状态。
+ *
+ * @property phase 当前阶段
+ * @property release 有新版本时的目标 release（[UpdatePhase.Available] /
+ *   [UpdatePhase.Downloading] 下非空）
+ * @property error 失败原因（人话，来自 `UpdateChecker` 的分流错误）
+ * @property downloadPercent 下载进度 0..100；未知总量时为 0
+ * @property downloadedBytes 已下载字节
+ * @property totalBytes 总字节；未知为 0
+ * @property hasChecked 是否已经跑过一次检查 —— 页面据此决定要不要自动查
+ */
+data class UpdateUiState(
+    val phase: UpdatePhase = UpdatePhase.Idle,
+    val release: UpdateReleaseInfo? = null,
+    val error: String? = null,
+    val downloadPercent: Int = 0,
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long = 0L,
+    val hasChecked: Boolean = false,
+)
+
+/**
+ * 界面上要用的一条 release。
+ *
+ * 直接从 `UpdateChecker.Release` 映射过来，而不是把那个 data class 抬进 model ——
+ * `UpdateChecker` 在 `data` 层，那里用的是 `org.json` 与 `HttpURLConnection`；
+ * 界面层只该看见"版本号 / 说明 / 下载地址"这些字段，不该依赖某一层的解析结果。
+ */
+data class UpdateReleaseInfo(
+    val tag: String,
+    val name: String,
+    val publishedAt: String,
+    val body: String,
+    val prerelease: Boolean,
+    val pageUrl: String,
+    val apkUrl: String?,
+    val apkName: String?,
+    val apkSize: Long,
 )
