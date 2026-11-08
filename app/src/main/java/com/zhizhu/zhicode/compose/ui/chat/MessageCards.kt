@@ -65,6 +65,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiIconDropdownMenu
 import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
+import com.zhizhu.zhicode.compose.ui.ZhiAttachmentRow
 import com.zhizhu.zhicode.compose.ui.ZhiImageRow
 import com.zhizhu.zhicode.compose.ui.ZhiImageViewer
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
@@ -282,12 +283,19 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
             // 短按也会看到整块气泡缩放一下、松手却没有反应 —— 像卡了点不动。
             pressFeedbackType = PressFeedbackType.None,
         ) {
-            // 图片画在正文**上方**：一条「图 + 一句话」的消息，图是主体，
+            // 附件画在正文**上方**：一条「图 + 一句话」的消息，图是主体，
             // 说明文字在下面；反过来会让图看起来像附注。
+            //
+            // 文件与图片分两行、各按各的长相（见 `ZhiAttachmentRow`）：
+            // 早先两者混在一条横向滚动条里，文件卡会被右边缘裁掉，也认不出谁是谁。
             //
             // 空 body 时不要画那个空 Text：`Text("")` 仍会占一行行高，
             // 于是"只发图"的气泡下面会多出一条空隙。
-            ZhiImageRow(images = item.images, onOpen = { viewing = it })
+            ZhiAttachmentRow(
+                attachments = item.attachments,
+                images = item.images,
+                onOpenImage = { viewing = it },
+            )
             if (item.body.isNotBlank()) {
                 Text(
                     text = item.body,

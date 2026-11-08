@@ -42,11 +42,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.data.SessionReader
+import com.zhizhu.zhicode.compose.model.ChatAttachment
 import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -553,6 +555,125 @@ internal fun ZhiImageRow(images: List<ChatImage>, onOpen: (ChatImage) -> Unit, m
                 maxWidth = BubbleImageMaxWidth,
                 onClick = { onOpen(image) },
             )
+        }
+    }
+}
+
+/**
+ * 气泡里的**文件**附件卡：图标 + 文件名 + 体积。
+ *
+ * ## 与图片是两种东西，刻意不共用一条
+ *
+ * 图片靠**画面**辨认（缩略图的内容本身就是信息），文件只能靠**名字 + 体积**辨认。
+ * 早先两者挤在同一条横向滚动条里、长相几乎一样，于是：
+ * - 靠屏幕右侧那张卡片被裁掉一半（第二张「控制布…」只露出半个字）；
+ * - 选了三四张之后认不出哪张是哪张。
+ *
+ * 现在文件走这一张张**独立卡片**，并且这一行**允许换行**（见 [ZhiAttachmentRow]），
+ * 不再有"横向滚出去被裁掉"这回事。
+ *
+ * ## 为什么显示体积
+ *
+ * 体积以前只出现在底部提示条那句「已附加：xxx（125KB）」里，消息一发出去就没了 ——
+ * 回头翻历史时只剩一个文件名，看不出当初发的是哪个版本（同名文件很常见）。
+ * 现在它跟着附件卡一起进对话流（`ChatAttachment.detail`）。
+ */
+@Composable
+internal fun ZhiAttachmentCard(
+    attachment: ChatAttachment,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MiuixTheme.colorScheme
+    Row(
+        modifier = modifier
+            .clip(ZhiSquircle(ZhiRadius.inner))
+            .background(scheme.surfaceContainerHigh)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(ZhiSquircle(ZhiRadius.inner))
+                .background(scheme.secondaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = ZhiIcons.file,
+                contentDescription = null,
+                tint = scheme.primary,
+                modifier = Modifier.size(15.dp),
+            )
+        }
+        Column(
+            modifier = Modifier.padding(start = 8.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = attachment.label,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                color = scheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 150.dp),
+            )
+            if (attachment.detail.isNotBlank()) {
+                Text(
+                    text = attachment.detail,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
+                    color = scheme.onSurfaceVariantSummary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 150.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 气泡里的附件区：**先文件、后图片**，各占自己的行。
+ *
+ * ## 为什么要分开两行、且文件行不滚动
+ *
+ * 用户报的两个问题都出在"两者混在一条横向滚动条里"：
+ * 1. 文件卡被右边缘裁掉（截图里第二张只露出半个）；
+ * 2. 图片和文件长得太像，认不出哪个是哪个。
+ *
+ * 所以：文件行**不滚动**，靠 `padding` 让它们自然收进气泡宽度内；
+ * 图片行保留横向滚动（图片同一行同高、横向铺开本来就是对的）。
+ *
+ * 顺序是文件在前、图片在后：图片是这一条的**主体**（点开就能看），
+ * 文件是附属说明，放下面不抢视线 —— 而"图在上、文字在下"与 [UserBubble] 里
+ * 正文在图片之下的排法一致。
+ */
+@Composable
+internal fun ZhiAttachmentRow(
+    attachments: List<ChatAttachment>,
+    images: List<ChatImage>,
+    onOpenImage: (ChatImage) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (attachments.isEmpty() && images.isEmpty()) return
+    Column(modifier = modifier.fillMaxWidth()) {
+        if (attachments.isNotEmpty()) {
+            // 横向不可滚动：文件数量通常一两个，靠换行收进气泡即可。
+            // ⚠️ 用 Column 逐条排而不是 Row：条数一多 Row 一定会溢出，
+            // 而溢出在这张卡里表现为"右边被切掉"，正是要修的那个观感。
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                attachments.forEach { attachment ->
+                    ZhiAttachmentCard(
+                        attachment = attachment,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+        if (images.isNotEmpty()) {
+            ZhiImageRow(images = images, onOpen = onOpenImage)
         }
     }
 }

@@ -56,6 +56,7 @@ import com.zhizhu.zhicode.compose.model.ApiConfigState
 import com.zhizhu.zhicode.compose.model.ApiProfile
 import com.zhizhu.zhicode.compose.model.ApiProfileDraft
 import com.zhizhu.zhicode.compose.model.Attachment
+import com.zhizhu.zhicode.compose.model.ChatAttachment
 import com.zhizhu.zhicode.compose.model.ChatImage
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
@@ -946,6 +947,18 @@ class WorkspaceViewModel(
         .filter { it.isImage }
         .mapNotNull { currentAttachmentImage(it.id) }
 
+    /**
+     * 这条消息要挂到气泡上的**非图片**附件。
+     *
+     * 只摘「叫什么、多大」两个字段 —— 正文留在 [Attachment.textBody] 里走提示词那条路，
+     * 不进 `ChatItem`（见 `ChatAttachment` 的说明）。
+     *
+     * ⚠️ 与 [currentImages] 同一条约束：必须在 `clearAttachments()` **之前**调用。
+     */
+    private fun currentFiles(): List<ChatAttachment> = _state.value.attachments
+        .filter { !it.isImage }
+        .map { ChatAttachment(id = it.id, label = it.label, detail = it.sizeLabel) }
+
     /** 清空附件：界面条目与载荷必须一起走，否则载荷留在 map 里没人回收。 */
     private fun clearAttachments() {
         attachmentPayloads.clear()
@@ -1592,6 +1605,8 @@ class WorkspaceViewModel(
                     detail = "${entry.scope.label} · ${entry.sizeLabel}",
                     isImage = false,
                     textBody = body,
+                    // 技能也是"文件"，气泡里同样给一行体积。
+                    sizeLabel = entry.sizeLabel,
                 ),
                 message = "已附加技能：${entry.name}",
             )
@@ -2117,6 +2132,7 @@ class WorkspaceViewModel(
                 body = text,
                 // 与下面两条分支同理：附件必须在 clearAttachments() 之前取。
                 images = currentImages(),
+                attachments = currentFiles(),
             )
             clearAttachments()
             _state.update {
@@ -2149,6 +2165,7 @@ class WorkspaceViewModel(
                 title = "你",
                 body = text,
                 images = currentImages(),
+                attachments = currentFiles(),
             )
             // 顺序很重要：先编好要发的内容块与拼好提示词，再把附件清掉。
             // 反过来的话队列里这条预输入就永远发不出那张图、也丢掉附加的技能了。
@@ -2201,6 +2218,7 @@ class WorkspaceViewModel(
             body = text,
             // 同上：必须在下面的 clearAttachments() 之前取，否则拿到的是空列表。
             images = currentImages(),
+            attachments = currentFiles(),
         )
         // 同上：先编内容块再清附件。
         val imageBlocks = buildImageBlocks()
@@ -5141,8 +5159,14 @@ class WorkspaceViewModel(
                     detail = key,
                     isImage = false,
                     textBody = body,
+                    sizeLabel = FileFormat.size(size),
                 ),
-                message = "已附加：$key（${FileFormat.size(size)}）",
+                // 只说**几个**，不报体积。
+                //
+                // 体积已经显示在附件卡片自己身上（那一行「125KB」），提示条再念一遍
+                // 是同一件事说两处 —— 而提示条更该回答的是"这次点了有没有生效"。
+                // 连点几个文件时，逐条带体积的文案还会长到看不清。
+                message = "已附加 ${kept.size + 1} 个文件",
                 messageIsError = false,
             )
         }
@@ -5196,8 +5220,9 @@ class WorkspaceViewModel(
                         detail = uri.toString(),
                         isImage = false,
                         textBody = body,
+                        sizeLabel = FileFormat.size(bytes.size.toLong()),
                     ),
-                    message = "已附加：$label（${FileFormat.size(bytes.size.toLong())}）",
+                    message = "已附加 ${kept.size + 1} 个文件",
                     messageIsError = false,
                 )
             }

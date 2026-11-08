@@ -18,17 +18,17 @@ class ZhiTextStylesTest {
 
     /** 期望的接线表。顺序即层级，所以「单调」不用另写一条用例。
      *
-     * R1 重设计：手机紧凑中间值
-     * （title1..4 = 24/19/16/15，main/paragraph/button/headline1 = 14，
-     *  body1/headline2 = 13，body2/subtitle = 12，footnote1/2 = 11/10）。
-     * 主题样式槽位的接线断言不变。
+     * Miuix **原生字阶**（`miuix-ui/theme/TextStyles.kt` 的 `defaultTextStyles()`）。
+     * 这个工程曾经把它整体压过一档（title1 24 / main 14），结果是"官方的组件 +
+     * 自己的字"，且四档标题被挤进 9sp 区间里。现在回到规范值 ——
+     * 要调观感请去调排版，不要动这张表。
      */
     private val expected = listOf(
-        "title1" to 24f, "title2" to 19f, "title3" to 16f, "title4" to 15f,
-        "main" to 14f, "paragraph" to 14f, "button" to 14f, "headline1" to 14f,
-        "body1" to 13f, "headline2" to 13f,
-        "body2" to 12f, "subtitle" to 12f,
-        "footnote1" to 11f, "footnote2" to 10f,
+        "title1" to 32f, "title2" to 24f, "title3" to 20f, "title4" to 18f,
+        "main" to 17f, "paragraph" to 17f, "button" to 17f, "headline1" to 17f,
+        "body1" to 16f, "headline2" to 16f,
+        "body2" to 14f, "subtitle" to 14f,
+        "footnote1" to 13f, "footnote2" to 11f,
     )
 
     private fun size(name: String): Float = when (name) {

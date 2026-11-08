@@ -24,6 +24,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -39,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontFamily
@@ -70,6 +72,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
 import com.zhizhu.zhicode.compose.ui.ZhiTextDropdownChip
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -310,27 +313,57 @@ fun Composer(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically(),
             ) {
-                // 横向可滚动，而不是 `take(4)`：
-                //
-                // 多选图片之后 `.take(4)` 变成了一个真 bug —— 第 5 张起会**照样发给模型**，
-                // 却在输入器上既看不见也删不掉。用户看到的是"我选了 6 张，怎么只有 4 张"，
-                // 而模型收到的却是 6 张。横向滚动让每一张都可达、可删。
-                Row(
+                /*
+                 * ⚠️ 附件条**分两段**：文件在上、图片在下，两段都各自独占整行。
+                 *
+                 * 早先是"所有附件混在一条横向滚动条里"，两个真问题都出在这儿：
+                 *
+                 * 1. **文件卡被裁掉**。横向滚动条里每张卡按自身宽度排，屏幕右边那张
+                 *    只露出一半（用户截图里第二张「控制布…」就是这样），看起来像渲染坏了；
+                 * 2. **认不出谁是谁**。图片缩略图和文件卡紧挨着、尺寸相当，
+                 *    选了三四张之后根本分不清哪个是文件、哪个是图。
+                 *
+                 * 现在按类型分段：
+                 *  · 文件段**不滚动**、卡片占满整行 —— 名字再长也只会省略号，不会被切掉；
+                 *  · 图片段保留横向滚动（同一行同高、横向铺开，本来就是图片带的正确形态），
+                 *    并保留 `.take(4)` 被删掉后那条约束：**每一张都必须可达、可删**。
+                 */
+                val pendingImages = state.attachments.filter { it.isImage }
+                    .mapNotNull { attachment -> onAttachmentImage(attachment.id)?.let { attachment to it } }
+                val pendingFiles = state.attachments.filter { !it.isImage }
+
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 6.dp)
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        .padding(bottom = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    state.attachments.forEach { attachment ->
-                        // 图片走缩略图卡片（图片本身就是"芯片"，X 叠在右上角），
-                        // 文本附件继续用「图标 + 文件名」的窄条 —— 两者形态不同是**有意的**：
-                        // 图片靠画面辨认，文件只能靠名字。
-                        val image = onAttachmentImage(attachment.id)
-                        if (attachment.isImage && image != null) {
-                            ZhiPendingImageChip(image = image, onRemove = { onRemoveAttachment(attachment) })
-                        } else {
-                            AttachmentChip(attachment) { onRemoveAttachment(attachment) }
+                    // ── 文件：每个占满一行，不会横向溢出 ──────────────────
+                    if (pendingFiles.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            pendingFiles.forEach { attachment ->
+                                AttachmentChip(attachment) { onRemoveAttachment(attachment) }
+                            }
+                        }
+                    }
+
+                    // ── 图片：横向滚动的缩略图带 ─────────────────────────
+                    if (pendingImages.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            pendingImages.forEach { (attachment, image) ->
+                                ZhiPendingImageChip(
+                                    image = image,
+                                    onRemove = { onRemoveAttachment(attachment) },
+                                )
+                            }
                         }
                     }
                 }
@@ -670,32 +703,75 @@ fun Composer(
 }
 }
 
+/**
+ * 待发区里的**文件**附件卡：图标 + 文件名 + 体积，占满整行。
+ *
+ * ## 为什么从"窄条"改成"整行卡片"
+ *
+ * 早先它是一个 `height(26.dp)`、名字写死 `width(112.dp)` 的窄条，然后一堆窄条
+ * 塞进横向滚动条 —— 于是屏幕右边那张**只露出半个**（用户截图里第二张
+ * 「控制布…」就是），而且名字长了也读不出是哪个文件。
+ *
+ * 现在它占满整行：名字用 `weight(1f)` 吃剩余宽度、超长才省略号，
+ * 永远不会被屏幕边缘裁掉。体积也从"只出现在底部提示条里"搬到了卡片上，
+ * 这样翻历史时还看得出当初发的是哪个版本。
+ *
+ * ## 图标给一个自己的底色块
+ *
+ * 参考图里图标是坐在一块浅色圆角方块里的，而不是直接浮在卡片底上。
+ * 一是让"这是一份文件"在扫视时更快认出来，二是卡片变高之后
+ * 一个孤立的小图标会显得很轻。
+ */
 @Composable
 private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
     Card(
-        modifier = Modifier.height(26.dp),
+        modifier = Modifier.fillMaxWidth(),
         cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(start = 8.dp, end = 2.dp),
+        insideMargin = PaddingValues(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
         colors = CardDefaults.defaultColors(
             color = scheme.surfaceContainerHigh,
             contentColor = scheme.onSurface,
         ),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                painter = if (attachment.isImage) ZhiIcons.image else ZhiIcons.file,
-                contentDescription = null,
-                tint = scheme.primary,
-                modifier = Modifier.size(13.dp),
-            )
-            Text(
-                text = attachment.label,
-                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.width(112.dp).padding(start = 4.dp),
-            )
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(ZhiSquircle(ZhiRadius.inner))
+                    .background(scheme.secondaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    painter = if (attachment.isImage) ZhiIcons.image else ZhiIcons.file,
+                    contentDescription = null,
+                    tint = scheme.primary,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f).padding(start = 8.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = attachment.label,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    color = scheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // 体积：技能那条路一直是空的（`sizeLabel` 在技能 Store 里才有），
+                // 空串就不画第二行，免得留一条没有内容的空行高。
+                if (attachment.sizeLabel.isNotBlank()) {
+                    Text(
+                        text = attachment.sizeLabel,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
+                        color = scheme.onSurfaceVariantSummary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             // 直接用 ZhiIconButton 的 compact 参数压成 22dp 点击区，
             // 不再外面套一个固定尺寸的 Box（那样只有内层图标可点，命中区也不对）
             ZhiIconButton(

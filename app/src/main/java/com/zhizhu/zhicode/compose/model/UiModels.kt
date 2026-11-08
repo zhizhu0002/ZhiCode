@@ -212,6 +212,23 @@ data class ChatItem(
      */
     val images: List<ChatImage> = emptyList(),
     /**
+     * 这条消息带的**非图片**附件（文本文件 / 技能）。
+     *
+     * 与 [images] 是**两个字段、两套长相**，刻意不合并成"一个带类型的附件列表"：
+     *
+     * - 图片靠**画面**辨认，所以它是缩略图（内容本身就是信息）；
+     * - 文件只能靠**名字 + 体积**辨认，所以它是一张卡片（两行文字）。
+     *
+     * 早先这两者共用一条横向滚动的窄条，结果是：文件卡片被右边缘裁掉一半
+     * （用户截图里第二张「控制布…」只露出半个），而图片和文件长得几乎一样，
+     * 选了三四张之后根本认不出哪张是哪张。
+     *
+     * 正文（`textBody`）**不在这里** —— 它只走提示词那条路（见
+     * `WorkspaceViewModel.buildPromptWithTextAttachments`），
+     * 不进 `ChatItem`，否则每条历史消息都要拖着一份文件内容。
+     */
+    val attachments: List<ChatAttachment> = emptyList(),
+    /**
      * 这一轮里被改过的文件（相对项目根的路径）。
      *
      * 只在助手消息上，从本轮的工具调用里回收：`Edit` / `Write` / `MultiEdit`
@@ -274,6 +291,32 @@ data class Attachment(
     val detail: String,
     val isImage: Boolean,
     val textBody: String? = null,
+    /**
+     * 体积，形如「125KB」。空串表示未知。
+     *
+     * 单独一个字段而不是塞进 [detail]：那个字段在两条路径上装着完全不同的东西
+     * （项目文件装相对路径、SAF 文档装 `content://` URI、技能装「范围 · 体积」），
+     * 它是**去重的键**，不是给人看的。而气泡卡片要显示的恰恰是体积。
+     * 以前体积只出现在底部提示条的那句「已附加：xxx（125KB）」里，消息一发出去就没了。
+     */
+    val sizeLabel: String = "",
+)
+
+/**
+ * 气泡里显示的一条**非图片**附件（文本文件 / 技能）。
+ *
+ * ## 为什么不直接复用 [Attachment]
+ *
+ * [Attachment] 是**待发区**的模型，它带着 `textBody`（整个文件正文）与 `detail`（去重键）。
+ * 气泡只需要"叫什么、多大"，把正文也挂进 `ChatItem` 会让每条历史消息都拖着一份
+ * 文件内容 —— 而 `ChatItem` 在整条对话流里是被反复 `copy()` 的。
+ * 所以发送那一刻把要显示的两个字段摘出来，正文留给提示词那条路径。
+ */
+data class ChatAttachment(
+    val id: String,
+    val label: String,
+    /** 体积等副标题，如「125KB」。空串则不画第二行。 */
+    val detail: String = "",
 )
 
 data class PermissionRequest(

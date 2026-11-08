@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -67,6 +68,8 @@ internal fun ZhiSideDrawer(
 ) {
     val scheme = MiuixTheme.colorScheme
     val scrimInteraction = remember { MutableInteractionSource() }
+    /** 面板自己的空动作交互源（只为吞掉空白处的点击，不带水波纹）。 */
+    val panelInteraction = remember { MutableInteractionSource() }
 
     /*
      * ⚠️ 关闭时用零尺寸 Modifier，打开时才是 fillMaxSize。
@@ -116,7 +119,43 @@ internal fun ZhiSideDrawer(
             Surface(
                 modifier = Modifier
                     .width(width.coerceAtMost(320.dp))
-                    .fillMaxHeight(),
+                    /*
+                     * ⚠️ 让开系统栏要加在**面板自己**身上，不能只加给内容。
+                     *
+                     * 早先的做法是"底色铺满、内容让位"（把 insets 加在里面的 Box 上）。
+                     * 那样面板的底色会一路顶到状态栏，看起来就是"侧栏顶到手机状态栏了" ——
+                     * 状态栏图标直接压在抽屉的圆角上。
+                     *
+                     * 现在整块面板（连底色）都落在状态栏与导航栏之内。
+                     * 顺序是 insets 在前、`fillMaxHeight` 在后：padding 是外层，
+                     * 于是面板铺满的是**去掉系统栏之后**的那段高度。
+                     */
+                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .fillMaxHeight()
+                    /*
+                     * ⚠️⚠️ 必须吞掉点击，否则点侧栏里的空白区域会把抽屉关掉。
+                     *
+                     * 原因不是"点到了遮罩"，而是**面板根本没有接手势**：
+                     * Miuix 的无 `onClick` `Surface` 只是一层 Box + 背景绘制
+                     * （源码里就是 `Box(modifier.surface(...))`，没有任何 pointerInput），
+                     * 所以它**不参与命中测试的消费**。
+                     * Compose 的命中去按**绘制顺序的倒序**找第一个消费事件的节点：
+                     * 面板在最上层但不消费 → 事件继续往下找 → 落到下层那个
+                     * `Surface(onClick = onClose)` 的遮罩上 → 抽屉关闭。
+                     *
+                     * 所以这里挂一个**空动作**的 clickable 把事件吃掉。
+                     * 用 `indication = null` 而不是 `Surface(onClick)`：
+                     * 后者会带涟漪，点空白处整块抽屉闪一下更像坏了。
+                     *
+                     * 这不是"挡住了子元素的点击"：Compose 命中去**先访问子节点**，
+                     * 行/卡片自己的 clickable 会先拿到事件，这里的空动作只在
+                     * 谁都没接的时候兜底。
+                     */
+                    .clickable(
+                        interactionSource = panelInteraction,
+                        indication = null,
+                        onClick = {},
+                    ),
                 // Miuix semantic overlay surface; no independent glass sampling/tint.
                 color = scheme.background,
                 // 这是本工程**唯一**保留圆弧圆角的悬浮面板：抽屉只有右侧两个角是圆的
@@ -128,11 +167,15 @@ internal fun ZhiSideDrawer(
             ) {
                 // ⚠️ 内边距只能加在**内容**上，不能加在面板的 `Surface` 上。
                 //
-                // 主界面是 edge-to-edge（DecorView 不再消费系统窗口 inset），抽屉要自己
-                // 让开系统栏，否则第一行压在状态栏底下。
+                // 这条规则**已经改了**：现在系统栏的让位加在**面板自己**身上
+                // （见上面 `Surface` 的 `windowInsetsPadding`）。
                 //
-                // 加在 `Surface` 上的话，面板底色会跟着缩进去：抽屉滑入时状态栏那一条
-                // 会露出后面的工作区。所以底色铺满、内容让位。
+                // 原来的做法是"底色铺满、内容让位" —— 代价是面板底色一路顶到
+                // 状态栏，状态栏图标直接压在抽屉圆角上，用户看到的就是
+                // 「侧栏顶到手机状态栏了」。抽屉是一条**抬升面板**（不是全屏页），
+                // 它本来就该整块落在系统栏之内 —— 与对话框、底部抽屉一致。
+                //
+                // 于是里面的内容**不再**重复加一次 insets，否则会白垫两倍高度。
                 //
                 // ⚠️⚠️ 里面**必须**再套一个 `Scaffold`，否则抽屉里的长按菜单画不出来。
                 //
@@ -148,9 +191,7 @@ internal fun ZhiSideDrawer(
                         top.yukonga.miuix.kmp.utils.MiuixPopupUtils.MiuixPopupHost()
                     },
                 ) { _ ->
-                    Box(modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars)) {
-                        content()
-                    }
+                    content()
                 }
             }
         }
