@@ -11,8 +11,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.CopySheetState
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiSheetCardColors
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
@@ -70,24 +72,39 @@ fun CopySheetOverlay(
                 .fillMaxWidth()
                 .padding(bottom = 8.dp),
         ) {
-            // 高度上限：长回复可以几千字，不设上限会把抽屉撑到顶住状态栏，
-            // 而且滚动手势要穿过整块内容才生效。留出屏幕的约六成，
-            // 超出部分在抽屉内部滚动（`enableNestedScroll` 默认为 true）。
-            SelectionContainer(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 420.dp)
-                    .verticalScroll(rememberScrollState()),
+            /*
+             * 原文装进一张 Miuix `Card`（底色走 [ZhiSheetCardColors]）。
+             *
+             * 原来是裸 `Column` + `SelectionContainer`，直接铺在抽屉背板上 ——
+             * 而背板的 `background` 与卡片默认色在深色下同为 `#242424`
+             * （见 ZhiSheetCardColors 的说明），所以这里以前**不敢**用卡片。
+             * 现在统一显式传 `secondaryContainer`，卡片与背板拉得开，
+             * 这段文本就有了一块明确的"取字区"，而不是悬在抽屉里的一片字。
+             */
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                colors = ZhiSheetCardColors(),
             ) {
-                // 原文照抄，不做 Markdown 渲染：这里的目的是**取字**，
-                // 渲染成标题/列表反而会把 `#`、`-` 这类标记吃掉，
-                // 用户划走的就不再是原来那份文本了。
-                Text(
-                    text = shown.text,
-                    style = MiuixTheme.textStyles.body1,
-                    color = MiuixTheme.colorScheme.onSurface,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                // 高度上限：长回复可以几千字，不设上限会把抽屉撑到顶住状态栏，
+                // 而且滚动手势要穿过整块内容才生效。留出屏幕的约六成，
+                // 超出部分在抽屉内部滚动（`enableNestedScroll` 默认为 true）。
+                SelectionContainer(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(14.dp),
+                ) {
+                    // 原文照抄，不做 Markdown 渲染：这里的目的是**取字**，
+                    // 渲染成标题/列表反而会把 `#`、`-` 这类标记吃掉，
+                    // 用户划走的就不再是原来那份文本了。
+                    Text(
+                        text = shown.text,
+                        style = MiuixTheme.textStyles.body1,
+                        color = MiuixTheme.colorScheme.onSurface,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }

@@ -58,6 +58,7 @@ import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
 import top.yukonga.miuix.kmp.utils.springAnimateToPage
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiSheetCardColors
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
 import com.zhizhu.zhicode.compose.ui.settings.SettingsLoadingHint
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
@@ -459,7 +460,7 @@ private fun AddMcpSheet(
             // ⚠️ 必须显式给 `secondaryContainer`：sheet 背板是 `background`，
             // 而 `Card` 的默认色是 `surfaceContainer` —— 暗色下**是同一个值**
             // （#242424），不传就是一张看不见的卡（本仓库已经栽过一次）。
-            colors = CardDefaults.defaultColors(color = scheme.secondaryContainer),
+            colors = ZhiSheetCardColors(),
         ) {
             BasicComponent(
                 title = "手动添加",
@@ -1131,6 +1132,9 @@ private fun TextDetailDialog(show: Boolean, title: String, body: String, onDismi
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,
+        // 居中形态（`largeScreen` 是**居中**开关，不是「大屏专用」）——
+        // 不传的话手机竖屏会被判成「非大屏」，弹窗从底部升起。理由见 PermissionOverlay。
+        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
     ) {
         DialogShell(
@@ -1186,6 +1190,9 @@ private fun McpImportDialog(
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,
+        // 居中形态（`largeScreen` 是**居中**开关，不是「大屏专用」）——
+        // 不传的话手机竖屏会被判成「非大屏」，弹窗从底部升起。理由见 PermissionOverlay。
+        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
     ) {
         DialogShell(

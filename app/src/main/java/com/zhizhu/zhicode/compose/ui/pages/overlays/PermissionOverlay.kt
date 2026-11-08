@@ -135,6 +135,10 @@ fun PermissionOverlay(
     OverlayDialog(
         show = request != null,
         onDismissRequest = onDeny,
+        // 居中形态（`largeScreen = true` 是**居中**开关，不是「大屏专用」）。
+        // 不传的话 Miuix 按窗口尺寸自动判：手机竖屏被判成「非大屏」，
+        // 走「底部贴边 + 从下滑入」那一档 —— 而这是一个确认框，语义上就该居中。
+        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,

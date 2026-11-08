@@ -20,9 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -54,19 +52,19 @@ import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Badge
-import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
+import top.yukonga.miuix.kmp.preference.CheckboxLocation
+import top.yukonga.miuix.kmp.preference.CheckboxPreference
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
@@ -109,10 +107,11 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
  *
  * ## 手写降到最低
  *
- * - 列表行 → Miuix [BasicComponent]（`title` / `summary` / `startAction` / `endActions`）
- * - 选中指示 → Miuix [Checkbox]，单选与多选**共用**。不用 Miuix `RadioButton`：
- *   它在未选中时不画任何东西（只画那个勾），单选行会连"这里能点"都看不出来。
- *   单选/多选的差别在**行为**（点另一行是否清掉原来那行），不在控件长相。
+ * - 列表行 → Miuix [CheckboxPreference]（`checkboxLocation = Start`）。
+ *   选中指示与整行的点击语义都由它自己处理，本文件不再手搓控件。
+ *   单选与多选**共用同一个控件**，差别只在行为（点另一行是否清掉原来那行）。
+ *   不用 Miuix `RadioButton`：它在未选中时不画任何东西（只画那个勾），
+ *   单选行会连"这里能点"都看不出来。
  * - 主按钮 → Miuix [Button] + [ButtonDefaults.buttonColorsPrimary]
  * - 次要按钮 → Miuix [Button] + `buttonColors`（与主按钮同形状、只有配色不同）
  * - 开关 → Miuix [Switch]
@@ -260,55 +259,46 @@ fun ChoicePickerOverlay(
                             localSelected = index
                         }
                     }
-                    BasicComponent(
+                    /*
+                     * 行首选择控件用官方 [CheckboxPreference]（`checkboxLocation = Start`）。
+                     *
+                     * ## 为什么不按"单选用 RadioButton、多选用 Checkbox"来分
+                     *
+                     * Miuix 的 `RadioButton` 只画那个勾（字节码里唯一的绘制路径是
+                     * `drawTrimmedCheck`，未选中时 alpha 动画到 0），也就是**未选中时
+                     * 整行不画任何东西** —— 一列选项看起来就是普通文字，用户看不出
+                     * "这里能点"。`Checkbox` 有 checked/unchecked 两套前景与底色，
+                     * 未选中态画得出来，所以单选行也要它，否则同一个窗口里
+                     * "能选 / 不能选"长得不一样。
+                     *
+                     * ## 为什么现在能直接用官方组件了
+                     *
+                     * 早先这里是手搓 `BasicComponent` + `startAction` 里塞一个
+                     * **缩到 0.78** 的 `Checkbox`（用 `graphicsLayer` 缩放，因为
+                     * `Checkbox` 内部是 `requiredSize(26.dp)` 且排在调用方 modifier
+                     * 之后，`Modifier.size()` 压不动它）。
+                     *
+                     * 那条限制只在"要把它缩小"时才成立。`CheckboxPreference` 自己
+                     * 管排版、勾选圈用库的原始尺寸，于是**不需要缩放**，
+                     * 也就不需要绕过任何东西 —— 直接用官方组件即可。
+                     *
+                     * ## 单选与多选的行为差异仍然保留
+                     *
+                     * 差别在**行为**（点另一行是否清掉原来那行），不在控件长相：
+                     * 见下面 `toggle` 里 `multi` 的那个分支。控件只是"看得见的入口"。
+                     */
+                    CheckboxPreference(
                         title = option.label,
                         titleColor = BasicComponentDefaults.titleColor(color = titleColor),
                         summary = option.detail.ifEmpty { null },
                         summaryColor = BasicComponentDefaults.summaryColor(
                             color = scheme.onSurfaceVariantSummary,
                         ),
-                        // 行首选择控件统一用 Miuix [Checkbox]，**单选与多选都一样**。
-                        //
-                        // 为什么不能按"单选用 RadioButton、多选用 Checkbox"来分：
-                        // Miuix 0.9.4 的 `RadioButton` 只画那个勾（字节码里唯一的绘制路径
-                        // 是 `drawTrimmedCheck`，未选中时 alpha 动画到 0），
-                        // 也就是说**未选中时整行不画任何东西** —— 一列选项看起来就是普通文字，
-                        // 用户看不出"这里能点"。而 `Checkbox` 有 checked/unchecked 两套
-                        // 前景与底色（见 `CheckboxColors`），未选中态是画得出来的。
-                        // 所以单选行也要它，否则同一个窗口里"能选/不能选"长得不一样。
-                        //
-                        // 单选与多选的**行为**差异仍然保留：单选点另一行会换掉原来那一行
-                        // （见下面的 toggle），多选可以同时勾多个。控件只是"看得见的入口"。
-                        //
-                        // 关于尺寸：0.9.4 的 Checkbox 固定 26dp 且是圆的（字节码
-                        // `requiredSize(26.dp)`，在调用方 modifier 之后，外面压不动），
-                        // 行因此比自己画一个小方框要高一点 —— 这是跟库对齐的代价，认了。
-                        //
-                        // Checkbox 自己也接同一个 toggle：点框与点整行是同一个动作，
-                        // 不会出现"点框没反应"（Compose 的点击会被消费，不会触发两遍）。
-                        startAction = {
-                            Checkbox(
-                                state = if (checked) ToggleableState.On else ToggleableState.Off,
-                                onClick = toggle,
-                                /*
-                                 * 缩小到 0.78（26dp → 约 20dp）。
-                                 *
-                                 * Miuix 0.9.4 的 `Checkbox` 内部是 `requiredSize(26.dp)`，
-                                 * 且**排在调用方 modifier 之后** —— `Modifier.size()` 会被它覆盖，
-                                 * 压不动。`graphicsLayer` 改的是绘制变换，不受 requiredSize 约束，
-                                 * 是唯一能从外部缩小的手段。
-                                 *
-                                 * ⚠️ 缩放只改**绘制**，不改布局占位：这行的行高仍按 26dp 算。
-                                 * 这是有意的 —— 行高由整行文案撑起，不需要为 checkbox 再调；
-                                 * 若把布局也缩到 20dp，行内垂直居中会偏移。
-                                 */
-                                modifier = Modifier.graphicsLayer {
-                                    scaleX = 0.78f
-                                    scaleY = 0.78f
-                                },
-                            )
-                        },
-                        onClick = toggle,
+                        checked = checked,
+                        // 点整行与点勾选圈是同一个动作：`CheckboxPreference` 内部
+                        // 已经把手势统一到这一处，不会出现"点框没反应"或触发两遍。
+                        onCheckedChange = { toggle() },
+                        checkboxLocation = CheckboxLocation.Start,
                         insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     )
                 }

@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardColors
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
@@ -75,6 +76,40 @@ internal object ZhiDialogWidth {
  * （技能/模型/文件选择）用这档，观感是"从底部升起的抽屉"。
  */
 internal val DialogSheetOutsideMargin = DpSize(0.dp, 8.dp)
+
+/**
+ * 底部抽屉（`OverlayBottomSheet`）里**卡片**的配色入口。
+ *
+ * ## 为什么必须有这个函数
+ *
+ * Miuix 的默认值分属两套、并不保证互相搭：
+ *
+ * | 组件 | 取色字段 | 深色实际值 |
+ * | --- | --- | --- |
+ * | `OverlayBottomSheet` 背板 | `BottomSheetDefaults.backgroundColor()` = `colorScheme.background` | `#242424` |
+ * | `Card` 默认底色 | `CardDefaults.defaultColors()` 的 `surfaceContainer` | `#242424` |
+ *
+ * **两者是同一个值** —— 于是"全部用默认值"在抽屉里恰好会让卡片**完全隐身**：
+ * 卡片边界看不出来，几行内容像是直接铺在背板上（浅色下同理，都是白）。
+ *
+ * 这不是 Miuix 设计得差，而是它的默认值面向"页面里直接放卡片"（页面底色是
+ * `surface`，与 `surfaceContainer` 拉得开），不是"卡片放在抽屉里"。
+ *
+ * 所以官方的 `BottomSheetSection` 示例给抽屉内的每张卡都**显式**传了
+ * `secondaryContainer`，本函数把这同一条规则收成一个入口 —— 免得每个抽屉
+ * 各写一遍，也免得漏掉一个。
+ *
+ * ## 内容颜色用 `onBackground` 而不是 `onSecondaryContainer`
+ *
+ * `onSecondaryContainer` 在深色下是 `#7C7C7C`（中灰），压在 `#434343` 上对比度
+ * 只有 1.8:1 —— 那正是本工程"按钮看起来全是灰的、像禁用"那个老 bug 的成因。
+ * 文字一律用 `onBackground`（近白），颜色语义只由**底色**承担。
+ */
+@Composable
+internal fun ZhiSheetCardColors(): CardColors = CardDefaults.defaultColors(
+    color = MiuixTheme.colorScheme.secondaryContainer,
+    contentColor = MiuixTheme.colorScheme.onBackground,
+)
 
 /**
  * 弹窗内容的外壳：左对齐标题 + 固定说明 + 中间内容区 + 底部固定按钮区。

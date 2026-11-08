@@ -513,7 +513,12 @@ internal fun FileSelectionToolbar(
             }
         }
     }
-    OverlayDialog(show = details != null && visible, onDismissRequest = { details = null }) {
+    OverlayDialog(
+        show = details != null && visible,
+        onDismissRequest = { details = null },
+        // 居中形态：这是个确认框，该出现在屏幕中央而不是从底部升起（见 PermissionOverlay）。
+        largeScreen = true,
+    ) {
         val shown = rememberLastNonNull(details)
         DialogShell("详情", actions = { PrimaryButton("确定", { details = null }) }) { Text(shown.orEmpty().joinToString("\n") { it.path }) }
     }

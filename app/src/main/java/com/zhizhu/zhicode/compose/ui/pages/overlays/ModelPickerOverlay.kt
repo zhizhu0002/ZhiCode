@@ -43,6 +43,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiSheetCardColors
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
@@ -473,7 +474,7 @@ private fun QuotaCard(
         modifier = modifier.fillMaxWidth(),
         // 与模型行同一套令牌入口（`defaultColors(color=…)`）：卡片的底色必须显式传，
         // 否则默认值与 sheet 背板同值，整张卡在背板上看不出来。
-        colors = CardDefaults.defaultColors(color = scheme.secondaryContainer),
+        colors = ZhiSheetCardColors(),
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Row(

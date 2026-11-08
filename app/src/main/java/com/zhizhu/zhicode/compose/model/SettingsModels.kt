@@ -418,6 +418,20 @@ data class ApiConfigState(
     val form: ApiProfileDraft? = null,
     /** 载荷还没读完，见 `WorkspaceViewModel.openApiConfig`。 */
     val loading: Boolean = false,
+    /**
+     * 「从模型选择面板直接进来的新增表单」。
+     *
+     * <p>为真时这一页**只渲染表单、不渲染列表**，而且返回直接退出这一页
+     * （回到工作区，模型面板还在）。为假时是常规形态：列表 ↔ 表单两级，
+     * 从表单返回先回列表。
+     *
+     * <p>为什么需要它：模型面板底部的「添加 API」语义就是**新增一条**，
+     * 让它先落在列表页上再让用户点「新增」，等于多一次无意义的跳转 ——
+     * 用户的原话是「bottom 直接跳转，不需要跳转多个页面（返回也是回到选择模型）」。
+     *
+     * <p>它**不是**持久状态：只在这一条链路里为真，页一关就随载荷一起丢掉。
+     */
+    val standalone: Boolean = false,
 )
 
 /** 模型目录里的一项。[displayName] 可能与 [id] 相同，界面据此决定要不要重复显示。 */

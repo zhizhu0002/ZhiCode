@@ -107,15 +107,30 @@ fun ApiConfigPage(
     val form = config.form
     // 退出动画期间离场页仍在绘制，那时 form 已经是 null —— 见 rememberLastNonNull 的说明。
     val shownForm = rememberLastNonNull(form)
-    // 二级整页（与设置主页同款骨架），列表/表单两态走**页面栈**：
-    // 只写一个 when 分支的话两态会被硬切，没有任何转场动画。
+    /*
+     * 「从模型面板直接进来的新增表单」（`standalone`）。
+     *
+     * 这一档**只渲染表单、不渲染列表**：模型面板底部那个「添加 API」的语义就是
+     * 新增一条，先落到列表页再让用户点「新增」是多一次无意义的跳转。
+     *
+     * ⚠️ 列表页也**不能**进路径：进了就会在表单下面垫一层，返回先回列表 ——
+     * 而这条链路要的是"返回直接回到模型面板"。所以 standalone 下唯一那一页
+     * 永远是 form 页，返回交给 `onDismiss`（关掉整页 → 露出底下的模型面板）。
+     *
+     * 路径不能为空（`SettingsPageStack` 会 require 报错），所以这里不给
+     * `filterNotNull()` 留出空路径的可能：standalone 时那一页是常量。
+     */
+    val standalone = config.standalone
     SettingsPageStack(
-        // 路径含最底下那一页：栈要靠整条路径算层级与方向。
-        path = listOf(
-            SettingsPageKey("api.list", 0),
-            if (form != null) SettingsPageKey("api.form", 1) else null,
-        ).filterNotNull(),
-        onBack = if (form == null) onDismiss else onCancelForm,
+        path = if (standalone) {
+            listOf(SettingsPageKey("api.form", 0))
+        } else {
+            listOf(
+                SettingsPageKey("api.list", 0),
+                if (form != null) SettingsPageKey("api.form", 1) else null,
+            ).filterNotNull()
+        },
+        onBack = if (standalone || form == null) onDismiss else onCancelForm,
     ) { key ->
         // ⚠️ 分支必须看**正在渲染的那一页**（key），不能看当前状态。
         val draft = if (key.id == "api.form") shownForm else null
@@ -135,7 +150,9 @@ fun ApiConfigPage(
         } else {
             SettingsSubPage(
                 title = if (draft.isEditing) "编辑 API 配置" else "新增 API 配置",
-                onBack = onCancelForm,
+                // standalone 时顶栏返回 = 关掉整页（回到模型面板），不是"退回列表"
+                // —— 这条链路下面根本没有列表页。
+                onBack = if (standalone) onDismiss else onCancelForm,
                 action = "保存" to (if (draft.saveable) onSave else null),
             ) {
                 ApiProfileForm(

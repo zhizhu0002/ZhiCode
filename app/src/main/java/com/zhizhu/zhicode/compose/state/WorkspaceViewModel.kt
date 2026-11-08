@@ -4024,6 +4024,39 @@ class WorkspaceViewModel(
 
     fun closeApiConfig() = _state.update { it.copy(apiConfig = null) }
 
+    /**
+     * 模型面板底部的「添加 API」：**直接开一张空白表单页**。
+     *
+     * ## 与 `openApiConfig() + newApiProfile()` 的区别
+     *
+     * 那两个连用会推成 `[工作区, 设置, API列表, API表单]` —— 用户要按三次返回
+     * 才能回到模型面板，而他从哪进来的很清楚："我刚在挑模型，点了添加 API"。
+     * 所以这里：
+     *
+     * 1. **不设 `settingsOpen`** —— 设置主页不垫在底下，栈里只有这一页；
+     * 2. **不关模型面板** —— `state.modelPicker` 保持原样，于是返回（系统返回键
+     *    或顶栏返回）关掉这一页之后**直接落回模型面板**，正是用户要的；
+     * 3. `standalone = true` —— 页面只渲染表单、不渲染列表（见 `ApiConfigState`）。
+     *
+     * 顺带也省掉一次磁盘读：表单是空白的，不需要先读列表再点新增。
+     * 保存成功后由 `saveApiProfile` 关页并刷新模型面板的 tab 栏，见那里。
+     */
+    fun openApiProfileFormFromModelPicker() {
+        hideSidebarForNavigation()
+        _state.update {
+            it.copy(
+                apiConfig = ApiConfigState(
+                    // 列表载荷与这条链路无关（页面不渲染列表），给空是安全的：
+                    // `ApiConfigPage` 里只有列表分支会读它们，而 standalone 不渲染列表。
+                    profiles = emptyList(),
+                    activeId = "",
+                    form = ApiProfileDraft.blank(),
+                    standalone = true,
+                ),
+            )
+        }
+    }
+
     // ---------------------------------------------------------------- 搜索服务
 
     /**
@@ -4182,6 +4215,9 @@ class WorkspaceViewModel(
     fun saveApiProfile() {
         val form = _state.value.apiConfig?.form ?: return
         if (!form.saveable) return
+        // 这条链路是"从模型面板进来加一条配置"，保存完就该回去接着挑模型 ——
+        // 所以先把标记抄出来，等写盘成功后再决定是关页还是留在列表页。
+        val standalone = _state.value.apiConfig?.standalone == true
         viewModelScope.launch(Dispatchers.IO) {
             val result = ApiConfigStore.save(getApplication(), form)
             if (result.isFailure) {
@@ -4190,9 +4226,47 @@ class WorkspaceViewModel(
                 return@launch
             }
             val state = ApiConfigStore.read(getApplication())
-            _state.update { it.copy(apiConfig = state, message = "API 配置已保存") }
+            _state.update {
+                if (standalone) {
+                    /*
+                     * standalone：关掉配置页（回到工作区），模型面板原样还开着。
+                     *
+                     * 配置页整块置 null 而不是只清 form —— 这条链路没有列表页可回，
+                     * 留着页面壳会让用户看到一张空的表单。模型面板的 tab 栏由下面
+                     * `refreshModelPickerProfiles` 补上新记录，所以关页不会让人
+                     * "刚加的配置不见了"。
+                     */
+                    it.copy(apiConfig = null, message = "API 配置已保存")
+                } else {
+                    it.copy(apiConfig = state, message = "API 配置已保存")
+                }
+            }
             syncActiveProfile()
             syncRoleCardFromStore()
+            if (standalone) refreshModelPickerProfiles()
+        }
+    }
+
+    /**
+     * 把模型面板的 API tab 栏重新同步成磁盘上的最新记录。
+     *
+     * ## 为什么不用 `showModelPicker()`
+     *
+     * 那个函数会把 `query` 重置成当前生效的模型名，并**重新拉一次模型目录** ——
+     * 而我们只是刚加了一条配置，用户还没选它，把面板状态整个重建会平白闪一下、
+     * 还要多发一次网络请求。这里只更新 tab 栏那两项，
+     * 并把 `activeProfileId` 跟着磁盘对齐（新配置若被自动设为生效，tab 要跟过去）。
+     */
+    private suspend fun refreshModelPickerProfiles() {
+        val config = withContext(Dispatchers.IO) { ApiConfigStore.read(getApplication()) }
+        _state.update { s ->
+            val picker = s.modelPicker ?: return@update s
+            s.copy(
+                modelPicker = picker.copy(
+                    profiles = config.profiles.map { ModelProfileTab(it.id, it.name) },
+                    activeProfileId = config.activeId,
+                ),
+            )
         }
     }
 

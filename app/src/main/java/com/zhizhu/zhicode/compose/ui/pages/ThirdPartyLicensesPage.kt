@@ -222,6 +222,9 @@ fun ThirdPartyLicensesPage(onBack: () -> Unit) {
     OverlayDialog(
         show = selectedIndex != null,
         onDismissRequest = { selectedIndex = null },
+        // 居中形态（`largeScreen` 是**居中**开关，不是「大屏专用」）——
+        // 不传的话手机竖屏会被判成「非大屏」，弹窗从底部升起。理由见 PermissionOverlay。
+        largeScreen = true,
         maxWidth = ZhiDialogWidth.Wide,
     ) {
         val item = selected ?: return@OverlayDialog

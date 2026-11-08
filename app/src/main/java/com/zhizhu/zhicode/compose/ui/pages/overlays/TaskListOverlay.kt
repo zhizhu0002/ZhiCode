@@ -43,6 +43,7 @@ import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiSheetCardColors
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -175,41 +176,57 @@ fun TaskListOverlay(
                 modifier = Modifier.padding(bottom = 10.dp),
             )
 
-            // 清单区吃掉余量并内部滚动（`DialogShell` 中间区同款写法）：
-            // 定高列里不 weight 的话，长清单会把「完成」按钮顶出屏幕。
-            Column(
+            /*
+             * 清单区装进一张 `Card`（底色走 [ZhiSheetCardColors]），内部再滚动。
+             *
+             * 原来这一段是裸 `Column` 直接铺在抽屉背板上，而背板的 `background`
+             * 与卡片默认色在深色下同为 `#242424`（见 ZhiSheetCardColors 的说明）——
+             * 所以此前这里只能用 `ZhiHorizontalDivider` 来分行。现在有了明确的卡片底色，
+             * 分隔线可以退回"行与行之间的细线"，而不是唯一的分组手段。
+             *
+             * `weight(1f)` 挂在卡片**里面**那个 Column 上（`DialogShell` 中间区同款写法）：
+             * 定高列里不 weight 的话，长清单会把「完成」按钮顶出屏幕。
+             */
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState()),
+                    .weight(1f),
+                colors = ZhiSheetCardColors(),
             ) {
-                // 整块内容可选中：长按选中、拖动扩展选区
-                SelectionContainer {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        tasks.forEachIndexed { index, task ->
-                            if (index > 0) {
-                                ZhiHorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                TaskStatusIndicator(state = task.state, size = 14.dp)
-                                Text(
-                                    text = task.title,
-                                    color = if (task.state == TaskState.PENDING) {
-                                        scheme.onSurfaceVariantSummary
-                                    } else {
-                                        scheme.onSurface
-                                    },
-                                    fontSize = MiuixTheme.textStyles.title4.fontSize,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(start = 8.dp),
-                                )
-                            }
-                            if (task.detail.isNotBlank()) {
-                                ZhiMarkdown(
-                                    source = task.detail,
-                                    modifier = Modifier.padding(start = 21.dp, top = 6.dp),
-                                    bodyFontSize = 11.5.sp,
-                                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(14.dp),
+                ) {
+                    // 整块内容可选中：长按选中、拖动扩展选区
+                    SelectionContainer {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            tasks.forEachIndexed { index, task ->
+                                if (index > 0) {
+                                    ZhiHorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TaskStatusIndicator(state = task.state, size = 14.dp)
+                                    Text(
+                                        text = task.title,
+                                        color = if (task.state == TaskState.PENDING) {
+                                            scheme.onSurfaceVariantSummary
+                                        } else {
+                                            scheme.onSurface
+                                        },
+                                        fontSize = MiuixTheme.textStyles.title4.fontSize,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(start = 8.dp),
+                                    )
+                                }
+                                if (task.detail.isNotBlank()) {
+                                    ZhiMarkdown(
+                                        source = task.detail,
+                                        modifier = Modifier.padding(start = 21.dp, top = 6.dp),
+                                        bodyFontSize = 11.5.sp,
+                                    )
+                                }
                             }
                         }
                     }

@@ -1399,7 +1399,7 @@ private fun PreferenceSection() {
             checked = cb,
             onCheckedChange = { cb = it },
             title = "CheckboxPreference",
-            summary = "勾选框在行首（本工程暂未使用）",
+            summary = "勾选框在行首（选择类页面用它，如提问选项）",
         )
         RadioButtonPreference(
             title = "RadioButtonPreference · A",

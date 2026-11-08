@@ -45,6 +45,8 @@ internal fun UnsavedChangesDialog(
     OverlayDialog(
         show = visible,
         onDismissRequest = onKeepEditing,
+        // 居中形态：确认框该出现在屏幕中央，而不是从底部升起（同 PermissionOverlay）。
+        largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
     ) {
         if (!shown) return@OverlayDialog

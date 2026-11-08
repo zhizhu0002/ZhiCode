@@ -3,6 +3,7 @@ package com.zhizhu.zhicode.compose.ui.pages.overlays
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,7 +31,9 @@ import com.zhizhu.zhicode.compose.ui.panes.FileListRow
 import com.zhizhu.zhicode.compose.ui.panes.FilePathBar
 import com.zhizhu.zhicode.compose.ui.panes.FileRootSwitcher
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiSheetCardColors
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
+import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
@@ -179,10 +182,30 @@ fun AttachFileOverlay(
             )
 
             // 4) 一层子项。空时把**原因**说出来，别让面板空着让人以为坏了。
-            // ⚠️ `fill = false` 是这一整处改动的**关键**：默认 `fill = true` 会把
-            // Column 撑到 heightIn 的上限，少条目时照样是一大片空 —— 等于没改。
-            // 置 false 之后列表按内容高，Column 也就按内容高（下限由 heightIn 的 min 托住）。
-            Box(modifier = Modifier.weight(1f, fill = false).fillMaxWidth()) {
+            /*
+             * ⚠️ `weight(1f, fill = false)` 是这一整处改动的**关键**：默认
+             * `fill = true` 会把 Column 撑到 `heightIn` 的上限，少条目时照样是
+             * 一大片空 —— 等于没改。置 false 之后列表按内容高，
+             * Column 也就按内容高（下限由 `heightIn` 的 min 托住）。
+             *
+             * 列表装进一张 `Card`（底色走 [ZhiSheetCardColors]），卡内再滚动。
+             *
+             * `FileListRow` 自己的卡片是**透明**的（它与文件面板的整页共用，
+             * 那一页要的是"行直接铺在页面底上"）。在抽屉里那套行就直接落在背板上，
+             * 而背板的 `background` 与 `Card` 默认色在深色下同为 `#242424`
+             * （见 ZhiSheetCardColors 的说明）—— 抽屉里因此没有明显的内容区边界。
+             *
+             * 这里统一收一层 `secondaryContainer` 卡片把它们框住，与其它抽屉
+             * （导出 / 复制 / 任务清单 / 模型选择）一致。卡内不留内边距：
+             * 行自己已经控制横向留白了。
+             */
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false),
+                insideMargin = PaddingValues(0.dp),
+                colors = ZhiSheetCardColors(),
+            ) {
                 val listState = rememberLazyListState()
                 LazyColumn(
                     state = listState,

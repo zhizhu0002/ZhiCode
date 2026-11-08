@@ -144,11 +144,17 @@ internal fun ZhiOverlayHost(
         // 额度卡片的「刷新」：重拉模型与额度（参考图的额度卡片也带这个按钮）
         onRefreshQuota = viewModel::refreshModelCatalog,
         onAddApi = {
-            viewModel.closeModelPicker()
-            // 先打开配置页、再进空白表单：tab 栏已经承担了"切到已有配置"，
-            // 这个按钮剩下的语义就是**新增**，停在列表页与按钮名字不符。
-            viewModel.openApiConfig()
-            viewModel.newApiProfile()
+            /*
+             * 直开一张空白表单页，**不关模型面板**。
+             *
+             * 原来的写法是「关面板 → openApiConfig() → newApiProfile()」，于是
+             * 栈是 `[工作区, 设置, API列表, API表单]`：用户从模型面板点这一下，
+             * 要么按三次返回才回得来，要么就得退出到工作区重开面板。
+             *
+             * 现在只推一页表单、面板留在下面（`modelPicker` 不动），
+             * 于是返回键一下就落回模型面板 —— 这才是这个按钮该有的去向。
+             */
+            viewModel.openApiProfileFormFromModelPicker()
         },
     )
 }
