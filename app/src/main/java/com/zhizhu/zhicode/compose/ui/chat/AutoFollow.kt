@@ -91,12 +91,34 @@ internal object AutoFollowPolicy {
  * 这里用「令牌变了就把它设回 true」达到同一件事，令牌由 ViewModel 在 send 时递增。
  * 默认 0 且只在 > 0 时生效，于是首帧那次启动不会误触发。
  */
+/**
+ * 「跟随最新内容」的句柄：既能读当前值，也能由界面**主动**重新打开跟随。
+ *
+ * 之所以需要主动入口：用户上翻历史后 `autoFollow` 变 false。等他点「回到底部」
+ * 回来时，如果只是把列表滚到底而不恢复这个标志，那么下一条流式输出又不会被跟随 ——
+ * 表现为"点了一次回到底部，之后又不跟了"。所以点击必须同时把标志打开。
+ */
+internal class AutoFollowHandle internal constructor(
+    val state: MutableState<Boolean>,
+) {
+    /** 重新打开跟随（界面主动调用）。 */
+    fun rearm() {
+        state.value = true
+    }
+}
+
+/**
+ * 观察 [listState]，返回「是否应该继续跟随最新内容」的**句柄**。
+ *
+ * 绝大多数调用点只需要读，用下面的 [rememberAutoFollow] 即可；
+ * 需要"点一下回到底部并恢复跟随"的地方用这个。
+ */
 @Composable
-internal fun rememberAutoFollow(
+internal fun rememberAutoFollowHandle(
     listState: LazyListState,
     forceFollowToken: Long = 0L,
     hysteresis: Dp = 8.dp,
-): State<Boolean> {
+): AutoFollowHandle {
     /*
      * ⚠️ 必须是 `rememberSaveable`，不能是普通 `remember`。
      *
@@ -174,5 +196,13 @@ internal fun rememberAutoFollow(
             }
         }
     }
-    return autoFollow
+    return AutoFollowHandle(autoFollow)
 }
+
+/** 只要读的话用这个。 */
+@Composable
+internal fun rememberAutoFollow(
+    listState: LazyListState,
+    forceFollowToken: Long = 0L,
+    hysteresis: Dp = 8.dp,
+): State<Boolean> = rememberAutoFollowHandle(listState, forceFollowToken, hysteresis).state

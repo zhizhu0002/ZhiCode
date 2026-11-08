@@ -70,7 +70,7 @@ internal fun WideWorkspace(
                 glass = NoGlass,
                 onOpenSidebar = viewModel::openSidebar,
                 onContextClick = {
-                    viewModel.onComposerChange("/usage")
+                    viewModel.requestComposerText("/usage")
                     viewModel.send()
                 },
                 onSettings = viewModel::openSettings,

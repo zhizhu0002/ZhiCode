@@ -46,21 +46,26 @@ object ZhiRadius {
     val button = MochiBaseline.cornerMedium
 
     /**
-     * 卡片、面板、弹窗、列表行 —— **28dp**，等于 Mochi 的 `extraLarge`。
+     * 卡片、面板、弹窗、列表行 —— **16dp**，等于 Mochi 的 `large`。
      *
-     * 改版前是 14dp。按 Mochi 设计规范，卡片与面板的圆角就是 `shapes.extraLarge`
-     * = 28dp；14dp 在它的九档里**根本不存在**，属于本工程自己造的一档。
+     * 这是全应用**唯一**的卡片圆角来源：`ZhiMetrics.card`、`MochiSkin` 的 `large`、
+     * 以及各处 `cornerRadius = ZhiRadius.card` 都指向这里，改这一个值即全局生效。
+     *
+     * 沿革：14dp → 28dp（照抄 Mochi `extraLarge`）→ **16dp**。
+     * 28dp 的问题：它比 Miuix 自己的 `CardDefaults.CornerRadius`（16dp）大得多，
+     * 于是同一个应用里并存两种卡片圆角 —— 设置页 28、弹窗与下拉 16，摆在一起
+     * 像两套设计。统一到 16 之后与 Miuix 原生组件天然一致。
      */
-    val card = MochiBaseline.cornerExtraLarge
+    val card = MochiBaseline.cornerLarge
 
     /**
      * 卡片内部再嵌一层的小块 —— **12dp**。
      *
-     * 这个值不是挑出来的，是**同心公式算出来的**：
-     * `card 28 − 内容内边距 16 = 12`，恰好落在 Mochi 的 `medium` 档上。
-     * 改 [card] 或改内边距时，这里要跟着重算（见 [MochiBaseline.concentric]）。
+     * ⚠️ 这里**不能**再用同心公式 `card − rowTextInset`：card 降到 16 之后
+     * `16 − 16 = 0`，内嵌块会变成直角，比外卡片还硬。所以退回显式的 `medium` 档。
+     * 12 与 16 只差 4dp，视觉上仍是"里层比外层略方一点"的正常嵌套关系。
      */
-    val inner = MochiBaseline.concentric(MochiBaseline.cornerExtraLarge, MochiBaseline.rowTextInset)
+    val inner = MochiBaseline.cornerMedium
 
     val square = MochiBaseline.cornerExtraSmall
 

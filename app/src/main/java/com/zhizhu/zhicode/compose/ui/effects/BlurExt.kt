@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
@@ -11,6 +12,7 @@ import com.zhizhu.zhicode.compose.theme.LocalZhiDark
 import com.zhizhu.zhicode.compose.theme.ZhiGlass
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurColors
+import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.textureBlur
@@ -84,4 +86,41 @@ fun PageBlurBar(
     ) {
         content()
     }
+}
+
+/**
+ * 让内容变成"模糊渐变的遮罩"（`contentBlendMode = DstIn`）。
+ *
+ * 效果的实质：把背板采样、模糊后，再用**内容自身的 alpha** 当遮罩画出来。
+ * 所以文字的颜色不重要，字形才是形状。
+ *
+ * ## [brightness] / [saturation] 为什么要能调
+ *
+ * 采样源就是字的颜色 —— 背板偏暗时，字形会跟着变暗到几乎看不见
+ * （实测：深蓝渐变上的深蓝字）。KSU Style 的做法是在混合时把采到的像素提亮，
+ * 于是字形比底色亮、能读。经验值：整页深色渐变配 `brightness ≈ 0.35f`。
+ *
+ * [backdrop] 为 null 时是**恒等**修饰符 —— 关掉模糊、或 API < 33 时调用方
+ * 不需要写分支，文字照常以正常颜色显示。
+ */
+@Composable
+fun Modifier.foregroundBlur(
+    backdrop: LayerBackdrop?,
+    radius: Float = 60f,
+    brightness: Float = 0f,
+    saturation: Float = 1f,
+): Modifier {
+    if (backdrop == null) return this
+    return this.textureBlur(
+        backdrop = backdrop,
+        // 形状交给内容自己定：文字不裁剪，图标不裁剪。需要圆角的调用方自己套 shape。
+        shape = RectangleShape,
+        blurRadiusX = radius.coerceIn(0f, BlurDefaults.MaxBlurRadius),
+        blurRadiusY = radius.coerceIn(0f, BlurDefaults.MaxBlurRadius),
+        colors = BlurDefaults.blurColors(
+            brightness = brightness.coerceIn(-1f, 1f),
+            saturation = saturation,
+        ),
+        contentBlendMode = BlendMode.DstIn,
+    )
 }

@@ -29,6 +29,18 @@ fun BgEffectBackground(
     bgModifier: Modifier = Modifier,
     isFullSize: Boolean = false,
     effectBackground: Boolean = true,
+    /**
+     * 是否让**分布点**逐帧缓慢漂移。
+     *
+     * 与 [dynamicBackground] 分开：后者只驱动色带的慢速流转（`colorStage` 那个
+     * `Animatable`，几秒一次），而这一项打开时[bgEffectDraw] 里会有一个
+     * `withFrameNanos` 循环**每帧**重绘。
+     *
+     * 演示页无所谓；关于页的 Hero 是常驻的，一直 60fps 画渐变等于白耗电，
+     * 那边传 `dynamicBackground = true, animateMotion = false`。
+     * 默认值等于旧行为，其他调用方不受影响。
+     */
+    animateMotion: Boolean = dynamicBackground,
     alpha: () -> Float = { 1f },
     content: @Composable BoxScope.() -> Unit,
 ) {
@@ -78,7 +90,7 @@ fun BgEffectBackground(
                     surface = surface,
                     effectBackground = effectBackground,
                     isFullSize = isFullSize,
-                    playing = dynamicBackground,
+                    playing = animateMotion,
                     colorStage = { colorStage.value },
                     alpha = alpha,
                 ),

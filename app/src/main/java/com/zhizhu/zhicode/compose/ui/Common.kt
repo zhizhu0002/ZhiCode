@@ -911,6 +911,77 @@ fun ZhiTextField(
 }
 
 /**
+ * 与上面那个 `String` 版本**同外观**，但直接吃 `TextFieldState`。
+ *
+ * ## 为什么需要这个重载
+ *
+ * String 版本内部已经有一个 `TextFieldState`（见上面），但它每次都要做两趟转换：
+ *
+ *   外部 `String` → `LaunchedEffect(value)` 写进 `fieldState`
+ *   `fieldState` → `snapshotFlow` → `onValueChange(String)` → 状态层
+ *
+ * 对"输入框的文字归状态层所有"的调用点（也就是发送框），这带来了一个真实的性能问题：
+ * 每次按键都要把字符串送进 `WorkspaceUiState`，而那个 `data class` 里装着**整份
+ * transcript**。`copy()` 本身不算贵，但它让 `ChatList` 的参数（`state`）变了 ——
+ * 于是用户每敲一个字符，整个对话流就重组一次。
+ *
+ * 用这个重载之后，文字归 `TextFieldState` 自己持有，按键只失效文本这一层；
+ * 调用点只在**真正需要**（发送、切会话、斜杠查询）时去读 `state.text`。
+ *
+ * ## 与 String 版本的行为差异（刻意的）
+ *
+ * 这里**没有** `LaunchedEffect(value)` 那条"外部改值写回"。外部要改值请直接调
+ * `fieldState.setTextAndPlaceCursorAtEnd(...)` —— 那也是唯一能同时把光标放到末尾的方式。
+ * 保留自动写回会与"文字归 fieldState 所有"自相矛盾，并且重新引入上面那个往返。
+ */
+@Composable
+fun ZhiTextField(
+    state: androidx.compose.foundation.text.input.TextFieldState,
+    modifier: Modifier = Modifier,
+    label: String = "",
+    useLabelAsPlaceholder: Boolean = true,
+    enabled: Boolean = true,
+    readOnly: Boolean = false,
+    singleLine: Boolean = false,
+    minLines: Int = 1,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
+    colors: TextFieldColors = TextFieldDefaults.textFieldColors(),
+    insideMargin: DpSize = TextFieldDefaults.InsideMargin,
+    cornerRadius: Dp = TextFieldDefaults.CornerRadius,
+    textStyle: TextStyle? = null,
+    cursorBrush: Brush = SolidColor(MiuixTheme.colorScheme.primary),
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    interactionSource: MutableInteractionSource? = null,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    trailingIcon: (@Composable () -> Unit)? = null,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val base = textStyle ?: MiuixTheme.textStyles.main
+    TextField(
+        state = state,
+        modifier = modifier,
+        insideMargin = insideMargin,
+        colors = colors,
+        cornerRadius = cornerRadius,
+        label = label,
+        useLabelAsPlaceholder = useLabelAsPlaceholder,
+        enabled = enabled,
+        readOnly = readOnly,
+        textStyle = base.copy(color = base.color.takeOrElse { scheme.onSurface }),
+        keyboardOptions = keyboardOptions,
+        lineLimits = if (singleLine) {
+            TextFieldLineLimits.SingleLine
+        } else {
+            TextFieldLineLimits.MultiLine(minHeightInLines = minLines, maxHeightInLines = maxLines)
+        },
+        leadingIcon = leadingIcon,
+        trailingIcon = trailingIcon,
+        interactionSource = interactionSource,
+        cursorBrush = cursorBrush,
+    )
+}
+
+/**
  * Miuix 复选设置行的稳定转发。
  *
  * 选择列表优先使用官方 [CheckboxPreference]，让标题、摘要、点击语义与复选框

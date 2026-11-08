@@ -1,5 +1,16 @@
 package com.zhizhu.zhicode.compose.ui.composer
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandHorizontally
@@ -80,8 +91,31 @@ fun Composer(
     state: WorkspaceUiState,
     wide: Boolean,
     glass: Glass,
-    onTextChange: (String) -> Unit,
+    /**
+     * 输入框文字的所有权在这里（见 [ComposerTextState] 的说明）。
+     *
+     * 传对象而不是 `String + onValueChange` 是**性能要求**：后者每按一个键都要把
+     * 文字写回 `WorkspaceUiState`（内含整份 transcript），于是整个对话流跟着重组。
+     */
+    textState: ComposerTextState,
+    /**
+     * 斜杠查询变化时通知状态层（它要算匹配列表、决定面板显不显示）。
+     *
+     * 只在「以 `/` 开头且还没打空格」这种真正需要面板的时候调用，
+     * 普通打字一次都不走状态层。
+     */
+    onSlashQueryChanged: (String?) -> Unit,
+    /** `@` 文件引用查询变化（`@` 之后的那一段；`null` = 不在引用态）。 */
+    onFileQueryChanged: (String?) -> Unit,
+    /** 从 `@` 补全面板里选中了一个路径。 */
+    onPickFile: (String) -> Unit,
+    /** 取消一条排队中的预输入。 */
+    onRemoveQueued: (String) -> Unit = {},
+    /** 把一条排队中的预输入取回输入框。 */
+    onEditQueued: (String) -> Unit = {},
     onSend: () -> Unit,
+    /** 长按发送键：只把消息发进对话流，不触发模型回复。 */
+    onSendWithoutReply: () -> Unit,
     onStop: () -> Unit,
     onPickSlash: (SlashCommand) -> Unit,
     onRemoveAttachment: (Attachment) -> Unit,
@@ -121,6 +155,71 @@ fun Composer(
 ) {
     ZhiFrameTrace.countRecompose("Composer")
     val scheme = MiuixTheme.colorScheme
+
+    /*
+     * 发送键可用性：从输入框状态派生，只在"空/非空"翻转时让读它的地方失效。
+     *
+     * 不要改成在组合期直接 `textState.field.text.isNotBlank()`：那会让整块 Composer
+     * 每个按键都重组一次，而这里本来正是要消灭那个开销。
+     */
+    val canSend by remember(textState) {
+        derivedStateOf { textState.field.text.isNotBlank() }
+    }
+
+    /*
+     * 这里曾经有一个 `noop: () -> Unit = remember { { } }`，用于"内层按钮只负责画、
+     * 点击交给外层 combinedClickable"。**那个设计是错的**，已删除：
+     * Miuix `IconButton` 自带 clickable 且在内层，子节点优先会把点击吃掉，
+     * 外层永远收不到 —— 症状是发送键点了毫无反应。
+     * 现在点击直接接在 `ZhiFilledIconButton(onClick = onSend)` 上。
+     */
+
+    /*
+     * 输入触发：`/` 命令 与 `@` 文件引用。
+     *
+     * 以前只有斜杠，而且是"每个字符都 `copy()` 一次整个状态"。现在把两种触发
+     * 压成同一条 `snapshotFlow`，并且用 `distinctUntilChanged` 之后，
+     * **普通打字一次都不发射** —— 状态层完全不知道用户在写正文。
+     *
+     * 判定规则（与主流编码 Agent 一致）：
+     *  · `/` 在**开头**且还没打空格 → 斜杠命令查询；
+     *  · `@` 在**任意位置**、且最后一个 `@` 之后还没有空格 → 文件引用查询。
+     * 两者互斥：同一时刻只会有一个非空（前者要求整段以 `/` 起头）。
+     */
+    LaunchedEffect(textState) {
+        snapshotFlow { textState.field.text.toString() }
+            .map { text ->
+                val lastAt = text.lastIndexOf('@')
+                val atQuery = if (lastAt >= 0) {
+                    val tail = text.substring(lastAt + 1)
+                    if (tail.contains(' ') || tail.contains('\n')) null else tail
+                } else null
+                val slashQuery =
+                    if (text.startsWith("/") && !text.contains(' ') && !text.contains('\n')) text
+                    else null
+                slashQuery to atQuery
+            }
+            .distinctUntilChanged()
+            .debounce(60)
+            .collect { (slashQuery, atQuery) ->
+                onSlashQueryChanged(slashQuery)
+                onFileQueryChanged(atQuery)
+            }
+    }
+
+    /*
+     * 外部动作写入输入框：「编辑后发送」「恢复草稿」「设置目标」等。
+     *
+     * 靠 `composerTextEpoch` 而不是"文字变了"来驱动 —— 用户打字不会回写那个字段，
+     * 所以字段值可能连续几次外部写入都相同（连着点两次"编辑后发送"同一条），
+     * 观察值就不会触发。版本号每次都 +1，见 `WorkspaceUiState.composerTextEpoch`。
+     */
+    var lastAppliedEpoch by remember { mutableStateOf(state.composerTextEpoch) }
+    LaunchedEffect(state.composerTextEpoch) {
+        if (state.composerTextEpoch == lastAppliedEpoch) return@LaunchedEffect
+        lastAppliedEpoch = state.composerTextEpoch
+        textState.setText(state.composerText)
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -129,6 +228,27 @@ fun Composer(
             // 否则阴影档位不同会让"可见边缘"差出几 dp，看上去就是"不是同宽的"。
             .padding(top = 4.dp, bottom = 10.dp),
     ) {
+
+        /*
+         * 排队中的预输入。
+         *
+         * 预输入的实现是「气泡立刻进对话流 + 文字排队等引擎」。如果没有这个面板，
+         * 用户排了两条之后既看不到队列、也无法取消 —— 只能等它们发出去。
+         *
+         * 放在输入卡片**上方**（与斜杠/文件面板同一位置）：三块都是"与输入相关
+         * 的附加信息"，位置统一才不会让人找不到。
+         */
+        AnimatedVisibility(
+            visible = state.pendingInputs.isNotEmpty(),
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            QueuedPromptPanel(
+                items = state.pendingInputs,
+                onRemove = onRemoveQueued,
+                onEdit = onEditQueued,
+            )
+        }
 
         // 斜杠面板展开/收起走动画。
         //
@@ -152,8 +272,26 @@ fun Composer(
             SlashPalette(matches = state.slashMatches, onPick = onPickSlash)
         }
 
+        /*
+         * `@` 文件引用面板。
+         *
+         * 与斜杠面板**互斥**：`/` 只能出现在开头，`@` 出现在任意位置，
+         * 但两者不会同时有查询串（见上面那条 `snapshotFlow` 的判定）。
+         * 所以这里用 `fileQuery != null` 单独控制，不会两个面板同时弹出来。
+         */
+        AnimatedVisibility(
+            visible = state.fileQuery != null,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            FilePalette(
+                query = state.fileQuery.orEmpty(),
+                matches = state.fileQueryMatches,
+                onPick = onPickFile,
+            )
+        }
+
         // 输入框 + 发送键**并排**：输入箱在左（weight 1f），方角发送键在右。
-        // 卡片统一走 FloatingBottomShell（Common.kt）：与任务卡、反馈条同一个
         // 圆角 / 阴影 / 横向内缩来源，保证三块"同框"。
         FloatingBottomShell(wide = wide, glass = glass) {
             Column(
@@ -205,8 +343,8 @@ fun Composer(
                 verticalAlignment = Alignment.Bottom,
             ) {
                 ZhiTextField(
-                    value = state.composerText,
-                    onValueChange = onTextChange,
+                    // 文字归 ComposerTextState 所有（见参数说明）。
+                    state = textState.field,
                     label = "描述任务或向 ZhiCode 提问",
                     useLabelAsPlaceholder = true,
                     // 透明容器 + 透明描边：只留外层方角框
@@ -270,22 +408,68 @@ fun Composer(
                     )
                 }
 
-                ZhiFilledIconButton(
-                    description = "发送消息",
-                    icon = ZhiIcons.send,
-                    iconSize = 16.dp,
-                    onClick = onSend,
-                    containerColor = scheme.primary,
-                    enabled = state.composerText.isNotBlank(),
-                    square = true,
-                    size = ComposerActionSize,
-                    modifier = Modifier.padding(start = 6.dp, bottom = 2.dp).selfPressSink(),
-                )
+                /*
+                 * 发送键。
+                 *
+                 * ⚠️ 这里**不**做"生成中变成取消"。
+                 *
+                 * 曾经加过那条：生成中且输入为空时把发送键画成红色停止键。
+                 * 结果是画面上出现**两个暂停键**（左边那个是原本就有的停止键），
+                 * 用户截图一眼就看出来了 —— 原来那个红色停止键本来就在生成中显示，
+                 * 再让发送键也变成停止，就是重复。
+                 *
+                 * 现在回到原来的分工：
+                 *  · 生成中 → 左边那个红色停止键负责停止（见上面的 AnimatedVisibility）；
+                 *  · 发送键永远只负责发送，输入为空时置灰。
+                 *
+                 * 保留的增强只有一处：**长按** = 只发进对话流、不触发模型。
+                 * 它不新增按钮，也不改变任何既有行为。
+                 */
+                Box(
+                    modifier = Modifier
+                        .padding(start = 6.dp, bottom = 2.dp)
+                        .selfPressSink()
+                        /*
+                         * 外层**只负责长按**，不接点击。
+                         *
+                         * 🔴 这里踩过一次：曾经把 `onClick = onSend` 放在这一层、
+                         * 内层 `IconButton` 传空 lambda，指望"外层接管点击"。
+                         * 结果**发送键完全没反应**。
+                         *
+                         * 原因是 Compose 的手势分发**子节点优先**：Miuix `IconButton`
+                         * 自带 `clickable`，它注册在更内层，会先把点击消费掉，
+                         * 外层 `combinedClickable` 永远收不到那个事件。
+                         * 长按不受影响 —— `IconButton` 只声明了 tap，没有 long-press。
+                         */
+                        .combinedClickable(
+                            enabled = canSend,
+                            onClick = {},
+                            onLongClick = onSendWithoutReply,
+                        ),
+                ) {
+                    ZhiFilledIconButton(
+                        description = "发送消息（长按：只发送不等待回复）",
+                        icon = ZhiIcons.send,
+                        iconSize = 16.dp,
+                        // 点击必须**真的**接在这里：见上面那段说明，
+                        // 交给外层是收不到的。
+                        onClick = onSend,
+                        containerColor = scheme.primary,
+                        contentColor = scheme.onPrimary,
+                        enabled = canSend,
+                        square = true,
+                        size = ComposerActionSize,
+                    )
+                }
             }
 
             // ---- 主体调试模式：输入行下方的 Markdown 实时预览 ----
             // 用生产渲染器 ZhiMarkdown，所以这里看到的排版就是消息里会有的排版。
             if (debugMode) {
+                // 调试面板会读文字长度与内容 —— 这里**可以**在组合期读 textState，
+                // 因为它只在调试模式下渲染，而调试模式本来就是"看真实排版"的用途，
+                // 不在乎那点重组开销。生产路径上不会有这个读取。
+                val debugText = textState.text()
                 ZhiHorizontalDivider(
                     modifier = Modifier.fillMaxWidth(),
                     color = scheme.outline.copy(alpha = 0.45f),
@@ -301,14 +485,14 @@ fun Composer(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "  ${state.composerText.length} 字 · ${state.attachments.size} 附件 · " +
+                        text = "  ${debugText.length} 字 · ${state.attachments.size} 附件 · " +
                             (state.slashQuery?.let { "斜杠「$it」" } ?: "无斜杠"),
                         color = scheme.onSurfaceVariantSummary,
                         fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         fontFamily = FontFamily.Monospace,
                     )
                 }
-                if (state.composerText.isBlank()) {
+                if (debugText.isBlank()) {
                     Text(
                         text = "输入框为空；在上面写点 Markdown（# 标题 / - 列表 / **粗体** / `代码` / 表格）即会在此渲染。",
                         color = scheme.onSurfaceVariantSummary,
@@ -317,7 +501,7 @@ fun Composer(
                     )
                 } else {
                     ZhiMarkdown(
-                        source = state.composerText,
+                        source = debugText,
                         bodyFontSize = MiuixTheme.textStyles.body2.fontSize,
                         modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
                     )

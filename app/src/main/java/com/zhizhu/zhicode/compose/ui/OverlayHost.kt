@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
+import com.zhizhu.zhicode.compose.model.ChoiceIntent
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.pages.overlays.AttachFileOverlay
@@ -45,6 +46,26 @@ internal fun ZhiOverlayHost(
         state.attachPickerOpen ||
         state.taskListOpen
 
+    // 导出面板（照 rikkahub 的 ChatExportSheet）：格式与选项在这里选。
+    com.zhizhu.zhicode.compose.ui.pages.overlays.ExportSheetOverlay(
+        sheet = state.exportSheet,
+        onDismiss = viewModel::dismissExportSheet,
+        onIncludeReasoningChange = viewModel::setExportIncludeReasoning,
+        onExpandReasoningChange = viewModel::setExportExpandReasoning,
+        onExportMarkdown = viewModel::exportSheetAsMarkdown,
+        onExportImage = viewModel::exportSheetAsImage,
+        onSelectMore = viewModel::exportSelectMore,
+    )
+    // 一次性事件：把准备要分享的内容交给系统分享面板。
+    // 放在这里而不是各页面里 —— 这个宿主是全局唯一的挂载点之一。
+    // 导出的落盘入口：SAF（系统文件管理器）。渲染图片要真实 Activity +
+    // 独立 composition，只能在界面层做，所以整条链路都在这里。
+    com.zhizhu.zhicode.compose.ui.export.ExportSaver(
+        payload = state.pendingExport,
+        onConsumed = viewModel::clearPendingExport,
+        onDone = viewModel::showMessage,
+    )
+
     PermissionOverlay(
         request = state.permissionRequest,
         onAllowOnce = { viewModel.resolvePermission(allow = true) },
@@ -62,7 +83,17 @@ internal fun ZhiOverlayHost(
         // 否则长按后会出现「下拉菜单 + 居中对话框」同时可见。
         picker = if (anchoredActionMenu) null else state.choicePicker,
         onSubmit = viewModel::onSubmitSelection,
-        onDismiss = viewModel::dismissChoicePicker,
+        // ⚠️ 用 `closeChoicePicker` 而不是 `dismissChoicePicker`。
+        //
+        // 后者是"容器收起动画结束"的通知，它对会话重命名/删除确认两个意图
+        // 故意什么都不做 —— 因为动画结束时新状态可能已经写进去了，
+        // 无条件清空会把刚打开的重命名对话框一起关掉（那正是「点重命名没反应」的根因）。
+        //
+        // 但「取消」按钮和点击空白走的是**同一个**回调。如果这里也用
+        // `dismissChoicePicker`，那对话框就永远关不掉了（用户报的
+        // 「点击取消也无法关闭」「点空白也关不掉」）。
+        // `closeChoicePicker` 是无条件关闭，正是这两个入口需要的语义。
+        onDismiss = viewModel::closeChoicePicker,
         onSubmitFreeForm = viewModel::onSubmitFreeForm,
     )
     // 「自由复制」底部抽屉：把一条消息的原文摊开让人划词。

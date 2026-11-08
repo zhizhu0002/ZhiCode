@@ -203,11 +203,18 @@ fun SettingsPage(
                 item(key = "context", contentType = "settings-group") { SettingsGroup("上下文与项目") { ContextProjectPage(draft, onChange, onNavigate) } }
                 item(key = "agent", contentType = "settings-group") { SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) } }
                 item(key = "extensions", contentType = "settings-group") { SettingsGroup("扩展") { ExtensionsPage(onNavigate, extensions) } }
-                // 「关于」单独成组：它是**元信息**（版本/源码/许可），
-                // 与上面那些"能配置 / 能增删"的扩展项不是同一类。
-                // 混在一起时用户找不到它 —— 它看起来像又一个扩展入口。
+                /*
+                 * 「关于 ZhiCode」单独成组，并**给它一个标题**。
+                 *
+                 * 之前它是一张**无标题卡**，紧贴在「扩展」卡下面：两张卡之间没有任何
+                 * 文字分隔，看起来就是同一张卡被劈开了（用户报的"扩展和下面的 card
+                 * 怎么回事"）。
+                 *
+                 * 而「记忆文件」是**能点的功能入口**（编辑项目级/用户级说明文件），
+                 * 与 MCP / Skill / 角色卡同类，所以挪进「扩展」组里。
+                 */
                 item(key = "meta", contentType = "settings-group") {
-                    SettingsGroup { MetaPage(onNavigate) }
+                    SettingsGroup("关于") { AboutEntryPage(onNavigate) }
                 }
             }
             // Miuix 原生滚动条
@@ -221,36 +228,28 @@ fun SettingsPage(
 // ------------------------------------------------------------------ 各分类页
 
 /**
- * 元信息分组：关于 + 记忆文件。
+ * 「关于」分组：只有一行入口。
  *
- * ## 为什么单独一张卡
+ * ## 为什么「记忆文件」不在这里了
  *
- * 这两项与「扩展」里那些（MCP / Skill / 角色卡）**性质不同**：那些是"能配置、
- * 能增删的扩展能力"，而这两项是"这个应用是什么、它怎么记住事"。
- * 混在一起时用户在扩展里找「关于」会连看几遍都找不到 —— 它读起来像又一个扩展入口。
+ * 它是**能点的功能入口**（编辑项目级 / 用户级说明文件），与 MCP、Skill、角色卡
+ * 同类，所以挪进了「扩展」组。留在这一张卡里时，用户看到的是"扩展卡下面又冒出
+ * 一张无标题卡、紧贴着、像被劈开的同一张卡"。
  *
- * 单独成组之后它在视觉上是**最后一张卡**，位置本身就是"这一页的收尾"。
+ * ## 为什么现在有标题了
  *
- * ## 为什么没有标题
- *
- * 一行入口 + 一张无标题卡，就是这一组的全部。给两个小入口配一个"其它"标题会
- * 多出一行只在重复自己意思的文字（`SettingsGroup` 支持 `title = null`）。
+ * 原来 `SettingsGroup(title = null)` 让这一组没有标题行，于是它和上一张卡之间
+ * 只有卡片间距、没有任何文字分隔 —— 视觉上就是一个可疑的"断口"。
+ * 现在独立成一张带「关于」标题的卡，位置本身就是这一页的收尾。
  */
 @Composable
-private fun MetaPage(onNavigate: (String) -> Unit) {
+private fun AboutEntryPage(onNavigate: (String) -> Unit) {
     SettingsIconEntry(
         title = "关于 ZhiCode",
-        summary = "其他",
+        summary = "版本、源码、许可证与隐私政策",
         icon = ZhiIcons.info,
         plate = SettingsPlateColors.gray,
         onClick = { onNavigate("about") },
-    )
-    SettingsIconEntry(
-        title = "记忆文件 · ZhiCode.md",
-        summary = "项目级与用户级说明文件",
-        icon = ZhiIcons.file,
-        plate = SettingsPlateColors.orange,
-        onClick = { onNavigate("memory") },
     )
 }
 
@@ -682,8 +681,23 @@ private fun ExtensionsPage(onNavigate: (String) -> Unit, extensions: ExtensionSu
         plate = SettingsPlateColors.green,
         onClick = { onNavigate("roleCards") },
     )
-    // 「关于」与「记忆文件」已移到独立的 `MetaPage`（见下），
-    // 它们不是"扩展"，留在这一组里会被当成又一个扩展入口。
+    /*
+     * 「记忆文件」放在这一组里。
+     *
+     * 它是一个**能点的功能入口**（编辑项目级 / 用户级说明文件），与上面三项同类：
+     * 都能配置、都能增删。之前它和「关于」挤在一张无标题卡里，位置又在「扩展」卡
+     * 正下方、没有任何文字分隔 —— 看起来就是同一张卡被劈开了。
+     */
+    SettingsIconEntry(
+        title = "记忆文件 · ZhiCode.md",
+        summary = "项目级与用户级说明文件",
+        icon = ZhiIcons.file,
+        plate = SettingsPlateColors.orange,
+        onClick = { onNavigate("memory") },
+    )
+
+    // 「关于」已移到独立的「关于」分组（`AboutEntryPage`）：它是**元信息**，
+    // 不是扩展能力，留在这里会被当成又一个扩展入口。
 
     // 仅 debug 构建：把工程真正在用的组件按类别铺开（含对话流/任务卡/输入器），
     // 用来复现"看起来不对"这类问题 —— 详见 ui/debug/UiDebugPage.kt。

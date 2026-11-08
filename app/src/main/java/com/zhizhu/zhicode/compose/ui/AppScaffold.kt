@@ -7,6 +7,7 @@ import com.zhizhu.zhicode.compose.ui.pages.ApiConfigPage
 import com.zhizhu.zhicode.compose.ui.pages.McpConfigPage
 import com.zhizhu.zhicode.compose.ui.pages.SearchServicesPage
 import com.zhizhu.zhicode.compose.ui.pages.AboutPage
+import com.zhizhu.zhicode.compose.ui.pages.PrivacyPolicyPage
 import com.zhizhu.zhicode.compose.ui.pages.MemoryPage
 import com.zhizhu.zhicode.compose.ui.pages.PromptsPage
 import com.zhizhu.zhicode.compose.ui.pages.ThemePage
@@ -245,13 +246,7 @@ private fun ZhiCodeScreen(
     // 这里只把它翻译成栈，增量 reconcile —— pop 触发弹出动画、push 触发推入动画。
     val desiredStack: List<NavKey> = buildList {
         add(AppKey.Workspace)
-        // 「关于」与「第三方许可」是**应用级**页面：入口在侧栏与设置里各一个，
-        // 从侧栏进来时设置页并没有开着。所以它们先于设置分支判断，
-        // 且许可页压在关于页之上（一条链：关于 → 许可）。
-        if (state.aboutOpen) {
-            add(AppKey.About)
-            if (state.licensesOpen) add(AppKey.Licenses)
-        } else if (state.uiDebugOpen) {
+        if (state.uiDebugOpen) {
             // UI 调试是**整页**而不是设置二级页：它显示的是全部组件与状态，
             // 与设置 draft 无关。放在 settingsOpen 之前判断，于是从设置页进来时
             // 栈是 [工作区, UI 调试]（设置主页留在 settingsOpen 里，返回即回到它）。
@@ -269,6 +264,26 @@ private fun ZhiCodeScreen(
                 state.themePageOpen -> add(SettingsKey.Theme)
                 state.chatDisplayOpen -> add(SettingsKey.ChatDisplay)
             }
+        }
+        /*
+         * 「关于 / 许可 / 隐私」必须**串在设置分支之后**，不能放在它前面。
+         *
+         * 之前是 `if (aboutOpen) … else { 设置分支 }`，于是从设置页进关于时，
+         * 栈从 `[工作区, 设置]` 变成 `[工作区, 关于]` —— **深度相同**，
+         * 走的是 `stack[last] = desired` 的 replace，而不是 push。
+         * MiuixNav 的 `MiuixDefault` 只有 push 才有「右缘滑入 + 被覆盖页视差」，
+         * replace 没有 → 用户看到的是硬切（"进关于页没有动画"）。
+         * 顺带还修了一个 bug：那样返回会直接回工作区，把设置页跳过。
+         *
+         * 串在后面之后：
+         *  · 侧栏进（settingsOpen=false）→ [工作区, 关于]，push，有动画；
+         *  · 设置进（settingsOpen=true）→ [工作区, 设置, 关于]，push，有动画，
+         *    返回正确回到设置。
+         */
+        if (state.aboutOpen) {
+            add(AppKey.About)
+            if (state.licensesOpen) add(AppKey.Licenses)
+            if (state.privacyOpen) add(AppKey.Privacy)
         }
     }
     LaunchedEffect(desiredStack) {
@@ -344,6 +359,7 @@ private fun ZhiCodeScreen(
             val live = viewModel.state.value
             when {
                 live.uiDebugOpen -> viewModel.closeUiDebug()
+                live.privacyOpen -> viewModel.closePrivacy()
                 live.licensesOpen -> viewModel.closeLicenses()
                 live.aboutOpen -> viewModel.closeAbout()
                 live.apiConfig != null -> viewModel.closeApiConfig()
@@ -509,10 +525,14 @@ private fun ZhiCodeScreen(
             AboutPage(
                 onBack = viewModel::closeAbout,
                 onOpenLicenses = viewModel::openLicenses,
+                onOpenPrivacy = viewModel::openPrivacy,
             )
         }
         entry<AppKey.Licenses>(swipeDismiss = swipeBack) {
             ThirdPartyLicensesPage(onBack = viewModel::closeLicenses)
+        }
+        entry<AppKey.Privacy>(swipeDismiss = swipeBack) {
+            PrivacyPolicyPage(onBack = viewModel::closePrivacy)
         }
         // UI 调试整页（仅 debug 构建有入口）。它拿的是**真实 state 与 ViewModel**：
         // 页面里的输入器、各浮层入口都是真能用的，不是静态贴图。
@@ -557,6 +577,9 @@ private sealed interface AppKey : NavKey {
      */
     data object About : AppKey
     data object Licenses : AppKey
+
+    /** 隐私政策。与 [Licenses] 平级：都从关于页进，压在关于之上。 */
+    data object Privacy : AppKey
 }
 
 /** 设置相关页面：hub 与各二级页。 */

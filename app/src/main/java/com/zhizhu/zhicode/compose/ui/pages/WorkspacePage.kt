@@ -5,6 +5,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -44,6 +46,7 @@ import com.zhizhu.zhicode.compose.ui.LiquidWorkspaceBar
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import top.yukonga.miuix.kmp.basic.Surface
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -65,6 +68,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 
+import com.zhizhu.zhicode.compose.model.ChoiceIntent
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
@@ -77,6 +81,7 @@ import com.zhizhu.zhicode.compose.ui.LocalNavBarProgress
 import com.zhizhu.zhicode.compose.ui.LocalNavBarTarget
 import com.zhizhu.zhicode.compose.ui.LocalNavBarScrollTick
 import com.zhizhu.zhicode.compose.ui.LocalNavBarTravelPx
+import com.zhizhu.zhicode.compose.ui.LocalBottomBarInset
 import com.zhizhu.zhicode.compose.ui.LocalFloatingNavInset
 import com.zhizhu.zhicode.compose.ui.PageFeedback
 import com.zhizhu.zhicode.compose.ui.TopBarInsetCompact
@@ -239,13 +244,22 @@ internal fun WorkspacePage(
      * 每像素滚动都把这一层（连同页面）重组一次。改成在 `offset { }` 里读
      * （布局阶段，且只失效布局、不重组），见下面 `PageFeedback` 处。
      */
-    // Overlay components are modal and must remain above the bottom navigation; hide the
-    // Scaffold bar while one is open rather than allowing it to cover sheet/dialog actions.
     val anchoredActionMenu = state.choicePicker?.isActionMenu == true
-    val modalOverlayOpen = state.permissionRequest != null || state.planApproval != null ||
-        (state.choicePicker != null && !anchoredActionMenu) || state.copySheet != null ||
-        state.attachPickerOpen || state.taskListOpen || state.environmentOpen ||
-        state.modelPicker != null || state.fileNameForm != null || state.fileDeletePrompt != null
+    /*
+     * 底栏 / 悬浮胶囊**不会**因为弹窗打开而消失或让位。
+     *
+     * 这里曾经有一个 `modalOverlayOpen` 变量，含义是「当前有模态浮层」，
+     * 效果是把 NavigationBar 整块移除、把内容底距归零、把悬浮胶囊摘掉。
+     *
+     * 问题是那会造成**整块跳动**：一打开任何 dialog 或 bottom sheet，
+     * 屏幕下方那排东西就凭空消失，内容同时往下窜；关掉又跳回来。
+     * 用户报的「打开所有 dialog 都会隐藏 NavigationBar，bottomsheet 也会」
+     * 就是这条。而模态的本意只是"压暗并拦住输入"，不需要真的移除任何东西 ——
+     * Miuix 的窗口本身自带压暗层，底栏被压暗即可。
+     *
+     * 所以现在：底栏照常渲染、内容照常让位、悬浮胶囊照常存在，
+     * 由浮层自己去盖住它们。
+     */
     // Edge-to-edge makes the transparent system navigation area part of the app window.
     // Paint the page backdrop at the root so that the floating bar's safe-area gap is
     // themed background, never the window's default black surface.
@@ -256,9 +270,8 @@ internal fun WorkspacePage(
             // This is the KSU mounting point: the bar is a Scaffold child, not a
             // z-indexed child of the captured workspace. Scaffold measures it once and
             // passes that exact height to the content lambda.
-            if (showBottomNavigation && !themeSettings.tabBarFloating && !modalOverlayOpen) {
+            if (showBottomNavigation && !themeSettings.tabBarFloating) {
                 Box(
-                    // 这里曾挂 `onGloballyPositioned { ZhiFrameTrace.note("nav-probe …") }`，
                     // 用来核对"导航栏实际位置与内容让位是否一致"。它每次布局变化都执行，
                     // 而悬浮/底栏在动画期间逐帧位移 → 日志里出现 893 次 `nav-probe`。
                     // 结论早已确认，探针删除；详见 ChatList.kt 同类注释与实测数据。
@@ -319,7 +332,7 @@ internal fun WorkspacePage(
                     glass = glassMain,
                     onOpenSidebar = viewModel::openSidebar,
                     onContextClick = {
-                        viewModel.onComposerChange("/usage")
+                        viewModel.requestComposerText("/usage")
                         viewModel.send()
                     },
                     onSettings = {
@@ -365,7 +378,7 @@ internal fun WorkspacePage(
                 .fillMaxSize()
                 .then(glassMain.capture(Modifier))
                 .padding(
-                    bottom = if (showBottomNavigation && !modalOverlayOpen) {
+                    bottom = if (showBottomNavigation) {
                         if (themeSettings.tabBarFloating) {
                             // 悬浮胶囊：**不让位**。内容铺到屏幕最底边（含导航栏那一段），
                             // 胶囊浮在它上面。让位交给各页的滚动内边距（LocalFloatingNavInset）。
@@ -404,6 +417,18 @@ internal fun WorkspacePage(
             // 曾经只提供给悬浮栏槽位，导致「下滑隐藏」在页面上从未生效过）。
             CompositionLocalProvider(
                 LocalFloatingNavInset provides floatingNavInset,
+                /*
+                 * 固定底栏的高度（悬浮模式下是 0，因为那时内容本来就不让位）。
+                 *
+                 * 给对话页用：键盘弹起时输入器要往上抬，但**不能**抬到屏幕最底
+                 * —— 它得停在 `max(键盘顶边, 底栏上沿)`。而底栏上沿 = 屏幕底 −
+                 * 这个值，所以对话页必须知道它。
+                 *
+                 * 之前对话页拿不到这个值，只能"键盘可见就把底栏让位归零"，
+                 * 于是键盘**收起动画**期间（此时抬起量已归零、但还没判定为收起）
+                 * 输入器直接落到屏幕最底、压在 NavigationBar 上（用户截图）。
+                 */
+                LocalBottomBarInset provides padding.calculateBottomPadding(),
                 LocalNavBarProgress provides navBarHideProgressState,
                 LocalNavBarTarget provides navBarHideTarget,
                 LocalNavBarScrollTick provides navBarScrollTick,
@@ -478,60 +503,23 @@ internal fun WorkspacePage(
                 )
             }
 
-            // ---- 侧边栏抽屉（窄屏）----
-            //
-            // ⚠️⚠️ 抽屉**必须待在 Scaffold 的 content 里**，不能像以前那样挂在
-            // Scaffold 之后的兄弟位置。这是「长按会话菜单/对话框点不出来」的根因：
-            //
-            // Miuix 的弹层（`OverlayDropdownPopup` / `OverlayDialog`）不自己绘制，
-            // 而是把状态注册进 `LocalPopupStates` / `LocalDialogStates`，再由
-            // `Scaffold` 的 `popupHost` 统一画出来。而 `ScaffoldLayout` 把 popup
-            // 放在**最后** `place`（`Scaffold.kt:374`）—— 它只能盖住 **Scaffold 内部**的内容。
-            //
-            // 抽屉原先在 Scaffold 之外，等于永久压在弹层上面：
-            //  · 长按会话 → 菜单注册成功、也被 popupHost 画了，但被抽屉挡住 → "没反应"；
-            //  · 点菜单项 → 对话框同样被挡 → 只看到侧栏动了，看不到对话框。
-            //
-            // 移进来之后，抽屉是普通内容、弹层在它之上，两个问题一起解决。
-            // 放在工作区 UI **之后**，所以它仍然盖住对话/终端/文件三屏。
-            if (!wide) {
-                ZhiSideDrawer(
-                    open = state.sidebarOpen,
-                    onClose = viewModel::closeSidebar,
-                    // 宽度上限 300dp：抽屉是"导航"，不是工作区 —— 铺到 320dp/82% 时
-                    // 它一打开就把后面的对话流整个盖住，用户反馈「侧栏有点太宽泛了」。
-                    // 比例 0.76 兜住小屏：360dp 的机器上是 274dp，不至于挤掉 24dp 图标。
-                    width = (configuration.screenWidthDp * 0.76f).dp.coerceAtMost(300.dp),
-                ) {
-                    ZhiSidebarHost(
-                        state = state,
-                        viewModel = viewModel,
-                        // ⚠️ 必须让开 Scaffold 的**顶栏高度**。
-                        //
-                        // 抽屉现在是 Scaffold content 里的普通内容，而 Miuix 的
-                        // `ScaffoldLayout` 把 topBar 画在 content **上面**（body 先
-                        // `place(0,0)`、顶栏随后叠上去）。所以 content 内 y=0 的东西
-                        // 会被顶栏盖住 —— 用户截图里「新会话」那一条正好被压没。
-                        //
-                        // 用 `TopBarInsetCompact`（顶栏 + Tab 行的实测高度，与
-                        // `WorkspaceLayouts` 给各面板让位用的是同一个值），
-                        // 加在**内容**上：抽屉面板底色仍铺到屏幕顶边，只是第一行不钻到顶栏底下。
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .padding(top = com.zhizhu.zhicode.compose.ui.TopBarInsetCompact),
-                    )
-                }
-            }
-
             // ---- Overlay 系列 ----
             // 弹窗挂载与模态模糊背景在 OverlayHost.kt。
             //
-            // 它必须留在 `Scaffold` 的 content 里：`OverlayDialog` → `DialogLayout`
-            // 不自己绘制，而是把状态注册进 `LocalDialogStates` / `LocalPopupStates`
-            // （`MiuixPopupUtils.kt:184-188`），再由**某个 Scaffold 的 `popupHost`**
-            // 负责画。这两个 local 是 `staticCompositionLocalOf`、默认值都是**空列表**，
-            // 在 Scaffold 之外注册等于没有宿主，对话框永远不会出现。
-            ZhiOverlayHost(state = state, viewModel = viewModel, glassMain = glassMain)
+            // ---- 浮层宿主（主 Scaffold 这一份）----
+            //
+            // 只在**抽屉关闭**时组合：抽屉打开时浮层由抽屉内部那一份负责
+            // （见函数末尾 `ZhiSideDrawer(overlayHost = …)`）。
+            // 两处同时存在会让同一个对话框被两个宿主各画一次。
+            //
+            // 为什么抽屉里那份能盖住抽屉：`ChoicePickerOverlay` 传了
+            // `renderInRootScaffold = false`，走的是**离调用点最近**的
+            // `LocalPopupStates` —— 也就是抽屉自己那个 Scaffold 的宿主，
+            // 它的 popupHost 在 `ScaffoldLayout` 里最后 place。
+            if (!state.sidebarOpen) {
+                ZhiOverlayHost(state = state, viewModel = viewModel, glassMain = glassMain)
+            }
+
 
 
             // ---- 全局调试浮层（debug 构建的 UI 调试页里打开）----
@@ -561,11 +549,30 @@ internal fun WorkspacePage(
     // 所以按"选择模式"切换，并让它们走同一组滑入/滑出动画：
     // 胶囊向下退、工具栏从下方升起来，看起来像是同一块东西换了个内容。
     val fileSelectionActive = !wide &&
-        (state.fileSelectionMode || state.fileSelection.isNotEmpty()) && !modalOverlayOpen
+        (state.fileSelectionMode || state.fileSelection.isNotEmpty())
     val floatingNavSlotAvailable = !wide &&
         themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM &&
-        themeSettings.tabBarFloating && !modalOverlayOpen
+        themeSettings.tabBarFloating
     val showFloatingNav = floatingNavSlotAvailable && !fileSelectionActive
+    /*
+     * 文件选择工具栏的底距 —— 必须按底栏形态分开算。
+     *
+     * ⚠️ 这里曾经写死 `FloatingNavBarGap + navigationBarBottomInsetDp`，
+     * 那是**悬浮胶囊**的底距。固定底栏模式下 NavigationBar 自己占了 64dp，
+     * 工具栏按同一个底距定位就正好和它**重合**，表现为「工具栏盖在 NavigationBar 上层」。
+     *
+     * 正确行为是叠在底栏之上：
+     *  · 悬浮胶囊模式 = 胶囊高度 + 间隙 + 系统栏（工具栏取代胶囊，同位置）；
+     *  · 固定底栏模式 = 底栏高度 + 系统栏 + 一点缝（工具栏浮在底栏上沿）。
+     *  · 顶栏模式（底栏不显示）= 只让系统栏。
+     */
+    val fileToolbarBottomPadding = when {
+        !showBottomNavigation -> navigationBarBottomInsetDp + FloatingNavBarGap
+        themeSettings.tabBarFloating -> FloatingNavBarHeight + FloatingNavBarGap + navigationBarBottomInsetDp
+        // NavigationBarDefaults.ItemHeight = 64dp（Miuix 实测值），
+        // 再加 8dp 呼吸缝，工具栏就不会贴着底栏图标。
+        else -> 64.dp + navigationBarBottomInsetDp + FloatingNavBarGap
+    }
     // 选择工具栏与底栏形态**无关**：顶栏模式、固定底栏模式下它照样要出来。
     // 只有"窄屏 + 没开模态浮层"是硬条件（宽屏用侧栏与行内动作，不需要它）。
     if (floatingNavSlotAvailable || fileSelectionActive) {
@@ -616,8 +623,23 @@ internal fun WorkspacePage(
             }
             AnimatedVisibility(
                 visible = fileSelectionActive,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut(),
+                // ⚠️ 过渡动画必须**明显大于**胶囊那条：工具栏是"整块面板浮上来"，
+                // 用 8dp 的滑入看不出发生过什么。这里用「上滑 + 淡入 + 缩放」三合一，
+                // 时长取 [ZhiMotion] 的进入族，退出略快（退出不该拖沓）。
+                enter = slideInVertically(
+                    animationSpec = tween(ZhiMotion.FADE_IN_MILLIS, easing = FastOutSlowInEasing),
+                    initialOffsetY = { it },
+                ) + fadeIn(ZhiMotion.fadeInSpec) + scaleIn(
+                    animationSpec = tween(ZhiMotion.FADE_IN_MILLIS, easing = FastOutSlowInEasing),
+                    initialScale = 0.92f,
+                ),
+                exit = slideOutVertically(
+                    animationSpec = tween(ZhiMotion.EXIT_MILLIS, easing = FastOutSlowInEasing),
+                    targetOffsetY = { it },
+                ) + fadeOut(ZhiMotion.fadeOutSpec) + scaleOut(
+                    animationSpec = tween(ZhiMotion.EXIT_MILLIS, easing = FastOutSlowInEasing),
+                    targetScale = 0.94f,
+                ),
             ) {
                 FileSelectionToolbar(
                     visible = true,
@@ -634,14 +656,53 @@ internal fun WorkspacePage(
                     onPaste = viewModel::pasteFilesIntoCurrentDirectory,
                     onSelectAll = viewModel::toggleSelectAllFiles,
                     onDismiss = viewModel::clearFileSelection,
-                    // 与胶囊同一个底距：工具栏比胶囊矮，底边对齐即可，
-                    // 两块切换时不会上下跳一截。
-                    modifier = Modifier.padding(bottom = FloatingNavBarGap + navigationBarBottomInsetDp),
+                    modifier = Modifier.padding(bottom = fileToolbarBottomPadding),
                 )
             }
         }
+
     }
+    /*
+     * ---- 侧栏抽屉（画在主 Scaffold **之后**）----
+     *
+     * 必须排在这里，不能放进主 Scaffold 的 content：`ScaffoldLayout` 把
+     * topBar / bottomBar 作为独立槽位在 body **之后** place，content 里的东西
+     * 永远被它们压住 —— 表现为抽屉第一行「新会话」被顶栏吃掉。
+     *
+     * ⚠️ 关闭时 `ZhiSideDrawer` 内部用零尺寸 Modifier，不参与命中测试，
+     * 所以不会挡住顶栏的汉堡按钮（这个坑踩过：抽屉关闭仍 `fillMaxSize`
+     * 会吃掉全屏点击，「侧栏按钮点了没反应」）。
+     *
+     * ⚠️ 也不要改成独立 `Dialog` 窗口：窗口 attach 有延迟，进出动画会在
+     * 黑屏之后才跑，表现为「侧栏打开/关闭时背景黑化有延迟」。
+     *
+     * ## 对话框怎么盖住抽屉
+     *
+     * 抽屉内部自带一个 `Scaffold`（渲染长按菜单用），`ZhiOverlayHost` 通过
+     * `overlayHost` 槽位挂进**那个** Scaffold；同时 `ChoicePickerOverlay` 用
+     * `renderInRootScaffold = false`，走最近的 `LocalPopupStates`。
+     * 于是对话框与长按菜单同源，都画在抽屉之上。
+     */
+    if (!wide) {
+        ZhiSideDrawer(
+            open = state.sidebarOpen,
+            onClose = viewModel::closeSidebar,
+            // 宽度上限 300dp：抽屉是"导航"，不是工作区 —— 铺到 320dp/82% 时
+            // 它一打开就把后面的对话流整个盖住，用户反馈「侧栏有点太宽泛了」。
+            // 比例 0.76 兜住小屏：360dp 的机器上是 274dp，不至于挤掉 24dp 图标。
+            width = (configuration.screenWidthDp * 0.76f).dp.coerceAtMost(300.dp),
+            overlayHost = {
+                ZhiOverlayHost(state = state, viewModel = viewModel, glassMain = glassMain)
+            },
+        ) {
+            ZhiSidebarHost(
+                state = state,
+                viewModel = viewModel,
+                modifier = Modifier.fillMaxHeight(),
+            )
+        }
     }
+}
 }
 
 /**

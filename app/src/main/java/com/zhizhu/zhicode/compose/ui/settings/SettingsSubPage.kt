@@ -203,6 +203,19 @@ internal fun <T : Any> rememberLastNonNull(value: T?): T? {
 internal fun SettingsSubPage(
     title: String,
     onBack: () -> Unit,
+    /**
+     * 标题下方的第二行说明。
+     *
+     * <p>为 **null 时不渲染任何额外节点** —— 其余二级页（API 配置 / MCP / 技能 /
+     * 角色卡 / 记忆 / 搜索服务）的布局与折叠高度都不受影响。用 null 而不是空串
+     * 表达"没有副标题"：空串会让下面那个 `Column` 多画一个有行高但没内容的
+     * `Text`，折叠态顶栏凭空高出一截。
+     *
+     * <p>为什么需要它：沙盒页的标题是「沙箱」，但"沙箱"这个词在本应用里
+     * 同时指内置 Termux 与 BlackBox 运行时。第二行 `虚拟安卓运行环境 · BlackBox`
+     * 是那一屏唯一说清"这是哪一个沙箱"的地方，塞进状态卡里反而会被当成状态。
+     */
+    subtitle: String? = null,
     action: Pair<String, (() -> Unit)?>? = null,
     /**
      * 右下角的悬浮操作按钮。
@@ -306,6 +319,14 @@ internal fun SettingsSubPage(
                 // 标题层级一致，返回时不会出现「标题突然变小」的断层。
                 TopAppBar(
                     title = title,
+                    // Miuix TopAppBar **原生就有** subtitle 槽位（见
+                    // docs/miuix-ref/topappbar.md 的属性表），它自己负责在标题下方
+                    // 画那一行并把折叠动画一起算进去。
+                    //
+                    // 不要试图用「title 传空 + 自己塞一个 Column」去做两行 ——
+                    // 那样 Miuix 的 largeTitle 折叠动画（按 title: String 计算缩放与位移）
+                    // 就完全失效，展开/折叠时标题会突然跳一下。
+                    subtitle = subtitle ?: "",
                     scrollBehavior = topAppBarScrollBehavior,
                     color = if (blurActive) Color.Transparent else scheme.surface,
                     navigationIcon = {

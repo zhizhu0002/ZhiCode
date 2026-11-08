@@ -2548,8 +2548,16 @@ private fun ComposerSection(state: WorkspaceUiState, viewModel: WorkspaceViewMod
             state = state,
             wide = false,
             glass = glass,
-            onTextChange = viewModel::onComposerChange,
+            // 调试页也给一份真实的文字状态：这个区块的定位是"真实组件 + 真实状态"，
+            // 换成一个假的空状态就看不出打字、斜杠、清空这些行为了。
+            textState = remember { com.zhizhu.zhicode.compose.ui.composer.ComposerTextState() },
+            onSlashQueryChanged = viewModel::onSlashQueryChanged,
+            // 调试页也接真实的文件补全：这样才看得出面板的样子与空结果文案。
+            onFileQueryChanged = viewModel::onFileQueryChanged,
+            onPickFile = {},
             onSend = viewModel::send,
+            // 调试页只是组件预览：长按发送不触发模型，避免误发一条真实消息。
+            onSendWithoutReply = {},
             onStop = viewModel::stop,
             onPickSlash = {},
             onRemoveAttachment = { viewModel.removeAttachment(it.id) },

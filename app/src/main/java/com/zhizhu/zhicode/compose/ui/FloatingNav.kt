@@ -35,6 +35,18 @@ import androidx.compose.ui.unit.dp
 internal val LocalFloatingNavInset = compositionLocalOf<Dp> { 0.dp }
 
 /**
+ * 当前**固定底栏**占掉的底部高度（悬浮模式下是 `0.dp`，因为那时内容本来就铺到底）。
+ *
+ * 对话页需要它来算「输入器最多能往下落到哪」：
+ * 屏幕底 − 这个值 = 底栏上沿。
+ *
+ * 键盘弹起时输入器要往上抬，但抬起量归零（键盘收起动画末尾）时它不该落到屏幕最底 ——
+ * 那样会压在 NavigationBar 上。正确的落点是 `max(键盘顶边, 底栏上沿)`，
+ * 而"底栏上沿"只有这个值给得出来（对话页自己读不到 Scaffold 的 content padding）。
+ */
+internal val LocalBottomBarInset = compositionLocalOf<Dp> { 0.dp }
+
+/**
  * 胶囊自身高度。与 `LiquidWorkspaceBar` 里主 Row 的 `height` 必须一致。
  *
  * 曾经从 64dp 收到 52dp，理由是"64dp 会把输入器下缘吃掉一截"。那个判断是错的：

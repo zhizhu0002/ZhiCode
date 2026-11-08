@@ -1,5 +1,12 @@
 package com.zhizhu.zhicode.compose.ui.pages
 
+import com.zhizhu.zhicode.compose.ui.composer.ComposerTextState
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import kotlinx.coroutines.flow.distinctUntilChanged
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.runtime.snapshotFlow
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -175,6 +182,16 @@ internal fun ChatPage(
         // 悬浮栏隐藏进度（补间后的显示值）。只在**绘制阶段**读它，不参与布局。
         val navBarProgressState = com.zhizhu.zhicode.compose.ui.LocalNavBarProgress.current
 
+        /*
+         * 固定底栏占掉的底部高度（悬浮模式下是 0）。
+         *
+         * 在**组合期**换算成 px 是可以的：它只在底栏形态/主题切换时变，
+         * 键盘动画期间完全不变。所以不需要下沉到布局阶段。
+         */
+        val bottomBarPx = with(density) {
+            com.zhizhu.zhicode.compose.ui.LocalBottomBarInset.current.roundToPx()
+        }
+
         val bottomInset = with(density) {
             // 悬浮胶囊（`LocalFloatingNavInset`）现在**不让布局**了 —— 内容铺到屏幕底边，
             // 所以输入器必须自己让开它，并且列表留白里也要算上它，否则最后一条消息
@@ -214,6 +231,14 @@ internal fun ChatPage(
             // 传的是**消息 id**（不是 ChatItem）—— VM 只需要一个能在 transcript 里定位的键，
             // 拿整条消息进去反而会让"动作作用在旧快照上"变得可能。
             onToolAction = { item, toolId, label -> viewModel.applyToolAction(item.id, toolId, label) },
+            // 多选导出：勾选、取消、导出三个动作都只改状态层，界面按状态重绘。
+            onToggleSelect = viewModel::toggleMultiSelect,
+            // 拖动对选：整段区间一次性替换选中集合（见 ChatList 的手势说明）。
+            onRangeSelect = viewModel::setMultiSelectRange,
+            onCancelSelect = viewModel::cancelMultiSelect,
+            // 导出：打开导出面板（格式与选项在面板里选，照 rikkahub 的 ChatExportSheet）。
+            onExportSelect = viewModel::openExportSheet,
+            onToggleSelectAll = viewModel::toggleSelectAll,
             // 长按消息的动作菜单：由那一条消息自己渲染（从手指位置长出来）
             anchoredMenu = { anchorId, fingerOffset ->
                 ZhiAnchoredMenuHost(state, viewModel, anchorId, fingerOffset)
@@ -326,10 +351,31 @@ internal fun ChatPage(
                 // 视觉等价：`padding` 是把内容从底边内缩，`offset` 是把整块往上摆，
                 // 而这块本来就贴在 BottomCenter，所以往上摆 = 让出键盘那一段。
                 .offset {
-                    // ⚠️ 别把这个读操作挪到组合里（比如 `val lift by remember { … }`），
-                    // 一挪回组合就又变成每帧重组了 —— 那正是这次要修的东西。
+                    /*
+                     * ⚠️ 别把这个读操作挪到组合里（比如 `val lift by remember { … }`），
+                     * 一挪回组合就又变成每帧重组了 —— 那正是这次要修的东西。
+                     *
+                     * ## 为什么是 `max(0, lift - bottomBarPx)` 而不是 `-lift`
+                     *
+                     * 这一列贴在**内容盒**底部，而内容盒底部已经让出了底栏
+                     * （`padding(bottom = 底栏高度)`，悬浮模式下是 0）。
+                     * 所以"往上抬 lift"实际会把输入器抬到 `底栏上沿 - lift`。
+                     *
+                     * 键盘完全弹开时 `lift` 很大，这样没问题。但**键盘收起动画的末尾**
+                     * `lift` 已经回到 0，而这一列仍贴在底栏上沿 —— 看起来没毛病。
+                     * 真正的坑在另一头：键盘**刚收起、抬起量还没归零**那几帧，
+                     * 输入器会一路落到底栏上沿，而底栏本身就在屏幕最底部，
+                     * 于是输入器与键盘之间、或输入器与底栏之间会错位（用户截图：
+                     * 键盘收起瞬间输入器压在 NavigationBar 上）。
+                     *
+                     * 取 `max(0, lift - bottomBarPx)` 之后：
+                     *   · lift = 0            → 位移 0，停在底栏上沿（正确落点）；
+                     *   · lift = 底栏高度     → 位移 0，仍停在底栏上沿（键盘正好盖住底栏，二者重合）；
+                     *   · lift = 900（全开）  → 位移 900 - 182，正好贴键盘顶边。
+                     * 也就是「输入器底边 = max(键盘顶边, 底栏上沿)」，连续、无跳变。
+                     */
                     val lift = if (liftByFullScreenOverlay) 0 else imeMotion.currentLiftPx
-                    IntOffset(0, -lift)
+                    IntOffset(0, -maxOf(0, lift - bottomBarPx))
                 }
                 // 实测**内容**高度（任务卡 + 反馈条 + 输入器自己）回报给上面的 bottomInset。
                 // `onSizeChanged` 只在尺寸真的变了时回调，所以正常的打字/滚动不产生额外开销。
@@ -459,6 +505,32 @@ private fun ComposerHost(
     glass: Glass,
     onFocusChanged: (Boolean) -> Unit,
 ) {
+    /*
+     * 输入框文字的所有权，提升到 `ComposerHost` 这一层。
+     *
+     * 为什么不放在 `Composer` 内部：`Composer` 会随 `state` 参数变化而重组，
+     * 内部的 `remember` 虽然能活过重组，但这里需要在**发送之后**清空它 ——
+     * 那个动作发生在 ViewModel（异步），把对象放这一层、由这里统一处理更容易看懂。
+     *
+     * ⚠️ 用 `remember`（不是 `rememberSaveable`）：`TextFieldState` 本身不提供 Saver，
+     * 而它在进程被回收时丢掉是可接受的 —— 草稿在切会话时已按会话存过。
+     */
+    val textState = remember { ComposerTextState() }
+
+    /*
+     * 切会话时存旧草稿、取新草稿。
+     *
+     * `LaunchedEffect(activeSessionId)` 的 key 变化顺序是：组合先看到新 id，
+     * 才轮到 effect 重启 —— 所以**拿不到**旧 id。因此用 remember 记住上一个 id，
+     * 在 effect 里"先存旧、再取新"。
+     */
+    var lastSessionId by remember { mutableStateOf(state.activeSessionId) }
+    LaunchedEffect(state.activeSessionId) {
+        if (state.activeSessionId == lastSessionId) return@LaunchedEffect
+        textState.saveDraft(lastSessionId)
+        lastSessionId = state.activeSessionId
+        textState.restoreDraft(state.activeSessionId)
+    }
     // 用 GetMultipleContents 而不是 GetContent：相册里一次挑多张是常态
     // （对比截图、多页文档），只能选一张的话用户得反复进出选择器。
     //
@@ -488,8 +560,23 @@ private fun ComposerHost(
         state = state,
         wide = wide,
         glass = glass,
-        onTextChange = viewModel::onComposerChange,
-        onSend = viewModel::send,
+        // 文字归这个对象所有（见 ComposerTextState）：按键不再写回状态层，
+        // 于是打字时整个对话流不会跟着重组。
+        textState = textState,
+        // 只有进入/离开斜杠命令态时才通知状态层；普通打字一次都不走。
+        onSlashQueryChanged = viewModel::onSlashQueryChanged,
+        // `@` 文件引用：查询串交给状态层算候选，选中后把路径写回文字。
+        onFileQueryChanged = viewModel::onFileQueryChanged,
+        onPickFile = { path ->
+            textState.replaceLastAtToken(path)
+            // 选中后立刻退出引用态：文字里已经补成 `@路径 `（带空格），
+            // 上面那条 snapshotFlow 会自己判定为"不在引用态"，但不显式清一次的话
+            // 面板会多停留一帧，看起来像闪了一下。
+            viewModel.onFileQueryChanged(null)
+        },
+        onSend = { viewModel.sendFromComposerText(textState) },
+        // 长按发送键：只发进对话流，不触发模型回复。
+        onSendWithoutReply = { viewModel.sendWithoutReplyFromComposerText(textState) },
         onStop = viewModel::stop,
         onRemoveAttachment = { viewModel.removeAttachment(it.id) },
         // `+` 菜单的四个动作
@@ -505,6 +592,9 @@ private fun ComposerHost(
         onEffortSelected = viewModel::setEffort,
         onModelChip = viewModel::showModelPicker,
         onPickSlash = viewModel::pickSlashCommand,
+        // 排队中的预输入：取回（编辑后再发）与取消。
+        onRemoveQueued = viewModel::removeQueuedPrompt,
+        onEditQueued = viewModel::editQueuedPrompt,
         // 主体调试模式：输入行下方实时渲染当前输入的 Markdown（与对话流同一渲染器）
         debugMode = state.debugAppMode,
         onFocusChanged = onFocusChanged,
@@ -545,11 +635,6 @@ internal fun ZhiAnchoredMenuHost(
     // 菜单从手指位置长出来，而退场动画期间 choicePicker 已经是 null —— 不兜住的话，
     // 面板会在退场那几帧里弹回条目左上角再消失。
     val shownPicker = rememberLastNonNull(picker) ?: return
-    com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note(
-        "session-menu/host anchor=$anchorId pickerAnchor=${picker?.anchorId}" +
-            " actionMenu=${picker?.isActionMenu} shownAnchor=${shownPicker.anchorId}" +
-            " shownMenu=${shownPicker.isActionMenu}",
-    )
     val open = picker != null && picker.isActionMenu && picker.anchorId == anchorId
     if (!shownPicker.isActionMenu || shownPicker.anchorId != anchorId) return
     ZhiAnchoredActionMenu(

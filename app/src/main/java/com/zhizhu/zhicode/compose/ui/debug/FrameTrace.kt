@@ -64,7 +64,7 @@ internal object ZhiFrameTrace {
      *
      * ## 为什么要有它，而不是只写 logcat
      *
-     * 第一次实现只 `Log.i`，结果在 IQ 沙箱里**读不到**：guest 进程的日志不进宿主 logcat
+     * 第一次实现只 `Log.i`，结果在沙箱里**读不到**：guest 进程的日志不进宿主 logcat
      * （实测 `logcat -d` 只能看到宿主的，看不到当前 guest 这一次运行的）。而沙箱截图是
      * 唯一可靠的观察通道 —— 所以结果要能被"看见"。
      *
@@ -83,7 +83,7 @@ internal object ZhiFrameTrace {
      *
      * [sink] 那条路（写进对话流）只在**对话面板可见**时才能被读到 —— 而排查
      * 「页签高亮和面板内容对不上」这类问题时，对话面板恰恰是看不见的那个。
-     * 而 logcat 在 IQ 沙箱里读不到（guest 日志不进宿主 logcat）。
+     * 而 logcat 在沙箱里读不到（guest 日志不进宿主 logcat）。
      *
      * 所以再开一条不依赖界面的通道：写进应用自己的 `filesDir`。宿主机上
      * 对应 `blackbox/data/user/0/<包名>/files/`，可以直接读。

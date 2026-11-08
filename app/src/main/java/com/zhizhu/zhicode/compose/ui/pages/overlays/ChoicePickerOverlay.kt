@@ -66,17 +66,27 @@ import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.window.WindowDialog
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 
 /**
- * 所有模态窗口都走 Miuix `overlay` 包的 [OverlayDialog]。
+ * 模态窗口默认走 Miuix `overlay` 包的 [OverlayDialog]。
  *
- * 为什么不用 `window` 包的 `WindowDialog`：它会创建**独立 Android Window**，
- * 既不会继承 `Scaffold` 的 `popupHost`（内部再用 Miuix 弹层组件就会失效），
- * 也无法参与主窗口的 `LayerBackdrop` 背景采样 —— 弹窗背后的模糊会做不出来。
- * 两者参数集完全一致，换过来无需改调用方形状。
+ * ## 本文件里那一处例外：会话重命名 / 删除确认用 `WindowDialog`
+ *
+ * 历史结论「不要用 `window` 包的 `WindowDialog`」有它成立的前提：
+ * `WindowDialog` 创建**独立 Android Window**，既不继承 `Scaffold` 的 `popupHost`
+ * （内部再用 Miuix 弹层组件会失效），也不参与主窗口的 `LayerBackdrop` 背景采样。
+ *
+ * 但**侧栏抽屉**这个场景把前提反了过来：抽屉必须画在主 Scaffold 之后才盖得住
+ * 顶栏/底栏（那两者是 Scaffold 的独立槽位，在 body 之后 place），
+ * 于是任何走 `popupHost` 的对话框都会被抽屉压住。此时代价换成收益：
+ *  · 这个对话框内部**不需要**再嵌弹层组件；
+ *  · 背景模糊早已按用户要求移除（见 `ZhiOverlayHost` 里 `modalOpen` 的说明），
+ *    没有 backdrop 采样需求。
+ * 所以「窗口级」正是这里要的特性 —— 详见下面 `WindowDialog` 处的注释。
  *
  * ## 位置与动画都交给 Miuix
  *
@@ -146,6 +156,20 @@ fun ChoicePickerOverlay(
     }
     val usingFreeForm = freeForm.isNotBlank()
 
+    /*
+     * ⚠️ 关键：`renderInRootScaffold = false`。
+     *
+     * 这条与本文件顶部那段历史结论相反，是因为**结构变了**：侧栏抽屉必须画在
+     * 主 Scaffold 之后才盖得住顶栏/底栏，而抽屉内部自带一个 `Scaffold`
+     * （为了渲染长按菜单，见 `ZhiSideDrawer`）。
+     *
+     * `renderInRootScaffold = true` 时对话框注册进**最外层** Scaffold 的 root 宿主，
+     * 那个宿主在抽屉**下面** → 对话框被抽屉整块遮住，表现就是「点了没反应」。
+     *
+     * 传 `false` 后走 `LocalPopupStates`（离调用点最近的那个 Scaffold），
+     * 也就是抽屉内部那个 —— 于是对话框和长按菜单一样，画在抽屉**之上**。
+     * 抽屉关闭时最近的宿主是主 Scaffold，同样成立。
+     */
     OverlayDialog(
         show = picker != null,
         onDismissRequest = onDismiss,
@@ -153,6 +177,7 @@ fun ChoicePickerOverlay(
         maxWidth = ZhiDialogWidth.Regular,
         outsideMargin = DialogWideOutsideMargin,
         insideMargin = DialogWideInsideMargin,
+        renderInRootScaffold = false,
     ) {
         val p = shownPicker ?: return@OverlayDialog
         DialogShell(

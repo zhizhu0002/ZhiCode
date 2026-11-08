@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -258,9 +259,21 @@ fun ZhiSidebar(
             // 侧栏是"去哪一屏"的导航，把两处配置项摆在导航栏里会让同一目标出现两条
             // 路径（侧栏一条、设置页「扩展」组一条），且侧栏会被越堆越长。
             // 配置类入口统一收到设置页（见 SettingsDialog 的 ExtensionsPage）。
+            //
+            // ── 「更多」默认贴底 ──────────────────────────────────────────────
+            //
+            // 它上面是**长度不定**的项目历史列表：一个会话都没有时那块是空的，
+            // 而「沙箱 / 运行环境 / 设置」这三项会紧贴在上面 —— 于是同一个侧栏
+            // 在不同项目里长得完全不一样，这三个入口的位置每次都要重新找。
+            //
+            // `weight(1f)` 在 `Column` 里表示"吃掉剩余高度"，`fill = true` 时
+            // 它**同时**把这一块推到下方：上面内容不足时它撑开空白，内容超长时
+            // 它退化成 0 高度、不挤占列表。这正是"默认置底但不遮挡内容"需要的语义，
+            // 比再塞一个 `Spacer(Modifier.weight(1f))` 少一层布局。
+            Spacer(Modifier.weight(1f, fill = true))
             SmallTitle(text = "更多")
             SidebarGroup {
-                SidebarRow(label = "ZhiCode 沙箱", icon = ZhiIcons.sandbox, onClick = onSandbox)
+                SidebarRow(label = "沙箱", icon = ZhiIcons.sandbox, onClick = onSandbox)
 
                 SidebarRow(
                     label = if (state.runtimeReady) "运行环境就绪" else "准备内置 Termux 环境",
@@ -444,10 +457,7 @@ private fun SessionRowInner(
         // 走原生参数后，Card 内部那唯一一个 combinedClickable 同时声明了
         // tap 与 long-press，不存在竞争。
         onClick = { onOpen() },
-        onLongPress = {
-            com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.note("row/longPress ${session.id}")
-            onActions()
-        },
+        onLongPress = { onActions() },
         modifier = Modifier.fillMaxWidth(),
         // 圆角 12dp（文档默认是 `CardDefaults.CornerRadius` = 16dp）。
         // 密集列表里 16dp 会让相邻两行看起来各是一个大方块，"列表"的连续感没了；

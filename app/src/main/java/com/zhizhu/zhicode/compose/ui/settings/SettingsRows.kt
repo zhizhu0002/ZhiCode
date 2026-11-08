@@ -38,6 +38,7 @@ import com.zhizhu.zhicode.compose.ui.effects.pressSink
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Slider
@@ -97,6 +98,10 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
  *
  * [horizontalPadding] 供**已经自己留了页边距**的页面传 0：沙箱页的 `LazyColumn`
  * 上挂着整页的 12dp 内边距，分组再各加一次就变成 24dp。默认值不变，老调用点无感。
+ *
+ * [containerColor] 给**铺了背景图/渐变**的页面用：传一个半透明色让底层透上来，
+ * 否则整页渐变到卡片这里会被一块实色截断，看起来像贴上去的。为 null 时一直是
+ * `Card` 的默认色，所有现有调用点行为不变。
  */
 @Composable
 internal fun SettingsGroup(
@@ -108,6 +113,7 @@ internal fun SettingsGroup(
      */
     title: String? = null,
     horizontalPadding: Dp = 12.dp,
+    containerColor: Color? = null,
     content: @Composable () -> Unit,
 ) {
     if (title != null) {
@@ -117,6 +123,14 @@ internal fun SettingsGroup(
         modifier = Modifier.padding(horizontal = horizontalPadding),
         cornerRadius = ZhiRadius.card,
         insideMargin = PaddingValues(0.dp),
+        colors = if (containerColor != null) {
+            CardDefaults.defaultColors(
+                color = containerColor,
+                contentColor = MiuixTheme.colorScheme.onSurface,
+            )
+        } else {
+            CardDefaults.defaultColors()
+        },
     ) {
         Column { content() }
     }

@@ -128,6 +128,19 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // 主题可能在别处被改过（设置页 / 顶栏的循环按钮），回到前台时对齐一次。
         applyStatusBarAppearance()
+        /*
+         * 保活恢复。
+         *
+         * 参考实现里这一步在 `MainActivity` 启动时做（`if (config.forcedKeepAliveEnabled)
+         * KeepAliveService.start(this, config.rootExecutionEnabled)`）。放在 `onResume`
+         * 而不是 `onCreate` 有两个原因：
+         *  - `onCreate` 时 ViewModel 的设置可能还没从磁盘恢复完，读到的是默认值 false；
+         *  - 用户可能刚在常驻通知里点了「停止保活」（那会把设置写回 false），
+         *    回到前台时要以磁盘上的真实值为准。
+         *
+         * 它内部只在开关为真时才启动，为假时什么都不做。
+         */
+        viewModel.resumeKeepAliveIfEnabled()
         // APK 安装权限被拒绝时，AndroidIntentBridge 会把安装 Intent 暂存起来并跳去系统设置页。
         // 用户授权后回到本页面，必须在这里把流程接上——没有这一步，
         // 「授予权限」之后安装就永远停在半路，用户只能再让 Agent 重做一遍。
