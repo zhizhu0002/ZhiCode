@@ -6,7 +6,17 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        /*
+         * jitpack 的唯一使用者是 Bcore 的 `com.github.tiann:FreeReflection:3.2.2`
+         * （绕过 hidden API 限制）。别把别的依赖往这里放 ——
+         * jitpack 是「按需构建 GitHub 仓库」的仓库，可用性不如 Maven Central，
+         * 只应该有这一个无法替代的坐标依赖它。
+         */
+        maven { url = 'https://www.jitpack.io' }
     }
 }
 rootProject.name = 'IQ-Code-Compose'
 include ':app'
+include ':Bcore'
+include ':black-reflection'
+include ':compiler'

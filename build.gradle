@@ -1,25 +1,33 @@
 plugins {
     id 'com.android.application' version '9.1.1' apply false
+    /*
+     * `com.android.library` 是 Bcore 模块需要的。
+     *
+     * 历史上这里没有它，因为沙盒被移除后就没有库模块了；Bcore 当时为了绕开
+     * "本机离线缓存里只有 application 的插件 marker"这件事，用的是传统
+     * `apply plugin: 'com.android.library'`。现在两个插件都显式声明，
+     * Bcore/build.gradle 仍然沿用 `apply plugin:` 的写法（它的来源是第三方代码，
+     * 尽量不去动它的形状），两者并存没有问题。
+     */
+    id 'com.android.library' version '9.1.1' apply false
     id 'org.jetbrains.kotlin.android' version '2.4.0' apply false
     id 'org.jetbrains.kotlin.plugin.compose' version '2.4.0' apply false
 }
 
 /*
- * 这里曾经还有两个模块：`:Bcore` / `:black-reflection` / `:compiler`
- * （BlackBox 虚拟 Android 运行时的宿主层，用于「ZhiCode 沙箱」）。
- * 沙盒功能已整体移除，三个模块与它们的构建脚本一并删除。
+ * 顶层模块：
+ *   :app             应用本体（Compose 界面 + 引擎 / 协议 / 工具 / 宿主层）
+ *   :Bcore           BlackBox 虚拟 Android 运行时（第三方，Apache-2.0）
+ *   :black-reflection Bcore 的注解驱动反射（第三方，Apache-2.0）
+ *   :compiler        Bcore 的编译期注解处理器（第三方，Apache-2.0）
  *
- * 删除时顺带丢掉的两样东西，都只服务于它们，别重新加回来：
+ * ⚠️ Bcore 的 native 层是**预编译冻结**的，本机无法重新编译 ——
+ * 原因与操作方式见 Bcore/build.gradle 顶部那段说明。
  *
- * 1. **`com.android.library` 的 `apply plugin:` 变通**。
- *    当时本机离线缓存里只有 `com.android.application` 的插件 marker，
- *    没有 library 的，于是 Bcore 用传统 `apply plugin:` 绕过 marker 解析。
- *    现在没有库模块了，不需要这个技巧。
- * 2. **`ext.iqNdkVersion`**。
- *    Bcore 的原版构建脚本引用它做 ndk-build；而本机是 aarch64 + bionic，
- *    Android NDK 只发布 linux-x86_64 宿主工具链，ndk-build 会直接报
- *    Unknown host CPU architecture。所以当时就已经绕开了它（改用预编译 .so），
- *    保留该字段只是为了让原版脚本行不用改。模块没了，字段也就没了。
+ * 另外提醒两件曾经踩过、别重新引入的东西：
  *
- * 一并移除的还有 jitpack 仓库：唯一使用者是 Bcore 通过 FreeReflection 绕 hidden API 限制。
+ * 1. **`ext.iqNdkVersion` 已删除**。Bcore 原版构建脚本引用它做 ndk-build；
+ *    而本机是 aarch64 + bionic，Android NDK 只发布 linux-x86_64 宿主工具链，
+ *    ndk-build 会直接报 Unknown host CPU architecture。所以 ndk-build 整个不启用。
+ * 2. **jitpack 只服务于 FreeReflection**，见 settings.gradle。
  */

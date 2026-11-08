@@ -109,3 +109,83 @@
 # 总量在 30KB 量级，换的是"打开 R8 之后工具仍然可用"。
 -keep class moe.shizuku.** { *; }
 -keep class rikka.shizuku.** { *; }
+
+# ---------------------------------------------------------------------------
+# 6) BlackBox 虚拟运行时（Bcore）—— IQ 沙箱的引擎
+# ---------------------------------------------------------------------------
+#
+# 这一段与上面 Shizuku 那段是同一类理由，但**后果更严重**：R8 在这里出错不会
+# 表现为某个功能不可用，而是**沙箱进程起不来**、或者装进去的应用一启动就崩，
+# 而你从宿主界面上只能看到一句"引擎初始化失败"。
+#
+# 具体需要钉住的东西，逐条对着真实调用点：
+#
+# 1) `top.niunaijun.blackbox.**` —— 整体的反射面。
+#    BlackBox 的核心手法就是"反射 + 动态代理"：它按**类名字符串**加载被 hook 的
+#    系统服务代理（`...fake/service/I*Proxy`）、按名字找 `*Manager` 单例、
+#    按名字构造 guest 的 `Application`/`Activity`。这些名字全部是运行期拼出来的，
+#    R8 看不到调用点。整个包必须 keep。
+#
+# 2) JNI 入口。`libblackbox.so` 是**预编译冻结**的二进制（本机 aarch64 上无法
+#    重新编译，见 Bcore/build.gradle），它按名字找 Java 侧的 native 方法与回调类。
+#    只要 R8 改一个名字，`.so` 就再也连不上，而这一侧完全没有编译期约束。
+#      · NativeCore 的 6 个 native 方法：init / enableIO / addIORule /
+#        hideXposed / disableHiddenApi / disableResourceLoading
+#      · JNI 回调的 setter（`.so` 反向调用 Java）
+-keepclasseswithmembernames,allowoptimization class top.niunaijun.** {
+    native <methods>;
+}
+-keep class top.niunaijun.blackbox.core.NativeCore { *; }
+-keep class top.niunaijun.jnihook.jni.JniHook { *; }
+-keep class top.niunaijun.jnihook.MethodUtils { *; }
+
+# 3) AIDL 生成的 Stub/Proxy。BlackBox 把系统服务换成自己的代理对象，靠的是
+#    `IInterface.Stub.asInterface(binder)` 与 `onTransact` 的接口描述符字符串。
+#    stub 被裁掉就没有可用的代理类。
+-keep class **.Stub { *; }
+-keep class **.Stub$* { *; }
+-keep class **.Proxy { *; }
+
+# 4) 清单里那三个组件由系统按名字实例化（R8 看不到 Java 调用点）。
+#    路径必须与 AndroidManifest.xml 一致。
+-keep class com.zhizhu.zhicode.sandbox.SandboxControlProvider { *; }
+-keep class com.zhizhu.zhicode.sandbox.SandboxDashboardActivity { *; }
+-keep class com.zhizhu.zhicode.sandbox.SandboxGuardService { *; }
+-keep class com.zhizhu.zhicode.sandbox.ZhiSandboxEngine { *; }
+
+# 5) `black-reflection` 的注解驱动反射层。
+#
+# 🔴 这一段曾经**漏了两个注解**，后果是沙箱里装任何 APK 都失败：
+#
+#   java.lang.RuntimeException: Not found @BlackClass or @BlackStrClass
+#       at xn.d(SourceFile:36)                      ← 混淆后的 BlackReflection
+#       at PackageParserCompat.createParser(...)
+#       at BPackageManagerService.parserApk(...)
+#   → parser apk error.
+#
+# 机制：注解处理器把每个 `@BClassName` 接口再生成两个**带 NotProcess 注解**的
+# 子接口（`...Context` / `...Static`），运行期真正被 `getAnnotation()` 读取的是
+# 后两者。原来的规则只 keep 了 `@BClassName`，于是这两个子接口被 R8 裁掉/改名，
+# 注解读不到 → 抛 RuntimeException → 被 `parserApk` 的 catch(Throwable) 吞成
+# 一句 `parser apk error.`，从上层完全看不出是注解丢了。
+#
+# 所以下面**必须同时包含 NotProcess 变体**，缺一个都可能让某条反射路径失效。
+-keep @top.niunaijun.blackreflection.annotation.BClassName class * { *; }
+-keep @top.niunaijun.blackreflection.annotation.BClassNameNotProcess class * { *; }
+-keep @top.niunaijun.blackreflection.annotation.BClassInvoke class * { *; }
+-keep @top.niunaijun.blackreflection.annotation.BField class * { *; }
+-keep @top.niunaijun.blackreflection.annotation.BFieldNotProcess class * { *; }
+-keep @top.niunaijun.blackreflection.annotation.BFieldCheckNotProcess class * { *; }
+-keep @top.niunaijun.blackreflection.annotation.BFieldSetNotProcess class * { *; }
+-keep @top.niunaijun.blackreflection.annotation.BMethod class * { *; }
+-keep @top.niunaijun.blackreflection.annotation.BMethodCheckNotProcess class * { *; }
+-keep @top.niunaijun.blackreflection.annotation.BStaticField class * { *; }
+-keep @top.niunaijun.blackreflection.annotation.BStaticMethod class * { *; }
+-keep @top.niunaijun.blackreflection.annotation.BConstructor class * { *; }
+-keep @top.niunaijun.blackreflection.annotation.BConstructorNotProcess class * { *; }
+
+# 注解处理器生成的 `BR*` 桥接类，以及 `black.**` 下的接口本体。
+# 前者由 Bcore 的代码 `import` 引用，后者靠字符串查找（`black.android.content.pm.XXX`），
+# R8 看不到后者的调用点。
+-keep class black.** { *; }
+-keep class top.niunaijun.blackreflection.** { *; }

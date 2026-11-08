@@ -1,0 +1,180 @@
+/*
+ * BlackBox 虚拟 Android 运行时（Bcore）—— 第三方组件，Apache-2.0，见 NOTICE。
+ *
+ * ## 这个文件与原版（IQ-Code-Android/Bcore）的差异，以及为什么
+ *
+ * 原版用 `externalNativeBuild { ndkBuild }` 从 `src/main/cpp` 现编 `libblackbox.so`。
+ * **在本工程所处的构建环境下这条路走不通**：这里是 aarch64 + bionic 的 Termux，
+ * 而 Android NDK 只发布 `linux-x86_64` 宿主工具链
+ * （实测 `android-sdk/ndk/29.0.13846066/toolchains/llvm/prebuilt/` 下只有 linux-x86_64），
+ * ndk-build 会直接报 Unknown host CPU architecture。
+ *
+ * 因此改成 **预编译 .so 冻结**：
+ *   - `libblackbox.so` 作为预编译产物放在 `app/src/main/jniLibs/arm64-v8a/`
+ *   - 本模块不再声明任何 externalNativeBuild / ndkVersion
+ *   - `src/main/cpp/` 仍然保留（含 Dobby 的 arm64 静态库与全部 C++ 源码），
+ *     它们是**存档与将来迁移**用的，不参与编译
+ *
+ * ⚠️ 代价必须说清楚：**native 层从此不可改**。要改 C++ 就得在一台 x86_64 宿主机上
+ * 重新 ndk-build，把产物替换进 `app/src/main/jniLibs/arm64-v8a/libblackbox.so`。
+ *
+ * 已验证 `.so` 与这里的 Java 侧是配套的（动态注册，不是 Java_* 静态命名）：
+ *   - `.so` 内 `JNI_OnLoad` 存在，并引用 `top/niunaijun/blackbox/core/NativeCore`
+ *   - `NativeCore` 的 6 个 native 方法名 init / enableIO / addIORule / hideXposed /
+ *     disableHiddenApi / disableResourceLoading 在 `.so` 中全部命中
+ */
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'top.niunaijun.blackbox'
+
+    // 与原版一样读工程级 ext，但**带兜底**：本工程（IQ-Code-Compose）没有
+    // IQ-Code-Android 那套 ext，直接读会在配置期抛 MissingPropertyException。
+    /*
+     * 兜底值是 **35**，不是宿主工程的 37。
+     *
+     * 这是刻意的：compileSdk 决定「能看到哪些 API」，而 Bcore 的源码是按 SDK 35
+     * 写的。升到 37 会立刻编译失败 —— Android 16 移除了若干 deprecated 常量，
+     * 实测第一处是 `Context.FINGERPRINT_SERVICE`
+     * （Bcore/.../fake/service/IFingerprintManagerProxy.java 三处引用）。
+     *
+     * 库模块用 35、宿主用 37 是合法组合：库只使用 35 及以下的 API，
+     * 而 app 的 compileSdk 才是决定整个 APK 面向哪个平台编译的那一个。
+     */
+    compileSdk rootProject.ext.has('compileSdkVersion') ? rootProject.ext.compileSdkVersion : 35
+
+    /*
+     * 原版这里有：
+     *   aidlPackagedList "android/app/IServiceConnection.aidl"
+     *   aidlPackagedList "android/accounts/IAccountManagerResponse.aidl"
+     *
+     * `aidlPackagedList` 是 AGP 8 之前用来把 framework AIDL 的**生成类**打进 AAR
+     * 的 DSL；**AGP 9 已移除它**，写了会直接配置失败
+     * （Could not find method aidlPackagedList()）。
+     *
+     * 不需要替代写法：这两个 .aidl 本来就在 `src/main/aidl/` 下
+     * （该目录共 54 个 AIDL），`buildFeatures { aidl true }` 会正常编译它们，
+     * 生成的类进入本模块的 classes，宿主工程用 implementation(project(':Bcore'))
+     * 就能看到。
+     */
+    buildFeatures {
+        aidl true
+    }
+
+    defaultConfig {
+        minSdkVersion rootProject.ext.has('minSdk') ? rootProject.ext.minSdk : 24
+        consumerProguardFiles "consumer-rules.pro"
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    /*
+     * 刻意**没有** externalNativeBuild：见文件顶部说明。
+     * 原版这里是：
+     *   externalNativeBuild { ndkBuild { path 'src/main/cpp/Android.mk' } }
+     *   ndkVersion = rootProject.ext.iqNdkVersion
+     */
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    tasks.withType(JavaCompile) {
+        options.compilerArgs << "-Xlint:-deprecation" << "-Xlint:-unchecked" << "-Xlint:-rawtypes"
+        options.fork = true
+        options.forkOptions.jvmArgs << "-Xmx2048m"
+        // Slim: drop LineNumberTable/LocalVariableTable/SourceFile from BlackBox classes (dex shrink).
+        options.debug = false
+        // 宿主工程的 Java 21 工具链会警告 class 文件版本；目标仍是 17，警告是噪音。
+        options.compilerArgs << "-nowarn"
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+        warningsAsErrors false
+        disable "UnusedResources", 'RestrictedApi'
+        /*
+         * 原版这里还有：
+         *   textOutput "stdout"
+         *   textReport false
+         *
+         * AGP 9 移除了这两个 setter（配置期直接报 `Value is null`）。它们的唯一作用是
+         * 让 lint 把文本报告打到 stdout 而不是写文件 —— 对构建结果没有影响，
+         * 删掉即可。报告仍然会生成在 build/reports/lint-results*。
+         */
+        checkOnly 'NewApi', 'InlinedApi'
+    }
+}
+
+/*
+ * Strip the AIDL-generated "Using: ..." comment line which contains backslash sequences
+ * that Java's compiler mis-parses as Unicode escapes on Windows paths.
+ * Must run as the aidl task's doLast: doing it in javac's doFirst rewrites aidl's declared
+ * outputs, so aidl's output snapshot never matches and aidl+javac re-run on every build.
+ *
+ * ⚠️ 与 Configuration Cache 的冲突及修法
+ *
+ * 原版在 doLast 里写 `file("${buildDir}/generated/aidl_source_output_dir")`。
+ * `buildDir` 是 **Gradle script 对象的属性**，在 execution time 读它会直接让
+ * Configuration Cache 失败：
+ *   Invocation of 'buildDir' references a Gradle script object from a Groovy closure
+ *   at execution time, which is unsupported with the configuration cache.
+ *
+ * 所以改成在**配置期**把目录包成 `Provider<Directory>`（`layout.buildDirectory.dir(...)`），
+ * doLast 里只对它 `get()`。Provider 是 Configuration Cache 的受支持类型，
+ * 这条规则因此既保留原行为、又能与 `org.gradle.configuration-cache=true` 共存。
+ */
+def aidlOutputDir = layout.buildDirectory.dir("generated/aidl_source_output_dir")
+tasks.matching { it.name.startsWith('compileReleaseAidl') || it.name.startsWith('compileDebugAidl') }.all {
+    def outputProvider = aidlOutputDir
+    doLast {
+        def aidlOut = outputProvider.get().asFile
+        if (aidlOut.exists()) {
+            aidlOut.eachFileRecurse { f ->
+                if (f.name.endsWith('.java')) {
+                    def content = f.text
+                    if (content.contains(' * Using:')) {
+                        content = content.replaceAll(/(?m)^ \* Using:.*$/, '')
+                        f.text = content
+                    }
+                }
+            }
+        }
+    }
+}
+
+tasks.withType(Javadoc) {
+    options.addStringOption('Xdoclint:none', '-quiet')
+    options.addStringOption('encoding', 'UTF-8')
+    options.addStringOption('charSet', 'UTF-8')
+}
+
+dependencies {
+    implementation fileTree(dir: "libs", include: ["*.jar", "*.aar"])
+    implementation(project(":black-reflection"))
+    annotationProcessor(project(":compiler"))
+    // androidx.core 全部用掉会拖进 lifecycle/coroutines/collection 等约 2000 个类；
+    // Bcore 只用注解（CLASS 保留，运行时不需要），所以只留 compileOnly。
+    compileOnly 'androidx.annotation:annotation:1.8.1'
+    implementation 'com.github.tiann:FreeReflection:3.2.2'
+}

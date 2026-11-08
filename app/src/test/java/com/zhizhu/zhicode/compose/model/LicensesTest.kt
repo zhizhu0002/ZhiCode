@@ -1,7 +1,6 @@
 package com.zhizhu.zhicode.compose.model
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -74,16 +73,21 @@ class LicensesTest {
     }
 
     @Test
-    fun theRemovedSandboxEngineIsNotListed() {
-        // 沙盒（Bcore / black-reflection / compiler + 静态链接的 Dobby）已整体移除，
-        // 不再分发 → 不再有署名义务。清单里继续列着它们反而是在声明"我分发了这个"。
+    fun theSandboxEngineIsListed() {
+        // 沙盒（Bcore / black-reflection / compiler + 静态链接的 Dobby）**重新分发**了，
+        // 因此必须回到清单里。
         //
-        // 这条断言防的是"删了代码但忘了删清单"：那种漏法不会编译失败，
-        // 只会在发布物里留下一段与事实不符的法律声明。
+        // 这条断言在两个方向上都防着：
+        // · 沙盒搬回来了但忘了加清单 → 发布物少了一段必须有的法律声明；
+        // · 沙盒又移除了但清单没跟着删 → 声明"我分发了这个"，与事实不符。
+        // 两种漏法都不会编译失败，只能靠断言。
+        //
+        // ⚠️ 上面的注释在本文件里曾经是反的（断言"不该列出来"）。沙盒回填时
+        // 必须一起翻，否则测试会挡着正确的代码。
         val names = THIRD_PARTY_LICENSES.map { it.name }
         listOf("BlackBox 虚拟化引擎（Bcore / black-reflection / compiler）", "静态链接在 libblackbox.so 内的 Dobby")
             .forEach {
-                assertFalse("沙盒已移除，清单里不该再有：$it", names.contains(it))
+                assertTrue("沙盒已回填，清单里必须有：$it", names.contains(it))
             }
     }
 

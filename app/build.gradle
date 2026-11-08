@@ -177,6 +177,17 @@ if (configuredApplicationId == null || configuredApplicationId.isEmpty()) {
 dependencies {
 
     /*
+     * BlackBox 虚拟 Android 运行时（Bcore）。
+     *
+     * 它是「IQ 沙箱」的引擎：把 guest APK 以虚拟用户 0 的身份跑起来，
+     * 宿主层是 com/zhizhu/zhicode/sandbox/。
+     *
+     * native 层（libblackbox.so）是**预编译冻结**的 —— 本机 aarch64 上编不了，
+     * 见 Bcore/build.gradle 顶部。
+     */
+    implementation project(':Bcore')
+
+    /*
      * Shizuku（https://github.com/RikkaApps/Shizuku）：无 Root 的 shell 身份。
      *
      * api 提供 `rikka.shizuku.Shizuku`（授权申请与状态查询），并**传递依赖**
