@@ -73,6 +73,7 @@ public final class ToolRegistry {
             new ShizukuBashTool(),
             new AndroidIntentTool(intentBridge),
             new ZhiDebugTool(context, shell),
+            new ZhiSandboxTool(context),
             new UiCanvasTool(context),
 
             // 诊断与联网

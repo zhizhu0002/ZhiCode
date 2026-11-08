@@ -5,6 +5,11 @@ import android.content.Context
 import android.util.Log
 import com.termux.app.zhicode.api.zcode.ZcodeDeviceMid
 import com.termux.shared.termux.TermuxConstants
+import com.zhizhu.zhicode.sandbox.SandboxAgentBridge
+import com.zhizhu.zhicode.sandbox.SandboxControlMailbox
+import com.zhizhu.zhicode.sandbox.SandboxDebugLog
+import com.zhizhu.zhicode.sandbox.SandboxProcessRole
+import com.zhizhu.zhicode.sandbox.ZhiSandboxEngine
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -15,7 +20,7 @@ import java.util.Locale
 /**
  * 应用入口。
  *
- * 这里做且只做三件必须在所有其他类之前完成的事：
+ * 这里做且只做四件必须在所有其他类之前完成的事：
  *
  * 1. **配置 Termux 路径**。`TermuxConstants` 是全部路径的单一来源，必须在任何
  *    引擎/终端类被加载前用本应用自己的包名与私有目录初始化。晚一步就会有人
@@ -23,19 +28,26 @@ import java.util.Locale
  * 2. **ZCode 设备标识就位**。见 [ZcodeDeviceMid] 的说明。
  * 3. **安装崩溃日志**。放在 `attachBaseContext` 里，早于 `ContentProvider` 创建，
  *    否则启动期崩溃抓不到。
+ * 4. **沙盒进程的引擎初始化**，见下。
  *
- * ## 这里曾经还有沙盒初始化
+ * ## 沙盒的进程边界（这条性质要保住）
  *
- * 原先这个类的绝大部分代码是 BlackBox 沙箱的进程编排：判断本进程是不是
- * `:zhisandbox` / `:black` / `:p0..:p49`，是就 `ZhiSandbox.attach/create`，
- * 主进程还要起一条 Termux 桥（`SandboxShell.start`）给 guest 侧转发工具调用。
- * 沙箱功能已整体移除，这些逻辑连同 `sandbox` 包一起删掉了。
- *
- * 删掉之后有一个**真实的收益**值得记下来：主进程不再加载任何 hook 运行时。
- * 原先 `SandboxProcess.ownsEngine()` 在主进程返回 false 只是"不 attach"，
- * 但相关类仍在 classpath 上、静态初始化仍可能被触发；现在这条路径彻底不存在了。
+ * BlackBox 虚拟运行时**只在沙盒相关进程里加载** —— `:iqsandbox` / `:black` /
+ * `:p0..:p49`，判定全部收在 [SandboxProcessRole.shouldAttachBlackBox]。
+ * **主进程一个 BlackBox 的类都不碰**，所以主界面启动速度与稳定性不受 hook
+ * 运行时影响。任何"顺手在主进程也初始化一下"的改动都会毁掉这条性质，
+ * 而症状很隐蔽（启动慢几十毫秒、偶发 crash），不会有人联想到沙盒。
  */
 class ZhiCodeApplication : Application() {
+
+    /**
+     * 本进程是不是沙盒进程。
+     *
+     * <p>在 [attachBaseContext] 里算一次、存起来 —— 后面 `onCreate` 要用它，
+     * 而那边再去读 `/proc/self/cmdline` 就多一次 IO，且两次读到的可能不一致
+     * （理论上一进程名固定，但没必要冒这个险）。
+     */
+    private var sandboxProcess = false
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
@@ -48,7 +60,74 @@ class ZhiCodeApplication : Application() {
         // 额度与套餐模型就会时有时无。
         ZcodeDeviceMid.install(base)
 
+        // 沙盒调试日志要在 ContentProvider 创建之前就位：
+        // `SandboxControlProvider.onCreate` 会立刻写一条事件，
+        // 那个时刻晚于 attachBaseContext、早于 Application.onCreate。
+        SandboxDebugLog.init(base)
+
+        // 启动期判一次「本应用是不是跑在别的沙箱里」。
+        // 界面据此可以直接给出结论，而不是发一次 IPC 白等 30 秒超时 ——
+        // 嵌套环境下引擎结构性不可用，见 ZhiSandboxEngine.isNestedRuntime。
+        ZhiSandboxEngine.noteEnvironment(base)
+
         installCrashLogger()
+
+        /*
+         * ⚠️ `attach()` 必须在这里，**不能挪到 onCreate**。
+         *
+         * BlackBox 的入口就叫 `doAttachBaseContext` —— 它的语义是
+         * 「在 base context 就绪时接管」，而 `Application.attachBaseContext`
+         * 正是那个时刻。放到 `onCreate` 里会晚一步，症状不是崩溃而是
+         * **引擎永远停在"等待 Application.onCreate"**，
+         * 于是管理页那边 `awaitReady(12000)` 超时、报
+         * 「引擎初始化超时（12000ms）」。
+         *
+         * 这也是原版 IQ-Code-Android 的接线位置（IQCodeApplication.attachBaseContext）。
+         *
+         * ## 为什么这里**不做**"嵌套时就地承载"
+         *
+         * 试过：本应用自己跑在别的虚拟运行时里时，让主进程就地 attach 引擎。
+         * 实测**直接打不开应用** —— 外层 BlackBox 已经在这个进程里装过一层
+         * native hook（`libblackbox.so` 的 ART/JNI/文件系统 hook），
+         * 再叠一层会让进程在启动期就死掉，连 Java 异常都来不及抛。
+         *
+         * 结论：**引擎永远只在子进程里**。嵌套场景下的 IPC 问题另想办法
+         * （见 SandboxControlMailbox 的说明），不靠改进程拓扑来解。
+         */
+        sandboxProcess = SandboxProcessRole.shouldAttachBlackBox(base)
+        if (sandboxProcess) {
+            ZhiSandboxEngine.attach(base)
+        }
+    }
+
+    /**
+     * 沙盒进程的引擎创建。
+     *
+     * ## 为什么 attach 在上面、create 在这里
+     *
+     * `attach` 只是把 `ClientConfiguration`（宿主包名、是否隐藏 Root…）交给
+     * `BlackBoxCore`，代价很低，所以要在 `attachBaseContext` 做；
+     * 真正的 `doCreate()` 会起服务、扫包、可能触发 hook —— 那必须等
+     * `Application.onCreate`（原版在这里踩过：provider 比 onCreate 更早，
+     * 在 provider 里 create 会让 Android 15 上的运行时初始化过早）。
+     *
+     * ## 只有沙盒进程会走到这里
+     *
+     * [SandboxProcessRole.shouldAttachBlackBox] 只认 `:iqsandbox` / `:black` /
+     * `:p0..:p49`。**主进程一个 BlackBox 类都不加载** —— 这是这套设计最重要的性质。
+     */
+    override fun onCreate() {
+        super.onCreate()
+
+        if (!sandboxProcess) return
+
+        // 先注册广播桥再 create：guest Activity 一旦 resume 就要能接控制指令，
+        // 而 create 里可能立刻拉起应用。
+        SandboxAgentBridge.register(this)
+        // 引擎控制信箱。与 provider 是**同一个 dispatch** 的两个入口 ——
+        // 沙箱内运行本应用时 guest 找不到宿主 provider，只能走这条。
+        SandboxControlMailbox.register(this)
+        ZhiSandboxEngine.create()
     }
 
     /**
