@@ -375,6 +375,35 @@ object ZhiColors {
      * 对比度约 5.3:1，且与 [PanelLight] / [CardLight] 同一族。
      */
     internal val MutedLight = Color(0xFF6E6E76)
+
+    /**
+     * **深色**的弱化文字 / 图标色（对应 Miuix 的 `onBackgroundVariant`）。
+     *
+     * ## 为什么必须也覆盖
+     *
+     * Miuix 深色给的是 `#787E96` —— 与浅色那个 `#8C93B0` 一样是**蓝灰**。
+     * 之前这里只覆盖了浅色，于是深色模式下整屏图标与次级文字都蒙着一层灰蓝，
+     * 配彩色图标块（`SettingsIconPlate`）时尤其明显。用户的原话是
+     * 「深浅色模式的大部分图标要么发灰」。
+     *
+     * 取值依据：在 [PanelDark] `#242424` 上需要 ≥4.5:1 的对比度，
+     * 同时**不带色相**（三通道相等）—— 它表达的是"弱一档"，不是"另一种颜色"。
+     * `#9A9AA2` 在 `#242424` 上约 5.4:1，在卡片 [DarkCard] `#2D2D2D` 上约 4.7:1。
+     */
+    internal val MutedDark = Color(0xFF9A9AA2)
+
+    /**
+     * 深色的"摘要"文字色（对应 Miuix 的 `onSurfaceVariantSummary`）。
+     *
+     * Miuix 原值是 `#80FFFFFF`（50% 白）。50% 白压在卡片 [DarkCard] `#2D2D2D` 上
+     * 只有约 4.1:1，工具卡摘要、设置行副标题这类**要读的**文字就偏灰了。
+     * 提到 62% 白（`#9EFFFFFF` 的等效实色）后约 5.6:1，仍是"弱一档"但可读。
+     *
+     * ⚠️ 用**不透明**色而不是 `Color.White.copy(alpha = …)`：半透明白会与底下的
+     * 卡片色混出不确定结果（同一段文字在页面底色上和在卡片上颜色不同），
+     * 那正是"有些地方灰得不一样"的来源。
+     */
+    internal val SummaryDark = Color(0xFF9E9EA6)
 }
 
 /**

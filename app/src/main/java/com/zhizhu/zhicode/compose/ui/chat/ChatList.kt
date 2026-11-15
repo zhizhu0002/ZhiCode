@@ -352,19 +352,31 @@ fun ChatList(
     /*
      * 往前补历史时**视口一动不动**（像聊天软件那样）。
      *
-     * `LazyColumn` 靠 key 找回第一可见项，前插理论上不该移动视口。但这条路径
-     * 同时还会**从尾部淘汰**（`trimResidentTail`），前插 + 后删一起发生时锚定
-     * 会失准，列表把位置夹到某一项上 —— 表现就是用户报的
-     * 「每次加载信息就会给我弄到最上面」。
+     * ## 为什么不能只靠 `LazyColumn` 的 key 锚定
      *
-     * 所以显式还原：记下补之前的第一可见项与偏移，补完之后按
-     * `原下标 + 前插条数` 请求滚动。`requestScrollToItem` 是非挂起的，
-     * 只登记目标、在下次测量里生效，所以这里不会产生可见的跳动。
+     * `LazyColumn` 靠 item key 找回第一可见项，前插理论上不该移动视口。
+     * 但这条路径同时还会**从尾部淘汰**（`trimResidentTail`），而且——
+     * 更关键的是——**块的 key 本身会变**：
+     *
+     * `TurnLayout.Block.Turn.key` 取的是「这一轮**首成员**的 id」。
+     * 往前补一页之后，如果新补进来的第一条是助手/工具类消息，它会**并入同一个
+     * Turn 并成为新的首成员**，于是那一块的 key 从旧 id 变成了新 id。
+     * 对 `LazyColumn` 来说那就是一块**全新的 item**，原来的锚点彻底失效，
+     * 位置被夹到某项上 —— 表现就是用户报的「每次上滑加载都会置顶」。
+     *
+     * 所以不能只记 key，还要记**像素位置**。这里改成：
+     *
+     *  1. 补之前记下「第一个 index > 0 的可见项」的 **key + offset**；
+     *  2. 补之后等一帧，先按 key 找回同一条 —— 找不到（key 变了）就按
+     *     **旧的绝对偏移**退回，保证视口停在原来的视觉位置。
+     *
+     * `requestScrollToItem` 是非挂起的：只登记目标、在下次测量里生效，
+     * 所以这里不会产生可见的跳动。
      */
     LaunchedEffect(state.transcriptPrependRevision) {
         if (state.transcriptPrependRevision == lastPrepend) return@LaunchedEffect
         lastPrepend = state.transcriptPrependRevision
-        // 等一帧：新内容要先被 LazyColumn 接收，才能用稳定 key 找回旧锚点。
+        // 等一帧：新内容要先被 LazyColumn 接收，才有 layoutInfo 可查。
         withFrameNanos { }
         val key = prependAnchorKey ?: return@LaunchedEffect
         val anchor = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }
@@ -726,10 +738,43 @@ fun ChatList(
         session = state.activeSessionId,
         revision = state.transcriptRevision,
     )
+    /*
+     * 上一帧的块表。**只为前插锚定服务**。
+     *
+     * 为什么需要它：往前补一页历史后，第一个 `Turn` 的首成员会变（新内容并入它），
+     * 于是那一块的 `key` 变了 —— 对 `LazyColumn` 来说就是一条全新的 item，
+     * 之前记住的滚动锚点作废，位置被夹到某项上。
+     * 用户看到的就是「每次上滑加载都会置顶」。
+     *
+     * 所以这里留住上一帧，算新块表时把**还认得出来的** key 钉回去
+     * （见 `TurnLayout.pinForPrepend`），让那一块对列表而言仍是同一块。
+     *
+     * ⚠️ 只在"前插"时钉，**追加**时不钉：追加场景下首成员本来就不变，
+     * 钉不钉都一样；而"整份 transcript 被替换"（切会话 / 回到最新）时
+     * 必须让它**彻底重建**，否则旧 key 会被钉到无关内容上。
+     * 所以判据是 `transcriptPrependRevision` 变过、且会话没换。
+     */
+    var previousBlocks by remember { mutableStateOf<List<TurnLayout.Block>>(emptyList()) }
+    var lastPrependSeen by remember { mutableStateOf(state.transcriptPrependRevision) }
+    var lastSessionForBlocks by remember { mutableStateOf(state.activeSessionId) }
+
     val blocks = remember(transcriptStamp) {
-        TurnLayout.blocks(
-            transcript.map { TurnLayout.Entry(it.id, isUser = it.kind == ChatKind.USER) },
-        )
+        val entries = transcript.map {
+            TurnLayout.Entry(it.id, isUser = it.kind == ChatKind.USER)
+        }
+        val sessionChanged = state.activeSessionId != lastSessionForBlocks
+        val prependHappened = state.transcriptPrependRevision != lastPrependSeen
+        val pinned = if (prependHappened && !sessionChanged) {
+            TurnLayout.pinForPrepend(previousBlocks, TurnLayout.blocks(entries))
+        } else {
+            emptyMap()
+        }
+        val next = TurnLayout.blocks(entries, pinned)
+        // 记下这一帧，供下一次前插对齐；顺手把版本号推进到当前。
+        previousBlocks = next
+        lastPrependSeen = state.transcriptPrependRevision
+        lastSessionForBlocks = state.activeSessionId
+        next
     }
     // TurnLayout only stores ids. Resolve them through one index instead of scanning the
     // complete transcript once for every member of every block (which becomes quadratic

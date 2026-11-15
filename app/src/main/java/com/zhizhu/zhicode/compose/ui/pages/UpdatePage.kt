@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -39,14 +38,14 @@ import com.zhizhu.zhicode.compose.model.UpdatePhase
 import com.zhizhu.zhicode.compose.model.UpdateUiState
 import com.zhizhu.zhicode.compose.model.changeLogFor
 import com.zhizhu.zhicode.compose.theme.ZhiSpacing
+import com.zhizhu.zhicode.compose.ui.FloatingBottomShell
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.effects.PageBlurBar
 import com.zhizhu.zhicode.compose.ui.effects.rememberPageBlurBackdrop
 import com.zhizhu.zhicode.compose.ui.rememberActionBusy
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
+import com.zhizhu.zhicode.compose.ui.rememberGlass
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
@@ -179,14 +178,21 @@ fun UpdatePage(
                     )
                 }
 
-                item(key = "status") {
-                    UpdateStatusBlock(
-                        state = state,
-                        checking = checking,
-                        onCheck = onCheck,
-                        onCancelDownload = onCancelDownload,
-                    )
-                }
+                /*
+                 * ⚠️ 这里**不放状态文案**。
+                 *
+                 * 解包了参考实现（`com.android.updater` 9.7.2）之后确认：
+                 * 它把"有没有新版本"拆成**两个独立 fragment**（`no_update_fragment` /
+                 * `new_update_fragment`），而两个 fragment 里**都没有**状态句 ——
+                 * 「已经是最新版本」「发现新版本」是 **Toast**
+                 * （`miui_summary_no_new_version` / `miui_summary_has_new_version`），
+                 * 不是页面内容。
+                 *
+                 * 所以横线下面**永远只有更新日志**。之前我在这里塞了一整块
+                 * 状态文案（还带一句"发布之后这里会显示新版本"的解释），
+                 * 那正是"和参考图完全不统一"的直接原因 —— 参考图里那块位置
+                 * 从头到尾都是正文。状态改走吐司，见上面那个 LaunchedEffect。
+                 */
 
                 // 更新内容。来源见类头注释：有新版看新版，否则看当前版本。
                 val sections = updateSections(state)
@@ -198,23 +204,54 @@ fun UpdatePage(
                     notesSections(sections)
                 }
 
-                item(key = "bottom") {
-                    UpdateBottomActions(
-                        state = state,
-                        checking = checking,
-                        downloading = downloading,
-                        onCheck = onCheck,
-                        onDownload = onDownload,
-                        onCancelDownload = onCancelDownload,
-                        onInstall = onInstall,
-                        onOpenPage = {
-                            val url = state.release?.pageUrl?.takeIf { it.isNotBlank() }
-                                ?: RELEASES_PAGE_URL
-                            runCatching { uriHandler.openUri(url) }
-                        },
-                    )
+                // 失败原因必须留在页面上（吐司一闪就没了，用户没法照着排查），
+                // 但它是**附加信息**，不替代日志，所以放在日志之后、很轻的一行。
+                if (state.phase == UpdatePhase.Failed && state.error != null) {
+                    item(key = "error") { SectionNote("检查失败：${state.error}") }
+                }
+
+                if (state.phase == UpdatePhase.Downloading) {
+                    item(key = "progress") {
+                        Box(Modifier.padding(horizontal = ZhiSpacing.pageMargin, vertical = 12.dp)) {
+                            DownloadProgress(state, onCancel = onCancelDownload)
+                        }
+                    }
+                }
+
+                item(key = "bottom-spacer") {
+                    // 给悬浮条让出位置。高度按参考实现的两个值之和：
+                    // `check_btn_margin_top` 9.09dp + 按钮 48dp + `check_btn_margin_bottom`
+                    // 28dp ≈ 85dp，再留一点余量防止内容被压。
+                    Spacer(Modifier.height(96.dp))
                 }
             }
+
+            // ---- 底部悬浮条 ----
+            //
+            // 参考实现把动作做成**贴底的悬浮按钮**（`no_update_fragment` 里的
+            // `Button` 用 `check_btn_margin_top` 9.09dp / `check_btn_margin_bottom`
+            // 28dp 做上下留白），而不是页面流里的一个实心蓝按钮。
+            //
+            // 这里复用工程自己的 `FloatingBottomShell`（任务卡 / 反馈条 / 输入器
+            // 都从它出）而不是另写一个：圆角、阴影、模糊半径、横向内缩都在那一个
+            // 地方定死，多处想不一致都不行。
+            UpdateFloatingBar(
+                state = state,
+                checking = checking,
+                downloading = downloading,
+                onCheck = onCheck,
+                onDownload = onDownload,
+                onCancelDownload = onCancelDownload,
+                onInstall = onInstall,
+                onOpenPage = {
+                    val url = state.release?.pageUrl?.takeIf { it.isNotBlank() }
+                        ?: RELEASES_PAGE_URL
+                    runCatching { uriHandler.openUri(url) }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = insets.calculateBottomPadding()),
+            )
         }
     }
 }
@@ -224,6 +261,10 @@ fun UpdatePage(
  *
  * 不套磨砂 —— 关于页那个 Hero 之所以需要 `textureBlur` + `DstIn`，是因为它压在一层
  * 动态渐变上；这一页是纯底色，套上去只会让字变糊。
+ *
+ * 间距取自参考实现（`com.android.updater` 9.7.2 的 `no_update_fragment`）：
+ * 品牌字距顶 `miui_white_text_logo_margin_top` = 121dp（这里取 40dp，因为我们的
+ * 顶栏比它的高）、版本号距品牌字 `miui_version_summary_margin_top` = 10dp。
  */
 @Composable
 private fun UpdateBrandHeader() {
@@ -231,95 +272,31 @@ private fun UpdateBrandHeader() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 40.dp, bottom = 28.dp),
+            .padding(top = 40.dp, bottom = 40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
             text = "ZhiCode",
             modifier = Modifier.fillMaxWidth(),
             color = scheme.onBackground,
-            // 字号走**字阶里最大的一档**（`title1` = 32sp），不硬写 sp。
+            // 字号走字阶里最大的一档（`title1`），不硬写 sp。
             // 硬写会让这一个字成为整套字阶之外的例外：将来字阶统一调整时漏改它，
             // 而"官方组件 + 自己的字"正是这个工程之前偏离 Miuix 规范的原因。
             fontSize = MiuixTheme.textStyles.title1.fontSize,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(6.dp))
+        // 参考实现是 10dp（`miui_version_summary_margin_top`）。
+        Spacer(Modifier.height(10.dp))
         Text(
             text = BuildConfig.VERSION_NAME,
             modifier = Modifier.fillMaxWidth(),
             color = scheme.onSurfaceVariantSummary,
-            fontSize = MiuixTheme.textStyles.body1.fontSize,
+            // 参考实现用 `text_size_13p3`（14.55sp）；这里取 `body2`（14sp）——
+            // 与规范值差 0.55sp 肉眼不可辨，而挂到字阶上才能随主题一起缩放。
+            fontSize = MiuixTheme.textStyles.body2.fontSize,
             textAlign = TextAlign.Center,
         )
-    }
-}
-
-/**
- * 状态区：一句话说清现在是什么情况，外加「检查更新」入口。
- *
- * 六种阶段各有明确文案。**不合并**"已是最新"与"上游还没有发布"——
- * 前者是"比过了没有更新的"，后者是"没有可比的东西"，
- * 混成一句话会在上游发布之后仍然显示"已是最新"，用户会以为检查坏了。
- */
-@Composable
-private fun UpdateStatusBlock(
-    state: UpdateUiState,
-    checking: Boolean,
-    onCheck: () -> Unit,
-    onCancelDownload: () -> Unit,
-) {
-    val scheme = MiuixTheme.colorScheme
-    val message = when {
-        checking || state.phase == UpdatePhase.Checking -> "正在检查更新…"
-        state.phase == UpdatePhase.Failed -> state.error ?: "检查更新失败"
-        state.phase == UpdatePhase.NoReleases -> "上游还没有发布可下载的版本。发布之后这里会显示新版本。"
-        state.phase == UpdatePhase.UpToDate -> "已经是最新版本。"
-        state.phase == UpdatePhase.Available && state.release != null -> {
-            buildString {
-                append("发现新版本 ").append(state.release.tag)
-                if (state.release.prerelease) append("（预发布）")
-                val date = formatPublished(state.release.publishedAt)
-                if (date.isNotEmpty()) append(" · ").append(date)
-            }
-        }
-        state.phase == UpdatePhase.Downloading -> "正在下载安装包…"
-        else -> "手动检查一次，看有没有新版本。"
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = ZhiSpacing.pageMargin, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = message,
-            color = if (state.phase == UpdatePhase.Failed) scheme.error else scheme.onSurface,
-            fontSize = MiuixTheme.textStyles.body1.fontSize,
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // 标签先算好再传：内联的 `text = if (…) "…" : "…"` 在 Kotlin 里
-            // 会与"没有 else 的 if 语句"产生歧义，解析器会在字符串那一列报错。
-            val checkLabel = if (checking) "检查中…" else "检查更新"
-            PrimaryButton(
-                text = checkLabel,
-                onClick = onCheck,
-                enabled = !checking && state.phase != UpdatePhase.Downloading,
-            )
-            if (state.phase == UpdatePhase.Available && !state.release?.apkUrl.isNullOrBlank()) {
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    text = state.release?.apkSize?.takeIf { it > 0 }?.let { formatSize(it) } ?: "",
-                    color = scheme.onSurfaceVariantSummary,
-                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                )
-            }
-        }
-        if (state.phase == UpdatePhase.Downloading) {
-            DownloadProgress(state, onCancel = onCancelDownload)
-        }
     }
 }
 
@@ -360,9 +337,24 @@ private fun DownloadProgress(state: UpdateUiState, onCancel: () -> Unit) {
     }
 }
 
-/** 底部动作：只在真有新版本（或正在下载）时出现。 */
+/**
+ * 底部悬浮条。
+ *
+ * ## 为什么是悬浮条而不是页面里的按钮
+ *
+ * 参考实现的「检查更新 / 立即下载」是**贴底的悬浮按钮**（`no_update_fragment`
+ * 里那个 `Button` 用 `check_btn_margin_top` 9.09dp、`check_btn_margin_bottom`
+ * 28dp 做上下留白，横向上与内容同宽），而不是插在正文流里的一个实心块。
+ *
+ * 那不只是外观：悬浮条**不随内容滚走**，而"检查更新"必须随时可按 ——
+ * 日志一长（真发过几个版本之后必然如此），流里的按钮会被推到几屏之外，
+ * 用户得先滚到底才能点。
+ *
+ * 复用工程自己的 [FloatingBottomShell]（任务卡 / 反馈条 / 输入器都从它出）：
+ * 圆角、阴影、模糊半径、横向内缩在那一处定死，三块想不一致都不行。
+ */
 @Composable
-private fun UpdateBottomActions(
+private fun UpdateFloatingBar(
     state: UpdateUiState,
     checking: Boolean,
     downloading: Boolean,
@@ -371,69 +363,89 @@ private fun UpdateBottomActions(
     onCancelDownload: () -> Unit,
     onInstall: () -> Unit,
     onOpenPage: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
+    val glass = rememberGlass()
     val hasUpdate = state.phase == UpdatePhase.Available && state.release != null
     val downloaded = hasUpdate && state.downloadPercent >= 100
     // 源码-only 的 Release 确实存在：没有 apkUrl 时**不给**「下载」按钮，
     // 只留「在浏览器打开」，而不是给一个点了没反应的按钮。
     val hasApk = !state.release?.apkUrl.isNullOrBlank()
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = ZhiSpacing.pageMargin, vertical = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        if (hasUpdate && hasApk) {
-            PrimaryButton(
-                text = when {
-                    downloading -> "取消下载"
-                    downloaded -> "安装"
-                    else -> "下载并安装"
-                },
-                onClick = when {
-                    downloading -> onCancelDownload
-                    downloaded -> onInstall
-                    else -> onDownload
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        } else if (hasUpdate && !hasApk) {
-            // 这次发布没有附带安装包（只发了源码）。如实说，不假装能下载。
-            Text(
-                text = "这次发布没有附带安装包，可以到仓库查看源码与标签。",
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-            )
+    /*
+     * 主按钮的文案与动作。**永远有一个主按钮**："检查更新"是这个页面的主要动作，
+     * 没有新版本时它就是唯一的按钮（参考实现同理 —— 无更新态那个 fragment 里
+     * 也有一个可点的按钮）。
+     */
+    val primaryText: String
+    val primaryAction: () -> Unit
+    val primaryEnabled: Boolean
+    when {
+        downloading -> {
+            primaryText = "取消下载"
+            primaryAction = onCancelDownload
+            primaryEnabled = true
         }
-
-        if (hasUpdate || state.phase == UpdatePhase.NoReleases) {
-            SecondaryTextAction(
-                text = "在浏览器打开" + if (hasUpdate) " Release 页" else "仓库",
-                onClick = onOpenPage,
-            )
+        hasUpdate && hasApk && downloaded -> {
+            primaryText = "安装"
+            primaryAction = onInstall
+            primaryEnabled = true
         }
-
-        if (state.phase == UpdatePhase.Failed) {
-            SecondaryTextAction(text = "重试", onClick = onCheck)
+        hasUpdate && hasApk -> {
+            primaryText = "下载并安装"
+            primaryAction = onDownload
+            primaryEnabled = true
+        }
+        else -> {
+            // 没有可下载的包（无更新 / 上游还没发 / 失败 / 只有源码）→ 就是"检查更新"。
+            // 标签先算好再传：内联的 `text = if (…) "…" : "…"` 在 Kotlin 里会与
+            // "没有 else 的 if 语句"产生歧义，解析器会在字符串那一列报错。
+            primaryText = if (checking) "检查中…" else "检查更新"
+            primaryAction = onCheck
+            primaryEnabled = !checking
         }
     }
-}
 
-/** 一行可点的次要动作（左对齐的蓝色文字，不带按钮底色）。 */
-@Composable
-private fun SecondaryTextAction(text: String, onClick: () -> Unit) {
-    Text(
-        text = text,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickableNoRipple(onClick)
-            .padding(vertical = 6.dp),
-        color = MiuixTheme.colorScheme.primary,
-        fontSize = MiuixTheme.textStyles.body1.fontSize,
-        textAlign = TextAlign.Center,
-    )
+    Column(modifier = modifier.fillMaxWidth()) {
+        FloatingBottomShell(wide = false, glass = glass, verticalPadding = 8.dp) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = ZhiSpacing.pageMargin, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // 这次发布没带安装包（只发了源码）时如实说一句，不假装能下载。
+                if (hasUpdate && !hasApk) {
+                    Text(
+                        text = "这次发布没有附带安装包，可在仓库查看源码与标签。",
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    )
+                }
+                PrimaryButton(
+                    text = primaryText,
+                    onClick = primaryAction,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = primaryEnabled,
+                )
+                // 次要入口：有新版时去 Release 页，无 Release 时去仓库。
+                // 只在真有目标时出现 —— 无更新态不需要多一行链接。
+                if (hasUpdate || state.phase == UpdatePhase.NoReleases) {
+                    Text(
+                        text = if (hasUpdate) "在浏览器打开 Release 页" else "在浏览器打开仓库",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickableNoRipple(onOpenPage)
+                            .padding(vertical = 4.dp),
+                        color = scheme.primary,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
+    }
 }
 
 /** 一段说明文字（用于「没有更新说明」这类情况）。 */
@@ -465,39 +477,33 @@ private fun LazyListScope.notesSections(sections: List<ChangeLogSection>) {
 @Composable
 private fun NotesSection(section: ChangeLogSection) {
     val scheme = MiuixTheme.colorScheme
-    Column(modifier = Modifier.fillMaxWidth()) {
+    // ⚠️ **不套 Card**。参考实现的小节标题与正文都直接浮在底色上
+    // （`new_update_fragment` 里只有 TextView 与配置行，没有卡片容器）。
+    // 之前这里给正文包了一张 `Card`，结果整页变成"一摞方块"：小节标题
+    // 反而比正文轻，扫读时分不出层级 —— 那正是"和参考图完全不统一"的一部分。
+    //
+    // 分隔靠的是间距与字重，不是容器边框：
+    //   小节标题：`title4` + SemiBold
+    //   条目正文：`body2` + 次级色
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                start = ZhiSpacing.pageMargin,
+                end = ZhiSpacing.pageMargin,
+                top = 20.dp,
+                bottom = 4.dp,
+            ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Text(
             text = section.title,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(
-                    start = ZhiSpacing.pageMargin,
-                    end = ZhiSpacing.pageMargin,
-                    top = 16.dp,
-                    bottom = 8.dp,
-                ),
+            modifier = Modifier.fillMaxWidth(),
             color = scheme.onBackground,
             fontWeight = FontWeight.SemiBold,
             fontSize = MiuixTheme.textStyles.title4.fontSize,
         )
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = ZhiSpacing.pageMargin),
-            colors = CardDefaults.defaultColors(),
-        ) {
-            Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                section.items.forEachIndexed { index, item ->
-                    if (index > 0) {
-                        ZhiHorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            color = scheme.dividerLine.copy(alpha = 0.5f),
-                        )
-                    }
-                    NotesItem(item)
-                }
-            }
-        }
+        section.items.forEach { item -> NotesItem(item) }
     }
 }
 
@@ -505,10 +511,8 @@ private fun NotesSection(section: ChangeLogSection) {
 private fun NotesItem(item: ChangeLogItem) {
     val scheme = MiuixTheme.colorScheme
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         if (item.title.isNotEmpty()) {
             Text(
@@ -521,7 +525,7 @@ private fun NotesItem(item: ChangeLogItem) {
         if (item.detail.isNotEmpty()) {
             Text(
                 text = item.detail,
-                color = if (item.title.isEmpty()) scheme.onSurface else scheme.onSurfaceVariantSummary,
+                color = scheme.onSurfaceVariantSummary,
                 fontSize = MiuixTheme.textStyles.body2.fontSize,
             )
         }

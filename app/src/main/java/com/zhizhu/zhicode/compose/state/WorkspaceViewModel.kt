@@ -6843,11 +6843,14 @@ class WorkspaceViewModel(
                 ThemeMode.LIGHT -> ThemeMode.DARK
                 ThemeMode.DARK -> ThemeMode.SYSTEM
             }
-            // 两个字段一起写：`themeSettings` 是真源，`themeMode` 是它的缓存
-            // （见 WorkspaceUiState.themeSettings 的说明）。
+            // 三个字段一起写：`themeSettings` 是真源，`themeMode` 是它的缓存
+            // （见 WorkspaceUiState.themeSettings 的说明），而 `settingsDraft`
+            // 里那份**必须**同步 —— 否则下一次 `applySettingsDraft()` 会拿
+            // draft 里的旧 mode 把这里的新值覆盖回去（详见 [updateThemeSettings]）。
             it.copy(
                 themeMode = next,
                 themeSettings = it.themeSettings.copy(mode = next),
+                settingsDraft = it.settingsDraft?.copy(themeMode = next),
                 message = "主题：${next.label}",
             )
         }
@@ -6857,15 +6860,73 @@ class WorkspaceViewModel(
     /**
      * 改主题设置。
      *
-     * 只置状态、不立刻落盘：调用方是设置页里的滑杆与开关，拖动一次会触发几十次
-     * 回调，每次都 `commit()` 会把主线程按住。落盘由 [persistThemeSettings] 负责，
-     * 页面关闭时（[flushSettings]）兑现。
+     * 只置状态、**不**立刻落盘：调用方是设置页里的滑杆与开关，拖动一次会触发几十次
+     * 回调，每次都 `commit()` 会把主线程按住。
+     *
+     * ## ⚠️ 但必须让 [flushSettings] 知道"有未落盘的改动"
+     *
+     * 这里原先**什么标记都不打**，而 `flushSettings()` 的第一句是
+     * `if (settingsPersistJob == null) return` —— 主题改动永远不会设置那个 job，
+     * 于是：
+     *
+     * · `closeSettings()` 调 `flushSettings()` → 直接返回；
+     * · `MainActivity.onStop` 调 `flushSettings()` → 直接返回；
+     * · 只有 `closeThemePage()` 那一处显式调了 `persistThemeSettings()` 才真写盘。
+     *
+     * 结果就是用户报的「设置不持久，重进就变回去」：在主题页里改完**直接按返回键
+     * 退回工作区**（不经过 `closeThemePage` 的那条路径，比如侧滑返回、或者从
+     * 设置 hub 一路退出去），那些改动只活在内存里；进程一被划掉就全没了。
+     *
+     * 修法不是"每次改都写盘"（那正是当初要避免的），而是把待落盘这件事**登记下来**：
+     * 挂一个已完成的占位 job，让 `flushSettings()` 的判据成立。
+     * 用同一个去抖窗口，语义与其它设置完全一致。
      */
     fun updateThemeSettings(transform: (com.zhizhu.zhicode.compose.data.ThemeSettings) ->
         com.zhizhu.zhicode.compose.data.ThemeSettings) {
         _state.update { s ->
             val next = transform(s.themeSettings)
-            s.copy(themeMode = next.mode, themeSettings = next)
+            s.copy(
+                themeMode = next.mode,
+                themeSettings = next,
+                /*
+                 * ⚠️ `settingsDraft` 里的 `themeMode` **必须同步**，否则会被它盖回去。
+                 *
+                 * `SettingsDraft.applyTo()` 有这么两行：
+                 *
+                 *     themeMode = themeMode,
+                 *     themeSettings = state.themeSettings.copy(mode = themeMode),
+                 *
+                 * 也就是**draft 里的旧值会把 state 覆盖掉**。而 `applySettingsDraft()`
+                 * 的调用点很多（设置页里任何一个开关、以及若干不走设置页的入口），
+                 * 它们平时不碰主题，却会因为这两行把用户刚选好的深浅冲回旧值。
+                 *
+                 * 用户看到的就是「在主题页选好深浅 → 退出 → 滑动几下（触发了某次
+                 * `applySettingsDraft`）→ 又变回去了」，而且**再进设置页看到的是旧值**
+                 * —— 因为 state 确实被写回旧值了，不是显示层的问题。
+                 *
+                 * 这里顺手同步 draft 是从源头消除这种"两个真源"的分歧；
+                 * `applyTo` 那两行保持不动（它是给"设置页自己改深浅"用的）。
+                 */
+                settingsDraft = s.settingsDraft?.copy(themeMode = next.mode),
+            )
+        }
+        // 登记"有一笔主题改动还没落盘"。见上面的说明：不能只置状态，
+        // 否则 flushSettings 会以为无事可做。50ms 后自己写一次；
+        // 用户若在这之前就退出，flushSettings 会提前兑现它。
+        scheduleThemePersist()
+    }
+
+    /**
+     * 安排一次主题落盘（与 [scheduleSettingsPersist] 同一套去抖语义，但走主题自己的
+     * 存储）。`settingsPersistJob` 是**共用**的登记位：`flushSettings()` 只需要知道
+     * "还有没有东西没写"，具体写什么由 `persistSettingsNow()` 一并负责。
+     */
+    private fun scheduleThemePersist() {
+        settingsPersistJob?.cancel()
+        settingsPersistJob = viewModelScope.launch {
+            delay(SettingsPersistDebounceMs)
+            persistThemeSettings()
+            settingsPersistJob = null
         }
     }
 
@@ -7395,11 +7456,26 @@ class WorkspaceViewModel(
      *
      * 没有待兑现的改动时**什么都不做**：`onStop` 每次都会调它，
      * 不能让它变成一个"每次切后台都全量写盘"的热路径。
+     *
+     * ## ⚠️ 主题设置也必须在这里兑现
+     *
+     * 主题存在 `ThemeStore`（**另一份** SharedPreferences），与 `SettingsDraft`
+     * 不是同一份数据。只调 `persistSettingsNow()` 写不到它。
+     *
+     * 而这条以前是坏的：`updateThemeSettings()` 只置状态、不打任何"待落盘"标记，
+     * 于是 `if (settingsPersistJob == null) return` 直接返回，主题永远不在这里落盘。
+     * 用户从主题页**侧滑返回**（不走 `closeThemePage` 那条显式持久化的路径）时，
+     * 改动只活在内存里 —— 这正是「设置不持久，重进就变回去」。
+     *
+     * 现在 `updateThemeSettings` 会通过 [scheduleThemePersist] 登记那个 job，
+     * 所以这里能一并对上。
      */
     fun flushSettings() {
         if (settingsPersistJob == null) return
         settingsPersistJob?.cancel()
         settingsPersistJob = null
+        // 两份存储，两条都要兑现（顺序无所谓，它们互不依赖）。
+        persistThemeSettings()
         persistSettingsNow()
     }
 

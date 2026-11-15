@@ -130,7 +130,7 @@ private fun rememberZhiColors(theme: ThemeSettings, isDark: Boolean): Colors {
         // 界面里按钮/开关/选中态的颜色，HCT 的 TonalSpot 会把它压成低饱和的中间调
         // （默认蓝 #3482FF 会变成 #415F91 那种灰蓝），"选了绿色结果界面是灰绿"。
         return remember(isDark, backdrop, theme.seedArgb) {
-            val base = if (isDark) darkColorScheme() else lightColorScheme().zhiLightNeutrals()
+            val base = if (isDark) darkColorScheme().zhiDarkNeutrals() else lightColorScheme().zhiLightNeutrals()
             val seed = Color(theme.seedArgb)
             // 亮色种子（暖阳橙 / 樱花粉）配白字会糊，按亮度换深色字。
             // 用命名常量而不是字面量：它是"高亮底上近乎纯黑的字"，与纯黑不同
@@ -192,13 +192,25 @@ private fun rememberZhiColors(theme: ThemeSettings, isDark: Boolean): Colors {
         )
     }
     val generated = controller.currentColors()
-    return remember(generated, backdrop) {
+    return remember(generated, backdrop, isDark) {
         // Monet 的浅色板用它自己的中性色（带种子色的灰）——**不要**再套
         // `zhiLightNeutrals()`：那套灰是为"固定色板"调的，叠在生成色板上
         // 会让强调色与容器色对不上（生成算法保证的是它自己那一套对比度）。
         // 同上面固定色板分支：`background` 不覆盖（它服务于底部弹层 / 对话框 / 抽屉），
         // 页面背板由 `ZhiColors.backdrop()` 与 `surface` 负责。
-        generated
+        //
+        // ⚠️ 但**弱化文字/图标**这一项要盖掉，理由与固定色板分支完全相同：
+        // Monet 生成出来的 `onBackgroundVariant` 带种子色的色相，在整屏图标上
+        // 就是一层"发灰的滤镜"。它表达的是"弱一档"，不该表达"另一种颜色"。
+        // 注意这里**只**动这两个字段，中性容器仍用生成结果。
+        if (isDark) {
+            generated.copy(
+                onBackgroundVariant = ZhiColors.MutedDark,
+                onSurfaceVariantSummary = ZhiColors.SummaryDark,
+            )
+        } else {
+            generated.copy(onBackgroundVariant = ZhiColors.MutedLight)
+        }
     }
 }
 
@@ -241,9 +253,25 @@ private fun scaledDensity(scale: Float): Density {
  * 逐个调用点换成 [ZhiColors] 也能修，但那有 200+ 个取值点，而且 Miuix **组件内部**
  * 取的色根本改不到。在这一个入口重映射则调用点一行都不用动。
  *
- * ## 只改浅色
+ * ## 深浅**两侧都要**重映射（这曾经是发灰的根因）
  *
- * 深色方案这几个字段本来就是 `#242424` 一族，用户反馈里也只提浅色。
+ * 这段原先只改了浅色，注释还写着"深色方案这几个字段本来就是 `#242424` 一族"。
+ * 那句话对容器色成立，但**对 `onBackgroundVariant` 不成立** ——
+ *
+ * | | Miuix 原值 | 性质 |
+ * | --- | --- | --- |
+ * | 浅色 `onBackgroundVariant` | `#8C93B0` | 蓝灰，白底上对比度约 2.9:1 |
+ * | 深色 `onBackgroundVariant` | `#787E96` | **同样是蓝灰**，在 `#242424` 上偏灰偏冷 |
+ *
+ * 于是"浅色改过、深色没改"直接表现为：深色模式下大量图标与次级文字发灰、发闷，
+ * 而浅色下同一处是正常的中性灰 —— 用户看到的是"深浅色模式下的图标要么发灰"。
+ *
+ * 更要紧的是**语义**：`onBackgroundVariant` 是"比正文弱一档的文字/图标"，
+ * 它不该带色相。带蓝味会让整屏图标看起来蒙了一层灰，尤其配彩色图标块
+ * （`SettingsIconPlate`）时更明显。
+ *
+ * 现在两侧都换成中性灰（深色 [ZhiColors.MutedDark] / 浅色 [ZhiColors.MutedLight]），
+ * 且各自与所在背板的对比度都在 4.5:1 以上。
  */
 private fun Colors.zhiLightNeutrals(): Colors = copy(
     surfaceContainerHigh = ZhiColors.CardLight,
@@ -252,4 +280,19 @@ private fun Colors.zhiLightNeutrals(): Colors = copy(
     secondaryVariant = ZhiColors.SoftFillLight,
     secondaryContainer = ZhiColors.SoftFillLight,
     onBackgroundVariant = ZhiColors.MutedLight,
+)
+
+/**
+ * 深色侧的同一批重映射。
+ *
+ * 容器色沿用 Miuix 原值（`#242424` 一族本来就是对的，它们与 [ZhiColors.PanelDark]
+ * 一致），只改**弱化文字/图标**这一项 —— 见 [zhiLightNeutrals] 上方那段说明。
+ *
+ * 另外把 `onSurfaceVariantSummary` 也从 `#80FFFFFF`（50% 白，浮在任何底色上都偏灰）
+ * 提到 62% 白：工具卡的摘要行、设置行的副标题全用它，50% 在 `#2D2D2D` 卡片上
+ * 只有约 4.1:1，看起来就是"发灰的说明文字"。
+ */
+private fun Colors.zhiDarkNeutrals(): Colors = copy(
+    onBackgroundVariant = ZhiColors.MutedDark,
+    onSurfaceVariantSummary = ZhiColors.SummaryDark,
 )

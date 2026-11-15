@@ -818,8 +818,17 @@ private fun ToolGroupCard(
     val done = ToolGrouping.isDone(group)
     val failed = ToolGrouping.hasFailure(group)
 
-    // 折叠组**没有卡片底**（反编译版 `addCollapsedToolActivity`：组头就是"图标 + 粗体标签 +
-    // ⌄"，靠成员缩进与 `⎿` 副行体现层级，整块没有任何背景）。
+    // ⚠️ 组与单条工具**必须同一个壳**。
+    //
+    // 单条工具在 `ToolBatch` 里被套了 `Card(cardSurface, ZhiRadius.card)`，
+    // 而这里此前是裸 `Column` —— 于是同一批工具里，"单条"是白卡片、"折叠组"
+    // 是直接浮在页面上的文字，两者并排时看起来像两套设计（用户报的正是这个）。
+    //
+    // 历史上这里确实**是**裸的，依据是反编译版 `addCollapsedToolActivity`：
+    // 那一处组头就是"图标 + 粗体标签 + ⌄"，没有任何背景。但那个参考实现的
+    // 单条工具也没有卡片底（它靠棋盘格与缩进分层），而我们给单条加了壳
+    // （见 `ToolBatch` 里那段"给 tools 加个框"的说明）—— 只给一半加壳，
+    // 两种形态就必然打架。要么都加、要么都不加；用户看过界面之后要都加。
     //
     // ⚠️⚠️ 根容器必须是**竖向**的，这不是随便挑的：
     //
@@ -834,10 +843,20 @@ private fun ToolGroupCard(
     //
     // 这和文件面板那次「裸 `when` 换成 `AnimatedContent`」是同一类失误：
     // 换容器时只看了它"多"提供了什么，没看它**顺手**提供了什么。
+    //
+    // 卡**不接管点击**：点击仍在表头那个 `Surface(onClick = onToggle)` 上 ——
+    // 两层都挂 onClick 会互相抢，而且外面那层拿不到"展开这一组"的语义。
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+        cornerRadius = ZhiRadius.card,
+        insideMargin = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
+        colors = CardDefaults.defaultColors(
+            color = ZhiColors.cardSurface(),
+            contentColor = scheme.onSurface,
+        ),
+    ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         // 表头点击走 Miuix Surface(onClick)：不再手写 Modifier.clickable。
         // 传的是"切换"：展开态由 `ChatItem.expandedGroups` 记账，这一层不去推目标状态。
@@ -938,6 +957,7 @@ private fun ToolGroupCard(
             }
         }
     }
+    } // Card
 }
 
 /**
