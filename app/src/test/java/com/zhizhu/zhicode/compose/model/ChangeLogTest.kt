@@ -5,6 +5,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /**
  * 本地自带的版本说明。
@@ -17,14 +18,28 @@ import org.junit.Test
  *
  * 尤其要钉住的是 **version 必须与 `BuildConfig.VERSION_NAME` 一致** ——
  * 不对齐的话 `changeLogFor` 取不到，页面会显示"这个版本没有留下更新说明"，
- * 而原因只是一个打错的字。这里用常量而不是读 BuildConfig（单元测试里没有它），
- * 所以那条一致性由 `changeLogCoversTheCurrentVersionName` 里的注释与
- * 发布流程保证；本测试至少钉住"这个文件里有一条 0.2"。
+ * 而原因只是一个打错的字。
+ *
+ * ## 为什么从 `app/build.gradle` 里读版本号，而不是写死
+ *
+ * 上一版这里写死成 `"0.2"`，注释还写着"改版本号时这里要一起改"。
+ * 那种约定必然失效：这次升到 `1.0.0` 就是差点漏掉 —— 漏掉的后果不是编译失败，
+ * 而是**更新页永远显示"这个版本没有留下更新说明"**，且没人会想到去查一个测试。
+ *
+ * 现在直接解析 `app/build.gradle` 的 `versionName`。单测工作目录是工程根
+ * （见 `app/build.gradle` 的 `testOptions`），所以路径是相对根写的。
+ * 读不到就明确失败 —— 那说明目录约定变了，该修的是测试而不是放过它。
  */
 class ChangeLogTest {
 
-    /** 与 `app/build.gradle` 的 `versionName` 手工对齐；改版本号时这里要一起改。 */
-    private val currentVersionName = "0.2"
+    /** 从构建脚本里取**当下**的 `versionName`，避免手工同步漏掉。 */
+    private val currentVersionName: String by lazy {
+        val script = File("app/build.gradle")
+        assertTrue("找不到 app/build.gradle：${script.absolutePath}", script.isFile)
+        val match = Regex("""versionName\s+'([^']+)'""").find(script.readText())
+        assertNotNull("app/build.gradle 里没有 versionName", match)
+        match!!.groupValues[1]
+    }
 
     @Test
     fun changeLogCoversTheCurrentVersionName() {
@@ -45,7 +60,9 @@ class ChangeLogTest {
 
     @Test
     fun versionLookupToleratesSurroundingWhitespace() {
-        assertNotNull(changeLogFor(" 0.2 "))
+        // 用当前版本号而不是字面量：这条测的是"前后空白会被 trim"，
+        // 不该因为版本号变化而失效（上一版写死了 "0.2"，升级时就被它拦住了）。
+        assertNotNull(changeLogFor(" $currentVersionName "))
     }
 
     @Test
