@@ -223,3 +223,40 @@ fun changeLogFor(version: String?): ChangeLogEntry? {
     if (target.isEmpty()) return null
     return CHANGE_LOG.firstOrNull { it.version == target }
 }
+
+/**
+ * 把这一份版本说明转成 **Markdown 原文**。
+ *
+ * ## 为什么要转
+ *
+ * 更新页现在统一用工程既有的 `ZhiMarkdown` 渲染（它支持粗体/行内代码/代码块/
+ * 列表/表格/链接）。远端 Release 的 `body` 本来就是 Markdown，而本地这份是
+ * 结构化数据 —— 转成同一种写法，页面就只需要**一条渲染路径**。
+ *
+ * 上一版两端各走各的：远端走"行首标记分流"，本地走结构渲染，而那个分流
+ * 完全没处理行内标记，于是 `**粗体**` 与反引号原样显示在界面上。
+ *
+ * ## 格式
+ *
+ * - 小节标题 → `## 标题`
+ * - 条目 → `- **标题**：正文`（没有标题时就是 `- 正文`）
+ *
+ * 用的是**标准 Markdown**，不掺任何自定义标记，所以同一份文本贴到
+ * Release 正文里也能正常显示。
+ */
+fun ChangeLogEntry.toMarkdown(): String = buildString {
+    for (section in sections) {
+        append("## ").append(section.title).append('\n').append('\n')
+        for (item in section.items) {
+            append("- ")
+            if (item.title.isNotEmpty()) {
+                append("**").append(item.title).append("**")
+                if (item.detail.isNotEmpty()) append("：").append(item.detail)
+            } else {
+                append(item.detail)
+            }
+            append('\n')
+        }
+        append('\n')
+    }
+}.trim()

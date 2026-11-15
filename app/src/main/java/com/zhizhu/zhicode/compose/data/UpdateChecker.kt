@@ -77,6 +77,36 @@ internal object UpdateChecker {
     private const val USER_AGENT = "ZhiCode-UpdateCheck"
     private const val PREFERRED_APK_SUFFIX = ".apk"
 
+    /**
+     * APK 下载的**镜像前缀**。拼法是 `前缀 + 完整的 GitHub URL`。
+     *
+     * ## 为什么需要它
+     *
+     * 本项目的 Release 附件放在 `github.com`，而它在部分网络（尤其是中国大陆）
+     * 下连不上或极慢。更新页的下载按钮在那类网络里等于按了没反应 ——
+     * 而"检查更新"本身能通（`api.github.com` 有时是通的），于是用户看到的是
+     * 「说有新版本，但下不动」这种更难解释的状态。
+     *
+     * ## 为什么只作用于**下载**、不作用于**检查**
+     *
+     * 检查要解析 JSON，经过一层转发之后响应体可能被改写或注入，
+     * 而那段代码是按"对方就是 GitHub API"写的（读 `tag_name`、`assets`……）。
+     * 下载的是二进制、且最终由系统安装器校验签名 —— 走镜像的风险面小得多。
+     *
+     * ## 为什么先镜像、且失败要能回退
+     *
+     * 镜像存在的理由就是"原地址在某些网络下连不上"，反过来先试原址等于让用户
+     * 白等一次超时。但 `ghfast.top` 是社区维护的公共服务，不保证长期可用 ——
+     * 所以**必须**回退到原地址，否则我们把"某些网络连不上 GitHub"
+     * 换成了"所有网络都依赖一个第三方镜像"，可用性反而更差。
+     *
+     * ## 隐私
+     *
+     * 走镜像意味着下载请求（含 GitHub 的附件路径）会经过第三方。
+     * 这一点写进了隐私政策页；请求里不含任何用户数据或设备标识。
+     */
+    private const val MIRROR_PREFIX = "https://ghfast.top/"
+
     private const val ERROR_REDIRECT = "更新检查请求被重定向，已拒绝"
     private const val ERROR_RATE_LIMITED = "GitHub 拒绝了这次请求（可能是访问过于频繁），请稍后再试"
     private const val ERROR_BODY_INVALID = "更新信息返回格式无效"
@@ -248,12 +278,58 @@ internal object UpdateChecker {
      *
      * 写入**先落 `.part` 再改名**：中途失败时不会留下一个看起来完整的半截 APK，
      * 那个半截包交给安装器只会得到一句语焉不详的解析失败。
+     *
+     * ## 镜像回退
+     *
+     * [mirrorPrefix] 非空时，先试 `mirrorPrefix + 原始 URL`，失败再回退原地址。
+     * 见 [MIRROR_PREFIX] 的说明。
      */
     fun downloadApk(
         url: String,
         target: File,
         onProgress: (downloaded: Long, total: Long) -> Unit,
         cancellation: Cancellation = Cancellation { false },
+        mirrorPrefix: String? = MIRROR_PREFIX,
+    ): File {
+        // 候选地址：镜像优先，原地址兜底。
+        //
+        // ⚠️ 顺序是"先镜像、失败再原址"而不是反过来：镜像存在的理由就是
+        // 原地址在某些网络下**根本连不上**，先试原址等于让用户白等一次超时。
+        //
+        // 但如果镜像本身挂了（`ghfast.top` 是社区维护的公共服务，不保证可用），
+        // 必须能回退 —— 否则我们把"某些网络连不上 GitHub"换成了
+        // "所有网络都依赖一个第三方镜像"，那是更糟的可用性。
+        val candidates = buildList {
+            if (!mirrorPrefix.isNullOrBlank()) add(mirrorPrefix + url)
+            add(url)
+        }
+        var lastFailure: Throwable? = null
+        for ((index, candidate) in candidates.withIndex()) {
+            try {
+                return downloadFrom(
+                    url = candidate,
+                    target = target,
+                    onProgress = onProgress,
+                    cancellation = cancellation,
+                )
+            } catch (cancelled: InterruptedException) {
+                // 用户主动取消：不该回退去试下一个地址。
+                throw cancelled
+            } catch (failure: Throwable) {
+                lastFailure = failure
+                // 还有下一个就继续；最后一个失败时把原因抛出去。
+                if (index == candidates.lastIndex) throw failure
+            }
+        }
+        throw lastFailure ?: IllegalStateException("下载失败")
+    }
+
+    /** 单个地址的实际下载。[downloadApk] 负责选地址与回退。 */
+    private fun downloadFrom(
+        url: String,
+        target: File,
+        onProgress: (downloaded: Long, total: Long) -> Unit,
+        cancellation: Cancellation,
     ): File {
         checkCancelled(cancellation)
         target.parentFile?.mkdirs()
@@ -279,6 +355,18 @@ internal object UpdateChecker {
             }
 
             var written = 0L
+            /*
+             * 进度必须在**循环里**报，不能只在结束时报一次。
+             *
+             * 之前这里只在下载完之后 `onProgress(written, total)` 调了一遍 ——
+             * 于是界面上的进度条在整个下载过程中一直是 0，最后一下跳到 100。
+             * 用户的原话是「进度没有动画，不知道下到哪里」，那正是这个原因。
+             *
+             * 但也不能每读一次就报：64KB 一块，一个几百 MB 的包就是几千次
+             * `_state.update`，每次都要写 SnapshotState 并让整页重组。
+             * 所以按**百分比**节流到 1% 一档，只在真的跨过一档时才回调。
+             */
+            var lastReportedPercent = -1
             try {
                 connection.inputStream.use { input ->
                     FileOutputStream(partial).use { output ->
@@ -290,6 +378,17 @@ internal object UpdateChecker {
                             written += count
                             if (written > MAX_APK_BYTES) throw IllegalStateException(ERROR_APK_TOO_LARGE)
                             output.write(buffer, 0, count)
+                            if (declared > 0) {
+                                val percent = ((written * 100) / declared).toInt().coerceIn(0, 100)
+                                if (percent != lastReportedPercent) {
+                                    lastReportedPercent = percent
+                                    onProgress(written, declared)
+                                }
+                            } else {
+                                // 服务端没给 Content-Length：总量未知，只能按已下载量报。
+                                // 界面那边 percent 会一直是 0 —— 这是诚实的，不编一个假分母。
+                                onProgress(written, 0L)
+                            }
                         }
                         output.flush()
                         output.fd.sync()
@@ -304,6 +403,7 @@ internal object UpdateChecker {
                 partial.delete()
                 throw IllegalStateException("下载到的安装包是空的")
             }
+            // 收尾那一报：确保界面一定走到 100%，不依赖某次循环刚好跨档。
             onProgress(written, if (declared > 0) declared else written)
             if (target.exists() && !target.delete()) {
                 partial.delete()

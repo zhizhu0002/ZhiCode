@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -227,7 +228,21 @@ private fun RealTerminalPane(
 
     val selectedIndex = state.sessions.indexOfFirst { it.selected }
 
-    Surface(modifier = modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
+    /*
+     * ⚠️ `imePadding()` 必须挂在这里，否则键盘会**盖住终端最后几行**。
+     *
+     * 之前整个终端页对 IME 毫无处理：`MainActivity` 声明了 `adjustResize`，
+     * 但那只是让窗口整体缩短；Compose 这一层没人消费 `WindowInsets.ime`，
+     * 于是终端（占满剩余高度）+ 扩展键面板照旧铺到屏幕底边 ——
+     * 键盘一弹起来就压在它们上面，看不出光标在哪一行，也点不到扩展键。
+     *
+     * 放进 `Surface` 而不是内部 `Column`：要缩的是**整页**，包括顶部 `PaneHeader`、
+     * 终端本体、以及底部那排扩展键。只缩终端本体的话扩展键仍会被压住。
+     */
+    Surface(
+        modifier = modifier.fillMaxSize().imePadding(),
+        color = ZhiColors.panelSurface(),
+    ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // 只留一条头。这里原来还画的是 `PaneHeader("终端", projectName)`，紧接着
             // 下面 RealTerminalPane 又画一条自己的工具栏（☰ / 会话名 / ⌨ / ⋮）——

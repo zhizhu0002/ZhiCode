@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.TaskState
+import com.zhizhu.zhicode.compose.ui.floatingNavSheetInset
 import com.zhizhu.zhicode.compose.ui.chat.TaskStatusIndicator
 import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.compose.model.ChoicePickerState
@@ -164,10 +165,23 @@ fun TaskListOverlay(
         // ⚠️ 窗口高度取 LocalWindowInfo，不能取 BoxWithConstraints 的 maxHeight
         // （sheet 量内容时给的约束不是屏幕高度，见 ModelPickerBody 的实测注释）。
         val windowHeight = LocalWindowInfo.current.containerDpSize.height
-        val sheetHeight = (windowHeight * TaskSheetHeightFraction)
-            .coerceAtMost(TaskSheetHeightCap)
-            .coerceAtLeast(TaskSheetHeightFloor)
-        Column(modifier = Modifier.fillMaxWidth().height(sheetHeight)) {
+        /*
+         * 为悬浮导航胶囊让位。
+         *
+         * 定高的来源是窗口高度，而抽屉渲染在 `popupHost` 槽位 —— 读不到内容区的
+         * `LocalFloatingNavInset`（见 `floatingNavSheetInset` 的说明）。
+         * 所以这里显式减掉它，否则面板底部会压在胶囊后面。
+         */
+        val navInset = floatingNavSheetInset()
+        val sheetHeight = (
+            (windowHeight * TaskSheetHeightFraction).coerceAtMost(TaskSheetHeightCap) - navInset
+            ).coerceAtLeast(TaskSheetHeightFloor)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(sheetHeight)
+                .padding(bottom = navInset),
+        ) {
             val done = tasks.count { it.state == TaskState.DONE }
             Text(
                 text = "$done / ${tasks.size} 已完成",

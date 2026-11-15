@@ -14,6 +14,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -149,6 +151,15 @@ internal fun WorkspacePage(
         pageCount = { compactTabs.size },
     )
     val showBottomNavigation = !wide && themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM
+    /*
+     * 是否处于「文件选择」态（工具栏出现、底栏让位）。
+     *
+     * ⚠️ 必须声明在这里（Scaffold 之前）：固定底栏那份形变在 `bottomBar`
+     * 槽位里要读它。原先是声明在悬浮槽位附近的，而那个位置在 Scaffold 之后，
+     * 于是只有浮层那份能用、`bottomBar` 里引用不到。
+     */
+    val fileSelectionActive = !wide &&
+        (state.fileSelectionMode || state.fileSelection.isNotEmpty())
     val floatingNavigationBlur = showBottomNavigation && themeSettings.tabBarFloating &&
         themeSettings.blurEnabled && themeSettings.floatingNavBlur && glassMain.supported
     // 底栏的模糊源必须**只**来自 `glassMain` 的层级捕获，而底栏本身位于
@@ -177,14 +188,57 @@ internal fun WorkspacePage(
      */
     val imeOpen = com.zhizhu.zhicode.compose.ui.LocalImeMotion.current.imeVisible
     /*
-     * 供各页当作滚动留白的值；非悬浮模式**或键盘可见时为 0**。
+     * 胶囊隐藏进度的**目标值**（`0` = 完全可见，`1` = 完全滑出）。
+     *
+     * 由滚动与手势直接写（见 `reportNavBarScroll` / `navBarHideOnVerticalDrag`）。
+     * 声明位置提前到 `navBarCollapsed` 之前 —— 后者要读它来判断"是否已收起"。
+     */
+    val navBarHideTarget = remember { mutableFloatStateOf(0f) }
+    /*
+     * 悬浮胶囊是否**已经完全收起**（滑出屏幕）。
+     *
+     * ## 为什么需要它
+     *
+     * 胶囊收起之后，内容底部仍然留着它的滚动留白 —— 用户看到的是屏幕最下方
+     * 多出一块用不到的空白（"收起后不应占位"）。收起意味着它不在那儿了，
+     * 就不该继续占着位置。
+     *
+     * ## 为什么用带滞后的离散状态，而不是直接读进度
+     *
+     * 留白一变 → 列表重新测量 → `scrollOffset` 变 → `reportNavBarScroll` 又写一次
+     * 进度 → 留白再变…… 连续值直接参与布局必然形成这个回路
+     * （`LocalNavBarProgress` 的注释里记过同一条教训）。
+     *
+     * 所以这里做成**离散**状态并加滞后：
+     *  · 进度 ≥ 0.995 才判定"已收起"；
+     *  · 进度 ≤ 0.85 才判定"又出来了"。
+     *
+     * 中间 0.85~0.995 是缓冲区，一次重新测量造成的轻微抖动不会让它来回翻转。
+     * 而翻转本身是离散的（一次布局变化），不会逐帧震荡。
+     */
+    val navBarCollapsed = remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        snapshotFlow { navBarHideTarget.floatValue }.collect { progress ->
+            if (!navBarCollapsed.value && progress >= 0.995f) {
+                navBarCollapsed.value = true
+            } else if (navBarCollapsed.value && progress <= 0.85f) {
+                navBarCollapsed.value = false
+            }
+        }
+    }
+    /*
+     * 供各页当作滚动留白的值；非悬浮模式、键盘可见、或胶囊已收起时为 0。
      *
      * ⚠️ 键盘弹起时必须归 0：悬浮胶囊在最底部，键盘弹出后它要么被键盘整个盖住、
      * 要么被抬出可视区 —— 两种情况都不需要再给内容留出它的高度。若仍然留着，
      * 键盘上方就会多出一整块空白（用户截图里终端扩展键栏与键盘之间、
      * 输入器与键盘之间那条大缝）。
+     *
+     * ⚠️ 收起时同理：它已经滑出屏幕，留白就成了纯空白。
      */
-    val floatingNavInset = if (showBottomNavigation && themeSettings.tabBarFloating && !imeOpen) {
+    val floatingNavInset = if (
+        showBottomNavigation && themeSettings.tabBarFloating && !imeOpen && !navBarCollapsed.value
+    ) {
         floatingNavigationAvoidance + FloatingNavContentGap
     } else {
         0.dp
@@ -202,7 +256,6 @@ internal fun WorkspacePage(
      * 追一条 120ms 的曲线之后，极小的滚动也会走出一段平滑位移。
      * 时长刻意取很短 —— 它是"补间"而不是"动画"，太长就跟不上手指了。
      */
-    val navBarHideTarget = remember { mutableFloatStateOf(0f) }
     // 列表滚动计数器：手势靠它判断"这一下归列表管"，避免同一段位移被算两次。
     // ⚠️ 用 `IntArray(1)` 而不是 `mutableStateOf(0)`：这个计数器由滚动**逐像素**自增，
     // 用 State 会每次都走一遍快照写入/失效分发；而它只在手势回调里被读（不进组合），
@@ -277,36 +330,110 @@ internal fun WorkspacePage(
                     // 结论早已确认，探针删除；详见 ChatList.kt 同类注释与实测数据。
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                PageBlurBar(backdrop = pageNavigationBackdrop) {
-                        NavigationBar(
-                            modifier = Modifier.align(Alignment.BottomCenter),
-                            // KSU 的做法：有可采样的背板时底栏底色必须是**透明**的，
-                            // 否则不透明的 surface 会把刚做好的模糊整个盖住
-                            // （表现就是"固定底栏切换后模糊没了/背板变透明"）。
-                            color = if (pageNavigationBackdrop != null) {
-                                Color.Transparent
-                            } else {
-                                MiuixTheme.colorScheme.surface
-                            },
-                        ) {
-                            WorkspaceTab.entries.forEach { tab ->
-                                val icon = when (tab) {
-                                    WorkspaceTab.CHAT -> com.zhizhu.zhicode.compose.ui.ZhiMaterialIcons.ChatBubble
-                                    WorkspaceTab.TERMINAL -> com.zhizhu.zhicode.compose.ui.ZhiMaterialIcons.Terminal
-                                    WorkspaceTab.FILES -> com.zhizhu.zhicode.compose.ui.ZhiMaterialIcons.Folder
-                                }
-                                NavigationBarItem(
-                                    modifier = Modifier.weight(1f),
-                                    icon = icon,
-                                    label = tab.label,
-                                    selected = state.tab == tab,
-                                    onClick = {
-                                        ZhiFrameTrace.begin("tab:${tab.name}")
-                                        viewModel.selectTab(tab)
+                    /*
+                     * 固定底栏 ↔ 选择工具栏的**形变**过渡（与悬浮胶囊那一份同构）。
+                     *
+                     * 用户要的是"从导航栏过渡成工具栏"，而不是工具栏从底下升起来、
+                     * 底栏往下退。做法与浮层那份一致：两者共享同一个落点，
+                     * 由**一个进度**驱动透明度与轻微缩放/位移，中间那一帧看起来
+                     * 就是同一块东西换了内容。
+                     *
+                     * 顺带解决了"工具栏要不要抬高"这个纠结：既然它**顶替**底栏
+                     * （而不是浮在底栏之上），就不需要任何额外抬高 —— 那个
+                     * `fileToolbarBottomPadding` 的固定底栏分支因此也用不上了。
+                     */
+                    val barMorph = updateTransition(
+                        targetState = fileSelectionActive,
+                        label = "bottomBarFileToolbarMorph",
+                    )
+                    val navAlpha by barMorph.animateFloat(
+                        transitionSpec = { tween(ZhiMotion.EXIT_MILLIS, easing = FastOutSlowInEasing) },
+                        label = "bottomNavAlpha",
+                    ) { selecting -> if (selecting) 0f else 1f }
+                    val navSink by barMorph.animateFloat(
+                        transitionSpec = { tween(ZhiMotion.EXIT_MILLIS, easing = FastOutSlowInEasing) },
+                        label = "bottomNavSink",
+                    ) { selecting -> if (selecting) 1f else 0f }
+                    val toolAlpha by barMorph.animateFloat(
+                        transitionSpec = { tween(ZhiMotion.FADE_IN_MILLIS, easing = FastOutSlowInEasing) },
+                        label = "bottomToolAlpha",
+                    ) { selecting -> if (selecting) 1f else 0f }
+                    val toolRise by barMorph.animateFloat(
+                        transitionSpec = { tween(ZhiMotion.FADE_IN_MILLIS, easing = FastOutSlowInEasing) },
+                        label = "bottomToolRise",
+                    ) { selecting -> if (selecting) 0f else 1f }
+
+                    if (navAlpha > 0f) {
+                        PageBlurBar(backdrop = pageNavigationBackdrop) {
+                            NavigationBar(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .graphicsLayer {
+                                        alpha = navAlpha
+                                        val shrink = 1f - 0.04f * navSink
+                                        scaleX = shrink
+                                        scaleY = shrink
+                                        translationY = 10.dp.toPx() * navSink
                                     },
-                                )
+                                // KSU 的做法：有可采样的背板时底栏底色必须是**透明**的，
+                                // 否则不透明的 surface 会把刚做好的模糊整个盖住
+                                // （表现就是"固定底栏切换后模糊没了/背板变透明"）。
+                                color = if (pageNavigationBackdrop != null) {
+                                    Color.Transparent
+                                } else {
+                                    MiuixTheme.colorScheme.surface
+                                },
+                            ) {
+                                WorkspaceTab.entries.forEach { tab ->
+                                    val icon = when (tab) {
+                                        WorkspaceTab.CHAT -> com.zhizhu.zhicode.compose.ui.ZhiMaterialIcons.ChatBubble
+                                        WorkspaceTab.TERMINAL -> com.zhizhu.zhicode.compose.ui.ZhiMaterialIcons.Terminal
+                                        WorkspaceTab.FILES -> com.zhizhu.zhicode.compose.ui.ZhiMaterialIcons.Folder
+                                    }
+                                    NavigationBarItem(
+                                        modifier = Modifier.weight(1f),
+                                        icon = icon,
+                                        label = tab.label,
+                                        selected = state.tab == tab,
+                                        onClick = {
+                                            ZhiFrameTrace.begin("tab:${tab.name}")
+                                            viewModel.selectTab(tab)
+                                        },
+                                    )
+                                }
                             }
                         }
+                    }
+                    if (toolAlpha > 0f) {
+                        FileSelectionToolbar(
+                            visible = true,
+                            entries = state.fileEntries,
+                            selection = state.fileSelection,
+                            glass = glassMain,
+                            onAttach = viewModel::attachSelectedEntries,
+                            onRename = viewModel::renameSelectedEntry,
+                            onDelete = viewModel::deleteSelectedEntries,
+                            onCopy = viewModel::copySelectedEntries,
+                            onMove = viewModel::moveSelectedEntries,
+                            clipboardCount = state.fileClipboard.size,
+                            clipboardMove = state.fileClipboardMove,
+                            onPaste = viewModel::pasteFilesIntoCurrentDirectory,
+                            onSelectAll = viewModel::toggleSelectAllFiles,
+                            onDismiss = viewModel::clearFileSelection,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                // ⚠️ **不要**在这里再写 `padding(horizontal = floatingHorizontalInset, vertical = 6.dp)`：
+                                // `FileSelectionToolbar` 内部已经有那一层。叠两次会让卡片比
+                                // 悬浮胶囊窄一圈、也矮一截，同时把内容挤出 `bottomBar` 槽位
+                                // —— 表现就是底部被裁（用户截图里工具栏下缘被切掉）。
+                                .graphicsLayer {
+                                    alpha = toolAlpha
+                                    val grow = 0.96f + 0.04f * (1f - toolRise)
+                                    scaleX = grow
+                                    scaleY = grow
+                                    translationY = 10.dp.toPx() * toolRise
+                                },
+                        )
                     }
                 }
             }
@@ -546,10 +673,11 @@ internal fun WorkspacePage(
     //
     // 这个槽位里可能出现**两块**东西：悬浮导航胶囊，和文件选择工具栏。
     // 它们不能同时出现 —— 两者的宽度、位置、圆角语言都一样，叠在一起就是一团。
-    // 所以按"选择模式"切换，并让它们走同一组滑入/滑出动画：
-    // 胶囊向下退、工具栏从下方升起来，看起来像是同一块东西换了个内容。
-    val fileSelectionActive = !wide &&
-        (state.fileSelectionMode || state.fileSelection.isNotEmpty())
+    // 所以按"选择模式"切换，并让它们走同一组形变过渡：
+    // 底栏淡出下沉、工具栏淡入落定，看起来像是同一块东西换了个内容。
+    //
+    // ⚠️ `fileSelectionActive` 声明在 Scaffold **之前**：
+    // 固定底栏那份形变在 `bottomBar` 槽位里也要读它。
     val floatingNavSlotAvailable = !wide &&
         themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM &&
         themeSettings.tabBarFloating
@@ -566,28 +694,126 @@ internal fun WorkspacePage(
      *  · 固定底栏模式 = 底栏高度 + 系统栏 + 一点缝（工具栏浮在底栏上沿）。
      *  · 顶栏模式（底栏不显示）= 只让系统栏。
      */
-    val fileToolbarBottomPadding = when {
-        !showBottomNavigation -> navigationBarBottomInsetDp + FloatingNavBarGap
-        themeSettings.tabBarFloating -> FloatingNavBarHeight + FloatingNavBarGap + navigationBarBottomInsetDp
-        // NavigationBarDefaults.ItemHeight = 64dp（Miuix 实测值），
-        // 再加 8dp 呼吸缝，工具栏就不会贴着底栏图标。
-        else -> 64.dp + navigationBarBottomInsetDp + FloatingNavBarGap
-    }
+    /*
+     * 选择工具栏的底部抬高量 —— **只让系统导航栏**。
+     *
+     * ## 为什么不再按底栏形态分开算
+     *
+     * 三种形态现在都让工具栏**顶替**底栏，而不是浮在它上方：
+     *
+     * | 底栏形态 | 工具栏出现的位置 |
+     * | --- | --- |
+     * | 悬浮胶囊 | 同一个浮层槽位，胶囊淡出、工具栏淡入（形变） |
+     * | 底部固定导航栏 | 同一个 `bottomBar` 槽位，底栏淡出、工具栏淡入（形变） |
+     * | 顶栏模式（无底栏） | 浮层槽位，底下什么都没有 |
+     *
+     * 既然都是"顶替"，就不需要任何额外抬高。原来那条固定底栏的
+     * `64.dp + 系统栏 + 呼吸缝` 是为了"浮在底栏之上"，而现在底栏已经让位了，
+     * 再抬高就等于凭空多出一段空白（用户看到的"工具栏飘在半空中"）。
+     */
+    val fileToolbarBottomPadding = navigationBarBottomInsetDp + FloatingNavBarGap
     // 选择工具栏与底栏形态**无关**：顶栏模式、固定底栏模式下它照样要出来。
     // 只有"窄屏 + 没开模态浮层"是硬条件（宽屏用侧栏与行内动作，不需要它）。
-    if (floatingNavSlotAvailable || fileSelectionActive) {
+    /*
+     * 悬浮底栏槽位里的形变：胶囊 ↔ 选择工具栏。
+     *
+     * ⚠️ 条件里**不能**再带 `|| fileSelectionActive`。
+     *
+     * 那个条件原本是为了让"顶栏模式下也要出现选择工具栏"。现在顶栏模式
+     * （`!showBottomNavigation`）仍然走这里，但**固定底栏模式**已经改成在
+     * `bottomBar` 槽位里做同一套形变了 —— 两处都渲染的话会同时出现两个工具栏。
+     *
+     * 所以判据改成"这个槽位负责这一块的时机"：
+     *  · 悬浮胶囊可用（`floatingNavSlotAvailable`）—— 它本来就在这个槽位；
+     *  · 或者根本没有底部导航（顶栏模式）且正在选择 —— 只能在浮层里出现。
+     */
+    /*
+     * ⚠️ 判据里**不能**出现 `fileSelectionActive`。
+     *
+     * 顶栏模式下原先是 `floatingNavSlotAvailable || (!showBottomNavigation && fileSelectionActive)`：
+     * 选择态是**第一次**进入这个分支的时机，于是里面那句
+     * `updateTransition(targetState = fileSelectionActive)` 一新建出来
+     * target 就已经是 `true` —— 没有从 0 到 1 的过程，工具栏直接就位。
+     * 用户看到的正是「顶栏模式没有动画」。
+     *
+     * 现在改成"这个槽位在当前形态下是否存在"：
+     *  · 悬浮胶囊可用 → 存在（胶囊平时就在这儿）；
+     *  · 没有任何底部导航（顶栏模式）→ 也存在，只是平时什么都不画。
+     * 这样过渡对象**始终在组合里**，选择态翻转时才真的走一遍动画。
+     */
+    if (floatingNavSlotAvailable || !showBottomNavigation) {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.BottomCenter,
         ) {
-            // 这里曾有 `density` / `reservedPx` / `navInsetPx` 三个局部量，
-            // 只服务于上面那个已删除的 `nav-probe` 探针。一并删掉，
-            // 免得留下"看起来有用、其实没人读"的值。
-            AnimatedVisibility(
-                visible = showFloatingNav,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut(),
-            ) {
+            /*
+             * 胶囊 ↔ 工具栏的**形变**过渡。
+             *
+             * ## 为什么不是两条独立的 `AnimatedVisibility`
+             *
+             * 原来两个组件各走一条「一个往下退、一个从下升上来」。那只是两块东西
+             * **错开**移动，看不出它们的关系 —— 用户的原话是「单纯的上升下降」。
+             *
+             * 现在改成**同一个进度**驱动的叠化：
+             *
+             *  · 两者始终处在同一个底部锚点、同样的横向内缩；
+             *  · 胶囊淡出的同时略微下沉并缩小，工具栏淡入的同时从略高处落定；
+             *  · 两条曲线同源（[ZhiMotion] 的进入/退出族），所以中间那一帧
+             *    看起来就是"同一块东西换了内容"，而不是两块各自进退。
+             *
+             * 用 `updateTransition` 而不是 `AnimatedVisibility`：后者的两个
+             * visibility 各自动画，无法保证中间的对应关系。
+             */
+            val morph = updateTransition(
+                targetState = fileSelectionActive,
+                label = "navFileToolbarMorph",
+            )
+            /*
+             * ⚠️ 胶囊只在**这个槽位真的有胶囊**时才能出现。
+             *
+             * 判据不能只看 `fileSelectionActive`：顶栏模式下 `floatingNavSlotAvailable`
+             * 为 false（那一档根本没有底部导航），而 `navAlpha` 只看选择态的话
+             * 目标值就是 `1f` —— 于是**顶栏模式下凭空画出一个悬浮胶囊**，
+             * 压住输入器（用户截图）。
+             *
+             * 正确判据是 `showFloatingNav`（槽位可用且不在选择态）。把槽位是否可用
+             * 单独提出来，语义上也更清楚：`slotHasNav` 描述"这个槽位在这套主题下
+             * 归不归胶囊用"，与"当前是不是选择态"是两件事。
+             */
+            val slotHasNav = floatingNavSlotAvailable
+            /*
+             * 胶囊被"下滑隐藏"时还要额外移出屏幕的量。
+             *
+             * 必须补 [NavBarShadowRoom]：`LiquidWorkspaceBar` 上挂着
+             * `dropShadow(radius = 10.dp)`，阴影是从边缘向外扩散的 —— 只按
+             * "高度 + 间隙 + 系统栏"平移的话，本体出去了但阴影还露一截，
+             * 看起来就是"没藏好"。这条曾经踩过一次。
+             */
+            val exitOffsetPx = with(LocalDensity.current) {
+                (FloatingNavBarHeight + FloatingNavBarGap +
+                    navigationBarBottomInsetDp + NavBarShadowRoom).toPx()
+            }
+            val navAlpha by morph.animateFloat(
+                transitionSpec = { tween(ZhiMotion.EXIT_MILLIS, easing = FastOutSlowInEasing) },
+                label = "navAlpha",
+            ) { selecting ->
+                // 槽位不可用（顶栏模式）→ 胶囊永远不该出现；可用时按选择态淡出。
+                if (slotHasNav && !selecting) 1f else 0f
+            }
+            val navSink by morph.animateFloat(
+                transitionSpec = { tween(ZhiMotion.EXIT_MILLIS, easing = FastOutSlowInEasing) },
+                label = "navSink",
+            ) { selecting -> if (selecting) 1f else 0f }
+            val toolbarAlpha by morph.animateFloat(
+                transitionSpec = { tween(ZhiMotion.FADE_IN_MILLIS, easing = FastOutSlowInEasing) },
+                label = "toolbarAlpha",
+            ) { selecting -> if (selecting) 1f else 0f }
+            val toolbarRise by morph.animateFloat(
+                transitionSpec = { tween(ZhiMotion.FADE_IN_MILLIS, easing = FastOutSlowInEasing) },
+                label = "toolbarRise",
+            ) { selecting -> if (selecting) 0f else 1f }
+
+            if (navAlpha > 0f) {
                 LiquidWorkspaceBar(
                     selected = state.tab,
                     onSelect = { tab ->
@@ -597,50 +823,19 @@ internal fun WorkspacePage(
                     backdrop = floatingNavigationBackdrop,
                     blurEnabled = floatingNavigationBackdrop != null,
                     modifier = Modifier
-                        // 下滑隐藏：胶囊整体滑出屏幕底部（`graphicsLayer` 平移而不是
-                        // 改变布局高度 —— 改高度会让下方的 `Shapes`/阴影每帧重新测量，
-                        // 滚动时直接掉帧）。
-                        //
-                        // ⚠️⚠️ 两处曾经写错，都会让"隐藏"看起来像坏了：
-                        //
-                        // 1. **没有动画**。原来是 `translationY = if (hidden) exit else 0f`，
-                        //    硬跳变 —— 胶囊是"啪"地消失/出现。现在走
-                        //    `animateFloatAsState`，时长与曲线取 [ZhiMotion] 里
-                        //    "退出"那条（与底栏收起、面板退出同一族）。
-                        //
-                        // 2. **移出量少了阴影**。原来只算 `高度 + 间隙 + 系统栏`，
-                        //    正好把 Body 送到屏幕外，但 `LiquidWorkspaceBar` 上挂着
-                        //    `dropShadow(radius = 10.dp)` —— 阴影是从边缘向外扩散的，
-                        //    本体移出去之后它还剩一截露在屏幕里，用户看到的就是
-                        //    "没藏好，还是漏出来一点"。这里补 [NavBarShadowRoom]。
                         .graphicsLayer {
-                            val exit = (FloatingNavBarHeight + FloatingNavBarGap +
-                                navigationBarBottomInsetDp + NavBarShadowRoom).toPx()
-                            // 只在**绘制阶段**读进度：滚动期间这一层不重组。
-                            translationY = exit * navBarHideProgressState.value
+                            alpha = navAlpha
+                            // 形变时胶囊略微下沉 + 缩小，像被"压"进工具栏那一层
+                            val shrink = 1f - 0.04f * navSink
+                            scaleX = shrink
+                            scaleY = shrink
+                            translationY = with(density) {
+                                (12.dp * navSink).toPx()
+                            } + exitOffsetPx * navBarHideProgressState.value
                         },
                 )
             }
-            AnimatedVisibility(
-                visible = fileSelectionActive,
-                // ⚠️ 过渡动画必须**明显大于**胶囊那条：工具栏是"整块面板浮上来"，
-                // 用 8dp 的滑入看不出发生过什么。这里用「上滑 + 淡入 + 缩放」三合一，
-                // 时长取 [ZhiMotion] 的进入族，退出略快（退出不该拖沓）。
-                enter = slideInVertically(
-                    animationSpec = tween(ZhiMotion.FADE_IN_MILLIS, easing = FastOutSlowInEasing),
-                    initialOffsetY = { it },
-                ) + fadeIn(ZhiMotion.fadeInSpec) + scaleIn(
-                    animationSpec = tween(ZhiMotion.FADE_IN_MILLIS, easing = FastOutSlowInEasing),
-                    initialScale = 0.92f,
-                ),
-                exit = slideOutVertically(
-                    animationSpec = tween(ZhiMotion.EXIT_MILLIS, easing = FastOutSlowInEasing),
-                    targetOffsetY = { it },
-                ) + fadeOut(ZhiMotion.fadeOutSpec) + scaleOut(
-                    animationSpec = tween(ZhiMotion.EXIT_MILLIS, easing = FastOutSlowInEasing),
-                    targetScale = 0.94f,
-                ),
-            ) {
+            if (toolbarAlpha > 0f) {
                 FileSelectionToolbar(
                     visible = true,
                     entries = state.fileEntries,
@@ -656,7 +851,17 @@ internal fun WorkspacePage(
                     onPaste = viewModel::pasteFilesIntoCurrentDirectory,
                     onSelectAll = viewModel::toggleSelectAllFiles,
                     onDismiss = viewModel::clearFileSelection,
-                    modifier = Modifier.padding(bottom = fileToolbarBottomPadding),
+                    modifier = Modifier
+                        // 与胶囊**同一个**底距：形变的前提就是两者落点一致，
+                        // 否则中途会看到一块在上升、一块在原地。
+                        .padding(bottom = fileToolbarBottomPadding)
+                        .graphicsLayer {
+                            alpha = toolbarAlpha
+                            val grow = 0.96f + 0.04f * (1f - toolbarRise)
+                            scaleX = grow
+                            scaleY = grow
+                            translationY = with(density) { (10.dp * toolbarRise).toPx() }
+                        },
                 )
             }
         }

@@ -29,6 +29,7 @@ import com.zhizhu.zhicode.compose.data.MemoryStore
 import com.zhizhu.zhicode.compose.data.SkillImport
 import com.zhizhu.zhicode.compose.data.SkillStore
 import com.zhizhu.zhicode.compose.data.UpdateChecker
+import com.zhizhu.zhicode.compose.data.UpdateStateStore
 import com.zhizhu.zhicode.compose.data.VersionCompare
 import com.zhizhu.zhicode.compose.data.WorkspacePaths
 import com.zhizhu.zhicode.compose.data.WorkspaceRepository
@@ -605,6 +606,10 @@ class WorkspaceViewModel(
         }.getOrDefault(ThemeMode.SYSTEM.name.lowercase())
         val theme = ThemeMode.entries.firstOrNull { it.name.equals(stored, ignoreCase = true) }
             ?: ThemeMode.SYSTEM
+        // 上一次「检查更新」的结论。进程被回收是常态（largeHeap + 常驻用户空间，
+        // 内存压力大时系统很容易在切后台之后收掉它），所以这个结论不能只活在内存里
+        // —— 否则「退出后台再进来，更新页就重置了」。
+        val restoredUpdate = UpdateStateStore.read(getApplication())
         val keys = WebSearchProvider.entries
             .filter { it.needsKey }
             .associateWith { provider ->
@@ -624,6 +629,9 @@ class WorkspaceViewModel(
                 themeSettings = runCatching { ThemeStore.read(getApplication()) }
                     .getOrDefault(it.themeSettings)
                     .let { stored -> stored.copy(mode = theme) },
+                // 只在真的读到过结论时才覆盖默认的 `Idle`。读不到就保持
+                // 「还没查过」，让 `openAbout` / `openUpdate` 去查一次。
+                update = restoredUpdate ?: it.update,
                 settings = it.settings.copy(
                     webSearchKeys = keys,
                     terminalCharMode = runCatching {
@@ -2093,6 +2101,10 @@ class WorkspaceViewModel(
                     }
                 }
             }
+            // 结论落盘。放在 `runBusy` 的块里、状态更新之后：这里已经在 IO 线程上，
+            // 而 `commit()` 是同步写 —— 放到主线程会把一次点击按住几毫秒。
+            // 只写"稳定的结论"（见 `UpdateStateStore` 的类头说明）。
+            UpdateStateStore.write(getApplication(), _state.value.update)
         }
     }
 
@@ -3844,10 +3856,22 @@ class WorkspaceViewModel(
      */
     fun exportSheetAsMarkdown() {
         val sheet = _state.value.exportSheet ?: return
+        /*
+         * 与其他导出一样**限制条数**。
+         *
+         * 原先这条没有上限：用户可以全选几千条消息再导 Markdown，正文能到几十 MB。
+         * 那不只是文件大 —— 图片导出那条路（同一份 `items`）会因此渲染不出结果，
+         * 用户的原话是"导出功能有问题，信息过多导致导出截图出问题"。
+         *
+         * 用同一个 `MaxExportItems` 而不是给 Markdown 单开一个数：两种导出
+         * 面对的是同一批内容，上限不同只会让人以为"选 60 条时截图失败但 Markdown 成功"
+         * 是另一个 bug。
+         */
+        val capped = sheet.items.take(MaxExportItems)
         val markdown = buildString {
             append("# ").append(sheet.title).append("\n\n")
             append("*Exported on ").append(clockLabel()).append("*\n\n")
-            sheet.items.forEach { item ->
+            capped.forEach { item ->
                 append(buildMessageMarkdown(item, sheet.includeReasoning)).append("\n---\n\n")
             }
         }
@@ -3871,7 +3895,7 @@ class WorkspaceViewModel(
     /** 面板里点「导出为图片」：只准备数据，渲染与落盘交给界面（SAF）。 */
     fun exportSheetAsImage() {
         val sheet = _state.value.exportSheet ?: return
-        val capped = sheet.items.take(MaxImageExportItems)
+        val capped = sheet.items.take(MaxExportItems)
         _state.update {
             it.copy(
                 exportSheet = null,
@@ -3886,7 +3910,7 @@ class WorkspaceViewModel(
                     expandReasoning = sheet.expandReasoning,
                 ),
                 message = if (sheet.items.size > capped.size) {
-                    "只导出前 ${capped.size} 条（图片一次最多 $MaxImageExportItems 条）"
+                    "只导出前 ${capped.size} 条（一次最多 $MaxExportItems 条）"
                 } else {
                     "正在准备图片…"
                 },
@@ -8299,7 +8323,7 @@ class WorkspaceViewModel(
          * `BitmapComposer` 在主线程做测量与布局，且导出图是一张**单幅 PNG** ——
          * 条数再多会两头受罪：主线程明显卡顿，而超高的图片也会被解码方拒绝。
          */
-        private const val MaxImageExportItems = 50
+        private const val MaxExportItems = 50
 
         /**
          * `/init` 的指令**搬走了**。

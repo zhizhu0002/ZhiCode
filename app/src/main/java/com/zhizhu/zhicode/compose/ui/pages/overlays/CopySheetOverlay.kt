@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.CopySheetState
+import com.zhizhu.zhicode.compose.ui.floatingNavSheetInset
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiSheetCardColors
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -70,7 +71,9 @@ fun CopySheetOverlay(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 8.dp),
+                // 为悬浮导航胶囊让位：抽屉在 popupHost 槽位，读不到内容区的
+                // `LocalFloatingNavInset`（详见 `floatingNavSheetInset` 的说明）。
+                .padding(bottom = 8.dp + floatingNavSheetInset()),
         ) {
             /*
              * 原文装进一张 Miuix `Card`（底色走 [ZhiSheetCardColors]）。

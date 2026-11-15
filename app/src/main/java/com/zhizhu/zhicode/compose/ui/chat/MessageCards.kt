@@ -275,8 +275,19 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
             cornerRadius = ZhiRadius.floating,
             insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             colors = CardDefaults.defaultColors(
-                color = scheme.primaryContainer,
-                contentColor = scheme.onPrimaryContainer,
+                /*
+                 * 用户气泡：**蓝底白字**（用户明确要求）。
+                 *
+                 * 原来用 `primaryContainer` / `onPrimaryContainer` —— 那是"容器"语义，
+                 * 深色下是深蓝底 + 低对比的浅蓝字（`onPrimaryContainer` 按 Miuix 的
+                 * 容器规则只有约 55% 明度），看起来发灰、不像"我说的话"。
+                 *
+                 * 换成 `primary` / `onPrimary` 这一对**实心强调色**：深浅两套方案里
+                 * 它们本来就是保证对比度的搭档（白字压在强调色上），语义也对 ——
+                 * 用户发言是这个界面里"最该被一眼认出"的那一列。
+                 */
+                color = scheme.primary,
+                contentColor = scheme.onPrimary,
             ),
             // ⚠️ 必须是 None，理由与 AssistantCard 完全相同：
             // 这张卡只有**长按**才有动作，而 Sink 是「按下即缩放」，

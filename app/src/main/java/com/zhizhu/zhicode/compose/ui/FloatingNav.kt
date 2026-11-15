@@ -1,5 +1,8 @@
 package com.zhizhu.zhicode.compose.ui
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -11,6 +14,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.unit.Dp
+import com.zhizhu.zhicode.compose.data.TabBarPosition
+import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import androidx.compose.ui.unit.dp
 
 /**
@@ -92,6 +97,41 @@ internal val LocalNavBarScrollTick = compositionLocalOf<IntArray> { IntArray(1) 
  * 列表留白必须用**稳定值**（[LocalFloatingNavInset]），只有悬浮层本身才跟着进度位移。
  */
 internal val LocalNavBarProgress = compositionLocalOf<State<Float>> { mutableStateOf(0f) }
+
+/**
+ * 底部抽屉（`OverlayBottomSheet`）需要为悬浮胶囊让出的高度。
+ *
+ * ## 为什么不能只靠 `LocalFloatingNavInset`
+ *
+ * 那个 Local 由 `WorkspacePage` 提供，覆盖的是**内容区**；而底部抽屉渲染在
+ * Scaffold 的 `popupHost` 里（`OverlayBottomSheet` 默认 `renderInRootScaffold = true`），
+ * 它在**另一个槽位**，读到的永远是默认值 `0.dp`。
+ *
+ * 于是抽屉铺到屏幕底边、被悬浮胶囊压住下半截 —— 用户截图里"复制全部"那颗按钮
+ * 正好卡在胶囊后面，点不到也看不全。
+ *
+ * ## 为什么这里自己算而不去扩 Local 的覆盖范围
+ *
+ * 把 Provider 提到 Scaffold 外层会连带影响 `LocalBottomBarInset` 等一串
+ * 只在内容区有意义的 Local（它们描述的是"内容区被底栏吃掉多少"，对 popup 无意义）。
+ * 而这里需要的两个输入（主题设置、系统导航栏 inset）在 popup 里都读得到，
+ * 自己拼一次更直接，也不会把两个不同作用域的东西混在一起。
+ *
+ * @return 需要额外追加到 sheet 底部的 dp。非悬浮底栏 / 顶栏模式下返回 `0.dp`
+ *   —— 那时 `OverlayBottomSheet` 自己的 `defaultWindowInsetsPadding` 已经够了。
+ */
+@Composable
+internal fun floatingNavSheetInset(): Dp {
+    val theme = LocalThemeSettings.current
+    val tabBottom = theme.tabBarPositionValue == TabBarPosition.BOTTOM
+    if (!tabBottom || !theme.tabBarFloating) return 0.dp
+    val navBarBottom = WindowInsets.navigationBars
+        .asPaddingValues()
+        .calculateBottomPadding()
+    // 胶囊 + 呼吸缝 + 系统导航栏；不再加 `FloatingNavContentGap`：
+    // 抽屉自己底部还有一圈内边距，两段加起来已经把"最后一行紧贴胶囊"隔开了。
+    return FloatingNavBarHeight + FloatingNavBarGap + navBarBottom
+}
 
 /**
  * 悬浮导航隐藏进度的**目标值**（`0` = 完全可见，`1` = 完全滑出）。

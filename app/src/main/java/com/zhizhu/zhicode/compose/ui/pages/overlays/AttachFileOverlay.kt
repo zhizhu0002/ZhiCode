@@ -32,6 +32,7 @@ import com.zhizhu.zhicode.compose.ui.panes.FilePathBar
 import com.zhizhu.zhicode.compose.ui.panes.FileRootSwitcher
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiSheetCardColors
+import com.zhizhu.zhicode.compose.ui.floatingNavSheetInset
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.InputField
@@ -132,6 +133,18 @@ fun AttachFileOverlay(
         // 把内容全拆掉，退场那 250~260ms 只是一张空壳在滑下去。
         val visible = browser.visibleEntries.ifEmpty { shownBrowser.orEmpty() }
         val scheme = MiuixTheme.colorScheme
+        /*
+         * 底部为悬浮导航胶囊让位。
+         *
+         * 抽屉渲染在 Scaffold 的 `popupHost` 槽里，与内容区是**两个槽位** ——
+         * 内容区那份 `LocalFloatingNavInset` 在这里读到的是默认值 `0.dp`。
+         * 结果抽屉铺到屏幕底边，被胶囊压住下半截（用户截图里"复制全部"那颗按钮
+         * 正好卡在胶囊后面，点不到也看不全）。
+         *
+         * 让位同时作用于**两处**：`heightIn` 的上限要减掉它，否则面板会顶出屏幕；
+         * 底部再补同样多的内边距，列表才不会缩在胶囊下面。
+         */
+        val navInset = floatingNavSheetInset()
         // 过滤框是否已展开。`InputField` 的必填参数，且承担 API ≤ 27 上的
         // 「先展开再聚焦」兼容职责（见下面那段注释），所以必须是真的状态。
         var filterExpanded by remember { mutableStateOf(false) }
@@ -140,7 +153,13 @@ fun AttachFileOverlay(
                 .fillMaxWidth()
                 // 内容自适应：少时贴内容、多时才到上限。见两个常量的注释
                 // （原先这里是按窗口比例算出来的**定高**）。
-                .heightIn(min = AttachSheetHeightFloor, max = AttachSheetHeightCap),
+                // 上限要减掉悬浮胶囊的让位，否则面板会顶出屏幕。
+                .heightIn(
+                    min = AttachSheetHeightFloor,
+                    max = (AttachSheetHeightCap - navInset).coerceAtLeast(AttachSheetHeightFloor),
+                )
+                // 底部再补同样多的留白：列表最后一行不能缩在胶囊后面。
+                .padding(bottom = navInset),
         ) {
             // 1) 根切换条（与文件面板共用）。换根是这一屏最常用的动作之一，
             //    所以放在最上面一行，而不是藏进菜单。

@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.ExportSheetState
+import com.zhizhu.zhicode.compose.ui.floatingNavSheetInset
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiSheetCardColors
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -60,7 +61,12 @@ fun ExportSheetOverlay(
         title = "导出",
         onDismissRequest = onDismiss,
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                // 为悬浮导航胶囊让位（抽屉在 popupHost 槽位，读不到内容区的 Local）。
+                .padding(bottom = 12.dp + floatingNavSheetInset()),
+        ) {
             // 导的是哪几条：一行说明就够，多余的视觉重量会把它变成标题。
             Text(
                 text = shown.title,

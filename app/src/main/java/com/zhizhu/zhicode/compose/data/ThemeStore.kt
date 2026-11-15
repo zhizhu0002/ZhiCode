@@ -73,7 +73,6 @@ enum class BottomBarStyle(val label: String) {
  * | [floatingBar] | `FloatingBottomShell` 关闭时满宽、去圆角与阴影 |
  * | [liquidGlass] | `Glass.surfaceColor` 的透明度与描边高光；经 [ThemeSettings.liquidGlassEffective] 受 [floatingBar] 门控 |
  * | [edgeSwipeBack] | `AppScaffold` 里 `entry(swipeDismiss = …)` |
- * | [predictiveBack] | `AppScaffold` 是否挂 `WindowNavigationEventBridge()` |
  * | [uiScale] | `LocalDensity` 缩放 |
  * | [tabBarPosition] | `AppScaffold` 把标签栏摆顶部或底部 |
  * | [tabBarFloating] | 底栏形态下是否走悬浮胶囊容器 |
@@ -81,16 +80,21 @@ enum class BottomBarStyle(val label: String) {
  * | [latexEnabled] | `ZhiMarkdown` 是否解析 `$…$` 等公式定界符 |
  * | [codeWrap] / [codeCollapse] / [codeLineNumbers] | `Markdown.CodeBlock` |
  *
- * ⚠️ 「预测性返回手势」（[predictiveBack]）在 Miuix 里是**可关**的，但关的方式不是给
- * `NavDisplay` 传参 —— 它没有这个参数。真正的开关在**窗口层**：
- * `top.yukonga.miuix.kmp.nav.gesture.WindowNavigationEventBridge()` 这个 composable
- * 才把系统 `OnBackInvokedDispatcher` 的 back-started / back-progressed 事件
- * 接到 miuix 的 `NavigationEventDispatcher` 上；不挂它，`NavDisplay` 内部的
- * `PredictiveBackHandler` 永远收不到"手势进行中"，返回就退化为"抬手即触发"。
+ * ⚠️ 「预测性返回手势」这个设置项**已经删掉**。
  *
- * 所以这个开关是真的：开 → 挂桥、拖动时预览上一页；关 → 不挂桥、返回立即生效。
- * （早前这里写着"刻意没有这个开关"，理由是当时以为 Miuix 没有关闭 API ——
- * 结论没错，但漏了桥这一层。）
+ * 它原本挂 Miuix 的 `WindowNavigationEventBridge()`，而那个 composable 在主窗口里
+ * 第一句就 `return`（窗口 dispatcher 与继承来的 dispatcher 必然是同一个），
+ * 所以开关开与关完全等价 —— 一个什么都不做的设置项比没有它更糟：
+ * 用户会以为"打开了就该有拖动预览"，然后去怀疑是别的地方坏了。
+ *
+ * 真正让它生效需要两件事，都不是一次修补能承受的：
+ * 1. 把 `OnBackInvokedDefaultInput` 装配到 Activity 的 dispatcher 上
+ *    （没有任何库会自动做这件事，`ComponentActivity` 只装了按键式的
+ *    `DirectNavigationEventInput`）；
+ * 2. `targetSdk ≥ 33`，否则系统根本不发"手势进行中"的进度回调。
+ *
+ * 第 2 条会连带改变存储权限、前台服务类型、通知权限与返回键路径的语义。
+ * 结论：**先删掉这个开关**，等真的愿意承担 targetSdk 迁移时再一起做回来。
  */
 data class ThemeSettings(
     val mode: ThemeMode = ThemeMode.SYSTEM,
@@ -111,13 +115,7 @@ data class ThemeSettings(
     val floatingBar: Boolean = true,
     val liquidGlass: Boolean = true,
     val edgeSwipeBack: Boolean = true,
-    /**
-     * 预测性返回手势：返回手势**拖动过程中**预览上一页（跟手位移 + 松手回弹）。
-     *
-     * 关闭后返回照常可用，只是抬手才生效、没有预览动画 —— 这正是
-     * `WindowNavigationEventBridge()` 挂不挂的差别（见类头注释）。
-     */
-    val predictiveBack: Boolean = true,
+    /* 「预测性返回手势」字段已删除，理由见类头注释。 */
     val uiScale: Float = UI_SCALE_DEFAULT,
     /**
      * 聊天正文字体族。存枚举的 `name`，与 `paletteStyle` 同一个约定：
@@ -233,7 +231,6 @@ internal object ThemeStore {
     private const val FLOATING_BAR = PREFIX + "floating_bar"
     private const val LIQUID_GLASS = PREFIX + "liquid_glass"
     private const val EDGE_SWIPE = PREFIX + "edge_swipe_back"
-    private const val PREDICTIVE_BACK = PREFIX + "predictive_back"
     private const val UI_SCALE = PREFIX + "ui_scale"
     private const val CHAT_FONT = PREFIX + "chat_font"
     private const val CHAT_FONT_PATH = PREFIX + "chat_font_path"
@@ -277,7 +274,6 @@ internal object ThemeStore {
             floatingBar = prefs.getBoolean(FLOATING_BAR, true),
             liquidGlass = prefs.getBoolean(LIQUID_GLASS, true),
             edgeSwipeBack = prefs.getBoolean(EDGE_SWIPE, true),
-            predictiveBack = prefs.getBoolean(PREDICTIVE_BACK, true),
             uiScale = clampUiScale(prefs.getFloat(UI_SCALE, UI_SCALE_DEFAULT)),
             chatFont = prefs.getString(CHAT_FONT, "")?.takeIf { it.isNotBlank() }
                 ?: ChatFontFamily.DEFAULT.name,
@@ -320,7 +316,6 @@ internal object ThemeStore {
                 .putBoolean(FLOATING_BAR, settings.floatingBar)
                 .putBoolean(LIQUID_GLASS, settings.liquidGlass)
                 .putBoolean(EDGE_SWIPE, settings.edgeSwipeBack)
-                .putBoolean(PREDICTIVE_BACK, settings.predictiveBack)
                 .putFloat(UI_SCALE, clampUiScale(settings.uiScale))
                 .putString(CHAT_FONT, settings.chatFont)
                 .putString(CHAT_FONT_PATH, settings.customFontPath)

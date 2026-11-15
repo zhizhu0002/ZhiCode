@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -469,23 +470,32 @@ internal fun FileSelectionToolbar(
         DropdownItem("详情", onClick = { details = entries.filter { it.path in selection } }),
         DropdownItem("退出选择", onClick = onDismiss),
     ))
-    AnimatedVisibility(visible, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
-        Surface(
-            modifier = modifier
-                // 横向内缩与悬浮胶囊同源（`floatingHorizontalInset`），两块边缘才能对齐。
-                // 以前是写死的 18dp，比胶囊的 12dp 窄一圈，看上去就是“没对齐”。
-                .padding(horizontal = com.zhizhu.zhicode.compose.ui.floatingHorizontalInset(wide = false), vertical = 6.dp)
-                .then(glass.blur(Modifier, ZhiSquircle(ZhiRadius.card), radius = 20f))
-                .border(
-                    width = 1.dp,
-                    color = if (ZhiColors.isDark()) {
-                        Color.White.copy(alpha = 0.10f)
+    /*
+     * ⚠️ 这里**没有** `AnimatedVisibility`。
+     *
+     * 它原先自带一层「上滑 + 淡入」，而调用方（`WorkspacePage`）现在用
+     * `updateTransition` 做「胶囊 ↔ 工具栏」的形变过渡 —— 两层动画叠在一起，
+     * 内层那条会与外层的进度脱节，看起来就是"工具栏自己在抖"。
+     *
+     * 淡入淡出与位移一律由调用方管：只有它知道该和谁交接（胶囊 / 固定底栏 /
+     * 什么都没有）。本组件只负责"长什么样"。
+     */
+    Surface(
+        modifier = modifier
+            // 横向内缩与悬浮胶囊同源（`floatingHorizontalInset`），两块边缘才能对齐。
+            // 以前是写死的 18dp，比胶囊的 12dp 窄一圈，看上去就是“没对齐”。
+            .padding(horizontal = com.zhizhu.zhicode.compose.ui.floatingHorizontalInset(wide = false), vertical = 6.dp)
+            .then(glass.blur(Modifier, CircleShape, radius = 20f))
+            .border(
+                width = 1.dp,
+                color = if (ZhiColors.isDark()) {
+                    Color.White.copy(alpha = 0.10f)
                     } else {
                         Color.White.copy(alpha = 0.62f)
                     },
-                    shape = ZhiSquircle(ZhiRadius.card),
+                    shape = CircleShape,
                 ),
-            shape = ZhiSquircle(ZhiRadius.card),
+            shape = CircleShape,
             color = glass.surfaceColor(
                 if (ZhiColors.isDark()) MiuixTheme.colorScheme.surfaceContainer
                 else ZhiColors.panelSurface(),
@@ -512,7 +522,6 @@ internal fun FileSelectionToolbar(
                 }
             }
         }
-    }
     OverlayDialog(
         show = details != null && visible,
         onDismissRequest = { details = null },

@@ -221,11 +221,7 @@ fun ThemePage(
                                 summary = if (shaderSupported) "为导航栏和悬浮层启用背景模糊" else "需要 Android 13 RuntimeShader 支持",
                                 enabled = shaderSupported, icon = ZhiIcons.layers, plate = SettingsPlateColors.blue,
                             )
-                            if (android.os.Build.VERSION.SDK_INT >= 34) SettingsToggle(
-                                title = "预测性返回手势", checked = theme.predictiveBack,
-                                onCheckedChange = { on -> onChange { it.copy(predictiveBack = on) } },
-                                summary = "系统返回手势拖动时预览上一页", icon = ZhiIcons.back, plate = SettingsPlateColors.green,
-                            )
+                            /* 「预测性返回手势」开关已删除，理由见 ThemeStore 类头注释。 */
                         }
                     }
                     item(key = "scale") {

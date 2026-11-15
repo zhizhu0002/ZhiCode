@@ -338,11 +338,21 @@ fun Composer(
                         .padding(bottom = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    // ── 文件：每个占满一行，不会横向溢出 ──────────────────
+                    // ── 文件：**横向**滚动，每个是固定宽的窄卡片 ──────────────
+                    //
+                    // 改回横向（用户要求）。中间那版是"每个占满一行、纵向堆叠"：
+                    // 选中三四个文件之后，输入器上方会被撑掉大半屏 ——
+                    // 而这里要表达的只是"我选了这几个"，不是让人逐个细读。
+                    //
+                    // 横向 + 定宽（[AttachmentChipWidth]）之后：
+                    //  · 一行放得下 2~3 个，超过就横滑，**高度恒定**；
+                    //  · 文件名在卡片内省略，体积仍显示在第二行 —— 认得出就够了。
                     if (pendingFiles.isNotEmpty()) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
                             pendingFiles.forEach { attachment ->
                                 AttachmentChip(attachment) { onRemoveAttachment(attachment) }
@@ -726,9 +736,11 @@ fun Composer(
 private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        // 横向排布所以是**定宽**。160dp 是"一行放两个半"的折中：
+        // 文件名能显示 8~10 个汉字，再窄就只剩图标；超过就横滑（见调用点）。
+        modifier = Modifier.width(AttachmentChipWidth),
         cornerRadius = ZhiRadius.inner,
-        insideMargin = PaddingValues(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+        insideMargin = PaddingValues(start = 6.dp, end = 2.dp, top = 5.dp, bottom = 5.dp),
         colors = CardDefaults.defaultColors(
             color = scheme.surfaceContainerHigh,
             contentColor = scheme.onSurface,
@@ -784,6 +796,15 @@ private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
         }
     }
 }
+
+/**
+ * 待发文件卡片的固定宽度。
+ *
+ * 横向排布（见调用点）：一行放得下两个半，超过就横滑。
+ * 定宽是必要的 —— 让卡片按内容自适应的话，"123.json" 三个字会缩成一小块、
+ * "chat-export-2026-11-15…" 又会撑到整屏，一列卡片宽度全不一样。
+ */
+private val AttachmentChipWidth = 160.dp
 
 private fun shorten(value: String, max: Int): String =
     if (value.length <= max) value else value.substring(0, max - 1) + "…"

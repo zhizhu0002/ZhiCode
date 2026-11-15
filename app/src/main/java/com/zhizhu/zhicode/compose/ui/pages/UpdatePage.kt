@@ -1,7 +1,9 @@
 package com.zhizhu.zhicode.compose.ui.pages
 
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,18 +32,20 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.BuildConfig
 import com.zhizhu.zhicode.compose.data.ReleaseNotes
-import com.zhizhu.zhicode.compose.model.ChangeLogItem
-import com.zhizhu.zhicode.compose.model.ChangeLogSection
 import com.zhizhu.zhicode.compose.model.RELEASES_PAGE_URL
 import com.zhizhu.zhicode.compose.model.UpdatePhase
 import com.zhizhu.zhicode.compose.model.UpdateUiState
 import com.zhizhu.zhicode.compose.model.changeLogFor
+import com.zhizhu.zhicode.compose.model.toMarkdown
+import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiSpacing
 import com.zhizhu.zhicode.compose.ui.FloatingBottomShell
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
+import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.effects.PageBlurBar
+import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import com.zhizhu.zhicode.compose.ui.effects.rememberPageBlurBackdrop
 import com.zhizhu.zhicode.compose.ui.rememberActionBusy
 import com.zhizhu.zhicode.compose.ui.rememberGlass
@@ -78,7 +81,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * - **没有新版本 / 上游还没发 Release / 检查失败** → **当前版本**的更新内容
  *   （本地自带的 `CHANGE_LOG`）。
  *
- * 两条路径产出**同一个** [ChangeLogSection] 结构，所以用同一段渲染代码画，
+ * 两条路径都产出 Markdown 原文，所以用同一段渲染代码画（`ZhiMarkdown`），
  * 用户看不出这一段是远端来的还是本地写死的。
  *
  * ## 「已经是最新版本」用系统吐司，不做页面内的悬浮胶囊
@@ -167,6 +170,25 @@ fun UpdatePage(
             ) {
                 item(key = "brand") { UpdateBrandHeader() }
 
+                /*
+                 * 「有新版本」胶囊 —— 放在 hero 区里、品牌字下方居中。
+                 *
+                 * 参考图的「有新版本」就是这样一颗**居中的胶囊按钮**（不是卡片里的一行）：
+                 * 它在视觉上属于"版本信息"那一块，而不是设置列表里的一项。
+                 * 之前我把它做成关于页卡片里的一行，位置与分量都不对 ——
+                 * 那是这个页面**最主要的动作**，应该一眼看到。
+                 *
+                 * 只在真有新版本时出现；无更新/上游无 Release 时不占位。
+                 */
+                if (state.phase == UpdatePhase.Available && state.release != null) {
+                    item(key = "new-version-pill") {
+                        NewVersionPill(
+                            version = state.release.tag,
+                            onClick = onCheck,
+                        )
+                    }
+                }
+
                 // 横线：用 Miuix 的 Divider（`Hairline` 得到恒定一个物理像素，
                 // 正是参考图那条发丝线），不手搓 `Box + background`。
                 item(key = "rule") {
@@ -194,14 +216,44 @@ fun UpdatePage(
                  * 从头到尾都是正文。状态改走吐司，见上面那个 LaunchedEffect。
                  */
 
-                // 更新内容。来源见类头注释：有新版看新版，否则看当前版本。
-                val sections = updateSections(state)
-                if (sections.isEmpty()) {
+                /*
+                 * 更新内容：直接交给工程既有的 `ZhiMarkdown`。
+                 *
+                 * ## 为什么不再自己分流
+                 *
+                 * 上一版这里用 `ReleaseNotes.parse` 把正文拆成"小节 + 条目"，
+                 * 只处理了行首的 `#` / `-`，**完全没处理行内标记**。结果用户看到的是
+                 * 一屏 `**粗体**`、`` `代码` ``、`| 表格 | 列 |` 原样显示 ——
+                 * 标记语言泄漏到界面上。
+                 *
+                 * `ZhiMarkdown` 是这个工程自己的完整渲染器（粗体/斜体/行内代码/
+                 * 代码块/列表/引用/表格/可点链接，全部复用 Miuix 配色）。
+                 * 引它比自己再补一套行内解析正确得多，而且**更新说明本来就是
+                 * Markdown** —— Release 的 `body` 直接就是 Markdown 原文。
+                 *
+                 * `ReleaseNotes` 保留：它仍然负责"这条 Release 有没有说明"的判断
+                 * 与长度上限（那两道限制不该丢），只是不再负责渲染。
+                 */
+                val notes = updateNotesMarkdown(state)
+                if (notes.isBlank()) {
                     item(key = "notes-empty") {
                         SectionNote("这个版本没有留下更新说明。")
                     }
                 } else {
-                    notesSections(sections)
+                    item(key = "notes") {
+                        ZhiMarkdown(
+                            source = notes,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(
+                                    start = ZhiSpacing.pageMargin,
+                                    end = ZhiSpacing.pageMargin,
+                                    top = 4.dp,
+                                    bottom = 8.dp,
+                                ),
+                            bodyFontSize = MiuixTheme.textStyles.body2.fontSize,
+                        )
+                    }
                 }
 
                 // 失败原因必须留在页面上（吐司一闪就没了，用户没法照着排查），
@@ -251,6 +303,49 @@ fun UpdatePage(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = insets.calculateBottomPadding()),
+            )
+        }
+    }
+}
+
+/**
+ * 「有新版本」胶囊。
+ *
+ * 照参考图的形态：**居中的圆角胶囊**，字号与正文同级但更轻，底色是比页面亮一档的
+ * 中性填充（参考图里那颗在深紫渐变上是很淡的一层）。
+ *
+ * ## 为什么不是 `PrimaryButton`
+ *
+ * `PrimaryButton` 是**实心强调色**，那是"提交/确认"的重量。这颗胶囊在参考图里
+ * 只是一层很淡的填充 + 常规文字 —— 它是**入口**（点了滚到更新说明），
+ * 不是危险或不可逆的动作。真正的下载按钮在底部悬浮条上，那一个才是实心的。
+ *
+ * 用 `surfaceContainerHigh` 而不是写死颜色：深浅色各自成立，跟随预设色。
+ */
+@Composable
+private fun NewVersionPill(version: String, onClick: () -> Unit) {
+    val scheme = MiuixTheme.colorScheme
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, bottom = 20.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(ZhiSquircle(ZhiRadius.button))
+                .background(scheme.surfaceContainerHigh)
+                .clickableNoRipple(onClick)
+                .padding(horizontal = 36.dp, vertical = 12.dp),
+        ) {
+            Text(
+                // 参考图只写「有新版本」；这里带上版本号，因为它就在品牌字下面，
+                // 用户一眼能看到"新的是哪个版本"，不必再往下找。
+                text = "有新版本 $version",
+                color = scheme.onSurface,
+                fontSize = MiuixTheme.textStyles.body1.fontSize,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
             )
         }
     }
@@ -462,98 +557,31 @@ private fun SectionNote(text: String) {
 }
 
 /**
- * 把小节列表铺进 LazyColumn。
+ * 横线下面该显示哪一份更新内容 —— 返回 **Markdown 原文**。
  *
- * 结构与隐私政策页一致：**小节标题浮在底色上、正文进一张卡**。
- * 标题不进卡片是刻意的 —— 卡片一多时，标题若也被包住，整页会变成
- * 一摞同等重量的方块，扫读时找不到分界。
- */
-private fun LazyListScope.notesSections(sections: List<ChangeLogSection>) {
-    sections.forEachIndexed { index, section ->
-        item(key = "section-$index") { NotesSection(section) }
-    }
-}
-
-@Composable
-private fun NotesSection(section: ChangeLogSection) {
-    val scheme = MiuixTheme.colorScheme
-    // ⚠️ **不套 Card**。参考实现的小节标题与正文都直接浮在底色上
-    // （`new_update_fragment` 里只有 TextView 与配置行，没有卡片容器）。
-    // 之前这里给正文包了一张 `Card`，结果整页变成"一摞方块"：小节标题
-    // 反而比正文轻，扫读时分不出层级 —— 那正是"和参考图完全不统一"的一部分。
-    //
-    // 分隔靠的是间距与字重，不是容器边框：
-    //   小节标题：`title4` + SemiBold
-    //   条目正文：`body2` + 次级色
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(
-                start = ZhiSpacing.pageMargin,
-                end = ZhiSpacing.pageMargin,
-                top = 20.dp,
-                bottom = 4.dp,
-            ),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = section.title,
-            modifier = Modifier.fillMaxWidth(),
-            color = scheme.onBackground,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = MiuixTheme.textStyles.title4.fontSize,
-        )
-        section.items.forEach { item -> NotesItem(item) }
-    }
-}
-
-@Composable
-private fun NotesItem(item: ChangeLogItem) {
-    val scheme = MiuixTheme.colorScheme
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        if (item.title.isNotEmpty()) {
-            Text(
-                text = item.title,
-                color = scheme.onSurface,
-                fontWeight = FontWeight.Medium,
-                fontSize = MiuixTheme.textStyles.body1.fontSize,
-            )
-        }
-        if (item.detail.isNotEmpty()) {
-            Text(
-                text = item.detail,
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = MiuixTheme.textStyles.body2.fontSize,
-            )
-        }
-    }
-}
-
-/**
- * 横线下面该显示哪一份更新内容。
+ * 有新版就看新版的（远端 Release 的 `body`，本来就是 Markdown），
+ * 否则看当前版本的（本地 `CHANGE_LOG`，由 [com.zhizhu.zhicode.compose.model.toMarkdown]
+ * 转成同一套写法）。两端都是 Markdown，所以渲染只有一套 —— `ZhiMarkdown`。
  *
- * 有新版就看新版的（远端 `body`），否则看当前版本的（本地 `CHANGE_LOG`）。
- * **两端都返回 [ChangeLogSection]**，所以渲染只有一套。
+ * ⚠️ 上一版这里返回的是"小节 + 条目"结构，配合自己写的分流渲染，
+ * 只处理了行首标记、没处理行内标记，于是 `**粗体**`、反引号、表格全部原样泄漏到界面。
+ * 换成 Markdown 原文 + 既有渲染器之后，这类问题从根上不会再有。
  */
-private fun updateSections(state: UpdateUiState): List<ChangeLogSection> {
+private fun updateNotesMarkdown(state: UpdateUiState): String {
     val release = state.release
     if (state.phase == UpdatePhase.Available && release != null) {
-        val fromRelease = ReleaseNotes.parse(release.body)
-        if (fromRelease.isNotEmpty()) return fromRelease
-        // 远端这条 Release 没写说明：退回当前版本的说明，而不是给一片空白。
+        // `ReleaseNotes.parse` 仍用来做两件事：判断"有没有说明"与截断超长正文
+        // （那两道限制不该因为换了渲染器就丢掉）。它返回空 = 这条 Release 没写说明。
+        val parsed = ReleaseNotes.parse(release.body)
+        if (parsed.isNotEmpty()) return release.body
+        // 远端没写说明：退回当前版本的说明，而不是给一片空白 ——
         // 用户至少能看到"我装的这个版本有什么"。
     }
-    return changeLogFor(BuildConfig.VERSION_NAME)?.sections.orEmpty()
+    return changeLogFor(BuildConfig.VERSION_NAME)?.toMarkdown().orEmpty()
 }
 
-/** `2025-11-08T10:20:30Z` → `2025-11-08`。解析不了就返回空串（不显示一个假日期）。 */
-private fun formatPublished(raw: String): String {
-    val date = raw.substringBefore('T').trim()
-    return if (date.length == 10) date else ""
-}
+/* 注：原先这里有个 `formatPublished`（把 ISO 时间截成日期），已经随
+ * "更新页不再单独显示发布日期"一起去掉 —— 参考图里也没有这一行。 */
 
 /** 字节数 → 人类可读。只在两处用，不引公共工具。 */
 private fun formatSize(bytes: Long): String = when {
