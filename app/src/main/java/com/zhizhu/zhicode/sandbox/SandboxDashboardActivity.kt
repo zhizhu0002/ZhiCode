@@ -9,7 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import com.zhizhu.zhicode.compose.data.ThemeSettings
 import com.zhizhu.zhicode.compose.data.ThemeStore
 import com.zhizhu.zhicode.compose.theme.ZhiAppTheme
-import com.zhizhu.zhicode.compose.ui.pages.SandboxBoardPage
+import com.zhizhu.zhicode.compose.ui.pages.miuix.SandboxBoardPage
 
 /**
  * 「沙箱」的宿主 Activity。

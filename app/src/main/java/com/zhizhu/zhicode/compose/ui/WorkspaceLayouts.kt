@@ -37,10 +37,10 @@ import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
-import com.zhizhu.zhicode.compose.ui.pages.ChatPage
-import com.zhizhu.zhicode.compose.ui.pages.FilesPage
-import com.zhizhu.zhicode.compose.ui.pages.TerminalPage
-import com.zhizhu.zhicode.compose.ui.pages.ZhiAnchoredMenuHost
+import com.zhizhu.zhicode.compose.ui.pages.miuix.ChatPage
+import com.zhizhu.zhicode.compose.ui.pages.miuix.FilesPage
+import com.zhizhu.zhicode.compose.ui.pages.miuix.TerminalPage
+import com.zhizhu.zhicode.compose.ui.pages.miuix.ZhiAnchoredMenuHost
 import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
 import top.yukonga.miuix.kmp.utils.springAnimateToPage
 import kotlinx.coroutines.launch
