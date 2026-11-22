@@ -214,9 +214,31 @@ internal fun ChatPage(
             //
             // 原先这里的注释写着"输入器那一列已经把这个 inset 算进自己的高度"，
             // 那个判断是错的，别再据此把 `settleBar` 删掉。
-            ((floatingContentHeightPx + settledImeLiftPx).toDp() + settleBar + FloatingBottomGap)
+            //
+            // ⚠️⚠️ IME 那一段**不在**这里（见 `imeSettledLift`）。混进来的后果是
+            // 「打开设置页，对话流被置底」—— 理由见那个值的说明。
+            (floatingContentHeightPx.toDp() + settleBar + FloatingBottomGap)
                 .coerceAtLeast(MinFloatingInset)
         }
+
+        /*
+         * 键盘停稳后要额外让出的高度，**单独**传给列表。
+         *
+         * ## 为什么不能并进 `bottomInset`
+         *
+         * `ChatList` 有一条 `LaunchedEffect(listState, bottomInset)`：留白一变就
+         * 重新贴底（任务卡浮起、输入器长高时救过场，见那里的说明）。
+         *
+         * 而 IME 这一段会**因为别的原因**归零：全屏浮层盖住工作区时
+         * `liftByFullScreenOverlay` 为真，`settledImeLiftPx` 被强制成 0。
+         * 于是「进设置」这个动作就会让 `bottomInset` 变小 → 列表重新贴底 →
+         * 用户刚翻到的历史被顶走。用户的原话是「进入设置消息流置底」。
+         *
+         * 拆出来之后：只有**内容高度**变化才重新贴底；键盘变化由
+         * `ImeLazyListAutoScroller` 做增量补偿（键盘长多少列表让多少，不强制落底）
+         * —— 那本来就是它的职责。
+         */
+        val imeSettledLift = with(density) { settledImeLiftPx.toDp() }
 
         ChatList(
             state = state,
@@ -254,6 +276,8 @@ internal fun ChatPage(
             // 顶部留白：S1 重构后顶栏在 topBar 槽位已由 Scaffold padding 处理，
             // 对话列表不再需要让出头部高度，可从 Scaffold padding 顶部起排。
             bottomInset = bottomInset,
+            // 键盘那一段单独给：它变化时只做增量补偿，不触发"内容变高 → 重新贴底"。
+            imeSettledLift = imeSettledLift,
             imeOpenGeneration = if (liftByFullScreenOverlay) 0 else imeMotion.openGeneration,
             composerFocused = composerFocused,
             // 首条消息落在顶栏（含 Tab 行）下缘；列表全高，滚动时消息从顶栏 blur 下穿过

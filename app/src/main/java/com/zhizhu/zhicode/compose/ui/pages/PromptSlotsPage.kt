@@ -3,7 +3,6 @@ package com.zhizhu.zhicode.compose.ui.pages
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,6 +27,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * 提示词设置页（形态参考 rikkahub 的「提示词」页）。
+ *
+ * ## 与其他设置二级页用**同一套**页面栈
+ *
+ * 列表 ↔ 编辑走 [SettingsPageStack]，与角色卡 / API 配置 / MCP / 技能 / 记忆
+ * 完全一致 —— 同一套转场、同一套返回层级、同一套边缘滑动。
+ * （中间有一版为了绕开排版问题改成状态直切 + 自造动画，结果是这一页的手感
+ * 和别的设置页不一样；问题在排版，不该用换容器去躲。）
  *
  * ## 只开放三个槽位
  *
@@ -56,7 +62,8 @@ fun PromptsPage(
     onChange: (PromptSlot, String) -> Unit,
     onReset: (PromptSlot) -> Unit,
 ) {
-    // 正在编辑哪个槽位。它是一个纯界面状态（不落盘），所以放在这一层。
+    // 正在编辑哪个槽位。它是一个纯界面状态（不落盘），所以放在这一层 ——
+    // 与 RoleCardsPage 的 `editor` 同一层级、同一写法。
     var editing by remember { mutableStateOf<PromptSlot?>(null) }
     // 退场动画期间 editing 已经是 null，编辑页还要把内容画完 —— 见 rememberLastNonNull。
     val shownEditing = rememberLastNonNull(editing)
@@ -68,12 +75,16 @@ fun PromptsPage(
     )
 
     SettingsPageStack(
+        // 路径含最底下那一页：栈要靠整条路径算层级与方向。
         path = listOf(
             SettingsPageKey("prompts.list", 0),
             if (editing != null) SettingsPageKey("prompts.edit", 1) else null,
         ).filterNotNull(),
+        // 编辑页只退一层（回列表），列表页才关整页。分层由页面栈负责，这里只接结果。
         onBack = if (editing == null) onDismiss else { { editing = null } },
     ) { key ->
+        // ⚠️ 分支必须看**正在渲染的那一页**（key），不能看当前状态 ——
+        // 否则退场动画期间那一页会渲染成空白。
         val open = if (key.id == "prompts.edit") shownEditing else null
         if (open == null) {
             SettingsSubPage(title = "提示词", onBack = onDismiss) {
@@ -83,15 +94,17 @@ fun PromptsPage(
                 )
             }
         } else {
-            PromptSlotEditor(
-                slot = open,
-                // 编辑框里展示的是**实际生效**的那一份：空串时展开成默认文案，
-                // 这样用户一进来就能看见自己在改什么，而不是面对一个空框。
-                value = open.resolve(custom[open]),
-                isCustom = open.resolveOrEmpty(custom[open]).isNotEmpty(),
-                onChange = { onChange(open, it) },
-                onReset = { onReset(open) },
-            )
+            SettingsSubPage(title = open.title, onBack = { editing = null }) {
+                PromptSlotEditor(
+                    slot = open,
+                    // 编辑框里展示的是**实际生效**的那一份：空串时展开成默认文案，
+                    // 这样用户一进来就能看见自己在改什么，而不是面对一个空框。
+                    value = open.resolve(custom[open]),
+                    isCustom = open.resolveOrEmpty(custom[open]).isNotEmpty(),
+                    onChange = { onChange(open, it) },
+                    onReset = { onReset(open) },
+                )
+            }
         }
     }
 }
@@ -105,7 +118,17 @@ private fun PromptSlotList(
     onEdit: (PromptSlot) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    Column {
+    /*
+     * ⚠️ `fillMaxWidth()` 是必须的。
+     *
+     * 本层位于 `SettingsSubPage` 的滚动容器里，横向约束是**有界**的，
+     * 但根 `Column` 默认只按子项自然宽度撑开；而里面每张 `SettingsGroup` 的
+     * Card 又想 `fillMaxWidth` —— 两者加起来会让卡片的测量宽度与实际摆放不一致。
+     * 显式给根容器一个宽度，测量就只有一个来源。
+     *
+     * 这是「提示词页文字互相穿透」的修法之一（另一条见编辑器里的 `heightIn` 说明）。
+     */
+    Column(modifier = Modifier.fillMaxWidth()) {
         SettingsFootnote(
             "这三项都只影响某一件事的措辞，不参与权限与安全判断。" +
                 "主系统提示不开放编辑——它规定了「不许声称做了没做的事」，那一条不能松。",
@@ -148,7 +171,8 @@ private fun PromptSlotEditor(
     onReset: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    Column {
+    // 同上：显式宽度，让卡片与输入框只有一个宽度来源。
+    Column(modifier = Modifier.fillMaxWidth()) {
         SettingsFootnote(slot.detail)
         SettingsGroup("可用变量") {
             Text(
@@ -166,9 +190,20 @@ private fun PromptSlotEditor(
                 useLabelAsPlaceholder = true,
                 singleLine = false,
                 minLines = 10,
-                modifier = Modifier.fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .heightIn(min = 220.dp),
+                /*
+                 * ⚠️ 这里**不能**再挂 `.heightIn(min = ...)`（上一版有，是重叠的直接原因）。
+                 *
+                 * 高度已经由 `minLines` 交给 `TextFieldLineLimits.MultiLine(minHeightInLines = …)`。
+                 * 外面再套一个「最小高度」会把测量拆成两个来源：外层把节点撑到某个高度、
+                 * 内部 TextField 按行数算另一个高度。两者不一致时，
+                 * `SettingsGroup` 的卡片按一个高度摆放、输入框按另一个高度绘制 ——
+                 * 于是它盖住下面的「操作」卡片。
+                 *
+                 * 用户截图里「正文」「操作」「恢复默认」三块互相穿透，就是这一条。
+                 */
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
         SettingsGroup("操作") {

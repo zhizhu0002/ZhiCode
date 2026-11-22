@@ -45,8 +45,6 @@ import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import com.zhizhu.zhicode.compose.model.parseTokenCount
 import com.zhizhu.zhicode.compose.ui.PageFeedbackSlot
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
-import com.zhizhu.zhicode.compose.ui.effects.PageBlurBar
-import com.zhizhu.zhicode.compose.ui.effects.rememberPageBlurBackdrop
 import com.zhizhu.zhicode.compose.ui.settings.SettingsChoice
 import com.zhizhu.zhicode.compose.ui.settings.SettingsEntry
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
@@ -66,7 +64,6 @@ import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.blur.layerBackdrop
 
 /**
  * ZhiCode 设置页：标题 + 返回 / 分组设置行。
@@ -131,6 +128,9 @@ fun SettingsPage(
     // 返回键 = ZhiIcons.back + 原生 IconButton。顶栏**没有动作按钮**：改动即时生效，
     // 没有需要用户再确认一次的东西（见文件顶部「没有保存按钮」一节）。
     if (draft == null) return
+    // 重组探针：日志里 `recompose/s SettingsPage=N` 说明这一层被反复重建。
+    // 没有这一行就无法区分"设置页自己重组"和"下面某个分组在重组"。
+    com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("SettingsPage")
 
     val scheme = MiuixTheme.colorScheme
     // ⚠️ 必须用 `rememberSaveable`，不能是 `rememberLazyListState()`。
@@ -143,18 +143,34 @@ fun SettingsPage(
         saver = androidx.compose.foundation.lazy.LazyListState.Saver,
     ) { androidx.compose.foundation.lazy.LazyListState() }
     val topAppBarScrollBehavior = MiuixScrollBehavior()
-    val pageBackdrop = rememberPageBlurBackdrop()
+    /*
+     * ⚠️ 这里**不用** `rememberPageBlurBackdrop()` + `layerBackdrop`。
+     *
+     * 它同时造成两个用户可见的问题：
+     *
+     * 1. **卡**：`layerBackdrop` 把整页内容录进离屏层供顶栏 `textureBlur` 取样，
+     *    而滚动时内容每个像素都在变 → **每帧重录整张设置页**（LazyColumn + 二十多行
+     *    图标底板 + 每行 squircle 路径裁剪全在内），再对那张层做一次 RuntimeShader 模糊。
+     *    实测进设置页时 `jankFrame #3 delta=183.1ms`。
+     *
+     * 2. **文字重叠**：顶栏底色是 `Color.Transparent`（要让模糊结果透出来），
+     *    所以模糊那一帧只要没跟上，下面的正文就直接从顶栏里透出来 ——
+     *    截图里「设置」标题压在第 2 行文字上、底部反馈条压住列表末行，都是这个。
+     *
+     * 参考实现（rikkahub 的 SettingPage）**不做**整页捕获：顶栏就是纯色
+     * `containerColor` + 大标题折叠。本工程照它改，两条症状一起消失。
+     */
 
     Scaffold(
         topBar = {
-            PageBlurBar(backdrop = pageBackdrop, blurActive = pageBackdrop != null) {
             // rikkahub 用 LargeFlexibleTopAppBar（大标题 + 滚动折叠）；
             // Miuix 对应组件 = TopAppBar（自带 largeTitle 折叠行为）。
+            // 底色走 surface **纯色**：没有再捕获整页背板（见上面那段说明）。
             TopAppBar(
                 title = "设置",
                 largeTitle = "设置",
                 scrollBehavior = topAppBarScrollBehavior,
-                color = if (pageBackdrop != null) Color.Transparent else scheme.surface,
+                color = scheme.surface,
                 navigationIcon = {
                     // 官方 BackNavigationIcon 同款：原生 IconButton + 左箭头。
                     // 字形走 ZhiIcons（Material Symbols），与整页其余图标同源。
@@ -167,14 +183,9 @@ fun SettingsPage(
                     }
                 },
             )
-            }
         },
     ) { padding ->
-        Box(
-            modifier = Modifier.fillMaxSize().then(
-                if (pageBackdrop != null) Modifier.layerBackdrop(pageBackdrop) else Modifier,
-            ),
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -244,6 +255,7 @@ fun SettingsPage(
  */
 @Composable
 private fun AboutEntryPage(onNavigate: (String) -> Unit) {
+    com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("AboutEntryPage")
     SettingsIconEntry(
         title = "关于 ZhiCode",
         summary = "版本、源码、许可证与隐私政策",
@@ -277,6 +289,7 @@ private fun GeneralPage(
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
 ) {
+    com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("GeneralPage")
     SettingsEntry(
         title = "主题设置",
         valueText = "深浅 · ${draft.themeMode.label} · 预设色 / 模糊 / 缩放",
@@ -304,6 +317,7 @@ private fun ModelServicePage(
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
 ) {
+    com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("ModelServicePage")
     // rikkahub hub 的「当前值行」：标题 + 当前值当副标题 + 行尾箭头，
     // 细节进二级页。原先这里用 SettingsEntry 且写了一句「密钥不会回填」的长说明，
     // 该说明在二级页里已有，这里按 hub 惯例收成一行当前值。
@@ -355,6 +369,7 @@ private fun ModelServicePage(
 
 @Composable
 private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
+    com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("AgentSecurityPage")
     /*
      * 这里原本第一项是「Agent 沙箱全权调试」（sandboxAgentFullAccess）：
      * 允许容器内安装、UI 操作与 Frida，不含真机 host 与 Root。
@@ -511,6 +526,7 @@ private fun ContextProjectPage(
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
 ) {
+    com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("ContextProjectPage")
     SettingsIntField(
         title = "上下文窗口",
         value = draft.contextWindow,
@@ -594,19 +610,21 @@ private fun CustomSystemPromptField(draft: SettingsDraft, onChange: (SettingsDra
     )
 }
 
-/** 项目目录是自由文本，走 `BasicComponent` 的 `bottomAction` 槽位放输入框。 */
+/**
+ * 项目目录是自由文本，走 `BasicComponent` 的 `bottomAction` 槽位放输入框。
+ *
+ * ⚠️ 这里**不再**自己维护 `var text by remember(...)`：去抖与草稿已经收进
+ * `SettingsTextField`（见那里的说明）。之前两处各存一份草稿，
+ * 外部值变化时两个 `remember` 的 key 更新顺序不同，会互相覆盖 ——
+ * 表现是"改完专项、回到设置页，目录又变回旧值"。
+ */
 @Composable
 private fun ProjectPathField(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
-    var text by remember(draft.projectPath) { mutableStateOf(draft.projectPath) }
-
     SettingsTextField(
         title = "项目目录",
-        value = text,
-        onValueChange = {
-            text = it
-            // 失焦前就同步回 draft，避免用户点「保存」时漏掉最后一次输入
-            onChange(draft.copy(projectPath = it.trim()))
-        },
+        value = draft.projectPath,
+        // `trim()` 留在这里：去抖只负责"什么时候提交"，不负责规整内容。
+        onValueChange = { onChange(draft.copy(projectPath = it.trim())) },
         summary = "与上下文历史一一绑定，保存后可恢复该项目记录",
         icon = ZhiIcons.directory,
         plate = SettingsPlateColors.blue,
@@ -631,6 +649,7 @@ private fun ProjectPathField(draft: SettingsDraft, onChange: (SettingsDraft) -> 
  */
 @Composable
 private fun ExtensionsPage(onNavigate: (String) -> Unit, extensions: ExtensionSummary) {
+    com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("ExtensionsPage")
     // rikkahub 式入口行：图标 + 标题 + 副标题；Miuix 用 ArrowPreference 的 startAction。
     // 注意：这里不放「API 配置」——那条带当前生效值的入口留在上面的
     // 「模型与对话」组里，同一目标只保留一条路径（hub 的规矩）。

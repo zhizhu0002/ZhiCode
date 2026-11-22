@@ -70,6 +70,18 @@ android {
 
         // 内置 Termux 只提供 arm64 用户空间
         ndk { abiFilters 'arm64-v8a' }
+
+        /*
+         * 帧探针开关（`ZhiFrameTrace.enabled`）。
+         *
+         * 它以前绑在 `BuildConfig.DEBUG` 上，于是**装了 release 包就一行日志都没有** ——
+         * 而真机问题只在 release 上复现，等于一直在没有数据的情况下猜。
+         *
+         * 抓数据：`./gradlew :app:assembleRelease -PframeTrace=true`
+         * 平时（含正式发布）：不传这个参数，探针被编译掉，零开销。
+         */
+        buildConfigField 'boolean', 'FRAME_TRACE',
+                (project.hasProperty('frameTrace') ? 'true' : 'false')
     }
 
     compileOptions {
@@ -95,6 +107,39 @@ android {
     androidResources { noCompress 'zip' }
 
     lint { abortOnError false; checkReleaseBuilds false }
+
+    /*
+     * Compose 编译器：**打开强跳过（strong skipping）**。
+     *
+     * ## 为什么这条直接决定对话流卡不卡
+     *
+     * Compose 默认对"不稳定"的参数**不跳过重组**。而 `WorkspaceUiState` 是个
+     * 含 `List<ChatItem>` 的巨型 data class（249 个字段），Compose 判定它不稳定 ——
+     * 于是每次流式输出让 `state` 一变，`ChatList(state = state, …)` **整棵重组**，
+     * 包括 `items(blocks)` 的重新构造。
+     *
+     * 真机日志的佐证：一次会话加载 + 若干次前插，累计 GC 15 次 / 3056ms，
+     * 且 `olderPage held` 一路涨到 600 —— 分配速率与"整表重组"的量级吻合。
+     *
+     * 强跳过会把"参数相等就跳过"的判据从"类型必须稳定"放宽到
+     * "`equals` 相等即可"，于是：
+     *  · `state` 没变 → `ChatList` 直接被跳过，不再重组；
+     *  · 单条消息变了 → 只有那一项的 `ChatItem` 不等，其余项跳过。
+     *
+     * ## 代价与前提
+     *
+     * 强跳过依赖 `equals`。本工程的状态类都是 `data class`（`equals` 按字段生成），
+     * 所以语义正确。⚠️ 但**可变类**（`class` + `var`）在强跳过下会出现
+     * "内容变了却不重组" —— 新增状态类时必须继续用 `data class`。
+     *
+     * 关掉它只需删掉这几行；行为回退到"不稳定就每次都重组"。
+     */
+    composeCompiler {
+        // 属性名来自插件 2.4.0 的 `ComposeCompilerGradlePluginExtension`：
+        // 它有 `enableStrongSkippingMode`（Boolean），**不是** `featureFlags { }`
+        // （那个在 Groovy DSL 里不可用，会报 "Could not find method featureFlags"）。
+        enableStrongSkippingMode = true
+    }
 
     /*
      * 单元测试的工作目录固定为**工程根**。

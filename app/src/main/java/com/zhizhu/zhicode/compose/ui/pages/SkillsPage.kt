@@ -898,9 +898,16 @@ private fun SkillCreateDialog(
     onDismiss: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    // 解析失败时才用错误色与加粗：那是要用户动手改的状态；
-    // 「已解析出 X」只是回显，用次级色就够，不然整屏都在报错。
-    val nameBroken = draft.nameMissing || draft.nameInvalid
+    /*
+     * 内容为空 = 用户还没开始写。此时「保存」禁用、提示是灰字指引 —— 都不是错误。
+     *
+     * ⚠️ 模板**不再**预填进内容里（见 `WorkspaceViewModel.newSkill`）：
+     * 那样会让框里出现正常文字色的示例、并且因为 `name: <技能名>` 过不了校验
+     * 而让对话框一打开就飘一行红字（用户报的"打开就是红的"）。
+     * 现在模板是输入框的**灰色占位符**，不参与解析。
+     */
+    val empty = draft.content.isBlank()
+    val nameBroken = (draft.nameMissing || draft.nameInvalid) && !empty
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,
@@ -925,26 +932,43 @@ private fun SkillCreateDialog(
                 ZhiTextField(
                     value = draft.content,
                     onValueChange = { value -> onChange { it.copy(content = value) } },
-                    label = "SKILL.md 内容",
-                    useLabelAsPlaceholder = false,
+                    /*
+                     * 空内容时显示为**灰色占位符**（`useLabelAsPlaceholder = true`
+                     * 时 Miuix 的 label 就是框内 hint，一输入就浮到上沿）。
+                     *
+                     * 于是示例 SKILL.md 照样看得见，但它是提示而不是内容：
+                     * 不参与解析、不影响「保存」可用性、也不会被误当成用户写的字。
+                     */
+                    label = if (empty) SkillStore.starterTemplate else "SKILL.md 内容",
+                    useLabelAsPlaceholder = true,
                     singleLine = false,
                     minLines = 8,
+                    /*
+                     * ⚠️ 高度上限是必须的。
+                     *
+                     * 示例模板是一段 10 行的多行文本，而 `minLines = 8` 只保证下限。
+                     * 上一版没有上限，占位符一变成多行就把框撑到弹窗可用高度的上限，
+                     * 把下面的「保存位置」和底部按钮整块挤出可视区（截图为证）。
+                     *
+                     * 12 行足够让模板完整露出来，又留出下面几行的位置。
+                     */
+                    maxLines = 12,
                     textStyle = MiuixTheme.textStyles.main.copy(fontFamily = FontFamily.Monospace),
                     modifier = Modifier.fillMaxWidth(),
                 )
 
                 Text(
                     text = when {
-                        // 预填的示例就在框里，所以这里要说的是"把占位符换掉"，
-                        // 而不是"frontmatter 里必须有一行 name"（那一行明明已经有了）。
-                        draft.nameInvalid && draft.content == SkillStore.starterTemplate ->
-                            "把 name 里的 <技能名> 换成你自己的名字（只能用字母、数字、. _ -）"
+                        // 空内容 = 还没开始写。这里给的是"要写什么形状"的指引，
+                        // 不是错误提示（示例就在上面的灰字占位符里）。
+                        empty -> "把 name 里的 <技能名> 换成你自己的名字（只能用字母、数字、. _ -）"
 
                         draft.nameMissing -> "找不到名称：frontmatter 里必须有一行 name: <技能名>"
                         draft.nameInvalid -> "名称有非法字符：只能包含字母、数字、. _ -（1–64 个字符）"
                         draft.name.isNotBlank() -> "技能名称：${draft.name}"
                         else -> "粘贴完整的 SKILL.md 文件内容"
                     },
+                    // 空内容用次级色（指引），真写了还非法才飘红。
                     color = if (nameBroken) scheme.error else scheme.onSurfaceVariantSummary,
                     fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     fontWeight = if (nameBroken) FontWeight.Medium else FontWeight.Normal,

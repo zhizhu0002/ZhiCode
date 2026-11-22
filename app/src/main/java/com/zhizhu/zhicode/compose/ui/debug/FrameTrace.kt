@@ -56,8 +56,26 @@ internal object ZhiFrameTrace {
     private const val IDLE_PROBE_FRAMES = 300
     private const val IDLE_PROBE_WINDOWS = 3
 
-    /** 仅 debug 构建启用：release 里这个方法体不会被调用，也不会有日志开销。 */
-    val enabled: Boolean get() = BuildConfig.DEBUG
+    /**
+     * 是否启用探针。
+     *
+     * ## 为什么不能只看 `BuildConfig.DEBUG`
+     *
+     * 原来这里写的是 `BuildConfig.DEBUG`，于是**release 包里所有探针都被编译掉**。
+     * 而真机复现用的恰恰是 release 包（debug 包的手感、GC 行为、包体都不一样，
+     * 用户报的问题只在 release 上出现）—— 结果就是：
+     *
+     *  · 日志里从来没有 `jankFrame` / `recompose/s` 行；
+     *  · 我据此判断"探针没跑到"，其实探针**根本不存在**；
+     *  · 两轮排查都在没有数据的情况下猜原因。
+     *
+     * 现在由 Gradle 的 `FRAME_TRACE` 开关控制（见 `app/build.gradle` 的
+     * `buildConfigField`）。需要抓真机数据时打开它重新打包即可，不需要改代码。
+     *
+     * ⚠️ 打开时**只**写文件（见 [writeToFile]），不往 logcat 刷屏；抓完记得关掉，
+     * 因为它会给每一帧挂一个 `Choreographer` 回调。
+     */
+    val enabled: Boolean get() = BuildConfig.FRAME_TRACE
 
     /**
      * 测量结果的出口。
@@ -402,6 +420,17 @@ internal object ZhiFrameTrace {
         sumNs += delta
         if (delta > maxNs) maxNs = delta
         if (delta > (FRAME_16_7_NS * JANK_FACTOR).toLong()) janks++
+        /*
+         * TEMP-PROBE：逐帧尖峰定位（验完即删）。
+         *
+         * 只报 `max` 一个数说不出"慢在哪一帧"。这里把每个超阈值的帧连同
+         * **它的序号**记下来：序号接近 0 = 首帧（首组合太重）；
+         * 序号在中间 = 转场途中的一次性重活（着色器编译 / 大量分配 / GC）；
+         * 序号接近 40 = 收尾。
+         */
+        if (delta > 25_000_000L) {
+            note("jankFrame #$frameCount delta=${format(delta / 1_000_000.0)}ms label=$current")
+        }
 
         if (frameCount >= TRACE_FRAMES) {
             val avgMs = sumNs / frameCount.toDouble() / 1_000_000.0

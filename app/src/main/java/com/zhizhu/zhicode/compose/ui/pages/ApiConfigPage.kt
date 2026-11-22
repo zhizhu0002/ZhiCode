@@ -310,7 +310,32 @@ private fun ApiProfileForm(
                 summary = null,
                 onSelectedIndexChange = { index ->
                     protocols.getOrNull(index)?.let { protocol ->
-                        onChange { it.copy(protocol = protocol) }
+                        onChange { draftNow ->
+                            /*
+                             * ⚠️ 切到 ZCode 时**自动**填好网关与身份头，不再要求用户多点一次。
+                             *
+                             * 上一版这里只改 `protocol`，界面下方留一行「填入 ZCode 默认值」
+                             * 要用户自己按。而这两项是**连上网关的必要条件**：
+                             * 不填就一定连不上，用户看到的是一个"选了 ZCode 却什么都发不出去"
+                             * 的配置页，然后才去猜那一行是干嘛的。
+                             *
+                             * 只在**地址还是空的**时候自动填：用户已经手填过（或从别的协议
+                             * 切过来留着自己的地址）时不覆盖 —— 那会把他刚写的东西抹掉。
+                             * 想恢复默认随时可以按下面那一行（它现在的作用是"重置为默认"）。
+                             */
+                            val autoFill = protocol == ApiProtocol.ZCODE &&
+                                draftNow.baseUrl.isBlank()
+                            if (autoFill) {
+                                baseUrlTouched = true
+                                draftNow.copy(
+                                    protocol = protocol,
+                                    baseUrl = ZCODE_GATEWAY,
+                                    extraHeaders = ZCODE_HEADERS_JSON,
+                                )
+                            } else {
+                                draftNow.copy(protocol = protocol)
+                            }
+                        }
                     }
                 },
             )
@@ -330,19 +355,18 @@ private fun ApiProfileForm(
             )
 
             /*
-             * ZCode 的「填入默认值」。
+             * ZCode 的「重置为默认」。
              *
-             * 参考实现把网关地址与身份头内置在代码里、界面上写「无需填写，直连 ZCode 网关」。
-             * 我们改成一键填入，差别是**值落在用户的配置里**而不是藏在代码里的常量：
-             * 于是「请求发到哪、以谁的身份」在配置页看得见、改得动、排得动障。
+             * 选了 ZCode 协议时**已经自动填好**（见上面 `onSelectedIndexChange`），
+             * 所以这一行不再是"必点的一步"，而是"我把默认值改坏了，想恢复"。
              *
-             * 一按同时填两样（网关 + 额外请求头）：它们是配套的，只填一样必然连不上，
-             * 而分开两次填会让人以为步骤没做完。
+             * 文案也跟着改：原来叫「填入 ZCode 默认值」，听起来像初始化动作；
+             * 现在它是重置，继续用那个名字会让人以为之前那次自动填充没生效。
              */
             if (draft.protocol == ApiProtocol.ZCODE) {
                 BasicComponent(
-                    title = "填入 ZCode 默认值",
-                    summary = "一次填好网关地址与额外请求头（可再自行修改）",
+                    title = "重置为 ZCode 默认值",
+                    summary = "恢复默认网关地址与额外请求头（改坏了用这个）",
                     onClick = {
                         baseUrlTouched = true
                         onChange { it.copy(baseUrl = ZCODE_GATEWAY, extraHeaders = ZCODE_HEADERS_JSON) }

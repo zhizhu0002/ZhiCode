@@ -47,7 +47,6 @@ import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
@@ -1352,14 +1351,33 @@ fun ZhiNoticeBar(
     content: (@Composable () -> Unit)? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
+    /*
+     * 三档的**底 + 字**必须成对给，而且都要过 4.5:1。
+     *
+     * ## 这一版修的是什么
+     *
+     * 旧写法里 WARN 的底是「琥珀 16% 叠在 `surfaceContainer` 上」，浅色下等于一块
+     * `#E8DFCF` 的土黄 —— 比页面暗、还带暖色相。而对话流里每一条 INFO 消息都走
+     * WARN 档（`InfoCard` 曾经这么传），于是一屏消息全是土黄块，
+     * 用户读到的就是「message card 显得很黑」。
+     *
+     * 现在：
+     *  · **WARN** 走 [ZhiColors.warnFill] / [ZhiColors.warnText] 这对实色
+     *    （浅 `#F8F1E6` / `#8A5A00`，深 `#433B2F` / `#F0B860`）；
+     *  · **ERROR** 的文字不再直接用 `scheme.error`（浅色下 `#E94634` 压在
+     *    `errorContainer` `#FDF6F4` 上只有 3.65:1），改成本工程调过的 [ZhiColors.red]
+     *    （浅 `#C62828` = 5.26:1，深 `#FF453A`）。
+     *  · **INFO** 的标题提到 `onSurface`：中性提示也要有一行能读的标题，
+     *    旧写法标题与正文同色，读起来像"没有标题的一段灰字"。
+     */
     val titleColor = when (tone) {
-        ZhiNoticeTone.ERROR -> scheme.error
-        ZhiNoticeTone.WARN -> ZhiColors.amber()
-        ZhiNoticeTone.INFO -> scheme.onSurfaceVariantSummary
+        ZhiNoticeTone.ERROR -> ZhiColors.red()
+        ZhiNoticeTone.WARN -> ZhiColors.warnText()
+        ZhiNoticeTone.INFO -> scheme.onSurface
     }
     val bodyColor = when (tone) {
-        ZhiNoticeTone.ERROR -> scheme.error
-        ZhiNoticeTone.WARN -> scheme.onSurface
+        ZhiNoticeTone.ERROR -> ZhiColors.red()
+        ZhiNoticeTone.WARN -> ZhiColors.warnText()
         ZhiNoticeTone.INFO -> scheme.onSurfaceVariantSummary
     }
     Surface(
@@ -1368,9 +1386,7 @@ fun ZhiNoticeBar(
         shape = ZhiSquircle(ZhiRadius.inner),
         color = when (tone) {
             ZhiNoticeTone.ERROR -> scheme.errorContainer
-            // 琥珀在主题里没有对应的容器色，用「琥珀按低透明度铺在表面色上」——
-            // 这样深浅色两档都成立，也不写死一个只在深色下对的十六进制值。
-            ZhiNoticeTone.WARN -> ZhiColors.amber().copy(alpha = 0.16f).compositeOver(scheme.surface)
+            ZhiNoticeTone.WARN -> ZhiColors.warnFill()
             ZhiNoticeTone.INFO -> scheme.surfaceContainer
         },
     ) {

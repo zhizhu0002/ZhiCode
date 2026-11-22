@@ -280,19 +280,44 @@ private fun Colors.zhiLightNeutrals(): Colors = copy(
     secondaryVariant = ZhiColors.SoftFillLight,
     secondaryContainer = ZhiColors.SoftFillLight,
     onBackgroundVariant = ZhiColors.MutedLight,
+    /*
+     * 下面三项是**容器上的次级文字**。Miuix 浅色给的是 `#A2A2A2` / `#959595`，
+     * 压在 `#FAFAFC` / `#FFFFFF` 上只有 **2.45:1 / 3.00:1** —— 远低于正文要求的
+     * 4.5:1。它们被 `onSurfaceContainerHigh` / `onSurfaceContainerVariant`
+     * 这两个槽位取用（对话框内容、下拉项、设置行的说明），于是浅色下这些字
+     * 看起来"很淡、像被洗过"。
+     *
+     * 换成 [ZhiColors.MutedLight] 的同一族中性灰，实测 5.27:1 / 5.64:1。
+     */
+    onSurfaceContainerHigh = ZhiColors.MutedLight,
+    onSurfaceContainerVariant = ZhiColors.MutedLight,
 )
 
 /**
  * 深色侧的同一批重映射。
  *
  * 容器色沿用 Miuix 原值（`#242424` 一族本来就是对的，它们与 [ZhiColors.PanelDark]
- * 一致），只改**弱化文字/图标**这一项 —— 见 [zhiLightNeutrals] 上方那段说明。
+ * 一致），改的是**容器上的文字** —— 见 [zhiLightNeutrals] 上方那段说明。
  *
- * 另外把 `onSurfaceVariantSummary` 也从 `#80FFFFFF`（50% 白，浮在任何底色上都偏灰）
- * 提到 62% 白：工具卡的摘要行、设置行的副标题全用它，50% 在 `#2D2D2D` 卡片上
- * 只有约 4.1:1，看起来就是"发灰的说明文字"。
+ * ## 三个槽位的对比度（这是「深色模式也有点问题」的主要成分）
+ *
+ * Miuix 深色给出的这三档在深色容器上都是**读不清**的：
+ *
+ * | 槽位 | Miuix 原值 | 所在底 | 对比度 | 换成 | 新对比度 |
+ * | --- | --- | --- | --- | --- | --- |
+ * | `onSurfaceVariantSummary` | `#80FFFFFF` | `#2D2D2D` | 4.1:1 | [ZhiColors.SummaryDark] | 4.7:1 |
+ * | `onSurfaceContainerHigh` | `#666666` | `#2D2D2D` | **2.40:1** | [ZhiColors.SummaryDark] | 4.7:1 |
+ * | `onSurfaceContainerVariant` | `#737373` | `#2D2D2D` | **2.90:1** | [ZhiColors.SecondaryDark] | 5.3:1 |
+ * | `onSecondaryContainer` | `#7C7C7C` | `#434343` | **2.37:1** | [ZhiColors.SecondaryDark] | 4.6:1 |
+ *
+ * `onSecondaryContainer` 是**最严重**的一个：它被侧栏选中行、设置行、沙箱磁贴
+ * 用来当"选中态正文色"，而 2.37:1 意味着选中的那一行比没选中的还难读 ——
+ * 这也是「深色下有些字发灰、糊成一团」的来源。
  */
 private fun Colors.zhiDarkNeutrals(): Colors = copy(
     onBackgroundVariant = ZhiColors.MutedDark,
     onSurfaceVariantSummary = ZhiColors.SummaryDark,
+    onSurfaceContainerHigh = ZhiColors.SummaryDark,
+    onSurfaceContainerVariant = ZhiColors.SecondaryDark,
+    onSecondaryContainer = ZhiColors.SecondaryDark,
 )

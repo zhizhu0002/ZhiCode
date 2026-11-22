@@ -71,6 +71,7 @@ import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
 import com.zhizhu.zhicode.compose.model.TaskState
 import com.zhizhu.zhicode.compose.model.ToolGrouping
+import com.termux.app.zhicode.storage.ZhiMemory
 import com.zhizhu.zhicode.compose.model.TurnLayout
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.theme.ZhiColors
@@ -217,6 +218,24 @@ fun ChatList(
      * 用它把内容顶到卡片上方，保证被遮住的对话仍能滑出来看到。
      */
     bottomInset: Dp = 0.dp,
+    /**
+     * 键盘停稳后额外让出的高度，**与 [bottomInset] 分开**。
+     *
+     * ## 为什么要分
+     *
+     * `contentPadding.bottom` 要的是两者之和（都是"屏幕底部有东西挡着"），
+     * 但**触发重新贴底的判据只能看 [bottomInset]**。
+     *
+     * `LaunchedEffect(listState, bottomInset)` 那条会"留白变高就重新贴底"，
+     * 而键盘这一段会因为别的原因归零 —— 全屏浮层（设置页、侧栏、环境面板）
+     * 盖住工作区时 `ChatPage` 把 `settledImeLiftPx` 强制成 0。于是"进设置"
+     * 会让留白变小 → 重新贴底 → 用户刚翻到的历史被顶走
+     * （用户原话：「进入设置消息流置底」）。
+     *
+     * 拆开之后：内容高度变化才重新贴底，键盘变化只走
+     * [ImeLazyListAutoScroller] 的增量补偿。
+     */
+    imeSettledLift: Dp = 0.dp,
     /** Activity 级 IME 从关闭到打开的代数；只在输入框真实聚焦时用于一次吸底。 */
     imeOpenGeneration: Int = 0,
     /** 发送框是否真实取得焦点；侧栏搜索框弹键盘时必须为 false。 */
@@ -334,11 +353,46 @@ fun ChatList(
      * 说明这次变长是**前面**补的，不是来了新消息。见 [ContentStamp.prepend]。
      */
     var lastPrepend by remember { mutableStateOf(state.transcriptPrependRevision) }
-    // 记录触发“加载更早消息”前的视口锚点；必须在 ViewModel 异步更新状态之前保存。
-    // 用稳定的 block key 锚定，而不是把 transcript 消息数当 LazyColumn 下标。
-    // 一个回合可能包含多条消息，前插条数与实际新增 item 数并不相等。
+    /** 锚定 effect 专用的版本号，与吸底 effect 的 `lastPrepend` **互不干扰**（见那段注释）。 */
+    /**
+     * 锚定 effect 专用的版本号，与吸底 effect 的 `lastPrepend` **互不干扰**（见那段注释）。
+     *
+     * 初值取**当前的** revision 而不是 `Int.MIN_VALUE`：后者会让 `LaunchedEffect`
+     * 在首次组合时就认为自己"错过了一次前插"，白跑一遍并打出一条
+     * `prependAnchor NO-KEY rev=0` —— 真机日志里这种噪音一共出现了 4 次，
+     * 会掩盖真正的锚定失败。首次组合本来就没有"上一次"可锚。
+     */
+    var lastAnchoredPrepend by remember { mutableStateOf(state.transcriptPrependRevision) }
+    /*
+     * 记录触发"加载更早消息"前的视口锚点；必须在 ViewModel 异步更新状态之前保存。
+     *
+     * ⚠️ 锚点记的是**消息 id**，不是 `LazyColumn` 的 item key。
+     *
+     * 上一版记的是 key，而 key 正是前插时会被钉/会变的那个东西 ——
+     * 等于用一个"可能变了的值"去查一个"需要它没变才查得到"的位置。
+     * 消息 id 在前插后是**恒定**的（历史消息本来就是同一条），
+     * 所以按 id 一定找得回原来那一块（见 `TurnLayout.containsMessage`）。
+     *
+     * 一个回合可能包含多条消息，前插条数与新增 item 数并不相等，
+     * 所以也不能拿 transcript 条数当 LazyColumn 下标。
+     */
+    var prependAnchorId by remember { mutableStateOf<String?>(null) }
+    /** key 只作兜底：按 id 找不到时才用它（例如那一块的消息被尾部淘汰了）。 */
     var prependAnchorKey by remember { mutableStateOf<Any?>(null) }
     var prependAnchorOffset by remember { mutableStateOf(0) }
+
+    /*
+     * 切块表的草稿缓存。
+     *
+     * ⚠️ 用普通字段而不是 `mutableStateOf`：它只在"下一次算块表"时被读，
+     * 没有任何界面因为它变化而重组。写成 state 并在组合期更新会触发
+     * 「写 → 失效 → 重跑 → 再写」的循环，流式输出时每帧都跑一遍。
+     *
+     * 声明在这一层（而不是下面算块表的地方）是因为 `loadOlderWithAnchor`
+     * 要读 `previous` 当"当前块表"：那个 lambda 在下面几行就创建了，
+     * 拿不到更后面的局部变量。
+     */
+    val blockCache = remember { BlockCache() }
 
     /**
      * 「该落到底」的待办标记。
@@ -349,41 +403,42 @@ fun ChatList(
      */
     var pendingBottom by remember { mutableStateOf(false) }
 
+    /**
+     * 刚进入组合的第一轮。
+     *
+     * 页面切换时 `ChatList` 会被 `SaveableStateHolder` 恢复，而 `autoFollowState`
+     * 是 `remember` —— 残留的 true 会让"恢复后第一次数据变化"误判成
+     * "用户要继续跟随"，于是主动置底。见下面吸底 effect 里的守卫说明。
+     */
+    var justRecomposed by remember { mutableStateOf(true) }
+
     /*
      * 往前补历史时**视口一动不动**（像聊天软件那样）。
      *
-     * ## 为什么不能只靠 `LazyColumn` 的 key 锚定
+     * ## 两条腿，缺一不可
      *
-     * `LazyColumn` 靠 item key 找回第一可见项，前插理论上不该移动视口。
-     * 但这条路径同时还会**从尾部淘汰**（`trimResidentTail`），而且——
-     * 更关键的是——**块的 key 本身会变**：
+     * 1. **块的 key 必须稳定**：`TurnLayout.Block.Turn.key` 取"这一轮首成员"的 id，
+     *    前插时新消息会并入第一个 Turn 并成为新首成员 → key 变 → 对 `LazyColumn`
+     *    来说那是一块全新的 item，锚点作废。`pinForPrepend` 把旧 key 钉回去解决这层。
+     * 2. **手动纠正视口**：光有稳定 key 还不够 —— 这条路径同时会从尾部淘汰
+     *    （`trimResidentTail`），前插 + 后删一起发生时自动锚定会失准。
      *
-     * `TurnLayout.Block.Turn.key` 取的是「这一轮**首成员**的 id」。
-     * 往前补一页之后，如果新补进来的第一条是助手/工具类消息，它会**并入同一个
-     * Turn 并成为新的首成员**，于是那一块的 key 从旧 id 变成了新 id。
-     * 对 `LazyColumn` 来说那就是一块**全新的 item**，原来的锚点彻底失效，
-     * 位置被夹到某项上 —— 表现就是用户报的「每次上滑加载都会置顶」。
+     * ## ⚠️ 为什么用"算下标"而不是"查可见项"
      *
-     * 所以不能只记 key，还要记**像素位置**。这里改成：
+     * 前两版都在 `visibleItemsInfo` 里按 key 找锚点。那有个致命前提：
+     * **锚点必须仍然可见**。而一次前插 30 条消息之后，原来的锚点被推到视口**下方**
+     * 好几十项之外 —— `visibleItemsInfo` 里根本没有它，于是：
      *
-     *  1. 补之前记下「第一个 index > 0 的可见项」的 **key + offset**；
-     *  2. 补之后等一帧，先按 key 找回同一条 —— 找不到（key 变了）就按
-     *     **旧的绝对偏移**退回，保证视口停在原来的视觉位置。
+     *  · 要么什么都找不到，循环空转到超时（`GAVE-UP`）；
+     *  · 要么找到的是列表被夹到顶部后的另一项，纠正到错误位置。
      *
-     * `requestScrollToItem` 是非挂起的：只登记目标、在下次测量里生效，
-     * 所以这里不会产生可见的跳动。
+     * 用户看到的永远是"加载完跳到最上面"。
+     *
+     * 现在改成**按块表算下标**：`blocks` 就在同一个组合作用域里，按 key 查它在
+     * 块表里的位置是 O(n) 一次性计算，不依赖可见性。再加上列表头部那个恒定 1 项
+     * （`older-loader` / `transcript-start`，见下面 `LazyColumn` 的顶部分支），
+     * 就得到 `LazyColumn` 的绝对下标 —— 无论锚点在哪都能精确跳过去。
      */
-    LaunchedEffect(state.transcriptPrependRevision) {
-        if (state.transcriptPrependRevision == lastPrepend) return@LaunchedEffect
-        lastPrepend = state.transcriptPrependRevision
-        // 等一帧：新内容要先被 LazyColumn 接收，才有 layoutInfo 可查。
-        withFrameNanos { }
-        val key = prependAnchorKey ?: return@LaunchedEffect
-        val anchor = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }
-            ?: return@LaunchedEffect
-        listState.requestScrollToItem(anchor.index, prependAnchorOffset)
-    }
-
     /*
      * 「回到最新」之后显式落底。
      *
@@ -445,10 +500,27 @@ fun ChatList(
      *
      * 锚点取「第一个 index > 0 的可见项」：index 0 是那条 `OlderLoader`
      * 占位，前插后它会被顶走，用它当锚点等于没锚。
+     *
+     * 记两样东西：
+     *  · `prependAnchorId` —— 那一块里**第一条消息的 id**（主锚点，前插后恒定）；
+     *  · `prependAnchorOffset` —— 它当时在视口里的偏移。
+     *
+     * ⚠️ 块的 key 只作兜底。前插时 key 会因为"新内容并入第一轮"而变化（或因为
+     * `pinForPrepend` 被钉回旧值），两种情况都不可靠 —— 而消息 id 一定还在。
      */
     val loadOlderWithAnchor: () -> Unit = remember(listState) {
         {
             val anchor = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index > 0 }
+            // 头部恒定占一项（`older-loader` / `transcript-start`），所以 LazyColumn
+            // 下标减 1 才是块表下标。空会话没有头部项，但那时也不会触发补页。
+            val headerCount = if (currentState.transcript.isEmpty()) 0 else 1
+            val blockIndex = (anchor?.index ?: -1) - headerCount
+            val block = blockCache.previous.getOrNull(blockIndex)
+            prependAnchorId = when (block) {
+                is TurnLayout.Block.Standalone -> block.id
+                is TurnLayout.Block.Turn -> block.ids.firstOrNull()
+                null -> null
+            }
             prependAnchorKey = anchor?.key
             prependAnchorOffset = anchor?.offset ?: 0
             onLoadOlderState()
@@ -563,6 +635,33 @@ fun ChatList(
                 return@collect
             }
 
+            /*
+             * 跟随吸底。
+             *
+             * ⚠️ `!justRecomposed` 这个守卫是修「打开设置页再返回，对话流被置底」的。
+             *
+             * 页面切换时 `ChatList` 会被 `MochiNavHost` 的 `SaveableStateHolder`
+             * **保存并恢复**，而 `autoFollowState` 是 `remember`（不跨进程、跨页面
+             * 也不保证重置）。于是回来后：
+             *
+             *  · `transcriptStamp` 因为 `prepend` / `jump` 这些版本号归零而**变了一次**
+             *    （它们本来就该变，那是数据真实变化）；
+             *  · 这条 `collect` 于是重跑；
+             *  · `autoFollowState.state.value` 残留为 true → `requestScrollToBottom`
+             *    → 把用户正在读的历史顶到最上面。
+             *
+             * 用户的原话是「切换设置页面对话流置底」。它**不是**吸底逻辑写错了，
+             * 而是"刚回到组合的那一次"不该算作用户要继续跟随。
+             *
+             * `justRecomposed` 在进入组合后的第一轮为 true，之后翻假 ——
+             * 所以真正的内容变化（流式输出、新消息）仍然正常跟随。
+             */
+            if (justRecomposed) {
+                justRecomposed = false
+                // 恢复后第一轮：只重新判定一次跟随意图，不主动滚动。
+                return@collect
+            }
+
             if (autoFollowState.state.value && !prepended) requestScrollToBottom(listState)
         }
     }
@@ -672,6 +771,16 @@ fun ChatList(
      * 待办落底的收尾：真正贴到底之后才清标记。
      *
      * 单独一条 effect 观察"是否已贴底"，而不是在登记那一帧清 —— 见上面 pendingBottom 处。
+     *
+     * ⚠️ 但它有个**跨页面泄漏**的坑：打开设置页时工作区被移出组合，这条 effect
+     * 不跑，而 `pendingBottom` 属于 `rememberSaveable` 之外的状态 —— 它会被
+     * `MochiNavHost` 的 `SaveableStateHolder` 连同整个 ChatList 的状态一起留住。
+     * 于是"切会话 → 立刻打开设置 → 返回"时，标记仍是 true，回来就**强制置底**，
+     * 把用户在读的历史顶走（用户报的「打开设置等页面，对话流会置底」）。
+     *
+     * 修法：贴底超时也给一个上限。列表在**可见**状态下正常几百毫秒内必然贴底；
+     * 若被打断（页面切走、内容还没测量），标记不该无限期留着 —— 它服务的是
+     * "这次切会话的第一屏"，不是"以后任何一次回来都要落底"。
      */
     LaunchedEffect(listState) {
         snapshotFlow {
@@ -680,6 +789,25 @@ fun ChatList(
         }
             .distinctUntilChanged()
             .collect { atBottom -> if (atBottom) pendingBottom = false }
+    }
+    /*
+     * `pendingBottom` 的**超时清除**。
+     *
+     * 标记置真之后最多保留 [PendingBottomTtlMillis]；期间没贴到底（页面被切走、
+     * 内容还没灌进来）就直接丢掉。见上面那段说明里的"跨页面泄漏"。
+     *
+     * 用 `snapshotFlow` 观察标记本身而不是在置真处起协程：置真发生在 collect 里，
+     * 那里起协程会让"每次内容变化"都新建一个协程。
+     */
+    LaunchedEffect(listState) {
+        snapshotFlow { pendingBottom }
+            .distinctUntilChanged()
+            .collect { pending ->
+                if (!pending) return@collect
+                kotlinx.coroutines.delay(PendingBottomTtlMillis)
+                // 超时后仍然为真 → 说明这次没能贴底（被打断），丢掉它。
+                if (pendingBottom) pendingBottom = false
+            }
     }
 
     // 输入法弹出/收起时把对话吸回底部：键盘顶起视口后列表可视高度骤变，
@@ -739,46 +867,137 @@ fun ChatList(
         revision = state.transcriptRevision,
     )
     /*
-     * 上一帧的块表。**只为前插锚定服务**。
+     * 块表的 `remember` key：**只看结构，不看正文长度**。
      *
-     * 为什么需要它：往前补一页历史后，第一个 `Turn` 的首成员会变（新内容并入它），
-     * 于是那一块的 `key` 变了 —— 对 `LazyColumn` 来说就是一条全新的 item，
-     * 之前记住的滚动锚点作废，位置被夹到某项上。
-     * 用户看到的就是「每次上滑加载都会置顶」。
+     * ⚠️ 这是「对话流卡顿」的直接修复点，别把 `lastBodyLength` 加回来。
      *
-     * 所以这里留住上一帧，算新块表时把**还认得出来的** key 钉回去
-     * （见 `TurnLayout.pinForPrepend`），让那一块对列表而言仍是同一块。
+     * `blocks` 的 key 原来是 [TranscriptStamp]，而那个指纹含 `lastBodyLength`
+     * 与 `lastToolCount` —— 流式输出每 32ms 让正文长度变一次，于是**每个 token**
+     * 都要：`transcript.map` 分配一份 O(n) 的 `Entry` 列表，再把整表切一遍块。
+     * 一万条消息的会话里，这是每帧几百微秒到毫秒级的主线程分配 + 遍历，
+     * 而它换来的结果与上一帧**完全一样**（追加正文不改块结构）。
      *
-     * ⚠️ 只在"前插"时钉，**追加**时不钉：追加场景下首成员本来就不变，
-     * 钉不钉都一样；而"整份 transcript 被替换"（切会话 / 回到最新）时
-     * 必须让它**彻底重建**，否则旧 key 会被钉到无关内容上。
-     * 所以判据是 `transcriptPrependRevision` 变过、且会话没换。
+     * 真正会改变块结构的变化只有这些：
+     *  · 加/删消息 → [size] / [firstId] / [lastId]；
+     *  · 末尾多了一条工具行 → 同一个回合多了个成员，但块还是那一块 ——
+     *    不过成员列表要跟着变，所以 [lastToolCount] 留着（它只在**新增工具**时变，
+     *    工具输出增长只改文本，不改条数）；
+     *  · 前插 / 回到最新 / 原地替换 → [prepend] / [jump] / [revision] / [session]。
+     *
+     * `lastBodyLength` 只影响**内容**渲染，而内容的刷新由 LazyColumn 各 item
+     * 自己的重组负责（它们读的是 `transcriptById`，那份索引由本指纹驱动）。
      */
-    var previousBlocks by remember { mutableStateOf<List<TurnLayout.Block>>(emptyList()) }
-    var lastPrependSeen by remember { mutableStateOf(state.transcriptPrependRevision) }
-    var lastSessionForBlocks by remember { mutableStateOf(state.activeSessionId) }
+    val structureStamp = StructureStamp(
+        size = transcript.size,
+        firstId = transcript.firstOrNull()?.id,
+        lastId = transcript.lastOrNull()?.id,
+        lastToolCount = transcript.lastOrNull()?.tools?.size ?: -1,
+        prepend = state.transcriptPrependRevision,
+        jump = state.transcriptJumpRevision,
+        session = state.activeSessionId,
+        revision = state.transcriptRevision,
+    )
 
-    val blocks = remember(transcriptStamp) {
+    val blocks = remember(structureStamp) {
         val entries = transcript.map {
             TurnLayout.Entry(it.id, isUser = it.kind == ChatKind.USER)
         }
-        val sessionChanged = state.activeSessionId != lastSessionForBlocks
-        val prependHappened = state.transcriptPrependRevision != lastPrependSeen
-        val pinned = if (prependHappened && !sessionChanged) {
-            TurnLayout.pinForPrepend(previousBlocks, TurnLayout.blocks(entries))
+        val sessionChanged = state.activeSessionId != blockCache.lastSession
+        val prependHappened = state.transcriptPrependRevision != blockCache.lastPrepend
+        // 只切一次块：`prependHappened` 时先算一份无 pin 的给 `pinForPrepend` 比对，
+        // 否则直接算最终结果。之前**无条件**切两次块，对几千条消息是白算一遍。
+        val next = if (prependHappened && !sessionChanged) {
+            val unpinned = TurnLayout.blocks(entries)
+            TurnLayout.blocks(entries, TurnLayout.pinForPrepend(blockCache.previous, unpinned))
         } else {
-            emptyMap()
+            TurnLayout.blocks(entries)
         }
-        val next = TurnLayout.blocks(entries, pinned)
         // 记下这一帧，供下一次前插对齐；顺手把版本号推进到当前。
-        previousBlocks = next
-        lastPrependSeen = state.transcriptPrependRevision
-        lastSessionForBlocks = state.activeSessionId
+        blockCache.previous = next
+        blockCache.lastPrepend = state.transcriptPrependRevision
+        blockCache.lastSession = state.activeSessionId
         next
+    }
+    LaunchedEffect(state.transcriptPrependRevision) {
+        /*
+         * ⚠️ 这里**不能**用 `lastPrepend`。
+         *
+         * 它被下面的吸底 effect（`ContentStamp` 那个 `collect`）用作"这次是不是前插"的
+         * 判据，而那个 collect 与这个 effect 都在组合后启动 —— 谁先跑不保证。
+         * 实测它先跑，并且已经把 `lastPrepend` 推进到当前值，于是这里的判据
+         * `state.transcriptPrependRevision == lastPrepend` 立刻为真、直接 return：
+         *
+         * **锚定逻辑一次都没执行过**（真机日志里 `prependAnchor` 零条），
+         * 用户看到的就是"加载完永远跳到最上面"。
+         *
+         * 用一个**只属于这里**的变量记住上次处理过的版本号，两者互不干扰。
+         */
+        if (state.transcriptPrependRevision == lastAnchoredPrepend) return@LaunchedEffect
+        lastAnchoredPrepend = state.transcriptPrependRevision
+        val anchorId = prependAnchorId
+        val key = prependAnchorKey
+        if (anchorId == null && key == null) {
+            ZhiMemory.log("prependAnchor NO-KEY rev=${state.transcriptPrependRevision}")
+            return@LaunchedEffect
+        }
+        val desiredOffset = prependAnchorOffset
+        // 头部恒定 1 项：`transcriptHasOlder` 为真时是 `older-loader`，
+        // 否则（非空会话）是 `transcript-start`。两者都占一个 LazyColumn item。
+        val headerCount = if (state.transcript.isEmpty()) 0 else 1
+        /*
+         * 先按**消息 id** 找那一块，找不到再退回按 key 找。
+         *
+         * id 是主锚点：前插之后它一定还在（历史消息本来就是同一条），
+         * 而块的 key 会因为"新内容并入第一轮"或 `pinForPrepend` 而变化。
+         * 用一个会变的值当锚点，正是「加载完跳到最上面」这一类问题的来源。
+         */
+        val blockIndex = anchorId?.let { id ->
+            blocks.indexOfFirst { TurnLayout.containsMessage(it, id) }
+        }?.takeIf { it >= 0 }
+            ?: blocks.indexOfFirst { it.key == key }
+        if (blockIndex < 0) {
+            // 锚点那一块已经不在了（会话被换掉 / 被尾部淘汰）。没有可复现的目标，
+            // 与其猜一个位置，不如什么都不做 —— 交给 `LazyColumn` 自己的锚定。
+            ZhiMemory.log("prependAnchor SKIP id=$anchorId key=$key（块已不在块表里）")
+            return@LaunchedEffect
+        }
+        val targetIndex = headerCount + blockIndex
+        // 立即登记一次：新内容还没测量完时这一条也会被尊重。
+        listState.requestScrollToItem(targetIndex, desiredOffset)
+        // 再连续校验若干帧 —— 每次重新测量都可能把位置夹走。
+        var stableFrames = 0
+        var corrections = 0
+        repeat(PrependAnchorMaxFrames) {
+            if (listState.firstVisibleItemIndex == targetIndex &&
+                listState.firstVisibleItemScrollOffset == desiredOffset
+            ) {
+                if (++stableFrames >= 2) {
+                    ZhiMemory.log(
+                        "prependAnchor OK id=$anchorId target=$targetIndex off=$desiredOffset fix=$corrections",
+                    )
+                    return@LaunchedEffect
+                }
+            } else {
+                stableFrames = 0
+                corrections++
+                listState.requestScrollToItem(targetIndex, desiredOffset)
+            }
+            withFrameNanos { }
+        }
+        ZhiMemory.log(
+            "prependAnchor GAVE-UP id=$anchorId target=$targetIndex" +
+                " got=${listState.firstVisibleItemIndex} fix=$corrections",
+        )
     }
     // TurnLayout only stores ids. Resolve them through one index instead of scanning the
     // complete transcript once for every member of every block (which becomes quadratic
     // for long sessions).
+    //
+    // ⚠️ key 必须是**含正文长度**的 [TranscriptStamp]，不能换成结构指纹。
+    // 这个映射存的是 `ChatItem` **实例**：流式追加 token 时列表里那一条是**新对象**，
+    // 结构没变 → 结构指纹不变 → 映射不重建 → 各 item 拿到的仍是旧实例，
+    // 表现就是「回复停在半句不动」。它只是 O(n) 一次 `associateBy`，
+    // 不像切块那样要分配 Entry 列表并按用户消息断开回合，代价低得多。
     val transcriptById = remember(transcriptStamp) { transcript.associateBy { it.id } }
 
     // 「已经见过」的消息 id —— 用来判断某个成员是**本次新出现的**还是历史。
@@ -992,7 +1211,7 @@ fun ChatList(
                         }
                         }
                     },
-                contentPadding = PaddingValues(top = topInset, bottom = bottomInset),
+                contentPadding = PaddingValues(top = topInset, bottom = bottomInset + imeSettledLift),
             ) {
                 if (state.transcript.isEmpty()) {
                     // 三态而不是两态：空列表可能是「新会话」也可能是「正在载入」。
@@ -1680,6 +1899,38 @@ private fun AnimatedMember(
 }
 
 /**
+ * 对话流的**结构指纹**：只覆盖"块表会发生什么变化"，不含正文长度。
+ *
+ * ## 为什么它与 [TranscriptStamp] 必须分开
+ *
+ * 两者原来是一个指纹，于是 `blocks` 的 `remember` key 里带着 `lastBodyLength` ——
+ * 流式输出每 32ms 让正文长度变一次，就**每个 token 重算一遍块表**：
+ * `transcript.map { Entry(...) }` 分配一份 O(n) 的列表，再按"用户发言断开回合"
+ * 切一遍。结果与上一帧一模一样 —— 追加正文根本不改变块结构。
+ *
+ * 长会话下这一项足以把主线程吃满，而它换来的收益是零。所以按用途拆开：
+ *
+ * | 指纹 | 用在哪 | 含正文长度 |
+ * | --- | --- | --- |
+ * | 本类 | `blocks`（切块、块 key、多选手势的块下标） | ✗ |
+ * | [TranscriptStamp] | `transcriptById`（id → `ChatItem` 实例）+ 吸底判据 | ✓ |
+ *
+ * ⚠️ 漏判的后果是**界面不更新**（块表不重建 = 列表少一条），所以这里保留
+ * `lastToolCount`：新增一条工具行会让那个回合多一个成员，块表要跟着变。
+ * 而工具**输出增长**只改文本、不改条数，不会误触发。
+ */
+private data class StructureStamp(
+    val size: Int,
+    val firstId: String?,
+    val lastId: String?,
+    val lastToolCount: Int,
+    val prepend: Int,
+    val jump: Int,
+    val session: String,
+    val revision: Int,
+)
+
+/**
  * 对话流的**结构指纹**：用来替代「拿整份 `List<ChatItem>` 当 `remember` 的 key」。
  *
  * ## 它解决的是什么
@@ -1819,3 +2070,34 @@ private fun SelectionBar(
         }
     }
 }
+
+/**
+ * 前插锚定最多校验多少帧。
+ *
+ * 一次补 30 条消息时 `LazyColumn` 要好几帧才测量完，而每次重新测量都可能
+ * 把滚动位置夹回去。60 帧（约 1 秒）足够覆盖这个窗口；再长就没意义了 ——
+ * 用户在那一秒之后已经在自己滑动，继续纠正就是跟他的手抢。
+ */
+private const val PrependAnchorMaxFrames = 60
+
+/**
+ * 切块表的草稿缓存（见 `blocks` 那段注释）。
+ *
+ * 用普通字段而不是 `mutableStateOf`：它只在"下一次算块表"时被读，
+ * 没有任何界面因为它变化而重组。写成 state 并在组合期更新会触发
+ * 「写 → 失效 → 重跑 → 再写」的循环，流式输出时每帧都跑一遍。
+ */
+private class BlockCache {
+    var previous: List<TurnLayout.Block> = emptyList()
+    var lastPrepend: Int = Int.MIN_VALUE
+    var lastSession: String = ""
+}
+
+/**
+ * `pendingBottom` 的最长存活时间。
+ *
+ * 列表在可见状态下几百毫秒内必然贴底，所以这个值只要"比正常贴底慢一些"就够。
+ * 1.2 秒足以覆盖"消息还在灌 + 图片解码撑高"的那几帧，又短到不会把
+ * 「打开设置页再回来」也判成待落底（用户在那来回通常超过这个时间）。
+ */
+private const val PendingBottomTtlMillis = 1200L

@@ -145,4 +145,43 @@ class TurnLayoutTest {
         assertTrue(TurnLayout.pinForPrepend(emptyList(), TurnLayout.blocks(listOf(other("a1")))).isEmpty())
         assertTrue(TurnLayout.pinForPrepend(TurnLayout.blocks(listOf(other("a1"))), emptyList()).isEmpty())
     }
+
+    @Test
+    fun pinForPrependAlignsFromTheTailBecauseAPrependInsertsManyBlocks() {
+        // ⚠️ 这条是「加载历史置顶」的正面断言。
+        //
+        // 一页历史 = 30 条消息，里面通常有好几条用户发言，而每条用户发言都是
+        // 独立的 Standalone —— 所以前插会往**头部插入好几块**，`next` 的前 k 项
+        // 是全新内容，旧表整体被推到后面 k 位。
+        //
+        // 按前端下标对齐时，旧的第 0 块只会去比"新的第 0 块"（互不相干），
+        // 而真正该钉的那一块（旧 0 ↔ 新 k）根本没被比较到 —— key 照旧变掉，
+        // LazyColumn 认为那是另一条 item，滚动锚点作废。
+        val before = TurnLayout.blocks(listOf(other("a1"), user("u1"), other("a2")))
+        // 前插一整轮：新的一条用户发言 + 一轮助手回合，所以块数从 3 变成 5。
+        val after = TurnLayout.blocks(
+            listOf(user("u0"), other("a0early"), other("a1"), user("u1"), other("a2")),
+        )
+        assertEquals(3, before.size)
+        // 前插后的块表：[St(u0), Turn(a0early,a1), St(u1), Turn(a2)] —— 多了一块。
+        assertEquals(4, after.size)
+
+        val pinned = TurnLayout.blocks(
+            listOf(user("u0"), other("a0early"), other("a1"), user("u1"), other("a2")),
+            TurnLayout.pinForPrepend(before, after),
+        )
+        // 原来第一轮（首成员 a1）现在位于下标 1，它必须仍叫 "a1"。
+        assertEquals("a1", pinned[1].key)
+        // 原来末尾那一轮也不能被顺手改掉。
+        assertEquals("a2", pinned[3].key)
+    }
+
+    @Test
+    fun containsMessageFindsBothBlockKinds() {
+        // 前插后按**消息 id** 找回锚点要用它（见 ChatList 的 prependAnchorId）。
+        val blocks = TurnLayout.blocks(listOf(other("a1"), other("g1"), user("u1")))
+        assertTrue(TurnLayout.containsMessage(blocks[0], "g1"))
+        assertTrue(TurnLayout.containsMessage(blocks[1], "u1"))
+        assertTrue(blocks.none { TurnLayout.containsMessage(it, "nope") })
+    }
 }

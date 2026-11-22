@@ -309,6 +309,31 @@ private fun ZhiCodeScreen(
         }
     }
 
+    /*
+     * 转场期间暂停整页玻璃录制（见 `Glass.suspended` 的说明）。
+     *
+     * ## 为什么用「栈变化后的一小段时间窗」而不是读 `NavDisplay` 的转场状态
+     *
+     * `NavDisplay` 的转场进度在 `presentation` 内部，公开 API 里拿不到一个
+     * 稳定的 `isTransitioning`。而转场时长是**已知的**（`NavTransitions.MiuixDefault`
+     * 约 350ms，见下面 `NavDisplay` 的 `transition =`），所以开一个略长于它的窗口
+     * 就够了：窗口内不录，窗口结束恢复录制。
+     *
+     * 窗口取值比转场长一点（[GlassSuspendMillis] > 转场时长）：短了会在转场尾声
+     * 突然开始录制（那一帧又要整屏重录），长了只是多停一会儿录制 —— 停录制
+     * 本身不花钱，它只是不往离屏层画而已。
+     *
+     * ⚠️ 这个 effect 以 `desiredStack` 为键，连续快速进出会重启它（取消上一个
+     * 延时），所以不会出现"上一次的恢复把这一次的暂停提前取消"。
+     */
+    LaunchedEffect(desiredStack) {
+        glass.suspended = true
+        glassMain.suspended = true
+        kotlinx.coroutines.delay(GlassSuspendMillis)
+        glass.suspended = false
+        glassMain.suspended = false
+    }
+
     // ---- 正交效果层（圆角裁剪 + 调暗）与手势返回方向 ----
     //
     // 照官方 example（`AppContent.kt`）的写法：
@@ -638,3 +663,13 @@ private sealed interface SettingsKey : NavKey {
      */
     data object ChatDisplay : SettingsKey
 }
+
+/**
+ * 转场期间暂停玻璃录制的时长（毫秒）。
+ *
+ * 取值说明见 [`AppScaffold`] 里那个 `LaunchedEffect(desiredStack)`：
+ * 它必须**略长于** `NavTransitions.MiuixDefault` 的转场时长（约 350ms），
+ * 否则转场尾声会突然恢复录制、那一帧又要整屏重录一遍。
+ * 多停一会儿不花钱 —— 暂停只是不往离屏层画，不做任何额外工作。
+ */
+private const val GlassSuspendMillis = 420L

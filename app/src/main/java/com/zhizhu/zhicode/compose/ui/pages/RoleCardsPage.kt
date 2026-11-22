@@ -3,6 +3,7 @@ package com.zhizhu.zhicode.compose.ui.pages
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -12,8 +13,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.RoleCard
 import com.zhizhu.zhicode.compose.model.RoleCardEditor
@@ -30,12 +34,11 @@ import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
 import com.zhizhu.zhicode.compose.ui.rememberActionBusy
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
-import top.yukonga.miuix.kmp.basic.DropdownDefaults
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -143,14 +146,14 @@ private fun RoleCardList(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
-        // 与设置主页同形态：一张分组卡里若干行，每行不再各套一张卡。
-        // （整页模式下不限高，滚动交给外层 SettingsSubPage。）
-        SettingsGroup("角色卡") {
-            if (state.loading) {
+        if (state.loading) {
+            SettingsGroup("角色卡") {
                 // 载荷还在 IO 上读（见 openRoleCards）：「暂时为空」与「本来就没有」
                 // 都是空列表，不区分就会把「正在读」误报成「还没建过」。
                 SettingsLoadingHint()
-            } else if (state.cards.isEmpty()) {
+            }
+        } else if (state.cards.isEmpty()) {
+            SettingsGroup("角色卡") {
                 Text(
                     text = "还没有角色卡。点「新建」写一段人设指令（例如固定的回答风格、必须遵守的" +
                         "工作流程），保存后会立即启用。",
@@ -158,52 +161,95 @@ private fun RoleCardList(
                     fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 )
-            } else {
-                state.cards.forEach { card ->
-                    val active = card.id == state.activeId
-                    // 同 API 配置列表：标题主色与左侧勾是同时变的。
-                    val titleColor by animateColorAsState(
-                        targetValue = if (active) scheme.primary else scheme.onBackground,
-                        animationSpec = ZhiMotion.colorSpec,
-                        label = "roleCardTitle",
-                    )
-                    BasicComponent(
-                        title = card.name,
-                        titleColor = BasicComponentDefaults.titleColor(color = titleColor),
-                        summary = card.summary,
-                        summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
-                        startAction = {
-                            // 未启用的留一个空位保持左对齐一致（与 API 配置列表同样的处理）。
-                            // 选中标记用 Check 图标而非 Checkbox，理由见 Dialogs.kt 同一处。
-                            if (active) {
-                                Icon(
-                                    painter = ZhiIcons.check,
-                                    contentDescription = null,
-                                    tint = scheme.primary,
-                                    modifier = Modifier.size(DropdownDefaults.CheckIconSize),
+            }
+        } else {
+            /*
+             * ⚠️ **一张角色卡 = 一张独立的 card**，不再把多张塞进同一个分组卡。
+             *
+             * 之前是 `SettingsGroup("角色卡") { forEach { BasicComponent(...) } }` ——
+             * 一张卡里叠着 N 行，行与行之间只靠分隔线，视觉上像"一条设置被劈成了几段"，
+             * 而角色卡是**互相独立的实体**（各有名字、内容、启用状态），
+             * 塞进同一张卡里既看不出边界，删错/点错也没有任何缓冲。
+             *
+             * 每张卡自己带间距，所以不能再套 `SettingsGroup`（那会多一层卡）。
+             */
+            state.cards.forEach { card ->
+                val active = card.id == state.activeId
+                val titleColor by animateColorAsState(
+                    targetValue = if (active) scheme.primary else scheme.onBackground,
+                    animationSpec = ZhiMotion.colorSpec,
+                    label = "roleCardTitle",
+                )
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    cornerRadius = com.zhizhu.zhicode.compose.theme.ZhiRadius.card,
+                    insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    colors = CardDefaults.defaultColors(
+                        color = if (active) {
+                            com.zhizhu.zhicode.compose.theme.ZhiColors.cardSurface()
+                        } else {
+                            scheme.surfaceContainer
+                        },
+                        contentColor = scheme.onSurface,
+                    ),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        /*
+                         * 勾选框**就是**启用开关（点它 = 启用这张 / 停用这张）。
+                         *
+                         * 理由：角色卡同一时刻只有一张生效，所以它是一个**单选的集合** ——
+                         * 而"停用"就是"一张都不选"。用一个 Checkbox 表达这件事，
+                         * 比原来那个"行尾有个勾 + 页面底部还有一个独立的停用按钮"清楚得多：
+                         *  · 勾上 → 启用这张（自动取消其他张）；
+                         *  · 取消勾选当前这张 → 停用（不再需要底部那个按钮）。
+                         *
+                         * 仍然用 Miuix Checkbox 而不是自绘：点按区域、动画、无障碍语义
+                         * 都由库负责，自己画一个 icon 这些全要重写。
+                         */
+                        Checkbox(
+                            state = if (active) ToggleableState.On else ToggleableState.Off,
+                            onClick = {
+                                if (active) onDisable() else onSelect(card)
+                            },
+                            modifier = Modifier.padding(end = 4.dp),
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = card.name,
+                                color = titleColor,
+                                fontSize = MiuixTheme.textStyles.body1.fontSize,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (card.summary.isNotBlank()) {
+                                Text(
+                                    text = card.summary,
+                                    color = scheme.onSurfaceVariantSummary,
+                                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(top = 2.dp),
                                 )
                             }
-                        },
-                        endActions = {
-                            ZhiIconButton(icon = ZhiIcons.edit, description = "编辑", onClick = { onEdit(card) }, iconSize = 15.dp)
-                            ZhiIconButton(icon = ZhiIcons.close, description = "删除", onClick = { onDelete(card) }, iconSize = 15.dp)
-                        },
-                        // 点一下就在"启用这张"之间切换；点已启用的那张不做停用（停用有单独按钮，
-                        // 避免误触把正在用的角色卡关掉却以为是切换到了别的）。
-                        onClick = { if (!active) onSelect(card) },
-                        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                    )
+                        }
+                        ZhiIconButton(
+                            icon = ZhiIcons.edit,
+                            description = "编辑",
+                            onClick = { onEdit(card) },
+                            iconSize = 15.dp,
+                        )
+                        ZhiIconButton(
+                            icon = ZhiIcons.close,
+                            description = "删除",
+                            onClick = { onDelete(card) },
+                            iconSize = 15.dp,
+                        )
+                    }
                 }
             }
-        }
-
-        if (state.activeId.isNotEmpty()) {
-            // 整页模式下「停用」放列表尾（原生 TextButton，与顶栏动作同族）
-            TextButton(
-                text = "停用当前角色卡",
-                onClick = onDisable,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            )
         }
     }
 }
