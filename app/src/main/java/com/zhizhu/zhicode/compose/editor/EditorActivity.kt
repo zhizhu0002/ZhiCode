@@ -12,7 +12,7 @@ import com.zhizhu.zhicode.compose.data.ThemeSettings
 import com.zhizhu.zhicode.compose.data.ThemeStore
 import com.zhizhu.zhicode.compose.theme.ZhiAppTheme
 import com.zhizhu.zhicode.compose.theme.ZhiThemeMode
-import com.zhizhu.zhicode.compose.ui.pages.EditorPage
+import com.zhizhu.zhicode.compose.ui.pages.miuix.EditorPage
 
 /**
  * 文本编辑器的宿主 Activity。

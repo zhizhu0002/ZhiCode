@@ -34,8 +34,6 @@ import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.PageFeedbackSlot
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
-import com.zhizhu.zhicode.compose.ui.effects.PageBlurBar
-import com.zhizhu.zhicode.compose.ui.effects.rememberPageBlurBackdrop
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -51,7 +49,6 @@ import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
 import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
 import top.yukonga.miuix.kmp.nav.transition.NavTransitions
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 /**
@@ -305,9 +302,21 @@ internal fun SettingsSubPage(
     val scheme = MiuixTheme.colorScheme
     val listState = rememberLazyListState()
     val topAppBarScrollBehavior = MiuixScrollBehavior()
-    val backdrop = rememberPageBlurBackdrop().takeIf { blurTopBar }
+    /*
+     * ⚠️ 二级页**不用** `layerBackdrop` + `PageBlurBar`（`blurTopBar` 因此不再生效，
+     * 保留参数只为调用点兼容）。
+     *
+     * 与设置主页同一个 bug 的两个症状：
+     *
+     * 1. **卡**：整页录进离屏层、滚动时每帧重录。二级页里有 MCP 表单、技能编辑器、
+     *    提示词长文本框，重录代价比主页还大。
+     * 2. **文字重叠**：顶栏 `Color.Transparent`，模糊没跟上时下面的正文直接从顶栏透出来。
+     *
+     * 顶栏改纯色 `surface`，两条一起消失（参考实现 rikkahub 的二级页同样不捕获）。
+     */
+    val backdrop: top.yukonga.miuix.kmp.blur.LayerBackdrop? = null
 
-    // FAB 的收放判定。`previousOffset` 刻意放在 derivedStateOf 外面（每次求值时更新），
+    // FAB 的收放判定。`previousScroll` 刻意放在 derivedStateOf 外面（每次求值时更新），
     // 这跟参考实现的写法一致：它比较的是"这一次求值"与"上一次求值"的滚动量之差。
     var previousScroll by remember { mutableIntStateOf(0) }
     val fabVisible by remember {
@@ -320,17 +329,28 @@ internal fun SettingsSubPage(
     }
 
     Scaffold(
+        /*
+         * ⚠️ `containerColor` **不要传**，用 Miuix 的默认值（`MiuixTheme.colorScheme.surface`）。
+         *
+         * 这一条是踩过的坑：为了修"提示词编辑页文字穿透"，这里曾经写成
+         * `containerColor = scheme.background`，结果页面底板变成了偏灰的 surface
+         * 系以外的一块色 —— 与 Miuix 其余页面（设置主页、关于页）不一致，
+         * 用户一眼就看出"底板不是黑的"。
+         *
+         * 而穿透的**真正**原因不在这里：那是 `SettingsPageStack` 的嵌套 `NavDisplay`
+         * 在转场期间同时绘制两页。提示词页已经改成状态直切（见 `PromptSlotsPage`），
+         * 只剩一页存在，穿透在原理上不会发生 —— 不需要靠改底色去遮。
+         */
         topBar = {
-            // 统一模糊：所有二级页的顶栏都走同一套 `PageBlurBar`，与主顶栏、
-            // 关于页、第三方开源页保持一致。
-            //
-            // ⚠️ 之前这里写的是 `color = scheme.surface` —— 一个**不透明**底色，
-            // 于是无论模糊开关是开是关，二级页顶栏看起来都跟别处不一样：
-            // 用户报的「顶栏有的是毛玻璃有的是一块实色」就是这个。
-            // 现在模糊可用时底色取透明（让 textureBlur 的结果透出来），
-            // 不可用时回落到 surface，两条路都不留半透明中间态。
-            val blurActive = backdrop != null
-            PageBlurBar(backdrop = backdrop, blurActive = blurActive) {
+            /*
+             * 顶栏底色 `scheme.surface` **纯色**，不再包 `PageBlurBar`。
+             *
+             * 之前包着是为了对 `layerBackdrop` 取样做毛玻璃，而整页捕获已经去掉
+             * （见上面 `backdrop` 的说明）：没有背板可取样，包着只剩一层恒等的 Box。
+             * 以前「顶栏有的是毛玻璃有的是一块实色」的不一致，现在统一成实色 ——
+             * 与设置主页、rikkahub 的二级页一致。
+             */
+            run {
                 // 与设置主页同款顶栏：Miuix TopAppBar 自带 largeTitle（大标题随滚动折叠），
                 // 对应 rikkahub 二级页的 LargeFlexibleTopAppBar —— 主页与二级页的
                 // 标题层级一致，返回时不会出现「标题突然变小」的断层。
@@ -345,7 +365,7 @@ internal fun SettingsSubPage(
                     // 就完全失效，展开/折叠时标题会突然跳一下。
                     subtitle = subtitle ?: "",
                     scrollBehavior = topAppBarScrollBehavior,
-                    color = if (blurActive) Color.Transparent else scheme.surface,
+                    color = scheme.surface,
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(
@@ -367,7 +387,6 @@ internal fun SettingsSubPage(
             )
             }
         },
-        // Miuix Scaffold 的原生 FAB 槽位：摆放、间距、insets 都由它负责。
         floatingActionButton = {
             floatingActionButton?.let { fab ->
                 if (hideFabOnScrollDown) {
@@ -408,11 +427,20 @@ internal fun SettingsSubPage(
                         .padding(top = padding.calculateTopPadding()),
                 ) { header() }
             }
-            Box(
-                modifier = Modifier.fillMaxWidth().weight(1f).then(
-                    if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier,
-                ),
-            ) {
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                /*
+                 * ⚠️ 回到 `LazyColumn` —— 与 Miuix 官方 example 和本工程设置主页一致。
+                 *
+                 * 中间有一版改成 `Column + verticalScroll`，理由是"修提示词页穿透"。
+                 * 那个因果判断是**错的**：穿透的真正原因是嵌套 `NavDisplay` 转场期间
+                 * 同时绘制两页（提示词页已改成状态直切，见 `PromptSlotsPage`），
+                 * 与滚动容器无关。
+                 *
+                 * 而 `LazyColumn` 才是 Miuix 设置页的既定形态（主页、官方 example 都是它），
+                 * 保留 `overScrollVertical` / `nestedScroll` 这套与顶栏联动的滚动行为；
+                 * 换成普通 `verticalScroll` 会丢掉 `LazyListState` 语义，
+                 * 让依赖它做判定的地方（如 FAB 收放）各写一套像素算术。
+                 */
                 LazyColumn(
                     state = listState,
                     modifier = Modifier

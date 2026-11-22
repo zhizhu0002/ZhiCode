@@ -1706,16 +1706,29 @@ fun ErrorCard(item: ChatItem) {
 }
 
 /**
- * 提示卡片（斜杠命令输出、计划审批结果等）。
+ * 提示卡片（斜杠命令输出、计划审批结果、`/help`、上下文压缩状态等）。
  *
- * 与 [ErrorCard] 同一个通知条分量，只有配色不同（琥珀 = [ZhiNoticeTone.WARN]）：
- * 它和错误是同一层级的信息块，形状本就该一致。
+ * 与 [ErrorCard] 共用同一个通知条分量，只有配色不同 —— 它和错误是同一层级的
+ * 信息块，形状本就该一致。
+ *
+ * ## 为什么是 [ZhiNoticeTone.INFO] 而**不是** WARN
+ *
+ * 这一档原来传的是 WARN（琥珀底）。当时的分工是"错误=红、提示=琥珀"，
+ * 看起来合理，实际后果是：这个应用里**绝大多数** INFO 消息（`/help` 输出、
+ * MCP 列表、压缩进度、帧耗时探针）都走这一条路径，于是整屏都是土黄块。
+ *
+ * 判定信息不该用**颜色**去加重：真正需要用户注意的内容会单独走 [ErrorCard]
+ * 或琥珀色的状态字形。普通提示只要"和正文有区别"就够了 —— 一个中性底
+ * （`surfaceContainer`）配正常正文色即可，这也正是 Miuix `Card` 的层级做法。
+ *
+ * ⚠️ 真正需要琥珀时，直接给 `ZhiNoticeBar(tone = ZhiNoticeTone.WARN)`，
+ * 那对色已按 ≥5:1 调过（见 `ZhiColors.warnFill`）。
  */
 @Composable
 fun InfoCard(item: ChatItem) {
     ZhiNoticeBar(
         title = item.title.ifEmpty { null },
-        tone = ZhiNoticeTone.WARN,
+        tone = ZhiNoticeTone.INFO,
         modifier = Modifier.padding(vertical = 4.dp),
         content = {
             // 提示正文也走 Markdown。这些内容里大量使用 `反引号` 标记命令与参数，

@@ -18,6 +18,11 @@ import top.yukonga.miuix.kmp.theme.ThemeController
 import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
+import ui.feice.mochi.effect.overscroll.ProvideMochiOverscroll
+import ui.feice.mochi.theme.MochiMaterials
+import ui.feice.mochi.theme.mochiGlassMaterials
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
+import com.zhizhu.zhicode.compose.ui.pages.ZhiPageSets
 
 /**
  * 应用的唯一主题栈：深浅判定 + 配色（含 Monet 种子色）+ 文字字阶 + 界面缩放。
@@ -81,7 +86,51 @@ fun ZhiAppTheme(theme: ThemeSettings, content: @Composable () -> Unit) {
             // 麻薯（Mochi）主题再包一层，位置在这里是**有讲究的**：见 MochiSkin.kt
             // 文件头的说明。一句话：现有调用点读 MiuixTheme 的不动，Mochi 组件读到的是
             // 同一套种子色 / 深浅判定 / G2 圆角，两套组件混排时不会各按各的默认值排版。
-            ZhiMochiTheme(theme, content)
+            ZhiMochiTheme(
+                theme = theme,
+                /*
+                 * 材质：只有 Mochi 组 + 用户显式打开时才给玻璃。
+                 *
+                 * `mochiGlassMaterials()` 是 Mochi 内置的整套（栏/控件/面板用 Regular，
+                 * 菜单/警告框用更实的 Thick）。**不给它** = `MochiMaterials()` 默认实例
+                 * = 纯色，界面与引入玻璃前逐像素一致。
+                 *
+                 * `remember` 是必须的，不是优化：`mochiGlassMaterials()` 每次调用都会
+                 * 建新的 `MochiMaterials` 实例，而 `MochiTheme` 拿到新实例会重建整棵
+                 * 玻璃渲染配置（取样层、金字塔级数都要重算）。不 remember 的话，
+                 * 主题层每次重组都会把玻璃引擎重置一遍。
+                 */
+                materials = remember(theme.mochiGlass) {
+                    if (theme.mochiGlass) mochiGlassMaterials() else MochiMaterials()
+                },
+            ) {
+                /*
+                 * 界面主题组（一个主题 = 一组 page.kt）。
+                 *
+                 * 用 `staticCompositionLocalOf`：它只在换主题时变一次，值一变就让整棵
+                 * 子树重组 —— 那正是换组时想要的（一屏全换），平时零逐帧开销。
+                 *
+                 * ⚠️ 放在 **MochiTheme 内层**：Mochi 组的页面要读 `MochiTheme.*`，
+                 * 而组的分辨（`ZhiSkins.byId`）只用到一个字符串，不需要主题色板。
+                 * 内外顺序对"读不到"没有影响，但放内层能让 Mochi 组页面在任何
+                 * 一层被引用时都拿得到一致的 Mochi 主题。
+                 */
+                CompositionLocalProvider(LocalZhiPageSet provides ZhiPageSets.byId(theme.pageSetId)) {
+                    /*
+                     * 越界回弹：Mochi 组件要求根部提供，`llms.txt:10` 把它和 MochiTheme
+                     * 并列为 root 必接项。
+                     *
+                     * 为什么现在就接（还没上 Mochi 页面）：它提供的是 Mochi 组件读的
+                     * `LocalMochiOverscroll`，没有它时 Mochi 列表回退到硬停，与
+                     * `philosophy.md:38`「越界用橡皮筋，不硬停」不一致。
+                     *
+                     * 对现有界面无影响：Miuix 的 `overScrollVertical()` 不读这个 Local。
+                     */
+                    ProvideMochiOverscroll {
+                        content()
+                    }
+                }
+            }
         }
     }
 }
@@ -280,19 +329,44 @@ private fun Colors.zhiLightNeutrals(): Colors = copy(
     secondaryVariant = ZhiColors.SoftFillLight,
     secondaryContainer = ZhiColors.SoftFillLight,
     onBackgroundVariant = ZhiColors.MutedLight,
+    /*
+     * 下面三项是**容器上的次级文字**。Miuix 浅色给的是 `#A2A2A2` / `#959595`，
+     * 压在 `#FAFAFC` / `#FFFFFF` 上只有 **2.45:1 / 3.00:1** —— 远低于正文要求的
+     * 4.5:1。它们被 `onSurfaceContainerHigh` / `onSurfaceContainerVariant`
+     * 这两个槽位取用（对话框内容、下拉项、设置行的说明），于是浅色下这些字
+     * 看起来"很淡、像被洗过"。
+     *
+     * 换成 [ZhiColors.MutedLight] 的同一族中性灰，实测 5.27:1 / 5.64:1。
+     */
+    onSurfaceContainerHigh = ZhiColors.MutedLight,
+    onSurfaceContainerVariant = ZhiColors.MutedLight,
 )
 
 /**
  * 深色侧的同一批重映射。
  *
  * 容器色沿用 Miuix 原值（`#242424` 一族本来就是对的，它们与 [ZhiColors.PanelDark]
- * 一致），只改**弱化文字/图标**这一项 —— 见 [zhiLightNeutrals] 上方那段说明。
+ * 一致），改的是**容器上的文字** —— 见 [zhiLightNeutrals] 上方那段说明。
  *
- * 另外把 `onSurfaceVariantSummary` 也从 `#80FFFFFF`（50% 白，浮在任何底色上都偏灰）
- * 提到 62% 白：工具卡的摘要行、设置行的副标题全用它，50% 在 `#2D2D2D` 卡片上
- * 只有约 4.1:1，看起来就是"发灰的说明文字"。
+ * ## 三个槽位的对比度（这是「深色模式也有点问题」的主要成分）
+ *
+ * Miuix 深色给出的这三档在深色容器上都是**读不清**的：
+ *
+ * | 槽位 | Miuix 原值 | 所在底 | 对比度 | 换成 | 新对比度 |
+ * | --- | --- | --- | --- | --- | --- |
+ * | `onSurfaceVariantSummary` | `#80FFFFFF` | `#2D2D2D` | 4.1:1 | [ZhiColors.SummaryDark] | 4.7:1 |
+ * | `onSurfaceContainerHigh` | `#666666` | `#2D2D2D` | **2.40:1** | [ZhiColors.SummaryDark] | 4.7:1 |
+ * | `onSurfaceContainerVariant` | `#737373` | `#2D2D2D` | **2.90:1** | [ZhiColors.SecondaryDark] | 5.3:1 |
+ * | `onSecondaryContainer` | `#7C7C7C` | `#434343` | **2.37:1** | [ZhiColors.SecondaryDark] | 4.6:1 |
+ *
+ * `onSecondaryContainer` 是**最严重**的一个：它被侧栏选中行、设置行、沙箱磁贴
+ * 用来当"选中态正文色"，而 2.37:1 意味着选中的那一行比没选中的还难读 ——
+ * 这也是「深色下有些字发灰、糊成一团」的来源。
  */
 private fun Colors.zhiDarkNeutrals(): Colors = copy(
     onBackgroundVariant = ZhiColors.MutedDark,
     onSurfaceVariantSummary = ZhiColors.SummaryDark,
+    onSurfaceContainerHigh = ZhiColors.SummaryDark,
+    onSurfaceContainerVariant = ZhiColors.SecondaryDark,
+    onSecondaryContainer = ZhiColors.SecondaryDark,
 )

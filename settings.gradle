@@ -15,7 +15,7 @@ dependencyResolutionManagement {
         maven { url = 'https://www.jitpack.io' }
     }
 }
-rootProject.name = 'IQ-Code-Compose'
+rootProject.name = 'Zhicode'
 include ':app'
 include ':Bcore'
 include ':black-reflection'

@@ -8,14 +8,14 @@ import androidx.compose.ui.graphics.RectangleShape
 import com.zhizhu.zhicode.compose.model.ChoiceIntent
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
-import com.zhizhu.zhicode.compose.ui.pages.overlays.AttachFileOverlay
-import com.zhizhu.zhicode.compose.ui.pages.overlays.ChoicePickerOverlay
-import com.zhizhu.zhicode.compose.ui.pages.overlays.CopySheetOverlay
-import com.zhizhu.zhicode.compose.ui.pages.overlays.EnvironmentOverlay
-import com.zhizhu.zhicode.compose.ui.pages.overlays.ModelPickerOverlay
-import com.zhizhu.zhicode.compose.ui.pages.overlays.PermissionOverlay
-import com.zhizhu.zhicode.compose.ui.pages.overlays.PlanApprovalOverlay
-import com.zhizhu.zhicode.compose.ui.pages.overlays.TaskListOverlay
+import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.AttachFileOverlay
+import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.ChoicePickerOverlay
+import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.CopySheetOverlay
+import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.EnvironmentOverlay
+import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.ModelPickerOverlay
+import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.PermissionOverlay
+import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.PlanApprovalOverlay
+import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.TaskListOverlay
 
 /**
  * 弹窗挂载宿主：从 `ZhiCodeScreen` 原地拆出，内容逐字未改。
@@ -47,7 +47,7 @@ internal fun ZhiOverlayHost(
         state.taskListOpen
 
     // 导出面板（照 rikkahub 的 ChatExportSheet）：格式与选项在这里选。
-    com.zhizhu.zhicode.compose.ui.pages.overlays.ExportSheetOverlay(
+    com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.ExportSheetOverlay(
         sheet = state.exportSheet,
         onDismiss = viewModel::dismissExportSheet,
         onIncludeReasoningChange = viewModel::setExportIncludeReasoning,

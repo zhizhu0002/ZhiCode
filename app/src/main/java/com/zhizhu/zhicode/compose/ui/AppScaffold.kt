@@ -1,22 +1,7 @@
 package com.zhizhu.zhicode.compose.ui
 
-import com.zhizhu.zhicode.compose.ui.pages.UiDebugPage
-import com.zhizhu.zhicode.compose.ui.pages.WorkspacePage
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
-import com.zhizhu.zhicode.compose.ui.pages.ApiConfigPage
-import com.zhizhu.zhicode.compose.ui.pages.McpConfigPage
-import com.zhizhu.zhicode.compose.ui.pages.SearchServicesPage
-import com.zhizhu.zhicode.compose.ui.pages.AboutPage
-import com.zhizhu.zhicode.compose.ui.pages.PrivacyPolicyPage
-import com.zhizhu.zhicode.compose.ui.pages.MemoryPage
-import com.zhizhu.zhicode.compose.ui.pages.PromptsPage
-import com.zhizhu.zhicode.compose.ui.pages.ThemePage
-import com.zhizhu.zhicode.compose.ui.pages.ChatDisplayPage
-import com.zhizhu.zhicode.compose.ui.pages.ThirdPartyLicensesPage
-import com.zhizhu.zhicode.compose.ui.pages.UpdatePage
-import com.zhizhu.zhicode.compose.ui.pages.RoleCardsPage
-import com.zhizhu.zhicode.compose.ui.pages.SkillsPage
-import com.zhizhu.zhicode.compose.ui.pages.SettingsPage
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
@@ -235,6 +220,17 @@ private fun ZhiCodeScreen(
     val glassMain = rememberGlass()
     val glass = rememberGlass()
 
+    /*
+     * 当前界面主题组（一个主题 = 一组 page.kt）。
+     *
+     * 下面每个 `entry` 都走 `pages.Xxx(...)`，而不是直接调具体页面 —— 这样
+     * 「换主题」只是换 `LocalZhiPageSet` 的值，路由层一行不动。
+     *
+     * 阶段 2 时它恒为 `MiuixPageSet`（空实现、全部回落），所以读它拿到的就是
+     * 今天这套页面。注入点在 `ZhiAppTheme`，按 `ThemeSettings.pageSetId` 选组。
+     */
+    val pages = LocalZhiPageSet.current
+
     // UI 重构（S1/S2）：顶栏迁入官方 `topBar` 槽位（与 Miuix example 的
     // BlurredBar + TopAppBar 同一结构）。此前顶栏是 Scaffold 内容里手排的
     // 悬浮 Box 层叠 —— 这让「+」下拉菜单等 Overlay 弹层的锚点坐标
@@ -308,6 +304,7 @@ private fun ZhiCodeScreen(
             stack[stack.lastIndex] = desiredStack.last()
         }
     }
+
 
     // ---- 正交效果层（圆角裁剪 + 调暗）与手势返回方向 ----
     //
@@ -390,7 +387,18 @@ private fun ZhiCodeScreen(
         },
     ) {
         entry<AppKey.Workspace> {
-            WorkspacePage(
+            /*
+             * 页面栈**只认接口，不认具体页面**（`ZhiPageSet`）。
+             *
+             * 这是「一个主题 = 一组 page.kt」的接线点：默认组 `MiuixPageSet`
+             * 是空实现、全部回落，所以这一行的行为与之前直接调 `WorkspacePage`
+             * 完全一致 —— 换组时只换 `LocalZhiPageSet` 的值，这里不动。
+             *
+             * ⚠️ 参数里 `isDark` / `wide` / `glass` / `glassMain` 仍然由本层算，
+             * 因为它们是**外壳的职责**（窗口尺寸、玻璃捕获节点不能包含自己），
+             * 不该让每个主题组各算一遍 —— 那会出现两组玻璃对象互相看不到对方。
+             */
+            pages.Workspace(
                 state = state,
                 viewModel = viewModel,
                 isDark = isDark,
@@ -402,172 +410,58 @@ private fun ZhiCodeScreen(
         // 设置页与它的二级页开启边缘滑动返回（Miuix 的 opt-in）；root 工作区不开 ——
         // 它下面没有可回退的页，而内部已经有侧栏抽屉与面板切换在横向上处理手势。
         entry<SettingsKey.Hub>(swipeDismiss = swipeBack) {
-            SettingsPage(
+            pages.Settings(
                 draft = settingsUi,
-                onChange = viewModel::applySettingsDraft,
-                onDismiss = viewModel::closeSettings,
-                onNavigate = viewModel::navigateFromSettings,
+                viewModel = viewModel,
                 extensions = state.extensions,
             )
         }
         entry<SettingsKey.Api>(swipeDismiss = swipeBack) {
-            ApiConfigPage(
-                config = apiUi,
-                onDismiss = viewModel::closeApiConfig,
-                onNew = viewModel::newApiProfile,
-                onEdit = viewModel::editApiProfile,
-                onSelect = viewModel::selectApiProfile,
-                onDelete = viewModel::deleteApiProfile,
-                onDraftChange = viewModel::updateApiProfileDraft,
-                onSave = viewModel::saveApiProfile,
-                onCancelForm = viewModel::cancelApiProfileForm,
-            )
+            pages.ApiConfig(config = apiUi, viewModel = viewModel)
         }
         entry<SettingsKey.Search>(swipeDismiss = swipeBack) {
-            SearchServicesPage(
-                state = searchServicesUi,
-                onDismiss = viewModel::closeSearchServices,
-                onNew = viewModel::newSearchService,
-                onEdit = viewModel::editSearchService,
-                onSelect = viewModel::selectSearchService,
-                onDelete = viewModel::deleteSearchService,
-                onDraftChange = viewModel::updateSearchServiceDraft,
-                onSave = viewModel::saveSearchService,
-                onCancelForm = viewModel::cancelSearchServiceForm,
-            )
+            pages.SearchServices(state = searchServicesUi, viewModel = viewModel)
         }
         entry<SettingsKey.Mcp>(swipeDismiss = swipeBack) {
-            McpConfigPage(
-                config = mcpUi,
-                onDismiss = viewModel::closeMcpConfig,
-                onNew = viewModel::newMcpServer,
-                onEdit = viewModel::editMcpServer,
-                onToggle = viewModel::toggleMcpServer,
-                onDelete = viewModel::deleteMcpServer,
-                onDraftChange = viewModel::updateMcpDraft,
-                onSave = viewModel::saveMcpServer,
-                onCancelForm = viewModel::cancelMcpForm,
-                onTest = viewModel::testMcpServer,
-                onToolOptionsChange = viewModel::setMcpToolOptions,
-                onOpenImport = viewModel::openMcpImport,
-                onImportTextChange = viewModel::updateMcpImportText,
-                onImportConfirm = viewModel::importMcpJson,
-                onImportCancel = viewModel::cancelMcpImport,
-                onTestAll = viewModel::testAllMcpServers,
-                onQueryChange = viewModel::setMcpQuery,
-            )
+            pages.McpConfig(config = mcpUi, viewModel = viewModel)
         }
         entry<SettingsKey.Skills>(swipeDismiss = swipeBack) {
-            SkillsPage(
-                state = skillsUi,
-                onDismiss = viewModel::closeSkills,
-                onQueryChange = viewModel::setSkillQuery,
-                onNew = viewModel::newSkill,
-                onNewUrl = viewModel::newSkillUrl,
-                onOpenDetail = viewModel::openSkillDetail,
-                onCloseDetail = viewModel::closeSkillDetail,
-                onEdit = viewModel::editSkill,
-                onAttach = viewModel::attachSkill,
-                onDelete = viewModel::deleteSkill,
-                onCreateDraftChange = viewModel::updateSkillCreateDraft,
-                onCreate = viewModel::createSkill,
-                onCancelCreate = viewModel::cancelSkillCreate,
-                onBodyChange = viewModel::updateSkillBody,
-                onSave = viewModel::saveSkill,
-                onCancelEdit = viewModel::cancelSkillEdit,
-                onNewFile = viewModel::newSkillFile,
-                onFileDraftChange = viewModel::updateSkillFileDraft,
-                onSaveFile = viewModel::saveSkillFile,
-                onCancelFile = viewModel::cancelSkillFileDraft,
-                onImportFile = viewModel::importSkillFromUri,
-                onDeleteFile = viewModel::deleteSkillFile,
-                onUrlDraftChange = viewModel::updateSkillUrlDraft,
-                onUrlImport = viewModel::importSkillFromUrl,
-                onCancelUrl = viewModel::cancelSkillUrl,
-            )
+            pages.Skills(state = skillsUi, viewModel = viewModel)
         }
         entry<SettingsKey.RoleCards>(swipeDismiss = swipeBack) {
-            RoleCardsPage(
-                state = roleCardsUi,
-                onDismiss = viewModel::closeRoleCards,
-                onNew = viewModel::newRoleCard,
-                onEdit = viewModel::editRoleCard,
-                onSelect = viewModel::selectRoleCard,
-                onDisable = viewModel::disableRoleCard,
-                onDelete = viewModel::deleteRoleCard,
-                onDraftChange = viewModel::updateRoleCardDraft,
-                onSave = viewModel::saveRoleCard,
-                onCancelEditor = viewModel::cancelRoleCardEditor,
-            )
+            pages.RoleCards(state = roleCardsUi, viewModel = viewModel)
         }
         entry<SettingsKey.Memory>(swipeDismiss = swipeBack) {
-            MemoryPage(
-                state = memoryUi,
-                onDismiss = viewModel::closeMemory,
-                onEdit = viewModel::editMemory,
-                onRunInit = { viewModel.closeMemory(); viewModel.runInitFromUi() },
-                onBodyChange = viewModel::updateMemoryBody,
-                onSave = viewModel::saveMemory,
-                onCancelEdit = viewModel::cancelMemoryEdit,
-            )
+            pages.Memory(state = memoryUi, viewModel = viewModel)
         }
         entry<SettingsKey.Theme>(swipeDismiss = swipeBack) {
-            ThemePage(
-                theme = state.themeSettings,
-                onDismiss = viewModel::closeThemePage,
-                onChange = viewModel::updateThemeSettings,
-            )
+            pages.Theme(theme = state.themeSettings, viewModel = viewModel)
         }
         entry<SettingsKey.ChatDisplay>(swipeDismiss = swipeBack) {
-            ChatDisplayPage(
-                theme = state.themeSettings,
-                onBack = viewModel::closeChatDisplay,
-                onChange = viewModel::updateThemeSettings,
-            )
+            pages.ChatDisplay(theme = state.themeSettings, viewModel = viewModel)
         }
         entry<SettingsKey.Prompts>(swipeDismiss = swipeBack) {
-            PromptsPage(
-                initPrompt = state.settings.initPrompt,
-                summaryPrompt = state.settings.summaryPrompt,
-                compactPromptHead = state.settings.compactPromptHead,
-                onDismiss = viewModel::closePrompts,
-                onChange = viewModel::setPromptSlot,
-                onReset = viewModel::resetPromptSlot,
-            )
+            pages.Prompts(state = state, viewModel = viewModel)
         }
         entry<AppKey.About>(swipeDismiss = swipeBack) {
-            AboutPage(
-                onBack = viewModel::closeAbout,
-                onOpenLicenses = viewModel::openLicenses,
-                onOpenPrivacy = viewModel::openPrivacy,
-                onOpenUpdate = viewModel::openUpdate,
-                update = state.update,
-            )
+            pages.About(update = state.update, viewModel = viewModel)
         }
         entry<AppKey.Update>(swipeDismiss = swipeBack) {
-            UpdatePage(
-                state = state.update,
-                onBack = viewModel::closeUpdate,
-                onCheck = { viewModel.checkForUpdates() },
-                onDownload = viewModel::downloadUpdate,
-                onCancelDownload = viewModel::cancelUpdateDownload,
-                onInstall = viewModel::installDownloadedUpdate,
-            )
+            pages.Update(state = state.update, viewModel = viewModel)
         }
         entry<AppKey.Licenses>(swipeDismiss = swipeBack) {
-            ThirdPartyLicensesPage(onBack = viewModel::closeLicenses)
+            pages.Licenses(viewModel = viewModel)
         }
         entry<AppKey.Privacy>(swipeDismiss = swipeBack) {
-            PrivacyPolicyPage(onBack = viewModel::closePrivacy)
+            pages.Privacy(viewModel = viewModel)
         }
         // UI 调试整页（仅 debug 构建有入口）。它拿的是**真实 state 与 ViewModel**：
         // 页面里的输入器、各浮层入口都是真能用的，不是静态贴图。
         entry<AppKey.UiDebug>(swipeDismiss = swipeBack) {
-            UiDebugPage(
+            pages.UiDebug(
                 state = state,
                 viewModel = viewModel,
                 glass = glass,
-                onBack = viewModel::closeUiDebug,
                 onExportSession = { name -> exportLauncher.launch(name) },
                 onImportSession = { importLauncher.launch(arrayOf("application/gzip", "application/octet-stream", "*/*")) },
             )
@@ -638,3 +532,4 @@ private sealed interface SettingsKey : NavKey {
      */
     data object ChatDisplay : SettingsKey
 }
+

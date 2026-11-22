@@ -640,10 +640,26 @@ internal fun SettingsNumberDialog(
 }
 
 /**
- * 自由文本设置项（项目目录）。
+ * 自由文本设置项（项目目录 / 自定义提示词）。
  *
  * Miuix 没有「偏好行里塞输入框」的现成组件，但它给了 [BasicComponent] 的 `bottomAction`
  * 槽位，这就是官方的扩展点：标题/说明仍由组件负责，输入框只占底部一行。
+ *
+ * ## ⚠️ 打字**不**逐键写回状态层
+ *
+ * 上一版是 `value = draft.xxx` + `onValueChange = { onChange(draft.copy(...)) }`。
+ * 也就是说**每按一个键**都要：`_state.update` → `AppScaffold` 重组 → 整张设置页
+ * 连同可见的七八行图标底板一起重组。在自定义提示词这种几百字的框里，
+ * 连打一串字就是连着一串整页重组 —— 手感是"打字发涩、光标跟不上"。
+ *
+ * 现在改成行内草稿 + **去抖提交**：
+ *
+ *  · 打字只改本行的 `draft`（一个 `mutableStateOf`），不碰页面状态；
+ *  · 停手 [CommitDebounceMillis] 之后才 `onValueChange` 一次；
+ *  · 外部值变了（保存成功、另一个入口改了同一项）就丢掉草稿，避免草稿压住真值。
+ *
+ * 去抖窗口与 `WorkspaceViewModel.SettingsPersistDebounceMs`(400ms) 同档：
+ * 用户在打字时不会察觉，而写盘次数也不再是"每个字符一次"。
  */
 @Composable
 internal fun SettingsTextField(
@@ -663,6 +679,21 @@ internal fun SettingsTextField(
     icon: Painter? = null,
     plate: Color? = null,
 ) {
+    // 行内草稿。null = 没有未提交的改动，此时显示外部真值。
+    var local by remember { mutableStateOf<String?>(null) }
+    val shown = local ?: value
+
+    // 外部值变了（保存回滚、别处改了同一项）→ 丢掉草稿，否则草稿会一直压着真值。
+    LaunchedEffect(value) { local = null }
+
+    // 去抖提交：停手之后才写回一次。`local` 变 null（外部值到位）时就无事可做。
+    LaunchedEffect(local) {
+        val pending = local ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(CommitDebounceMillis)
+        // 期间又改了（local 已被换掉）→ 这次不提交，让新一轮去抖负责。
+        if (local == pending && pending != value) onValueChange(pending)
+    }
+
     BasicComponent(
         title = title,
         summary = summary,
@@ -671,8 +702,8 @@ internal fun SettingsTextField(
         insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         bottomAction = {
             ZhiTextField(
-                value = value,
-                onValueChange = onValueChange,
+                value = shown,
+                onValueChange = { local = it },
                 // [modifier] 下发给 ZhiTextField 的输入框本体，
                 // 调用点靠它挂 `onFocusChanged`（数值项失焦时要把文本收敛成真实值）。
                 modifier = modifier.fillMaxWidth(),
@@ -682,6 +713,14 @@ internal fun SettingsTextField(
         },
     )
 }
+
+/**
+ * 文本输入行的去抖窗口（毫秒）。
+ *
+ * 与 `WorkspaceViewModel.SettingsPersistDebounceMs`(400ms) 同档：短到用户察觉不到
+ * "没生效"，长到能把连续敲键合并成一次提交。
+ */
+private const val CommitDebounceMillis = 400L
 
 /**
  * 行首图标块的 `startAction` 槽位。

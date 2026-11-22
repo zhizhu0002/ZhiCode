@@ -131,29 +131,49 @@ object TurnLayout {
     /**
      * 为新一份块表算出"该把哪些 key 钉住"。
      *
-     * 逐块对齐：新旧两边**同一位置**的两块，如果某一方是 `Turn` 且
-     * 成员有交集，就把旧的 key 钉到新的那一块上。
+     * ## ⚠️ 必须**从尾部**对齐，不能从前端
      *
-     * ## 为什么按位置对齐已经够了
+     * 上一版是 `previous[i] ↔ next[i]`（两边同一前端下标配对），注释里的理由是
+     * "前插只影响最前面那一块"。**那个前提是错的**：一页历史是 30 条消息，
+     * 里面通常有好几条用户发言，而每条用户发言都是一个独立的 `Standalone` ——
+     * 所以前插会往头部插入**好几块**，`next` 的前 `k` 项是全新内容，
+     * 旧表的前几项被整体推到后面 `k` 位。
      *
-     * 前插只影响**最前面那一块**（新内容从头部进来）；尾部淘汰只影响**最后面**。
-     * 中间各块的位置与身份都不变，按位置对齐不会错配。
+     * 前端对齐于是拿"新的第 0 块"去对"旧的第 0 块"（互不相干，钉不上），
+     * 而真正需要钉住的那一块（旧的第 0 块 ↔ 新的第 k 块）根本没被比较到 ——
+     * 它的 key 照旧从 `a1` 变成 `a0`，`LazyColumn` 认为那是**另一条 item**，
+     * 滚动锚点作废。用户看到的就是「每次上滑加载都置顶」。
      *
-     * 位置对齐在"中间插入了整块"时会错位，但那种情况在这个界面上不存在：
-     * 历史只会从头部补、只往尾部删。
+     * 尾部是稳定的：**历史只从头部补、只往尾部删**，所以"从末尾往前数第 i 块"
+     * 在前后两帧里指的是同一块内容。
+     *
+     * 成员有交集才钉：完全没交集说明这一块真的换人了，钉过去反而会把旧 key
+     * 安到无关内容上。
      */
     fun pinForPrepend(previous: List<Block>, next: List<Block>): Map<Int, String> {
         if (previous.isEmpty() || next.isEmpty()) return emptyMap()
         val out = HashMap<Int, String>()
         val shared = minOf(previous.size, next.size)
-        for (i in 0 until shared) {
-            val old = previous[i]
-            val new = next[i]
+        for (back in 0 until shared) {
+            val newIndex = next.size - 1 - back
+            val old = previous[previous.size - 1 - back]
+            val new = next[newIndex]
             if (old is Block.Turn && new is Block.Turn) {
-                // 成员有交集才钉：完全没交集说明这一块换人了，钉过去反而错。
-                if (old.ids.any { it in new.ids }) out[i] = old.key
+                if (old.ids.any { it in new.ids }) out[newIndex] = old.key
             }
         }
         return out
+    }
+
+    /**
+     * 这一块里有没有这条消息。
+     *
+     * 给"前插后按**消息 id** 找回锚点"用（见 `ChatList` 的 `prependAnchorId`）。
+     * 按 id 找比按块的 key 找可靠：key 本身就是前插时会被钉/会变的那个东西，
+     * 用它当锚点等于用一个"可能变了的值"去查一个"需要它没变才查得到"的位置。
+     */
+    fun containsMessage(block: Block, id: String): Boolean = when (block) {
+        is Block.Standalone -> block.id == id
+        is Block.Turn -> block.ids.contains(id)
     }
 }

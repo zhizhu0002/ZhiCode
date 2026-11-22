@@ -15,7 +15,7 @@ Java 编写的 Agent 引擎与协议层，应用内自带一套 Termux 用户空
 | --- | --- |
 | 应用名 / 包名 | `ZhiCode` / `com.zhizhu.code` |
 | 版本 | `versionName 1.0.0`，`versionCode 100` |
-| 仓库名 | `IQ-Code-Compose`（`settings.gradle` 的 `rootProject.name`） |
+| 仓库名 | `Zhicode`（`settings.gradle` 的 `rootProject.name`） |
 | 平台 | Android，**仅 arm64-v8a** |
 | SDK | `compileSdk 37` / `targetSdk 28` / `minSdk 24` |
 | 界面 | Jetpack Compose + Miuix `0.9.4` |

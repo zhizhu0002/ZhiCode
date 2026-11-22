@@ -28,7 +28,7 @@ apply plugin: 'com.android.library'
 android {
     namespace 'top.niunaijun.blackbox'
 
-    // 与原版一样读工程级 ext，但**带兜底**：本工程（IQ-Code-Compose）没有
+    // 与原版一样读工程级 ext，但**带兜底**：本工程（Zhicode）没有
     // IQ-Code-Android 那套 ext，直接读会在配置期抛 MissingPropertyException。
     /*
      * 兜底值是 **35**，不是宿主工程的 37。

@@ -197,6 +197,32 @@ object ZhiColors {
     private val redContainerDark = Color(0xFF3A1A1C)
     private val redContainerLight = Color(0xFFFBE0E0)
 
+    /*
+     * 警示档（通知条 WARN）的**底 + 字**，深浅各一对。
+     *
+     * ## 为什么不再用「琥珀 16% 叠在表面色上」
+     *
+     * 那个写法看起来"自适应"，实测在浅色下得到的是一块 **#E8DFCF 的土黄**：
+     * 比页面 `#F7F7F7` 暗一档、又带明显暖色相，铺满整屏时读到的是"脏"而不是
+     * "提示"。对话流里每一条 INFO 消息都走 WARN 档（见 `InfoCard`），于是整屏
+     * 都是土黄块 —— 这正是「浅色模式 message card 显得很黑」里面积最大的那一块。
+     *
+     * 现在改成**实色淡琥珀 + 深琥珀字**，且不依赖 alpha：
+     *
+     * | | 底色 | 文字 | 对比度 |
+     * | --- | --- | --- | --- |
+     * | 浅色 | `#F8F1E6` | `#8A5A00` | 5.28:1 |
+     * | 深色 | `#433B2F` | `#F0B860` | 6.16:1 |
+     *
+     * ⚠️ 用**不透明**色而不是 `Color.copy(alpha = …)`：半透明会与底下那层混出
+     * 不确定的结果（同一条通知落在页面底色上和落在卡片上颜色不同），
+     * 与 [SummaryDark] 的取舍是同一条理由。
+     */
+    private val WarnFillLight = Color(0xFFF8F1E6)
+    private val WarnFillDark = Color(0xFF433B2F)
+    private val WarnTextLight = Color(0xFF8A5A00)
+    private val WarnTextDark = Color(0xFFF0B860)
+
     /**
      * 当前是否深色主题。
      *
@@ -221,6 +247,14 @@ object ZhiColors {
     /** 提醒（风险说明、计划批准提示）。 */
     @Composable
     fun amber(): Color = if (isDark()) amberOnDark else amberOnLight
+
+    /** 警示通知条的底色（淡琥珀实色，见 [WarnFillLight] 的说明）。 */
+    @Composable
+    fun warnFill(): Color = if (isDark()) WarnFillDark else WarnFillLight
+
+    /** 警示通知条上的文字色（与 [warnFill] 成对，对比度 ≥5:1）。 */
+    @Composable
+    fun warnText(): Color = if (isDark()) WarnTextDark else WarnTextLight
 
     @Composable
     fun greenContainer(): Color = if (isDark()) greenContainerDark else greenContainerLight
@@ -317,15 +351,37 @@ object ZhiColors {
      * `surfaceContainerHighest`）—— 那是**卡片**的层级语义，方向恰好相反。
      * 方向不是配色偏好：井表示"这是程序吐出来的原始字节"，卡片表示"这是应用渲染的内容"。
      *
-     * 取值按同一关系落到本工程的页面底色上（深 [backdrop] `#242424` / 浅 `#EDEDED`）：
-     * 深色直接用 IQ Code 的 `#0A0B0C`；浅色取 `#E7E5DE` —— 与 IQ Code 亮色里
-     * "比页面低 6/7/10" 的差值同量级。
+     * 取值按同一关系落到本工程的页面底色上，但**方向在深色下必须改**：
+     *
+     * | | 页面 | 卡片 | 终端井 | 井的判据 |
+     * | --- | --- | --- | --- | --- |
+     * | 浅色 | `#F7F7F7` | `#FAFAFC` | **`#EAEAEE`** | 比页面暗一档 |
+     * | 深色 | `#000000` | `#2D2D2D` | **`#17171A`** | 比**卡片**暗、比页面亮 |
+     *
+     * ## 深色为什么不能照抄 IQ Code 的 `#0A0B0C`
+     *
+     * 那个值成立的前提是 IQ Code 的深色页面**不是纯黑**（`#12110F`）。本工程的
+     * 深色页面是 Miuix 的 `surface` = 纯黑（见下面的三级色阶），于是在纯黑上再画
+     * 一个 `#0A0B0C` 的井，两者对比度只有 **1.07:1** —— 井的边界完全看不出来，
+     * 工具输出像是直接贴在页面上的裸文本，卡片里的层次也消失了。
+     * 这就是「深色模式也有点问题」里最直接的一条。
+     *
+     * 纯黑之下已经没有更暗的档，所以深色侧改用**夹在页面与卡片之间**的一档：
+     * `#17171A`（对纯黑 1.23:1、对卡片 `#2D2D2D` 1.24:1）。它读起来仍然是"凹进去的
+     * 一块"，因为它比**所在的卡片**暗，而工具输出永远在卡片里。
+     *
+     * ## 浅色为什么不再是暖米色
+     *
+     * 旧值 `#E7E5DE` 是照 IQ Code「暖黑」调色板取的**暖米色**，而本工程其余中性色
+     * 都是冷灰（页面 `#F7F7F7`、卡片 `#FAFAFC`）。一块暖米色夹在冷灰里，在浅色下
+     * 就是"发脏、发黄的那一块"（与 WARN 通知条同一个病）。改成中性灰 `#EAEAEE`
+     * 之后仍然比页面暗一档，但色相与整屏一致。
      */
     @Composable
     fun terminalSurface(): Color = if (isDark()) TerminalDark else TerminalLight
 
-    private val TerminalDark = Color(0xFF0A0B0C)
-    private val TerminalLight = Color(0xFFE7E5DE)
+    private val TerminalDark = Color(0xFF17171A)
+    private val TerminalLight = Color(0xFFEAEAEE)
 
     /*
      * 深色三级色阶 —— 数值全部取自 Miuix `darkColorScheme`（
@@ -404,6 +460,20 @@ object ZhiColors {
      * 那正是"有些地方灰得不一样"的来源。
      */
     internal val SummaryDark = Color(0xFF9E9EA6)
+
+    /**
+     * 深色下**容器/选中底上**的正文色（对应 Miuix 的 `onSecondaryContainer` 与
+     * `onSurfaceContainerVariant`）。
+     *
+     * 比 [SummaryDark] 再亮一档，因为这两个槽位所在的两块底比其他容器更亮：
+     * `secondaryContainer` 深色是 `#434343`（比卡片 `#2D2D2D` 还亮），
+     * 而 Miuix 给它的文字是中灰 `#7C7C7C` —— 只有 **2.37:1**，选中的那一行
+     * 反而比没选中的更难读。
+     *
+     * `#B0B0B8` 在 `#434343` 上 4.59:1、在 `#2D2D2D` 上 5.3:1，仍然是"弱一档"，
+     * 但可读。与 [MutedDark] 一样**三通道近似相等**：它表达的是明度差，不是色相。
+     */
+    internal val SecondaryDark = Color(0xFFB0B0B8)
 }
 
 /**

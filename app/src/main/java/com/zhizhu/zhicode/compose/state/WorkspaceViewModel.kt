@@ -1204,23 +1204,27 @@ class WorkspaceViewModel(
     /**
      * 打开发起「手动添加」对话框。
      *
-     * 表单**预填一份示例 SKILL.md**（见 `SkillStore.starterTemplate`）：用户改一改就能存，
-     * 而不是面对一个空框猜 frontmatter 要写什么。里面的名字是占位符、过不了校验，
-     * 所以「保存」一开始是禁用的 —— 必须先换成自己的名字，
-     * 否则点两下就会建出一个没打算建的技能。
+     * 表单**内容留空**，示例 SKILL.md 以**灰色占位符**的形式显示在输入框里
+     * （见 `SkillsPage` 里那个 `ZhiTextField` 的 `label`）。
      *
-     * 名字照常由内容解析得出（与 [updateSkillCreateDraft] 同一条规则），
-     * 不在这里单独存一份：两份来源必然会在用户改内容时不一致。
+     * ## 为什么不再把模板填进内容里
+     *
+     * 上一版是把模板当**真实内容**预填，理由是"改一改就能存，不用面对空框猜格式"。
+     * 但那样做有两个副作用：
+     *
+     *  · 框里是**正常文字色**的模板，看起来像用户自己写的，用户得先全删再写；
+     *  · 模板里的 `name: <技能名>` 过不了校验 → 一打开对话框就是**一行红字**，
+     *    像是页面坏了，而用户其实什么都还没做。
+     *
+     * 改成占位符之后：灰字、一输入就浮到框上沿消失、不参与解析 ——
+     * 于是「保存」在用户打字之前一直是禁用的（因为内容为空），
+     * 而这正是想要的效果，且不需要靠"模板故意写非法"来实现。
      */
     fun newSkill() {
-        val content = SkillStore.starterTemplate
         _state.update {
             it.copy(
                 skills = it.skills?.copy(
-                    createForm = SkillCreateDraft(
-                        content = content,
-                        name = SkillStore.nameFromContent(content).orEmpty(),
-                    ),
+                    createForm = SkillCreateDraft(content = "", name = ""),
                     detail = null,
                     editing = null,
                 ),
