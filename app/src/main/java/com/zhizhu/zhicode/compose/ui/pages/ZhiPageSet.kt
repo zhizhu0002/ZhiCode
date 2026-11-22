@@ -2,6 +2,7 @@ package com.zhizhu.zhicode.compose.ui.pages
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
+import com.zhizhu.zhicode.compose.ui.pages.mochi.MochiPageSet
 import com.zhizhu.zhicode.compose.data.ThemeSettings
 import com.zhizhu.zhicode.compose.model.ApiConfigState
 import com.zhizhu.zhicode.compose.model.ExtensionSummary
@@ -356,8 +357,12 @@ object MiuixPageSet : ZhiPageSet {
  */
 object ZhiPageSets {
 
-    /** 全部可用组。**第一个是默认组**，`byId` 找不到时回到它。 */
-    val all: List<ZhiPageSet> = listOf(MiuixPageSet)
+    /**
+     * 全部可用组。**第一个是默认组**，`byId` 找不到时回到它。
+     *
+     * 加一个新主题组只需要在这里加一行 —— 界面代码一行都不用改。
+     */
+    val all: List<ZhiPageSet> = listOf(MiuixPageSet, MochiPageSet)
 
     val default: ZhiPageSet get() = all.first()
 

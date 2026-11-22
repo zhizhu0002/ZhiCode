@@ -42,6 +42,7 @@ import com.zhizhu.zhicode.compose.theme.ZhiSpacing
 import com.zhizhu.zhicode.compose.ui.FloatingBottomShell
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
+import com.zhizhu.zhicode.compose.ui.pages.updateNotesMarkdown
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.effects.PageBlurBar
@@ -567,18 +568,6 @@ private fun SectionNote(text: String) {
  * 只处理了行首标记、没处理行内标记，于是 `**粗体**`、反引号、表格全部原样泄漏到界面。
  * 换成 Markdown 原文 + 既有渲染器之后，这类问题从根上不会再有。
  */
-private fun updateNotesMarkdown(state: UpdateUiState): String {
-    val release = state.release
-    if (state.phase == UpdatePhase.Available && release != null) {
-        // `ReleaseNotes.parse` 仍用来做两件事：判断"有没有说明"与截断超长正文
-        // （那两道限制不该因为换了渲染器就丢掉）。它返回空 = 这条 Release 没写说明。
-        val parsed = ReleaseNotes.parse(release.body)
-        if (parsed.isNotEmpty()) return release.body
-        // 远端没写说明：退回当前版本的说明，而不是给一片空白 ——
-        // 用户至少能看到"我装的这个版本有什么"。
-    }
-    return changeLogFor(BuildConfig.VERSION_NAME)?.toMarkdown().orEmpty()
-}
 
 /* 注：原先这里有个 `formatPublished`（把 ISO 时间截成日期），已经随
  * "更新页不再单独显示发布日期"一起去掉 —— 参考图里也没有这一行。 */
