@@ -251,49 +251,38 @@ fun ThemePage(
                         }
                     }
                     /*
-                     * 界面主题组（一个主题 = 一组 page.kt）。
+                     * 「界面主题」（页面组切换）入口**暂时隐藏**。
                      *
-                     * 与上面的「配色」是**两个维度**：配色决定颜色种子，这一项决定
-                     * 整套页面长什么样。同一个配色可以配任意一组页面。
+                     * ## 为什么隐藏而不是留着
                      *
-                     * 用 `OverlayDropdownPreference` 而不是 `SettingsChoice`：本页现有的
-                     * 两个选择器（「调色板风格」「颜色规范」）都用它，换一种形态会让
-                     * 读者以为这一项是另一种优先级。
+                     * 链路三段都已接好：
+                     *
+                     *     ThemeSettings.pageSetId
+                     *       → ThemeStore 读写（PAGE_SET 键）
+                     *       → ZhiAppTheme 注入 LocalZhiPageSet = ZhiPageSets.byId(...)
+                     *       → AppScaffold 每个 entry 走 pages.Xxx(...)
+                     *
+                     * 但真机上切换后**页面上看不出任何变化**（选「麻薯」再进关于页，
+                     * 仍是 Miuix 版本）。断点还没定位 —— 可能是 `TabRow` 的
+                     * `onTabSelected` 没触发、可能是 `onChange { it.copy(pageSetId=…) }`
+                     * 被别处覆盖、也可能是 `LocalZhiPageSet` 的 provide 作用域没覆盖到
+                     * `NavDisplay` 的 entry 内容。
+                     *
+                     * 查清之前界面上**不放一个点了没反应的开关** —— 那比没有这个功能更糟。
+                     *
+                     * ## 恢复方法
+                     *
+                     * 代码全部在 git 历史里（提交 696c114 起），`git show <commit>:<path>`
+                     * 可取回。数据层完全保留：`pageSetId` 字段、`ThemeStore` 的读写、
+                     * `ZhiPageSets` 注册表、`MochiPageSet` 实现都还在，恢复 UI 后
+                     * 已落盘的 `pageSetId` 会立即生效。
+                     *
+                     * ⚠️ 恢复前必须先加一行能复现的检查（例如在 `pages.Xxx` 里打当前
+                     * 组 id），确认断在哪一环，不要只是把 UI 打开再猜一次。
+                     *
+                     * 另：「效果」组里「液态玻璃」的条件是 `pageSetId == "mochi"`，
+                     * 入口隐藏后它也自然不可达。两者一起恢复。
                      */
-                    item(key = "pageSet") {
-                        SettingsGroup("界面主题") {
-                            val sets = ZhiPageSets.all
-                            /*
-                             * 用 `TabRow` 而不是下拉 —— **本页的下拉弹不出来**。
-                             *
-                             * 本页 `Scaffold(popupHost = { })` 把弹层宿主置空了（那是为了
-                             * 不让模糊背板被宿主再画一层），而 `OverlayDropdownPreference`
-                             * 需要一个宿主来放菜单；没有就**静默不弹**：箭头在、能点、
-                             * 没有任何菜单出现。加 `renderInRootScaffold = false` 也不解决。
-                             *
-                             * 而同一页、同一个 Scaffold 下的「NavigationBar 位置」一直是好的 ——
-                             * 它用的就是 `TabRow`，内联控件，不经过宿主。所以这里沿用同一个控件：
-                             * 形态也和那一项一致（都是"在几个并列项里挑一个"）。
-                             *
-                             * 页面组只有 2 项，分段控件正合适；将来超过 3 项再考虑别的形态。
-                             */
-                            TabRow(
-                                tabs = sets.map { it.name },
-                                selectedTabIndex = sets.indexOfFirst { it.id == theme.pageSetId }
-                                    .coerceAtLeast(0),
-                                onTabSelected = { index ->
-                                    sets.getOrNull(index)?.let { set ->
-                                        onChange { it.copy(pageSetId = set.id) }
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                                height = 48.dp,
-                            )
-                            SettingsFootnote(
-                                "决定整组页面的排版与组件风格；配色在上面的「颜色」里单独设置。",
-                            )
-                        }
-                    }
                     item(key = "scale") {
                         SettingsGroup("界面缩放") {
                             SettingsSliderRow(
