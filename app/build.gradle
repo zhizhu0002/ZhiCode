@@ -300,7 +300,24 @@ dependencies {
      * 图标（mochi-icons）/ Nothing 外观（mochi-nothing）/ iOS 外观（mochi-ios）
      * 是各自独立的 artifact，用到再加，别一次不全带进来。
      */
-    implementation 'io.github.feice11:mochi-compose:0.2.0'
+    implementation 'io.github.feice11:mochi-compose:0.3.0'
+
+    /*
+     * 图标：Mochi 的强制接入要求。
+     *
+     * `llms.txt:45` 原文：「Icons: add the mochi-icons module and use
+     * `MochiIonicon("name")`（full Ionicons, Outline / Filled / Sharp）。
+     * **Do not use Material Icons**, hand-drawn paths or emoji as icons.」
+     *
+     * 本工程现有界面全部用 `ZhiIcons`（Material Symbols）——那是 Miuix 组的图标语言，
+     * 继续保留。**Mochi 组的页面**必须换成 `MochiIonicon`，两组的图标不混用：
+     * 一个页面内混两种图标库，笔画粗细和光学尺寸都对不齐，属于规范明令禁止的做法。
+     *
+     * ⚠️ 版本必须与 `mochi-compose` **严格一致**：`mochi-icons:0.3.0` 的 POM 把
+     * `mochi-compose:0.3.0` 声明为 compile 依赖，跨版本会在运行时 `NoSuchMethodError`。
+     * 升级时这两个坐标一起改。
+     */
+    implementation 'io.github.feice11:mochi-icons:0.3.0'
 
     /*
      * AndroidLiquidGlass（Kyant0）—— https://github.com/Kyant0/AndroidLiquidGlass

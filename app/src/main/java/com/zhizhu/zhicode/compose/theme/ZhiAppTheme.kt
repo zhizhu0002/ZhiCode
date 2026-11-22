@@ -18,6 +18,7 @@ import top.yukonga.miuix.kmp.theme.ThemeController
 import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
+import ui.feice.mochi.effect.overscroll.ProvideMochiOverscroll
 
 /**
  * 应用的唯一主题栈：深浅判定 + 配色（含 Monet 种子色）+ 文字字阶 + 界面缩放。
@@ -81,7 +82,23 @@ fun ZhiAppTheme(theme: ThemeSettings, content: @Composable () -> Unit) {
             // 麻薯（Mochi）主题再包一层，位置在这里是**有讲究的**：见 MochiSkin.kt
             // 文件头的说明。一句话：现有调用点读 MiuixTheme 的不动，Mochi 组件读到的是
             // 同一套种子色 / 深浅判定 / G2 圆角，两套组件混排时不会各按各的默认值排版。
-            ZhiMochiTheme(theme, content)
+            ZhiMochiTheme(theme) {
+                /*
+                 * 越界回弹：Mochi 组件要求根部提供，`llms.txt:10` 把它和 MochiTheme
+                 * 并列为 root 必接项。
+                 *
+                 * 为什么现在就要接，虽然还没上 Mochi 页面：它提供的是 Mochi 组件
+                 * 读的 `LocalMochiOverscroll`，没有它时 Mochi 列表回退到硬停，
+                 * 观感与它自己的规范不一致（`philosophy.md:38`「越界用橡皮筋，不硬停」）。
+                 * 提前接上，第 4 阶段写第一个 Mochi 页面时不用再改主题层。
+                 *
+                 * 对本工程现有界面**无影响**：Miuix 的 `overScrollVertical()` 与
+                 * 悬浮栏的拖动各有自己的实现，不读这个 Local。
+                 */
+                ProvideMochiOverscroll {
+                    content()
+                }
+            }
         }
     }
 }

@@ -12,6 +12,7 @@ import ui.feice.mochi.shape.MochiRoundedRectangle
 import ui.feice.mochi.theme.MochiColorScheme
 import ui.feice.mochi.theme.MochiShapes
 import ui.feice.mochi.theme.MochiTextStyles
+import ui.feice.mochi.theme.MochiMaterials
 import ui.feice.mochi.theme.MochiTheme
 import ui.feice.mochi.theme.darkColorScheme
 import ui.feice.mochi.theme.defaultShapes
@@ -49,12 +50,33 @@ import ui.feice.mochi.theme.lightColorScheme
  * 外层，两边的明暗就可能在「应用内强制深色 + 系统浅色」这类组合下打架。
  */
 @Composable
-fun ZhiMochiTheme(theme: ThemeSettings, content: @Composable () -> Unit) {
+fun ZhiMochiTheme(
+    theme: ThemeSettings,
+    /**
+     * 材质：浮在内容上的栏用纯色还是液态玻璃、顶栏下面要不要模糊。
+     *
+     * ## 为什么单独一个参数，不塞进 [ThemeSettings]
+     *
+     * 材质和配色在 Mochi 里是**正交**的两件事（`docs/zh_CN/guide/theme.md:35`）：
+     * 「材质和配色无关，Mochi、Nothing、iOS 三套外观都能用，两项各自开关」。
+     * 塞进同一个设置类会让"换外观顺手改了玻璃"这种耦合变得可能。
+     *
+     * 默认 [MochiMaterials] 的默认实例 = **没有玻璃**，滚动边缘模糊开着。
+     * 这保证本参数引入的那一刻，界面与引入前**逐像素一致** —— 玻璃是显式打开的。
+     *
+     * ⚠️ 玻璃是「贵」的效果：`effects.md:215` 说明每组玻璃要建取样层 + 模糊金字塔
+     * （标准样式 4～6 级，大块面板到 8、9 级），节点越多每帧越慢。所以只用在
+     * **成组**的位置（底栏、悬浮栏），不要逐行铺开。
+     */
+    materials: MochiMaterials = MochiMaterials(),
+    content: @Composable () -> Unit,
+) {
     val isDark = ZhiThemeMode.rememberCurrentDark(theme.mode)
     MochiTheme(
         colors = rememberZhiMochiColors(theme, isDark),
         textStyles = zhiMochiTextStyles(),
         shapes = zhiMochiShapes(),
+        materials = materials,
         /*
          * 这里**不**传那个 Boolean（MochiTheme 里真实的名字是 `systemBarAppearance`）。
          * 它管的是「由 Mochi 去改系统栏图标的明暗」；而本工程的系统栏明暗已经由
