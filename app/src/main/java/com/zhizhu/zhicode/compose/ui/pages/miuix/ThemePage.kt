@@ -263,17 +263,31 @@ fun ThemePage(
                     item(key = "pageSet") {
                         SettingsGroup("界面主题") {
                             val sets = ZhiPageSets.all
-                            OverlayDropdownPreference(
-                                title = "页面风格",
-                                items = sets.map { it.name },
-                                selectedIndex = sets.indexOfFirst { it.id == theme.pageSetId }
+                            /*
+                             * 用 `TabRow` 而不是下拉 —— **本页的下拉弹不出来**。
+                             *
+                             * 本页 `Scaffold(popupHost = { })` 把弹层宿主置空了（那是为了
+                             * 不让模糊背板被宿主再画一层），而 `OverlayDropdownPreference`
+                             * 需要一个宿主来放菜单；没有就**静默不弹**：箭头在、能点、
+                             * 没有任何菜单出现。加 `renderInRootScaffold = false` 也不解决。
+                             *
+                             * 而同一页、同一个 Scaffold 下的「NavigationBar 位置」一直是好的 ——
+                             * 它用的就是 `TabRow`，内联控件，不经过宿主。所以这里沿用同一个控件：
+                             * 形态也和那一项一致（都是"在几个并列项里挑一个"）。
+                             *
+                             * 页面组只有 2 项，分段控件正合适；将来超过 3 项再考虑别的形态。
+                             */
+                            TabRow(
+                                tabs = sets.map { it.name },
+                                selectedTabIndex = sets.indexOfFirst { it.id == theme.pageSetId }
                                     .coerceAtLeast(0),
-                                renderInRootScaffold = false,
-                                onSelectedIndexChange = { index ->
+                                onTabSelected = { index ->
                                     sets.getOrNull(index)?.let { set ->
                                         onChange { it.copy(pageSetId = set.id) }
                                     }
                                 },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                                height = 48.dp,
                             )
                             SettingsFootnote(
                                 "决定整组页面的排版与组件风格；配色在上面的「颜色」里单独设置。",

@@ -103,40 +103,10 @@ class Glass internal constructor(
     /** 当前设备/Runtime 是否支持 RuntimeShader 模糊。 */
     val supported: Boolean get() = backdrop != null
 
-    /**
-     * 转场期间**暂停录制**（由 `AppScaffold` 在导航转场开始/结束时切换）。
-     *
-     * ## 为什么需要它
-     *
-     * 实测（`jankFrame` 探针）：进设置页的转场里 `avg=16.0ms` 正常，
-     * 但第 3 帧单帧 **183ms**。那一帧同时在做两件事 ——
-     * `SettingsPage` 首次组合，以及工作区被 `layerBackdrop` **整屏重录**。
-     *
-     * 而转场期间工作区正按进度做位移/缩放（`NavDisplay` 给每页加的
-     * `graphicsLayer`），内容每帧都在变 → 那张离屏层每帧都要重录一遍整屏。
-     * 此时**没有任何东西在采样它**：悬浮输入器与顶栏都被上层的新页面盖住了。
-     *
-     * 所以转场期间把它摘掉：省掉逐帧整屏录制，回到静止页再装回去。
-     *
-     * ## 为什么是 `mutableStateOf`
-     *
-     * [capture] 在**组合期**读这个值来决定挂不挂 `layerBackdrop`。普通字段
-     * （`@Volatile` + 外部代数计数器）做不到"改了就重新求值"：计数器那边
-     * 没有任何东西在读，`capture` 不会重跑，暂停就永远不生效。
-     *
-     * 做成 state 的代价是每次转场开始/结束各重组一次**读它的那一层**
-     * （工作区/对话页各一次），换来整段转场不再逐帧重录整屏 —— 这笔账明显划算。
-     */
-    private val suspendedState = androidx.compose.runtime.mutableStateOf(false)
-
-    var suspended: Boolean
-        get() = suspendedState.value
-        set(value) { suspendedState.value = value }
-
     /** 加在被模糊层压住的内容上：把它的绘制录进 layer。 */
     /** Capture only the content owner; consumers are always siblings outside this modifier. */
     fun capture(modifier: Modifier): Modifier =
-        if (backdrop != null && !suspended) modifier.layerBackdrop(backdrop) else modifier
+        if (backdrop != null) modifier.layerBackdrop(backdrop) else modifier
 
     /** 加在悬浮层上：对已捕获的背景做高斯模糊。 */
     fun blur(modifier: Modifier, shape: Shape, radius: Float = ZhiGlass.FloatingBlur): Modifier =
