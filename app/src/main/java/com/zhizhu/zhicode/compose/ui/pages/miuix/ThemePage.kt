@@ -165,13 +165,13 @@ fun ThemePage(
                                     OverlayDropdownPreference(
                                         title = "调色板风格", items = paletteStyles.map { it.name },
                                         selectedIndex = paletteStyles.indexOfFirst { it.name == theme.paletteStyle }.coerceAtLeast(0),
-                                        onSelectedIndexChange = { index -> paletteStyles.getOrNull(index)?.let { style -> onChange { it.copy(paletteStyle = style.name) } } },
+                                        renderInRootScaffold = false, onSelectedIndexChange = { index -> paletteStyles.getOrNull(index)?.let { style -> onChange { it.copy(paletteStyle = style.name) } } },
                                     )
                                     val specs = ThemeColorSpec.entries
                                     OverlayDropdownPreference(
                                         title = "颜色规范", items = specs.map { it.name },
                                         selectedIndex = specs.indexOfFirst { it.name == theme.colorSpec }.coerceAtLeast(0),
-                                        onSelectedIndexChange = { index -> specs.getOrNull(index)?.let { spec -> onChange { it.copy(colorSpec = spec.name) } } },
+                                        renderInRootScaffold = false, onSelectedIndexChange = { index -> specs.getOrNull(index)?.let { spec -> onChange { it.copy(colorSpec = spec.name) } } },
                                     )
                                 }
                             }
@@ -234,12 +234,12 @@ fun ThemePage(
                              * 4～9 级模糊金字塔，系统每帧要遍历所有渲染节点；Mochi 的
                              * 接入规范也明确要求「打开前说明代价」。
                              */
-                            SettingsToggle(
+                            if (theme.pageSetId == "mochi") SettingsToggle(
                                 title = "液态玻璃",
                                 checked = theme.mochiGlass,
                                 onCheckedChange = { on -> onChange { it.copy(mochiGlass = on) } },
                                 summary = if (shaderSupported) {
-                                    "折射玻璃与实时模糊，更耗电；需要 Android 13"
+                                    "麻薯页面专用的折射玻璃，更耗电"
                                 } else {
                                     "需要 Android 13 RuntimeShader 支持"
                                 },
@@ -268,6 +268,7 @@ fun ThemePage(
                                 items = sets.map { it.name },
                                 selectedIndex = sets.indexOfFirst { it.id == theme.pageSetId }
                                     .coerceAtLeast(0),
+                                renderInRootScaffold = false,
                                 onSelectedIndexChange = { index ->
                                     sets.getOrNull(index)?.let { set ->
                                         onChange { it.copy(pageSetId = set.id) }
