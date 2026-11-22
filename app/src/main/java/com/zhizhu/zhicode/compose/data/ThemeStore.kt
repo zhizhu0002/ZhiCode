@@ -170,6 +170,26 @@ data class ThemeSettings(
     val codeCollapse: Boolean = false,
     /** 代码块是否显示行号。 */
     val codeLineNumbers: Boolean = false,
+    // ---- 界面主题组 ----
+    /**
+     * 界面主题组 id（一个主题 = 一组 page.kt）。非法或缺失时回落到默认组。
+     *
+     * 与 [presetId] 是**两个维度**，不要合并：`presetId` 决定颜色种子，
+     * 本项决定"这一套页面长什么样"。同一个配色可以配任意一套页面。
+     */
+    val pageSetId: String = "miuix",
+    /**
+     * Mochi 材质：液态玻璃 + 滚动边缘模糊。
+     *
+     * 默认**关闭**。理由不是保守，是**代价**：`docs/zh_CN/guide/effects.md:215`
+     * 说明每组玻璃要建取样层 + 4～9 级模糊金字塔（按配方里最粗那路模糊取级数），
+     * 且系统每帧要遍历所有渲染节点。`llms.txt:66` 也明确要求「Ask before turning
+     * glass on: it costs power」。
+     *
+     * 与 [blurEnabled] 是两条独立管线（本工程的 miuix-blur vs Mochi 的 AGSL），
+     * 互不影响，见 [MOCHI_GLASS] 的说明。
+     */
+    val mochiGlass: Boolean = false,
 ) {
     val preset get() = presetById(presetId)
 
@@ -246,6 +266,27 @@ internal object ThemeStore {
     private const val CODE_COLLAPSE = PREFIX + "code_collapse"
     private const val CODE_LINE_NUMBERS = PREFIX + "code_line_numbers"
 
+    /*
+     * 界面主题组（一个主题 = 一组 page.kt）。
+     *
+     * 存**组 id** 而不是页面实现本身：`ThemeSettings` 这一层刻意不依赖 compose
+     * 类型（它还要能被非 Compose 的调用点读），与 `paletteStyle` / `chatFont`
+     * 的约定一致 —— 存枚举的 `name`，非法值在读取处回落默认。
+     */
+    private const val PAGE_SET = PREFIX + "page_set"
+
+    /**
+     * Mochi 的材质（液态玻璃 / 滚动边缘模糊）开关。
+     *
+     * 与 [BLUR]（本工程自己的悬浮层虚化）是**两件事**，不要合并：
+     *  - [BLUR] 管的是 `Glass`（miuix-blur 管线，顶栏/悬浮栏/弹窗的虚化）；
+     *  - 本项管的是 Mochi 组页面里 `MochiMaterials`（AGSL 液态玻璃 + 折射）。
+     *
+     * 分开的理由：两条管线是独立实现（见 `build.gradle` 里 backdrop 那段说明），
+     * 开关的代价也不同 —— 液态玻璃要建取样层和模糊金字塔，比普通虚化贵得多。
+     */
+    private const val MOCHI_GLASS = PREFIX + "mochi_glass"
+
     /** 聊天字号比例的合法区间。与 `UI_SCALE_MIN/MAX` 分开：正文可以拉得比界面密度更开。 */
     const val CHAT_FONT_SCALE_MIN = 0.8f
     const val CHAT_FONT_SCALE_MAX = 1.6f
@@ -290,6 +331,8 @@ internal object ThemeStore {
             codeWrap = prefs.getBoolean(CODE_WRAP, false),
             codeCollapse = prefs.getBoolean(CODE_COLLAPSE, false),
             codeLineNumbers = prefs.getBoolean(CODE_LINE_NUMBERS, false),
+            pageSetId = prefs.getString(PAGE_SET, "")?.takeIf { it.isNotBlank() } ?: "miuix",
+            mochiGlass = prefs.getBoolean(MOCHI_GLASS, false),
         )
     }
 
@@ -329,6 +372,8 @@ internal object ThemeStore {
                 .putBoolean(CODE_WRAP, settings.codeWrap)
                 .putBoolean(CODE_COLLAPSE, settings.codeCollapse)
                 .putBoolean(CODE_LINE_NUMBERS, settings.codeLineNumbers)
+                .putString(PAGE_SET, settings.pageSetId)
+                .putBoolean(MOCHI_GLASS, settings.mochiGlass)
                 .commit()
         }
     }

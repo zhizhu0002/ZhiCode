@@ -342,6 +342,30 @@ object MiuixPageSet : ZhiPageSet {
 }
 
 /**
+ * 界面主题组注册表。
+ *
+ * 与 `THEME_PRESETS`（配色预设）同一个套路：一张表 + 一个带兜底的查找。
+ * 新增一个主题组 = 写一个新的 `object XxxPageSet : ZhiPageSet { … }` +
+ * 在 [all] 里加一行。**界面代码一行都不用改**。
+ *
+ * ## [byId] 为什么必须兜底
+ *
+ * `pageSetId` 是落盘的字符串。老版本写下的 id 在新版本里可能已经不存在
+ * （改名、删除），那时应当**回落到默认组**而不是崩或空白 —— 与
+ * `presetId` / `paletteStyle` / `chatFont` 的处理方式完全一致。
+ */
+object ZhiPageSets {
+
+    /** 全部可用组。**第一个是默认组**，`byId` 找不到时回到它。 */
+    val all: List<ZhiPageSet> = listOf(MiuixPageSet)
+
+    val default: ZhiPageSet get() = all.first()
+
+    fun byId(id: String?): ZhiPageSet =
+        if (id == null) default else all.firstOrNull { it.id == id } ?: default
+}
+
+/**
  * 当前界面主题组。
  *
  * 用 `staticCompositionLocalOf` 而不是 `compositionLocalOf`：它只在用户换主题时

@@ -72,6 +72,7 @@ import com.zhizhu.zhicode.compose.ui.effects.PageBlurBar
 import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import com.zhizhu.zhicode.compose.ui.effects.rememberPageBlurBackdrop
 import com.zhizhu.zhicode.compose.ui.settings.SettingsEntry
+import com.zhizhu.zhicode.compose.ui.settings.SettingsFootnote
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
 import com.zhizhu.zhicode.compose.ui.settings.SettingsNumberDialog
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPlateColors
@@ -86,6 +87,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.layerBackdrop
+import com.zhizhu.zhicode.compose.ui.pages.ZhiPageSets
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -221,7 +223,60 @@ fun ThemePage(
                                 summary = if (shaderSupported) "为导航栏和悬浮层启用背景模糊" else "需要 Android 13 RuntimeShader 支持",
                                 enabled = shaderSupported, icon = ZhiIcons.layers, plate = SettingsPlateColors.blue,
                             )
+                            /*
+                             * Mochi 液态玻璃 —— 与上面那一项是**两条独立管线**。
+                             *
+                             * 上面那个开关管本工程自己的 `Glass`（miuix-blur：顶栏、悬浮栏、
+                             * 弹窗的虚化）；这一项管 Mochi 组页面里的 `MochiMaterials`
+                             * （AGSL 折射玻璃 + 模糊金字塔）。
+                             *
+                             * 默认关闭，理由是代价而不是保守：每组玻璃要建取样层 +
+                             * 4～9 级模糊金字塔，系统每帧要遍历所有渲染节点；Mochi 的
+                             * 接入规范也明确要求「打开前说明代价」。
+                             */
+                            SettingsToggle(
+                                title = "液态玻璃",
+                                checked = theme.mochiGlass,
+                                onCheckedChange = { on -> onChange { it.copy(mochiGlass = on) } },
+                                summary = if (shaderSupported) {
+                                    "折射玻璃与实时模糊，更耗电；需要 Android 13"
+                                } else {
+                                    "需要 Android 13 RuntimeShader 支持"
+                                },
+                                enabled = shaderSupported,
+                                icon = ZhiIcons.layers,
+                                plate = SettingsPlateColors.purple,
+                            )
                             /* 「预测性返回手势」开关已删除，理由见 ThemeStore 类头注释。 */
+                        }
+                    }
+                    /*
+                     * 界面主题组（一个主题 = 一组 page.kt）。
+                     *
+                     * 与上面的「配色」是**两个维度**：配色决定颜色种子，这一项决定
+                     * 整套页面长什么样。同一个配色可以配任意一组页面。
+                     *
+                     * 用 `OverlayDropdownPreference` 而不是 `SettingsChoice`：本页现有的
+                     * 两个选择器（「调色板风格」「颜色规范」）都用它，换一种形态会让
+                     * 读者以为这一项是另一种优先级。
+                     */
+                    item(key = "pageSet") {
+                        SettingsGroup("界面主题") {
+                            val sets = ZhiPageSets.all
+                            OverlayDropdownPreference(
+                                title = "页面风格",
+                                items = sets.map { it.name },
+                                selectedIndex = sets.indexOfFirst { it.id == theme.pageSetId }
+                                    .coerceAtLeast(0),
+                                onSelectedIndexChange = { index ->
+                                    sets.getOrNull(index)?.let { set ->
+                                        onChange { it.copy(pageSetId = set.id) }
+                                    }
+                                },
+                            )
+                            SettingsFootnote(
+                                "决定整组页面的排版与组件风格；配色在上面的「颜色」里单独设置。",
+                            )
                         }
                     }
                     item(key = "scale") {

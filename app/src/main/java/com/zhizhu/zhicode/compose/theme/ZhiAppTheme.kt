@@ -19,6 +19,10 @@ import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
 import ui.feice.mochi.effect.overscroll.ProvideMochiOverscroll
+import ui.feice.mochi.theme.MochiMaterials
+import ui.feice.mochi.theme.mochiGlassMaterials
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
+import com.zhizhu.zhicode.compose.ui.pages.ZhiPageSets
 
 /**
  * 应用的唯一主题栈：深浅判定 + 配色（含 Monet 种子色）+ 文字字阶 + 界面缩放。
@@ -82,21 +86,49 @@ fun ZhiAppTheme(theme: ThemeSettings, content: @Composable () -> Unit) {
             // 麻薯（Mochi）主题再包一层，位置在这里是**有讲究的**：见 MochiSkin.kt
             // 文件头的说明。一句话：现有调用点读 MiuixTheme 的不动，Mochi 组件读到的是
             // 同一套种子色 / 深浅判定 / G2 圆角，两套组件混排时不会各按各的默认值排版。
-            ZhiMochiTheme(theme) {
+            ZhiMochiTheme(
+                theme = theme,
                 /*
-                 * 越界回弹：Mochi 组件要求根部提供，`llms.txt:10` 把它和 MochiTheme
-                 * 并列为 root 必接项。
+                 * 材质：只有 Mochi 组 + 用户显式打开时才给玻璃。
                  *
-                 * 为什么现在就要接，虽然还没上 Mochi 页面：它提供的是 Mochi 组件
-                 * 读的 `LocalMochiOverscroll`，没有它时 Mochi 列表回退到硬停，
-                 * 观感与它自己的规范不一致（`philosophy.md:38`「越界用橡皮筋，不硬停」）。
-                 * 提前接上，第 4 阶段写第一个 Mochi 页面时不用再改主题层。
+                 * `mochiGlassMaterials()` 是 Mochi 内置的整套（栏/控件/面板用 Regular，
+                 * 菜单/警告框用更实的 Thick）。**不给它** = `MochiMaterials()` 默认实例
+                 * = 纯色，界面与引入玻璃前逐像素一致。
                  *
-                 * 对本工程现有界面**无影响**：Miuix 的 `overScrollVertical()` 与
-                 * 悬浮栏的拖动各有自己的实现，不读这个 Local。
+                 * `remember` 是必须的，不是优化：`mochiGlassMaterials()` 每次调用都会
+                 * 建新的 `MochiMaterials` 实例，而 `MochiTheme` 拿到新实例会重建整棵
+                 * 玻璃渲染配置（取样层、金字塔级数都要重算）。不 remember 的话，
+                 * 主题层每次重组都会把玻璃引擎重置一遍。
                  */
-                ProvideMochiOverscroll {
-                    content()
+                materials = remember(theme.mochiGlass) {
+                    if (theme.mochiGlass) mochiGlassMaterials() else MochiMaterials()
+                },
+            ) {
+                /*
+                 * 界面主题组（一个主题 = 一组 page.kt）。
+                 *
+                 * 用 `staticCompositionLocalOf`：它只在换主题时变一次，值一变就让整棵
+                 * 子树重组 —— 那正是换组时想要的（一屏全换），平时零逐帧开销。
+                 *
+                 * ⚠️ 放在 **MochiTheme 内层**：Mochi 组的页面要读 `MochiTheme.*`，
+                 * 而组的分辨（`ZhiSkins.byId`）只用到一个字符串，不需要主题色板。
+                 * 内外顺序对"读不到"没有影响，但放内层能让 Mochi 组页面在任何
+                 * 一层被引用时都拿得到一致的 Mochi 主题。
+                 */
+                CompositionLocalProvider(LocalZhiPageSet provides ZhiPageSets.byId(theme.pageSetId)) {
+                    /*
+                     * 越界回弹：Mochi 组件要求根部提供，`llms.txt:10` 把它和 MochiTheme
+                     * 并列为 root 必接项。
+                     *
+                     * 为什么现在就接（还没上 Mochi 页面）：它提供的是 Mochi 组件读的
+                     * `LocalMochiOverscroll`，没有它时 Mochi 列表回退到硬停，与
+                     * `philosophy.md:38`「越界用橡皮筋，不硬停」不一致。
+                     *
+                     * 对现有界面无影响：Miuix 的 `overScrollVertical()` 不读这个 Local。
+                     */
+                    ProvideMochiOverscroll {
+                        content()
+                    }
                 }
             }
         }
