@@ -168,11 +168,11 @@ val THIRD_PARTY_LICENSES: List<LicenseEntry> = listOf(
     LicenseEntry(
         name = "Mochi Compose",
         license = "Apache-2.0",
-        version = "0.2.0",
+        version = "0.3.0",
         group = "界面框架",
         author = "feice11",
         homepage = "https://github.com/feice11/mochi-compose",
-        detail = "提供 iOS 26 式列表/菜单与 G2 连续圆角的组件库。" +
+        detail = "提供 iOS 26 式列表/菜单、组件（mochi-compose / mochi-icons）与 G2 连续圆角的组件库。" +
             "已知缺口：它是按 backdrop 1.0.6 编译的，而本工程显式用了 2.0.1；" +
             "目前尚未调用它的玻璃组件，一旦启用需先核对方法签名，否则会是 NoSuchMethodError。",
     ),
@@ -251,6 +251,26 @@ val THIRD_PARTY_LICENSES: List<LicenseEntry> = listOf(
         homepage = "https://github.com/zhanghai/MaterialFiles",
         detail = "本工程参考它的独立文件页与顶部层级交互形态，**未复制**其任何源码或资源。" +
             "因此这一项是设计参考，不是随发行物链接或内嵌的第三方代码。",
+    ),
+    LicenseEntry(
+        name = "CC Switch",
+        license = "MIT",
+        version = "—",
+        group = "资源与致谢",
+        author = "farion1231 (Jason Young)",
+        homepage = "https://github.com/farion1231/cc-switch",
+        detail = "借鉴并适配其 Pi 多供应商预设清单、thinkingLevelMap 推理档位配置，" +
+            "以及供应商列表使用的品牌矢量图标资源（ic_provider_*.xml 与 ProviderBrandIcons.kt）。",
+    ),
+    LicenseEntry(
+        name = "DeepSeek Harness 交互参考",
+        license = "MIT · 未复制源码",
+        version = "—",
+        group = "资源与致谢",
+        author = "DeepSeek",
+        homepage = "https://github.com/deepseek-ai/deepseek-harness",
+        detail = "侧边栏按工作区目录聚合会话列表及每组默认折叠保留最近 5 条的视觉结构参考，" +
+            "基于 Compose / Miuix 独立实现，未复制其 TypeScript 或前端源码。",
     ),
     LicenseEntry(
         name = "ZhiCode 自身",

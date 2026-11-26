@@ -112,11 +112,15 @@ internal object SessionReader {
      */
     fun merge(older: List<ChatItem>, newer: List<ChatItem>): List<ChatItem> = older + newer
 
-    /** 侧栏列表。按最近活动倒序。 */
+    /** 侧栏单项目列表。按最近活动倒序。 */
     fun list(projectDirectory: String): List<SessionSummary> {
         val raw = runCatching { SessionStore.listSessions(projectDirectory) }.getOrDefault(emptyList())
-        // 先按**原始时间戳**排序再映射成界面模型：
-        // 界面模型里只有"3 分钟前"这种相对文案，按它排序是错的。
+        return raw.sortedByDescending { it.activityModifiedAt }.map { it.toUi() }
+    }
+
+    /** 侧栏全量工作区列表（跨全部项目）。按最近活动倒序。 */
+    fun listAll(): List<SessionSummary> {
+        val raw = runCatching { SessionStore.listSessions() }.getOrDefault(emptyList())
         return raw.sortedByDescending { it.activityModifiedAt }.map { it.toUi() }
     }
 
@@ -621,13 +625,15 @@ internal object SessionReader {
     // ------------------------------------------------------------------
 
     private fun SessionStore.SessionSummary.toUi(): SessionSummary {
-        // 直接用会话标识当 id：它就是打开、改备注、删除所需要的全部信息。
+        val cleanProject = project.trimEnd('/').ifBlank { "/" }
         return SessionSummary(
             id = id,
             title = if (title.isBlank()) "新会话" else title,
-            project = File(project.ifBlank { "/" }).name,
+            project = File(cleanProject).name,
+            projectPath = cleanProject,
             messageCount = messageCount,
             updatedAtLabel = relativeTime(activityModifiedAt),
+            updatedAtMs = activityModifiedAt,
             note = note,
         )
     }
@@ -657,22 +663,17 @@ internal object SessionReader {
         else -> ToolKind.OTHER
     }
 
-    /**
-     * 相对时间。刚写下的会话显示"刚刚"，避免出现"0 分钟前"这种别扭文案。
-     */
-    private fun relativeTime(timestamp: Long): String {
+    /** 紧凑相对时间（参考 DeepSeek Harness 侧栏：`刚刚` / `5分钟` / `11小时` / `3天` / `M月d日`）。 */
+    internal fun relativeTime(timestamp: Long, now: Long = System.currentTimeMillis()): String {
         if (timestamp <= 0L) return ""
-        val now = System.currentTimeMillis()
-        val delta = now - timestamp
+        val delta = (now - timestamp).coerceAtLeast(0L)
         if (delta < 60_000L) return "刚刚"
-        if (delta < 3_600_000L) return "${delta / 60_000L} 分钟前"
-        val today = Calendar.getInstance()
+        if (delta < 3_600_000L) return "${delta / 60_000L}分钟"
+        if (delta < 86_400_000L) return "${delta / 3_600_000L}小时"
+        val days = delta / 86_400_000L
+        if (days < 30L) return "${days}天"
+        val today = Calendar.getInstance().apply { timeInMillis = now }
         val then = Calendar.getInstance().apply { timeInMillis = timestamp }
-        if (today.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
-            today.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
-        ) {
-            return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
-        }
         if (today.get(Calendar.YEAR) == then.get(Calendar.YEAR)) {
             return SimpleDateFormat("M月d日", Locale.getDefault()).format(Date(timestamp))
         }

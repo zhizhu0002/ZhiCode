@@ -36,6 +36,8 @@ import com.zhizhu.zhicode.compose.data.UpdateStateStore
 import com.zhizhu.zhicode.compose.data.VersionCompare
 import com.zhizhu.zhicode.compose.data.WorkspacePaths
 import com.zhizhu.zhicode.compose.data.WorkspaceRepository
+import com.zhizhu.zhicode.compose.data.WorkspaceStore
+import com.zhizhu.zhicode.compose.data.canonicalWorkspacePath
 import com.zhizhu.zhicode.compose.engine.EngineEvents
 import com.zhizhu.zhicode.compose.engine.EngineOverrides
 import com.zhizhu.zhicode.compose.engine.EnginePlanApproval
@@ -111,6 +113,8 @@ import com.zhizhu.zhicode.compose.model.RoleCardEditor
 import com.zhizhu.zhicode.compose.model.RoleCardsState
 import com.zhizhu.zhicode.compose.model.SLASH_COMMANDS
 import com.zhizhu.zhicode.compose.model.SessionSummary
+import com.zhizhu.zhicode.compose.model.SidebarOrderBy
+import com.zhizhu.zhicode.compose.model.WorkspaceEntry
 import com.zhizhu.zhicode.compose.model.SettingsCategory
 import com.zhizhu.zhicode.compose.model.DEFAULT_MAX_CONCURRENT_SUBAGENTS
 import com.zhizhu.zhicode.compose.model.SkillCreateDraft
@@ -181,6 +185,8 @@ class WorkspaceViewModel(
 
     /** 内置 Termux 环境安装器（第一次使用前会解压 32MB 的 bootstrap）。 */
     private val installer = RuntimeInstaller(application)
+
+    private val workspaceStore = WorkspaceStore(application)
 
     /** 真实 ZhiCode 引擎。懒创建，第一次发消息时才初始化。 */
     private val engine = ZhiEngineController(application, this)
@@ -533,7 +539,11 @@ class WorkspaceViewModel(
                     s
                 } else {
                     claimed = true
-                    s.copy(runtimeInstalling = true, runtimeProgress = 0, runtimeMessage = reason)
+                    s.copy(
+                        runtimeInstalling = true,
+                        runtimeProgress = 0,
+                        runtimeMessage = reason,
+                    )
                 }
             }
             if (!claimed) {
@@ -606,10 +616,26 @@ class WorkspaceViewModel(
             if (runCatching { installer.isInstalled() }.getOrDefault(false)) {
                 installer.setupStorageLinks()
             }
+            val workspaces = workspaceStore.loadWorkspaces(WorkspacePaths.defaultProject())
+            val orderBy = workspaceStore.loadOrderBy()
+            val sessions = SessionReader.listAll()
+            val latest = sessions.firstOrNull()
+            val targetProject = latest?.projectPath?.takeIf { it.isNotBlank() && File(it).isDirectory }
+                ?: workspaceStore.loadLastActivePath(WorkspacePaths.defaultProject())
+            _state.update {
+                it.copy(
+                    workspaces = workspaces,
+                    sidebarOrderBy = orderBy,
+                    sessions = sessions,
+                    projectPath = targetProject,
+                    projectName = WorkspacePaths.nameOf(targetProject),
+                    filePath = targetProject,
+                )
+            }
             ensureWorkspace()
-            val sessions = SessionReader.list(_state.value.projectPath)
-            _state.update { it.copy(sessions = sessions) }
-            sessions.firstOrNull()?.let { openSession(it) }
+            if (latest != null) {
+                openSession(latest)
+            }
         }
     }
 
@@ -3432,7 +3458,7 @@ class WorkspaceViewModel(
      */
     private fun syncActiveSessionFromDisk() {
         viewModelScope.launch(Dispatchers.IO) {
-            val sessions = SessionReader.list(_state.value.projectPath)
+            val sessions = SessionReader.listAll()
             val sessionId = engine.sessionId()
             _state.update { s ->
                 val activeId = when {
@@ -6133,7 +6159,7 @@ class WorkspaceViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             // titleOverride 传空串 = 不覆盖标题，只改备注。
             val ok = SessionReader.updateMetadata(session.id, note, "")
-            val sessions = SessionReader.list(_state.value.projectPath)
+            val sessions = SessionReader.listAll()
             _state.update {
                 it.copy(
                     sessions = sessions,
@@ -6151,7 +6177,7 @@ class WorkspaceViewModel(
     private fun saveSessionTitle(session: SessionSummary, title: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val ok = SessionReader.updateMetadata(session.id, session.note, title)
-            val sessions = SessionReader.list(_state.value.projectPath)
+            val sessions = SessionReader.listAll()
             _state.update {
                 it.copy(
                     sessions = sessions,
@@ -6510,17 +6536,18 @@ class WorkspaceViewModel(
         resetStopTracking()
         val seq = ++openSessionSeq
 
+        val targetPath = session.projectPath.takeIf { it.isNotBlank() }?.let { canonicalWorkspacePath(it) }
+        val switchingProject = targetPath != null && targetPath != canonicalWorkspacePath(_state.value.projectPath)
+        if (switchingProject && targetPath != null) {
+            switchProjectPathInternal(targetPath)
+        }
+
         _state.update {
             it.copy(
                 sidebarOpen = false,
                 tab = WorkspaceTab.CHAT,
-                workingStatus = "正在载入会话…",
-                // 见 `transcriptLoading` 的说明：置真之后对话流显示"载入中"占位，
-                // 而不是那条"想让 ZhiCode 做什么？"的空会话提示。
+                workingStatus = null,
                 transcriptLoading = true,
-                // 旧会话的内容**立刻清掉**。否则新会话的消息到达之前，
-                // 屏幕上还挂着上一条会话的对话 —— 那比空白更令人困惑
-                // （用户会以为切错了会话，或者以为消息串了）。
                 transcript = emptyList(),
                 contextTokens = 0,
                 transcriptHasOlder = false,
@@ -6533,19 +6560,11 @@ class WorkspaceViewModel(
             val pageDeferred = async { SessionReader.openPage(session.id) }
             val fastTokensDeferred = async { engine.estimateSessionContextTokens(session.id) }
             val engineDeferred = async<Result<Unit>> {
-                // 引擎必须先配置好才有 config 可用，否则 resumeConversation 不会恢复项目/工作流。
                 runCatching {
                     engine.configure(engineOverrides())
                     engine.resumeConversation(session.id).getOrThrow()
                 }
             }
-            /*
-             * 读库失败必须自己接住并清掉 [WorkspaceUiState.transcriptLoading]。
-             *
-             * 不接的后果：`openPage` 抛异常 → `await()` 把异常抛穿这个协程 →
-             * `transcriptLoading` 永远停在 true → 对话流**永久**显示"载入中"占位，
-             * 用户再怎么点都看不到内容，而且没有任何提示。那比直接报错糟得多。
-             */
             val page = runCatching { pageDeferred.await() }.getOrElse { error ->
                 engineDeferred.cancel()
                 if (seq != openSessionSeq) return@launch
@@ -6566,6 +6585,29 @@ class WorkspaceViewModel(
                     " ms=" + (android.os.SystemClock.elapsedRealtime() - startedAt),
             )
             val fastTokens = runCatching { fastTokensDeferred.await() }.getOrDefault(0)
+            if (seq != openSessionSeq) {
+                engineDeferred.cancel()
+                return@launch
+            }
+            // SQLite 本地分页先到先展示，不阻塞用户阅读历史对话等待 PRoot / Pi 冷启动握手。
+            _state.update {
+                it.copy(
+                    activeSessionId = session.id,
+                    transcript = page.items,
+                    transcriptHasOlder = page.hasMore,
+                    transcriptOldestSeq = page.oldestSeq,
+                    transcriptLoadingOlder = false,
+                    transcriptPrependRevision = 0,
+                    transcriptHasNewer = false,
+                    transcriptJumpRevision = 0,
+                    tasks = page.tasks,
+                    contextTokens = fastTokens,
+                    stopping = false,
+                    composerBusy = false,
+                    workingStatus = null,
+                    transcriptLoading = false,
+                )
+            }
             val resumed = engineDeferred.await()
             if (seq != openSessionSeq) return@launch
             val footprint = engine.memoryFootprint()
@@ -6579,23 +6621,8 @@ class WorkspaceViewModel(
             val finalTokens = if (measuredTokens > 0) measuredTokens else fastTokens
             _state.update {
                 it.copy(
-                    activeSessionId = session.id,
-                    transcript = page.items,
-                    transcriptHasOlder = page.hasMore,
-                    transcriptOldestSeq = page.oldestSeq,
-                    transcriptLoadingOlder = false,
-                    // 换了一条会话就重新计数：新会话的第一页不是"往前补"，
-                    // 列表必须无条件吸底（见 UiModels 里的说明）。
-                    transcriptPrependRevision = 0,
-                    transcriptHasNewer = false,
-                    transcriptJumpRevision = 0,
-                    tasks = page.tasks,
                     contextTokens = finalTokens,
                     contextWindow = engine.contextWindowTokens().takeIf { w -> w > 0 } ?: it.contextWindow,
-                    stopping = false,
-                    composerBusy = false,
-                    workingStatus = null,
-                    transcriptLoading = false,
                     message = resumed.exceptionOrNull()?.let { error ->
                         "会话历史已显示，但引擎恢复失败：" + (error.message ?: "未知原因")
                     },
@@ -6801,7 +6828,7 @@ class WorkspaceViewModel(
                 engine.resetConversation()
                 discardStreamingAssistant()
             }
-            val sessions = SessionReader.list(_state.value.projectPath)
+            val sessions = SessionReader.listAll()
             val next = sessions.firstOrNull()
             _state.update {
                 it.copy(
@@ -6823,28 +6850,125 @@ class WorkspaceViewModel(
         }
     }
 
-    /** 在侧栏会话管理中切换项目目录并刷新会话列表。 */
-    fun updateProjectDirectory(rawPath: String) {
-        val next = rawPath.trim()
-        if (next.isEmpty()) return
+    private fun switchProjectPathInternal(cleanPath: String) {
         val baseDraft = _state.value.settingsDraft ?: SettingsDraft.from(_state.value)
-        applySettingsDraft(baseDraft.copy(projectPath = next))
-        refreshSessions()
+        applySettingsDraft(baseDraft.copy(projectPath = cleanPath))
+        workspaceStore.saveLastActivePath(cleanPath)
         runCatching { engine.configure(engineOverrides()) }
-        _state.update { it.copy(message = "项目目录：$next", messageIsError = false) }
     }
 
-    /** 从磁盘重新读取会话列表（新建/发消息/删除之后调用）。 */
+    /** 在侧栏会话管理中切换项目目录并确保其已注册为一个工作区。 */
+    fun updateProjectDirectory(rawPath: String) {
+        val clean = canonicalWorkspacePath(rawPath)
+        if (clean.isEmpty()) return
+        addWorkspace(clean, WorkspacePaths.nameOf(clean), switchToIt = true)
+    }
+
+    /** 添加并持久化一个工作区目录。 */
+    fun addWorkspace(rawPath: String, customLabel: String = "", switchToIt: Boolean = true) {
+        val clean = canonicalWorkspacePath(rawPath)
+        if (clean.isEmpty()) return
+        WorkspacePaths.ensure(clean)
+        val defaultPath = canonicalWorkspacePath(WorkspacePaths.defaultProject())
+        val label = customLabel.trim().ifEmpty {
+            if (clean == defaultPath) "默认工作区" else WorkspacePaths.nameOf(clean)
+        }
+        val current = _state.value.workspaces
+        val exists = current.any { canonicalWorkspacePath(it.path) == clean }
+        val updated = if (exists) {
+            current.map {
+                if (canonicalWorkspacePath(it.path) == clean) it.copy(expanded = true, label = if (customLabel.isNotBlank()) label else it.label)
+                else it
+            }
+        } else {
+            val fresh = WorkspaceEntry(
+                id = clean,
+                path = clean,
+                label = label,
+                isDefault = clean == defaultPath,
+                expanded = true,
+                createdAt = System.currentTimeMillis(),
+            )
+            listOf(fresh) + current
+        }
+        workspaceStore.saveWorkspaces(updated)
+        _state.update { it.copy(workspaces = updated) }
+        if (switchToIt) {
+            switchProjectPathInternal(clean)
+            _state.update { it.copy(message = "已切换工作区：$label", messageIsError = false) }
+        }
+        refreshSessions()
+    }
+
+    fun renameWorkspace(path: String, newLabel: String) {
+        val clean = canonicalWorkspacePath(path)
+        val trimmed = newLabel.trim()
+        if (trimmed.isEmpty()) return
+        val updated = _state.value.workspaces.map {
+            if (canonicalWorkspacePath(it.path) == clean && !it.isDefault) it.copy(label = trimmed) else it
+        }
+        workspaceStore.saveWorkspaces(updated)
+        _state.update { it.copy(workspaces = updated, message = "已重命名工作区：$trimmed", messageIsError = false) }
+    }
+
+    fun removeWorkspace(path: String) {
+        val clean = canonicalWorkspacePath(path)
+        val updated = _state.value.workspaces.filterNot {
+            canonicalWorkspacePath(it.path) == clean && !it.isDefault
+        }
+        workspaceStore.saveWorkspaces(updated)
+        val defaultPath = canonicalWorkspacePath(WorkspacePaths.defaultProject())
+        if (canonicalWorkspacePath(_state.value.projectPath) == clean) {
+            switchProjectPathInternal(defaultPath)
+        }
+        _state.update { it.copy(workspaces = updated, message = "已从侧栏移除工作区", messageIsError = false) }
+    }
+
+    fun toggleWorkspaceExpanded(path: String) {
+        val clean = canonicalWorkspacePath(path)
+        val current = _state.value.workspaces
+        val hasEntry = current.any { canonicalWorkspacePath(it.path) == clean }
+        val updated = if (hasEntry) {
+            current.map {
+                if (canonicalWorkspacePath(it.path) == clean) it.copy(expanded = !it.expanded) else it
+            }
+        } else {
+            current + WorkspaceEntry(
+                id = clean,
+                path = clean,
+                label = WorkspacePaths.nameOf(clean),
+                expanded = false,
+            )
+        }
+        workspaceStore.saveWorkspaces(updated)
+        _state.update { it.copy(workspaces = updated) }
+    }
+
+    fun setAllWorkspacesExpanded(expanded: Boolean) {
+        val updated = _state.value.workspaces.map { it.copy(expanded = expanded) }
+        workspaceStore.saveWorkspaces(updated)
+        _state.update { it.copy(workspaces = updated) }
+    }
+
+    fun setSidebarOrderBy(orderBy: SidebarOrderBy) {
+        workspaceStore.saveOrderBy(orderBy)
+        _state.update { it.copy(sidebarOrderBy = orderBy) }
+    }
+
+    /** 在指定工作区目录内直接开始新会话。 */
+    fun newSessionInWorkspace(workspacePath: String) {
+        val clean = canonicalWorkspacePath(workspacePath)
+        if (clean.isNotEmpty() && clean != canonicalWorkspacePath(_state.value.projectPath)) {
+            switchProjectPathInternal(clean)
+        }
+        newSession()
+    }
+
+    /** 从磁盘重新读取全量会话列表（跨所有工作区）。 */
     fun refreshSessions() {
         viewModelScope.launch(Dispatchers.IO) {
-            val projectAtStart = _state.value.projectPath
-            val sessions = SessionReader.list(projectAtStart)
-            _state.update { state ->
-                if (state.projectPath != projectAtStart) return@update state
-                // 保留"尚未落库的新会话"这一状态：此刻 activeSessionId 为空且
-                // 列表里还没有对应会话，不能被列表刷新覆盖掉。
-                state.copy(sessions = sessions)
-            }
+            val sessions = SessionReader.listAll()
+            _state.update { state -> state.copy(sessions = sessions) }
         }
     }
 
@@ -7294,7 +7418,12 @@ class WorkspaceViewModel(
         val failure = installRuntimeReporting()
         if (failure != null) {
             appendRuntimeLog("安装失败：$failure")
-            _state.update { it.copy(runtimeInstalling = false, runtimeMessage = "初始化失败：$failure") }
+            _state.update {
+                it.copy(
+                    runtimeInstalling = false,
+                    runtimeMessage = "初始化失败：$failure",
+                )
+            }
             return
         }
         appendRuntimeLog("安装完成：已装=${runCatching { installer.installedVersion() }.getOrNull() ?: "(无)"}")
@@ -7308,21 +7437,17 @@ class WorkspaceViewModel(
                 environmentReport = reportText,
             )
         }
-        // home 目录是随运行环境一起出现的，所以工作区只能在这之后创建。
-        // 不创建的话：文件面板永远显示"目录不存在"，
-        // 终端的工作目录会回退到 home，会话也会落在一个不存在的项目键下。
         ensureWorkspace()
     }
 
-    /**
-     * 跑一次安装，失败时返回一句人话原因（成功返回 `null`）。
-     *
-     * 把"失败原因"作为返回值而不是就地写状态：调用方还需要把同一句话写进日志，
-     * 两处分别拼一遍字符串必然走样。
-     */
     private suspend fun installRuntimeReporting(): String? = runCatching {
         installer.install { message, percent ->
-            _state.update { it.copy(runtimeMessage = message, runtimeProgress = percent) }
+            _state.update {
+                it.copy(
+                    runtimeMessage = message,
+                    runtimeProgress = percent,
+                )
+            }
         }
     }.exceptionOrNull()?.let { error ->
         error.message ?: error.javaClass.simpleName

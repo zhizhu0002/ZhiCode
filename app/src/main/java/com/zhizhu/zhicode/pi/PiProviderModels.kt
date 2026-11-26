@@ -189,9 +189,24 @@ fun resolveSupportedThinkingLevels(model: PiModelConfig?): List<PiThinkingLevel>
     }
 }
 
+/** 计算对话框二级菜单展示的思考档位：当模型逐项添加有效映射且未设置禁用黑名单时，仅显示已添加档位。 */
+fun resolveMenuThinkingLevels(model: PiModelConfig?): List<PiThinkingLevel> {
+    if (model == null) return resolveSupportedThinkingLevels(null)
+    if (!model.reasoning) return listOf(PiThinkingLevel.OFF)
+    val map = model.thinkingLevelMap
+    if (map.isNotEmpty() && !map.containsValue(null)) {
+        val explicit = PiThinkingLevel.entries.filter { map[it] != null }
+        if (explicit.isNotEmpty()) return explicit
+    }
+    return resolveSupportedThinkingLevels(model)
+}
+
 /** 当切换模型后原档位不再被支持时，按 Pi `clampThinkingLevel` 夹紧到最近支持档位。 */
-fun clampThinkingLevel(model: PiModelConfig?, requested: PiThinkingLevel): PiThinkingLevel {
-    val available = resolveSupportedThinkingLevels(model)
+fun clampThinkingLevel(model: PiModelConfig?, requested: PiThinkingLevel): PiThinkingLevel =
+    clampThinkingLevel(resolveSupportedThinkingLevels(model), requested)
+
+/** 将请求档位夹紧到给定可用档位列表中最接近的一项。 */
+fun clampThinkingLevel(available: List<PiThinkingLevel>, requested: PiThinkingLevel): PiThinkingLevel {
     if (requested in available) return requested
     val all = PiThinkingLevel.entries
     val idx = all.indexOf(requested).coerceAtLeast(0)

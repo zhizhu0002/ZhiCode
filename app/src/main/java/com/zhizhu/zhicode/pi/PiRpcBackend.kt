@@ -100,6 +100,18 @@ internal class PiRpcBackend(
     private var activeModelId: String = ""
 
     @Volatile
+    private var appliedProviderKey: String = ""
+
+    @Volatile
+    private var appliedModelId: String = ""
+
+    @Volatile
+    private var appliedThinkingLevel: String = ""
+
+    @Volatile
+    private var needsRestartForEnvChange: Boolean = false
+
+    @Volatile
     private var sessionStore: SessionStore? = null
 
     @Volatile
@@ -162,32 +174,43 @@ internal class PiRpcBackend(
         val synced = PiConfigSync.syncToContainer(appContext, next)
         val envKey = processRestartKey(next, synced)
         val alive = process?.isAlive == true
-        if (alive && !busyFlag.get() && envKey != activeProcessEnvKey) {
-            ioExecutor.execute { stopProcessQuietly() }
-            return
-        }
         val providerOrModelChanged = synced.providerId != activeProviderKey || synced.modelId != activeModelId
         activeProviderKey = synced.providerId
         activeModelId = synced.modelId
+        if (alive && envKey != activeProcessEnvKey) {
+            if (!busyFlag.get()) {
+                needsRestartForEnvChange = false
+                ioExecutor.execute { stopProcessQuietly() }
+            } else {
+                needsRestartForEnvChange = true
+            }
+            return
+        }
         if (alive) {
             ioExecutor.execute {
-                if (synced.modelId.isNotEmpty() && (providerOrModelChanged || prev.model != next.model)) {
-                    runCatching {
-                        sendCommandAsync(
-                            JSONObject()
-                                .put("type", "set_model")
-                                .put("provider", synced.providerId)
-                                .put("modelId", synced.modelId),
-                        )
-                    }
+                if (process?.isAlive == true && !busyFlag.get() && (needsRestartForEnvChange || activeProcessEnvKey != envKey)) {
+                    stopProcessQuietly()
+                    return@execute
                 }
-                if (prev.effort != next.effort) {
+                if (synced.modelId.isNotEmpty() && (appliedProviderKey != synced.providerId || appliedModelId != synced.modelId || providerOrModelChanged || prev.model != next.model)) {
+                    val ok = runCatching {
+                        applyModelAndThinkingLocked(synced.providerId, synced.modelId, synced.thinkingLevel, throwOnFailure = false)
+                    }.getOrDefault(false)
+                    if (!ok && !busyFlag.get()) {
+                        stopProcessQuietly()
+                        return@execute
+                    }
+                } else if (appliedThinkingLevel != synced.thinkingLevel || prev.effort != next.effort) {
                     runCatching {
-                        sendCommandAsync(
+                        val thinkResp = sendCommandBlocking(
                             JSONObject()
                                 .put("type", "set_thinking_level")
                                 .put("level", synced.thinkingLevel),
+                            CMD_TIMEOUT_MS,
                         )
+                        if (thinkResp.optBoolean("success", false)) {
+                            appliedThinkingLevel = synced.thinkingLevel
+                        }
                     }
                 }
                 if (prev.autoCompact != next.autoCompact) {
@@ -230,7 +253,21 @@ internal class PiRpcBackend(
             try {
                 ensureSessionStore(config)
                 recordUserMessage(prompt, images)
+                val synced = PiConfigSync.syncToContainer(appContext, config)
+                if (process?.isAlive == true && (needsRestartForEnvChange || activeProcessEnvKey != processRestartKey(config, synced))) {
+                    stopProcessQuietly()
+                }
                 ensureProcessStarted()
+                if (appliedProviderKey != synced.providerId || appliedModelId != synced.modelId || appliedThinkingLevel != synced.thinkingLevel) {
+                    val ok = runCatching {
+                        applyModelAndThinkingLocked(synced.providerId, synced.modelId, synced.thinkingLevel, throwOnFailure = false)
+                    }.getOrDefault(false)
+                    if (!ok) {
+                        stopProcessQuietly()
+                        ensureProcessStarted()
+                        applyModelAndThinkingLocked(synced.providerId, synced.modelId, synced.thinkingLevel, throwOnFailure = true)
+                    }
+                }
 
                 val cmd = JSONObject()
                     .put("type", "prompt")
@@ -329,6 +366,10 @@ internal class PiRpcBackend(
         val hostFile = if (targetFile.isNotEmpty()) File(ContainerPaths.guestToHost(targetFile).absolutePath) else null
         val fileEstimated = if (hostFile != null && hostFile.isFile) estimateContextTokensFromSessionFile(hostFile) else 0
         lastMeasuredContextTokens = if (fileEstimated > 0) fileEstimated.toLong() else -1L
+        val synced = PiConfigSync.syncToContainer(appContext, currentConfig)
+        if (process?.isAlive == true && (needsRestartForEnvChange || activeProcessEnvKey != processRestartKey(currentConfig, synced))) {
+            stopProcessQuietly()
+        }
         if (hostFile != null && hostFile.isFile) {
             ensureProcessStarted(recordInitialSessionFile = false)
             val resp = sendCommandBlocking(
@@ -339,6 +380,7 @@ internal class PiRpcBackend(
                 throw IllegalStateException(resp.optString("error", "恢复 Pi 会话失败"))
             }
             piSessionFile = targetFile
+            applyModelAndThinkingLocked(synced.providerId, synced.modelId, synced.thinkingLevel, throwOnFailure = true)
             val statsResp = runCatching {
                 sendCommandBlocking(JSONObject().put("type", "get_session_stats"), CMD_TIMEOUT_MS)
             }.getOrNull()
@@ -351,7 +393,46 @@ internal class PiRpcBackend(
             }
         } else if (process?.isAlive == true) {
             runCatching { sendCommandBlocking(JSONObject().put("type", "new_session"), CMD_TIMEOUT_MS) }
+            runCatching { applyModelAndThinkingLocked(synced.providerId, synced.modelId, synced.thinkingLevel, throwOnFailure = false) }
         }
+    }
+
+    private fun applyModelAndThinkingLocked(
+        providerId: String,
+        modelId: String,
+        thinkingLevel: String,
+        throwOnFailure: Boolean = true,
+    ): Boolean {
+        if (modelId.isNotEmpty()) {
+            val modelResp = sendCommandBlocking(
+                JSONObject()
+                    .put("type", "set_model")
+                    .put("provider", providerId)
+                    .put("modelId", modelId),
+                CMD_TIMEOUT_MS,
+            )
+            if (!modelResp.optBoolean("success", false)) {
+                val err = modelResp.optString("error", "未知错误")
+                if (throwOnFailure) {
+                    throw IllegalStateException("切换模型失败（$providerId/$modelId）：$err")
+                }
+                return false
+            }
+            appliedProviderKey = providerId
+            appliedModelId = modelId
+        }
+        if (thinkingLevel.isNotEmpty()) {
+            val thinkResp = sendCommandBlocking(
+                JSONObject()
+                    .put("type", "set_thinking_level")
+                    .put("level", thinkingLevel),
+                CMD_TIMEOUT_MS,
+            )
+            if (thinkResp.optBoolean("success", false)) {
+                appliedThinkingLevel = thinkingLevel
+            }
+        }
+        return true
     }
 
     fun respondPermission(requestId: String, allow: Boolean): Boolean {
@@ -437,8 +518,8 @@ internal class PiRpcBackend(
             val proot = ProotCommand.prootBinary(appContext)
             val loader = ProotCommand.loaderBinary(appContext)
             val rootfs = ContainerPaths.rootfsDir()
-            check(proot.isFile && loader.isFile && File(rootfs, "bin/bash").exists()) {
-                "Debian 运行时尚未初始化，请先完成环境初始化"
+            if (!(proot.isFile && loader.isFile && File(rootfs, "bin/bash").exists())) {
+                throw IllegalStateException("Debian 运行时尚未初始化，请先完成环境初始化")
             }
 
             val guestCwd = ContainerPaths.hostToGuest(config.projectDirectory)
@@ -466,17 +547,20 @@ internal class PiRpcBackend(
             process = started
             stdinStream = started.outputStream
             activeProcessEnvKey = processRestartKey(config, synced)
+            needsRestartForEnvChange = false
             activeProviderKey = synced.providerId
             activeModelId = synced.modelId
+            appliedProviderKey = synced.providerId
+            appliedModelId = synced.modelId
+            appliedThinkingLevel = synced.thinkingLevel
 
             startStdoutThread(started)
             startStderrThread(started)
 
             val stateResp = sendCommandBlocking(JSONObject().put("type", "get_state"), STARTUP_TIMEOUT_MS)
             if (!stateResp.optBoolean("success", false)) {
-                val err = stateResp.optString("error", "Pi 初始化失败")
                 stopProcessQuietly()
-                throw IllegalStateException(err)
+                throw IllegalStateException(stateResp.optString("error", "Pi 初始化失败"))
             }
             val sessionFile = stateResp.optJSONObject("data")?.optString("sessionFile", "") ?: ""
             if (recordInitialSessionFile) {
@@ -487,11 +571,12 @@ internal class PiRpcBackend(
                         CMD_TIMEOUT_MS,
                     )
                     if (!switchResp.optBoolean("success", false)) {
-                        val err = switchResp.optString("error", "恢复 Pi 会话上下文失败")
                         stopProcessQuietly()
-                        throw IllegalStateException(err)
+                        throw IllegalStateException(switchResp.optString("error", "恢复 Pi 会话上下文失败"))
                     }
                     piSessionFile = existingFile
+                    // switch_session 会恢复历史文件中的 model_change，必须在恢复后重新强制切到当前选中模型。
+                    applyModelAndThinkingLocked(synced.providerId, synced.modelId, synced.thinkingLevel, throwOnFailure = true)
                     val hostFile = File(ContainerPaths.guestToHost(existingFile).absolutePath)
                     val estimated = estimateContextTokensFromSessionFile(hostFile)
                     if (estimated > 0 && lastMeasuredContextTokens <= 0L) {
@@ -510,6 +595,11 @@ internal class PiRpcBackend(
             process = null
             val out = stdinStream
             stdinStream = null
+            activeProcessEnvKey = ""
+            appliedProviderKey = ""
+            appliedModelId = ""
+            appliedThinkingLevel = ""
+            needsRestartForEnvChange = false
             runCatching { out?.close() }
             if (running != null && running.isAlive) {
                 running.destroy()
@@ -566,6 +656,11 @@ internal class PiRpcBackend(
             process = null
             val out = stdinStream
             stdinStream = null
+            activeProcessEnvKey = ""
+            appliedProviderKey = ""
+            appliedModelId = ""
+            appliedThinkingLevel = ""
+            needsRestartForEnvChange = false
             runCatching { out?.close() }
         }
         val wasBusy = busyFlag.getAndSet(false)

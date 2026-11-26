@@ -196,7 +196,7 @@ done
     AndroidX                                        Android Open Source Project · Apache-2.0
       （activity-compose 1.12.0 / lifecycle-viewmodel-compose 2.9.4 /
         lifecycle-runtime-compose 2.9.4 / profileinstaller 1.4.0 / annotation 1.8.1 compileOnly）
-    Mochi Compose 0.2.0                             feice11 · Apache-2.0
+    Mochi Compose 0.3.0                             feice11 · Apache-2.0
     AndroidLiquidGlass · backdrop 2.0.1             Kyant0 · Apache-2.0
 
   编辑器与语法
@@ -304,7 +304,32 @@ vscode-kotlin、vscode-logfile-highlighter、YAML-Syntax-Highlighter 等上游�
 逐项清单、已核实的版权行、已知的本地修改、以及**未核实项**与核实命令，
 见 app/src/main/assets/sora/textmate/NOTICE.md —— 那份文件是这一节的细则，请连它一起读。
 
-12. ZhiCode 自己的代码
+11. CC Switch — MIT
+--------------------------------------------------------------------------------
+
+来源 : https://github.com/farion1231/cc-switch
+许可 : MIT License, Copyright (c) 2025 Jason Young
+许可原文: https://github.com/farion1231/cc-switch/blob/main/LICENSE
+
+对应文件 :
+  app/src/main/java/com/zhizhu/zhicode/pi/PiCatalogAndPresets.kt
+  app/src/main/java/com/zhizhu/zhicode/compose/ui/ProviderBrandIcons.kt
+  app/src/main/res/drawable/ic_provider_*.xml
+
+本工程参考并适配 CC Switch 的 Pi 多供应商预设、thinkingLevelMap 映射配置，并将上游
+src/icons/svg/ 下的供应商 SVG 图标转换为 Android VectorDrawable 随应用分发。
+
+12. DeepSeek Harness 交互参考 — MIT（未复制源码）
+--------------------------------------------------------------------------------
+
+来源 : https://github.com/deepseek-ai/deepseek-harness
+许可 : MIT License, Copyright (c) 2026 DeepSeek
+许可原文: https://github.com/deepseek-ai/deepseek-harness/blob/master/LICENSE
+
+本工程侧边栏的工作区目录分层与每组折叠保留 5 条会话的交互形态参考自 DeepSeek Harness，
+**未复制**其源码；工作区索引、持久化与界面基于本工程 Compose / Miuix 独立实现。
+
+13. ZhiCode 自己的代码
 --------------------------------------------------------------------------------
 
 ZhiCode 自身的代码（Compose 界面层、沙箱宿主层、引擎与工具集、诊断与安全边界等）

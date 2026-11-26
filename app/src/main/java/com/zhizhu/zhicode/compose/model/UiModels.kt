@@ -249,10 +249,41 @@ data class SessionSummary(
     val id: String,
     val title: String,
     val project: String,
+    val projectPath: String = "",
     val messageCount: Int,
     val updatedAtLabel: String,
+    val updatedAtMs: Long = 0L,
     val busy: Boolean = false,
     val note: String = "",
+)
+
+/** 侧栏注册的工作区目录项（含不可删除的「默认工作区」）。 */
+data class WorkspaceEntry(
+    val id: String,
+    val path: String,
+    val label: String,
+    val isDefault: Boolean = false,
+    val expanded: Boolean = true,
+    val createdAt: Long = 0L,
+)
+
+/** 侧栏工作区与会话排列模式。 */
+enum class SidebarOrderBy(val label: String) {
+    UPDATED("按最近活跃"),
+    MANUAL("按添加顺序"),
+}
+
+/** 侧栏工作区分组视图节点（对齐 DeepSeek Harness WorkspaceBrowser）。 */
+data class WorkspaceGroup(
+    val key: String,
+    val title: String,
+    val path: String,
+    val isDefault: Boolean,
+    val expanded: Boolean,
+    val containsActive: Boolean,
+    val totalCount: Int,
+    val hiddenCount: Int,
+    val sessions: List<SessionSummary>,
 )
 
 enum class WorkspaceTab(val label: String) {
@@ -932,6 +963,10 @@ data class WorkspaceUiState(
     val runtimeProgress: Int = 0,
     /** 初始化过程中的当前步骤文案。 */
     val runtimeMessage: String = "",
+    /** 已注册的侧栏工作区目录清单。 */
+    val workspaces: List<WorkspaceEntry> = emptyList(),
+    /** 侧栏工作区排序方式。 */
+    val sidebarOrderBy: SidebarOrderBy = SidebarOrderBy.UPDATED,
     /** 非空即「环境自检」弹窗打开。 */
     val environmentOpen: Boolean = false,
     /** 环境自检报告全文（可复制）。 */

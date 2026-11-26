@@ -61,7 +61,7 @@ import com.zhizhu.zhicode.compose.model.ModelThinkingPickerState
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import com.zhizhu.zhicode.pi.PiModelConfig
 import com.zhizhu.zhicode.pi.clampThinkingLevel
-import com.zhizhu.zhicode.pi.resolveSupportedThinkingLevels
+import com.zhizhu.zhicode.pi.resolveMenuThinkingLevels
 import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.DropdownEntry
 import top.yukonga.miuix.kmp.basic.DropdownItem
@@ -978,14 +978,14 @@ private fun ModelThinkingPopupMenu(
             )
         } else {
             val modelItems = shown.models.map { model ->
-                val levels = resolveSupportedThinkingLevels(model)
+                val levels = resolveMenuThinkingLevels(model)
                 val multiTier = levels.size > 1
                 val isCurrent = model.id == shown.currentModelId
                 val summary = buildString {
                     append("${model.contextWindow / 1000}K")
                     if (model.supportsImage) append(" · 视觉")
                     if (multiTier) {
-                        val active = if (isCurrent) clampThinkingLevel(model, shown.currentEffort.toPiLevel()).id else levels.joinToString("/") { it.id }
+                        val active = if (isCurrent) clampThinkingLevel(levels, shown.currentEffort.toPiLevel()).id else levels.joinToString("/") { it.id }
                         append(" · ").append(active)
                     } else {
                         append(" · 非推理")
@@ -1002,7 +1002,7 @@ private fun ModelThinkingPopupMenu(
                         if (multiTier) {
                             onEnterSubmenu(model)
                         } else {
-                            onSelectModelAndEffort(model.id, EffortLevel.OFF)
+                            onSelectModelAndEffort(model.id, EffortLevel.entries.firstOrNull { it.wire == levels.firstOrNull()?.id } ?: EffortLevel.OFF)
                         }
                     },
                 )
@@ -1021,9 +1021,9 @@ private fun ModelThinkingPopupMenu(
             )
         }
     } else {
-        val levels = resolveSupportedThinkingLevels(subModel)
+        val levels = resolveMenuThinkingLevels(subModel)
         val clampedActive = if (subModel.id == shown.currentModelId) {
-            clampThinkingLevel(subModel, shown.currentEffort.toPiLevel())
+            clampThinkingLevel(levels, shown.currentEffort.toPiLevel())
         } else null
         listOf(
             DropdownEntry(

@@ -422,11 +422,16 @@ internal fun ZhiSidebarHost(
             ZhiAnchoredMenuHost(state, viewModel, anchorId, fingerOffset, renderInRootScaffold = false)
         },
         onSandbox = { viewModel.openSandbox() },
-        // 「运行环境」行现在是真实探测结果 + 真实的安装/自检窗口，
-        // 不再是把 /doctor 当普通消息发出去（那样只会得到一句 Mock 回复）。
         onRuntime = viewModel::openEnvironment,
         onSettings = viewModel::openSettings,
         onUpdateProjectPath = viewModel::updateProjectDirectory,
+        onAddWorkspace = { path, label -> viewModel.addWorkspace(path, label, switchToIt = true) },
+        onRenameWorkspace = viewModel::renameWorkspace,
+        onRemoveWorkspace = viewModel::removeWorkspace,
+        onToggleWorkspaceExpanded = viewModel::toggleWorkspaceExpanded,
+        onSetAllWorkspacesExpanded = viewModel::setAllWorkspacesExpanded,
+        onSetSidebarOrderBy = viewModel::setSidebarOrderBy,
+        onNewSessionInWorkspace = viewModel::newSessionInWorkspace,
         modifier = modifier,
     )
 }

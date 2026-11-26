@@ -58,6 +58,39 @@ class PiProviderAndThinkingTest {
     }
 
     @Test
+    fun resolveMenuThinkingLevels_hidesUnaddedTiersWhenExplicitMapConfigured() {
+        val customHy4 = PiModelConfig(
+            id = "cn:hy4flash",
+            name = "Hy4 flash",
+            reasoning = true,
+            thinkingLevelMap = mapOf(
+                PiThinkingLevel.LOW to "low",
+                PiThinkingLevel.MAX to "max",
+            ),
+        )
+        assertEquals(
+            listOf(PiThinkingLevel.LOW, PiThinkingLevel.MAX),
+            resolveMenuThinkingLevels(customHy4),
+        )
+        assertEquals(
+            PiThinkingLevel.MAX,
+            clampThinkingLevel(resolveMenuThinkingLevels(customHy4), PiThinkingLevel.HIGH),
+        )
+
+        val defaultReasoning = PiModelConfig(id = "custom-default", reasoning = true)
+        assertEquals(
+            listOf(
+                PiThinkingLevel.OFF,
+                PiThinkingLevel.MINIMAL,
+                PiThinkingLevel.LOW,
+                PiThinkingLevel.MEDIUM,
+                PiThinkingLevel.HIGH,
+            ),
+            resolveMenuThinkingLevels(defaultReasoning),
+        )
+    }
+
+    @Test
     fun clampThinkingLevel_clampsUnsupportedToNearest() {
         val nonReasoning = PiModelConfig(id = "gpt-4.1", reasoning = false)
         assertEquals(PiThinkingLevel.OFF, clampThinkingLevel(nonReasoning, PiThinkingLevel.HIGH))
