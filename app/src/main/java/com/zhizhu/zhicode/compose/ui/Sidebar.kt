@@ -276,7 +276,7 @@ fun ZhiSidebar(
                 SidebarRow(label = "沙箱", icon = ZhiIcons.sandbox, onClick = onSandbox)
 
                 SidebarRow(
-                    label = if (state.runtimeReady) "运行环境就绪" else "准备内置 Termux 环境",
+                    label = if (state.runtimeReady) "运行环境就绪" else "准备内置 Debian 环境",
                     icon = ZhiIcons.runtime,
                     tint = if (state.runtimeReady) ZhiColors.green() else Color.Unspecified,
                     onClick = onRuntime,

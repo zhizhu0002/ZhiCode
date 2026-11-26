@@ -167,37 +167,21 @@ done
 会被 javac 内联且绑死包名；现在全部路径在运行期由应用的 BuildConfig.APPLICATION_ID 派生。
 保留这个类名与调用点，是因为它们遍布全工程。
 
-5. Termux 用户空间（bootstrap 归档）— 各程序各自的许可
+5. PRoot — GPL-2.0+
 --------------------------------------------------------------------------------
 
-文件 : app/src/main/assets/bootstrap-aarch64.zip
-       33,484,104 字节 / 4,533 个条目 / 解压后 90,872,448 字节
-       var/lib/dpkg/status 里当前有 85 个包（含目录项与符号链接清单）
+文件 : app/src/main/jniLibs/arm64-v8a/libproot.so、libprootloader.so
+来源 : https://github.com/termux/proot (v5.1.107.102) + Samba talloc 2.4.2 静态链接
+许可 : GNU General Public License v2.0 or later
 
-来源 : 由 termux/termux-packages 的 fork 构建，配方见 tools/termux-bootstrap-fork/
-       （含构建工作流、裁剪脚本与验收脚本 VerifyBootstrap.java）
-       构建目的：让归档内的前缀直接就是本应用的私有目录
-       （/data/data/com.zhizhu.code/files/usr），从而不需要解压期的前缀改写。
+以独立子进程执行，用于在无 Root 环境下承载内置 Debian 容器，与本工程代码不构成衍生作品。
 
-许可 : 归档内是数百个**独立可执行程序**，各自适用各自的许可，其中包含：
-         bash        GPL-3.0        （TERMUX_PKG_LICENSE="GPL-3.0"）
-         coreutils   GPL-3.0
-         apt/dpkg    GPL-2.0+
-         sed/grep    GPL-3.0
-         openssl     Apache-2.0
-         zlib、xz、libc++ 等 LGPL / MIT / BSD 变体
-       完整列表以归档内各包自带文档与 termux-packages 的 <package>/build.sh 声明为准。
+5.1 Debian 容器镜像与 Node.js / Pi 运行时 — 各组件各自的许可
+--------------------------------------------------------------------------------
 
-为什么这不要求本项目整体转为 GPL：
-
-  这些程序是**独立可执行文件**，由本应用以子进程方式启动（fork/exec），
-  与本应用的代码之间不构成衍生作品。GPL 明确允许把 GPL 程序与其它许可的程序
-  **聚合**（aggregate）在一起分发，只要聚合体中的每个部分仍受其自身许可约束。
-  这与「把 GPL 库链接进同一个进程」是两回事 —— 对照第 3 节：libtermux.so 确实是被
-  链接进本进程的，但它是 Apache-2.0，所以那条链路也不产生 GPL 传染。
-
-使用者要拿到这些程序的源码，出处是 termux-packages 与上方的构建配方。
-**发行时请确认该源码对接收者可得。**
+文件 : app/src/main/assets/debian-arm64.tar.gz
+来源 : debian:bookworm-slim (linux/arm64) + Node.js v22.23.5 + @earendil-works/pi-coding-agent 1.6.1
+许可 : 归档内各自组件适用其原始许可（GPL / MIT / BSD / Apache-2.0 等），以独立子进程运行。
 
 6. 通过 Gradle 依赖引入的组件 — 随构件分发
 --------------------------------------------------------------------------------

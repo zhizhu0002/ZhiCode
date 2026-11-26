@@ -69,10 +69,6 @@ internal fun WideWorkspace(
                 // 不透明 Surface，窄屏顶栏仍在 capture 外保留独立玻璃。
                 glass = NoGlass,
                 onOpenSidebar = viewModel::openSidebar,
-                onContextClick = {
-                    viewModel.requestComposerText("/usage")
-                    viewModel.send()
-                },
                 onSettings = viewModel::openSettings,
                 tabs = null,
             )
@@ -292,7 +288,7 @@ internal val TopBarTabRowPadding = 12.dp
 // SmallTopAppBar 官方 CollapsedHeight = 52dp；窄屏 Tab 行在 bottomContent 槽位。
 // S1 之后顶栏占布局高度、内容不再重叠 —— 但顶栏 blur 需要内容从底下滚过，
 // 所以 Scaffold 内容层不再吃 padding.top，各面板用这两个常量自己留出可见区起点。
-internal val TopBarInset = 52.dp
+internal val TopBarInset = 56.dp
 
 /**
  * 顶栏**自己消费掉的窗口 inset**（就是状态栏那一条）。

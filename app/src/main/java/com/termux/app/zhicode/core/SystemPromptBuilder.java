@@ -71,7 +71,7 @@ public final class SystemPromptBuilder {
         "\nCapabilities, by task:\n"
             + "- Read, search and edit project files: Read, ReadMany, Stat, Tree, LS, Glob, Grep, "
             + "Write, Edit, MultiEdit, Copy, Mkdir, Move, Delete.\n"
-            + "- Run real commands in the embedded Termux userland: Bash (same HOME/PREFIX/filesystem "
+            + "- Run real commands in the embedded Debian PRoot userland: Bash (same /root & filesystem "
             + "as the visible Terminal tab).\n"
             + "- Inspect repository state: GitStatus (overview); Bash for git mutations, tests and builds.\n"
             + "- Open a URL, another app or an Android system screen: AndroidIntent.\n"
@@ -142,13 +142,9 @@ public final class SystemPromptBuilder {
     };
 
     private static final String[] SEC_TOOL_CHOICE = {
-        "Bash runs inside the embedded Termux userland as the app's Android UID; it is not proot and "
-            + "there is no containerized Linux distribution.",
-        "Prefer Termux's pkg for user packages (for example `pkg install -y openjdk-21`) instead of raw "
-            + "apt/dpkg flows unless you are diagnosing a broken package state.",
-        "When a package command fails, read the real stderr and exit code. Call TermuxDoctor before "
-            + "retrying; use TermuxRepair only when dpkg is interrupted, a package still references the old "
-            + "data path, or dependencies are half-configured. Never loop blindly.",
+        "Bash runs inside the embedded Debian (PRoot) container as emulated root (fake uid 0) within "
+            + "the app's Android sandbox; standard Debian apt-get / dpkg / npm / git work directly.",
+        "When apt/dpkg fails, read the real stderr and exit code cleanly before retrying; never loop blindly.",
         "For opening a browser or URL, launching another phone app, or opening an Android system screen, "
             + "use AndroidIntent. Never use Bash `am start`: Android would then see the wrong caller identity.",
         "ui_canvas customizes the runtime presentation without rebuilding. Use stable named slot IDs and "
@@ -176,7 +172,7 @@ public final class SystemPromptBuilder {
             + "subagent may change it or treat approval as permission escalation.",
         "After plan approval, continue the same session and execute the approved plan without asking the "
             + "user to resend the task. Explore and Plan subagents must not control the parent approval flow.",
-        "Never assume a desktop-only path. Use the active project and the Termux HOME/PREFIX.",
+        "Never assume a desktop-only path. Use the active project inside the Debian container.",
     };
 
     private static final String[] SEC_WEB = {

@@ -17,6 +17,9 @@ import com.zhizhu.zhicode.compose.model.UpdateUiState
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.Glass
+import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
+import com.zhizhu.zhicode.compose.data.OobeStore
+import com.zhizhu.zhicode.compose.ui.pages.miuix.OobePage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ApiConfigPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.AboutPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ChatDisplayPage
@@ -112,6 +115,10 @@ interface ZhiPageSet {
             onDismiss = viewModel::closeSettings,
             onNavigate = viewModel::navigateFromSettings,
             extensions = extensions,
+            brandSignature = LocalThemeSettings.current.topBrandSignature,
+            onBrandSignatureChange = { next ->
+                viewModel.updateThemeSettings { it.copy(topBrandSignature = next.trim()) }
+            },
         )
     }
 
@@ -294,6 +301,26 @@ interface ZhiPageSet {
     @Composable
     fun Privacy(viewModel: WorkspaceViewModel) {
         PrivacyPolicyPage(onBack = viewModel::closePrivacy)
+    }
+
+    // ------------------------------------------------------------------ 引导页
+
+    @Composable
+    fun Oobe(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        OobePage(
+            state = state,
+            canDismissDirectly = !OobeStore.isRequired(context),
+            onRefreshPermissions = viewModel::refreshOobePermissions,
+            onNextStep = viewModel::advanceOobeStep,
+            onBackStep = viewModel::goBackOobeStep,
+            onDismissReopened = viewModel::dismissReopenedOobe,
+            onInstallRuntime = viewModel::installRuntime,
+            onRepairRuntime = viewModel::repairRuntime,
+            onToggleRoot = viewModel::toggleRootFromOobe,
+            onOpenApiConfig = viewModel::openApiConfigFromOobe,
+            onSkipOrFinish = viewModel::completeOobe,
+        )
     }
 
     // ------------------------------------------------------------------ 调试

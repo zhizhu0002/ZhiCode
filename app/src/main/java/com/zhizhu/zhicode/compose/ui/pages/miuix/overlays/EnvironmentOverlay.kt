@@ -108,7 +108,7 @@ fun EnvironmentOverlay(
             prompt = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = if (displayedReady) "内置 Termux 环境：已就绪" else "内置 Termux 环境：未安装",
+                        text = if (displayedReady) "内置 Debian 环境：已就绪" else "内置 Debian 环境：未安装",
                         color = if (displayedReady) scheme.primary else scheme.onSurfaceVariantSummary,
                         fontSize = MiuixTheme.textStyles.body1.fontSize,
                     )

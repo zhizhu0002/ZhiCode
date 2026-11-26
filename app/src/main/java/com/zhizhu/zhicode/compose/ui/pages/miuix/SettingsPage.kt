@@ -10,6 +10,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Column
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
@@ -45,6 +46,14 @@ import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import com.zhizhu.zhicode.compose.model.parseTokenCount
 import com.zhizhu.zhicode.compose.ui.PageFeedbackSlot
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import com.zhizhu.zhicode.compose.ui.settings.SettingsChoice
 import com.zhizhu.zhicode.compose.ui.settings.SettingsEntry
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
@@ -122,6 +131,8 @@ fun SettingsPage(
      * 三个存储都在磁盘上，在设置页里读会变成"每次重组读一次"。
      */
     extensions: ExtensionSummary = ExtensionSummary(),
+    brandSignature: String = "",
+    onBrandSignatureChange: (String) -> Unit = {},
 ) {
     // 整页设置，骨架全部用 Miuix 原生组件，照官方 example 的 SettingsPage 模式：
     // Scaffold + SmallTopAppBar(MiuixScrollBehavior) + LazyColumn(overScroll+nestedScroll)。
@@ -143,6 +154,7 @@ fun SettingsPage(
         saver = androidx.compose.foundation.lazy.LazyListState.Saver,
     ) { androidx.compose.foundation.lazy.LazyListState() }
     val topAppBarScrollBehavior = MiuixScrollBehavior()
+    var brandDialogOpen by remember { mutableStateOf(false) }
     /*
      * ⚠️ 这里**不用** `rememberPageBlurBackdrop()` + `layerBackdrop`。
      *
@@ -207,7 +219,17 @@ fun SettingsPage(
                 // 拆开之后只组合可见的那部分，首帧成本随**屏幕高度**增长而不是整页长度。
                 // 各分组的状态都是组内局部的（`SettingsGroup` 只画一张卡），
                 // 所以拆 item 不会打断任何 remember/动画。
-                item(key = "general", contentType = "settings-group") { SettingsGroup("通用") { GeneralPage(draft, onChange, onNavigate) } }
+                item(key = "general", contentType = "settings-group") {
+                    SettingsGroup("通用") {
+                        GeneralPage(
+                            draft = draft,
+                            onChange = onChange,
+                            onNavigate = onNavigate,
+                            brandSignature = brandSignature,
+                            onEditBrandSignature = { brandDialogOpen = true },
+                        )
+                    }
+                }
                 item(key = "modelService", contentType = "settings-group") {
                     SettingsGroup("模型与服务") { ModelServicePage(draft, onChange, onNavigate) }
                 }
@@ -234,6 +256,15 @@ fun SettingsPage(
             PageFeedbackSlot(modifier = Modifier.align(Alignment.BottomCenter))
         }
     }
+    BrandSignatureDialog(
+        show = brandDialogOpen,
+        initial = brandSignature,
+        onConfirm = { next ->
+            brandDialogOpen = false
+            onBrandSignatureChange(next)
+        },
+        onDismiss = { brandDialogOpen = false },
+    )
 }
 
 // ------------------------------------------------------------------ 各分类页
@@ -256,6 +287,13 @@ fun SettingsPage(
 @Composable
 private fun AboutEntryPage(onNavigate: (String) -> Unit) {
     com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("AboutEntryPage")
+    SettingsIconEntry(
+        title = "初始引导",
+        summary = "权限授权、运行环境与模型配置向导",
+        icon = ZhiIcons.runtime,
+        plate = SettingsPlateColors.blue,
+        onClick = { onNavigate("oobe") },
+    )
     SettingsIconEntry(
         title = "关于 ZhiCode",
         summary = "版本、源码、许可证与隐私政策",
@@ -288,8 +326,18 @@ private fun GeneralPage(
     draft: SettingsDraft,
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
+    brandSignature: String,
+    onEditBrandSignature: () -> Unit,
 ) {
     com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("GeneralPage")
+    SettingsEntry(
+        title = "顶栏签名",
+        valueText = brandSignature.trim().ifBlank { "ZhiCode（默认）" },
+        onClick = onEditBrandSignature,
+        summary = "当前：${brandSignature.trim().ifBlank { "ZhiCode（默认）" }} · 替换顶部品牌名（过长自动滚动）",
+        icon = ZhiIcons.edit,
+        plate = SettingsPlateColors.purple,
+    )
     SettingsEntry(
         title = "主题设置",
         valueText = "深浅 · ${draft.themeMode.label} · 预设色 / 模糊 / 缩放",
@@ -752,6 +800,61 @@ private fun SettingsIconEntry(
         startAction = { SettingsIconPlate(icon = icon, color = plate) },
         onClick = onClick,
     )
+}
+
+@Composable
+private fun BrandSignatureDialog(
+    show: Boolean,
+    initial: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember(show, initial) { mutableStateOf(initial) }
+    val scheme = MiuixTheme.colorScheme
+    OverlayDialog(
+        show = show,
+        onDismissRequest = onDismiss,
+        largeScreen = true,
+        maxWidth = ZhiDialogWidth.Compact,
+        outsideMargin = DialogWideOutsideMargin,
+        insideMargin = DialogWideInsideMargin,
+    ) {
+        DialogShell(
+            title = "顶栏签名",
+            actions = {
+                if (initial.isNotBlank() || text.isNotBlank()) {
+                    SecondaryButton(
+                        text = "恢复默认",
+                        onClick = { onConfirm("") },
+                    )
+                }
+                SecondaryButton(
+                    text = "取消",
+                    onClick = onDismiss,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+                PrimaryButton(
+                    text = "确定",
+                    onClick = { onConfirm(text.trim()) },
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            },
+        ) {
+            ZhiTextField(
+                value = text,
+                onValueChange = { text = it.replace('\n', ' ') },
+                label = "输入自定义签名（留空显示 ZhiCode）",
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            top.yukonga.miuix.kmp.basic.Text(
+                text = "顶栏展示区域有限，超出宽度时会自动横向滚动显示。",
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    }
 }
 
 // ------------------------------------------------------------------ 工具

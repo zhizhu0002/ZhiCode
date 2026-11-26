@@ -249,46 +249,39 @@ private fun ZhiCodeScreen(
     // 由 ViewModel 状态派生的「期望栈」：VM 仍是打开/关闭的唯一入口，
     // 这里只把它翻译成栈，增量 reconcile —— pop 触发弹出动画、push 触发推入动画。
     val desiredStack: List<NavKey> = buildList {
-        add(AppKey.Workspace)
-        if (state.uiDebugOpen) {
-            // UI 调试是**整页**而不是设置二级页：它显示的是全部组件与状态，
-            // 与设置 draft 无关。放在 settingsOpen 之前判断，于是从设置页进来时
-            // 栈是 [工作区, UI 调试]（设置主页留在 settingsOpen 里，返回即回到它）。
-            add(AppKey.UiDebug)
+        if (state.oobeOpen) {
+            add(AppKey.Oobe)
+            if (state.apiConfig != null) add(SettingsKey.Api)
         } else {
-            if (state.settingsOpen) add(SettingsKey.Hub)
-            when {
-                state.apiConfig != null -> add(SettingsKey.Api)
-                state.mcpConfig != null -> add(SettingsKey.Mcp)
-                state.searchServices != null -> add(SettingsKey.Search)
-                state.skills != null -> add(SettingsKey.Skills)
-                state.roleCards != null -> add(SettingsKey.RoleCards)
-                state.memory != null -> add(SettingsKey.Memory)
-                state.promptsOpen -> add(SettingsKey.Prompts)
-                state.themePageOpen -> add(SettingsKey.Theme)
-                state.chatDisplayOpen -> add(SettingsKey.ChatDisplay)
+            add(AppKey.Workspace)
+            if (state.uiDebugOpen) {
+                // UI 调试是**整页**而不是设置二级页：它显示的是全部组件与状态，
+                // 与设置 draft 无关。放在 settingsOpen 之前判断，于是从设置页进来时
+                // 栈是 [工作区, UI 调试]（设置主页留在 settingsOpen 里，返回即回到它）。
+                add(AppKey.UiDebug)
+            } else {
+                if (state.settingsOpen) add(SettingsKey.Hub)
+                when {
+                    state.apiConfig != null -> add(SettingsKey.Api)
+                    state.mcpConfig != null -> add(SettingsKey.Mcp)
+                    state.searchServices != null -> add(SettingsKey.Search)
+                    state.skills != null -> add(SettingsKey.Skills)
+                    state.roleCards != null -> add(SettingsKey.RoleCards)
+                    state.memory != null -> add(SettingsKey.Memory)
+                    state.promptsOpen -> add(SettingsKey.Prompts)
+                    state.themePageOpen -> add(SettingsKey.Theme)
+                    state.chatDisplayOpen -> add(SettingsKey.ChatDisplay)
+                }
             }
-        }
-        /*
-         * 「关于 / 许可 / 隐私」必须**串在设置分支之后**，不能放在它前面。
-         *
-         * 之前是 `if (aboutOpen) … else { 设置分支 }`，于是从设置页进关于时，
-         * 栈从 `[工作区, 设置]` 变成 `[工作区, 关于]` —— **深度相同**，
-         * 走的是 `stack[last] = desired` 的 replace，而不是 push。
-         * MiuixNav 的 `MiuixDefault` 只有 push 才有「右缘滑入 + 被覆盖页视差」，
-         * replace 没有 → 用户看到的是硬切（"进关于页没有动画"）。
-         * 顺带还修了一个 bug：那样返回会直接回工作区，把设置页跳过。
-         *
-         * 串在后面之后：
-         *  · 侧栏进（settingsOpen=false）→ [工作区, 关于]，push，有动画；
-         *  · 设置进（settingsOpen=true）→ [工作区, 设置, 关于]，push，有动画，
-         *    返回正确回到设置。
-         */
-        if (state.aboutOpen) {
-            add(AppKey.About)
-            if (state.licensesOpen) add(AppKey.Licenses)
-            if (state.privacyOpen) add(AppKey.Privacy)
-            if (state.updatePageOpen) add(AppKey.Update)
+            /*
+             * 「关于 / 许可 / 隐私」必须**串在设置分支之后**，不能放在它前面。
+             */
+            if (state.aboutOpen) {
+                add(AppKey.About)
+                if (state.licensesOpen) add(AppKey.Licenses)
+                if (state.privacyOpen) add(AppKey.Privacy)
+                if (state.updatePageOpen) add(AppKey.Update)
+            }
         }
     }
     LaunchedEffect(desiredStack) {
@@ -364,6 +357,11 @@ private fun ZhiCodeScreen(
             // 组合的快照**，它会在"刚变脏、刚关闭"这类时刻过期。
             val live = viewModel.state.value
             when {
+                live.oobeOpen -> when {
+                    live.apiConfig != null -> viewModel.closeApiConfig()
+                    live.oobeStep != com.zhizhu.zhicode.compose.runtime.OobeStep.PERMISSIONS -> viewModel.goBackOobeStep()
+                    !com.zhizhu.zhicode.compose.data.OobeStore.isRequired(context) -> viewModel.dismissReopenedOobe()
+                }
                 live.uiDebugOpen -> viewModel.closeUiDebug()
                 live.updatePageOpen -> viewModel.closeUpdate()
                 live.privacyOpen -> viewModel.closePrivacy()
@@ -382,6 +380,9 @@ private fun ZhiCodeScreen(
             }
         },
     ) {
+        entry<AppKey.Oobe> {
+            LocalZhiPageSet.current.Oobe(state = state, viewModel = viewModel)
+        }
         entry<AppKey.Workspace> {
             /*
              * 页面栈**只认接口，不认具体页面**（`ZhiPageSet`）。
@@ -479,6 +480,7 @@ private fun ZhiCodeScreen(
  * `@Serializable` —— 栈的真源仍是 ViewModel 状态，这里只是把它渲染出来。
  */
 private sealed interface AppKey : NavKey {
+    data object Oobe : AppKey
     data object Workspace : AppKey
 
     /** UI 调试整页（debug 构建的设置页里有入口）。 */

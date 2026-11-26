@@ -31,7 +31,7 @@ class DocumentTreeTest {
     @get:Rule
     val tmp = TemporaryFolder()
 
-    private val home: File by lazy { tmp.newFolder("home") }
+    private val home: File by lazy { tmp.newFolder("debian") }
 
     // ---- ID ↔ 路径 ------------------------------------------------------
 
@@ -49,7 +49,7 @@ class DocumentTreeTest {
         assertTrue(file.createNewFile())
 
         val id = DocumentTree.documentIdFor(home, file)
-        assertEquals("home/projects/demo/a.kt", id)
+        assertEquals("debian/projects/demo/a.kt", id)
         assertFalse("ID 里不该出现平台分隔符", id.contains('\\'))
 
         assertEquals(file.canonicalFile, DocumentTree.fileForId(home, id))
@@ -60,8 +60,8 @@ class DocumentTreeTest {
     fun directoriesRoundTrip() {
         val dir = File(home, "a/b")
         assertTrue(dir.mkdirs())
-        assertEquals("home/a/b", DocumentTree.documentIdFor(home, dir))
-        assertEquals(dir.canonicalFile, DocumentTree.fileForId(home, "home/a/b"))
+        assertEquals("debian/a/b", DocumentTree.documentIdFor(home, dir))
+        assertEquals(dir.canonicalFile, DocumentTree.fileForId(home, "debian/a/b"))
     }
 
     // ---- ID 的合法性 ----------------------------------------------------
@@ -69,8 +69,8 @@ class DocumentTreeTest {
     @Test
     fun malformedIdsAreRejected() {
         listOf(
-            null, "", "other", "other/x", "homex", "home2/a",
-            "/home/a", "HOME/a", "home_/a",
+            null, "", "other", "other/x", "debianx", "debian2/a",
+            "/debian/a", "DEBIAN/a", "debian_/a",
         ).forEach { bad ->
             assertThrows("应当拒绝非法 ID：$bad") { DocumentTree.fileForId(home, bad) }
         }
@@ -80,7 +80,7 @@ class DocumentTreeTest {
     @Test
     fun dotSegmentsAreRejectedAnywhereInTheId() {
         listOf(
-            "home/..", "home/../etc", "home/a/../../b", "home/a/..", "home/a/./b", "home/.",
+            "debian/..", "debian/../etc", "debian/a/../../b", "debian/a/..", "debian/a/./b", "debian/.",
         ).forEach { bad ->
             assertThrows("应当拒绝含 . / .. 段的 ID：$bad") { DocumentTree.fileForId(home, bad) }
         }
@@ -91,7 +91,7 @@ class DocumentTreeTest {
      *
      * 这条是刻意的判据选择：用 `relative.contains("..")` 判断的话，
      * 一个叫 `a..b.txt` 的合法文件会被拒 —— 而我们自己生成的 ID 正是
-     * `home/a..b.txt`，于是它**转不回来**，表现是文件管理器里这个文件打不开。
+     * `debian/a..b.txt`，于是它**转不回来**，表现是文件管理器里这个文件打不开。
      * 所以判据是「整段就是 `..`」，不是「包含 `..`」。
      */
     @Test
@@ -100,7 +100,7 @@ class DocumentTreeTest {
             val file = File(home, name)
             assertTrue("创建失败：$name", file.createNewFile())
             val id = DocumentTree.documentIdFor(home, file)
-            assertEquals("home/$name", id)
+            assertEquals("debian/$name", id)
             assertEquals(
                 "名字里含 .. 的合法文件必须能转回来：$name",
                 file.canonicalFile,
@@ -114,10 +114,10 @@ class DocumentTreeTest {
     fun privateDirectoriesAreUnreachableById() {
         DocumentTree.privateNames.forEach { name ->
             assertThrows("不该能按 ID 访问私有目录：$name") {
-                DocumentTree.fileForId(home, "home/$name")
+                DocumentTree.fileForId(home, "debian/$name")
             }
             assertThrows("私有目录出现在中间也要挡住：$name") {
-                DocumentTree.fileForId(home, "home/sub/$name/x")
+                DocumentTree.fileForId(home, "debian/sub/$name/x")
             }
         }
     }
@@ -137,13 +137,29 @@ class DocumentTreeTest {
         assertTrue(File(outside, "secret.txt").createNewFile())
         Files.createSymbolicLink(File(home, "escape").toPath(), outside.toPath())
 
-        val error = assertThrows("经符号链接越出 HOME 必须被拦住") {
-            DocumentTree.fileForId(home, "home/escape/secret.txt")
+        val error = assertThrows("经符号链接越出容器必须被拦住") {
+            DocumentTree.fileForId(home, "debian/escape/secret.txt")
         }
         assertTrue("提示要说清是越界：${error.message}", error.message!!.contains("越界"))
 
-        assertThrows("HOME 之外的路径不该能转成文档 ID") {
+        assertThrows("容器之外的路径不该能转成文档 ID") {
             DocumentTree.documentIdFor(home, File(outside, "secret.txt"))
+        }
+    }
+
+    @Test
+    fun containerInternalAbsoluteSymlinkResolvesInsideRoot() {
+        val usrBin = File(home, "usr/bin")
+        assertTrue(usrBin.mkdirs())
+        val tool = File(usrBin, "hello")
+        assertTrue(tool.createNewFile())
+        val altDir = File(home, "etc/alternatives")
+        assertTrue(altDir.mkdirs())
+        runCatching {
+            Files.createSymbolicLink(File(altDir, "hello").toPath(), java.nio.file.Paths.get("/usr/bin/hello"))
+        }.onSuccess {
+            val resolved = DocumentTree.fileForId(home, "debian/etc/alternatives/hello")
+            assertEquals(tool.canonicalFile, resolved.canonicalFile)
         }
     }
 

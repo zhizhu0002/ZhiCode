@@ -70,4 +70,11 @@ class ThemeModeDraftTest {
         assertEquals(ThemeMode.SYSTEM, applied.themeMode)
         assertEquals(null, applied.settingsDraft)
     }
+
+    @Test
+    fun `topBrandSignature 为空或仅空白时回落默认 ZhiCode`() {
+        assertEquals("ZhiCode", ThemeSettings().resolvedTopBrand)
+        assertEquals("ZhiCode", ThemeSettings(topBrandSignature = "   ").resolvedTopBrand)
+        assertEquals("MyCode", ThemeSettings(topBrandSignature = "  MyCode  ").resolvedTopBrand)
+    }
 }

@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -59,12 +60,14 @@ import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.ChatItem
@@ -76,6 +79,7 @@ import com.zhizhu.zhicode.compose.model.TurnLayout
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.ui.LocalImeMotion
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
@@ -218,24 +222,8 @@ fun ChatList(
      * 用它把内容顶到卡片上方，保证被遮住的对话仍能滑出来看到。
      */
     bottomInset: Dp = 0.dp,
-    /**
-     * 键盘停稳后额外让出的高度，**与 [bottomInset] 分开**。
-     *
-     * ## 为什么要分
-     *
-     * `contentPadding.bottom` 要的是两者之和（都是"屏幕底部有东西挡着"），
-     * 但**触发重新贴底的判据只能看 [bottomInset]**。
-     *
-     * `LaunchedEffect(listState, bottomInset)` 那条会"留白变高就重新贴底"，
-     * 而键盘这一段会因为别的原因归零 —— 全屏浮层（设置页、侧栏、环境面板）
-     * 盖住工作区时 `ChatPage` 把 `settledImeLiftPx` 强制成 0。于是"进设置"
-     * 会让留白变小 → 重新贴底 → 用户刚翻到的历史被顶走
-     * （用户原话：「进入设置消息流置底」）。
-     *
-     * 拆开之后：内容高度变化才重新贴底，键盘变化只走
-     * [ImeLazyListAutoScroller] 的增量补偿。
-     */
-    imeSettledLift: Dp = 0.dp,
+    occupiedBottomPx: Int = 0,
+    suppressImeResize: Boolean = false,
     /** Activity 级 IME 从关闭到打开的代数；只在输入框真实聚焦时用于一次吸底。 */
     imeOpenGeneration: Int = 0,
     /** 发送框是否真实取得焦点；侧栏搜索框弹键盘时必须为 false。 */
@@ -584,7 +572,15 @@ fun ChatList(
      * "这次键盘是不是输入器提起来的"的代数记账，本文件不再需要它驱动滚动，
      * 但仍保留参数以免调用点改动 —— 真正生效的是下面的 `enabled`。
      */
-    ImeLazyListAutoScroller(listState = listState, enabled = composerFocused)
+    val imeMotion = LocalImeMotion.current
+    val imeShrinkPx = {
+        if (suppressImeResize) 0 else (imeMotion.imeBottomPx - occupiedBottomPx).coerceAtLeast(0)
+    }
+    ImeLazyListAutoScroller(
+        listState = listState,
+        enabled = composerFocused && !suppressImeResize,
+        imeShrinkPx = imeShrinkPx,
+    )
 
     // 内容观察器必须常驻：加载会话、前插历史、流式输出都在这里处理。
     LaunchedEffect(listState) {
@@ -1036,13 +1032,24 @@ fun ChatList(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        // 顶部下拉加载更早的消息（与「滚到顶自动补」共用同一个回调，
-        // 靠 `transcriptLoadingOlder` 幂等 —— 两条路径不会把同一页读两遍）。
-        //
-        // ⚠️ 0.9.4 的 `PullToRefresh` **没有** `onPullProgress` 与 `refreshThreshold`
-        // 参数（核过 aar 的 javap 输出：main 分支已经加上去了，但本工程钉的是 0.9.4）。
-        // 所以这里只用最稳的那四个参数。
-        PullToRefresh(
+        // 布局期同步按键盘高度缩小列表视口，保持外层 glass.capture 全屏不抖。
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .layout { measurable, constraints ->
+                    val maxH = (constraints.maxHeight - imeShrinkPx()).coerceAtLeast(0)
+                    val placeable = measurable.measure(
+                        constraints.copy(
+                            minHeight = constraints.minHeight.coerceAtMost(maxH),
+                            maxHeight = maxH,
+                        ),
+                    )
+                    layout(constraints.maxWidth, constraints.maxHeight) {
+                        placeable.place(0, 0)
+                    }
+                },
+        ) {
+            PullToRefresh(
             isRefreshing = state.transcriptLoadingOlder,
             onRefresh = loadOlderWithAnchor,
             pullToRefreshState = pullToRefreshState,
@@ -1220,7 +1227,7 @@ fun ChatList(
                         }
                         }
                     },
-                contentPadding = PaddingValues(top = topInset, bottom = bottomInset + imeSettledLift),
+                contentPadding = PaddingValues(top = topInset, bottom = bottomInset),
             ) {
                 if (state.transcript.isEmpty()) {
                     // 三态而不是两态：空列表可能是「新会话」也可能是「正在载入」。
@@ -1455,6 +1462,7 @@ fun ChatList(
             }
             }
         }
+        }
         // Miuix 滚动条：自动淡入淡出、可拖拽，比自绘指示条更贴近 HyperOS
 
         /*
@@ -1521,6 +1529,7 @@ fun ChatList(
             exit = fadeOut(ZhiMotion.fadeOutSpec) + scaleOut(ZhiMotion.scaleExitSpec, targetScale = 0.85f),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
+                .offset { IntOffset(0, -imeShrinkPx()) }
                 .padding(end = 18.dp, bottom = bottomInset + 8.dp),
         ) {
             ScrollToBottomPill(

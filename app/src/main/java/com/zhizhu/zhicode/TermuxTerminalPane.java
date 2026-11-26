@@ -21,6 +21,8 @@ import com.termux.terminal.TerminalSessionClient;
 import com.termux.terminal.TextStyle;
 import com.termux.view.TerminalView;
 import com.termux.view.TerminalViewClient;
+import com.zhizhu.zhicode.bridge.AndroidHostBridge;
+import com.zhizhu.zhicode.pi.PiBridgeFiles;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -30,6 +32,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -113,7 +116,7 @@ public final class TermuxTerminalPane extends FrameLayout
 
     /** 环境未就绪时的说明。刻意指路而不是说"正在准备"，见原实现的说明。 */
     private static final String RUNTIME_NOTICE =
-        "内置 Termux 环境尚未就绪。\n请先在侧栏「准备内置 Termux 环境」里初始化，完成后这里就是可输入的真实终端。";
+        "内置 Debian 运行环境尚未就绪。\n请先初始化内置环境，完成后这里会直接进入 Debian 终端。";
     /** PTY 失败界面的固定文字。Compose 侧按 [State.failureDetail] 是否存在决定要不要显示。 */
     public static final String FAILURE_TITLE = "终端启动失败";
     public static final String FAILURE_FOOTNOTE =
@@ -414,21 +417,33 @@ public final class TermuxTerminalPane extends FrameLayout
             showTerminalFailure(loadError);
             return;
         }
-        String shell = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/" + SHELL_NAME;
-        if (!new File(shell).isFile()) {
+        File proot = ProotCommand.prootBinary(getContext());
+        File loader = ProotCommand.loaderBinary(getContext());
+        File rootfs = ContainerPaths.rootfsDir();
+        if (!proot.isFile() || !loader.isFile() || !new File(rootfs, "bin/bash").exists()) {
             showRuntimeNotice();
             return;
         }
-        String cwd = new File(nextSessionWorkingDirectory).isDirectory()
-            ? nextSessionWorkingDirectory
-            : TermuxConstants.TERMUX_HOME_DIR_PATH;
-        String[] args = new String[]{shell, "-l"};
+        PiBridgeFiles.ensureInstalled(getContext());
+        String guestCwd = ContainerPaths.hostToGuest(nextSessionWorkingDirectory);
+        List<String> prootArgs = ProotCommand.buildArgs(
+            getContext(),
+            guestCwd,
+            Arrays.asList("/bin/bash", "-l"),
+            AndroidHostBridge.Companion.shared(getContext()).bridgeEnv(),
+            true);
+        String[] args = prootArgs.toArray(new String[0]);
 
         // 前面几道关都过了，说明环境和 PTY 都是好的：把之前的"未就绪"提示撤掉。
         runtimeNotice = null;
 
-        TerminalSession session = new TerminalSession(shell, cwd, args, environmentArray(),
-            SCROLLBACK_LINES, this);
+        TerminalSession session = new TerminalSession(
+            proot.getAbsolutePath(),
+            rootfs.getAbsolutePath(),
+            args,
+            environmentArray(),
+            SCROLLBACK_LINES,
+            this);
         session.mSessionName = SESSION_NAME_PREFIX + (sessions.size() + 1);
         sessions.add(session);
         applyTerminalPalette(session);
@@ -774,48 +789,7 @@ public final class TermuxTerminalPane extends FrameLayout
     }
 
     private String[] environmentArray() {
-        Map<String, String> env = new LinkedHashMap<>();
-        String prefix = TermuxConstants.TERMUX_PREFIX_DIR_PATH;
-        env.put("HOME", TermuxConstants.TERMUX_HOME_DIR_PATH);
-        env.put("PREFIX", prefix);
-        env.put("TMPDIR", prefix + "/tmp");
-        env.put("PATH", prefix + "/bin");
-        // 终端 PTY 直接 exec <prefix>/bin/bash（经 libtermux.so），不走 TermuxShellExecutor，
-        // 所以这条路径必须**单独**设置 LD_LIBRARY_PATH。
-        // 内置 Termux 的 ELF 不会被改写前缀（见 RuntimeInstaller），它们内嵌的
-        // DT_RUNPATH 指向不存在的 /data/data/com.termux/files/usr/lib，
-        // 少了这个变量终端里所有二进制都会 CANNOT LINK EXECUTABLE。
-        env.put("LD_LIBRARY_PATH", prefix + "/lib");
-        env.put("SHELL", prefix + "/bin/bash");
-        env.put("TERM", "xterm-256color");
-        env.put("COLORTERM", "truecolor");
-        env.put("LANG", "en_US.UTF-8");
-        env.put("TERMUX_VERSION", "0.118.3");
-        env.put("TERMUX_APP__PACKAGE_NAME", getContext().getPackageName());
-        env.put("TERMUX_APP__PACKAGE_MANAGER", "apt");
-        env.put("TERMUX_APP__PACKAGE_VARIANT", "apt-android-7");
-        env.put("TERMUX_APP__FILES_DIR", TermuxConstants.TERMUX_FILES_DIR_PATH);
-        env.put("TERMUX_APP__DATA_DIR", TermuxConstants.TERMUX_DATA_DIR_PATH);
-        env.put("TERMUX_APP__LEGACY_DATA_DIR", TermuxConstants.TERMUX_DATA_DIR_PATH);
-        env.put("TERMUX_APP__PID", Integer.toString(android.os.Process.myPid()));
-        env.put("TERMUX_APP__UID", Integer.toString(android.os.Process.myUid()));
-        env.put("TERMUX_APP__TARGET_SDK", "28");
-        env.put("TERMUX_MAIN_PACKAGE_FORMAT", "debian");
-        env.put("TERMUX_PKG_NO_MIRROR_SELECT", "1");
-        env.put("TERMUX_APK_RELEASE", "ZHICODE");
-        env.put("TERMUX__HOME", TermuxConstants.TERMUX_HOME_DIR_PATH);
-        env.put("TERMUX__PREFIX", prefix);
-        env.put("TERMUX__ROOTFS_DIR", TermuxConstants.TERMUX_FILES_DIR_PATH);
-        env.put("TERMUX__ROOTFS", TermuxConstants.TERMUX_FILES_DIR_PATH);
-        env.put("ZHICODE_APP", "1");
-        env.put("ZHICODE_TERMINAL_SESSION", "1");
-        env.put("ZHICODE_APK_PATH", getContext().getApplicationInfo().sourceDir);
-
-        List<String> out = new ArrayList<>();
-        for (Map.Entry<String, String> entry : env.entrySet()) {
-            out.add(entry.getKey() + "=" + entry.getValue());
-        }
-        return out.toArray(new String[0]);
+        return ProotCommand.hostEnvArray(getContext());
     }
 
     private void write(String text) {

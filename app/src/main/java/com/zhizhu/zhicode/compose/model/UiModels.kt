@@ -237,12 +237,12 @@ data class ChatItem(
      */
     val editedFiles: List<String> = emptyList(),
     /**
-     * 本轮从提问到完成的耗时（毫秒，0 = 未知）。
+     * 本轮从提问到完成的耗时（毫秒，< 0 表示未知）。
      *
      * 写在**这一轮最后一条助手消息**上（见 `onEngineTurnComplete`）：
      * 一个回合里助手可能产出多条消息，只有最后一条才代表"整轮结束"。
      */
-    val elapsedMs: Long = 0L,
+    val elapsedMs: Long = -1L,
 )
 
 data class SessionSummary(
@@ -1177,6 +1177,14 @@ data class WorkspaceUiState(
      * 不能在界面里读（见 [ExtensionSummary] 的说明）。
      */
     val extensions: ExtensionSummary = ExtensionSummary(),
+    /** 首次引导（OOBE）整页是否显示。 */
+    val oobeOpen: Boolean = false,
+    /** 当前 OOBE 步骤。 */
+    val oobeStep: com.zhizhu.zhicode.compose.runtime.OobeStep =
+        com.zhizhu.zhicode.compose.runtime.OobeStep.PERMISSIONS,
+    /** 设备权限与可选增强能力实时快照。 */
+    val oobePermissions: com.zhizhu.zhicode.compose.runtime.OobePermissionsSnapshot =
+        com.zhizhu.zhicode.compose.runtime.OobePermissionsSnapshot(),
 ) {
     val activeSession: SessionSummary?
         get() = sessions.firstOrNull { it.id == activeSessionId }
@@ -1204,11 +1212,11 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/keepalive", "强制后台保活：on / off / check"),
     SlashCommand("/mcp", "配置和管理 MCP 服务器；/mcp list · add · enable · disable · remove <名称>"),
     SlashCommand("/web", "联网搜索设置；也可直接输入 /web 搜索词"),
-    SlashCommand("/terminal", "打开内置 Termux 终端"),
+    SlashCommand("/terminal", "打开内置 Debian 终端"),
     SlashCommand("/sandbox", "打开沙箱：虚拟安卓运行环境，可安装/运行/调试 APK"),
     SlashCommand("/files", "打开项目文件与代码编辑器"),
-    SlashCommand("/doctor", "检查 Termux 运行环境"),
-    SlashCommand("/repair", "修复中断的 apt/dpkg 状态"),
+    SlashCommand("/doctor", "检查 Debian / PRoot 运行环境"),
+    SlashCommand("/repair", "修复 Debian 容器配置与挂载链接"),
     SlashCommand("/skills", "为下一条任务附加本地 Skill；带名称直接附加，例如 /skills pdf"),
     SlashCommand("/status", "查看模型、项目、上下文、运行时和会话状态"),
     SlashCommand("/stats", "查看当前会话与运行状态"),
@@ -1221,7 +1229,7 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/tasks", "查看 Android Agent 的任务与会话文件"),
     SlashCommand("/agents", "管理内置、项目、用户和正在运行的子 Agent"),
     SlashCommand("/cancel", "停止当前正在执行的 Agent 回合"),
-    SlashCommand("/runtime", "打开内置 Termux 运行环境控制"),
+    SlashCommand("/runtime", "打开内置 Debian 运行环境控制"),
 )
 
 /**

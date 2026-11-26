@@ -994,7 +994,7 @@ data class AppSettings(
     val webSearchSearxngUrl: String = "",
     val autoCompact: Boolean = true,
     /** 自动压缩上限，取值 50..100（百分比）。 */
-    val autoCompactPercent: Int = 80,
+    val autoCompactPercent: Int = 60,
     val customSystemPrompt: String = "",
     /**
      * 可自定义的提示词槽位，三份都遵循「空串 = 用默认」（见 [PromptSlot]）。

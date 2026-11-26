@@ -937,17 +937,17 @@ private fun initialSamples(): List<DebugItem> = listOf(
                     kind = ToolKind.READ,
                 ),
                 // ToolKind.OTHER：既不是搜索/读取/编辑，也不是命令的那一类
-                // （AndroidIntent / TermuxDoctor / Skill …），用来确认分组文案不会漏掉它们。
+                // （AndroidIntent / Skill …），用来确认分组文案不会漏掉它们。
                 ToolActivity(
                     id = "c-other",
-                    toolName = "TermuxDoctor",
-                    displayName = "环境自检",
-                    summary = "内置 Termux",
+                    toolName = "GitStatus",
+                    displayName = "仓库状态",
+                    summary = "Debian PRoot",
                     completed = true,
                     elapsedMs = 1_450,
                     kind = ToolKind.OTHER,
-                    output = "prefix: /data/data/com.zhizhu.code/files/usr\n" +
-                        "arch: aarch64\npackages: 337 files ok",
+                    output = "rootfs: /data/user/0/com.zhizhu.code/files/debian\n" +
+                        "arch: aarch64\ndebian 12 + node22 + pi 1.6.1",
                 ),
             ),
         ),

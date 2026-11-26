@@ -22,6 +22,9 @@ import com.zhizhu.zhicode.compose.data.FileBrowser
 import com.zhizhu.zhicode.compose.data.McpStore
 import com.zhizhu.zhicode.compose.data.MockWorkspaceRepository
 import com.zhizhu.zhicode.compose.data.ModelCatalogStore
+import com.zhizhu.zhicode.compose.data.OobeStore
+import com.zhizhu.zhicode.compose.runtime.OobePermissions
+import com.zhizhu.zhicode.compose.runtime.OobeStep
 import com.zhizhu.zhicode.compose.data.SessionReader
 import com.zhizhu.zhicode.compose.data.ThemeStore
 import com.zhizhu.zhicode.compose.data.RoleCardStore
@@ -250,6 +253,9 @@ class WorkspaceViewModel(
 
     /** 导出请求序号（见 `ExportPayload.nonce`）。 */
     private var exportNonce: Int = 0
+    /** 最近一次打开会话的序号，丢弃过时切换结果。 */
+    @Volatile
+    private var openSessionSeq: Long = 0L
 
     /**
      * 正在进行的「提问」流程。
@@ -398,8 +404,20 @@ class WorkspaceViewModel(
     }
 
     init {
+        val oobeNeeded = OobeStore.isRequired(getApplication()) ||
+            !runCatching { installer.isInstalled() }.getOrDefault(false)
         initSessionState()
-        autoInstallRuntimeIfStale()
+        if (oobeNeeded) {
+            _state.update {
+                it.copy(
+                    oobeOpen = true,
+                    oobeStep = OobeStep.PERMISSIONS,
+                    oobePermissions = OobePermissions.inspect(getApplication()),
+                )
+            }
+        } else {
+            autoInstallRuntimeIfStale()
+        }
     }
 
     // ------------------------------------------------------------ 终端保活
@@ -672,7 +690,7 @@ class WorkspaceViewModel(
             _state.update {
                 it.copy(
                     fileEntries = emptyList(),
-                    fileNote = "工作区还不存在：$path\n初始化内置 Termux 环境后会自动建立。",
+                    fileNote = "工作区还不存在：$path\n初始化内置 Debian 环境后会自动建立。",
                 )
             }
             return
@@ -2807,6 +2825,9 @@ class WorkspaceViewModel(
     // ==================================================================
 
     override fun onEngineSessionStarted(model: String) {
+        if (turnStartedAtElapsedMs <= 0L) {
+            turnStartedAtElapsedMs = SystemClock.elapsedRealtime()
+        }
         streamingAssistantId = null
         currentGroupId = null
         liveTools.clear()
@@ -3088,7 +3109,10 @@ class WorkspaceViewModel(
                                 // 同 `diff`：漏了这行，沙箱截图就停在这一层，工具卡里什么都不显示
                                 // （模型那边照样看得到图），且**编译器不会提醒**。
                                 previews = previews,
-                                elapsedMs = maxOf(tool.elapsedMs, 0L),
+                                elapsedMs = maxOf(
+                                    tool.elapsedMs,
+                                    if (tool.startedAtMs > 0L) maxOf(0L, SystemClock.elapsedRealtime() - tool.startedAtMs) else 0L,
+                                ),
                                 additions = if (addedLines > 0) addedLines else tool.additions,
                                 deletions = if (deletedLines > 0) deletedLines else tool.deletions,
                                 // 包管理器命令失败时默认展开：报错信息通常很长，
@@ -3301,6 +3325,7 @@ class WorkspaceViewModel(
         // 引擎已经把队首预输入并入了对话。界面这边做的是：
         // 出队一条（FIFO），并把还在流的上一段回复收尾。
         finalizeStreaming(keepIfEmpty = false)
+        turnStartedAtElapsedMs = SystemClock.elapsedRealtime()
         _state.update { s ->
             val rest = s.pendingInputs.drop(1)
             s.copy(
@@ -3437,6 +3462,7 @@ class WorkspaceViewModel(
     private fun finishTurnWithError(text: String) {
         val owner = turnSessionId
         turnSessionId = null
+        turnStartedAtElapsedMs = 0L
         if (owner != null && owner != _state.value.activeSessionId) return
 
         finalizeStreaming(keepIfEmpty = false)
@@ -3662,7 +3688,7 @@ class WorkspaceViewModel(
                     append("`").append(command).append("` 在当前 Compose 版本里还没有对应实现，")
                     append("本机也没有执行任何操作。\n\n")
                     append("可用的相关指令：\n")
-                    append("` /doctor ` `/runtime` `/repair` — 内置 Termux 环境\n")
+                    append("` /doctor ` `/runtime` `/repair` — 内置 Debian 容器环境\n")
                     append("` /compact ` — 真正调用模型压缩上下文\n")
                     append("` /context ` — 查看或设置上下文窗口\n")
                     append("` /copy ` — 复制最近一条回复\n")
@@ -6416,6 +6442,7 @@ class WorkspaceViewModel(
         pendingPermissionId = null
         // 见 newSession()：换会话时停止流程一并作废。
         resetStopTracking()
+        val seq = ++openSessionSeq
 
         _state.update {
             it.copy(
@@ -6429,6 +6456,7 @@ class WorkspaceViewModel(
                 // 屏幕上还挂着上一条会话的对话 —— 那比空白更令人困惑
                 // （用户会以为切错了会话，或者以为消息串了）。
                 transcript = emptyList(),
+                contextTokens = 0,
                 transcriptHasOlder = false,
                 transcriptHasNewer = false,
                 transcriptLoadingOlder = false,
@@ -6436,19 +6464,13 @@ class WorkspaceViewModel(
         }
         viewModelScope.launch(Dispatchers.IO) {
             val startedAt = android.os.SystemClock.elapsedRealtime()
-            // 只读**最近一页**（`SessionReader.PAGE_MESSAGES` 条）＋完整任务清单。
-            // 早先这里是「一次读完整条会话」—— 一次长会话的内容块是几十 MB 量级，
-            // 真机上"打开一万条的长会话直接崩"就是这一步。往前翻页见 loadOlderTranscript。
-            //
-            // ⚠️ 读库与引擎恢复**并行**跑：两者互不依赖（resume 只需要 `engine.configure`
-            // 先完成，而那一步在下面这个 async 之外）。原来是串行，等于把两次 IO 的
-            // 等待时间相加 —— 长会话上能差出几百毫秒。
             val pageDeferred = async { SessionReader.openPage(session.id) }
+            val fastTokensDeferred = async { engine.estimateSessionContextTokens(session.id) }
             val engineDeferred = async<Result<Unit>> {
                 // 引擎必须先配置好才有 config 可用，否则 resumeConversation 不会恢复项目/工作流。
                 runCatching {
                     engine.configure(engineOverrides())
-                    engine.resumeConversation(session.id)
+                    engine.resumeConversation(session.id).getOrThrow()
                 }
             }
             /*
@@ -6460,6 +6482,7 @@ class WorkspaceViewModel(
              */
             val page = runCatching { pageDeferred.await() }.getOrElse { error ->
                 engineDeferred.cancel()
+                if (seq != openSessionSeq) return@launch
                 _state.update {
                     it.copy(
                         transcriptLoading = false,
@@ -6476,7 +6499,9 @@ class WorkspaceViewModel(
                     " hasOlder=" + page.hasMore +
                     " ms=" + (android.os.SystemClock.elapsedRealtime() - startedAt),
             )
+            val fastTokens = runCatching { fastTokensDeferred.await() }.getOrDefault(0)
             val resumed = engineDeferred.await()
+            if (seq != openSessionSeq) return@launch
             val footprint = engine.memoryFootprint()
             ZhiMemory.log(
                 "resumeConversation session=" + session.id +
@@ -6484,6 +6509,8 @@ class WorkspaceViewModel(
                     " historyChars=" + ZhiMemory.size(footprint.second) +
                     " ms=" + (android.os.SystemClock.elapsedRealtime() - startedAt),
             )
+            val measuredTokens = engine.estimateContextTokens()
+            val finalTokens = if (measuredTokens > 0) measuredTokens else fastTokens
             _state.update {
                 it.copy(
                     activeSessionId = session.id,
@@ -6497,7 +6524,7 @@ class WorkspaceViewModel(
                     transcriptHasNewer = false,
                     transcriptJumpRevision = 0,
                     tasks = page.tasks,
-                    contextTokens = engine.estimateContextTokens(),
+                    contextTokens = finalTokens,
                     contextWindow = engine.contextWindowTokens().takeIf { w -> w > 0 } ?: it.contextWindow,
                     stopping = false,
                     composerBusy = false,
@@ -6985,8 +7012,7 @@ class WorkspaceViewModel(
             append("- 内置：").append(bundled).append('\n')
             append(
                 if (same) "- 状态：一致 ✅"
-                else "- 状态：**不一致** — 启动时会自动重装 `usr`（`home` 不受影响，\n" +
-                    "  但用 apt 装过的包会丢，因为它们在 `usr` 里）"
+                else "- 状态：**不一致** — 启动时会自动升级 Debian 容器系统目录（`/root` 工作区与个人数据会保留）"
             )
         }
     }
@@ -7009,6 +7035,131 @@ class WorkspaceViewModel(
     }
 
     /** 打开「环境自检」：现场跑一遍探测并生成可复制的报告。 */
+    // ---------------------------------------------------------------- OOBE 引导
+
+    fun refreshOobePermissions() {
+        val snap = OobePermissions.inspect(getApplication())
+        _state.update { it.copy(oobePermissions = snap) }
+        refreshSharedStoragePermission()
+    }
+
+    fun reopenOobeFromSettings() {
+        hideSidebarForNavigation()
+        val snap = OobePermissions.inspect(getApplication())
+        _state.update {
+            it.copy(
+                settingsOpen = false,
+                oobeOpen = true,
+                oobeStep = OobeStep.PERMISSIONS,
+                oobePermissions = snap,
+            )
+        }
+    }
+
+    fun dismissReopenedOobe() {
+        _state.update { it.copy(oobeOpen = false) }
+    }
+
+    fun advanceOobeStep() {
+        val current = _state.value
+        when (current.oobeStep) {
+            OobeStep.PERMISSIONS -> {
+                val snap = OobePermissions.inspect(getApplication())
+                if (!snap.allRequiredGranted) {
+                    _state.update {
+                        it.copy(
+                            oobePermissions = snap,
+                            message = "请先授予全部基础权限",
+                            messageIsError = true,
+                        )
+                    }
+                    return
+                }
+                val upToDate = runCatching { installer.isUpToDate() }.getOrDefault(false)
+                val ready = runCatching { installer.isInstalled() }.getOrDefault(false)
+                _state.update {
+                    it.copy(
+                        oobePermissions = snap,
+                        oobeStep = OobeStep.RUNTIME,
+                        runtimeReady = ready,
+                        runtimeMessage = if (upToDate) "内置 Debian 环境已就绪" else it.runtimeMessage,
+                    )
+                }
+                if (!upToDate && !current.runtimeInstalling) {
+                    installRuntime()
+                }
+            }
+            OobeStep.RUNTIME -> {
+                if (!_state.value.runtimeReady || _state.value.runtimeInstalling) return
+                _state.update { it.copy(oobeStep = OobeStep.MODEL) }
+                viewModelScope.launch(Dispatchers.IO) { syncActiveProfile() }
+            }
+            OobeStep.MODEL -> completeOobe()
+        }
+    }
+
+    fun goBackOobeStep() {
+        val current = _state.value
+        when (current.oobeStep) {
+            OobeStep.PERMISSIONS -> Unit
+            OobeStep.RUNTIME -> if (!current.runtimeInstalling) {
+                refreshOobePermissions()
+                _state.update { it.copy(oobeStep = OobeStep.PERMISSIONS) }
+            }
+            OobeStep.MODEL -> _state.update { it.copy(oobeStep = OobeStep.RUNTIME) }
+        }
+    }
+
+    fun openApiConfigFromOobe() {
+        _state.update {
+            it.copy(apiConfig = ApiConfigState(profiles = emptyList(), activeId = "", loading = true))
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val loaded = runCatching { ApiConfigStore.read(getApplication()) }.getOrNull()
+            _state.update { s ->
+                val current = s.apiConfig ?: return@update s
+                s.copy(apiConfig = loaded ?: current.copy(loading = false))
+            }
+            if (loaded != null) {
+                syncActiveProfile()
+                syncRoleCardFromStore()
+            }
+        }
+    }
+
+    fun toggleRootFromOobe(enable: Boolean) {
+        if (!enable) {
+            updateRootSetting(false)
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = runCatching {
+                val shell = com.termux.app.zhicode.termux.TermuxShellExecutor(getApplication())
+                val res = shell.executeAsRoot("id -u", getApplication<Application>().filesDir.absolutePath, 10_000)
+                res.exitCode == 0 && !res.timedOut && res.stdout.trim() == "0"
+            }.getOrDefault(false)
+            if (ok) {
+                updateRootSetting(true)
+                _state.update { it.copy(message = "已获取 Root 授权并启用") }
+            } else {
+                updateRootSetting(false)
+                _state.update { it.copy(message = "未获得 Root 授权", messageIsError = true) }
+            }
+        }
+    }
+
+    fun completeOobe() {
+        OobeStore.markCompleted(getApplication())
+        _state.update { it.copy(oobeOpen = false) }
+        viewModelScope.launch(Dispatchers.IO) {
+            if (runCatching { installer.isInstalled() }.getOrDefault(false)) {
+                installer.setupStorageLinks()
+            }
+            ensureWorkspace()
+            syncActiveProfile()
+        }
+    }
+
     fun openEnvironment() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
@@ -7075,7 +7226,7 @@ class WorkspaceViewModel(
             it.copy(
                 runtimeInstalling = false,
                 runtimeProgress = 100,
-                runtimeMessage = "内置 Termux 环境已就绪",
+                runtimeMessage = "内置 Debian 环境已就绪",
                 runtimeReady = installer.isInstalled(),
                 environmentReport = reportText,
             )
@@ -7605,6 +7756,7 @@ class WorkspaceViewModel(
             // 从设置页进来时设置页仍然开着，于是返回会先回到设置主页 ——
             // 这正是从设置里点进去的人期望的。
             "about" -> openAbout()
+            "oobe" -> reopenOobeFromSettings()
             "uiDebug" -> openUiDebug()
             else -> Unit
         }

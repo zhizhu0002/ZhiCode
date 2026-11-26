@@ -93,7 +93,7 @@ class ZhiDocumentsProvider : DocumentsProvider() {
                     DocumentsContract.Root.FLAG_SUPPORTS_IS_CHILD,
                 "*/*",
                 home().usableSpace,
-                "应用的工作目录（可读写）",
+                "Debian 容器根目录（可读写）",
                 // 不给图标：让它用文件管理器自己的存储图标，比塞一个错的合适。
                 null,
             ),
@@ -134,9 +134,11 @@ class ZhiDocumentsProvider : DocumentsProvider() {
         // 按名字排（不按修改时间）：见类注释里与参考实现的分歧说明。
         children.sortedBy { it.name.lowercase(Locale.US) }.forEach { child ->
             if (DocumentTree.isPrivateName(child.name)) return@forEach
-            // 单条越界不该让整个目录列不出来 —— 静默跳过这一条，列其余的。
+            // 越界或不可解析的容器软链接只跳过单条，不影响其余目录浏览。
             runCatching {
-                cursor.include(DocumentTree.canonicalUnderRoot(home(), child), DocumentTree.documentIdFor(home(), child))
+                val resolved = DocumentTree.canonicalUnderRoot(home(), child)
+                val docId = DocumentTree.documentIdFor(home(), child)
+                cursor.include(resolved, docId, child.name)
             }
         }
         return cursor
@@ -253,7 +255,7 @@ class ZhiDocumentsProvider : DocumentsProvider() {
      * - 目录：重命名 / 删除 / **在里面新建**（对目录谈"写内容"没有意义）；
      * - 文件：重命名 / 删除 / **写**（编辑保存）。
      */
-    private fun MatrixCursor.include(file: File, documentId: String) {
+    private fun MatrixCursor.include(file: File, documentId: String, displayNameOverride: String? = null) {
         val directory = file.isDirectory
         var flags = DocumentsContract.Document.FLAG_SUPPORTS_RENAME or
             DocumentsContract.Document.FLAG_SUPPORTS_DELETE
@@ -267,7 +269,7 @@ class ZhiDocumentsProvider : DocumentsProvider() {
             DOCUMENT_FIELDS_WITH_SUMMARY,
             arrayOf(
                 documentId,
-                if (documentId == DocumentTree.ROOT_DOCUMENT_ID) "HOME" else file.name,
+                if (documentId == DocumentTree.ROOT_DOCUMENT_ID) "Debian /" else (displayNameOverride ?: file.name),
                 if (directory) DocumentsContract.Document.MIME_TYPE_DIR else mimeOf(file),
                 flags,
                 if (file.isFile) file.length() else null,
@@ -346,9 +348,9 @@ class ZhiDocumentsProvider : DocumentsProvider() {
 
     // ------------------------------------------------------------------ 工具
 
-    /** 共享根 = 应用的 HOME。环境还没装时也建出来：provider 可能在那之前就被查询。 */
+    /** 共享根 = Debian 容器根目录 `/`。环境未初始化时也保证目录存在。 */
     private fun home(): File {
-        val dir = File(TermuxConstants.TERMUX_HOME_DIR_PATH)
+        val dir = ContainerPaths.rootfsDir()
         if (!dir.isDirectory) dir.mkdirs()
         return dir
     }

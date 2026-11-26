@@ -435,7 +435,14 @@ private fun PreviewDevice(
                     Modifier.fillMaxWidth().height(20.dp).padding(horizontal = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("ZhiCode", color = scheme.onBackground, fontSize = PreviewType.micro, maxLines = 1, modifier = Modifier.weight(1f))
+                    Text(
+                        text = theme.resolvedTopBrand,
+                        color = scheme.onBackground,
+                        fontSize = PreviewType.micro,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
                     Text("••", color = scheme.primary, fontSize = PreviewType.micro)
                 }
                 if (theme.tabBarPositionValue == TabBarPosition.TOP) {

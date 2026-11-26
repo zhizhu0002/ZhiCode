@@ -1,33 +1,38 @@
 package com.zhizhu.zhicode.compose.ui
 
-import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.zhizhu.zhicode.compose.theme.ZhiGlass
-import com.zhizhu.zhicode.compose.theme.ZhiColors
-import com.zhizhu.zhicode.compose.model.ThemeMode
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
-import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
+import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
+import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.theme.ZhiGlass
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
-import top.yukonga.miuix.kmp.basic.SmallTopAppBar
-import top.yukonga.miuix.kmp.blur.BlurDefaults
-import top.yukonga.miuix.kmp.blur.BlendColorEntry
-import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TooltipBox
+import top.yukonga.miuix.kmp.blur.BlendColorEntry
+import top.yukonga.miuix.kmp.blur.BlurDefaults
+import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -54,12 +59,16 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 没有 List、没有可变对象，所以这个承诺是**可核对的**（不是靠"看起来没问题"）。
  * 编译器据此把顶栏的跳过判断简化成逐字段比较，而不是退化成整体 "unstable"。
  */
+/** 限制顶栏品牌显示宽度并在超长时横向连续滚动。 */
+internal fun Modifier.brandSignatureMarquee(): Modifier = this
+    .widthIn(max = 188.dp)
+    .clipToBounds()
+    .basicMarquee(iterations = Int.MAX_VALUE)
+
 @Immutable
 data class TopBarState(
     val composerBusy: Boolean,
     val modelLabel: String,
-    val contextTokens: Int,
-    val contextWindow: Int,
     val deviceStatus: String,
     val tab: WorkspaceTab,
 ) {
@@ -68,51 +77,31 @@ data class TopBarState(
         fun from(state: WorkspaceUiState) = TopBarState(
             composerBusy = state.composerBusy,
             modelLabel = state.modelLabel,
-            contextTokens = state.contextTokens,
-            contextWindow = state.contextWindow,
             deviceStatus = state.deviceStatus,
             tab = state.tab,
         )
     }
 }
 
-/**
- * 顶栏（UI 重构 S2）：容器迁到官方 [SmallTopAppBar]。
- *
- * 结构与 Miuix example 的 BlurredBar + AdaptiveTopAppBar 一致：
- * 玻璃模糊由调用方（AppScaffold/WideWorkspace）包在 ZhiTopBar 外层，
- * 这里只负责官方槽位：title / navigationIcon / actions / bottomContent。
- *
- * 官方默认 padding 与 50dp 高度全部保留（不再覆写）。
- */
 @Composable
 fun ZhiTopBar(
     state: TopBarState,
     wide: Boolean,
     glass: Glass,
     onOpenSidebar: () -> Unit,
-    onContextClick: () -> Unit,
     onSettings: () -> Unit,
     modifier: Modifier = Modifier,
-    // 随头部一起悬浮的按键组；为 null 时不渲染（宽屏的按键组在右侧栏各自的位置）。
     tabs: List<WorkspaceTab>? = null,
     onSelectTab: (WorkspaceTab) -> Unit = {},
     selectedTab: WorkspaceTab = state.tab,
-    /**
-     * 当前 Pager 页，用于让标签高亮跟随弹簧动画（见 `WorkspaceTabs.pagerPage`）。
-     *
-     * 为 null 时高亮回到 `selectedTab` 驱动的旧行为。
-     */
     pagerPage: Int? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
+    val brandTitle = LocalThemeSettings.current.resolvedTopBrand
 
-    // 官方 BlurredBar 模式（miuix example/utils/PageUtils.kt:127）：
-    // textureBlur 挂在**包裹 Box** 上并混入一层 surface(0.8) 做磨砂底色，
-    // TopAppBar 自身底色取透明 —— 之前把 surface(0.72) 直接叠在 blur 修饰符上，
-    // 半透明底色把模糊结果盖死，肉眼等于没有 blur。
     ZhiFrameTrace.countRecompose("TopBar")
     val blurActive = glass.supported
+    val containerColor = if (blurActive) Color.Transparent else scheme.surfaceContainer
     Box(
         modifier = modifier.then(
             if (blurActive) {
@@ -126,7 +115,6 @@ fun ZhiTopBar(
                                 color = if (ZhiColors.isDark()) {
                                     scheme.surface.copy(alpha = ZhiGlass.TopBarAlpha)
                                 } else {
-                                    // 与所有整页顶栏共用同一层级；浅色透明度略高以保持干净白底。
                                     Color.White.copy(alpha = 0.78f)
                                 },
                             ),
@@ -138,91 +126,99 @@ fun ZhiTopBar(
             },
         ),
     ) {
-    SmallTopAppBar(
-        modifier = Modifier,
-        title = "ZhiCode",
-        color = if (blurActive) Color.Transparent else scheme.surfaceContainer,
-        // 与底部 FloatingBottomShell 共用 Glass 的透明度、模糊半径和边缘策略。
-        defaultWindowInsetsPadding = false,
-        navigationIcon = {
-            if (!wide) {
-                ZhiIconButton(
-                    icon = ZhiIcons.menu,
-                    description = "打开侧栏",
-                    onClick = onOpenSidebar,
-                )
-            }
-        },
-        actions = {
-            if (wide) {
-                Text(
-                    text = if (state.composerBusy) "工作中 · ${state.modelLabel}" else state.modelLabel,
-                    color = if (state.composerBusy) scheme.primary else scheme.onSurfaceVariantSummary,
-                    fontSize = MiuixTheme.textStyles.body2.fontSize,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                )
-            }
-
-            // 上下文 chip 按占用率变色：≥90% 红底红字、≥72% 强调色、否则弱化色
-            val ctxPct = if (state.contextWindow > 0) {
-                Math.round(state.contextTokens * 100.0 / state.contextWindow).toInt()
-            } else {
-                0
-            }
-            ZhiChip(
-                label = WorkspaceViewModel.formatTokens(state.contextTokens) + "/" +
-                    WorkspaceViewModel.formatTokens(state.contextWindow),
-                onClick = onContextClick,
-                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                containerColor = when {
-                    ctxPct >= 90 -> scheme.errorContainer
-                    ctxPct >= 72 -> scheme.primary.copy(alpha = 0.12f)
-                    else -> Color.Unspecified
-                },
-                contentColor = when {
-                    ctxPct >= 90 -> scheme.error
-                    ctxPct >= 72 -> scheme.primary
-                    else -> Color.Unspecified
-                },
-            )
-
-            if (wide) {
-                Text(
-                    text = state.deviceStatus,
-                    color = scheme.onSurfaceVariantSummary,
-                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                    maxLines = 1,
-                    modifier = Modifier.padding(start = 8.dp),
-                )
-            }
-
-            // 图标按钮包 Miuix TooltipBox，长按出说明气泡
-            TooltipBox(text = "打开设置") {
-                ZhiIconButton(
-                    compact = 34.dp,
-                    icon = ZhiIcons.settings,
-                    description = "打开设置",
-                    onClick = onSettings,
-                    tint = scheme.onSurface,
-                )
-            }
-        },
-        bottomContent = {
-            Column {
-                if (tabs != null) {
-                    WorkspaceTabs(
-                        tabs = tabs,
-                        selected = selectedTab,
-                        onSelect = onSelectTab,
-                        pagerPage = pagerPage,
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(containerColor),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .height(56.dp)
+                    .padding(horizontal = 12.dp),
+            ) {
+                if (!wide) {
+                    ZhiIconButton(
+                        icon = ZhiIcons.menu,
+                        description = "打开侧栏",
+                        onClick = onOpenSidebar,
+                        modifier = Modifier.align(Alignment.CenterStart),
                     )
+                    Text(
+                        text = brandTitle,
+                        color = scheme.onSurface,
+                        fontSize = MiuixTheme.textStyles.title3.fontSize,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .brandSignatureMarquee(),
+                    )
+                    TooltipBox(
+                        text = "打开设置",
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    ) {
+                        ZhiIconButton(
+                            compact = 34.dp,
+                            icon = ZhiIcons.settings,
+                            description = "打开设置",
+                            onClick = onSettings,
+                            tint = scheme.onSurface,
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = brandTitle,
+                            color = scheme.onSurface,
+                            fontSize = MiuixTheme.textStyles.title3.fontSize,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.brandSignatureMarquee(),
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        Text(
+                            text = if (state.composerBusy) "工作中 · ${state.modelLabel}" else state.modelLabel,
+                            color = if (state.composerBusy) scheme.primary else scheme.onSurfaceVariantSummary,
+                            fontSize = MiuixTheme.textStyles.body2.fontSize,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        )
+                        Text(
+                            text = state.deviceStatus,
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                        TooltipBox(text = "打开设置") {
+                            ZhiIconButton(
+                                compact = 34.dp,
+                                icon = ZhiIcons.settings,
+                                description = "打开设置",
+                                onClick = onSettings,
+                                tint = scheme.onSurface,
+                            )
+                        }
+                    }
                 }
-                // 服务中时是 Miuix 不确定进度条；空闲时以分隔线结束顶栏（与可选标签行一起）。
-                if (state.composerBusy) ZhiIndeterminateBar() else ZhiHorizontalDivider(color = scheme.dividerLine)
             }
-        },
-    )
+            if (tabs != null) {
+                WorkspaceTabs(
+                    tabs = tabs,
+                    selected = selectedTab,
+                    onSelect = onSelectTab,
+                    pagerPage = pagerPage,
+                )
+            }
+            if (state.composerBusy) ZhiIndeterminateBar() else ZhiHorizontalDivider(color = scheme.dividerLine)
+        }
     }
 }

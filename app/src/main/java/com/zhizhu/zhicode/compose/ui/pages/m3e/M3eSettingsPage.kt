@@ -11,9 +11,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -56,9 +61,12 @@ fun M3eSettingsPage(
     onDismiss: () -> Unit,
     onNavigate: (String) -> Unit,
     extensions: ExtensionSummary = ExtensionSummary(),
+    brandSignature: String = "",
+    onBrandSignatureChange: (String) -> Unit = {},
 ) {
     if (draft == null) return
     val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+    var brandDialogOpen by remember { mutableStateOf(false) }
 
     M3eSubPageScaffold(
         title = "设置",
@@ -76,8 +84,17 @@ fun M3eSettingsPage(
             item(key = "general") {
                 M3eSectionHeader("通用")
                 M3eSegmentedColumn {
-                    val generalCount = if (draft.webSearchEnabled) 6 else 3
+                    val generalCount = if (draft.webSearchEnabled) 7 else 4
                     var idx = 0
+                    M3eNavigationRow(
+                        index = idx++,
+                        count = generalCount,
+                        title = "顶栏签名",
+                        valueText = brandSignature.trim().ifBlank { "ZhiCode（默认）" },
+                        summary = "自定义顶部显示名称（过长自动滚动）",
+                        icon = ZhiIcons.edit,
+                        onClick = { brandDialogOpen = true },
+                    )
                     M3eNavigationRow(
                         index = idx++,
                         count = generalCount,
@@ -110,8 +127,8 @@ fun M3eSettingsPage(
                     ) {
                         Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(2.dp)) {
                             M3eNavigationRow(
-                                index = 3,
-                                count = 6,
+                                index = 4,
+                                count = 7,
                                 title = "搜索服务",
                                 summary = "添加 Tavily / Exa / Brave / Perplexity / SearXNG 等",
                                 icon = ZhiIcons.cloud,
@@ -119,8 +136,8 @@ fun M3eSettingsPage(
                                 onClick = { onNavigate("searchServices") },
                             )
                             M3eSliderRow(
-                                index = 4,
-                                count = 6,
+                                index = 5,
+                                count = 7,
                                 title = "默认搜索结果数（1-50）",
                                 value = draft.webSearchMaxResults.toFloat(),
                                 valueText = "${draft.webSearchMaxResults} 条",
@@ -131,8 +148,8 @@ fun M3eSettingsPage(
                                 icon = ZhiIcons.listCount,
                             )
                             M3eSliderRow(
-                                index = 5,
-                                count = 6,
+                                index = 6,
+                                count = 7,
                                 title = "联网超时（秒）",
                                 value = draft.webSearchTimeoutSec.toFloat(),
                                 valueText = "${draft.webSearchTimeoutSec} 秒",
@@ -390,7 +407,15 @@ fun M3eSettingsPage(
                 M3eSegmentedColumn {
                     M3eNavigationRow(
                         index = 0,
-                        count = 1,
+                        count = 2,
+                        title = "初始引导",
+                        summary = "权限授权、运行环境与模型配置向导",
+                        icon = ZhiIcons.runtime,
+                        onClick = { onNavigate("oobe") },
+                    )
+                    M3eNavigationRow(
+                        index = 1,
+                        count = 2,
                         title = "关于 ZhiCode",
                         summary = "版本、源码、许可证与隐私政策",
                         icon = ZhiIcons.info,
@@ -400,6 +425,48 @@ fun M3eSettingsPage(
                 Spacer(Modifier.height(12.dp))
             }
         }
+    }
+
+    if (brandDialogOpen) {
+        var text by remember(brandDialogOpen, brandSignature) { mutableStateOf(brandSignature) }
+        AlertDialog(
+            onDismissRequest = { brandDialogOpen = false },
+            title = { Text("顶栏签名") },
+            text = {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it.replace('\n', ' ') },
+                    singleLine = true,
+                    label = { Text("留空显示默认 ZhiCode") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        brandDialogOpen = false
+                        onBrandSignatureChange(text.trim())
+                    },
+                ) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                androidx.compose.foundation.layout.Row {
+                    if (brandSignature.isNotBlank() || text.isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                brandDialogOpen = false
+                                onBrandSignatureChange("")
+                            },
+                        ) {
+                            Text("恢复默认")
+                        }
+                    }
+                    TextButton(onClick = { brandDialogOpen = false }) { Text("取消") }
+                }
+            },
+        )
     }
 }
 

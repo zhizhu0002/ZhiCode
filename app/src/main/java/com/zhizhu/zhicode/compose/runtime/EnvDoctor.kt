@@ -12,6 +12,9 @@ import com.termux.app.zhicode.core.DocumentTree
 import com.termux.app.zhicode.core.ProviderLog
 import com.termux.app.zhicode.core.StorageLinks
 import com.termux.shared.termux.TermuxConstants
+import com.zhizhu.zhicode.ContainerPaths
+import com.zhizhu.zhicode.ProotCommand
+import com.zhizhu.zhicode.RuntimeInstaller
 import java.io.File
 
 /**
@@ -76,7 +79,7 @@ object EnvDoctor {
     private fun runtimeShape(context: Context): String {
         val dataDir = context.applicationInfo?.dataDir.orEmpty()
         return if (dataDir.contains("blackbox")) {
-            "ZhiCode 沙箱内（数据目录被虚拟化，内置 Termux 无法在此安装，请在真机上验证）"
+            "ZhiCode 沙箱内（虚拟化数据目录，请在真机验证 PRoot / SAF）"
         } else {
             "真机/独立运行"
         }
@@ -85,61 +88,45 @@ object EnvDoctor {
     // ------------------------------------------------------------------ 路径
 
     private fun pathInfo(sb: StringBuilder) {
-        sb.appendLine("## Termux 路径")
+        sb.appendLine("## Debian / PRoot 路径")
         sb.appendLine("configured  : ${TermuxConstants.isConfigured()}")
         sb.appendLine("PACKAGE_NAME: ${TermuxConstants.TERMUX_PACKAGE_NAME}")
         sb.appendLine("DATA_DIR    : ${TermuxConstants.TERMUX_DATA_DIR_PATH}")
         sb.appendLine("FILES_DIR   : ${TermuxConstants.TERMUX_FILES_DIR_PATH}")
+        sb.appendLine("ROOTFS      : ${TermuxConstants.DEBIAN_ROOTFS_DIR_PATH}")
         sb.appendLine("HOME        : ${TermuxConstants.TERMUX_HOME_DIR_PATH}")
-        sb.appendLine("PREFIX      : ${TermuxConstants.TERMUX_PREFIX_DIR_PATH}")
-
-        // 前缀改写必须等长，否则 bootstrap 里的 337 个 ELF 会被写坏。
-        // 这里把它当成一条一等公民的自检项，而不是等安装时才炸。
-        // 注意：沙箱里必然不等长（数据目录被虚拟化），这是预期结果而非缺陷。
-        val oldLen = "/data/data/com.termux".length
-        val newLen = TermuxConstants.TERMUX_DATA_DIR_PATH.length
-        val expectedLen = oldLen - "/data/user/0/".length
-        val lenOk = oldLen == newLen
-        sb.appendLine("前缀等长    : ${if (lenOk) "通过" else "不通过"} ($oldLen -> $newLen)")
-        if (!lenOk) {
-            sb.appendLine("  期望      : 数据目录恰好 $oldLen 字符，即包名恰好 $expectedLen 字符")
-            sb.appendLine("  实际包名  : ${TermuxConstants.TERMUX_PACKAGE_NAME} (${TermuxConstants.TERMUX_PACKAGE_NAME.length} 字符)")
-            sb.appendLine("  原因      : 数据目录被前缀改写之外的东西改变了长度（沙箱虚拟化最常见）")
-        }
+        sb.appendLine("PROOT_TMP   : ${TermuxConstants.PROOT_TMP_DIR_PATH}")
         sb.appendLine()
     }
 
-    // ---------------------------------------------------------------- Termux
+    // ---------------------------------------------------------------- Debian
 
     private fun termuxInfo(sb: StringBuilder) {
-        val prefix = File(TermuxConstants.TERMUX_PREFIX_DIR_PATH)
-        val home = File(TermuxConstants.TERMUX_HOME_DIR_PATH)
-        val bash = File(TermuxConstants.TERMUX_BASH_PATH)
-        val marker = File(prefix, "etc/${TermuxConstants.BRAND_SLUG}-runtime-v1")
+        val rootfs = ContainerPaths.rootfsDir()
+        val home = ContainerPaths.homeDir()
+        val bash = File(rootfs, "bin/bash")
+        val node = File(rootfs, "usr/local/bin/node")
+        val pi = File(rootfs, "usr/local/bin/pi")
+        val marker = File(rootfs, "etc/zhicode-debian-v1")
 
-        sb.appendLine("## 内置 Termux 环境")
-        sb.appendLine("PREFIX 存在 : ${prefix.isDirectory}  (${countChildren(prefix)} 项)")
+        sb.appendLine("## 内置 Debian 容器")
+        sb.appendLine("ROOTFS 存在 : ${rootfs.isDirectory}  (${countChildren(rootfs)} 项)")
         sb.appendLine("HOME 存在   : ${home.isDirectory}")
-        sb.appendLine("bash 存在   : ${bash.isFile}  可执行=${bash.canExecute()}")
-        sb.appendLine("bin 条目数  : ${countChildren(File(prefix, "bin"))}")
-        sb.appendLine("usr-staging : ${File(TermuxConstants.TERMUX_FILES_DIR_PATH, "usr-staging").exists()}")
-        sb.appendLine("usr-backup  : ${File(TermuxConstants.TERMUX_FILES_DIR_PATH, "usr-backup").exists()}")
+        sb.appendLine("bash 存在   : ${bash.exists()}")
+        sb.appendLine("node 存在   : ${node.isFile}")
+        sb.appendLine("pi 存在     : ${pi.exists()}")
+        sb.appendLine("staging     : ${File(TermuxConstants.TERMUX_FILES_DIR_PATH, "debian-staging").exists()}")
+        sb.appendLine("backup      : ${File(TermuxConstants.TERMUX_FILES_DIR_PATH, "debian-backup").exists()}")
         sb.appendLine("marker      : ${marker.isFile}")
         if (marker.isFile) {
             val lines = runCatching { marker.readLines() }.getOrNull().orEmpty()
             sb.appendLine("  版本      : ${lines.getOrNull(0) ?: "?"}")
             sb.appendLine("  sha256    : ${lines.getOrNull(1) ?: "?"}")
         }
-
-        // 兼容层：装了这些，apt 才能安装 Termux 官方仓库的包
-        sb.appendLine("dpkg-wrapper: ${File(prefix, "bin/dpkg").isFile}")
-        sb.appendLine("dpkg-real   : ${File(prefix, "bin/dpkg.${TermuxConstants.BRAND_SLUG}-real").isFile}")
-        sb.appendLine("deb-patch   : ${File(prefix, "libexec/${TermuxConstants.BRAND_SLUG}/${TermuxConstants.BRAND_SLUG}-deb-patch").isFile}")
-        sb.appendLine("apt 钩子    : ${File(prefix, "etc/apt/apt.conf.d/99${TermuxConstants.BRAND_SLUG}-prefix-rewrite").isFile}")
         sb.appendLine()
     }
 
-    // -------------------------------------------------- 内置 bootstrap 资产
+    // -------------------------------------------------- 内置资产与 native
 
     private fun nativeInfo(context: Context, sb: StringBuilder) {
         sb.appendLine("## 内置资产与 native")
@@ -150,9 +137,14 @@ object EnvDoctor {
         sb.appendLine("assets 根   : ${listed.joinToString(", ").take(200)}")
 
         val size = runCatching {
-            context.assets.open("bootstrap-aarch64.zip").use { it.available().toLong() }
+            context.assets.open(RuntimeInstaller.BOOTSTRAP_ASSET).use { it.available().toLong() }
         }.getOrNull()
-        sb.appendLine("bootstrap   : ${if (size != null) "$size 字节" else "读取失败"}")
+        sb.appendLine("debian 归档 : ${if (size != null) "$size 字节" else "读取失败"}")
+
+        val proot = ProotCommand.prootBinary(context)
+        val loader = ProotCommand.loaderBinary(context)
+        sb.appendLine("libproot.so : ${if (proot.isFile) "${proot.length()} 字节" else "缺失"}")
+        sb.appendLine("loader.so   : ${if (loader.isFile) "${loader.length()} 字节" else "缺失"}")
 
         val libDir = context.applicationInfo?.nativeLibraryDir
         val lib = libDir?.let { File(it, "libtermux.so") }
@@ -163,9 +155,6 @@ object EnvDoctor {
                 true
             }.getOrElse { false }
             sb.appendLine("System.load : ${if (loaded) "成功" else "失败"}")
-            if (!loaded) {
-                sb.appendLine("  提示      : 该 .so 必须按绝对路径加载；若 APK 用了 extractNativeLibs=false 会失败")
-            }
         }
         sb.appendLine()
     }
@@ -211,15 +200,15 @@ object EnvDoctor {
      * 就在这两者之间，所以自检要一路走到"建一个再删掉"。
      */
     private fun localMountInfo(context: Context, sb: StringBuilder) {
-        val home = File(TermuxConstants.TERMUX_HOME_DIR_PATH)
-        sb.appendLine("## 本地挂载（文件管理器访问 HOME）")
-        for (line in DocumentTree.describe(home)) sb.appendLine(line)
+        val rootfs = ContainerPaths.rootfsDir()
+        sb.appendLine("## 本地挂载（文件管理器访问 Debian 容器根目录 /）")
+        for (line in DocumentTree.describe(rootfs)) sb.appendLine(line)
 
         val authority = "${context.packageName}.documents"
-        sb.appendLine("provider     : $authority（DocumentsProvider，SAF 发布 HOME，不搬目录）")
+        sb.appendLine("provider     : $authority（DocumentsProvider，SAF 暴露容器 /）")
         sb.appendLine("已注册       : ${isDocumentsProviderRegistered(context, authority)}")
-        val readable = home.canRead() && home.isDirectory
-        sb.appendLine("文件管理器可用: ${if (readable) "是" else "否（HOME 读不到）"}")
+        val readable = rootfs.canRead() && rootfs.isDirectory
+        sb.appendLine("文件管理器可用: ${if (readable) "是" else "否（容器根目录读不到）"}")
         for (line in providerRoundTrip(context, authority)) sb.appendLine(line)
         for (line in providerLogTail()) sb.appendLine(line)
         sb.appendLine()

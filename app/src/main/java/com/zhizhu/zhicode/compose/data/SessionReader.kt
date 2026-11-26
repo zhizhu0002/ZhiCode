@@ -378,6 +378,19 @@ internal object SessionReader {
                         )
                     }
                 }
+                "turn_elapsed" -> {
+                    val elapsed = row.optJSONObject("payload")?.optLong("elapsed_ms", -1L) ?: -1L
+                    if (elapsed > 0L) {
+                        for (i in items.lastIndex downTo 0) {
+                            val item = items[i]
+                            if (item.kind == ChatKind.USER) break
+                            if (item.kind == ChatKind.ASSISTANT) {
+                                items[i] = item.copy(elapsedMs = elapsed)
+                                break
+                            }
+                        }
+                    }
+                }
             }
         }
         return closeUnfinished(items)

@@ -221,37 +221,18 @@ internal fun TerminalExtraKeys(
 ) {
     if (state.extraKeys.isEmpty()) return
     val palette = chrome()
-    // 悬浮胶囊浮在屏幕最底部，而扩展键是终端面板的最后一行 —— 不让开就会被压住
-    // （ESC / TAB / PGUP 全都点不到，用户截图里就是这样）。
-    // 用**高度**而不是 padding：扩展键自己的背景是一整块 bar 色，让出来的那一段
-    // 必须也是同一块颜色，否则底边会多出一条别的色的缝。
-    val navInset = com.zhizhu.zhicode.compose.ui.LocalFloatingNavInset.current
-    val bottomBarPx = with(LocalDensity.current) {
-        com.zhizhu.zhicode.compose.ui.LocalBottomBarInset.current.roundToPx()
+    val imeMotion = LocalImeMotion.current
+    val navInset = if (imeMotion.imeVisible) {
+        0.dp
+    } else {
+        com.zhizhu.zhicode.compose.ui.LocalFloatingNavInset.current
     }
     val landscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val imeMotion = LocalImeMotion.current
-    // 悬浮栏隐藏进度（补间后的显示值）。只在绘制阶段读，不参与布局。
     val navBarProgressState = com.zhizhu.zhicode.compose.ui.LocalNavBarProgress.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            // TerminalPage 的根容器在 edge-to-edge 下不会自动 resize；
-            // 直接读布局阶段的 IME 位移，扣除已让位的固定底栏高度，避免在固定底栏/顶栏模式下多抬一段缝隙。
-            .offset { IntOffset(0, -maxOf(0, imeMotion.currentLiftPx - bottomBarPx)) }
-            // 悬浮栏隐藏时，这块扩展键栏**向下填满胶囊腾出的空间**。
-            //
-            // ⚠️ 位移量 = `navInset`（= 胶囊让位量），**不是**自身高度 + navInset。
-            // 曾经写成 `(heightPx + navInset) * progress`，于是整块键栏沉出屏幕，
-            // 底部只剩一条空的 bar 色带 —— 用户截图里就是这个。
-            //
-            // 为什么 `navInset` 就够：这块的 `height` 里本来就含 `+ navInset`
-            // （让开胶囊那段）。胶囊滑走后把 `navInset` 平移下去，键位正好补到屏幕底边。
-            //
-            // 用 `graphicsLayer`（绘制阶段）而不是改 `height`/`padding`（布局阶段）：
-            // 布局变化会改终端内容区高度、触发重新测量，甚至反向影响滚动位置 ——
-            // 那正是"下滑时弹一下"的来源。绘制阶段位移对布局零影响。
             .graphicsLayer {
                 val progress = navBarProgressState.value
                 if (progress > 0f) translationY = navInset.toPx() * progress

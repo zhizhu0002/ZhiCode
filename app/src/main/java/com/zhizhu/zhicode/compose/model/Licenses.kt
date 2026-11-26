@@ -106,16 +106,24 @@ val THIRD_PARTY_LICENSES: List<LicenseEntry> = listOf(
             "本工程用的是后者，且**整体重写**过：路径在运行期由包名派生，不再写成常量。",
     ),
     LicenseEntry(
-        name = "Termux 用户空间（bootstrap 归档）",
-        license = "各程序各自的许可",
-        version = "—",
+        name = "PRoot",
+        license = "GPL-2.0+",
+        version = "5.1.107.102",
         group = "运行环境",
-        author = "termux",
-        homepage = "https://github.com/termux/termux-packages",
-        detail = "归档内是数百个独立可执行程序，各自适用各自的许可，其中包含 GPL-3.0（bash / coreutils / " +
-            "sed / grep）、GPL-2.0+（apt / dpkg）、Apache-2.0（openssl）以及 LGPL / MIT / BSD 变体。" +
-            "它们是**独立可执行文件**，由本应用以子进程方式启动，与本工程代码不构成衍生作品 —— " +
-            "GPL 明确允许把它们与其它许可的程序聚合分发。",
+        author = "PRoot / Termux Contributors",
+        homepage = "https://github.com/termux/proot",
+        detail = "用户态 chroot/bind 挂载实现（libproot.so 与 libprootloader.so，静态链接 talloc），" +
+            "作为独立子进程在无 Root 环境下承载 Debian 容器。",
+    ),
+    LicenseEntry(
+        name = "Debian 容器镜像与 Node.js / Pi 运行时",
+        license = "各组件各自的许可",
+        version = "Debian 12 · Node 22 · Pi 1.6.1",
+        group = "运行环境",
+        author = "Debian / OpenJS / Earendil Works",
+        homepage = "https://github.com/earendil-works/pi",
+        detail = "归档内含 Debian bookworm-slim arm64 基础系统（GPL / MIT / BSD / Apache-2.0）、" +
+            "Node.js 运行时（MIT）及 @earendil-works/pi-coding-agent（MIT），作为独立子进程运行。",
     ),
     /*
      * ⚠️ 这一组原来只有一条「通过 Gradle 依赖引入的组件」，把八个库糊在一段文字里。

@@ -24,6 +24,10 @@ class ImeMotionState {
     var settledLiftPx by mutableIntStateOf(0)
         private set
 
+    /** Raw window IME bottom inset in pixels (from the screen bottom edge). */
+    var imeBottomPx by mutableIntStateOf(0)
+        private set
+
     /** Actual bottom navigation inset, kept separate from the IME lift. */
     var navigationBarInsetPx by mutableIntStateOf(0)
         private set
@@ -49,9 +53,12 @@ class ImeMotionState {
     private var openingSignalled = false
 
     fun apply(insets: WindowInsetsCompat) {
-        val lift = liftOf(insets)
-        navigationBarInsetPx = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
-        val wasOpen = currentLiftPx > 0 || settledLiftPx > 0
+        val rawIme = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+        val lift = (rawIme - nav).coerceAtLeast(0)
+        navigationBarInsetPx = nav
+        val wasOpen = imeBottomPx > 0 || settledLiftPx > 0
+        imeBottomPx = rawIme
         currentLiftPx = lift
         if (!wasOpen && lift > 0 && !openingSignalled) {
             openingSignalled = true
@@ -59,8 +66,8 @@ class ImeMotionState {
         }
         if (runningImeAnimations == 0) {
             settledLiftPx = lift
-            imeVisible = lift > 0
-            if (lift == 0) openingSignalled = false
+            imeVisible = rawIme > 0
+            if (rawIme == 0) openingSignalled = false
         }
     }
 
@@ -70,7 +77,7 @@ class ImeMotionState {
             // 动画**一开始**就翻真：让位量必须立即归零，否则键盘动画期间
             // 扩展键栏 / 输入器与键盘之间会裂开一条缝（用户截图）。
             imeVisible = true
-            if (currentLiftPx == 0 && settledLiftPx == 0 && !openingSignalled) {
+            if (imeBottomPx == 0 && settledLiftPx == 0 && !openingSignalled) {
                 openingSignalled = true
                 openGeneration++
             }
@@ -78,8 +85,11 @@ class ImeMotionState {
     }
 
     fun onProgress(insets: WindowInsetsCompat): WindowInsetsCompat {
-        currentLiftPx = liftOf(insets)
-        navigationBarInsetPx = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+        val rawIme = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+        imeBottomPx = rawIme
+        currentLiftPx = (rawIme - nav).coerceAtLeast(0)
+        navigationBarInsetPx = nav
         return insets
     }
 
@@ -88,8 +98,8 @@ class ImeMotionState {
             runningImeAnimations = (runningImeAnimations - 1).coerceAtLeast(0)
             if (runningImeAnimations == 0) {
                 settledLiftPx = currentLiftPx
-                imeVisible = currentLiftPx > 0
-                if (currentLiftPx == 0) openingSignalled = false
+                imeVisible = imeBottomPx > 0
+                if (imeBottomPx == 0) openingSignalled = false
             }
         }
     }
@@ -97,20 +107,17 @@ class ImeMotionState {
     fun reset() {
         runningImeAnimations = 0
         openingSignalled = false
+        imeBottomPx = 0
         currentLiftPx = 0
         settledLiftPx = 0
         navigationBarInsetPx = 0
         imeVisible = false
     }
 
-    private fun liftOf(insets: WindowInsetsCompat): Int {
-        val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-        val navigation = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
-        return (ime - navigation).coerceAtLeast(0)
-    }
-
     /** Composer offset to the bottom edge of the app content, excluding the IME only. */
-    fun composerLiftPx(insets: WindowInsetsCompat): Int = liftOf(insets)
+    fun composerLiftPx(insets: WindowInsetsCompat): Int =
+        (insets.getInsets(WindowInsetsCompat.Type.ime()).bottom -
+            insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom).coerceAtLeast(0)
 }
 
 val LocalImeMotion = staticCompositionLocalOf { ImeMotionState() }

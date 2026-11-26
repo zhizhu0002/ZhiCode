@@ -4,6 +4,8 @@ import android.content.Context;
 
 import com.termux.app.zhicode.storage.ZhiMemory;
 import com.termux.shared.termux.TermuxConstants;
+import com.zhizhu.zhicode.ContainerPaths;
+import com.zhizhu.zhicode.ProotCommand;
 
 import java.io.BufferedReader;
 import java.io.Closeable;
@@ -15,6 +17,8 @@ import java.io.InputStreamReader;
 import java.io.FileReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -22,34 +26,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * 在嵌入式 Termux 的 Bionic 用户空间里直接跑命令（不经 proot）。
- *
- * <h3>为什么这么绕：退出码需要一个可信来源</h3>
- * {@link Process#waitFor()} 给出的退出码在两种情况下是错的：命令自己的
- * wrapper 被杀（拿不到真实码）、以及命令启动了后台进程导致父进程先退出。
- * 所以真正的命令被包了一层：写 pid → 跑命令 → 把「随机 token:退出码」写进
- * 一个控制文件 → {@code exit}。控制文件与进程退出两个信号由
- * {@link BashCompletionCoordinator} 裁定，见那里的说明。
- *
- * <h3>{@code setsid} 与进程组</h3>
- * 取消与超时都要终止**整棵进程树**。有 {@code setsid} 时整棵树在一个进程组里，
- * 可以直接对 {@code -pid} 发信号；没有时只能自己遍历 {@code /proc} 拼出树
- * （见 {@link #terminateProcessTree}）。root 模式两者都不可靠 —— 那棵树在
- * root 的命名空间里，必须再用一次 {@code su} 去杀。
- *
- * <h3>为什么必须设置 {@code LD_LIBRARY_PATH}</h3>
- * 内置 Termux 的 ELF **不再**被改写前缀（见 RuntimeInstaller）。它们内嵌的
- * DT_RUNPATH 仍指向不存在的 {@code /data/data/com.termux/files/usr/lib}，
- * 而 DT_RUNPATH 只是提示、会被 {@code LD_LIBRARY_PATH} 覆盖，所以这里**必须**
- * 设置它，否则所有二进制都找不到 libc++、zlib 等。
- *
- * <p>注意这与旧实现相反：旧版把 bootstrap 的 ELF 等长改写成真实路径，因此刻意
- * {@code remove} 掉 {@code LD_LIBRARY_PATH}（旧注释说「forcing LD_LIBRARY_PATH
- * can break apt/dpkg/java subprocesses」）。现在 ELF 保持原样，移除它会让
- * 所有二进制起不来。
+ * 在内置 Debian（PRoot）容器内执行命令（Root 模式则直接在宿主走 su）。
  */
 public final class TermuxShellExecutor {
 
@@ -58,41 +37,21 @@ public final class TermuxShellExecutor {
     /** 单个流最多保留的字符数。两个流各自独立计算。 */
     public static final int MAX_CAPTURE_CHARS = 2_000_000;
 
-    /** 控制文件的轮询间隔。 */
     private static final long CONTROL_POLL_MS = 40L;
-    /** 拿到控制文件后，等进程真正退出的宽限期。 */
     private static final long CONTROL_EXIT_GRACE_MS = 250L;
-    /** 等 pid 文件出现的宽限期（shell 起来到写 pid 之间的时间）。 */
     private static final long PID_FILE_GRACE_MS = 300L;
-    /** 收集线程的 join 超时。 */
     private static final long THREAD_JOIN_MS = 1500L;
-    /** 主动等待循环的单次步长，同时也是心跳间隔。 */
     private static final long WAIT_STEP_MS = 500L;
-    /** 终止时的宽限期：先 TERM，等一等，再 KILL。 */
     private static final long TERM_GRACE_MS = 180L;
-    private static final long TERM_GRACE_SHORT_MS = 120L;
     private static final long ROOT_KILL_TIMEOUT_MS = 2000L;
 
     private static final int EXIT_TIMED_OUT = 124;
-    /** 已有包管理任务在跑。借用 sysexits 的 EX_TEMPFAIL。 */
-    private static final int EXIT_PACKAGE_BUSY = 75;
-    /** root 模式下 cwd 进不去。SYSEXITS 的 EX_OSFILE。 */
     private static final int EXIT_BAD_CWD = 72;
 
     private static final String TRUNCATION_MARKER = "\n…output truncated…";
     private static final String STDERR_HEADER = "[stderr]\n";
     private static final String NO_OUTPUT = "(no output)";
     private static final String TIMEOUT_MARKER = "\n[command timed out]";
-
-    /**
-     * 全局的包管理事务锁。
-     *
-     * <p>apt/dpkg 在整机范围内只有一把锁。两个并发的 apt 都会失败，
-     * 而失败信息（"Could not get lock"）看起来像权限问题。所以在**启动之前**
-     * 就用一把进程内的锁挡住：第二个调用直接返回「已有任务在跑」。
-     * 这是静态的，因为同一个应用里可能有多个执行器实例（工具、终端、子代理）。
-     */
-    private static final ReentrantLock PACKAGE_TRANSACTION = new ReentrantLock();
 
     /** 命令行输出的实时投递。 */
     public interface OutputListener {
@@ -171,31 +130,15 @@ public final class TermuxShellExecutor {
 
     private Result run(String command, String cwd, int timeoutMs, OutputListener listener, boolean asRoot)
             throws Exception {
-        requireRuntimeInstalled();
+        if (!asRoot) requireRuntimeInstalled(context);
         String requestedWorking = resolveRequestedWorking(cwd, asRoot);
-        // Java 无法在 su 启动之前 chdir 到只有 root 能进的目录，所以 root 模式
-        // 用 HOME 作为 ProcessBuilder 的工作目录，真正的 cd 交给 shell 去做。
-        File working = asRoot ? new File(TermuxConstants.TERMUX_HOME_DIR_PATH) : new File(requestedWorking);
+        File working = ContainerPaths.rootfsDir();
+        if (!working.isDirectory()) working = context.getFilesDir();
 
         String rawCommand = command == null ? "" : command;
         boolean packageCommand = !asRoot && isPackageCommand(rawCommand.toLowerCase(Locale.US));
-        boolean packageLockHeld = false;
-        if (packageCommand) {
-            packageLockHeld = PACKAGE_TRANSACTION.tryLock();
-            if (!packageLockHeld) {
-                return new Result(EXIT_PACKAGE_BUSY, "",
-                    "[ZhiCode] 已有 ZhiCode 包管理任务正在运行。不会再启动第二个 apt/pkg/dpkg，"
-                        + "请等待当前任务完成或先停止它。\n", false);
-            }
-            cleanupOrphanedPackageManagers(listener);
-        }
-
-        try {
-            return runLocked(rawCommand, requestedWorking, working, timeoutMs, listener,
-                asRoot, packageCommand);
-        } finally {
-            if (packageLockHeld) PACKAGE_TRANSACTION.unlock();
-        }
+        return runLocked(rawCommand, requestedWorking, working, timeoutMs, listener,
+            asRoot, packageCommand);
     }
 
     /**
@@ -205,11 +148,12 @@ public final class TermuxShellExecutor {
     private Result runLocked(String rawCommand, String requestedWorking, File working, int timeoutMs,
                              OutputListener listener, boolean asRoot, boolean packageCommand)
             throws Exception {
-        String prefix = TermuxConstants.TERMUX_PREFIX_DIR_PATH;
-        String executionId = android.os.Process.myPid() + "-" + System.nanoTime()
-            + "-" + UUID.randomUUID();
-        File pidFile = temporaryFile(prefix, (asRoot ? "root" : "exec") + "-" + executionId + ".pid");
-        File controlFile = temporaryFile(prefix, "complete-" + executionId + ".status");
+        File rootfs = ContainerPaths.rootfsDir();
+        String hostTmpRoot = asRoot ? context.getFilesDir().getAbsolutePath() : rootfs.getAbsolutePath();
+        File pidFile = temporaryFile(hostTmpRoot, (asRoot ? "root" : "exec") + "-"
+            + android.os.Process.myPid() + "-" + System.nanoTime() + "-" + UUID.randomUUID() + ".pid");
+        File controlFile = temporaryFile(hostTmpRoot, "complete-"
+            + android.os.Process.myPid() + "-" + System.nanoTime() + "-" + UUID.randomUUID() + ".status");
         String controlToken = UUID.randomUUID().toString().replace("-", "");
         long startedAt = System.currentTimeMillis();
 
@@ -222,29 +166,27 @@ public final class TermuxShellExecutor {
         Thread controlThread = null;
         ControlWatcher controlWatcher = null;
         BashCompletionCoordinator completion = new BashCompletionCoordinator();
-        // 只在 catch(InterruptedException) 里置位；它让 finally 知道「已经播报过取消」，
-        // 不必再补一句“正在清理”。
         boolean interrupted = false;
         boolean terminationRequested = false;
         boolean isolateProcessGroup = false;
-        // 见 catch 块：收尾期间清掉中断位，跑完在 finally 末尾还回去。
         boolean deferredInterrupt = false;
 
         try {
-            File tempDirectory = new File(prefix + "/tmp");
-            if (!tempDirectory.isDirectory() && !tempDirectory.mkdirs() && !tempDirectory.isDirectory()) {
-                throw new IllegalStateException("Cannot create Termux temporary directory: " + tempDirectory);
+            File tempDirectory = pidFile.getParentFile();
+            if (tempDirectory != null && !tempDirectory.isDirectory()
+                    && !tempDirectory.mkdirs() && !tempDirectory.isDirectory()) {
+                throw new IllegalStateException("Cannot create temporary directory: " + tempDirectory);
             }
             createPrivateControlFile(pidFile);
             createPrivateControlFile(controlFile);
 
-            String shellPath = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/bash";
-            File setsid = new File(prefix + "/bin/setsid");
-            isolateProcessGroup = setsid.isFile() && setsid.canExecute();
+            String shellPath = asRoot ? "/system/bin/sh" : "/bin/bash";
+            File setsid = asRoot ? null : new File(rootfs, "usr/bin/setsid");
+            isolateProcessGroup = setsid != null && setsid.exists();
 
             ProcessBuilder builder = buildProcess(
-                rawCommand, requestedWorking, prefix, shellPath, setsid, working,
-                asRoot, isolateProcessGroup, pidFile, controlFile, controlToken, packageCommand);
+                rawCommand, requestedWorking, shellPath, isolateProcessGroup,
+                working, asRoot, pidFile, controlFile, controlToken, packageCommand);
             process = builder.start();
 
             stdout = new Capture(process.getInputStream(), false, listener, startedAt);
@@ -370,144 +312,82 @@ public final class TermuxShellExecutor {
      * ProcessBuilder 设工作目录并（可能）用 setsid；root 模式必须把 cd 写进
      * shell 命令里，因为 su 之后的进程不在我们的目录上下文里。
      */
-    private ProcessBuilder buildProcess(String rawCommand, String requestedWorking, String prefix,
-                                        String shellPath, File setsid, File working, boolean asRoot,
-                                        boolean isolateProcessGroup, File pidFile, File controlFile,
-                                        String controlToken, boolean packageCommand) {
-        // 命令本体：先写 pid，跑命令，再把「token:退出码」写进控制文件。
+    private ProcessBuilder buildProcess(String rawCommand, String requestedWorking, String shellPath,
+                                        boolean isolateProcessGroup, File working, boolean asRoot,
+                                        File pidFile, File controlFile, String controlToken,
+                                        boolean packageCommand) {
+        String guestPidPath = asRoot ? pidFile.getAbsolutePath() : "/tmp/" + pidFile.getName();
+        String guestControlPath = asRoot ? controlFile.getAbsolutePath() : "/tmp/" + controlFile.getName();
+
         String commandShell = quote(shellPath) + " -lc " + quote(rawCommand);
         String wrapped = "umask 077;"
-            + " printf '%s\\n' $$ > " + quote(pidFile.getAbsolutePath()) + ";"
+            + " printf '%s\\n' $$ > " + quote(guestPidPath) + ";"
             + " " + commandShell + ";"
             + " zhicode_exit=$?;"
             + " printf '%s:%s\\n' " + quote(controlToken) + " \"$zhicode_exit\" > "
-            + quote(controlFile.getAbsolutePath()) + ";"
+            + quote(guestControlPath) + ";"
             + " exit \"$zhicode_exit\"";
 
         ProcessBuilder builder;
         if (asRoot) {
-            // root 模式下 cd 必须由 shell 自己做：su 之后进程的 cwd 是 HOME，
-            // 而用户要的工作目录可能只有 root 能进。
             String launcher = "exec "
-                + (isolateProcessGroup ? quote(setsid.getAbsolutePath()) + " --wait " : "")
+                + (isolateProcessGroup ? "setsid --wait " : "")
                 + quote(shellPath) + " -lc " + quote(wrapped);
             String rootWrapped = "umask 077; cd " + quote(requestedWorking)
                 + " || { echo 'Root cwd does not exist or is inaccessible' >&2; exit " + EXIT_BAD_CWD + "; }; "
-                + rootEnvironmentExports(prefix) + launcher;
+                + rootEnvironmentExports() + launcher;
             builder = new ProcessBuilder(findSuBinary(), "-c", rootWrapped);
-        } else if (isolateProcessGroup) {
-            builder = new ProcessBuilder(setsid.getAbsolutePath(), "--wait", shellPath, "-lc", wrapped);
+            builder.directory(working);
         } else {
-            builder = new ProcessBuilder(shellPath, "-lc", wrapped);
+            List<String> inner = isolateProcessGroup
+                ? Arrays.asList("/usr/bin/setsid", "--wait", shellPath, "-lc", wrapped)
+                : Arrays.asList(shellPath, "-lc", wrapped);
+            Map<String, String> extraEnv = new HashMap<>();
+            extraEnv.put("ZHICODE_APK_PATH", context.getApplicationInfo().sourceDir);
+            extraEnv.put("ZHICODE_TOOL_EXECUTOR", "1");
+            if (packageCommand) {
+                extraEnv.put("DEBIAN_FRONTEND", "noninteractive");
+                extraEnv.put("APT_LISTCHANGES_FRONTEND", "none");
+            }
+            List<String> prootArgs = ProotCommand.buildArgs(
+                context, requestedWorking, inner, extraEnv, false);
+            builder = new ProcessBuilder(prootArgs);
+            builder.directory(working);
+            ProotCommand.applyHostEnv(context, builder.environment());
         }
-        builder.directory(working);
-        applyEnvironment(builder.environment(), prefix, requestedWorking, packageCommand);
         return builder;
     }
 
-    /**
-     * 交给 su 的那一份环境变量。
-     *
-     * <p>只带最少的一组：root 的 shell 里不该继承我们进程的全部环境
-     * （那会带进去一堆 Android 特有的变量）。{@code PATH} 显式给出
-     * 系统目录，因为 root 的默认 PATH 里没有 {@code $PREFIX/bin}。
-     */
-    private static String rootEnvironmentExports(String prefix) {
-        return "export HOME=" + quote(TermuxConstants.TERMUX_HOME_DIR_PATH)
-            + " PREFIX=" + quote(prefix)
-            + " TMPDIR=" + quote(prefix + "/tmp")
-            + " PATH=" + quote(prefix + "/bin:/system/bin:/system/xbin")
-            + " LANG=en_US.UTF-8 TERM=xterm-256color COLORTERM=truecolor"
-            + " SHELL=" + quote(prefix + "/bin/bash")
+    private static String rootEnvironmentExports() {
+        return "export PATH='/sbin:/system/bin:/system/xbin:/vendor/bin'"
+            + " HOME=" + quote(TermuxConstants.TERMUX_HOME_DIR_PATH)
+            + " TERM=xterm-256color COLORTERM=truecolor"
             + " ZHICODE_APP=1 ZHICODE_TOOL_EXECUTOR=1 ZHICODE_ROOT_EXECUTOR=1; ";
-    }
-
-    /**
-     * 设置子进程环境。
-     *
-     * <p>分四组：路径与库定位、终端与语言、Termux 自身的身份变量（保证
-     * {@code $PREFIX} 相关的脚本行为正确）、以及只针对包管理命令的两个 debconf 开关。
-     *
-     * <p>{@code TERMUX_APP__LEGACY_DATA_DIR} 指向当前数据目录而不是真的「旧目录」：
-     * 内置运行时的路径已经就是当前目录，某些脚本会读这个变量做兼容判断，
-     * 指向一个不存在的路径会让它们走上错误的兼容分支。
-     */
-    private void applyEnvironment(Map<String, String> env, String prefix, String requestedWorking,
-                                  boolean packageCommand) {
-        // 路径与库定位。LD_LIBRARY_PATH 的原因见类注释。
-        env.put("HOME", TermuxConstants.TERMUX_HOME_DIR_PATH);
-        env.put("PREFIX", prefix);
-        env.put("TMPDIR", prefix + "/tmp");
-        env.put("PATH", prefix + "/bin");
-        env.put("LD_LIBRARY_PATH", prefix + "/lib");
-        env.put("PWD", requestedWorking);
-        env.put("SHELL", prefix + "/bin/bash");
-
-        // 终端与语言。
-        env.put("LANG", "en_US.UTF-8");
-        env.put("TERM", "xterm-256color");
-        env.put("COLORTERM", "truecolor");
-        // 让构建工具输出确定性的纯日志。命令本身是普通 bash，可以自己覆盖。
-        env.put("CI", "true");
-
-        // 运行时的自我标识。
-        env.put("ZHICODE_APP", "1");
-        env.put("ZHICODE_APK_PATH", context.getApplicationInfo().sourceDir);
-        env.put("ZHICODE_TOOL_EXECUTOR", "1");
-
-        // Termux 自身的身份变量：包管理脚本与 termux-* 工具会读它们。
-        env.put("TERMUX_VERSION", "0.118.3");
-        env.put("TERMUX_APP__PACKAGE_NAME", TermuxConstants.TERMUX_PACKAGE_NAME);
-        env.put("TERMUX_APP__PACKAGE_MANAGER", "apt");
-        env.put("TERMUX_APP__PACKAGE_VARIANT", "apt-android-7");
-        env.put("TERMUX_APP__FILES_DIR", TermuxConstants.TERMUX_FILES_DIR_PATH);
-        env.put("TERMUX_APP__DATA_DIR", TermuxConstants.TERMUX_DATA_DIR_PATH);
-        env.put("TERMUX_APP__LEGACY_DATA_DIR", TermuxConstants.TERMUX_DATA_DIR_PATH);
-        env.put("TERMUX_APP__PID", Integer.toString(android.os.Process.myPid()));
-        env.put("TERMUX_APP__UID", Integer.toString(android.os.Process.myUid()));
-        env.put("TERMUX_APP__TARGET_SDK", "28");
-        env.put("TERMUX_MAIN_PACKAGE_FORMAT", "debian");
-        env.put("TERMUX_PKG_NO_MIRROR_SELECT", "1");
-        env.put("TERMUX_APK_RELEASE", "ZHICODE");
-        env.put("TERMUX__HOME", TermuxConstants.TERMUX_HOME_DIR_PATH);
-        env.put("TERMUX__PREFIX", prefix);
-        env.put("TERMUX__ROOTFS_DIR", TermuxConstants.TERMUX_FILES_DIR_PATH);
-        env.put("TERMUX__ROOTFS", TermuxConstants.TERMUX_FILES_DIR_PATH);
-
-        if (packageCommand) {
-            // Agent 发起的安装绝不能在不可见的 debconf 提示上停住。
-            // 可见的交互式终端**刻意**不设这两个变量，那里的提示是用户要看的。
-            env.put("DEBIAN_FRONTEND", "noninteractive");
-            env.put("APT_LISTCHANGES_FRONTEND", "none");
-        }
     }
 
     // ================================================================ 准备与校验
 
-    private static void requireRuntimeInstalled() {
-        if (!new File(TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/bash").isFile()) {
-            throw new IllegalStateException("Embedded Termux runtime is not installed yet");
+    private static void requireRuntimeInstalled(Context context) {
+        if (!ProotCommand.prootBinary(context).isFile()
+                || !ProotCommand.loaderBinary(context).isFile()
+                || !new File(ContainerPaths.rootfsDir(), "bin/bash").exists()) {
+            throw new IllegalStateException("Embedded Debian PRoot runtime is not installed yet");
         }
     }
 
-    /**
-     * 校验并要求工作目录存在（root 模式除外）。
-     *
-     * <p>root 模式跳过这个检查是必须的：用户可能要在 {@code /data/adb} 这类
-     * 只有 root 能进的目录里执行，而本进程连 {@code isDirectory()} 都问不出结果。
-     */
     private static String resolveRequestedWorking(String cwd, boolean asRoot) {
         String requested = cwd == null || cwd.isEmpty() ? TermuxConstants.TERMUX_HOME_DIR_PATH : cwd;
-        if (!asRoot && !new File(requested).isDirectory()) {
-            throw new IllegalArgumentException("Working directory does not exist: " + requested);
+        if (!asRoot) {
+            File target = ContainerPaths.guestToHost(requested);
+            if (!target.isDirectory()) {
+                throw new IllegalArgumentException("Working directory does not exist: " + requested);
+            }
         }
         return requested;
     }
 
-    /** 与 {@code BashTool} 的判定同源：这里再判一次是因为终端与子代理也走这条路径。 */
     private static boolean isPackageCommand(String lowerCommand) {
-        return lowerCommand.contains("pkg ") || lowerCommand.startsWith("pkg")
-            || lowerCommand.contains("apt ") || lowerCommand.startsWith("apt ")
+        return lowerCommand.contains("apt ") || lowerCommand.startsWith("apt ")
             || lowerCommand.contains("apt-get ") || lowerCommand.startsWith("apt-get")
             || lowerCommand.contains("dpkg ") || lowerCommand.startsWith("dpkg");
     }
@@ -522,8 +402,8 @@ public final class TermuxShellExecutor {
      * 「加品牌前缀以免与真正的 Termux 冲突」这个意图从未生效。
      * 现在直接拼 {@link TermuxConstants#BRAND_SLUG} 的值。
      */
-    private static File temporaryFile(String prefix, String suffix) {
-        return new File(prefix + "/tmp/" + TermuxConstants.BRAND_SLUG + "-" + suffix);
+    private static File temporaryFile(String rootPath, String suffix) {
+        return new File(rootPath + "/tmp/" + TermuxConstants.BRAND_SLUG + "-" + suffix);
     }
 
     /**
@@ -786,29 +666,8 @@ public final class TermuxShellExecutor {
      * <p>只回收**孤儿**包管理器进程（{@code PPid == 1}）：终端里正在跑的 apt
      * 的父进程是那个终端 shell，不会被这里杀掉。
      */
+    // 遗留包管理器清理已随 Termux 移除；方法留空避免外部引用断开。
     public static void cleanupOrphanedPackageManagers() {
-        cleanupOrphanedPackageManagers(null);
-    }
-
-    private static void cleanupOrphanedPackageManagers(OutputListener listener) {
-        for (ProcInfo process : listOwnProcesses()) {
-            if (process.ppid != 1 || !isPackageProcessName(process.name)) continue;
-            if (process.pid == android.os.Process.myPid()) continue;
-            notify(listener, "\n[ZhiCode] 检测到上次取消后遗留的 " + process.name
-                + " (PID " + process.pid + ")，正在释放 dpkg 锁…\n");
-            signal(process.pid, android.system.OsConstants.SIGTERM);
-            sleepQuietly(TERM_GRACE_SHORT_MS);
-            if (new File("/proc/" + process.pid).exists()) {
-                signal(process.pid, android.system.OsConstants.SIGKILL);
-            }
-        }
-    }
-
-    private static boolean isPackageProcessName(String name) {
-        if (name == null) return false;
-        String lower = name.toLowerCase(Locale.US);
-        return lower.equals("apt") || lower.equals("apt-get") || lower.equals("dpkg")
-            || lower.equals("dpkg-deb") || lower.equals("pkg");
     }
 
     /**

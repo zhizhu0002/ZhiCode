@@ -127,7 +127,7 @@ fun EmptyState() {
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "ZhiCode 可以读取项目、编辑文件、运行命令，并在内置 Termux 环境中验证修改。",
+            text = "ZhiCode 可以读取项目、编辑文件、运行命令，并在内置 Debian 容器中验证修改。",
             color = scheme.onBackgroundVariant,
             fontSize = MiuixTheme.textStyles.body1.fontSize,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp),

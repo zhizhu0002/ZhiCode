@@ -27,6 +27,7 @@ import com.zhizhu.zhicode.compose.model.PlanApproval
 import com.zhizhu.zhicode.compose.model.readChatImageBlocks
 import com.termux.app.zhicode.storage.ApiSettingsStore
 import com.termux.app.zhicode.tasks.TaskStore
+import com.zhizhu.zhicode.pi.PiRpcBackend
 import org.json.JSONObject
 import java.util.LinkedHashMap
 import java.util.concurrent.Executors
@@ -175,7 +176,125 @@ internal class ZhiEngineController(
     private var generation = 0L
 
     private var engine: ZhiCodeEngine? = null
+    private var piBackend: PiRpcBackend? = null
     private var apiStore: ApiSettingsStore? = null
+
+    private fun usePiBackend(config: SessionConfig? = sessionConfig): Boolean =
+        !"debug-scripted".equals(config?.protocol, ignoreCase = true)
+
+    private val piSink = object : PiRpcBackend.Sink {
+        override fun onSessionStarted(model: String) {
+            val gen = generation
+            onMainForGeneration(gen) { events.onEngineSessionStarted(model) }
+        }
+
+        override fun onTextDelta(delta: String) {
+            if (delta.isNotEmpty()) queueText(delta)
+        }
+
+        override fun onThinkingDelta(delta: String) {
+            this@ZhiEngineController.onThinkingDelta(delta)
+        }
+
+        override fun onToolBatchStarted(toolIds: List<String>) {
+            if (toolIds.isEmpty()) return
+            val gen = generation
+            onMainForGeneration(gen) { events.onEngineToolBatchStarted(toolIds) }
+        }
+
+        override fun onToolUse(call: ToolCall) {
+            this@ZhiEngineController.onToolUse(call)
+        }
+
+        override fun onToolProgress(toolId: String, chunk: String, isError: Boolean, elapsedMs: Long) {
+            if (chunk.isEmpty()) return
+            synchronized(toolProgressLock) {
+                val existing = pendingToolProgress[toolId]
+                if (existing == null || existing.stderr != isError) {
+                    pendingToolProgress[toolId] = ToolProgressBuffer(toolId, isError, StringBuilder(chunk), elapsedMs)
+                } else {
+                    existing.chunk.append(chunk)
+                    existing.elapsedMs = maxOf(existing.elapsedMs, elapsedMs)
+                }
+                if (toolProgressFlushPosted) return
+                toolProgressFlushPosted = true
+            }
+            main.postDelayed(flushToolProgress, TOOL_PROGRESS_MERGE_MS)
+        }
+
+        override fun onToolResult(
+            id: String,
+            name: String,
+            isError: Boolean,
+            exitCode: Int,
+            content: String,
+            diff: String,
+            addedLines: Int,
+            deletedLines: Int,
+            command: String,
+            previews: List<ChatImage>,
+        ) {
+            val gen = generation
+            onMainForGeneration(gen) {
+                flushTextNow()
+                events.onEngineToolResult(
+                    id = id,
+                    name = name,
+                    isError = isError,
+                    exitCode = exitCode,
+                    content = content,
+                    diff = diff,
+                    addedLines = addedLines,
+                    deletedLines = deletedLines,
+                    command = command,
+                    previews = previews,
+                )
+            }
+        }
+
+        override fun onToolBatchCompleted(toolIds: List<String>) {
+            if (toolIds.isEmpty()) return
+            val gen = generation
+            onMainForGeneration(gen) { events.onEngineToolBatchCompleted(toolIds) }
+        }
+
+        override fun onPermissionRequest(requestId: String, toolName: String, summary: String, highRisk: Boolean) {
+            val gen = generation
+            onMainForGeneration(gen) {
+                flushTextNow()
+                events.onEnginePermissionRequest(requestId, toolName, summary, highRisk)
+            }
+        }
+
+        override fun onResponseRetry() {
+            this@ZhiEngineController.onResponseRetry()
+        }
+
+        override fun onQueuedPromptApplied() {
+            this@ZhiEngineController.onQueuedPromptApplied()
+        }
+
+        override fun onUsage(inputTokens: Long, outputTokens: Long) {
+            this@ZhiEngineController.onUsage(inputTokens, outputTokens)
+        }
+
+        override fun onStatus(status: String) {
+            this@ZhiEngineController.onStatus(status)
+        }
+
+        override fun onTurnComplete(stopReason: String) {
+            this@ZhiEngineController.onTurnComplete(stopReason)
+        }
+
+        override fun onError(message: String, error: Throwable?) {
+            this@ZhiEngineController.onError(message, error)
+        }
+    }
+
+    private fun pi(): PiRpcBackend {
+        piBackend?.let { return it }
+        return PiRpcBackend(appContext, piSink).also { piBackend = it }
+    }
 
     /** 最近一次实际生效的配置，供界面查询（只读）。 */
     @Volatile
@@ -236,7 +355,7 @@ internal class ZhiEngineController(
         val fingerprint = configurationFingerprint(base)
         val changed = fingerprint != lastConfiguredFingerprint
         sessionConfig = base
-        engine().configure(base)
+        if (usePiBackend(base)) pi().configure(base) else engine().configure(base)
         if (changed) lastConfiguredFingerprint = fingerprint
         // ⚠️ 这里必须落盘。原先只把值写进内存与引擎，`ApiSettingsStore.save()` 在
         // 整个工程里**零调用方** —— 于是权限模式、推理档、上下文窗口、项目目录、
@@ -257,7 +376,7 @@ internal class ZhiEngineController(
         config.permissionMode, config.projectDirectory, config.customSystemPrompt,
         config.initPrompt, config.summaryPrompt, config.compactPromptHead,
         config.roleCard, config.toolMode, config.visionEnabled.toString(),
-        config.autoCompact.toString(), config.contextWindowTokens.toString(),
+        config.autoCompact.toString(), config.autoCompactRatio.toString(), config.contextWindowTokens.toString(),
         config.webSearchEnabled.toString(), config.webSearchProvider,
         config.webSearchMaxResults.toString(), config.webTimeoutMs.toString(),
         config.rootExecutionEnabled.toString(),
@@ -265,10 +384,10 @@ internal class ZhiEngineController(
         config.forcedKeepAliveEnabled.toString(), config.maxConcurrentSubagents.toString(), config.workflowId,
     ).joinToString("\u0000")
 
-    fun isBusy(): Boolean = engine?.isBusy ?: false
+    fun isBusy(): Boolean = if (usePiBackend()) piBackend?.isBusy() ?: false else engine?.isBusy ?: false
 
     /** 当前回合已经开始（用于区分「该排队」还是「该直接发」）。 */
-    fun hasEngine(): Boolean = engine != null
+    fun hasEngine(): Boolean = if (usePiBackend()) piBackend != null else engine != null
 
     /**
      * 发送一轮请求。
@@ -281,13 +400,18 @@ internal class ZhiEngineController(
         // 新回合开一代：让排队的旧取消（cancel() 的代际守卫）自行动失效，
         // 否则"停止 → 立刻再发"时，排在后台队列里的那次取消会杀掉这条新回合。
         generation++
+        if (usePiBackend()) {
+            pi().sendPrompt(prompt, extraContent)
+            return
+        }
         if (extraContent == null || extraContent.length() == 0) engine().sendPrompt(prompt)
         else engine().sendPrompt(prompt, extraContent)
     }
 
     /** 排队一条预输入。返回 false 表示引擎当时并不忙（调用方应改走 [sendPrompt]）。 */
     fun steer(prompt: String, messageId: String, extraContent: JSONArray? = null): Boolean =
-        engine?.steerPrompt(prompt, extraContent ?: JSONArray(), messageId) ?: false
+        if (usePiBackend()) piBackend?.steer(prompt, extraContent, messageId) ?: false
+        else engine?.steerPrompt(prompt, extraContent ?: JSONArray(), messageId) ?: false
 
     /**
      * 停止当前回合。
@@ -321,11 +445,12 @@ internal class ZhiEngineController(
         val genAtSubmit = generation
         engineOps.execute {
             if (generation != genAtSubmit) return@execute
+            runCatching { piBackend?.cancel() }
             runCatching { engine?.cancel() }
         }
     }
 
-    fun resumeConversation(sessionId: String) {
+    fun resumeConversation(sessionId: String): Result<Unit> {
         require(sessionId.isNotBlank()) { "会话标识为空" }
         generation++
         synchronized(deltaLock) {
@@ -346,15 +471,22 @@ internal class ZhiEngineController(
             toolProgressFlushPosted = false
         }
         val genAtSubmit = generation
+        val future = java.util.concurrent.CompletableFuture<Result<Unit>>()
         engineOps.execute {
-            if (generation != genAtSubmit) return@execute
-            runCatching { engine().resumeConversation(sessionId) }
-                .onFailure { error ->
-                    onMainForGeneration(genAtSubmit) {
-                        events.onEngineError("恢复会话失败：${error.message ?: error}", error)
-                    }
+            if (generation != genAtSubmit) {
+                future.complete(Result.success(Unit))
+                return@execute
+            }
+            val result = runCatching {
+                if (usePiBackend()) pi().resumeConversation(sessionId) else engine().resumeConversation(sessionId)
+            }.onFailure { error ->
+                onMainForGeneration(genAtSubmit) {
+                    events.onEngineError("恢复会话失败：${error.message ?: error}", error)
                 }
+            }
+            future.complete(result)
         }
+        return future.get()
     }
 
     fun resetConversation() {
@@ -381,6 +513,7 @@ internal class ZhiEngineController(
         val genAtSubmit = generation
         engineOps.execute {
             if (generation != genAtSubmit) return@execute
+            runCatching { piBackend?.resetConversation() }
             runCatching { engine?.resetConversation() }
         }
     }
@@ -390,6 +523,7 @@ internal class ZhiEngineController(
         main.removeCallbacks(flushDelta)
         main.removeCallbacks(flushThinking)
         main.removeCallbacks(flushToolProgress)
+        runCatching { piBackend?.shutdown() }
         runCatching { engine?.shutdown() }
         engineOps.shutdownNow()
     }
@@ -399,7 +533,8 @@ internal class ZhiEngineController(
     // ------------------------------------------------------------------
 
     fun respondPermission(requestId: String, allow: Boolean): Boolean =
-        runCatching { engine?.respondPermission(requestId, allow) ?: false }.getOrDefault(false)
+        if (usePiBackend()) runCatching { piBackend?.respondPermission(requestId, allow) ?: false }.getOrDefault(false)
+        else runCatching { engine?.respondPermission(requestId, allow) ?: false }.getOrDefault(false)
 
     fun respondQuestion(requestId: String, answers: JSONObject): Boolean =
         runCatching { engine?.respondQuestion(requestId, answers) ?: false }.getOrDefault(false)
@@ -407,22 +542,35 @@ internal class ZhiEngineController(
     fun respondPlanApproval(requestId: String, decision: PlanApprovalGate.Decision, feedback: String): Boolean =
         runCatching { engine?.respondPlanApproval(requestId, decision, feedback) ?: false }.getOrDefault(false)
 
-    fun planWorkflowState(): PlanWorkflowState = engine?.planWorkflowState ?: PlanWorkflowState.idle()
+    fun planWorkflowState(): PlanWorkflowState =
+        if (usePiBackend()) piBackend?.planWorkflowState() ?: PlanWorkflowState.idle()
+        else engine?.planWorkflowState ?: PlanWorkflowState.idle()
 
     /** `/plan`：进入只读计划模式。 */
-    fun enterPlanModeFromUi(): ToolExecutionResult = engine().enterPlanModeFromUi()
+    fun enterPlanModeFromUi(): ToolExecutionResult =
+        if (usePiBackend()) pi().enterPlanModeFromUi() else engine().enterPlanModeFromUi()
 
     /** `/plan off`：退出计划模式并附带驳回理由。 */
-    fun cancelPlanModeFromUi(feedback: String): ToolExecutionResult = engine().cancelPlanModeFromUi(feedback)
+    fun cancelPlanModeFromUi(feedback: String): ToolExecutionResult =
+        if (usePiBackend()) pi().cancelPlanModeFromUi(feedback) else engine().cancelPlanModeFromUi(feedback)
 
     // ------------------------------------------------------------------
     // 上下文用量
     // ------------------------------------------------------------------
 
-    fun estimateContextTokens(): Int = runCatching { engine?.estimateContextTokens() ?: 0 }.getOrDefault(0)
+    fun estimateContextTokens(): Int = runCatching {
+        if (usePiBackend()) piBackend?.estimateContextTokens() ?: 0 else engine?.estimateContextTokens() ?: 0
+    }.getOrDefault(0)
+
+    fun estimateSessionContextTokens(sessionId: String): Int = runCatching {
+        if (usePiBackend()) pi().estimateContextTokensForSession(sessionId)
+        else engine?.estimateContextTokens() ?: 0
+    }.getOrDefault(0)
 
     /** 当前会话的标识（`sessions.db` 里的 id）。引擎尚未配置或还没写过内容时为 null。 */
-    fun sessionId(): String? = runCatching { engine?.sessionId }.getOrNull()
+    fun sessionId(): String? = runCatching {
+        if (usePiBackend()) piBackend?.sessionId() else engine?.sessionId
+    }.getOrNull()
 
     /**
      * 内存里这份引擎历史的规模 —— **只给诊断日志用**。
@@ -432,12 +580,16 @@ internal class ZhiEngineController(
      * 它回答的是这轮排查最关键的那个问题：**常驻到底是引擎的历史，还是界面那 200 条**。
      */
     fun memoryFootprint(): Pair<Int, Long> = runCatching {
+        if (usePiBackend()) return@runCatching 0 to -1L
         val current = engine ?: return@runCatching 0 to -1L
         current.messageCount() to current.historyChars()
     }.getOrDefault(0 to -1L)
 
     fun hasMeasuredContextUsage(): Boolean =
-        runCatching { engine?.hasMeasuredContextUsage() ?: false }.getOrDefault(false)
+        runCatching {
+            if (usePiBackend()) piBackend?.hasMeasuredContextUsage() ?: false
+            else engine?.hasMeasuredContextUsage() ?: false
+        }.getOrDefault(false)
 
     fun contextWindowTokens(): Int = sessionConfig?.contextWindowTokens ?: 0
 
@@ -488,8 +640,12 @@ internal class ZhiEngineController(
      */
     fun compactContext(instructions: String): Result<String> = runCatching {
         check(!isBusy()) { "任务正在运行，完成后再压缩上下文" }
-        val engine = engine ?: error("引擎尚未初始化")
-        engine.compactContext(instructions.trim())
+        if (usePiBackend()) {
+            pi().compactContext(instructions.trim())
+        } else {
+            val engine = engine ?: error("引擎尚未初始化")
+            engine.compactContext(instructions.trim())
+        }
     }
 
     /**
@@ -506,8 +662,12 @@ internal class ZhiEngineController(
      * 是最难查的一种"功能没了"。
      */
     fun mcpStatus(): Result<List<McpServerStatus>> = runCatching {
-        val engine = engine ?: error("引擎尚未初始化")
-        parseMcpStatus(engine.mcpServers())
+        if (usePiBackend()) {
+            parseMcpStatus(pi().mcpServers())
+        } else {
+            val engine = engine ?: error("引擎尚未初始化")
+            parseMcpStatus(engine.mcpServers())
+        }
     }
 
     private fun parseMcpStatus(rows: JSONArray): List<McpServerStatus> = buildList {
@@ -565,7 +725,9 @@ internal class ZhiEngineController(
     private fun currentConfig(): SessionConfig =
         sessionConfig ?: ApiSettingsStore(appContext).load()
 
-    fun contextPercent(): Int = runCatching { engine?.contextPercent() ?: 0 }.getOrDefault(0)
+    fun contextPercent(): Int = runCatching {
+        if (usePiBackend()) piBackend?.contextPercent() ?: 0 else engine?.contextPercent() ?: 0
+    }.getOrDefault(0)
 
     // ------------------------------------------------------------------
     // 流式文本合并（原版 queueStreamingDelta：32ms 合并成块）
@@ -1017,7 +1179,7 @@ internal fun readEngineSettings(store: ApiSettingsStore): EngineOverrides? =
             compactPromptHead = config.compactPromptHead,
             visionEnabled = config.visionEnabled,
             autoCompact = config.autoCompact,
-            autoCompactPercent = (config.autoCompactRatio * 100).toInt().coerceIn(50, 100),
+            autoCompactPercent = kotlin.math.round(config.autoCompactRatio * 100.0).toInt().coerceIn(50, 100),
             webSearchEnabled = config.webSearchEnabled,
             webSearchProvider = config.webSearchProvider,
             webSearchMaxResults = config.webSearchMaxResults,

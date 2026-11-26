@@ -1,7 +1,10 @@
 package com.zhizhu.zhicode.compose.ui.composer
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.CircleShape
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -42,10 +45,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,6 +65,12 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.ZhiFilledIconButton
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
 import com.zhizhu.zhicode.compose.ui.effects.selfPressSink
 import com.zhizhu.zhicode.compose.ui.FloatingBottomShell
 import com.zhizhu.zhicode.compose.ui.ZhiPendingImageChip
@@ -74,11 +86,14 @@ import com.zhizhu.zhicode.compose.ui.ZhiTextDropdownChip
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
+import com.zhizhu.zhicode.compose.model.formatTokenCountShort
+import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -146,18 +161,14 @@ fun Composer(
     onPermissionSelected: (PermissionMode) -> Unit,
     onEffortSelected: (EffortLevel) -> Unit,
     onModelChip: () -> Unit,
-    /**
-     * **主体调试模式**：输入行下方就地渲染当前输入的 Markdown（用对话流的渲染器）。
-     *
-     * 之所以做在真实输入器里：Markdown 观感问题（折行、代码块宽度、表格溢出）
-     * 只在真实的输入器宽度与真实字体下才看得出来。
-     */
+    onCompactContext: () -> Unit = {},
     debugMode: Boolean = false,
     modifier: Modifier = Modifier,
     onFocusChanged: (Boolean) -> Unit = {},
 ) {
     ZhiFrameTrace.countRecompose("Composer")
     val scheme = MiuixTheme.colorScheme
+    var contextDetailOpen by remember { mutableStateOf(false) }
 
     /*
      * 发送键可用性：从输入框状态派生，只在"空/非空"翻转时让读它的地方失效。
@@ -692,18 +703,24 @@ fun Composer(
                     modifier = Modifier.weight(1f),
                 )
 
-                Spacer(modifier = Modifier.width(8.dp))
-                /*
-                 * 暂停键与发送键**已移到输入框右侧**（见上方输入行）。
-                 *
-                 * 为什么搬：这一排本来是「+ · 权限 · 推理 · 模型 · 停止 · 发送」六件，
-                 * 在 360dp 上模型名被压成「deepse」这种词中被切的样子。
-                 * 把两个动作键挪到输入行之后，这一排只剩三个 chip，
-                 * 模型名有足够宽度完整显示，动作键也回到了"贴着输入位置"的语义上。
-                 */
+                Spacer(modifier = Modifier.width(6.dp))
+                ContextUsageRingBadge(
+                    tokens = state.contextTokens,
+                    window = state.contextWindow,
+                    onClick = { contextDetailOpen = true },
+                )
             } // 底排 Row
         } // FloatingBottomShell
     }
+    ContextDetailsDialog(
+        show = contextDetailOpen,
+        state = state,
+        onCompact = {
+            contextDetailOpen = false
+            onCompactContext()
+        },
+        onDismiss = { contextDetailOpen = false },
+    )
 }
 }
 
@@ -815,3 +832,151 @@ private fun shorten(value: String, max: Int): String =
  * 前身 34/36 本来也不满足 48dp，这次只是把它统一并再收小一档。
  */
 private val ComposerActionSize = 30.dp
+
+@Composable
+private fun ContextProgressRing(
+    fraction: Float,
+    ringSize: Dp,
+    strokeWidth: Dp,
+    accentColor: Color,
+    trackColor: Color,
+) {
+    Canvas(modifier = Modifier.size(ringSize)) {
+        val stroke = strokeWidth.toPx()
+        drawArc(
+            color = trackColor,
+            startAngle = 0f,
+            sweepAngle = 360f,
+            useCenter = false,
+            style = Stroke(width = stroke),
+        )
+        if (fraction > 0f) {
+            drawArc(
+                color = accentColor,
+                startAngle = -90f,
+                sweepAngle = 360f * fraction,
+                useCenter = false,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContextUsageRingBadge(
+    tokens: Int,
+    window: Int,
+    onClick: () -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val fraction = if (window > 0) (tokens.toFloat() / window).coerceIn(0f, 1f) else 0f
+    val pct = (fraction * 100f).roundToInt().coerceIn(0, 100)
+    val accent = when {
+        pct >= 90 -> scheme.error
+        pct >= 72 -> ZhiColors.amber()
+        else -> scheme.primary
+    }
+    val textColor = when {
+        pct >= 90 -> scheme.error
+        pct >= 72 -> ZhiColors.amber()
+        else -> scheme.onSurfaceVariantSummary
+    }
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        ContextProgressRing(
+            fraction = fraction,
+            ringSize = 13.dp,
+            strokeWidth = 2.dp,
+            accentColor = accent,
+            trackColor = scheme.onSurface.copy(alpha = 0.14f),
+        )
+        Text(
+            text = "$pct%",
+            color = textColor,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            style = MiuixTheme.textStyles.footnote2.copy(fontFeatureSettings = "tnum"),
+        )
+    }
+}
+
+@Composable
+private fun ContextDetailsDialog(
+    show: Boolean,
+    state: WorkspaceUiState,
+    onCompact: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val scheme = MiuixTheme.colorScheme
+    val used = state.contextTokens.coerceAtLeast(0)
+    val window = state.contextWindow.coerceAtLeast(0)
+    val remaining = if (window > 0) (window - used).coerceAtLeast(0) else 0
+    val fraction = if (window > 0) (used.toFloat() / window).coerceIn(0f, 1f) else 0f
+    val pct = (fraction * 100f).roundToInt().coerceIn(0, 100)
+    val accent = when {
+        pct >= 90 -> scheme.error
+        pct >= 72 -> ZhiColors.amber()
+        else -> scheme.primary
+    }
+
+    OverlayDialog(
+        show = show,
+        onDismissRequest = onDismiss,
+        largeScreen = true,
+        maxWidth = ZhiDialogWidth.Compact,
+        outsideMargin = DialogWideOutsideMargin,
+        insideMargin = DialogWideInsideMargin,
+    ) {
+        DialogShell(
+            title = "上下文占用",
+            actions = {
+                if (!state.composerBusy && used > 0) {
+                    SecondaryButton(
+                        text = "压缩上下文",
+                        onClick = onCompact,
+                    )
+                }
+                PrimaryButton(
+                    text = "关闭",
+                    onClick = onDismiss,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            },
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ContextProgressRing(
+                        fraction = fraction,
+                        ringSize = 22.dp,
+                        strokeWidth = 3.dp,
+                        accentColor = accent,
+                        trackColor = scheme.onSurface.copy(alpha = 0.14f),
+                    )
+                    Text(
+                        text = "$pct%  ·  ${formatTokenCountShort(used)} / ${formatTokenCountShort(window)}",
+                        color = scheme.onBackground,
+                        fontSize = MiuixTheme.textStyles.body1.fontSize,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Text(
+                    text = "已用：${"%,d".format(used)} tokens\n" +
+                        "剩余：${"%,d".format(remaining)} tokens\n" +
+                        "窗口上限：${"%,d".format(window)} tokens\n" +
+                        "当前模型：${state.profileName} · ${state.modelLabel}\n" +
+                        "自动压缩：${if (state.settings.autoCompact) "开启（达到 ${state.settings.autoCompactPercent}% 触发）" else "关闭"}",
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    lineHeight = 20.sp,
+                )
+            }
+        }
+    }
+}
