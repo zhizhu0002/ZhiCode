@@ -88,7 +88,7 @@ object EnvDoctor {
     // ------------------------------------------------------------------ 路径
 
     private fun pathInfo(sb: StringBuilder) {
-        sb.appendLine("## Debian / PRoot 路径")
+        sb.appendLine("## Ubuntu 24.04 / PRoot 路径")
         sb.appendLine("configured  : ${TermuxConstants.isConfigured()}")
         sb.appendLine("PACKAGE_NAME: ${TermuxConstants.TERMUX_PACKAGE_NAME}")
         sb.appendLine("DATA_DIR    : ${TermuxConstants.TERMUX_DATA_DIR_PATH}")
@@ -99,7 +99,7 @@ object EnvDoctor {
         sb.appendLine()
     }
 
-    // ---------------------------------------------------------------- Debian
+    // ---------------------------------------------------------------- Ubuntu
 
     private fun termuxInfo(sb: StringBuilder) {
         val rootfs = ContainerPaths.rootfsDir()
@@ -107,21 +107,22 @@ object EnvDoctor {
         val bash = File(rootfs, "bin/bash")
         val node = File(rootfs, "usr/local/bin/node")
         val pi = File(rootfs, "usr/local/bin/pi")
-        val marker = File(rootfs, "etc/zhicode-debian-v1")
+        val marker = File(rootfs, "etc/zhicode-ubuntu-v1")
 
-        sb.appendLine("## 内置 Debian 容器")
+        sb.appendLine("## Ubuntu 24.04 容器")
         sb.appendLine("ROOTFS 存在 : ${rootfs.isDirectory}  (${countChildren(rootfs)} 项)")
         sb.appendLine("HOME 存在   : ${home.isDirectory}")
         sb.appendLine("bash 存在   : ${bash.exists()}")
         sb.appendLine("node 存在   : ${node.isFile}")
         sb.appendLine("pi 存在     : ${pi.exists()}")
-        sb.appendLine("staging     : ${File(TermuxConstants.TERMUX_FILES_DIR_PATH, "debian-staging").exists()}")
-        sb.appendLine("backup      : ${File(TermuxConstants.TERMUX_FILES_DIR_PATH, "debian-backup").exists()}")
+        sb.appendLine("staging     : ${File(TermuxConstants.TERMUX_FILES_DIR_PATH, "ubuntu-staging").exists()}")
+        sb.appendLine("backup      : ${File(TermuxConstants.TERMUX_FILES_DIR_PATH, "ubuntu-backup").exists()}")
         sb.appendLine("marker      : ${marker.isFile}")
         if (marker.isFile) {
             val lines = runCatching { marker.readLines() }.getOrNull().orEmpty()
             sb.appendLine("  版本      : ${lines.getOrNull(0) ?: "?"}")
             sb.appendLine("  sha256    : ${lines.getOrNull(1) ?: "?"}")
+            sb.appendLine("  来源      : ${lines.getOrNull(2) ?: "?"}")
         }
         sb.appendLine()
     }
@@ -139,7 +140,7 @@ object EnvDoctor {
         val size = runCatching {
             context.assets.open(RuntimeInstaller.BOOTSTRAP_ASSET).use { it.available().toLong() }
         }.getOrNull()
-        sb.appendLine("debian 归档 : ${if (size != null) "$size 字节" else "读取失败"}")
+        sb.appendLine("node+pi归档 : ${if (size != null) "$size 字节" else "读取失败"}")
 
         val proot = ProotCommand.prootBinary(context)
         val loader = ProotCommand.loaderBinary(context)

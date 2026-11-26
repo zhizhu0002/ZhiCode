@@ -66,7 +66,7 @@ class LicensesTest {
     fun theListCoversTheItemsThatAreEasyToForget() {
         val names = THIRD_PARTY_LICENSES.map { it.name }
         // 这两项最容易被漏掉：它们不是 Gradle 依赖，只存在于归档或数据文件里。
-        listOf("Debian 容器镜像与 Node.js / Pi 运行时", "Material Symbols 图标")
+        listOf("Ubuntu 24.04 容器镜像与内置 Node.js / Pi 运行时", "XZ for Java (org.tukaani:xz)", "Material Symbols 图标")
             .forEach { assertTrue("清单缺少易漏项：$it", names.contains(it)) }
         // 自身许可也在这一页里（用户点进来会以为只有第三方）。
         assertTrue(names.any { it.contains("ZhiCode 自身") })

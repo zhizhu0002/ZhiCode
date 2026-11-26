@@ -244,7 +244,11 @@ private fun ZhiCodeScreen(
     // 页面各自硬切，方向得手工标记、层级也得手工维护，还会出现「二级页返回
     // 直接回工作区」的断栈问题。栈由系统返回键驱动（NavDisplay 内部接
     // PredictiveBackHandler），层级天然正确：二级页 → 设置主页 → 工作区。
-    val nav = remember { NavController(navBackStackOf(AppKey.Workspace)) }
+    val nav = remember {
+        NavController(
+            navBackStackOf(if (state.oobeOpen) AppKey.Oobe else AppKey.Workspace)
+        )
+    }
 
     // 由 ViewModel 状态派生的「期望栈」：VM 仍是打开/关闭的唯一入口，
     // 这里只把它翻译成栈，增量 reconcile —— pop 触发弹出动画、push 触发推入动画。

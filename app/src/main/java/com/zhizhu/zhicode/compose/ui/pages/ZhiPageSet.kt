@@ -319,6 +319,7 @@ interface ZhiPageSet {
             onNextStep = viewModel::advanceOobeStep,
             onBackStep = viewModel::goBackOobeStep,
             onDismissReopened = viewModel::dismissReopenedOobe,
+            onSelectRuntimeMirror = viewModel::selectUbuntuMirror,
             onInstallRuntime = viewModel::installRuntime,
             onRepairRuntime = viewModel::repairRuntime,
             onToggleRoot = viewModel::toggleRootFromOobe,

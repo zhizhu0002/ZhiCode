@@ -91,7 +91,7 @@ object ProotCommand {
         args += "SHELL=/bin/bash"
         args += "PATH=$DEFAULT_PATH"
         args += "ZHICODE_APP=1"
-        args += "ZHICODE_CONTAINER=debian"
+        args += "ZHICODE_CONTAINER=ubuntu"
         args += if (interactive) "ZHICODE_TERMINAL_SESSION=1" else "CI=true"
         for ((k, v) in extraGuestEnv) {
             args += "$k=$v"

@@ -42,7 +42,7 @@ public final class BashTool implements ZhiTool {
     @Override public String name() { return "Bash"; }
 
     @Override public String description() {
-        return "Run bash inside the embedded Debian (PRoot) container for project commands, builds, tests, git, and apt packages.";
+        return "Run bash inside the Ubuntu 24.04 (PRoot) container for project commands, builds, tests, git, and apt packages.";
     }
 
     @Override public JSONObject inputSchema() {

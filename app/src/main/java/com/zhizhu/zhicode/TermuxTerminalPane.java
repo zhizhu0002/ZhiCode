@@ -116,7 +116,7 @@ public final class TermuxTerminalPane extends FrameLayout
 
     /** 环境未就绪时的说明。刻意指路而不是说"正在准备"，见原实现的说明。 */
     private static final String RUNTIME_NOTICE =
-        "内置 Debian 运行环境尚未就绪。\n请先初始化内置环境，完成后这里会直接进入 Debian 终端。";
+        "Ubuntu 24.04 运行环境尚未就绪。\n请先完成引导页云端下载安装，完成后这里会直接进入 Ubuntu 终端。";
     /** PTY 失败界面的固定文字。Compose 侧按 [State.failureDetail] 是否存在决定要不要显示。 */
     public static final String FAILURE_TITLE = "终端启动失败";
     public static final String FAILURE_FOOTNOTE =
@@ -423,6 +423,14 @@ public final class TermuxTerminalPane extends FrameLayout
         if (!proot.isFile() || !loader.isFile() || !new File(rootfs, "bin/bash").exists()) {
             showRuntimeNotice();
             return;
+        }
+        File hushlogin = new File(rootfs, "root/.hushlogin");
+        if (!hushlogin.exists()) {
+            try {
+                File parent = hushlogin.getParentFile();
+                if (parent != null) parent.mkdirs();
+                hushlogin.createNewFile();
+            } catch (Throwable ignored) {}
         }
         PiBridgeFiles.ensureInstalled(getContext());
         String guestCwd = ContainerPaths.hostToGuest(nextSessionWorkingDirectory);

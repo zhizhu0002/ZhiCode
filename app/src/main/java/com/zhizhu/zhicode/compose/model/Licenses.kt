@@ -113,17 +113,26 @@ val THIRD_PARTY_LICENSES: List<LicenseEntry> = listOf(
         author = "PRoot / Termux Contributors",
         homepage = "https://github.com/termux/proot",
         detail = "用户态 chroot/bind 挂载实现（libproot.so 与 libprootloader.so，静态链接 talloc），" +
-            "作为独立子进程在无 Root 环境下承载 Debian 容器。",
+            "作为独立子进程在无 Root 环境下承载 Ubuntu 24.04 容器。",
     ),
     LicenseEntry(
-        name = "Debian 容器镜像与 Node.js / Pi 运行时",
+        name = "Ubuntu 24.04 容器镜像与内置 Node.js / Pi 运行时",
         license = "各组件各自的许可",
-        version = "Debian 12 · Node 22 · Pi 1.6.1",
+        version = "Ubuntu 24.04 · Node 22 · Pi 1.6.1",
         group = "运行环境",
-        author = "Debian / OpenJS / Earendil Works",
+        author = "Canonical / Termux / OpenJS / Earendil Works",
         homepage = "https://github.com/earendil-works/pi",
-        detail = "归档内含 Debian bookworm-slim arm64 基础系统（GPL / MIT / BSD / Apache-2.0）、" +
-            "Node.js 运行时（MIT）及 @earendil-works/pi-coding-agent（MIT），作为独立子进程运行。",
+        detail = "OOBE 引导从清华大学 TUNA、中科大 USTC 或 GitHub (termux/proot-distro) 按需云端下载 Ubuntu 24.04 LTS arm64 根文件系统，" +
+            "并叠加 APK 内置 Node.js v22.23.5（MIT）与 @earendil-works/pi-coding-agent 1.6.1（MIT），以独立子进程运行。",
+    ),
+    LicenseEntry(
+        name = "XZ for Java (org.tukaani:xz)",
+        license = "0BSD / Public Domain",
+        version = "1.12",
+        group = "运行环境",
+        author = "Lasse Collin (Tukaani Project)",
+        homepage = "https://tukaani.org/xz/java.html",
+        detail = "纯 Java XZ/LZMA2 流式解压实现，用于解压 GitHub proot-distro 源提供的 Ubuntu 24.04 `.tar.xz` 根文件系统。",
     ),
     /*
      * ⚠️ 这一组原来只有一条「通过 Gradle 依赖引入的组件」，把八个库糊在一段文字里。

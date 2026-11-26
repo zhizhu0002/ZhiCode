@@ -56,6 +56,7 @@ import com.zhizhu.zhicode.compose.engine.toUiPlanApproval
 import com.zhizhu.zhicode.compose.runtime.EnvDoctor
 import com.termux.shared.termux.TermuxConstants
 import com.zhizhu.zhicode.RuntimeInstaller
+import com.zhizhu.zhicode.UbuntuMirrorSource
 import com.zhizhu.zhicode.TermuxTerminalPane
 import com.zhizhu.zhicode.compose.model.ActionBusy
 import com.zhizhu.zhicode.compose.model.AgentTask
@@ -375,6 +376,7 @@ class WorkspaceViewModel(
             sidebarOpen = false,
             // 真实探测，不再是写死的 true
             runtimeReady = installer.isInstalled(),
+            ubuntuMirrorId = installer.savedMirrorOrNull()?.id ?: "",
         )
     )
 
@@ -518,6 +520,7 @@ class WorkspaceViewModel(
     private fun autoInstallRuntimeIfStale() {
         // IO 线程：读 marker、比对 sha256、写日志都是磁盘操作
         viewModelScope.launch(Dispatchers.IO) {
+            if (!installer.isInstalled()) return@launch
             val installed = runCatching { installer.installedVersion() }.getOrNull()
             val bundled = runCatching { installer.bundledVersion() }.getOrNull() ?: "?"
             val upToDate = runCatching { installer.isUpToDate() }.getOrElse { error ->
@@ -529,10 +532,7 @@ class WorkspaceViewModel(
             )
             if (upToDate) return@launch
 
-            val reason = if (installed == null) "正在初始化内置环境…" else "内置环境已更新，正在升级…"
-            // "抢占"必须放在同一次 _state.update 里：启动自动装与用户手动点「初始化」
-            // 可能同时到达，分开的 check-then-set 会让两边都跑一遍（第二次会把
-            // staging 删掉再重建，前一次的进度全乱）。与 turnSessionId 是同一类竞态。
+            val reason = "正在离线更新内置 Node.js 与 Pi…"
             var claimed = false
             _state.update { s ->
                 if (s.runtimeInstalling) {
@@ -546,12 +546,24 @@ class WorkspaceViewModel(
                     )
                 }
             }
-            if (!claimed) {
-                appendRuntimeLog("已有安装在进行，本次跳过")
-                return@launch
+            if (!claimed) return@launch
+            appendRuntimeLog("开始离线更新 Node.js/Pi")
+            withContext(Dispatchers.Main) { releaseTerminalPane() }
+            val err = runCatching {
+                installer.upgradeNodePiIfInstalled { msg, pct ->
+                    _state.update { it.copy(runtimeMessage = msg, runtimeProgress = pct) }
+                }
+            }.exceptionOrNull()
+            val reportText = buildEnvironmentReport()
+            _state.update {
+                it.copy(
+                    runtimeInstalling = false,
+                    runtimeProgress = if (err == null) 100 else 0,
+                    runtimeMessage = if (err == null) "Ubuntu 24.04 + Node.js + Pi 已就绪" else "更新失败：${err.message ?: err.javaClass.simpleName}",
+                    runtimeReady = installer.isInstalled(),
+                    environmentReport = reportText,
+                )
             }
-            appendRuntimeLog("开始自动安装（$reason）")
-            installRuntimeBlocking(reason)
         }
     }
 
@@ -7283,11 +7295,11 @@ class WorkspaceViewModel(
                         oobePermissions = snap,
                         oobeStep = OobeStep.RUNTIME,
                         runtimeReady = ready,
-                        runtimeMessage = if (upToDate) "内置 Debian 环境已就绪" else it.runtimeMessage,
+                        runtimeMessage = if (upToDate) "Ubuntu 24.04 运行环境已就绪" else if (ready) "正在校验内置 Node.js 与 Pi…" else "",
                     )
                 }
-                if (!upToDate && !current.runtimeInstalling) {
-                    installRuntime()
+                if (ready && !upToDate && !current.runtimeInstalling) {
+                    autoInstallRuntimeIfStale()
                 }
             }
             OobeStep.RUNTIME -> {
@@ -7387,35 +7399,47 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 安装（或重新初始化）内置 Termux 环境。
-     *
-     * 解压 32MB、落 3473 个文件、建 1177 个符号链接，必须放到 IO 线程，
-     * 并且把进度实时回灌给 UI —— 整个过程在真机上要十几秒，不给反馈会被当成卡死。
-     */
-    fun installRuntime() {
-        if (_state.value.runtimeInstalling) return
+    fun selectUbuntuMirror(mirrorId: String) {
+        val mirror = UbuntuMirrorSource.findById(mirrorId) ?: return
+        installer.setSelectedMirror(mirror)
         _state.update {
-            it.copy(runtimeInstalling = true, runtimeProgress = 0, runtimeMessage = "正在准备…")
+            it.copy(
+                ubuntuMirrorId = mirror.id,
+                runtimeMessage = if (!it.runtimeReady && it.runtimeMessage == "请先选择 Ubuntu 24.04 下载源") "" else it.runtimeMessage,
+            )
         }
-        viewModelScope.launch(Dispatchers.IO) { installRuntimeBlocking("正在准备…") }
     }
 
     /**
-     * 真正干活的那一段。**必须在 IO 线程调用**（解压 33MB、建 2689 个符号链接）。
-     *
-     * 抽出来是因为有两处入口：用户手动点「初始化」（[installRuntime]）与启动时的
-     * 版本过期自动重装（[autoInstallRuntimeIfStale]）。两处必须走同一段逻辑 ——
-     * 分别写一份必然走样（一处忘了 `ensureWorkspace()`，另一处忘了更新报告）。
+     * 安装（或重新初始化）Ubuntu 24.04 + 内置 Node.js + Pi 环境。
      */
-    private suspend fun installRuntimeBlocking(preparing: String) {
-        // 装之前必须先关终端：install() 的 activatePrefix() 会把整个 usr 目录 rename 换掉，
-        // 正在跑的 bash 会立刻指向一个已不存在的前缀（`/bin/bash` 还在内存里，
-        // 但它 fork 出的任何东西都会失败）。切换要在主线程做，所以这里显式切过去等它。
+    fun installRuntime() {
+        if (_state.value.runtimeInstalling) return
+        val mirror = UbuntuMirrorSource.findById(_state.value.ubuntuMirrorId)
+            ?: installer.savedMirrorOrNull()
+        if (mirror == null) {
+            _state.update {
+                it.copy(runtimeMessage = "请先选择 Ubuntu 24.04 下载源")
+            }
+            return
+        }
+        val preparing = "正在从 ${mirror.displayName} 准备下载…"
+        _state.update {
+            it.copy(
+                ubuntuMirrorId = mirror.id,
+                runtimeInstalling = true,
+                runtimeProgress = 0,
+                runtimeMessage = preparing,
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) { installRuntimeBlocking(mirror, preparing) }
+    }
+
+    private suspend fun installRuntimeBlocking(mirror: UbuntuMirrorSource, preparing: String) {
         withContext(Dispatchers.Main) { releaseTerminalPane() }
 
         _state.update { it.copy(runtimeMessage = preparing) }
-        val failure = installRuntimeReporting()
+        val failure = installRuntimeReporting(mirror)
         if (failure != null) {
             appendRuntimeLog("安装失败：$failure")
             _state.update {
@@ -7432,16 +7456,18 @@ class WorkspaceViewModel(
             it.copy(
                 runtimeInstalling = false,
                 runtimeProgress = 100,
-                runtimeMessage = "内置 Debian 环境已就绪",
+                runtimeMessage = "Ubuntu 24.04 + Node.js + Pi 安装完成，请点击「下一步」",
                 runtimeReady = installer.isInstalled(),
                 environmentReport = reportText,
+                message = if (it.oobeOpen) "Ubuntu 24.04 运行环境已安装完成" else it.message,
+                messageIsError = if (it.oobeOpen) false else it.messageIsError,
             )
         }
         ensureWorkspace()
     }
 
-    private suspend fun installRuntimeReporting(): String? = runCatching {
-        installer.install { message, percent ->
+    private suspend fun installRuntimeReporting(mirror: UbuntuMirrorSource): String? = runCatching {
+        installer.install(mirror) { message, percent ->
             _state.update {
                 it.copy(
                     runtimeMessage = message,

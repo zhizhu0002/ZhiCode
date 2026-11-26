@@ -9,12 +9,15 @@ import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
 import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import com.zhizhu.zhicode.UbuntuMirrorSource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +53,8 @@ fun EnvironmentOverlay(
     installing: Boolean,
     progress: Int,
     message: String,
+    selectedMirrorId: String = "",
+    onSelectMirror: (String) -> Unit = {},
     onDismiss: () -> Unit,
     onInstall: () -> Unit,
     onRepair: () -> Unit,
@@ -106,12 +111,36 @@ fun EnvironmentOverlay(
             },
             // 状态条固定不滚动，安装进度一眼可见
             prompt = {
+                val activeMirror = UbuntuMirrorSource.findById(selectedMirrorId)
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = if (displayedReady) "内置 Debian 环境：已就绪" else "内置 Debian 环境：未安装",
+                        text = if (displayedReady) "Ubuntu 24.04 运行环境：已就绪" else "Ubuntu 24.04 运行环境：未安装",
                         color = if (displayedReady) scheme.primary else scheme.onSurfaceVariantSummary,
                         fontSize = MiuixTheme.textStyles.body1.fontSize,
                     )
+                    if (!displayedInstalling) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            UbuntuMirrorSource.entries.forEach { mirror ->
+                                val picked = mirror == activeMirror
+                                val shortLabel = when (mirror) {
+                                    UbuntuMirrorSource.TUNA -> "清华 TUNA"
+                                    UbuntuMirrorSource.USTC -> "中科大 USTC"
+                                    UbuntuMirrorSource.GITHUB -> "GitHub"
+                                }
+                                Text(
+                                    text = if (picked) "✓ $shortLabel" else shortLabel,
+                                    color = if (picked) scheme.primary else scheme.onSurfaceVariantSummary,
+                                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                                    modifier = Modifier
+                                        .clickable { onSelectMirror(mirror.id) }
+                                        .padding(vertical = 4.dp, horizontal = 4.dp),
+                                )
+                            }
+                        }
+                    }
                     if (displayedInstalling) {
                         LinearProgressIndicator(
                             progress = (displayedProgress.coerceIn(0, 100)) / 100f,
@@ -142,14 +171,24 @@ fun EnvironmentOverlay(
                     onClick = onCopy,
                     cornerRadius = ZhiRadius.button,
                 )
+                val activeMirror = UbuntuMirrorSource.findById(selectedMirrorId)
                 Row(modifier = Modifier.padding(start = 8.dp)) {
                     if (displayedReady) {
-                        SecondaryButton(text = "重新初始化", onClick = onInstall)
+                        SecondaryButton(
+                            text = if (displayedInstalling) "下载安装中…" else "重新下载安装",
+                            onClick = { if (!displayedInstalling) onInstall() },
+                        )
                     } else {
                         PrimaryButton(
-                            text = if (displayedInstalling) "安装中…" else "初始化环境",
+                            text = if (displayedInstalling) {
+                                "下载安装中…"
+                            } else if (activeMirror == null) {
+                                "请先选下载源"
+                            } else {
+                                "云端下载并安装"
+                            },
                             onClick = onInstall,
-                            enabled = !displayedInstalling,
+                            enabled = !displayedInstalling && activeMirror != null,
                         )
                     }
                 }

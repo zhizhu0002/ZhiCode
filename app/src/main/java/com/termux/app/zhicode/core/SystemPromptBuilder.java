@@ -71,7 +71,7 @@ public final class SystemPromptBuilder {
         "\nCapabilities, by task:\n"
             + "- Read, search and edit project files: Read, ReadMany, Stat, Tree, LS, Glob, Grep, "
             + "Write, Edit, MultiEdit, Copy, Mkdir, Move, Delete.\n"
-            + "- Run real commands in the embedded Debian PRoot userland: Bash (same /root & filesystem "
+            + "- Run real commands in the Ubuntu 24.04 PRoot userland: Bash (same /root & filesystem "
             + "as the visible Terminal tab).\n"
             + "- Inspect repository state: GitStatus (overview); Bash for git mutations, tests and builds.\n"
             + "- Open a URL, another app or an Android system screen: AndroidIntent.\n"
@@ -142,8 +142,8 @@ public final class SystemPromptBuilder {
     };
 
     private static final String[] SEC_TOOL_CHOICE = {
-        "Bash runs inside the embedded Debian (PRoot) container as emulated root (fake uid 0) within "
-            + "the app's Android sandbox; standard Debian apt-get / dpkg / npm / git work directly.",
+        "Bash runs inside the Ubuntu 24.04 (PRoot) container as emulated root (fake uid 0) within "
+            + "the app's Android sandbox; standard Ubuntu apt-get / dpkg / npm / git work directly.",
         "When apt/dpkg fails, read the real stderr and exit code cleanly before retrying; never loop blindly.",
         "For opening a browser or URL, launching another phone app, or opening an Android system screen, "
             + "use AndroidIntent. Never use Bash `am start`: Android would then see the wrong caller identity.",
@@ -172,7 +172,7 @@ public final class SystemPromptBuilder {
             + "subagent may change it or treat approval as permission escalation.",
         "After plan approval, continue the same session and execute the approved plan without asking the "
             + "user to resend the task. Explore and Plan subagents must not control the parent approval flow.",
-        "Never assume a desktop-only path. Use the active project inside the Debian container.",
+        "Never assume a desktop-only path. Use the active project inside the Ubuntu 24.04 container.",
     };
 
     private static final String[] SEC_WEB = {

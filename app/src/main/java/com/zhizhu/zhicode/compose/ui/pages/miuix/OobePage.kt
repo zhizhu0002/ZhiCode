@@ -46,6 +46,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.zhizhu.zhicode.RuntimeInstaller
+import com.zhizhu.zhicode.UbuntuMirrorSource
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.runtime.OobePermissions
 import com.zhizhu.zhicode.compose.runtime.OobePermissionsSnapshot
@@ -74,7 +75,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
 /**
- * 三步初始引导页：系统权限 -> Debian 运行环境 -> 模型供应商配置（可跳过）。
+ * 三步初始引导页：系统权限 -> Ubuntu 24.04 运行环境 -> 模型供应商配置（可跳过）。
  */
 @Composable
 fun OobePage(
@@ -84,6 +85,7 @@ fun OobePage(
     onNextStep: () -> Unit,
     onBackStep: () -> Unit,
     onDismissReopened: () -> Unit,
+    onSelectRuntimeMirror: (String) -> Unit = {},
     onInstallRuntime: () -> Unit,
     onRepairRuntime: () -> Unit,
     onToggleRoot: (Boolean) -> Unit,
@@ -353,33 +355,51 @@ fun OobePage(
                         }
                     }
                     OobeStep.RUNTIME -> {
+                        val selectedMirror = UbuntuMirrorSource.findById(state.ubuntuMirrorId)
                         item(key = "runtimeInstall") {
-                            SettingsGroup("Debian 运行环境") {
+                            var showReinstallOptions by remember(state.runtimeReady, state.runtimeInstalling) {
+                                mutableStateOf(false)
+                            }
+                            SettingsGroup("Ubuntu 24.04 运行环境") {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(horizontal = 16.dp, vertical = 14.dp),
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        SettingsIconPlate(icon = ZhiIcons.runtime, color = SettingsPlateColors.blue)
+                                        SettingsIconPlate(
+                                            icon = if (state.runtimeReady) ZhiIcons.done else ZhiIcons.runtime,
+                                            color = if (state.runtimeReady) SettingsPlateColors.green else SettingsPlateColors.blue,
+                                        )
                                         Spacer(Modifier.width(12.dp))
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = if (state.runtimeReady) "运行环境已就绪" else if (state.runtimeInstalling) "正在安装运行环境" else "等待安装",
-                                                color = if (state.runtimeReady) scheme.primary else scheme.onBackground,
+                                                text = if (state.runtimeReady && !state.runtimeInstalling) {
+                                                    "Ubuntu 24.04 运行环境安装完成"
+                                                } else if (state.runtimeInstalling) {
+                                                    "正在从 ${selectedMirror?.displayName ?: "云端"} 下载安装"
+                                                } else {
+                                                    "请选择 Ubuntu 24.04 下载源"
+                                                },
+                                                color = if (state.runtimeReady && !state.runtimeInstalling) scheme.primary else scheme.onBackground,
                                                 fontSize = MiuixTheme.textStyles.headline2.fontSize,
                                                 fontWeight = FontWeight.Medium,
                                             )
                                             Text(
-                                                text = RuntimeInstaller.BOOTSTRAP_SOURCE,
+                                                text = if (state.runtimeReady && !state.runtimeInstalling) {
+                                                    selectedMirror?.let { "下载源：${it.displayName} · 内置 Node.js + Pi 已就绪，请点击「下一步」" }
+                                                        ?: "Ubuntu 24.04 + 内置 Node.js + Pi 已就绪，请点击「下一步」"
+                                                } else {
+                                                    RuntimeInstaller.BOOTSTRAP_SOURCE
+                                                },
                                                 color = scheme.onSurfaceVariantSummary,
                                                 fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                                             )
                                         }
                                         Icon(
-                                            painter = if (state.runtimeReady) ZhiIcons.done else ZhiIcons.pending,
+                                            painter = if (state.runtimeReady && !state.runtimeInstalling) ZhiIcons.done else ZhiIcons.pending,
                                             contentDescription = null,
-                                            tint = if (state.runtimeReady) scheme.primary else scheme.onSurfaceVariantSummary,
+                                            tint = if (state.runtimeReady && !state.runtimeInstalling) scheme.primary else scheme.onSurfaceVariantSummary,
                                             modifier = Modifier.size(20.dp),
                                         )
                                     }
@@ -398,7 +418,7 @@ fun OobePage(
                                             color = scheme.onSurfaceVariantSummary,
                                             fontSize = MiuixTheme.textStyles.body2.fontSize,
                                         )
-                                    } else if (state.runtimeMessage.isNotBlank()) {
+                                    } else if (!state.runtimeReady && state.runtimeMessage.isNotBlank()) {
                                         Spacer(Modifier.height(10.dp))
                                         Text(
                                             text = state.runtimeMessage,
@@ -409,18 +429,79 @@ fun OobePage(
                                 }
 
                                 if (!state.runtimeInstalling) {
+                                    if (!state.runtimeReady || showReinstallOptions) {
+                                        UbuntuMirrorSource.entries.forEach { mirror ->
+                                            val picked = mirror == selectedMirror
+                                            BasicComponent(
+                                                title = mirror.displayName,
+                                                titleColor = BasicComponentDefaults.titleColor(
+                                                    color = if (picked) scheme.primary else scheme.onBackground,
+                                                ),
+                                                summary = mirror.summary,
+                                                summaryColor = BasicComponentDefaults.summaryColor(
+                                                    color = scheme.onSurfaceVariantSummary,
+                                                ),
+                                                startAction = {
+                                                    SettingsIconPlate(
+                                                        icon = ZhiIcons.cloud,
+                                                        color = if (picked) SettingsPlateColors.blue else SettingsPlateColors.gray,
+                                                    )
+                                                },
+                                                endActions = {
+                                                    if (picked) {
+                                                        Icon(
+                                                            painter = ZhiIcons.done,
+                                                            contentDescription = null,
+                                                            tint = scheme.primary,
+                                                            modifier = Modifier.size(18.dp),
+                                                        )
+                                                    }
+                                                },
+                                                onClick = { onSelectRuntimeMirror(mirror.id) },
+                                                insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                            )
+                                        }
+                                    }
+
                                     if (!state.runtimeReady) {
-                                        BasicComponent(
-                                            title = "立即解压安装",
-                                            summary = "内置离线包 · 无需联网下载",
-                                            onClick = onInstallRuntime,
-                                            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        ) {
+                                            PrimaryButton(
+                                                text = selectedMirror?.let { "从 ${it.displayName} 下载并安装" }
+                                                    ?: "请先在上方选择下载源",
+                                                onClick = onInstallRuntime,
+                                                enabled = selectedMirror != null,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+                                        }
                                     } else {
+                                        if (showReinstallOptions) {
+                                            BasicComponent(
+                                                title = "校准挂载链接与配置",
+                                                summary = "校验容器路径并修复共享存储链接",
+                                                onClick = onRepairRuntime,
+                                                insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                            )
+                                            BasicComponent(
+                                                title = selectedMirror?.let { "使用 ${it.displayName} 重新下载安装" }
+                                                    ?: "选择上方下载源后重新下载安装",
+                                                summary = "保留 /root 工作区，重新拉取 Ubuntu 24.04 系统层",
+                                                enabled = selectedMirror != null,
+                                                onClick = onInstallRuntime,
+                                                insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                            )
+                                        }
                                         BasicComponent(
-                                            title = "校准挂载链接与配置",
-                                            summary = "校验容器路径并修复共享存储链接",
-                                            onClick = onRepairRuntime,
+                                            title = if (showReinstallOptions) "收起维护与重装选项" else "维护 / 切换镜像重新安装",
+                                            summary = if (showReinstallOptions) {
+                                                "折叠下载源与校准入口"
+                                            } else {
+                                                "仅在环境异常或需更换镜像源时使用"
+                                            },
+                                            onClick = { showReinstallOptions = !showReinstallOptions },
                                             insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                                         )
                                     }

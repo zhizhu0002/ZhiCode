@@ -176,12 +176,22 @@ done
 
 以独立子进程执行，用于在无 Root 环境下承载内置 Debian 容器，与本工程代码不构成衍生作品。
 
-5.1 Debian 容器镜像与 Node.js / Pi 运行时 — 各组件各自的许可
+5.1 Ubuntu 24.04 容器镜像与内置 Node.js / Pi 运行时 — 各组件各自的许可
 --------------------------------------------------------------------------------
 
-文件 : app/src/main/assets/debian-arm64.tar.gz
-来源 : debian:bookworm-slim (linux/arm64) + Node.js v22.23.5 + @earendil-works/pi-coding-agent 1.6.1
-许可 : 归档内各自组件适用其原始许可（GPL / MIT / BSD / Apache-2.0 等），以独立子进程运行。
+文件 : app/src/main/assets/node-pi-linux-arm64.tgz（内置）+ 云端 Ubuntu 24.04 LTS (noble arm64) rootfs
+来源 :
+  - Ubuntu Base 24.04 (noble arm64) 清华 TUNA 镜像: https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/ubuntu-base/releases/noble/release/
+  - Ubuntu Base 24.04 (noble arm64) 中科大 USTC 镜像: https://mirrors.ustc.edu.cn/ubuntu-cdimage/ubuntu-base/releases/noble/release/
+  - Termux proot-distro Ubuntu 24.04 GitHub Release: https://github.com/termux/proot-distro/releases/tag/v4.17.3
+  - Node.js v22.23.5 + @earendil-works/pi-coding-agent 1.6.1
+许可 : 容器系统包及归档内各组件适用其原始许可（GPL / MIT / BSD / Apache-2.0 等），以独立子进程运行。
+
+5.2 XZ for Java (org.tukaani:xz) — 0BSD / Public Domain
+--------------------------------------------------------------------------------
+
+来源 : https://tukaani.org/xz/java.html（Gradle 依赖 `org.tukaani:xz:1.12`）
+许可 : 0BSD / Public Domain（随 APK 分发，用于流式解压 GitHub `.tar.xz` 根文件系统镜像）
 
 6. 通过 Gradle 依赖引入的组件 — 随构件分发
 --------------------------------------------------------------------------------

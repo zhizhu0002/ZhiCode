@@ -124,6 +124,8 @@ internal fun ZhiOverlayHost(
         installing = state.runtimeInstalling,
         progress = state.runtimeProgress,
         message = state.runtimeMessage,
+        selectedMirrorId = state.ubuntuMirrorId,
+        onSelectMirror = viewModel::selectUbuntuMirror,
         onDismiss = viewModel::closeEnvironment,
         onInstall = viewModel::installRuntime,
         onRepair = viewModel::repairRuntime,

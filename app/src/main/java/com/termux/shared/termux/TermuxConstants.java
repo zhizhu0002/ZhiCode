@@ -33,7 +33,7 @@ public final class TermuxConstants {
      */
     private static final String DEFAULT_PACKAGE_NAME = BuildConfig.APPLICATION_ID;
     private static final String DEFAULT_FILES_DIR_PATH = "/data/user/0/" + DEFAULT_PACKAGE_NAME + "/files";
-    private static final String DEFAULT_DEBIAN_ROOTFS_DIR_PATH = DEFAULT_FILES_DIR_PATH + "/debian";
+    private static final String DEFAULT_DEBIAN_ROOTFS_DIR_PATH = DEFAULT_FILES_DIR_PATH + "/ubuntu";
 
     /**
      * 品牌短标识，**整份代码里只在这里定义一次**。
@@ -58,7 +58,7 @@ public final class TermuxConstants {
     /** 数据根目录，Termux 约定为 {@code <data-dir>/files}。 */
     public static String TERMUX_FILES_DIR_PATH = DEFAULT_FILES_DIR_PATH;
 
-    /** Debian 容器根目录（`/data/user/0/<pkg>/files/debian`）。 */
+    /** Ubuntu 24.04 容器根目录（`/data/user/0/<pkg>/files/ubuntu`）。 */
     public static String DEBIAN_ROOTFS_DIR_PATH = DEFAULT_DEBIAN_ROOTFS_DIR_PATH;
 
     /** proot 临时目录（`/data/user/0/<pkg>/files/proot-tmp`）。 */
@@ -141,7 +141,7 @@ public final class TermuxConstants {
 
         TERMUX_PACKAGE_NAME = packageName;
         TERMUX_FILES_DIR_PATH = filesDirPath;
-        DEBIAN_ROOTFS_DIR_PATH = filesDirPath + "/debian";
+        DEBIAN_ROOTFS_DIR_PATH = filesDirPath + "/ubuntu";
         PROOT_TMP_DIR_PATH = filesDirPath + "/proot-tmp";
         File parent = new File(filesDirPath).getParentFile();
         TERMUX_DATA_DIR_PATH = parent == null ? filesDirPath : parent.getAbsolutePath();

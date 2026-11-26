@@ -379,6 +379,9 @@ dependencies {
      */
     implementation 'ru.noties:jlatexmath-android:0.2.0'
 
+    // 纯 Java XZ 流式解压：用于 GitHub proot-distro Ubuntu 24.04 .tar.xz 云端根文件系统解包（0BSD/Public Domain）
+    implementation 'org.tukaani:xz:1.12'
+
     // 原版引擎源码里用到了 androidx.annotation 的 @NonNull/@Nullable 等注解，仅编译期需要
     compileOnly 'androidx.annotation:annotation:1.8.1'
 

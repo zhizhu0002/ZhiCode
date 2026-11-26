@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode
 
 import android.system.Os
+import org.tukaani.xz.XZInputStream
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -8,10 +9,12 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.util.zip.GZIPInputStream
 
 /**
- * 纯 Kotlin `.tar.gz` 流式解包器，用于解压内置 Debian 根文件系统。
+ * 纯 Kotlin `.tar.gz` / `.tar.xz` 流式解包器，用于解压云端 Ubuntu 根文件系统与内置 Node/Pi 包。
  */
 internal object TarGzExtractor {
 
@@ -39,7 +42,13 @@ internal object TarGzExtractor {
     }
 
     @Throws(Exception::class)
-    fun extract(input: InputStream, targetRoot: File, progress: ProgressCallback? = null) {
+    fun extract(
+        input: InputStream,
+        targetRoot: File,
+        useXz: Boolean = false,
+        stripComponents: Int = 0,
+        progress: ProgressCallback? = null,
+    ) {
         val counting = CountingInputStream(BufferedInputStream(input, 64 * 1024))
         val rootCanonical = targetRoot.canonicalPath
         val header = ByteArray(BLOCK_SIZE)
@@ -52,7 +61,13 @@ internal object TarGzExtractor {
         var paxLinkPath: String? = null
         var paxSize: Long? = null
 
-        GZIPInputStream(counting, 64 * 1024).use { tar ->
+        val decompressed: InputStream = if (useXz) {
+            XZInputStream(counting)
+        } else {
+            GZIPInputStream(counting, 64 * 1024)
+        }
+
+        decompressed.use { tar ->
             while (readFullyOrEof(tar, header)) {
                 if (isAllZero(header)) break
 
@@ -96,8 +111,8 @@ internal object TarGzExtractor {
                 paxLinkPath = null
                 paxSize = null
 
-                val cleanPath = entryPath.trimStart('.').trimStart('/').trimEnd('/')
-                if (cleanPath.isEmpty()) {
+                val stripped = stripPathComponents(entryPath, stripComponents)
+                if (stripped.isEmpty()) {
                     if (size > 0) {
                         skipFully(tar, size)
                         skipPadding(tar, size)
@@ -105,7 +120,7 @@ internal object TarGzExtractor {
                     continue
                 }
 
-                val destination = safeRootPath(rootCanonical, cleanPath)
+                val destination = safeRootPath(rootCanonical, stripped)
                 when (typeFlag) {
                     '5' -> {
                         if (!destination.isDirectory && !destination.mkdirs() && !destination.isDirectory) {
@@ -115,25 +130,25 @@ internal object TarGzExtractor {
                     }
                     '2' -> {
                         destination.parentFile?.mkdirs()
-                        if (destination.exists()) destination.delete()
+                        deleteExistingEntry(destination)
                         Os.symlink(linkTarget, destination.absolutePath)
                     }
                     '1' -> {
                         // Android SELinux 禁止普通应用调用 link(2)，硬链接转为相对符号链接。
                         destination.parentFile?.mkdirs()
-                        if (destination.exists()) destination.delete()
-                        val cleanTarget = linkTarget.trimStart('.').trimStart('/')
-                        val rel = relativeSymlinkTarget(cleanPath, cleanTarget)
+                        deleteExistingEntry(destination)
+                        val cleanTarget = stripPathComponents(linkTarget, stripComponents)
+                        val rel = relativeSymlinkTarget(stripped, cleanTarget)
                         Os.symlink(rel, destination.absolutePath)
                     }
                     '0', '\u0000' -> {
                         destination.parentFile?.mkdirs()
-                        if (destination.exists()) destination.delete()
+                        deleteExistingEntry(destination)
                         FileOutputStream(destination).use { out ->
                             var remaining = size
                             while (remaining > 0) {
                                 val chunk = tar.read(ioBuffer, 0, minOf(ioBuffer.size.toLong(), remaining).toInt())
-                                if (chunk < 0) throw IOException("Unexpected EOF extracting $cleanPath")
+                                if (chunk < 0) throw IOException("Unexpected EOF extracting $stripped")
                                 out.write(ioBuffer, 0, chunk)
                                 remaining -= chunk
                             }
@@ -157,6 +172,24 @@ internal object TarGzExtractor {
             }
         }
         progress?.onProgress(counting.bytesRead)
+    }
+
+    internal fun stripPathComponents(rawPath: String, stripCount: Int): String {
+        val segments = rawPath.trimStart('.').trimStart('/').trimEnd('/').split('/').filter { it.isNotEmpty() }
+        if (stripCount <= 0) return segments.joinToString("/")
+        if (segments.size <= stripCount) return ""
+        return segments.drop(stripCount).joinToString("/")
+    }
+
+    private fun deleteExistingEntry(target: File) {
+        val path = target.toPath()
+        if (Files.isSymbolicLink(path)) {
+            Files.deleteIfExists(path)
+        } else if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+            FileTree.deleteRecursive(target)
+        } else {
+            Files.deleteIfExists(path)
+        }
     }
 
     private fun relativeSymlinkTarget(linkPath: String, targetPath: String): String {
@@ -219,6 +252,8 @@ internal object TarGzExtractor {
             if (b == ' ' || b == '\u0000') break
             if (b in '0'..'7') {
                 result = (result shl 3) or (b - '0').toLong()
+            } else {
+                break
             }
             i++
         }
@@ -226,66 +261,64 @@ internal object TarGzExtractor {
     }
 
     private fun parsePaxHeaders(text: String): Map<String, String> {
-        val out = LinkedHashMap<String, String>()
-        for (line in text.split('\n')) {
-            val space = line.indexOf(' ')
-            if (space <= 0 || space + 1 >= line.length) continue
-            val rest = line.substring(space + 1)
-            val eq = rest.indexOf('=')
-            if (eq <= 0) continue
-            out[rest.substring(0, eq)] = rest.substring(eq + 1)
+        val out = HashMap<String, String>()
+        var idx = 0
+        while (idx < text.length) {
+            val sp = text.indexOf(' ', idx)
+            if (sp <= idx) break
+            val eq = text.indexOf('=', sp + 1)
+            val nl = text.indexOf('\n', sp + 1)
+            val len = text.substring(idx, sp).toIntOrNull()
+            if (eq > sp && nl > eq) {
+                val key = text.substring(sp + 1, eq)
+                val value = text.substring(eq + 1, nl)
+                out[key] = value
+            }
+            idx = if (len != null && len > 0) idx + len else if (nl >= 0) nl + 1 else text.length
         }
         return out
     }
 
-    private fun readTextEntry(input: InputStream, size: Long): String {
-        val out = ByteArrayOutputStream(size.toInt().coerceAtLeast(64))
-        val buf = ByteArray(4096)
-        var remaining = size
-        while (remaining > 0) {
-            val read = input.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
-            if (read < 0) throw IOException("Unexpected EOF in tar metadata")
-            out.write(buf, 0, read)
-            remaining -= read
+    private fun readTextEntry(stream: InputStream, size: Long): String {
+        val bytes = ByteArray(size.toInt())
+        var offset = 0
+        while (offset < bytes.size) {
+            val n = stream.read(bytes, offset, bytes.size - offset)
+            if (n < 0) break
+            offset += n
         }
-        return String(out.toByteArray(), StandardCharsets.UTF_8)
+        return String(bytes, 0, offset, StandardCharsets.UTF_8)
     }
 
-    private fun skipPadding(input: InputStream, size: Long) {
-        val rem = (BLOCK_SIZE - (size % BLOCK_SIZE).toInt()) % BLOCK_SIZE
-        if (rem > 0) skipFully(input, rem.toLong())
+    private fun skipPadding(stream: InputStream, size: Long) {
+        val rem = (size % BLOCK_SIZE).toInt()
+        if (rem > 0) skipFully(stream, (BLOCK_SIZE - rem).toLong())
     }
 
-    private fun skipFully(input: InputStream, bytes: Long) {
-        var remaining = bytes
-        val buf = ByteArray(4096)
-        while (remaining > 0) {
-            val skipped = input.skip(remaining)
-            if (skipped > 0) {
-                remaining -= skipped
-            } else {
-                val read = input.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
-                if (read < 0) throw IOException("Unexpected EOF while skipping")
-                remaining -= read
-            }
+    private fun skipFully(stream: InputStream, total: Long) {
+        var left = total
+        val buf = ByteArray(8192)
+        while (left > 0) {
+            val n = stream.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+            if (n < 0) break
+            left -= n
         }
     }
 
-    private fun readFullyOrEof(input: InputStream, buffer: ByteArray): Boolean {
+    private fun readFullyOrEof(stream: InputStream, buffer: ByteArray): Boolean {
         var offset = 0
         while (offset < buffer.size) {
-            val read = input.read(buffer, offset, buffer.size - offset)
-            if (read < 0) {
-                if (offset == 0) return false
-                throw IOException("Truncated tar header")
-            }
-            offset += read
+            val n = stream.read(buffer, offset, buffer.size - offset)
+            if (n < 0) return false
+            offset += n
         }
         return true
     }
 
     private fun isAllZero(block: ByteArray): Boolean {
-        for (b in block) if (b != 0.toByte()) return false
+        for (b in block) {
+            if (b != 0.toByte()) return false
+        }
         return true
     }
 }

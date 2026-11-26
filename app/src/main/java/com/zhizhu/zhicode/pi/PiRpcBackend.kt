@@ -519,7 +519,7 @@ internal class PiRpcBackend(
             val loader = ProotCommand.loaderBinary(appContext)
             val rootfs = ContainerPaths.rootfsDir()
             if (!(proot.isFile && loader.isFile && File(rootfs, "bin/bash").exists())) {
-                throw IllegalStateException("Debian 运行时尚未初始化，请先完成环境初始化")
+                throw IllegalStateException("Ubuntu 24.04 运行时尚未初始化，请先完成云端下载与安装")
             }
 
             val guestCwd = ContainerPaths.hostToGuest(config.projectDirectory)

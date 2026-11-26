@@ -93,7 +93,7 @@ class ZhiDocumentsProvider : DocumentsProvider() {
                     DocumentsContract.Root.FLAG_SUPPORTS_IS_CHILD,
                 "*/*",
                 home().usableSpace,
-                "Debian 容器根目录（可读写）",
+                "Ubuntu 24.04 容器根目录（可读写）",
                 // 不给图标：让它用文件管理器自己的存储图标，比塞一个错的合适。
                 null,
             ),
