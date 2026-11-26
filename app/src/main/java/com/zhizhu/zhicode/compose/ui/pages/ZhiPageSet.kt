@@ -166,6 +166,10 @@ interface ZhiPageSet {
             onDraftChange = viewModel::updateApiProfileDraft,
             onSave = viewModel::saveApiProfile,
             onCancelForm = viewModel::cancelApiProfileForm,
+            onApplyPreset = viewModel::applyApiPreset,
+            onFetchDraftModels = viewModel::fetchDraftModelCatalog,
+            onUpdateContextAndPrompt = viewModel::updateContextAndPromptFromApiConfig,
+            onOpenPrompts = viewModel::openPrompts,
         )
     }
 

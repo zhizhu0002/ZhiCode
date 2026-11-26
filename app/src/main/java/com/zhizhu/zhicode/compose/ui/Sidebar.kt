@@ -40,6 +40,14 @@ import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
 import com.zhizhu.zhicode.compose.model.SessionSummary
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -68,6 +76,7 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
  */
 data class SidebarState(
     val projectName: String,
+    val projectPath: String,
     val sessions: List<SessionSummary>,
     val activeSessionId: String,
     val runtimeReady: Boolean,
@@ -75,6 +84,7 @@ data class SidebarState(
     companion object {
         fun from(state: WorkspaceUiState) = SidebarState(
             projectName = state.projectName,
+            projectPath = state.projectPath,
             sessions = state.sessions,
             activeSessionId = state.activeSessionId,
             runtimeReady = state.runtimeReady,
@@ -140,9 +150,12 @@ fun ZhiSidebar(
     onSandbox: () -> Unit,
     onRuntime: () -> Unit,
     onSettings: () -> Unit,
+    onUpdateProjectPath: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
+    var projectDialogOpen by remember { mutableStateOf(false) }
+    var projectDraft by remember(state.projectPath) { mutableStateOf(state.projectPath) }
     // 搜索是**本地**过滤：`state.sessions` 本来就是完整列表，过滤只影响渲染那一层。
     // 抽屉关闭时内容会被 AnimatedVisibility 销毁，所以查询词不跨开关保留 ——
     // 这是与参考实现（查询词存在 Activity 字段里）的差别，代价是重开抽屉后要重输。
@@ -178,6 +191,14 @@ fun ZhiSidebar(
                     icon = ZhiIcons.newSession,
                     iconTint = scheme.primary,
                     onClick = onNewSession,
+                )
+                SidebarRow(
+                    label = "项目目录：${state.projectName}",
+                    icon = ZhiIcons.directory,
+                    onClick = {
+                        projectDraft = state.projectPath
+                        projectDialogOpen = true
+                    },
                 )
             }
 
@@ -283,6 +304,46 @@ fun ZhiSidebar(
                 )
                 SidebarRow(label = "设置", icon = ZhiIcons.settings, onClick = onSettings)
             }
+        }
+    }
+
+    OverlayDialog(
+        show = projectDialogOpen,
+        onDismissRequest = { projectDialogOpen = false },
+        largeScreen = true,
+        maxWidth = ZhiDialogWidth.Compact,
+        outsideMargin = DialogWideOutsideMargin,
+        insideMargin = DialogWideInsideMargin,
+    ) {
+        DialogShell(
+            title = "项目目录",
+            actions = {
+                SecondaryButton(text = "取消", onClick = { projectDialogOpen = false })
+                PrimaryButton(
+                    text = "应用",
+                    enabled = projectDraft.trim().isNotEmpty(),
+                    onClick = {
+                        onUpdateProjectPath(projectDraft.trim())
+                        projectDialogOpen = false
+                    },
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            },
+        ) {
+            Text(
+                text = "与上下文历史一一绑定，切换后加载对应项目会话列表。",
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            )
+            ZhiTextField(
+                value = projectDraft,
+                onValueChange = { projectDraft = it },
+                label = "项目路径",
+                useLabelAsPlaceholder = true,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

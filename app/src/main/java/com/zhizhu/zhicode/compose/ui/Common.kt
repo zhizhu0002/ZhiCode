@@ -8,6 +8,7 @@ import com.zhizhu.zhicode.compose.theme.ZhiSpacing
 import com.zhizhu.zhicode.compose.theme.ZhiSpace
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -413,6 +414,7 @@ fun ZhiSmallPill(
     onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     highlighted: Boolean = false,
+    marquee: Boolean = false,
 ) {
     val scheme = MiuixTheme.colorScheme
     val foreground by animateColorAsState(
@@ -431,7 +433,21 @@ fun ZhiSmallPill(
             text = label,
             fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             maxLines = 1,
-            modifier = Modifier.padding(horizontal = 8.dp),
+            overflow = if (marquee) TextOverflow.Clip else TextOverflow.Ellipsis,
+            modifier = Modifier
+                .padding(horizontal = if (marquee) 2.dp else 8.dp)
+                .then(
+                    if (marquee) {
+                        Modifier.basicMarquee(
+                            iterations = Int.MAX_VALUE,
+                            initialDelayMillis = 800,
+                            repeatDelayMillis = 1000,
+                            velocity = 36.dp,
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
         )
     }
 }

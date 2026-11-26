@@ -74,6 +74,12 @@ import com.zhizhu.zhicode.compose.model.CopySheetState
 import com.zhizhu.zhicode.compose.model.ExtensionSummary
 import com.zhizhu.zhicode.compose.model.EffortLevel
 import com.zhizhu.zhicode.compose.model.FileDeletePrompt
+import com.zhizhu.zhicode.pi.PiCatalogAndPresets
+import com.zhizhu.zhicode.pi.PiModelConfig
+import com.zhizhu.zhicode.pi.PiProviderPreset
+import com.zhizhu.zhicode.pi.PiThinkingLevel
+import com.zhizhu.zhicode.pi.clampThinkingLevel
+import com.zhizhu.zhicode.pi.resolveSupportedThinkingLevels
 import com.zhizhu.zhicode.compose.model.FileEntry
 import com.zhizhu.zhicode.compose.model.FileNameForm
 import com.zhizhu.zhicode.compose.model.FileRoot
@@ -82,6 +88,8 @@ import com.zhizhu.zhicode.compose.model.FileSortKey
 import com.zhizhu.zhicode.compose.model.LiveOutput
 import com.zhizhu.zhicode.compose.model.McpConfigState
 import com.zhizhu.zhicode.compose.model.McpScope
+import com.zhizhu.zhicode.compose.model.ModelOption
+import com.zhizhu.zhicode.compose.model.ModelThinkingPickerState
 import com.zhizhu.zhicode.compose.model.McpServer
 import com.zhizhu.zhicode.compose.model.McpServerDraft
 import com.zhizhu.zhicode.compose.model.McpServerStatus
@@ -3561,21 +3569,17 @@ class WorkspaceViewModel(
         _state.update {
             it.copy(
                 permissionRequest = null,
-                permissionMode = if (alwaysAllow) PermissionMode.ACCEPT_EDITS else it.permissionMode,
+                permissionMode = if (alwaysAllow) PermissionMode.BYPASS else it.permissionMode,
                 message = if (alwaysAllow) {
-                    if (allow) "已允许本次调用，并切换为自动编辑" else "已拒绝本次调用，并切换为自动编辑"
+                    if (allow) "已允许本次调用，并切换为全部放行" else "已拒绝本次调用，并切换为全部放行"
                 } else {
                     if (allow) "已允许本次调用" else "已拒绝本次调用"
                 },
             )
         }
-        // 切到自动编辑后要立刻下发，否则下一条工具调用还会弹窗。
         if (alwaysAllow) {
             runCatching { engine.configure(engineOverrides()) }
-            // 这一次授权**改变了权限模式**（自动编辑），所以要落盘：
-            // 它不再是"仅本次"的语义了。少了这一句，重启后会读回旧模式，
-            // 用户会以为"总是允许"没生效过。
-            persistRuntimeChoice(mode = PermissionMode.ACCEPT_EDITS)
+            persistRuntimeChoice(mode = PermissionMode.BYPASS)
         }
     }
 
@@ -4378,20 +4382,28 @@ class WorkspaceViewModel(
         // 而「一个配置档都没有」本来也是合法状态（子页没有对列表做 `!!`）。
         _state.update {
             it.copy(
-                apiConfig = ApiConfigState(profiles = emptyList(), activeId = "", loading = true),
-                // 设置主页垫在子页之下（页面栈），返回才有回退目标。
-                settingsOpen = true,
-                settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+                apiConfig = ApiConfigState(
+                    profiles = emptyList(),
+                    activeId = "",
+                    loading = true,
+                    autoCompact = it.settings.autoCompact,
+                    autoCompactPercent = it.settings.autoCompactPercent,
+                    customSystemPrompt = it.settings.customSystemPrompt,
+                ),
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
             val loaded = runCatching { ApiConfigStore.read(getApplication()) }.getOrNull()
             _state.update { s ->
-                // 读盘期间用户可能已经返回：那时载荷已置空，结果直接丢弃。
                 val current = s.apiConfig ?: return@update s
-                s.copy(apiConfig = loaded ?: current.copy(loading = false))
+                s.copy(
+                    apiConfig = loaded?.copy(
+                        autoCompact = s.settings.autoCompact,
+                        autoCompactPercent = s.settings.autoCompactPercent,
+                        customSystemPrompt = s.settings.customSystemPrompt,
+                    ) ?: current.copy(loading = false),
+                )
             }
-            // 这两个只在读成功后才跑：它们要从刚读到的配置里推导当前档位。
             if (loaded != null) {
                 syncActiveProfile()
                 syncRoleCardFromStore()
@@ -4400,6 +4412,54 @@ class WorkspaceViewModel(
     }
 
     fun closeApiConfig() = _state.update { it.copy(apiConfig = null) }
+
+    fun openApiConfigManageFromPicker() {
+        _state.update { it.copy(modelPicker = null) }
+        openApiConfig()
+    }
+
+    fun openApiConfigEditActiveProvider() {
+        _state.update { it.copy(modelThinkingPicker = null) }
+        openApiConfig()
+        viewModelScope.launch(Dispatchers.IO) {
+            val loaded = runCatching { ApiConfigStore.read(getApplication()) }.getOrNull() ?: return@launch
+            val active = loaded.profiles.firstOrNull { it.id == loaded.activeId } ?: loaded.profiles.firstOrNull()
+            _state.update { s ->
+                val current = s.apiConfig ?: return@update s
+                s.copy(
+                    apiConfig = loaded.copy(
+                        form = active?.let { ApiProfileDraft.from(it) } ?: ApiProfileDraft.blank(),
+                        autoCompact = s.settings.autoCompact,
+                        autoCompactPercent = s.settings.autoCompactPercent,
+                        customSystemPrompt = s.settings.customSystemPrompt,
+                    ),
+                )
+            }
+        }
+    }
+
+    fun updateContextAndPromptFromApiConfig(
+        autoCompact: Boolean,
+        autoCompactPercent: Int,
+        customSystemPrompt: String,
+    ) {
+        val baseDraft = _state.value.settingsDraft ?: SettingsDraft.from(_state.value)
+        val nextDraft = baseDraft.copy(
+            autoCompact = autoCompact,
+            autoCompactPercent = autoCompactPercent,
+            customSystemPrompt = customSystemPrompt,
+        )
+        applySettingsDraft(nextDraft)
+        _state.update { s ->
+            s.copy(
+                apiConfig = s.apiConfig?.copy(
+                    autoCompact = s.settings.autoCompact,
+                    autoCompactPercent = s.settings.autoCompactPercent,
+                    customSystemPrompt = s.settings.customSystemPrompt,
+                ),
+            )
+        }
+    }
 
     /**
      * 模型面板底部的「添加 API」：**直接开一张空白表单页**。
@@ -4615,7 +4675,14 @@ class WorkspaceViewModel(
                      */
                     it.copy(apiConfig = null, message = "API 配置已保存")
                 } else {
-                    it.copy(apiConfig = state, message = "API 配置已保存")
+                    it.copy(
+                        apiConfig = state.copy(
+                            autoCompact = it.settings.autoCompact,
+                            autoCompactPercent = it.settings.autoCompactPercent,
+                            customSystemPrompt = it.settings.customSystemPrompt,
+                        ),
+                        message = "API 配置已保存",
+                    )
                 }
             }
             syncActiveProfile()
@@ -4634,13 +4701,42 @@ class WorkspaceViewModel(
      * 还要多发一次网络请求。这里只更新 tab 栏那两项，
      * 并把 `activeProfileId` 跟着磁盘对齐（新配置若被自动设为生效，tab 要跟过去）。
      */
+    fun applyApiPreset(preset: PiProviderPreset) = _state.update {
+        val config = it.apiConfig ?: return@update it
+        it.copy(apiConfig = config.copy(form = ApiProfileDraft.fromPreset(preset)))
+    }
+
+    suspend fun fetchDraftModelCatalog(draft: ApiProfileDraft): Result<List<ModelOption>> =
+        withContext(Dispatchers.IO) {
+            ModelCatalogStore.fetchForDraft(
+                context = getApplication(),
+                profileId = draft.id,
+                protocolWire = when (draft.protocol) {
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.OPENAI_RESPONSES -> "openai-responses"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.OPENAI_CHAT -> "openai-chat"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.ANTHROPIC -> "anthropic"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.GOOGLE_GENERATIVE_AI -> "google-generative-ai"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.BEDROCK_CONVERSE_STREAM -> "bedrock-converse-stream"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.MISTRAL_CONVERSATIONS -> "mistral-conversations"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.CODEX_RESPONSES -> "codex-responses"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.ZCODE -> "zcode"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.DEBUG_SCRIPTED -> "debug-scripted"
+                },
+                baseUrl = draft.baseUrl,
+                rawApiKey = draft.apiKey,
+                extraHeaders = draft.extraHeaders,
+            ).map { it.models }.recoverCatching { err ->
+                throw IllegalStateException(ModelCatalogStore.friendlyError(err))
+            }
+        }
+
     private suspend fun refreshModelPickerProfiles() {
         val config = withContext(Dispatchers.IO) { ApiConfigStore.read(getApplication()) }
         _state.update { s ->
             val picker = s.modelPicker ?: return@update s
             s.copy(
                 modelPicker = picker.copy(
-                    profiles = config.profiles.map { ModelProfileTab(it.id, it.name) },
+                    profiles = config.profiles.map { it.toPickerTab() },
                     activeProfileId = config.activeId,
                 ),
             )
@@ -4655,7 +4751,11 @@ class WorkspaceViewModel(
             val state = ApiConfigStore.read(getApplication())
             _state.update {
                 it.copy(
-                    apiConfig = state,
+                    apiConfig = state.copy(
+                        autoCompact = it.settings.autoCompact,
+                        autoCompactPercent = it.settings.autoCompactPercent,
+                        customSystemPrompt = it.settings.customSystemPrompt,
+                    ),
                     message = if (result.isSuccess) "已切换 API 配置" else "切换失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
                 )
             }
@@ -4670,7 +4770,11 @@ class WorkspaceViewModel(
             val state = ApiConfigStore.read(getApplication())
             _state.update {
                 it.copy(
-                    apiConfig = state,
+                    apiConfig = state.copy(
+                        autoCompact = it.settings.autoCompact,
+                        autoCompactPercent = it.settings.autoCompactPercent,
+                        customSystemPrompt = it.settings.customSystemPrompt,
+                    ),
                     message = if (result.isSuccess) "配置已删除" else "无法删除：${result.exceptionOrNull()?.message ?: "未知原因"}",
                 )
             }
@@ -5149,15 +5253,39 @@ class WorkspaceViewModel(
      */
     private fun syncActiveProfile() {
         val active = ApiConfigStore.active(getApplication())
+        val activeProfile = ApiConfigStore.activeProfile(getApplication())
+        val activeModelId = modelOverride ?: active?.model ?: ""
+        val activeModelCfg = activeProfile?.resolveModel(activeModelId)
+            ?: activeModelId.takeIf { it.isNotBlank() }?.let { id ->
+                PiCatalogAndPresets.inferModelConfig(id, id, activeProfile?.protocol?.toPiFormat() ?: com.zhizhu.zhicode.pi.PiApiFormat.OPENAI_COMPLETIONS)
+            }
+        val supported = resolveSupportedThinkingLevels(activeModelCfg).map { it.toUiEffort() }
+        val prevEffort = _state.value.effort
+        val clampedEffort = clampThinkingLevel(activeModelCfg, prevEffort.toPiLevel()).toUiEffort()
+
         _state.update {
             it.copy(
                 profileName = active?.name ?: "未配置",
-                modelLabel = modelOverride ?: active?.model ?: "未设置",
+                modelLabel = activeModelId.ifBlank { "未设置" },
                 apiKeyConfigured = active?.hasKey == true,
+                contextWindow = activeModelCfg?.contextWindow ?: it.contextWindow,
+                availableEfforts = supported,
+                effort = clampedEffort,
+                settingsDraft = it.settingsDraft?.copy(
+                    contextWindow = activeModelCfg?.contextWindow ?: it.contextWindow,
+                    availableEfforts = supported,
+                    effort = clampedEffort,
+                ),
             )
+        }
+        if (clampedEffort != prevEffort) {
+            persistRuntimeChoice(effort = clampedEffort)
         }
         runCatching { engine.configure(engineOverrides()) }
     }
+
+    private fun PiThinkingLevel.toUiEffort(): EffortLevel =
+        EffortLevel.entries.firstOrNull { it.wire == id } ?: EffortLevel.HIGH
 
     private fun appendInfo(title: String, body: String) {
         _state.update {
@@ -5297,19 +5425,18 @@ class WorkspaceViewModel(
     fun setPermissionMode(mode: PermissionMode) {
         _state.update { it.copy(permissionMode = mode, message = "权限模式：${mode.label}") }
         persistRuntimeChoice(mode = mode)
+        if (engine.hasEngine() && !engine.isBusy()) {
+            runCatching { engine.configure(engineOverrides()) }
+        }
     }
 
     fun setEffort(level: EffortLevel) {
         _state.update { it.copy(effort = level, message = "推理强度：${level.label}") }
         persistRuntimeChoice(effort = level)
+        if (engine.hasEngine() && !engine.isBusy()) {
+            runCatching { engine.configure(engineOverrides()) }
+        }
     }
-
-    /*
-     * 下面两个是**斜杠命令**用的（`/permissions`、`/effort`）。
-     *
-     * 为什么不共用下拉：斜杠命令是在终端/输入框里敲出来的，没有"点一下展开"
-     * 的按钮可以挂下拉菜单，只能弹一个居中列表让人挑。所以这两条路都得留。
-     */
 
     fun showPermissionPicker() {
         val values = PermissionMode.entries
@@ -5331,7 +5458,7 @@ class WorkspaceViewModel(
     }
 
     fun showEffortPicker() {
-        val values = EffortLevel.entries
+        val values = _state.value.availableEfforts.ifEmpty { EffortLevel.DEFAULT_AVAILABLE }
         _state.update {
             it.copy(
                 choicePicker = ChoicePickerState(
@@ -5620,10 +5747,16 @@ class WorkspaceViewModel(
      * 会话正在跑的时候换模型不会打断当前轮：模型写在配置记录里，下一轮 `configure`
      * 自然带上（原版的"下一完整轮生效"）。
      */
+    private fun ApiProfile.toPickerTab(): ModelProfileTab = ModelProfileTab(
+        id = id,
+        name = name,
+        protocolLabel = protocol.label,
+        modelLabel = model.ifBlank { effectiveModels().firstOrNull()?.id ?: "未设置模型" },
+        models = effectiveModels(),
+    )
+
+    /** 打开纯供应商切换面板（纯本地读取，不拉取在线模型目录）。 */
     fun showModelPicker() {
-        // 直接从存储读那几份 API 记录，而**不是**从 `s.apiConfig` 读：
-        // 后者的语义是"API 配置弹窗当前打开"，面板显示时它恰好是 null，
-        // 所以那样取值会永远落到 `s.profileName` 兜底上、tab 栏也永远没有数据。
         val config = ApiConfigStore.read(getApplication())
         val active = config.profiles.firstOrNull { it.id == config.activeId }
         _state.update { s ->
@@ -5631,15 +5764,15 @@ class WorkspaceViewModel(
                 modelPicker = ModelPickerState(
                     profileName = active?.name ?: s.profileName,
                     currentModel = active?.model?.takeIf { it.isNotBlank() } ?: s.modelLabel,
-                    // 面板一打开就先把"要用的模型名"填成当前生效的那个：
-                    // 高亮看的正是这个字段，不填的话刚打开时一行都不高亮。
-                    query = active?.model?.takeIf { it.isNotBlank() } ?: s.modelLabel,
-                    profiles = config.profiles.map { ModelProfileTab(it.id, it.name) },
+                    query = "",
+                    loading = false,
+                    status = "",
+                    models = emptyList(),
+                    profiles = config.profiles.map { it.toPickerTab() },
                     activeProfileId = config.activeId,
                 ),
             )
         }
-        fetchModelCatalog()
     }
 
     fun closeModelPicker() {
@@ -5650,154 +5783,80 @@ class WorkspaceViewModel(
         _state.update { it.copy(modelPicker = null) }
     }
 
-    /**
-     * 切换面板里 tab 选中的那份 API 记录，并重新拉它自己的模型目录。
-     *
-     * ## 为什么不复用 [selectApiProfile]
-     *
-     * 那个函数会写 `apiConfig = state`，而 `apiConfig != null` 在本工程里的语义是
-     * **"API 配置弹窗当前打开"**（`AppScaffold` 用它决定显示哪个弹窗）。在模型面板里
-     * 调它就会在面板上凭空弹出一张配置页。这里只更新面板自己那份状态。
-     */
+    /** 直接切换激活供应商并收起纯供应商切换面板。 */
     fun selectModelPickerProfile(profileId: String) {
-        // 换配置就用那份配置自己的模型，别把上一条配置的会话级覆盖带过去。
-        // 与 selectApiProfile 同一处理。
         modelOverride = null
+        closeModelPicker()
         viewModelScope.launch(Dispatchers.IO) {
             val result = ApiConfigStore.select(getApplication(), profileId)
             val config = ApiConfigStore.read(getApplication())
             val active = config.profiles.firstOrNull { it.id == config.activeId }
+            syncActiveProfile()
+            syncRoleCardFromStore()
             _state.update { s ->
-                // 面板可能已经被关掉了：那就只同步摘要，不要把状态又塞回去。
-                val picker = s.modelPicker ?: return@update s
                 s.copy(
-                    modelPicker = picker.copy(
-                        profileName = active?.name ?: picker.profileName,
-                        currentModel = active?.model.orEmpty(),
-                        // 换配置后旧配置的模型名不能留在框里 —— 那会让「完成」把
-                        // A 家的模型名写到 B 家的配置上。清空比留错值安全。
-                        query = active?.model.orEmpty(),
-                        profiles = config.profiles.map { ModelProfileTab(it.id, it.name) },
-                        activeProfileId = config.activeId,
-                        loading = true,
-                        status = "正在从当前 API 获取模型…",
-                        models = emptyList(),
-                    ),
-                    message = if (result.isSuccess) "已切换 API 配置"
+                    message = if (result.isSuccess) "已切换供应商：${active?.name ?: ""}"
                     else "切换失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+                    messageIsError = result.isFailure,
                 )
             }
-            // 面板还开着才需要重新拉目录；关掉了就不必再发一次请求。
-            if (_state.value.modelPicker != null) fetchModelCatalog()
         }
-        // 摘要与引擎配置要立刻跟上，否则底栏还显示旧配置名。
-        syncActiveProfile()
-        syncRoleCardFromStore()
     }
 
-    fun setModelQuery(text: String) {
-        _state.update { s -> s.copy(modelPicker = s.modelPicker?.copy(query = text)) }
-    }
-
-    /**
-     * 重新拉一次模型目录（面板里额度卡片的「刷新」走这里）。
-     *
-     * 面板没开时直接返回：没有面板可更新，发出去的请求就只是白跑一趟。
-     * 拉取本身复用 [fetchModelCatalog]，它已经把 loading 态与失败态都处理好了。
-     */
-    fun refreshModelCatalog() {
-        if (_state.value.modelPicker == null) return
+    /** 打开本地模型与思考强度两级选择菜单（完全本地配置，不发起网络请求）。 */
+    fun openModelThinkingPicker() {
+        val config = ApiConfigStore.read(getApplication())
+        val active = config.profiles.firstOrNull { it.id == config.activeId }
+        val models = active?.effectiveModels().orEmpty()
+        val currentId = modelOverride?.takeIf { it.isNotBlank() }
+            ?: active?.model?.takeIf { it.isNotBlank() }
+            ?: _state.value.modelLabel
         _state.update { s ->
-            s.copy(modelPicker = s.modelPicker?.copy(loading = true, status = "正在刷新模型与额度…"))
-        }
-        fetchModelCatalog()
-    }
-
-    private fun fetchModelCatalog() {
-        modelCatalogJob?.cancel()
-        modelCatalogJob = viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { ModelCatalogStore.fetch(getApplication()) }
-            val fetched = result.getOrNull()
-            _state.update { s ->
-                // 面板可能已经被关掉了：这时不要把状态又塞回去。
-                val picker = s.modelPicker ?: return@update s
-                s.copy(
-                    modelPicker = if (fetched == null) {
-                        picker.copy(
-                            loading = false,
-                            status = ModelCatalogStore.friendlyError(result.exceptionOrNull()),
-                            models = emptyList(),
-                            // 列表没拿到，额度卡片也一并清掉：留着上一次的数字
-                            // 会让人以为那是当前的（它可能已经是刷新前的旧值）。
-                            quota = emptyList(),
-                            quotaError = "",
-                            modelsNote = "",
-                        )
-                    } else {
-                        picker.copy(
-                            loading = false,
-                            status = if (fetched.models.isEmpty()) "API 未返回可用模型，可手动输入"
-                            else "已获取 ${fetched.models.size} 个模型",
-                            models = fetched.models,
-                            quota = fetched.quota,
-                            // 额度失败**不**让整次读取失败（见 ModelCatalogStore.Catalog）：
-                            // 模型列表照旧可用，原因只写在额度卡片里。
-                            quotaError = fetched.quotaError,
-                            modelsNote = fetched.note,
-                        )
-                    },
-                )
-            }
+            s.copy(
+                modelThinkingPicker = ModelThinkingPickerState(
+                    providerId = active?.id.orEmpty(),
+                    providerName = active?.name ?: s.profileName,
+                    models = models,
+                    currentModelId = currentId,
+                    currentEffort = s.effort,
+                    expandedModel = null,
+                ),
+            )
         }
     }
 
-    /**
-     * 在列表里**点某一行**：立刻选中它并保存，但**不关面板**。
-     *
-     * 与 [applySelectedModel] 的区别只有"关不关面板"这一件事，但这一点决定了观感：
-     * 之前只有点底部按钮才写配置，于是高亮要等那一下才动 —— 用户点了一行却看不到
-     * 任何反馈，会以为没点上。现在点哪行哪行立刻变蓝，配置同时也已经存好了。
-     *
-     * 保存做成 **latest-wins**：连点几下时取消上一个写入任务。不取消的话多个 IO 写入
-     * 并发进行、完成顺序不定，最后落盘的可能是中间那一次点到的模型 —— 而界面上显示的
-     * 却是最后一次点的那个，两边就此分叉。
-     */
-    fun selectModel(model: String) {
-        val target = model.trim()
-        if (target.isEmpty()) return
-        // 先把界面上那一份改掉，点击的反馈必须是**同步**的（等 IO 回来才变蓝会顿一下）。
-        // 用于高亮的 `query` 就是"要用的模型名"，所以改它等于把高亮挪过去。
-        _state.update { s -> s.copy(modelPicker = s.modelPicker?.copy(query = target)) }
-        persistModel(target)
+    fun closeModelThinkingPicker() {
+        _state.update { it.copy(modelThinkingPicker = null) }
     }
 
-    /**
-     * 应用选定的模型：写进当前配置记录并重跑 `configure`，让下一次请求就用上新模型。
-     *
-     * 这里**不**走 `engineOverrides().model`：模型属于配置记录的持久化内容，
-     * 只做一次内存覆盖会让"底栏显示的模型"和"实际请求的模型"在下一次启动后分叉。
-     */
-    fun applySelectedModel(model: String) {
-        val target = model.trim()
-        if (target.isEmpty()) return
-        closeModelPicker()
-        persistModel(target)
+    fun enterModelThinkingSubmenu(model: PiModelConfig) {
+        _state.update { s ->
+            s.copy(modelThinkingPicker = s.modelThinkingPicker?.copy(expandedModel = model))
+        }
     }
 
-    /** [selectModel] 与 [applySelectedModel] 共用的落盘部分（区别只在调用方关不关面板）。 */
-    private fun persistModel(target: String) {
+    fun backToModelThinkingList() {
+        _state.update { s ->
+            s.copy(modelThinkingPicker = s.modelThinkingPicker?.copy(expandedModel = null))
+        }
+    }
+
+    fun selectModelAndEffort(modelId: String, effort: EffortLevel) {
+        val target = modelId.trim()
+        if (target.isEmpty()) return
+        closeModelThinkingPicker()
         modelOverride = target
+        _state.update { it.copy(effort = effort) }
+        persistRuntimeChoice(effort = effort)
         modelSaveJob?.cancel()
         modelSaveJob = viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { ApiConfigStore.setDefaultModel(getApplication(), target) }
-            // 覆盖值先生效，所以即使写配置失败模型也已经切换了；把这一点如实说出来，
-            // 而不是报一个"保存失败"让人以为模型没换。
             syncActiveProfile()
             syncRoleCardFromStore()
             _state.update {
                 it.copy(
-                    message = if (result.isSuccess) "模型：$target"
-                    else "模型：$target（本次会话已生效，未能写入配置：${result.exceptionOrNull()?.message ?: "未知原因"}）",
+                    message = if (result.isSuccess) "已切换：$target · ${effort.label}"
+                    else "已切换：$target · ${effort.label}（未能写入默认配置）",
                 )
             }
         }
@@ -6197,9 +6256,16 @@ class WorkspaceViewModel(
                 } else _state.update { it.copy(choicePicker = null) }
             }
             ChoiceIntent.EFFORT -> {
-                val level = EffortLevel.entries.getOrNull(index)
-                if (level != null) _state.update {
-                    it.copy(choicePicker = null, effort = level, message = "推理强度：${level.label}")
+                val available = _state.value.availableEfforts.ifEmpty { EffortLevel.DEFAULT_AVAILABLE }
+                val level = available.getOrNull(index)
+                if (level != null) {
+                    _state.update {
+                        it.copy(choicePicker = null, effort = level, message = "推理强度：${level.label}")
+                    }
+                    persistRuntimeChoice(effort = level)
+                    if (engine.hasEngine() && !engine.isBusy()) {
+                        runCatching { engine.configure(engineOverrides()) }
+                    }
                 } else _state.update { it.copy(choicePicker = null) }
             }
             // 这里**没有** MODEL：模型面板要异步拉目录并写回配置记录，
@@ -6755,6 +6821,17 @@ class WorkspaceViewModel(
             // 删除后仍留历史时，顺手把最近一条打开，避免出现"删完一片空白"。
             if (wasActive && next != null) openSession(next)
         }
+    }
+
+    /** 在侧栏会话管理中切换项目目录并刷新会话列表。 */
+    fun updateProjectDirectory(rawPath: String) {
+        val next = rawPath.trim()
+        if (next.isEmpty()) return
+        val baseDraft = _state.value.settingsDraft ?: SettingsDraft.from(_state.value)
+        applySettingsDraft(baseDraft.copy(projectPath = next))
+        refreshSessions()
+        runCatching { engine.configure(engineOverrides()) }
+        _state.update { it.copy(message = "项目目录：$next", messageIsError = false) }
     }
 
     /** 从磁盘重新读取会话列表（新建/发消息/删除之后调用）。 */

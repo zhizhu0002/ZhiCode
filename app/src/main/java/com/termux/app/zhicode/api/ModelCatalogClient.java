@@ -89,7 +89,7 @@ public final class ModelCatalogClient {
         try {
             prepare(connection, config);
             String body = readBounded(connection, cancellation);
-            return parse(body);
+            return parse(body, ApiProtocol.fromWire(config.protocol));
         } finally {
             connection.disconnect();
         }
@@ -122,7 +122,12 @@ public final class ModelCatalogClient {
      * 协议改名时这里会被漏掉，表现为「目录接口 401，而对话正常」。
      */
     private static void applyAuth(HttpURLConnection connection, SessionConfig config) {
-        if (ApiProtocol.fromWire(config.protocol) != ApiProtocol.ANTHROPIC) {
+        ApiProtocol protocol = ApiProtocol.fromWire(config.protocol);
+        if (protocol == ApiProtocol.GOOGLE_GENERATIVE_AI) {
+            connection.setRequestProperty("x-goog-api-key", config.apiKey);
+            return;
+        }
+        if (protocol != ApiProtocol.ANTHROPIC) {
             connection.setRequestProperty(HEADER_AUTHORIZATION, BEARER_PREFIX + config.apiKey);
             return;
         }
@@ -184,16 +189,33 @@ public final class ModelCatalogClient {
      * 免得为一个不会显示的条目付出解析代价。
      */
     static List<ModelDescriptor> parse(String body) throws Exception {
-        JSONArray data = new JSONObject(body).optJSONArray(JSON_ARRAY_FIELD);
+        return parse(body, null);
+    }
+
+    static List<ModelDescriptor> parse(String body, ApiProtocol protocol) throws Exception {
+        JSONObject root = new JSONObject(body);
+        JSONArray data = root.optJSONArray(JSON_ARRAY_FIELD);
+        boolean isGeminiList = false;
+        if (data == null && protocol == ApiProtocol.GOOGLE_GENERATIVE_AI) {
+            data = root.optJSONArray("models");
+            isGeminiList = data != null;
+        }
         if (data == null) throw new IllegalStateException(ERROR_BODY);
 
         Map<String, ModelDescriptor> byId = new LinkedHashMap<>();
         for (int i = 0; i < data.length() && byId.size() < MAX_MODELS; i++) {
             JSONObject item = data.optJSONObject(i);
             if (item == null) continue;
-            String id = sanitizeId(item.optString("id", ""));
+            String rawId = isGeminiList
+                    ? item.optString("name", item.optString("id", ""))
+                    : item.optString("id", "");
+            if (isGeminiList && rawId.startsWith("models/")) {
+                rawId = rawId.substring("models/".length());
+            }
+            String id = sanitizeId(rawId);
             if (id.isEmpty() || byId.containsKey(id)) continue;
-            String name = sanitizeName(item.optString("display_name", item.optString("name", id)), id);
+            String fallbackDisplay = item.optString("displayName", item.optString("display_name", item.optString("name", id)));
+            String name = sanitizeName(fallbackDisplay, id);
             byId.put(id, new ModelDescriptor(id, name));
         }
 

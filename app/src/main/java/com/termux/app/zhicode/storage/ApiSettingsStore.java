@@ -391,6 +391,12 @@ public final class ApiSettingsStore {
         prefs.edit().putString(Key.ACTIVE_PROFILE, profileId).apply();
     }
 
+    /** 读取指定配置的密钥（供多供应商同步层在内存中组装运行环境，不落明文盘）。 */
+    public synchronized String apiKeyForProfile(ApiProfile profile) {
+        if (profile == null) return "";
+        return apiKeyFor(profile);
+    }
+
     /** 取某 profile 解析后的完整会话配置；profile 不存在返回 null。 */
     public synchronized SessionConfig resolveProfile(String profileId, SessionConfig base) {
         ApiProfile profile = findProfile(getProfiles(), profileId);
@@ -461,6 +467,9 @@ public final class ApiSettingsStore {
         saved.baseUrl = trimToEmpty(saved.baseUrl);
         saved.extraHeaders = trimToEmpty(saved.extraHeaders);
         saved.defaultModel = trimToEmpty(saved.defaultModel);
+        saved.providerKey = trimToEmpty(saved.providerKey);
+        saved.compatJson = trimToEmpty(saved.compatJson);
+        saved.modelsJson = trimToEmpty(saved.modelsJson);
         saved.revision = 1;
         saved.credentialRevision = 1;
         return saved;

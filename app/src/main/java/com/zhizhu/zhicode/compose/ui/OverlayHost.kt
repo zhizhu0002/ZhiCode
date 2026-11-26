@@ -12,7 +12,6 @@ import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.AttachFileOverlay
 import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.ChoicePickerOverlay
 import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.CopySheetOverlay
 import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.EnvironmentOverlay
-import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.ModelPickerOverlay
 import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.PermissionOverlay
 import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.PlanApprovalOverlay
 import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.TaskListOverlay
@@ -130,31 +129,5 @@ internal fun ZhiOverlayHost(
         onRepair = viewModel::repairRuntime,
         onRefresh = viewModel::refreshEnvironmentReport,
         onCopy = { viewModel.copyEnvironmentReport() },
-    )
-    ModelPickerOverlay(
-        picker = state.modelPicker,
-        onDismiss = viewModel::closeModelPicker,
-        onQueryChange = viewModel::setModelQuery,
-        // 点一行：立刻选中并保存，面板不关（高亮就是在这一步跟过去的）
-        onPickModel = viewModel::selectModel,
-        // 换一份 API 记录：重新拉它自己的模型目录
-        onSelectProfile = viewModel::selectModelPickerProfile,
-        // 主按钮：选择在点击那一刻已经存好，这里只是应用手动输入的名字并收起面板
-        onUse = viewModel::applySelectedModel,
-        // 额度卡片的「刷新」：重拉模型与额度（参考图的额度卡片也带这个按钮）
-        onRefreshQuota = viewModel::refreshModelCatalog,
-        onAddApi = {
-            /*
-             * 直开一张空白表单页，**不关模型面板**。
-             *
-             * 原来的写法是「关面板 → openApiConfig() → newApiProfile()」，于是
-             * 栈是 `[工作区, 设置, API列表, API表单]`：用户从模型面板点这一下，
-             * 要么按三次返回才回得来，要么就得退出到工作区重开面板。
-             *
-             * 现在只推一页表单、面板留在下面（`modelPicker` 不动），
-             * 于是返回键一下就落回模型面板 —— 这才是这个按钮该有的去向。
-             */
-            viewModel.openApiProfileFormFromModelPicker()
-        },
     )
 }

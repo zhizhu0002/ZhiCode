@@ -268,10 +268,10 @@ private fun ZhiCodeScreen(
                     state.skills != null -> add(SettingsKey.Skills)
                     state.roleCards != null -> add(SettingsKey.RoleCards)
                     state.memory != null -> add(SettingsKey.Memory)
-                    state.promptsOpen -> add(SettingsKey.Prompts)
                     state.themePageOpen -> add(SettingsKey.Theme)
                     state.chatDisplayOpen -> add(SettingsKey.ChatDisplay)
                 }
+                if (state.promptsOpen) add(SettingsKey.Prompts)
             }
             /*
              * 「关于 / 许可 / 隐私」必须**串在设置分支之后**，不能放在它前面。
@@ -367,13 +367,13 @@ private fun ZhiCodeScreen(
                 live.privacyOpen -> viewModel.closePrivacy()
                 live.licensesOpen -> viewModel.closeLicenses()
                 live.aboutOpen -> viewModel.closeAbout()
+                live.promptsOpen -> viewModel.closePrompts()
                 live.apiConfig != null -> viewModel.closeApiConfig()
                 live.mcpConfig != null -> viewModel.closeMcpConfig()
                 live.searchServices != null -> viewModel.closeSearchServices()
                 live.skills != null -> viewModel.closeSkills()
                 live.roleCards != null -> viewModel.closeRoleCards()
                 live.memory != null -> viewModel.closeMemory()
-                live.promptsOpen -> viewModel.closePrompts()
                 live.themePageOpen -> viewModel.closeThemePage()
                 live.chatDisplayOpen -> viewModel.closeChatDisplay()
                 live.settingsOpen -> viewModel.closeSettings()

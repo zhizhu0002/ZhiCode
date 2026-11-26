@@ -94,6 +94,12 @@ internal class PiRpcBackend(
     private var activeProcessEnvKey: String = ""
 
     @Volatile
+    private var activeProviderKey: String = PiConfigSync.PROVIDER_ID
+
+    @Volatile
+    private var activeModelId: String = ""
+
+    @Volatile
     private var sessionStore: SessionStore? = null
 
     @Volatile
@@ -160,9 +166,12 @@ internal class PiRpcBackend(
             ioExecutor.execute { stopProcessQuietly() }
             return
         }
+        val providerOrModelChanged = synced.providerId != activeProviderKey || synced.modelId != activeModelId
+        activeProviderKey = synced.providerId
+        activeModelId = synced.modelId
         if (alive) {
             ioExecutor.execute {
-                if (synced.modelId.isNotEmpty() && prev.model != next.model) {
+                if (synced.modelId.isNotEmpty() && (providerOrModelChanged || prev.model != next.model)) {
                     runCatching {
                         sendCommandAsync(
                             JSONObject()
@@ -457,6 +466,8 @@ internal class PiRpcBackend(
             process = started
             stdinStream = started.outputStream
             activeProcessEnvKey = processRestartKey(config, synced)
+            activeProviderKey = synced.providerId
+            activeModelId = synced.modelId
 
             startStdoutThread(started)
             startStderrThread(started)
@@ -921,22 +932,28 @@ internal class PiRpcBackend(
         }
     }
 
-    private fun processRestartKey(config: SessionConfig, synced: PiConfigSync.SyncedConfig): String = listOf(
-        config.projectDirectory,
-        config.protocol,
-        config.baseUrl,
-        config.apiKey,
-        config.extraHeaders,
-        config.customSystemPrompt,
-        config.roleCard,
-        config.rootExecutionEnabled.toString(),
-        config.shizukuExecutionEnabled.toString(),
-        config.webSearchEnabled.toString(),
-        config.contextWindowTokens.toString(),
-        synced.compactionEnabled.toString(),
-        synced.compactionReserveTokens.toString(),
-        synced.modelId,
-    ).joinToString("\u0000")
+    private fun processRestartKey(config: SessionConfig, synced: PiConfigSync.SyncedConfig): String {
+        val multiKeys = synced.env.entries
+            .filter { it.key.startsWith("ZHICODE_KEY_") }
+            .sortedBy { it.key }
+        val envPairs = if (multiKeys.isNotEmpty()) {
+            multiKeys.joinToString("\u0001") { "${it.key}=${it.value}" }
+        } else {
+            "ZHICODE_API_KEY=${synced.env["ZHICODE_API_KEY"].orEmpty()}"
+        }
+        return listOf(
+            config.projectDirectory,
+            config.customSystemPrompt,
+            config.roleCard,
+            config.rootExecutionEnabled.toString(),
+            config.shizukuExecutionEnabled.toString(),
+            config.webSearchEnabled.toString(),
+            synced.compactionEnabled.toString(),
+            synced.compactionReserveTokens.toString(),
+            synced.modelsJsonHash,
+            envPairs,
+        ).joinToString("\u0000")
+    }
 
     companion object {
         private const val STARTUP_TIMEOUT_MS = 30_000L

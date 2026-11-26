@@ -176,12 +176,6 @@ export default function (pi: ExtensionAPI) {
     if (mode === "bypassPermissions") {
       return;
     }
-    if (mode === "dontAsk" && !info.highRisk) {
-      return;
-    }
-    if ((mode === "acceptEdits" || mode === "auto") && info.kind === "write") {
-      return;
-    }
 
     const title = `zhi-perm:${event.toolName}:${info.highRisk ? "1" : "0"}`;
     const allowed = await ctx.ui.confirm(title, info.summary || event.toolName);

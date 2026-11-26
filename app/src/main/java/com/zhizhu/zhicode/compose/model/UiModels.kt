@@ -260,16 +260,27 @@ enum class WorkspaceTab(val label: String) {
 }
 
 enum class PermissionMode(val label: String, val detail: String) {
-    ASK("每次询问", "每个工具调用都需要你确认"),
-    ACCEPT_EDITS("自动编辑", "自动允许文件编辑，其他调用仍需确认"),
-    PLAN("规划", "先产出计划，批准后再执行"),
-    AUTO("自动", "由 ZhiCode 判断哪些调用需要确认"),
-    DONT_ASK("不询问", "不再弹出确认，高风险操作仍会提示"),
-    BYPASS("跳过权限", "跳过全部权限检查，仅限受信环境"),
+    ASK("询问确认", "只读操作直接放行，写入与命令执行需你确认"),
+    PLAN("仅规划", "只读探索模式，拦截所有文件修改与命令执行"),
+    BYPASS("全部放行", "跳过工具确认，直接执行所有已启用工具"),
 }
 
-enum class EffortLevel(val label: String) {
-    LOW("低"), MEDIUM("中"), HIGH("高"), MAX("最高"), AUTO("自动")
+enum class EffortLevel(val label: String, val wire: String) {
+    OFF("off", "off"),
+    MINIMAL("minimal", "minimal"),
+    LOW("low", "low"),
+    MEDIUM("medium", "medium"),
+    HIGH("high", "high"),
+    XHIGH("xhigh", "xhigh"),
+    MAX("max", "max"),
+    ;
+
+    fun toPiLevel(): com.zhizhu.zhicode.pi.PiThinkingLevel =
+        com.zhizhu.zhicode.pi.PiThinkingLevel.fromId(wire)
+
+    companion object {
+        val DEFAULT_AVAILABLE: List<EffortLevel> = listOf(OFF, MINIMAL, LOW, MEDIUM, HIGH)
+    }
 }
 
 enum class ThemeMode(val label: String) { SYSTEM("跟随系统"), LIGHT("浅色"), DARK("深色") }
@@ -888,7 +899,8 @@ data class WorkspaceUiState(
     /** 任务详情窗口是否打开。 */
     val taskListOpen: Boolean = false,
     val permissionMode: PermissionMode = PermissionMode.ASK,
-    val effort: EffortLevel = EffortLevel.AUTO,
+    val effort: EffortLevel = EffortLevel.HIGH,
+    val availableEfforts: List<EffortLevel> = EffortLevel.DEFAULT_AVAILABLE,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     /**
      * 主题与显示设置（预设、Monet 种子色、AMOLED、四个显示开关、界面缩放）。
@@ -1090,6 +1102,7 @@ data class WorkspaceUiState(
      */
     val update: UpdateUiState = UpdateUiState(),
     val modelPicker: com.zhizhu.zhicode.compose.model.ModelPickerState? = null,
+    val modelThinkingPicker: com.zhizhu.zhicode.compose.model.ModelThinkingPickerState? = null,
     /**
      * 非空即「UI 调试」整页打开（**仅 debug 构建**有入口，见设置页的「扩展」组）。
      *

@@ -582,8 +582,17 @@ private fun ComposerHost(
         onAttachmentImage = viewModel::currentAttachmentImage,
         // 页脚的下拉：选中即生效，不再弹选择器
         onPermissionSelected = viewModel::setPermissionMode,
-        onEffortSelected = viewModel::setEffort,
+        onModelThinkingChip = viewModel::openModelThinkingPicker,
+        onEnterModelThinkingSubmenu = viewModel::enterModelThinkingSubmenu,
+        onBackToModelThinkingList = viewModel::backToModelThinkingList,
+        onSelectModelAndEffort = viewModel::selectModelAndEffort,
+        onDismissModelThinking = viewModel::closeModelThinkingPicker,
+        onConfigureModels = viewModel::openApiConfigEditActiveProvider,
         onModelChip = viewModel::showModelPicker,
+        onSelectProvider = viewModel::selectModelPickerProfile,
+        onDismissProvider = viewModel::closeModelPicker,
+        onAddProvider = viewModel::openApiProfileFormFromModelPicker,
+        onManageProviders = viewModel::openApiConfigManageFromPicker,
         onCompactContext = {
             viewModel.requestComposerText("/compact")
             viewModel.send()

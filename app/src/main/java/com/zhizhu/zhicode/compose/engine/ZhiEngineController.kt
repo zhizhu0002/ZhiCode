@@ -1054,42 +1054,21 @@ internal class ZhiEngineController(
 
 internal fun PermissionMode.toEngineMode(): String = when (this) {
     PermissionMode.ASK -> PermissionModePolicy.DEFAULT
-    PermissionMode.ACCEPT_EDITS -> PermissionModePolicy.ACCEPT_EDITS
     PermissionMode.PLAN -> PermissionModePolicy.PLAN
-    PermissionMode.AUTO -> PermissionModePolicy.AUTO
-    PermissionMode.DONT_ASK -> PermissionModePolicy.DONT_ASK
     PermissionMode.BYPASS -> PermissionModePolicy.BYPASS
 }
 
-internal fun EffortLevel.toEngineEffort(): String = when (this) {
-    EffortLevel.LOW -> "low"
-    EffortLevel.MEDIUM -> "medium"
-    EffortLevel.HIGH -> "high"
-    EffortLevel.MAX -> "max"
-    EffortLevel.AUTO -> "auto"
-}
+internal fun EffortLevel.toEngineEffort(): String = wire
 
-/**
- * 引擎推理档 → 界面枚举。
- *
- * 与 [engineModeToUi] 成对：启动时要把盘上存的值读回界面状态，
- * 而盘上存的是**引擎字符串**（`low`/`medium`/…）。
- *
- * 认不出来时回落到 [EffortLevel.AUTO]（界面的默认档），
- * 而不是抛异常 —— 用户手动改过 prefs、或将来引擎加了新档位时，
- * 正确的反应是"用默认值"，不是崩在启动路径上。
- */
 internal fun engineEffortToUi(effort: String?): EffortLevel {
     val key = effort?.trim()?.lowercase().orEmpty()
-    return EffortLevel.entries.firstOrNull { it.toEngineEffort() == key } ?: EffortLevel.AUTO
+    if (key == "none") return EffortLevel.OFF
+    return EffortLevel.entries.firstOrNull { it.wire == key } ?: EffortLevel.HIGH
 }
 
-/** 引擎权限模式 → 界面枚举（引擎回传的可能是 `default`）。 */
+/** 引擎权限模式 → 界面枚举（历史 acceptEdits/auto/dontAsk 统一安全归回 ASK）。 */
 internal fun engineModeToUi(mode: String?): PermissionMode = when (PermissionModePolicy.normalize(mode)) {
-    PermissionModePolicy.ACCEPT_EDITS -> PermissionMode.ACCEPT_EDITS
     PermissionModePolicy.PLAN -> PermissionMode.PLAN
-    PermissionModePolicy.AUTO -> PermissionMode.AUTO
-    PermissionModePolicy.DONT_ASK -> PermissionMode.DONT_ASK
     PermissionModePolicy.BYPASS -> PermissionMode.BYPASS
     else -> PermissionMode.ASK
 }

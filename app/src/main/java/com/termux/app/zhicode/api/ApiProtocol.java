@@ -44,6 +44,9 @@ enum ApiProtocol {
     ANTHROPIC("anthropic"),
     OPENAI_CHAT("openai-chat"),
     OPENAI_RESPONSES("openai-responses"),
+    GOOGLE_GENERATIVE_AI("google-generative-ai"),
+    BEDROCK_CONVERSE_STREAM("bedrock-converse-stream"),
+    MISTRAL_CONVERSATIONS("mistral-conversations"),
 
     /** Codex 变体。与 {@link #OPENAI_RESPONSES} 共用传输实现，但线上行为不同。 */
     CODEX_RESPONSES(OpenAIResponsesProvider.WIRE_CODEX_RESPONSES),
@@ -96,7 +99,9 @@ enum ApiProtocol {
         for (ApiProtocol protocol : values()) {
             if (protocol.wireName.equals(wire)) return protocol;
         }
-        if (ALIAS_OPENAI_COMPATIBLE.equals(wire)) return OPENAI_CHAT;
+        if (ALIAS_OPENAI_COMPATIBLE.equals(wire) || "openai-completions".equals(wire)) return OPENAI_CHAT;
+        if ("anthropic-messages".equals(wire)) return ANTHROPIC;
+        if ("openai-codex-responses".equals(wire)) return CODEX_RESPONSES;
         return null;
     }
 }

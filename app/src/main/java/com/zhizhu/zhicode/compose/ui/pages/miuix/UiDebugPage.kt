@@ -2412,7 +2412,7 @@ private fun WorkspaceSection(state: WorkspaceUiState, viewModel: WorkspaceViewMo
                 )
                 TextButton(
                     text = "推理 → 自动",
-                    onClick = { viewModel.setEffort(EffortLevel.AUTO) },
+                    onClick = { viewModel.setEffort(EffortLevel.HIGH) },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -2570,8 +2570,17 @@ private fun ComposerSection(state: WorkspaceUiState, viewModel: WorkspaceViewMod
             // 这里返回 null 会让芯片回退成「图标 + 文件名」形态（不影响真实输入器）。
             onAttachmentImage = { null },
             onPermissionSelected = viewModel::setPermissionMode,
-            onEffortSelected = viewModel::setEffort,
+            onModelThinkingChip = viewModel::openModelThinkingPicker,
+            onEnterModelThinkingSubmenu = viewModel::enterModelThinkingSubmenu,
+            onBackToModelThinkingList = viewModel::backToModelThinkingList,
+            onSelectModelAndEffort = viewModel::selectModelAndEffort,
+            onDismissModelThinking = viewModel::closeModelThinkingPicker,
+            onConfigureModels = viewModel::openApiConfigEditActiveProvider,
             onModelChip = viewModel::showModelPicker,
+            onSelectProvider = viewModel::selectModelPickerProfile,
+            onDismissProvider = viewModel::closeModelPicker,
+            onAddProvider = viewModel::openApiProfileFormFromModelPicker,
+            onManageProviders = viewModel::openApiConfigManageFromPicker,
             modifier = Modifier.fillMaxWidth(),
         )
     }

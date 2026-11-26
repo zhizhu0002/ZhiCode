@@ -1,5 +1,10 @@
 package com.zhizhu.zhicode.compose.model
 
+import com.zhizhu.zhicode.pi.PiApiFormat
+import com.zhizhu.zhicode.pi.PiModelConfig
+import com.zhizhu.zhicode.pi.PiProviderPreset
+import com.zhizhu.zhicode.pi.sanitizePiProviderKey
+
 import com.termux.app.zhicode.storage.ApiSettingsStore
 
 /**
@@ -306,48 +311,34 @@ enum class WebSearchProvider(
 /** API 协议。对应参考图表单里「协议」值框的 `OpenAI Responses`。 */
 enum class ApiProtocol(val label: String) {
     OPENAI_RESPONSES("OpenAI Responses"),
-    OPENAI_CHAT("OpenAI Chat"),
-    ANTHROPIC("Anthropic"),
-
-    /**
-     * Codex 变体（参考图表单里 `OpenAI Responses` 之后那一项）。
-     *
-     * 它**不是** `OPENAI_RESPONSES` 的别名，虽然共用同一个传输实现：
-     * 端点、UA 与四个关联头都不一样（`/responses` 而非 `/v1/responses`、
-     * 自称 `codex_cli_rs/<ver>`、外加 `originator`/`session-id`/`thread-id`/
-     * `x-client-request-id`），请求体也不一样（必须 `store:false`，
-     * 且**不能**发 `max_output_tokens`）。详见 `OpenAIResponsesProvider`。
-     */
+    OPENAI_CHAT("OpenAI Chat Completions"),
+    ANTHROPIC("Anthropic Messages"),
+    GOOGLE_GENERATIVE_AI("Google Generative AI"),
+    BEDROCK_CONVERSE_STREAM("Amazon Bedrock"),
+    MISTRAL_CONVERSATIONS("Mistral"),
     CODEX_RESPONSES("Codex Responses"),
-
-    /**
-     * ZCode（Z.ai 的套餐网关）。
-     *
-     * 报文形状与 [ANTHROPIC] 相同，差别在连接与请求头：网关地址、授权码、
-     * 以及它要求的**额外身份头**都由用户自己填（见 [ApiProfileDraft.extraHeaders]）。
-     * 我们不内置它的地址，也不内置它的客户端标识 —— 理由见 `ZcodeWire` 的类注释。
-     */
     ZCODE("ZCode"),
-
-    /**
-     * 调试用：不发网络请求，按脚本产出回复（含真实的工具调用）。
-     *
-     * 只在 debug 构建里出现在协议下拉与「新增配置」的候选里（见
-     * [com.zhizhu.zhicode.compose.ui.dialogs.ApiConfigOverlay]）；发布包即使读到
-     * 这样一条记录，引擎侧也会明确拒绝（见 `ModelProviders.debugScripted`）。
-     */
     DEBUG_SCRIPTED("调试 · 本地模拟（无网络）"),
     ;
 
     /** 是否只在 debug 构建里可选。 */
     val debugOnly: Boolean get() = this == DEBUG_SCRIPTED
+
+    fun toPiFormat(): PiApiFormat = when (this) {
+        OPENAI_RESPONSES -> PiApiFormat.OPENAI_RESPONSES
+        OPENAI_CHAT -> PiApiFormat.OPENAI_COMPLETIONS
+        ANTHROPIC -> PiApiFormat.ANTHROPIC_MESSAGES
+        GOOGLE_GENERATIVE_AI -> PiApiFormat.GOOGLE_GENERATIVE_AI
+        BEDROCK_CONVERSE_STREAM -> PiApiFormat.BEDROCK_CONVERSE_STREAM
+        MISTRAL_CONVERSATIONS -> PiApiFormat.MISTRAL_CONVERSATIONS
+        CODEX_RESPONSES -> PiApiFormat.OPENAI_CODEX_RESPONSES
+        ZCODE -> PiApiFormat.ZCODE
+        DEBUG_SCRIPTED -> PiApiFormat.DEBUG_SCRIPTED
+    }
 }
 
 /**
- * 一条 API 配置记录。
- *
- * [apiKey] 会被保存，但按原版约定**不回填到编辑表单**（避免密钥在界面上暴露）；
- * 见 [ApiProfileDraft.from]。
+ * 一条 API 供应商配置记录（对齐 Pi 多供应商与多模型结构）。
  */
 data class ApiProfile(
     val id: String,
@@ -356,82 +347,112 @@ data class ApiProfile(
     val baseUrl: String,
     val apiKey: String,
     val model: String,
-    /** 额外请求头（JSON 对象文本），空串表示不加。见 [ApiProfileDraft.extraHeaders]。 */
     val extraHeaders: String = "",
+    val providerKey: String = "",
+    val compatJson: String = "",
+    val models: List<PiModelConfig> = emptyList(),
 ) {
-    /** 参考图卡片第二行的 `协议名 · 模型名` 形式。 */
-    val summary: String get() = "${protocol.label} · ${model.ifBlank { "未设置模型" }}"
+    val summary: String get() = "${protocol.label} · ${model.ifBlank { models.firstOrNull()?.id ?: "未设置模型" }}"
+
+    fun effectiveProviderKey(fallbackIndex: Int = 0): String =
+        sanitizePiProviderKey(providerKey.ifBlank { name }, "provider-${fallbackIndex + 1}")
+
+    fun effectiveModels(): List<PiModelConfig> {
+        if (models.isNotEmpty()) return models
+        val m = model.trim()
+        return if (m.isEmpty()) emptyList() else listOf(PiModelConfig(id = m, name = m))
+    }
+
+    fun resolveModel(selectedModelId: String? = null): PiModelConfig? {
+        val target = selectedModelId?.trim()?.takeIf { it.isNotEmpty() } ?: model.trim()
+        val list = effectiveModels()
+        if (target.isEmpty()) return list.firstOrNull()
+        return list.firstOrNull { it.id == target }
+    }
 }
 
-/** 新增 / 编辑表单的草稿。 */
+/** 新增 / 编辑供应商表单的草稿。 */
 data class ApiProfileDraft(
     val id: String?,
+    val presetId: String = "custom",
+    val pickingPreset: Boolean = false,
+    val providerKey: String = "",
     val name: String = "",
-    val protocol: ApiProtocol = ApiProtocol.OPENAI_RESPONSES,
+    val protocol: ApiProtocol = ApiProtocol.OPENAI_CHAT,
     val baseUrl: String = "",
     val apiKey: String = "",
     val model: String = "",
-    /**
-     * 额外请求头（JSON 对象文本），空串表示不加。
-     *
-     * 目前只有 [ApiProtocol.ZCODE] 用得上：那个网关要求特定的身份头才受理。
-     * 做成用户填而不是内置，是因为那些头的取值属于那个服务的客户端标识，
-     * 写死在代码里等于替用户宣称一个身份，而且对方一改所有人都一起断。
-     *
-     * 只有 ZCode 协议下才显示这个输入框（见 `ApiConfigOverlay`）——
-     * 对别的协议显示一个"额外请求头"框，只会让人以为那是必需项。
-     */
     val extraHeaders: String = "",
+    val compatJson: String = "",
+    val models: List<PiModelConfig> = emptyList(),
     /** 编辑已有记录时为真：密钥框留空表示"沿用原密钥"。 */
     val isEditing: Boolean = false,
 ) {
     val nameError: String? get() = if (name.isBlank()) "请填写名称" else null
-    val baseUrlError: String? get() = if (baseUrl.isBlank()) "请填写 API Base URL" else null
-    val saveable: Boolean get() = nameError == null && baseUrlError == null
+    val baseUrlError: String? get() = if (baseUrl.isBlank() && protocol != ApiProtocol.BEDROCK_CONVERSE_STREAM && protocol != ApiProtocol.DEBUG_SCRIPTED) "请填写 API Base URL" else null
+    val saveable: Boolean get() = !pickingPreset && nameError == null && baseUrlError == null
 
     companion object {
-        fun blank(): ApiProfileDraft = ApiProfileDraft(id = null)
+        fun blank(): ApiProfileDraft = ApiProfileDraft(id = null, pickingPreset = true)
+
+        fun fromPreset(preset: PiProviderPreset): ApiProfileDraft {
+            val proto = when (preset.api) {
+                PiApiFormat.OPENAI_RESPONSES -> ApiProtocol.OPENAI_RESPONSES
+                PiApiFormat.OPENAI_COMPLETIONS -> ApiProtocol.OPENAI_CHAT
+                PiApiFormat.ANTHROPIC_MESSAGES -> ApiProtocol.ANTHROPIC
+                PiApiFormat.GOOGLE_GENERATIVE_AI -> ApiProtocol.GOOGLE_GENERATIVE_AI
+                PiApiFormat.BEDROCK_CONVERSE_STREAM -> ApiProtocol.BEDROCK_CONVERSE_STREAM
+                PiApiFormat.MISTRAL_CONVERSATIONS -> ApiProtocol.MISTRAL_CONVERSATIONS
+                PiApiFormat.OPENAI_CODEX_RESPONSES -> ApiProtocol.CODEX_RESPONSES
+                PiApiFormat.ZCODE -> ApiProtocol.ZCODE
+                PiApiFormat.DEBUG_SCRIPTED -> ApiProtocol.DEBUG_SCRIPTED
+            }
+            return ApiProfileDraft(
+                id = null,
+                presetId = preset.id,
+                pickingPreset = false,
+                providerKey = if (preset.isCustom) "" else preset.providerKey,
+                name = if (preset.isCustom) "" else preset.name,
+                protocol = proto,
+                baseUrl = preset.baseUrl,
+                extraHeaders = preset.extraHeaders,
+                compatJson = preset.compatJson,
+                models = preset.models,
+                model = preset.models.firstOrNull()?.id.orEmpty(),
+            )
+        }
 
         /** 编辑已有记录：**故意不回填 apiKey**。 */
         fun from(profile: ApiProfile): ApiProfileDraft = ApiProfileDraft(
             id = profile.id,
+            presetId = "custom",
+            pickingPreset = false,
+            providerKey = profile.providerKey,
             name = profile.name,
             protocol = profile.protocol,
             baseUrl = profile.baseUrl,
             apiKey = "",
             model = profile.model,
             extraHeaders = profile.extraHeaders,
+            compatJson = profile.compatJson,
+            models = profile.effectiveModels(),
             isEditing = true,
         )
     }
 }
 
 /**
- * API 配置页的状态。
- *
- * [form] 非空即为「新增 / 编辑」表单页，否则显示列表页——两张页面共用一个弹窗，
- * 对应参考图的两张截图。
+ * API 配置页的状态（含已整合的上下文压缩与提示词入口）。
  */
 data class ApiConfigState(
     val profiles: List<ApiProfile>,
     val activeId: String,
     val form: ApiProfileDraft? = null,
-    /** 载荷还没读完，见 `WorkspaceViewModel.openApiConfig`。 */
     val loading: Boolean = false,
-    /**
-     * 「从模型选择面板直接进来的新增表单」。
-     *
-     * <p>为真时这一页**只渲染表单、不渲染列表**，而且返回直接退出这一页
-     * （回到工作区，模型面板还在）。为假时是常规形态：列表 ↔ 表单两级，
-     * 从表单返回先回列表。
-     *
-     * <p>为什么需要它：模型面板底部的「添加 API」语义就是**新增一条**，
-     * 让它先落在列表页上再让用户点「新增」，等于多一次无意义的跳转 ——
-     * 用户的原话是「bottom 直接跳转，不需要跳转多个页面（返回也是回到选择模型）」。
-     *
-     * <p>它**不是**持久状态：只在这一条链路里为真，页一关就随载荷一起丢掉。
-     */
     val standalone: Boolean = false,
+    val autoCompact: Boolean = true,
+    val autoCompactPercent: Int = 60,
+    val customSystemPrompt: String = "",
 )
 
 /** 模型目录里的一项。[displayName] 可能与 [id] 相同，界面据此决定要不要重复显示。 */
@@ -900,44 +921,15 @@ data class ModelPickerState(
     val profileName: String,
     val currentModel: String,
     val query: String = "",
-    val loading: Boolean = true,
-    val status: String = "正在从当前 API 获取模型…",
+    val loading: Boolean = false,
+    val status: String = "",
     val models: List<ModelOption> = emptyList(),
-    /**
-     * 套餐额度行（目前只有 ZCode 会填）。空表示不显示额度卡片。
-     *
-     * 每行的数字与倒计时**已经是成品文案**（由协议层算好）：分档规则属于协议知识，
-     * 界面再算一遍迟早会和那边不一致。
-     */
     val quota: List<QuotaRow> = emptyList(),
-    /**
-     * 额度读取失败的原因（空表示没失败）。
-     *
-     * 与 [quota] 分开而不是共用一个字段：额度成功时它是空的，失败时 [quota] 是空的 ——
-     * 但"没额度"和"读不到额度"是两件事，卡片要说的话也不一样（前者不显示卡片，
-     * 后者要说明为什么读不到并留一个「刷新」）。
-     */
     val quotaError: String = "",
-    /** [models] 旁边的一句补充，如「（仅套餐可用模型）」。 */
     val modelsNote: String = "",
-    /**
-     * 已配置的 API 记录，用于面板里的快速切换 tab 栏。
-     *
-     * <p>**必须在这里另存一份，不能现读 `WorkspaceUiState.apiConfig`**：那个字段的语义
-     * 是"API 配置弹窗当前打开"，面板显示时为 null（`closeApiConfig()` 会清掉），
-     * 所以从它取值会永远拿不到东西。
-     */
     val profiles: List<ModelProfileTab> = emptyList(),
-    /** 当前生效的 API 记录 id，与 [profiles] 配套。 */
     val activeProfileId: String = "",
 ) {
-    /**
-     * 当前生效的 API 在 [profiles] 里的下标；找不到时为 0。
-     *
-     * <p>做成**派生属性**而不是在组合函数里现算：`indexOfFirst` 在"没找到"时返回 -1，
-     * 而 Miuix 的 `TabRow` 需要一个合法下标 —— 直接把 -1 传下去会没有任何 tab 被选中，
-     * 看上去像控件坏了。这里的 0 兜底和边界情况都是能脱离 Compose 单测的。
-     */
     val activeProfileIndex: Int
         get() = profiles.indexOfFirst { it.id == activeProfileId }.coerceAtLeast(0)
 
@@ -945,13 +937,25 @@ data class ModelPickerState(
     val showProfileTabs: Boolean get() = profiles.size > 1
 }
 
-/**
- * 面板 tab 栏里的一条 API 记录。
- *
- * <p>只留切换需要的两样东西（id 与显示名），不直接把 `ApiProfile` 放进面板状态：
- * 那个类型带着 `apiKey` —— 面板没有任何理由持有密钥，少一个地方碰它少一处泄漏面。
- */
-data class ModelProfileTab(val id: String, val name: String)
+/** 供应商切换与本地模型展示列表项（不含密钥）。 */
+data class ModelProfileTab(
+    val id: String,
+    val name: String,
+    val protocolLabel: String = "",
+    val modelLabel: String = "",
+    val models: List<PiModelConfig> = emptyList(),
+)
+
+/** 对话底栏「本地模型 + 推理二级菜单」状态（纯本地读取，不发起网络请求）。 */
+data class ModelThinkingPickerState(
+    val providerId: String,
+    val providerName: String,
+    val models: List<PiModelConfig>,
+    val currentModelId: String,
+    val currentEffort: EffortLevel,
+    /** 非空即正在展示该模型的二级推理档位子菜单；null 显示一级本地模型列表。 */
+    val expandedModel: PiModelConfig? = null,
+)
 
 /**
  * 首次进入时的 API 配置列表：**空**。
@@ -1113,6 +1117,8 @@ data class SettingsDraft(
     val webSearchSearxngUrl: String,
     val autoCompact: Boolean,
     val autoCompactPercent: Int,
+    /** 当前模型可用推理档位。 */
+    val availableEfforts: List<EffortLevel> = EffortLevel.DEFAULT_AVAILABLE,
     /** 当前分类 Tab。放在 draft 里，取消时一并丢弃，重新打开总是回到第一类。 */
     val category: SettingsCategory = SettingsCategory.APPEARANCE,
 ) {
@@ -1123,6 +1129,7 @@ data class SettingsDraft(
                 themeMode = state.themeMode,
                 permissionMode = state.permissionMode,
                 effort = state.effort,
+                availableEfforts = state.availableEfforts,
                 contextWindow = state.contextWindow,
                 projectPath = state.projectPath,
                 customSystemPrompt = s.customSystemPrompt,
