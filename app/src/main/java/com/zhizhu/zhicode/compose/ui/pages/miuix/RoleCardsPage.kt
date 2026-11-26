@@ -288,8 +288,7 @@ private fun RoleCardEditorForm(
                 singleLine = false,
                 minLines = 8,
                 modifier = Modifier.fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .heightIn(min = 180.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
 

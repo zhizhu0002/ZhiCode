@@ -180,8 +180,7 @@ private fun MemoryEditorBody(
                 singleLine = false,
                 minLines = 12,
                 modifier = Modifier.fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .heightIn(min = 260.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
         Text(

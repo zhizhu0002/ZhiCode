@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -109,8 +110,11 @@ internal fun TerminalRenameDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
-    // 只在"打开的那一次"取初值：否则用户打字时宿主推送新快照会把输入冲掉。
-    var draft by remember(show) { mutableStateOf(initial) }
+    // 只在重新打开时重置草稿：关闭动画期间保留最后输入，避免退场帧先闪回空串。
+    var draft by remember { mutableStateOf(initial) }
+    LaunchedEffect(show) {
+        if (show) draft = initial
+    }
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,

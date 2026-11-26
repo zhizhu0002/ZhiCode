@@ -868,19 +868,23 @@ fun ZhiTextField(
 ) {
     val scheme = MiuixTheme.colorScheme
     val fieldState = remember { TextFieldState(value) }
+    val latestValue by rememberUpdatedState(value)
+    val latestOnValueChange by rememberUpdatedState(onValueChange)
 
     // 外部改值：只在真不一致时写回，并把光标放到末尾。
     // 少了这一步，点列表填值之后光标会留在旧位置，用户接着输入就插错地方
     // ——即上面第 2 个缺陷的来源。
     LaunchedEffect(value) {
-        if (fieldState.text != value) fieldState.setTextAndPlaceCursorAtEnd(value)
+        if (fieldState.text.toString() != value) fieldState.setTextAndPlaceCursorAtEnd(value)
     }
 
-    // 内部改值回传给状态层。snapshotFlow 自身只在值真的变化时发射，
-    // 所以外部写回不会被再次回传而打成循环。
-    // （`TextFieldState.text` 是 `CharSequence`，这里显式转成 `String`。）
+    // 内部改值回传给状态层：跳过首次订阅发射与和外部值一致的回声，
+    // 避免表单一打开就触发 onValueChange("") 把 touched 全部置真（满屏误飘红）。
     LaunchedEffect(fieldState) {
-        snapshotFlow { fieldState.text.toString() }.collect { onValueChange(it) }
+        snapshotFlow { fieldState.text.toString() }
+            .collect { text ->
+                if (text != latestValue) latestOnValueChange(text)
+            }
     }
 
     val base = textStyle ?: MiuixTheme.textStyles.main

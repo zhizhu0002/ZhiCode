@@ -258,22 +258,21 @@ private fun ApiProfileForm(
     draft: ApiProfileDraft,
     onChange: ((ApiProfileDraft) -> ApiProfileDraft) -> Unit,
 ) {
-    // 地址是否走明文 HTTP：部分自建网关只有 http。这个开关对应引擎里的
-    // usesCleartextTraffic 场景，正常应保持关闭。
-    var allowCleartext by remember(draft.id) { mutableStateOf(draft.baseUrl.startsWith("http://")) }
+    // 地址是否走明文 HTTP：与当前 Base URL 的协议前缀双向保持一致。
+    var allowCleartext by remember(draft.id) {
+        mutableStateOf(draft.baseUrl.startsWith("http://", ignoreCase = true))
+    }
     // 见 ZhiFieldError：没碰过的字段不飘红。key 取 draft.id，换记录时归零。
     var nameTouched by remember(draft.id) { mutableStateOf(false) }
     var baseUrlTouched by remember(draft.id) { mutableStateOf(false) }
-    var visionEnabled by remember(draft.id) { mutableStateOf(true) }
 
-    // 明文开关与地址前缀强绑定：勾上就把 http:// 规范成 http://，
-    // 不勾就把 http:// 改成 https://。避免出现"地址是 http 但开关是关的"这种自相矛盾状态。
-    LaunchedEffect(allowCleartext) {
+    // 用户手工编辑 URL、点重置默认或自动填充 ZCode 时，让开关状态同步当前 URL 的协议头。
+    LaunchedEffect(draft.baseUrl) {
         val url = draft.baseUrl
-        if (allowCleartext && url.startsWith("https://")) {
-            onChange { it.copy(baseUrl = "http://" + url.removePrefix("https://")) }
-        } else if (!allowCleartext && url.startsWith("http://")) {
-            onChange { it.copy(baseUrl = "https://" + url.removePrefix("http://")) }
+        if (url.startsWith("http://", ignoreCase = true)) {
+            allowCleartext = true
+        } else if (url.startsWith("https://", ignoreCase = true)) {
+            allowCleartext = false
         }
     }
 
@@ -378,7 +377,19 @@ private fun ApiProfileForm(
                 title = "允许明文 HTTP",
                 summary = if (allowCleartext) "当前地址走 http（不加密）" else "仅使用 https",
                 checked = allowCleartext,
-                onCheckedChange = { allowCleartext = it },
+                onCheckedChange = { checked ->
+                    allowCleartext = checked
+                    onChange { current ->
+                        val url = current.baseUrl
+                        when {
+                            checked && url.startsWith("https://", ignoreCase = true) ->
+                                current.copy(baseUrl = "http://" + url.drop(8))
+                            !checked && url.startsWith("http://", ignoreCase = true) ->
+                                current.copy(baseUrl = "https://" + url.drop(7))
+                            else -> current
+                        }
+                    }
+                },
             )
         }
 
@@ -435,15 +446,6 @@ private fun ApiProfileForm(
                 useLabelAsPlaceholder = true,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            )
-
-            SwitchPreference(
-                title = "发送图片（Vision）",
-                // 一句话说明：SwitchPreference 的 summary 走 body2 字阶，长说明在
-                // 行内被压缩裁切（中文字形切一半），长解释放不下就不该塞进 summary。
-                summary = "用于不支持视觉的模型",
-                checked = visionEnabled,
-                onCheckedChange = { visionEnabled = it },
             )
         }
 

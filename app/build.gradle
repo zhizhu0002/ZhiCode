@@ -342,6 +342,9 @@ dependencies {
      */
     implementation 'io.github.kyant0:backdrop:2.0.1'
 
+    // Material 3 Expressive（1.5.0+）：与 Miuix 共存于同一应用，通过 ZhiPageSet 体系实时切换。
+    implementation 'androidx.compose.material3:material3:1.5.0'
+
     /*
      * 基线配置文件（app/src/main/baseline-prof.txt）的**装机器**。
      *

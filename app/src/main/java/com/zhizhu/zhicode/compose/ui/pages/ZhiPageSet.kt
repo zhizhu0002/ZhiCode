@@ -2,6 +2,7 @@ package com.zhizhu.zhicode.compose.ui.pages
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
+import com.zhizhu.zhicode.compose.ui.pages.m3e.Material3ExpressivePageSet
 import com.zhizhu.zhicode.compose.ui.pages.mochi.MochiPageSet
 import com.zhizhu.zhicode.compose.data.ThemeSettings
 import com.zhizhu.zhicode.compose.model.ApiConfigState
@@ -362,7 +363,7 @@ object ZhiPageSets {
      *
      * 加一个新主题组只需要在这里加一行 —— 界面代码一行都不用改。
      */
-    val all: List<ZhiPageSet> = listOf(MiuixPageSet, MochiPageSet)
+    val all: List<ZhiPageSet> = listOf(MiuixPageSet, Material3ExpressivePageSet, MochiPageSet)
 
     val default: ZhiPageSet get() = all.first()
 

@@ -556,10 +556,6 @@ fun Composer(
                 modifier = Modifier.fillMaxWidth().height(40.dp).padding(top = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().height(36.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
                 // `+` 不再直接弹相册：改成 Miuix 的动作菜单（OverlayIconDropdownMenu）。
                 //
                 // ⚠️ 它必须位于 Miuix `Scaffold` 内 —— Overlay 系列靠 Scaffold 提供的
@@ -706,8 +702,6 @@ fun Composer(
                  * 模型名有足够宽度完整显示，动作键也回到了"贴着输入位置"的语义上。
                  */
             } // 底排 Row
-
-            } // 悬浮面板内容 Column
         } // FloatingBottomShell
     }
 }

@@ -16,7 +16,6 @@ import androidx.compose.ui.Modifier
 import java.util.LinkedHashMap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import top.yukonga.miuix.kmp.basic.Surface
@@ -92,8 +91,6 @@ private fun OutputWindow(text: String, diffMode: Boolean) {
                             text = line.ifEmpty { " " },
                             fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                             fontFamily = FontFamily.Monospace,
-                            maxLines = 1,
-                            overflow = TextOverflow.Clip,
                         )
                     }
                 }
@@ -124,8 +121,6 @@ private fun DiffLine(line: String) {
         color = foreground,
         fontSize = MiuixTheme.textStyles.footnote1.fontSize,
         fontFamily = FontFamily.Monospace,
-        maxLines = 1,
-        overflow = TextOverflow.Clip,
         modifier = Modifier
             .fillMaxWidth()
             .background(background)

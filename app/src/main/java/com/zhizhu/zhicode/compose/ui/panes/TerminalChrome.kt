@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -225,6 +226,9 @@ internal fun TerminalExtraKeys(
     // 用**高度**而不是 padding：扩展键自己的背景是一整块 bar 色，让出来的那一段
     // 必须也是同一块颜色，否则底边会多出一条别的色的缝。
     val navInset = com.zhizhu.zhicode.compose.ui.LocalFloatingNavInset.current
+    val bottomBarPx = with(LocalDensity.current) {
+        com.zhizhu.zhicode.compose.ui.LocalBottomBarInset.current.roundToPx()
+    }
     val landscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val imeMotion = LocalImeMotion.current
@@ -234,8 +238,8 @@ internal fun TerminalExtraKeys(
         modifier = Modifier
             .fillMaxWidth()
             // TerminalPage 的根容器在 edge-to-edge 下不会自动 resize；
-            // 直接读布局阶段的 IME 位移，让扩展键与终端工具栏一起上移。
-            .offset { IntOffset(0, -imeMotion.currentLiftPx) }
+            // 直接读布局阶段的 IME 位移，扣除已让位的固定底栏高度，避免在固定底栏/顶栏模式下多抬一段缝隙。
+            .offset { IntOffset(0, -maxOf(0, imeMotion.currentLiftPx - bottomBarPx)) }
             // 悬浮栏隐藏时，这块扩展键栏**向下填满胶囊腾出的空间**。
             //
             // ⚠️ 位移量 = `navInset`（= 胶囊让位量），**不是**自身高度 + navInset。

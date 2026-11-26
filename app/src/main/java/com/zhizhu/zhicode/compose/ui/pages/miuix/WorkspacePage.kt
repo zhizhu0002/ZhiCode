@@ -512,11 +512,7 @@ internal fun WorkspacePage(
                             0.dp
                         } else padding.calculateBottomPadding()
                     } else {
-                        padding.calculateBottomPadding() +
-                            WindowInsets.systemBars.union(WindowInsets.displayCutout)
-                                .only(WindowInsetsSides.Bottom)
-                                .asPaddingValues()
-                                .calculateBottomPadding()
+                        padding.calculateBottomPadding()
                     },
                 ),
         ) {
@@ -555,7 +551,11 @@ internal fun WorkspacePage(
                  * 于是键盘**收起动画**期间（此时抬起量已归零、但还没判定为收起）
                  * 输入器直接落到屏幕最底、压在 NavigationBar 上（用户截图）。
                  */
-                LocalBottomBarInset provides padding.calculateBottomPadding(),
+                LocalBottomBarInset provides if (showBottomNavigation && themeSettings.tabBarFloating) {
+                    0.dp
+                } else {
+                    padding.calculateBottomPadding()
+                },
                 LocalNavBarProgress provides navBarHideProgressState,
                 LocalNavBarTarget provides navBarHideTarget,
                 LocalNavBarScrollTick provides navBarScrollTick,
@@ -621,11 +621,12 @@ internal fun WorkspacePage(
                         // 8dp 的固定底距走 padding（组合期常量，不随滚动变）；
                         // 随进度变化的那一段走 `offset { }` —— 布局阶段求值，
                         // 滚动时不触发重组（见上面 `workspaceBottomAvoidance` 的说明）。
+                        // progress=0（胶囊可见）时上移让开胶囊，progress=1（胶囊收起）时回落到底边距。
                         .padding(bottom = 8.dp)
                         .offset {
-                            val hidden = workspaceBottomAvoidance.toPx() *
-                                navBarHideProgressState.value
-                            IntOffset(0, hidden.toInt())
+                            val visibleAvoidance = workspaceBottomAvoidance.toPx() *
+                                (1f - navBarHideProgressState.value)
+                            IntOffset(0, -visibleAvoidance.toInt())
                         },
                 )
             }
@@ -962,7 +963,7 @@ private val NavBarShadowRoom = 24.dp
  * （`startProgress` 记的就是抬手时的值）——所以整体读起来是
  * "用手把这块东西推走/拽回来"，而不是"划一下触发开关"。
  */
-private fun Modifier.navBarHideOnVerticalDrag(
+internal fun Modifier.navBarHideOnVerticalDrag(
     progress: androidx.compose.runtime.MutableFloatState,
     exitPx: Float,
     scrollTick: IntArray,

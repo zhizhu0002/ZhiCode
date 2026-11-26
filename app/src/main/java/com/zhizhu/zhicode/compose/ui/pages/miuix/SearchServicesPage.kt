@@ -197,8 +197,10 @@ private fun SearchServiceForm(
     onDelete: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    // 见 ZhiFieldError：没碰过的字段不飘红。
+    // 见 ZhiFieldError：没碰过的字段不飘红。切换记录或服务类型时重新归零。
     var nameTouched by remember(draft.id) { mutableStateOf(false) }
+    var fieldTouched by remember(draft.id, draft.type) { mutableStateOf(false) }
+    var keyTouched by remember(draft.id, draft.type) { mutableStateOf(false) }
     Column {
         SettingsGroup("基本信息") {
             ZhiTextField(
@@ -255,10 +257,18 @@ private fun SearchServiceForm(
 
             // 字段按服务类型声明渲染：加一家服务只需要在枚举里加 fields，不碰这里。
             draft.type.fields.forEach { field ->
-                SearchServiceField(field = field, draft = draft, onChange = onChange)
+                SearchServiceField(
+                    field = field,
+                    draft = draft,
+                    onChange = onChange,
+                    onTouch = {
+                        if (field.name == SearchFieldName.API_KEY) keyTouched = true
+                        else fieldTouched = true
+                    },
+                )
             }
-            ZhiFieldError(draft.fieldError, true)
-            ZhiFieldError(draft.keyError, true)
+            ZhiFieldError(draft.fieldError, fieldTouched)
+            ZhiFieldError(draft.keyError, keyTouched)
         }
 
         if (draft.isEditing) {
@@ -284,6 +294,7 @@ private fun SearchServiceField(
     field: SearchField,
     draft: SearchServiceDraft,
     onChange: ((SearchServiceDraft) -> SearchServiceDraft) -> Unit,
+    onTouch: () -> Unit,
 ) {
     val value = if (field.name == SearchFieldName.API_KEY) draft.apiKey else draft.config[field.name].orEmpty()
 
@@ -295,6 +306,7 @@ private fun SearchServiceField(
             title = field.label,
             summary = field.hint.ifBlank { null },
             onSelectedIndexChange = { picked ->
+                onTouch()
                 field.options.getOrNull(picked)?.let { option ->
                     onChange { it.copy(config = it.config + (field.name to option)) }
                 }
@@ -306,10 +318,11 @@ private fun SearchServiceField(
     ZhiTextField(
         value = value,
         onValueChange = { text ->
+            onTouch()
             if (field.name == SearchFieldName.API_KEY) {
-                onChange { it.copy(apiKey = text.trim()) }
+                onChange { it.copy(apiKey = text) }
             } else {
-                onChange { it.copy(config = it.config + (field.name to text.trim())) }
+                onChange { it.copy(config = it.config + (field.name to text)) }
             }
         },
         label = field.label,
