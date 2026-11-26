@@ -2,16 +2,16 @@
 
 这个工程的维护者不多，所以下面这些约定主要是为了**别把已经踩过的坑再踩一遍**。
 
-## 1. 提交前先跑这些
+## 1. 提交前执行测试
 
 ```bash
-git diff --check                            # 先看空白与补丁完整性
-./gradlew :app:compileReleaseKotlin --offline   # 编得过再说
+git diff --check                                # 看空白与补丁完整性
+./gradlew :app:compileReleaseKotlin --offline   # 编译是否成功
 
-bash test-jvm-fast.sh                       # 改到纯逻辑时跑这个（秒级）
+bash test-jvm-fast.sh                           # 改到纯逻辑时跑这个（秒级测试）
 ```
 
-发版前另外跑：
+发布 Releases 前另外跑：
 
 ```bash
 ./gradlew :app:assembleRelease
@@ -24,15 +24,17 @@ bash test-jvm-fast.sh                       # 改到纯逻辑时跑这个（秒�
 | `bash test-jvm-fast.sh` | `app/src/test/` 里被列出的那批纯 JVM 单测 | 秒级，只编被测试依赖的那几个文件 |
 | `./gradlew :app:testDebugUnitTest` | 全部 JVM 单测 | 分钟级，会走完整 Kotlin / 资源编译 |
 
+> [!CAUTION]
+> 注意！以下内容由 AI AGENTS 维护，人类维护者决定不触碰以下内容，部分内容可能过时或不可信。 ( 这 句 真 的 是 人 类 写 的 )
+
 > ⚠️ **仓库里不再有「源码文本级结构断言」。** 工程早期有一整套 `app/tests/*.java` +
 > `test-source-no-build.sh`，靠 grep 源码字符串钉住约定；它当时**有一部分是红的**，已整套删除。
-> 所以：**不要把已经删掉的那条入口写回文档或 CI**，也不要指望「跑一遍测试」能拦住约定类问题 ——
+> 所以：**不要把已经删掉的那条入口写回文档或 CI**，也不要指望「跑一遍测试」能拦住未对其的问题 ——
 > 现在只能靠下面的约定本身 + review。
 
 ## 2. 约定与它们的失败模式（**没有自动化守卫**）
 
-下面这些都是「写错了也不会编译失败」的约定。**它们现在只靠文档与 review 来守** ——
-工程早期那套源码文本级断言（`app/tests/*.java`）已经整套删除，不要再引用它。
+下面这些都是 AGENTS 记录的「写错了也不会编译失败」的约定。**它们现在只靠文档与 review 来保护**
 
 | 约定 | 违反后的表现 | 为什么值得守 |
 | --- | --- | --- |
