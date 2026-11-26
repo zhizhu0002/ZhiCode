@@ -22,6 +22,9 @@ import com.zhizhu.zhicode.compose.data.FileBrowser
 import com.zhizhu.zhicode.compose.data.McpStore
 import com.zhizhu.zhicode.compose.data.MockWorkspaceRepository
 import com.zhizhu.zhicode.compose.data.ModelCatalogStore
+import com.zhizhu.zhicode.compose.data.OobeStore
+import com.zhizhu.zhicode.compose.runtime.OobePermissions
+import com.zhizhu.zhicode.compose.runtime.OobeStep
 import com.zhizhu.zhicode.compose.data.SessionReader
 import com.zhizhu.zhicode.compose.data.ThemeStore
 import com.zhizhu.zhicode.compose.data.RoleCardStore
@@ -33,6 +36,8 @@ import com.zhizhu.zhicode.compose.data.UpdateStateStore
 import com.zhizhu.zhicode.compose.data.VersionCompare
 import com.zhizhu.zhicode.compose.data.WorkspacePaths
 import com.zhizhu.zhicode.compose.data.WorkspaceRepository
+import com.zhizhu.zhicode.compose.data.WorkspaceStore
+import com.zhizhu.zhicode.compose.data.canonicalWorkspacePath
 import com.zhizhu.zhicode.compose.engine.EngineEvents
 import com.zhizhu.zhicode.compose.engine.EngineOverrides
 import com.zhizhu.zhicode.compose.engine.EnginePlanApproval
@@ -71,6 +76,12 @@ import com.zhizhu.zhicode.compose.model.CopySheetState
 import com.zhizhu.zhicode.compose.model.ExtensionSummary
 import com.zhizhu.zhicode.compose.model.EffortLevel
 import com.zhizhu.zhicode.compose.model.FileDeletePrompt
+import com.zhizhu.zhicode.pi.PiCatalogAndPresets
+import com.zhizhu.zhicode.pi.PiModelConfig
+import com.zhizhu.zhicode.pi.PiProviderPreset
+import com.zhizhu.zhicode.pi.PiThinkingLevel
+import com.zhizhu.zhicode.pi.clampThinkingLevel
+import com.zhizhu.zhicode.pi.resolveSupportedThinkingLevels
 import com.zhizhu.zhicode.compose.model.FileEntry
 import com.zhizhu.zhicode.compose.model.FileNameForm
 import com.zhizhu.zhicode.compose.model.FileRoot
@@ -79,6 +90,8 @@ import com.zhizhu.zhicode.compose.model.FileSortKey
 import com.zhizhu.zhicode.compose.model.LiveOutput
 import com.zhizhu.zhicode.compose.model.McpConfigState
 import com.zhizhu.zhicode.compose.model.McpScope
+import com.zhizhu.zhicode.compose.model.ModelOption
+import com.zhizhu.zhicode.compose.model.ModelThinkingPickerState
 import com.zhizhu.zhicode.compose.model.McpServer
 import com.zhizhu.zhicode.compose.model.McpServerDraft
 import com.zhizhu.zhicode.compose.model.McpServerStatus
@@ -100,6 +113,8 @@ import com.zhizhu.zhicode.compose.model.RoleCardEditor
 import com.zhizhu.zhicode.compose.model.RoleCardsState
 import com.zhizhu.zhicode.compose.model.SLASH_COMMANDS
 import com.zhizhu.zhicode.compose.model.SessionSummary
+import com.zhizhu.zhicode.compose.model.SidebarOrderBy
+import com.zhizhu.zhicode.compose.model.WorkspaceEntry
 import com.zhizhu.zhicode.compose.model.SettingsCategory
 import com.zhizhu.zhicode.compose.model.DEFAULT_MAX_CONCURRENT_SUBAGENTS
 import com.zhizhu.zhicode.compose.model.SkillCreateDraft
@@ -170,6 +185,8 @@ class WorkspaceViewModel(
 
     /** 内置 Termux 环境安装器（第一次使用前会解压 32MB 的 bootstrap）。 */
     private val installer = RuntimeInstaller(application)
+
+    private val workspaceStore = WorkspaceStore(application)
 
     /** 真实 ZhiCode 引擎。懒创建，第一次发消息时才初始化。 */
     private val engine = ZhiEngineController(application, this)
@@ -250,6 +267,9 @@ class WorkspaceViewModel(
 
     /** 导出请求序号（见 `ExportPayload.nonce`）。 */
     private var exportNonce: Int = 0
+    /** 最近一次打开会话的序号，丢弃过时切换结果。 */
+    @Volatile
+    private var openSessionSeq: Long = 0L
 
     /**
      * 正在进行的「提问」流程。
@@ -398,8 +418,20 @@ class WorkspaceViewModel(
     }
 
     init {
+        val oobeNeeded = OobeStore.isRequired(getApplication()) ||
+            !runCatching { installer.isInstalled() }.getOrDefault(false)
         initSessionState()
-        autoInstallRuntimeIfStale()
+        if (oobeNeeded) {
+            _state.update {
+                it.copy(
+                    oobeOpen = true,
+                    oobeStep = OobeStep.PERMISSIONS,
+                    oobePermissions = OobePermissions.inspect(getApplication()),
+                )
+            }
+        } else {
+            autoInstallRuntimeIfStale()
+        }
     }
 
     // ------------------------------------------------------------ 终端保活
@@ -507,7 +539,11 @@ class WorkspaceViewModel(
                     s
                 } else {
                     claimed = true
-                    s.copy(runtimeInstalling = true, runtimeProgress = 0, runtimeMessage = reason)
+                    s.copy(
+                        runtimeInstalling = true,
+                        runtimeProgress = 0,
+                        runtimeMessage = reason,
+                    )
                 }
             }
             if (!claimed) {
@@ -580,10 +616,26 @@ class WorkspaceViewModel(
             if (runCatching { installer.isInstalled() }.getOrDefault(false)) {
                 installer.setupStorageLinks()
             }
+            val workspaces = workspaceStore.loadWorkspaces(WorkspacePaths.defaultProject())
+            val orderBy = workspaceStore.loadOrderBy()
+            val sessions = SessionReader.listAll()
+            val latest = sessions.firstOrNull()
+            val targetProject = latest?.projectPath?.takeIf { it.isNotBlank() && File(it).isDirectory }
+                ?: workspaceStore.loadLastActivePath(WorkspacePaths.defaultProject())
+            _state.update {
+                it.copy(
+                    workspaces = workspaces,
+                    sidebarOrderBy = orderBy,
+                    sessions = sessions,
+                    projectPath = targetProject,
+                    projectName = WorkspacePaths.nameOf(targetProject),
+                    filePath = targetProject,
+                )
+            }
             ensureWorkspace()
-            val sessions = SessionReader.list(_state.value.projectPath)
-            _state.update { it.copy(sessions = sessions) }
-            sessions.firstOrNull()?.let { openSession(it) }
+            if (latest != null) {
+                openSession(latest)
+            }
         }
     }
 
@@ -672,7 +724,7 @@ class WorkspaceViewModel(
             _state.update {
                 it.copy(
                     fileEntries = emptyList(),
-                    fileNote = "工作区还不存在：$path\n初始化内置 Termux 环境后会自动建立。",
+                    fileNote = "工作区还不存在：$path\n初始化内置 Debian 环境后会自动建立。",
                 )
             }
             return
@@ -2807,6 +2859,9 @@ class WorkspaceViewModel(
     // ==================================================================
 
     override fun onEngineSessionStarted(model: String) {
+        if (turnStartedAtElapsedMs <= 0L) {
+            turnStartedAtElapsedMs = SystemClock.elapsedRealtime()
+        }
         streamingAssistantId = null
         currentGroupId = null
         liveTools.clear()
@@ -3088,7 +3143,10 @@ class WorkspaceViewModel(
                                 // 同 `diff`：漏了这行，沙箱截图就停在这一层，工具卡里什么都不显示
                                 // （模型那边照样看得到图），且**编译器不会提醒**。
                                 previews = previews,
-                                elapsedMs = maxOf(tool.elapsedMs, 0L),
+                                elapsedMs = maxOf(
+                                    tool.elapsedMs,
+                                    if (tool.startedAtMs > 0L) maxOf(0L, SystemClock.elapsedRealtime() - tool.startedAtMs) else 0L,
+                                ),
                                 additions = if (addedLines > 0) addedLines else tool.additions,
                                 deletions = if (deletedLines > 0) deletedLines else tool.deletions,
                                 // 包管理器命令失败时默认展开：报错信息通常很长，
@@ -3301,6 +3359,7 @@ class WorkspaceViewModel(
         // 引擎已经把队首预输入并入了对话。界面这边做的是：
         // 出队一条（FIFO），并把还在流的上一段回复收尾。
         finalizeStreaming(keepIfEmpty = false)
+        turnStartedAtElapsedMs = SystemClock.elapsedRealtime()
         _state.update { s ->
             val rest = s.pendingInputs.drop(1)
             s.copy(
@@ -3399,7 +3458,7 @@ class WorkspaceViewModel(
      */
     private fun syncActiveSessionFromDisk() {
         viewModelScope.launch(Dispatchers.IO) {
-            val sessions = SessionReader.list(_state.value.projectPath)
+            val sessions = SessionReader.listAll()
             val sessionId = engine.sessionId()
             _state.update { s ->
                 val activeId = when {
@@ -3437,6 +3496,7 @@ class WorkspaceViewModel(
     private fun finishTurnWithError(text: String) {
         val owner = turnSessionId
         turnSessionId = null
+        turnStartedAtElapsedMs = 0L
         if (owner != null && owner != _state.value.activeSessionId) return
 
         finalizeStreaming(keepIfEmpty = false)
@@ -3535,21 +3595,17 @@ class WorkspaceViewModel(
         _state.update {
             it.copy(
                 permissionRequest = null,
-                permissionMode = if (alwaysAllow) PermissionMode.ACCEPT_EDITS else it.permissionMode,
+                permissionMode = if (alwaysAllow) PermissionMode.BYPASS else it.permissionMode,
                 message = if (alwaysAllow) {
-                    if (allow) "已允许本次调用，并切换为自动编辑" else "已拒绝本次调用，并切换为自动编辑"
+                    if (allow) "已允许本次调用，并切换为全部放行" else "已拒绝本次调用，并切换为全部放行"
                 } else {
                     if (allow) "已允许本次调用" else "已拒绝本次调用"
                 },
             )
         }
-        // 切到自动编辑后要立刻下发，否则下一条工具调用还会弹窗。
         if (alwaysAllow) {
             runCatching { engine.configure(engineOverrides()) }
-            // 这一次授权**改变了权限模式**（自动编辑），所以要落盘：
-            // 它不再是"仅本次"的语义了。少了这一句，重启后会读回旧模式，
-            // 用户会以为"总是允许"没生效过。
-            persistRuntimeChoice(mode = PermissionMode.ACCEPT_EDITS)
+            persistRuntimeChoice(mode = PermissionMode.BYPASS)
         }
     }
 
@@ -3662,7 +3718,7 @@ class WorkspaceViewModel(
                     append("`").append(command).append("` 在当前 Compose 版本里还没有对应实现，")
                     append("本机也没有执行任何操作。\n\n")
                     append("可用的相关指令：\n")
-                    append("` /doctor ` `/runtime` `/repair` — 内置 Termux 环境\n")
+                    append("` /doctor ` `/runtime` `/repair` — 内置 Debian 容器环境\n")
                     append("` /compact ` — 真正调用模型压缩上下文\n")
                     append("` /context ` — 查看或设置上下文窗口\n")
                     append("` /copy ` — 复制最近一条回复\n")
@@ -4352,20 +4408,28 @@ class WorkspaceViewModel(
         // 而「一个配置档都没有」本来也是合法状态（子页没有对列表做 `!!`）。
         _state.update {
             it.copy(
-                apiConfig = ApiConfigState(profiles = emptyList(), activeId = "", loading = true),
-                // 设置主页垫在子页之下（页面栈），返回才有回退目标。
-                settingsOpen = true,
-                settingsDraft = it.settingsDraft ?: SettingsDraft.from(it),
+                apiConfig = ApiConfigState(
+                    profiles = emptyList(),
+                    activeId = "",
+                    loading = true,
+                    autoCompact = it.settings.autoCompact,
+                    autoCompactPercent = it.settings.autoCompactPercent,
+                    customSystemPrompt = it.settings.customSystemPrompt,
+                ),
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
             val loaded = runCatching { ApiConfigStore.read(getApplication()) }.getOrNull()
             _state.update { s ->
-                // 读盘期间用户可能已经返回：那时载荷已置空，结果直接丢弃。
                 val current = s.apiConfig ?: return@update s
-                s.copy(apiConfig = loaded ?: current.copy(loading = false))
+                s.copy(
+                    apiConfig = loaded?.copy(
+                        autoCompact = s.settings.autoCompact,
+                        autoCompactPercent = s.settings.autoCompactPercent,
+                        customSystemPrompt = s.settings.customSystemPrompt,
+                    ) ?: current.copy(loading = false),
+                )
             }
-            // 这两个只在读成功后才跑：它们要从刚读到的配置里推导当前档位。
             if (loaded != null) {
                 syncActiveProfile()
                 syncRoleCardFromStore()
@@ -4374,6 +4438,54 @@ class WorkspaceViewModel(
     }
 
     fun closeApiConfig() = _state.update { it.copy(apiConfig = null) }
+
+    fun openApiConfigManageFromPicker() {
+        _state.update { it.copy(modelPicker = null) }
+        openApiConfig()
+    }
+
+    fun openApiConfigEditActiveProvider() {
+        _state.update { it.copy(modelThinkingPicker = null) }
+        openApiConfig()
+        viewModelScope.launch(Dispatchers.IO) {
+            val loaded = runCatching { ApiConfigStore.read(getApplication()) }.getOrNull() ?: return@launch
+            val active = loaded.profiles.firstOrNull { it.id == loaded.activeId } ?: loaded.profiles.firstOrNull()
+            _state.update { s ->
+                val current = s.apiConfig ?: return@update s
+                s.copy(
+                    apiConfig = loaded.copy(
+                        form = active?.let { ApiProfileDraft.from(it) } ?: ApiProfileDraft.blank(),
+                        autoCompact = s.settings.autoCompact,
+                        autoCompactPercent = s.settings.autoCompactPercent,
+                        customSystemPrompt = s.settings.customSystemPrompt,
+                    ),
+                )
+            }
+        }
+    }
+
+    fun updateContextAndPromptFromApiConfig(
+        autoCompact: Boolean,
+        autoCompactPercent: Int,
+        customSystemPrompt: String,
+    ) {
+        val baseDraft = _state.value.settingsDraft ?: SettingsDraft.from(_state.value)
+        val nextDraft = baseDraft.copy(
+            autoCompact = autoCompact,
+            autoCompactPercent = autoCompactPercent,
+            customSystemPrompt = customSystemPrompt,
+        )
+        applySettingsDraft(nextDraft)
+        _state.update { s ->
+            s.copy(
+                apiConfig = s.apiConfig?.copy(
+                    autoCompact = s.settings.autoCompact,
+                    autoCompactPercent = s.settings.autoCompactPercent,
+                    customSystemPrompt = s.settings.customSystemPrompt,
+                ),
+            )
+        }
+    }
 
     /**
      * 模型面板底部的「添加 API」：**直接开一张空白表单页**。
@@ -4589,7 +4701,14 @@ class WorkspaceViewModel(
                      */
                     it.copy(apiConfig = null, message = "API 配置已保存")
                 } else {
-                    it.copy(apiConfig = state, message = "API 配置已保存")
+                    it.copy(
+                        apiConfig = state.copy(
+                            autoCompact = it.settings.autoCompact,
+                            autoCompactPercent = it.settings.autoCompactPercent,
+                            customSystemPrompt = it.settings.customSystemPrompt,
+                        ),
+                        message = "API 配置已保存",
+                    )
                 }
             }
             syncActiveProfile()
@@ -4608,13 +4727,42 @@ class WorkspaceViewModel(
      * 还要多发一次网络请求。这里只更新 tab 栏那两项，
      * 并把 `activeProfileId` 跟着磁盘对齐（新配置若被自动设为生效，tab 要跟过去）。
      */
+    fun applyApiPreset(preset: PiProviderPreset) = _state.update {
+        val config = it.apiConfig ?: return@update it
+        it.copy(apiConfig = config.copy(form = ApiProfileDraft.fromPreset(preset)))
+    }
+
+    suspend fun fetchDraftModelCatalog(draft: ApiProfileDraft): Result<List<ModelOption>> =
+        withContext(Dispatchers.IO) {
+            ModelCatalogStore.fetchForDraft(
+                context = getApplication(),
+                profileId = draft.id,
+                protocolWire = when (draft.protocol) {
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.OPENAI_RESPONSES -> "openai-responses"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.OPENAI_CHAT -> "openai-chat"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.ANTHROPIC -> "anthropic"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.GOOGLE_GENERATIVE_AI -> "google-generative-ai"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.BEDROCK_CONVERSE_STREAM -> "bedrock-converse-stream"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.MISTRAL_CONVERSATIONS -> "mistral-conversations"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.CODEX_RESPONSES -> "codex-responses"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.ZCODE -> "zcode"
+                    com.zhizhu.zhicode.compose.model.ApiProtocol.DEBUG_SCRIPTED -> "debug-scripted"
+                },
+                baseUrl = draft.baseUrl,
+                rawApiKey = draft.apiKey,
+                extraHeaders = draft.extraHeaders,
+            ).map { it.models }.recoverCatching { err ->
+                throw IllegalStateException(ModelCatalogStore.friendlyError(err))
+            }
+        }
+
     private suspend fun refreshModelPickerProfiles() {
         val config = withContext(Dispatchers.IO) { ApiConfigStore.read(getApplication()) }
         _state.update { s ->
             val picker = s.modelPicker ?: return@update s
             s.copy(
                 modelPicker = picker.copy(
-                    profiles = config.profiles.map { ModelProfileTab(it.id, it.name) },
+                    profiles = config.profiles.map { it.toPickerTab() },
                     activeProfileId = config.activeId,
                 ),
             )
@@ -4629,7 +4777,11 @@ class WorkspaceViewModel(
             val state = ApiConfigStore.read(getApplication())
             _state.update {
                 it.copy(
-                    apiConfig = state,
+                    apiConfig = state.copy(
+                        autoCompact = it.settings.autoCompact,
+                        autoCompactPercent = it.settings.autoCompactPercent,
+                        customSystemPrompt = it.settings.customSystemPrompt,
+                    ),
                     message = if (result.isSuccess) "已切换 API 配置" else "切换失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
                 )
             }
@@ -4644,7 +4796,11 @@ class WorkspaceViewModel(
             val state = ApiConfigStore.read(getApplication())
             _state.update {
                 it.copy(
-                    apiConfig = state,
+                    apiConfig = state.copy(
+                        autoCompact = it.settings.autoCompact,
+                        autoCompactPercent = it.settings.autoCompactPercent,
+                        customSystemPrompt = it.settings.customSystemPrompt,
+                    ),
                     message = if (result.isSuccess) "配置已删除" else "无法删除：${result.exceptionOrNull()?.message ?: "未知原因"}",
                 )
             }
@@ -5123,15 +5279,39 @@ class WorkspaceViewModel(
      */
     private fun syncActiveProfile() {
         val active = ApiConfigStore.active(getApplication())
+        val activeProfile = ApiConfigStore.activeProfile(getApplication())
+        val activeModelId = modelOverride ?: active?.model ?: ""
+        val activeModelCfg = activeProfile?.resolveModel(activeModelId)
+            ?: activeModelId.takeIf { it.isNotBlank() }?.let { id ->
+                PiCatalogAndPresets.inferModelConfig(id, id, activeProfile?.protocol?.toPiFormat() ?: com.zhizhu.zhicode.pi.PiApiFormat.OPENAI_COMPLETIONS)
+            }
+        val supported = resolveSupportedThinkingLevels(activeModelCfg).map { it.toUiEffort() }
+        val prevEffort = _state.value.effort
+        val clampedEffort = clampThinkingLevel(activeModelCfg, prevEffort.toPiLevel()).toUiEffort()
+
         _state.update {
             it.copy(
                 profileName = active?.name ?: "未配置",
-                modelLabel = modelOverride ?: active?.model ?: "未设置",
+                modelLabel = activeModelId.ifBlank { "未设置" },
                 apiKeyConfigured = active?.hasKey == true,
+                contextWindow = activeModelCfg?.contextWindow ?: it.contextWindow,
+                availableEfforts = supported,
+                effort = clampedEffort,
+                settingsDraft = it.settingsDraft?.copy(
+                    contextWindow = activeModelCfg?.contextWindow ?: it.contextWindow,
+                    availableEfforts = supported,
+                    effort = clampedEffort,
+                ),
             )
+        }
+        if (clampedEffort != prevEffort) {
+            persistRuntimeChoice(effort = clampedEffort)
         }
         runCatching { engine.configure(engineOverrides()) }
     }
+
+    private fun PiThinkingLevel.toUiEffort(): EffortLevel =
+        EffortLevel.entries.firstOrNull { it.wire == id } ?: EffortLevel.HIGH
 
     private fun appendInfo(title: String, body: String) {
         _state.update {
@@ -5271,19 +5451,18 @@ class WorkspaceViewModel(
     fun setPermissionMode(mode: PermissionMode) {
         _state.update { it.copy(permissionMode = mode, message = "权限模式：${mode.label}") }
         persistRuntimeChoice(mode = mode)
+        if (engine.hasEngine() && !engine.isBusy()) {
+            runCatching { engine.configure(engineOverrides()) }
+        }
     }
 
     fun setEffort(level: EffortLevel) {
         _state.update { it.copy(effort = level, message = "推理强度：${level.label}") }
         persistRuntimeChoice(effort = level)
+        if (engine.hasEngine() && !engine.isBusy()) {
+            runCatching { engine.configure(engineOverrides()) }
+        }
     }
-
-    /*
-     * 下面两个是**斜杠命令**用的（`/permissions`、`/effort`）。
-     *
-     * 为什么不共用下拉：斜杠命令是在终端/输入框里敲出来的，没有"点一下展开"
-     * 的按钮可以挂下拉菜单，只能弹一个居中列表让人挑。所以这两条路都得留。
-     */
 
     fun showPermissionPicker() {
         val values = PermissionMode.entries
@@ -5305,7 +5484,7 @@ class WorkspaceViewModel(
     }
 
     fun showEffortPicker() {
-        val values = EffortLevel.entries
+        val values = _state.value.availableEfforts.ifEmpty { EffortLevel.DEFAULT_AVAILABLE }
         _state.update {
             it.copy(
                 choicePicker = ChoicePickerState(
@@ -5594,10 +5773,16 @@ class WorkspaceViewModel(
      * 会话正在跑的时候换模型不会打断当前轮：模型写在配置记录里，下一轮 `configure`
      * 自然带上（原版的"下一完整轮生效"）。
      */
+    private fun ApiProfile.toPickerTab(): ModelProfileTab = ModelProfileTab(
+        id = id,
+        name = name,
+        protocolLabel = protocol.label,
+        modelLabel = model.ifBlank { effectiveModels().firstOrNull()?.id ?: "未设置模型" },
+        models = effectiveModels(),
+    )
+
+    /** 打开纯供应商切换面板（纯本地读取，不拉取在线模型目录）。 */
     fun showModelPicker() {
-        // 直接从存储读那几份 API 记录，而**不是**从 `s.apiConfig` 读：
-        // 后者的语义是"API 配置弹窗当前打开"，面板显示时它恰好是 null，
-        // 所以那样取值会永远落到 `s.profileName` 兜底上、tab 栏也永远没有数据。
         val config = ApiConfigStore.read(getApplication())
         val active = config.profiles.firstOrNull { it.id == config.activeId }
         _state.update { s ->
@@ -5605,15 +5790,15 @@ class WorkspaceViewModel(
                 modelPicker = ModelPickerState(
                     profileName = active?.name ?: s.profileName,
                     currentModel = active?.model?.takeIf { it.isNotBlank() } ?: s.modelLabel,
-                    // 面板一打开就先把"要用的模型名"填成当前生效的那个：
-                    // 高亮看的正是这个字段，不填的话刚打开时一行都不高亮。
-                    query = active?.model?.takeIf { it.isNotBlank() } ?: s.modelLabel,
-                    profiles = config.profiles.map { ModelProfileTab(it.id, it.name) },
+                    query = "",
+                    loading = false,
+                    status = "",
+                    models = emptyList(),
+                    profiles = config.profiles.map { it.toPickerTab() },
                     activeProfileId = config.activeId,
                 ),
             )
         }
-        fetchModelCatalog()
     }
 
     fun closeModelPicker() {
@@ -5624,154 +5809,80 @@ class WorkspaceViewModel(
         _state.update { it.copy(modelPicker = null) }
     }
 
-    /**
-     * 切换面板里 tab 选中的那份 API 记录，并重新拉它自己的模型目录。
-     *
-     * ## 为什么不复用 [selectApiProfile]
-     *
-     * 那个函数会写 `apiConfig = state`，而 `apiConfig != null` 在本工程里的语义是
-     * **"API 配置弹窗当前打开"**（`AppScaffold` 用它决定显示哪个弹窗）。在模型面板里
-     * 调它就会在面板上凭空弹出一张配置页。这里只更新面板自己那份状态。
-     */
+    /** 直接切换激活供应商并收起纯供应商切换面板。 */
     fun selectModelPickerProfile(profileId: String) {
-        // 换配置就用那份配置自己的模型，别把上一条配置的会话级覆盖带过去。
-        // 与 selectApiProfile 同一处理。
         modelOverride = null
+        closeModelPicker()
         viewModelScope.launch(Dispatchers.IO) {
             val result = ApiConfigStore.select(getApplication(), profileId)
             val config = ApiConfigStore.read(getApplication())
             val active = config.profiles.firstOrNull { it.id == config.activeId }
+            syncActiveProfile()
+            syncRoleCardFromStore()
             _state.update { s ->
-                // 面板可能已经被关掉了：那就只同步摘要，不要把状态又塞回去。
-                val picker = s.modelPicker ?: return@update s
                 s.copy(
-                    modelPicker = picker.copy(
-                        profileName = active?.name ?: picker.profileName,
-                        currentModel = active?.model.orEmpty(),
-                        // 换配置后旧配置的模型名不能留在框里 —— 那会让「完成」把
-                        // A 家的模型名写到 B 家的配置上。清空比留错值安全。
-                        query = active?.model.orEmpty(),
-                        profiles = config.profiles.map { ModelProfileTab(it.id, it.name) },
-                        activeProfileId = config.activeId,
-                        loading = true,
-                        status = "正在从当前 API 获取模型…",
-                        models = emptyList(),
-                    ),
-                    message = if (result.isSuccess) "已切换 API 配置"
+                    message = if (result.isSuccess) "已切换供应商：${active?.name ?: ""}"
                     else "切换失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
+                    messageIsError = result.isFailure,
                 )
             }
-            // 面板还开着才需要重新拉目录；关掉了就不必再发一次请求。
-            if (_state.value.modelPicker != null) fetchModelCatalog()
         }
-        // 摘要与引擎配置要立刻跟上，否则底栏还显示旧配置名。
-        syncActiveProfile()
-        syncRoleCardFromStore()
     }
 
-    fun setModelQuery(text: String) {
-        _state.update { s -> s.copy(modelPicker = s.modelPicker?.copy(query = text)) }
-    }
-
-    /**
-     * 重新拉一次模型目录（面板里额度卡片的「刷新」走这里）。
-     *
-     * 面板没开时直接返回：没有面板可更新，发出去的请求就只是白跑一趟。
-     * 拉取本身复用 [fetchModelCatalog]，它已经把 loading 态与失败态都处理好了。
-     */
-    fun refreshModelCatalog() {
-        if (_state.value.modelPicker == null) return
+    /** 打开本地模型与思考强度两级选择菜单（完全本地配置，不发起网络请求）。 */
+    fun openModelThinkingPicker() {
+        val config = ApiConfigStore.read(getApplication())
+        val active = config.profiles.firstOrNull { it.id == config.activeId }
+        val models = active?.effectiveModels().orEmpty()
+        val currentId = modelOverride?.takeIf { it.isNotBlank() }
+            ?: active?.model?.takeIf { it.isNotBlank() }
+            ?: _state.value.modelLabel
         _state.update { s ->
-            s.copy(modelPicker = s.modelPicker?.copy(loading = true, status = "正在刷新模型与额度…"))
-        }
-        fetchModelCatalog()
-    }
-
-    private fun fetchModelCatalog() {
-        modelCatalogJob?.cancel()
-        modelCatalogJob = viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { ModelCatalogStore.fetch(getApplication()) }
-            val fetched = result.getOrNull()
-            _state.update { s ->
-                // 面板可能已经被关掉了：这时不要把状态又塞回去。
-                val picker = s.modelPicker ?: return@update s
-                s.copy(
-                    modelPicker = if (fetched == null) {
-                        picker.copy(
-                            loading = false,
-                            status = ModelCatalogStore.friendlyError(result.exceptionOrNull()),
-                            models = emptyList(),
-                            // 列表没拿到，额度卡片也一并清掉：留着上一次的数字
-                            // 会让人以为那是当前的（它可能已经是刷新前的旧值）。
-                            quota = emptyList(),
-                            quotaError = "",
-                            modelsNote = "",
-                        )
-                    } else {
-                        picker.copy(
-                            loading = false,
-                            status = if (fetched.models.isEmpty()) "API 未返回可用模型，可手动输入"
-                            else "已获取 ${fetched.models.size} 个模型",
-                            models = fetched.models,
-                            quota = fetched.quota,
-                            // 额度失败**不**让整次读取失败（见 ModelCatalogStore.Catalog）：
-                            // 模型列表照旧可用，原因只写在额度卡片里。
-                            quotaError = fetched.quotaError,
-                            modelsNote = fetched.note,
-                        )
-                    },
-                )
-            }
+            s.copy(
+                modelThinkingPicker = ModelThinkingPickerState(
+                    providerId = active?.id.orEmpty(),
+                    providerName = active?.name ?: s.profileName,
+                    models = models,
+                    currentModelId = currentId,
+                    currentEffort = s.effort,
+                    expandedModel = null,
+                ),
+            )
         }
     }
 
-    /**
-     * 在列表里**点某一行**：立刻选中它并保存，但**不关面板**。
-     *
-     * 与 [applySelectedModel] 的区别只有"关不关面板"这一件事，但这一点决定了观感：
-     * 之前只有点底部按钮才写配置，于是高亮要等那一下才动 —— 用户点了一行却看不到
-     * 任何反馈，会以为没点上。现在点哪行哪行立刻变蓝，配置同时也已经存好了。
-     *
-     * 保存做成 **latest-wins**：连点几下时取消上一个写入任务。不取消的话多个 IO 写入
-     * 并发进行、完成顺序不定，最后落盘的可能是中间那一次点到的模型 —— 而界面上显示的
-     * 却是最后一次点的那个，两边就此分叉。
-     */
-    fun selectModel(model: String) {
-        val target = model.trim()
-        if (target.isEmpty()) return
-        // 先把界面上那一份改掉，点击的反馈必须是**同步**的（等 IO 回来才变蓝会顿一下）。
-        // 用于高亮的 `query` 就是"要用的模型名"，所以改它等于把高亮挪过去。
-        _state.update { s -> s.copy(modelPicker = s.modelPicker?.copy(query = target)) }
-        persistModel(target)
+    fun closeModelThinkingPicker() {
+        _state.update { it.copy(modelThinkingPicker = null) }
     }
 
-    /**
-     * 应用选定的模型：写进当前配置记录并重跑 `configure`，让下一次请求就用上新模型。
-     *
-     * 这里**不**走 `engineOverrides().model`：模型属于配置记录的持久化内容，
-     * 只做一次内存覆盖会让"底栏显示的模型"和"实际请求的模型"在下一次启动后分叉。
-     */
-    fun applySelectedModel(model: String) {
-        val target = model.trim()
-        if (target.isEmpty()) return
-        closeModelPicker()
-        persistModel(target)
+    fun enterModelThinkingSubmenu(model: PiModelConfig) {
+        _state.update { s ->
+            s.copy(modelThinkingPicker = s.modelThinkingPicker?.copy(expandedModel = model))
+        }
     }
 
-    /** [selectModel] 与 [applySelectedModel] 共用的落盘部分（区别只在调用方关不关面板）。 */
-    private fun persistModel(target: String) {
+    fun backToModelThinkingList() {
+        _state.update { s ->
+            s.copy(modelThinkingPicker = s.modelThinkingPicker?.copy(expandedModel = null))
+        }
+    }
+
+    fun selectModelAndEffort(modelId: String, effort: EffortLevel) {
+        val target = modelId.trim()
+        if (target.isEmpty()) return
+        closeModelThinkingPicker()
         modelOverride = target
+        _state.update { it.copy(effort = effort) }
+        persistRuntimeChoice(effort = effort)
         modelSaveJob?.cancel()
         modelSaveJob = viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { ApiConfigStore.setDefaultModel(getApplication(), target) }
-            // 覆盖值先生效，所以即使写配置失败模型也已经切换了；把这一点如实说出来，
-            // 而不是报一个"保存失败"让人以为模型没换。
             syncActiveProfile()
             syncRoleCardFromStore()
             _state.update {
                 it.copy(
-                    message = if (result.isSuccess) "模型：$target"
-                    else "模型：$target（本次会话已生效，未能写入配置：${result.exceptionOrNull()?.message ?: "未知原因"}）",
+                    message = if (result.isSuccess) "已切换：$target · ${effort.label}"
+                    else "已切换：$target · ${effort.label}（未能写入默认配置）",
                 )
             }
         }
@@ -6048,7 +6159,7 @@ class WorkspaceViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             // titleOverride 传空串 = 不覆盖标题，只改备注。
             val ok = SessionReader.updateMetadata(session.id, note, "")
-            val sessions = SessionReader.list(_state.value.projectPath)
+            val sessions = SessionReader.listAll()
             _state.update {
                 it.copy(
                     sessions = sessions,
@@ -6066,7 +6177,7 @@ class WorkspaceViewModel(
     private fun saveSessionTitle(session: SessionSummary, title: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val ok = SessionReader.updateMetadata(session.id, session.note, title)
-            val sessions = SessionReader.list(_state.value.projectPath)
+            val sessions = SessionReader.listAll()
             _state.update {
                 it.copy(
                     sessions = sessions,
@@ -6171,9 +6282,16 @@ class WorkspaceViewModel(
                 } else _state.update { it.copy(choicePicker = null) }
             }
             ChoiceIntent.EFFORT -> {
-                val level = EffortLevel.entries.getOrNull(index)
-                if (level != null) _state.update {
-                    it.copy(choicePicker = null, effort = level, message = "推理强度：${level.label}")
+                val available = _state.value.availableEfforts.ifEmpty { EffortLevel.DEFAULT_AVAILABLE }
+                val level = available.getOrNull(index)
+                if (level != null) {
+                    _state.update {
+                        it.copy(choicePicker = null, effort = level, message = "推理强度：${level.label}")
+                    }
+                    persistRuntimeChoice(effort = level)
+                    if (engine.hasEngine() && !engine.isBusy()) {
+                        runCatching { engine.configure(engineOverrides()) }
+                    }
                 } else _state.update { it.copy(choicePicker = null) }
             }
             // 这里**没有** MODEL：模型面板要异步拉目录并写回配置记录，
@@ -6416,19 +6534,22 @@ class WorkspaceViewModel(
         pendingPermissionId = null
         // 见 newSession()：换会话时停止流程一并作废。
         resetStopTracking()
+        val seq = ++openSessionSeq
+
+        val targetPath = session.projectPath.takeIf { it.isNotBlank() }?.let { canonicalWorkspacePath(it) }
+        val switchingProject = targetPath != null && targetPath != canonicalWorkspacePath(_state.value.projectPath)
+        if (switchingProject && targetPath != null) {
+            switchProjectPathInternal(targetPath)
+        }
 
         _state.update {
             it.copy(
                 sidebarOpen = false,
                 tab = WorkspaceTab.CHAT,
-                workingStatus = "正在载入会话…",
-                // 见 `transcriptLoading` 的说明：置真之后对话流显示"载入中"占位，
-                // 而不是那条"想让 ZhiCode 做什么？"的空会话提示。
+                workingStatus = null,
                 transcriptLoading = true,
-                // 旧会话的内容**立刻清掉**。否则新会话的消息到达之前，
-                // 屏幕上还挂着上一条会话的对话 —— 那比空白更令人困惑
-                // （用户会以为切错了会话，或者以为消息串了）。
                 transcript = emptyList(),
+                contextTokens = 0,
                 transcriptHasOlder = false,
                 transcriptHasNewer = false,
                 transcriptLoadingOlder = false,
@@ -6436,30 +6557,17 @@ class WorkspaceViewModel(
         }
         viewModelScope.launch(Dispatchers.IO) {
             val startedAt = android.os.SystemClock.elapsedRealtime()
-            // 只读**最近一页**（`SessionReader.PAGE_MESSAGES` 条）＋完整任务清单。
-            // 早先这里是「一次读完整条会话」—— 一次长会话的内容块是几十 MB 量级，
-            // 真机上"打开一万条的长会话直接崩"就是这一步。往前翻页见 loadOlderTranscript。
-            //
-            // ⚠️ 读库与引擎恢复**并行**跑：两者互不依赖（resume 只需要 `engine.configure`
-            // 先完成，而那一步在下面这个 async 之外）。原来是串行，等于把两次 IO 的
-            // 等待时间相加 —— 长会话上能差出几百毫秒。
             val pageDeferred = async { SessionReader.openPage(session.id) }
+            val fastTokensDeferred = async { engine.estimateSessionContextTokens(session.id) }
             val engineDeferred = async<Result<Unit>> {
-                // 引擎必须先配置好才有 config 可用，否则 resumeConversation 不会恢复项目/工作流。
                 runCatching {
                     engine.configure(engineOverrides())
-                    engine.resumeConversation(session.id)
+                    engine.resumeConversation(session.id).getOrThrow()
                 }
             }
-            /*
-             * 读库失败必须自己接住并清掉 [WorkspaceUiState.transcriptLoading]。
-             *
-             * 不接的后果：`openPage` 抛异常 → `await()` 把异常抛穿这个协程 →
-             * `transcriptLoading` 永远停在 true → 对话流**永久**显示"载入中"占位，
-             * 用户再怎么点都看不到内容，而且没有任何提示。那比直接报错糟得多。
-             */
             val page = runCatching { pageDeferred.await() }.getOrElse { error ->
                 engineDeferred.cancel()
+                if (seq != openSessionSeq) return@launch
                 _state.update {
                     it.copy(
                         transcriptLoading = false,
@@ -6476,14 +6584,12 @@ class WorkspaceViewModel(
                     " hasOlder=" + page.hasMore +
                     " ms=" + (android.os.SystemClock.elapsedRealtime() - startedAt),
             )
-            val resumed = engineDeferred.await()
-            val footprint = engine.memoryFootprint()
-            ZhiMemory.log(
-                "resumeConversation session=" + session.id +
-                    " engineMsgs=" + footprint.first +
-                    " historyChars=" + ZhiMemory.size(footprint.second) +
-                    " ms=" + (android.os.SystemClock.elapsedRealtime() - startedAt),
-            )
+            val fastTokens = runCatching { fastTokensDeferred.await() }.getOrDefault(0)
+            if (seq != openSessionSeq) {
+                engineDeferred.cancel()
+                return@launch
+            }
+            // SQLite 本地分页先到先展示，不阻塞用户阅读历史对话等待 PRoot / Pi 冷启动握手。
             _state.update {
                 it.copy(
                     activeSessionId = session.id,
@@ -6491,18 +6597,32 @@ class WorkspaceViewModel(
                     transcriptHasOlder = page.hasMore,
                     transcriptOldestSeq = page.oldestSeq,
                     transcriptLoadingOlder = false,
-                    // 换了一条会话就重新计数：新会话的第一页不是"往前补"，
-                    // 列表必须无条件吸底（见 UiModels 里的说明）。
                     transcriptPrependRevision = 0,
                     transcriptHasNewer = false,
                     transcriptJumpRevision = 0,
                     tasks = page.tasks,
-                    contextTokens = engine.estimateContextTokens(),
-                    contextWindow = engine.contextWindowTokens().takeIf { w -> w > 0 } ?: it.contextWindow,
+                    contextTokens = fastTokens,
                     stopping = false,
                     composerBusy = false,
                     workingStatus = null,
                     transcriptLoading = false,
+                )
+            }
+            val resumed = engineDeferred.await()
+            if (seq != openSessionSeq) return@launch
+            val footprint = engine.memoryFootprint()
+            ZhiMemory.log(
+                "resumeConversation session=" + session.id +
+                    " engineMsgs=" + footprint.first +
+                    " historyChars=" + ZhiMemory.size(footprint.second) +
+                    " ms=" + (android.os.SystemClock.elapsedRealtime() - startedAt),
+            )
+            val measuredTokens = engine.estimateContextTokens()
+            val finalTokens = if (measuredTokens > 0) measuredTokens else fastTokens
+            _state.update {
+                it.copy(
+                    contextTokens = finalTokens,
+                    contextWindow = engine.contextWindowTokens().takeIf { w -> w > 0 } ?: it.contextWindow,
                     message = resumed.exceptionOrNull()?.let { error ->
                         "会话历史已显示，但引擎恢复失败：" + (error.message ?: "未知原因")
                     },
@@ -6708,7 +6828,7 @@ class WorkspaceViewModel(
                 engine.resetConversation()
                 discardStreamingAssistant()
             }
-            val sessions = SessionReader.list(_state.value.projectPath)
+            val sessions = SessionReader.listAll()
             val next = sessions.firstOrNull()
             _state.update {
                 it.copy(
@@ -6730,17 +6850,125 @@ class WorkspaceViewModel(
         }
     }
 
-    /** 从磁盘重新读取会话列表（新建/发消息/删除之后调用）。 */
+    private fun switchProjectPathInternal(cleanPath: String) {
+        val baseDraft = _state.value.settingsDraft ?: SettingsDraft.from(_state.value)
+        applySettingsDraft(baseDraft.copy(projectPath = cleanPath))
+        workspaceStore.saveLastActivePath(cleanPath)
+        runCatching { engine.configure(engineOverrides()) }
+    }
+
+    /** 在侧栏会话管理中切换项目目录并确保其已注册为一个工作区。 */
+    fun updateProjectDirectory(rawPath: String) {
+        val clean = canonicalWorkspacePath(rawPath)
+        if (clean.isEmpty()) return
+        addWorkspace(clean, WorkspacePaths.nameOf(clean), switchToIt = true)
+    }
+
+    /** 添加并持久化一个工作区目录。 */
+    fun addWorkspace(rawPath: String, customLabel: String = "", switchToIt: Boolean = true) {
+        val clean = canonicalWorkspacePath(rawPath)
+        if (clean.isEmpty()) return
+        WorkspacePaths.ensure(clean)
+        val defaultPath = canonicalWorkspacePath(WorkspacePaths.defaultProject())
+        val label = customLabel.trim().ifEmpty {
+            if (clean == defaultPath) "默认工作区" else WorkspacePaths.nameOf(clean)
+        }
+        val current = _state.value.workspaces
+        val exists = current.any { canonicalWorkspacePath(it.path) == clean }
+        val updated = if (exists) {
+            current.map {
+                if (canonicalWorkspacePath(it.path) == clean) it.copy(expanded = true, label = if (customLabel.isNotBlank()) label else it.label)
+                else it
+            }
+        } else {
+            val fresh = WorkspaceEntry(
+                id = clean,
+                path = clean,
+                label = label,
+                isDefault = clean == defaultPath,
+                expanded = true,
+                createdAt = System.currentTimeMillis(),
+            )
+            listOf(fresh) + current
+        }
+        workspaceStore.saveWorkspaces(updated)
+        _state.update { it.copy(workspaces = updated) }
+        if (switchToIt) {
+            switchProjectPathInternal(clean)
+            _state.update { it.copy(message = "已切换工作区：$label", messageIsError = false) }
+        }
+        refreshSessions()
+    }
+
+    fun renameWorkspace(path: String, newLabel: String) {
+        val clean = canonicalWorkspacePath(path)
+        val trimmed = newLabel.trim()
+        if (trimmed.isEmpty()) return
+        val updated = _state.value.workspaces.map {
+            if (canonicalWorkspacePath(it.path) == clean && !it.isDefault) it.copy(label = trimmed) else it
+        }
+        workspaceStore.saveWorkspaces(updated)
+        _state.update { it.copy(workspaces = updated, message = "已重命名工作区：$trimmed", messageIsError = false) }
+    }
+
+    fun removeWorkspace(path: String) {
+        val clean = canonicalWorkspacePath(path)
+        val updated = _state.value.workspaces.filterNot {
+            canonicalWorkspacePath(it.path) == clean && !it.isDefault
+        }
+        workspaceStore.saveWorkspaces(updated)
+        val defaultPath = canonicalWorkspacePath(WorkspacePaths.defaultProject())
+        if (canonicalWorkspacePath(_state.value.projectPath) == clean) {
+            switchProjectPathInternal(defaultPath)
+        }
+        _state.update { it.copy(workspaces = updated, message = "已从侧栏移除工作区", messageIsError = false) }
+    }
+
+    fun toggleWorkspaceExpanded(path: String) {
+        val clean = canonicalWorkspacePath(path)
+        val current = _state.value.workspaces
+        val hasEntry = current.any { canonicalWorkspacePath(it.path) == clean }
+        val updated = if (hasEntry) {
+            current.map {
+                if (canonicalWorkspacePath(it.path) == clean) it.copy(expanded = !it.expanded) else it
+            }
+        } else {
+            current + WorkspaceEntry(
+                id = clean,
+                path = clean,
+                label = WorkspacePaths.nameOf(clean),
+                expanded = false,
+            )
+        }
+        workspaceStore.saveWorkspaces(updated)
+        _state.update { it.copy(workspaces = updated) }
+    }
+
+    fun setAllWorkspacesExpanded(expanded: Boolean) {
+        val updated = _state.value.workspaces.map { it.copy(expanded = expanded) }
+        workspaceStore.saveWorkspaces(updated)
+        _state.update { it.copy(workspaces = updated) }
+    }
+
+    fun setSidebarOrderBy(orderBy: SidebarOrderBy) {
+        workspaceStore.saveOrderBy(orderBy)
+        _state.update { it.copy(sidebarOrderBy = orderBy) }
+    }
+
+    /** 在指定工作区目录内直接开始新会话。 */
+    fun newSessionInWorkspace(workspacePath: String) {
+        val clean = canonicalWorkspacePath(workspacePath)
+        if (clean.isNotEmpty() && clean != canonicalWorkspacePath(_state.value.projectPath)) {
+            switchProjectPathInternal(clean)
+        }
+        newSession()
+    }
+
+    /** 从磁盘重新读取全量会话列表（跨所有工作区）。 */
     fun refreshSessions() {
         viewModelScope.launch(Dispatchers.IO) {
-            val projectAtStart = _state.value.projectPath
-            val sessions = SessionReader.list(projectAtStart)
-            _state.update { state ->
-                if (state.projectPath != projectAtStart) return@update state
-                // 保留"尚未落库的新会话"这一状态：此刻 activeSessionId 为空且
-                // 列表里还没有对应会话，不能被列表刷新覆盖掉。
-                state.copy(sessions = sessions)
-            }
+            val sessions = SessionReader.listAll()
+            _state.update { state -> state.copy(sessions = sessions) }
         }
     }
 
@@ -6985,8 +7213,7 @@ class WorkspaceViewModel(
             append("- 内置：").append(bundled).append('\n')
             append(
                 if (same) "- 状态：一致 ✅"
-                else "- 状态：**不一致** — 启动时会自动重装 `usr`（`home` 不受影响，\n" +
-                    "  但用 apt 装过的包会丢，因为它们在 `usr` 里）"
+                else "- 状态：**不一致** — 启动时会自动升级 Debian 容器系统目录（`/root` 工作区与个人数据会保留）"
             )
         }
     }
@@ -7009,6 +7236,131 @@ class WorkspaceViewModel(
     }
 
     /** 打开「环境自检」：现场跑一遍探测并生成可复制的报告。 */
+    // ---------------------------------------------------------------- OOBE 引导
+
+    fun refreshOobePermissions() {
+        val snap = OobePermissions.inspect(getApplication())
+        _state.update { it.copy(oobePermissions = snap) }
+        refreshSharedStoragePermission()
+    }
+
+    fun reopenOobeFromSettings() {
+        hideSidebarForNavigation()
+        val snap = OobePermissions.inspect(getApplication())
+        _state.update {
+            it.copy(
+                settingsOpen = false,
+                oobeOpen = true,
+                oobeStep = OobeStep.PERMISSIONS,
+                oobePermissions = snap,
+            )
+        }
+    }
+
+    fun dismissReopenedOobe() {
+        _state.update { it.copy(oobeOpen = false) }
+    }
+
+    fun advanceOobeStep() {
+        val current = _state.value
+        when (current.oobeStep) {
+            OobeStep.PERMISSIONS -> {
+                val snap = OobePermissions.inspect(getApplication())
+                if (!snap.allRequiredGranted) {
+                    _state.update {
+                        it.copy(
+                            oobePermissions = snap,
+                            message = "请先授予全部基础权限",
+                            messageIsError = true,
+                        )
+                    }
+                    return
+                }
+                val upToDate = runCatching { installer.isUpToDate() }.getOrDefault(false)
+                val ready = runCatching { installer.isInstalled() }.getOrDefault(false)
+                _state.update {
+                    it.copy(
+                        oobePermissions = snap,
+                        oobeStep = OobeStep.RUNTIME,
+                        runtimeReady = ready,
+                        runtimeMessage = if (upToDate) "内置 Debian 环境已就绪" else it.runtimeMessage,
+                    )
+                }
+                if (!upToDate && !current.runtimeInstalling) {
+                    installRuntime()
+                }
+            }
+            OobeStep.RUNTIME -> {
+                if (!_state.value.runtimeReady || _state.value.runtimeInstalling) return
+                _state.update { it.copy(oobeStep = OobeStep.MODEL) }
+                viewModelScope.launch(Dispatchers.IO) { syncActiveProfile() }
+            }
+            OobeStep.MODEL -> completeOobe()
+        }
+    }
+
+    fun goBackOobeStep() {
+        val current = _state.value
+        when (current.oobeStep) {
+            OobeStep.PERMISSIONS -> Unit
+            OobeStep.RUNTIME -> if (!current.runtimeInstalling) {
+                refreshOobePermissions()
+                _state.update { it.copy(oobeStep = OobeStep.PERMISSIONS) }
+            }
+            OobeStep.MODEL -> _state.update { it.copy(oobeStep = OobeStep.RUNTIME) }
+        }
+    }
+
+    fun openApiConfigFromOobe() {
+        _state.update {
+            it.copy(apiConfig = ApiConfigState(profiles = emptyList(), activeId = "", loading = true))
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val loaded = runCatching { ApiConfigStore.read(getApplication()) }.getOrNull()
+            _state.update { s ->
+                val current = s.apiConfig ?: return@update s
+                s.copy(apiConfig = loaded ?: current.copy(loading = false))
+            }
+            if (loaded != null) {
+                syncActiveProfile()
+                syncRoleCardFromStore()
+            }
+        }
+    }
+
+    fun toggleRootFromOobe(enable: Boolean) {
+        if (!enable) {
+            updateRootSetting(false)
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = runCatching {
+                val shell = com.termux.app.zhicode.termux.TermuxShellExecutor(getApplication())
+                val res = shell.executeAsRoot("id -u", getApplication<Application>().filesDir.absolutePath, 10_000)
+                res.exitCode == 0 && !res.timedOut && res.stdout.trim() == "0"
+            }.getOrDefault(false)
+            if (ok) {
+                updateRootSetting(true)
+                _state.update { it.copy(message = "已获取 Root 授权并启用") }
+            } else {
+                updateRootSetting(false)
+                _state.update { it.copy(message = "未获得 Root 授权", messageIsError = true) }
+            }
+        }
+    }
+
+    fun completeOobe() {
+        OobeStore.markCompleted(getApplication())
+        _state.update { it.copy(oobeOpen = false) }
+        viewModelScope.launch(Dispatchers.IO) {
+            if (runCatching { installer.isInstalled() }.getOrDefault(false)) {
+                installer.setupStorageLinks()
+            }
+            ensureWorkspace()
+            syncActiveProfile()
+        }
+    }
+
     fun openEnvironment() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
@@ -7066,7 +7418,12 @@ class WorkspaceViewModel(
         val failure = installRuntimeReporting()
         if (failure != null) {
             appendRuntimeLog("安装失败：$failure")
-            _state.update { it.copy(runtimeInstalling = false, runtimeMessage = "初始化失败：$failure") }
+            _state.update {
+                it.copy(
+                    runtimeInstalling = false,
+                    runtimeMessage = "初始化失败：$failure",
+                )
+            }
             return
         }
         appendRuntimeLog("安装完成：已装=${runCatching { installer.installedVersion() }.getOrNull() ?: "(无)"}")
@@ -7075,26 +7432,22 @@ class WorkspaceViewModel(
             it.copy(
                 runtimeInstalling = false,
                 runtimeProgress = 100,
-                runtimeMessage = "内置 Termux 环境已就绪",
+                runtimeMessage = "内置 Debian 环境已就绪",
                 runtimeReady = installer.isInstalled(),
                 environmentReport = reportText,
             )
         }
-        // home 目录是随运行环境一起出现的，所以工作区只能在这之后创建。
-        // 不创建的话：文件面板永远显示"目录不存在"，
-        // 终端的工作目录会回退到 home，会话也会落在一个不存在的项目键下。
         ensureWorkspace()
     }
 
-    /**
-     * 跑一次安装，失败时返回一句人话原因（成功返回 `null`）。
-     *
-     * 把"失败原因"作为返回值而不是就地写状态：调用方还需要把同一句话写进日志，
-     * 两处分别拼一遍字符串必然走样。
-     */
     private suspend fun installRuntimeReporting(): String? = runCatching {
         installer.install { message, percent ->
-            _state.update { it.copy(runtimeMessage = message, runtimeProgress = percent) }
+            _state.update {
+                it.copy(
+                    runtimeMessage = message,
+                    runtimeProgress = percent,
+                )
+            }
         }
     }.exceptionOrNull()?.let { error ->
         error.message ?: error.javaClass.simpleName
@@ -7605,6 +7958,7 @@ class WorkspaceViewModel(
             // 从设置页进来时设置页仍然开着，于是返回会先回到设置主页 ——
             // 这正是从设置里点进去的人期望的。
             "about" -> openAbout()
+            "oobe" -> reopenOobeFromSettings()
             "uiDebug" -> openUiDebug()
             else -> Unit
         }

@@ -96,12 +96,9 @@ public final class FridaRuntimeManager {
         if (!dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) throw new IllegalStateException("无法创建 Frida 目录: " + dir);
         if (!cache.isDirectory() && !cache.mkdirs() && !cache.isDirectory()) throw new IllegalStateException("无法创建 Frida cache: " + cache);
         File xz = new File(cache, "frida-gadget-" + VERSION + "-android-arm64.so.xz");
-        String curl = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/curl";
-        String xzbin = TermuxConstants.TERMUX_BIN_PREFIX_DIR_PATH + "/xz";
-        if (!new File(curl).isFile() || !new File(xzbin).isFile())
-            throw new IllegalStateException("内置 Termux runtime 尚未就绪，Frida 安装需要 curl 与 xz");
-
-        String dl = q(curl) + " -L --fail --retry 2 --connect-timeout 20 -o " + q(xz.getAbsolutePath() + ".tmp") + " " + q(GADGET_URL)
+        String curl = "/usr/bin/curl";
+        String dl = "command -v xz >/dev/null 2>&1 || apt-get update && apt-get install -y --no-install-recommends xz-utils && "
+            + curl + " -L --fail --retry 2 --connect-timeout 20 -o " + q(xz.getAbsolutePath() + ".tmp") + " " + q(GADGET_URL)
             + " && mv " + q(xz.getAbsolutePath() + ".tmp") + " " + q(xz.getAbsolutePath());
         TermuxShellExecutor.Result r = shell.execute(dl, normalizeCwd(cwd), 240_000, null);
         if (r.exitCode != 0) throw new IllegalStateException("Frida Gadget 下载失败: " + r.combined());
@@ -112,7 +109,7 @@ public final class FridaRuntimeManager {
         }
 
         File tmp = new File(dir, "libiqfrida.so.tmp");
-        String unpack = q(xzbin) + " -dc " + q(xz.getAbsolutePath()) + " > " + q(tmp.getAbsolutePath())
+        String unpack = "xz -dc " + q(xz.getAbsolutePath()) + " > " + q(tmp.getAbsolutePath())
             + " && chmod 700 " + q(tmp.getAbsolutePath()) + " && mv " + q(tmp.getAbsolutePath()) + " " + q(dest.getAbsolutePath());
         r = shell.execute(unpack, normalizeCwd(cwd), 120_000, null);
         if (r.exitCode != 0) throw new IllegalStateException("Frida Gadget 解压失败: " + r.combined());

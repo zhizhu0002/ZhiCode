@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.pages.m3e
 
 import androidx.compose.runtime.Composable
+import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.data.ThemeSettings
 import com.zhizhu.zhicode.compose.model.ExtensionSummary
 import com.zhizhu.zhicode.compose.model.SettingsDraft
@@ -54,6 +55,10 @@ object Material3ExpressivePageSet : ZhiPageSet {
             onDismiss = viewModel::closeSettings,
             onNavigate = viewModel::navigateFromSettings,
             extensions = extensions,
+            brandSignature = LocalThemeSettings.current.topBrandSignature,
+            onBrandSignatureChange = { next ->
+                viewModel.updateThemeSettings { it.copy(topBrandSignature = next.trim()) }
+            },
         )
     }
 

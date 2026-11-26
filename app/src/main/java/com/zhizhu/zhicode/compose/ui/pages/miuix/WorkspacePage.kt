@@ -187,6 +187,14 @@ internal fun WorkspacePage(
      * `imeVisible` 在动画开始那一刻就翻真，且每次开合只变两次，可以安全在组合期读。
      */
     val imeOpen = com.zhizhu.zhicode.compose.ui.LocalImeMotion.current.imeVisible
+    val imeNavAlpha by animateFloatAsState(
+        targetValue = if (imeOpen) 0f else 1f,
+        animationSpec = tween(
+            durationMillis = if (imeOpen) ZhiMotion.EXIT_MILLIS else ZhiMotion.FADE_IN_MILLIS,
+            easing = FastOutSlowInEasing,
+        ),
+        label = "miuixImeNavAlpha",
+    )
     /*
      * 胶囊隐藏进度的**目标值**（`0` = 完全可见，`1` = 完全滑出）。
      *
@@ -237,7 +245,7 @@ internal fun WorkspacePage(
      * ⚠️ 收起时同理：它已经滑出屏幕，留白就成了纯空白。
      */
     val floatingNavInset = if (
-        showBottomNavigation && themeSettings.tabBarFloating && !imeOpen && !navBarCollapsed.value
+        showBottomNavigation && themeSettings.tabBarFloating && !navBarCollapsed.value
     ) {
         floatingNavigationAvoidance + FloatingNavContentGap
     } else {
@@ -458,10 +466,6 @@ internal fun WorkspacePage(
                     wide = false,
                     glass = glassMain,
                     onOpenSidebar = viewModel::openSidebar,
-                    onContextClick = {
-                        viewModel.requestComposerText("/usage")
-                        viewModel.send()
-                    },
                     onSettings = {
                         ZhiFrameTrace.begin("settings:open")
                         viewModel.openSettings()
@@ -814,10 +818,11 @@ internal fun WorkspacePage(
                 label = "toolbarRise",
             ) { selecting -> if (selecting) 0f else 1f }
 
-            if (navAlpha > 0f) {
+            if (navAlpha > 0f && imeNavAlpha > 0.005f) {
                 LiquidWorkspaceBar(
                     selected = state.tab,
                     onSelect = { tab ->
+                        if (imeOpen) return@LiquidWorkspaceBar
                         ZhiFrameTrace.begin("tab:${tab.name}")
                         viewModel.selectTab(tab)
                     },
@@ -825,7 +830,7 @@ internal fun WorkspacePage(
                     blurEnabled = floatingNavigationBackdrop != null,
                     modifier = Modifier
                         .graphicsLayer {
-                            alpha = navAlpha
+                            alpha = navAlpha * imeNavAlpha
                             // 形变时胶囊略微下沉 + 缩小，像被"压"进工具栏那一层
                             val shrink = 1f - 0.04f * navSink
                             scaleX = shrink
@@ -836,7 +841,7 @@ internal fun WorkspacePage(
                         },
                 )
             }
-            if (toolbarAlpha > 0f) {
+            if (toolbarAlpha > 0f && imeNavAlpha > 0.005f) {
                 FileSelectionToolbar(
                     visible = true,
                     entries = state.fileEntries,
@@ -857,7 +862,7 @@ internal fun WorkspacePage(
                         // 否则中途会看到一块在上升、一块在原地。
                         .padding(bottom = fileToolbarBottomPadding)
                         .graphicsLayer {
-                            alpha = toolbarAlpha
+                            alpha = toolbarAlpha * imeNavAlpha
                             val grow = 0.96f + 0.04f * (1f - toolbarRise)
                             scaleX = grow
                             scaleY = grow

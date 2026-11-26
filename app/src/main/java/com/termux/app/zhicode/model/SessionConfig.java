@@ -125,7 +125,7 @@ public final class SessionConfig {
     public int contextWindowTokens = 128000;
     public boolean autoCompact = true;
     /** 用户可选的压缩阈值系数；Claude 式输出预留与 13k 安全余量仍然是权威。 */
-    public double autoCompactRatio = 1.0;
+    public double autoCompactRatio = 0.60;
 
     // ------------------------------------------------------------ 联网工具
 

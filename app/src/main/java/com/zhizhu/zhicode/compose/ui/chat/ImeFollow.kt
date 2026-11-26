@@ -1,13 +1,10 @@
 package com.zhizhu.zhicode.compose.ui.chat
 
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
@@ -52,24 +49,22 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 internal fun ImeLazyListAutoScroller(
     listState: LazyListState,
     enabled: Boolean,
+    imeShrinkPx: () -> Int,
 ) {
-    val ime = WindowInsets.ime
-    val density = LocalDensity.current
-
     LaunchedEffect(listState, enabled) {
         if (!enabled) return@LaunchedEffect
-        // 记录"上一次已补偿到的键盘高度"。用局部变量而不是 State：
-        // 它只在协程里读写，进组合没有意义，反而会多一次重组。
-        var consumedPx = 0
-        snapshotFlow { ime.getBottom(density) }
+        // 跟随布局收缩后的真实视口高度变化，确保 canScrollForward 已更新再增量滚动。
+        var lastViewportHeight = listState.layoutInfo.viewportSize.height
+        snapshotFlow { listState.layoutInfo.viewportSize.height }
             .distinctUntilChanged()
-            .collect { currentPx ->
-                val delta = currentPx - consumedPx
-                consumedPx = currentPx
-                // 键盘收起（delta < 0）不补偿，理由见上面的说明。
-                if (delta <= 0) return@collect
-                // `scrollBy` 在列表根本不能滚时是安全的空操作；
-                // 内容不足一屏时也不该出现位移，所以这里不做额外判断。
+            .collect { currentHeight ->
+                if (lastViewportHeight <= 0) {
+                    lastViewportHeight = currentHeight
+                    return@collect
+                }
+                val delta = lastViewportHeight - currentHeight
+                lastViewportHeight = currentHeight
+                if (delta <= 0 || imeShrinkPx() <= 0) return@collect
                 listState.scrollBy(delta.toFloat())
             }
     }

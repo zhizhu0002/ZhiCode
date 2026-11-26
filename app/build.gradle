@@ -103,8 +103,8 @@ android {
         resources { excludes += ['META-INF/*.kotlin_module'] }
     }
 
-    // bootstrap-aarch64.zip 不能被压缩：一是包体巨大，二是要按 32MB 原样读进 assets
-    androidResources { noCompress 'zip' }
+    // 内置 Debian 根文件系统归档无需 AAPT 二次压缩
+    androidResources { noCompress 'zip', 'tgz' }
 
     lint { abortOnError false; checkReleaseBuilds false }
 

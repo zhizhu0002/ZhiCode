@@ -10,6 +10,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Column
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
@@ -45,6 +46,14 @@ import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import com.zhizhu.zhicode.compose.model.parseTokenCount
 import com.zhizhu.zhicode.compose.ui.PageFeedbackSlot
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
+import com.zhizhu.zhicode.compose.ui.dialogs.PrimaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
+import com.zhizhu.zhicode.compose.ui.dialogs.ZhiDialogWidth
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import com.zhizhu.zhicode.compose.ui.settings.SettingsChoice
 import com.zhizhu.zhicode.compose.ui.settings.SettingsEntry
 import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
@@ -122,6 +131,8 @@ fun SettingsPage(
      * 三个存储都在磁盘上，在设置页里读会变成"每次重组读一次"。
      */
     extensions: ExtensionSummary = ExtensionSummary(),
+    brandSignature: String = "",
+    onBrandSignatureChange: (String) -> Unit = {},
 ) {
     // 整页设置，骨架全部用 Miuix 原生组件，照官方 example 的 SettingsPage 模式：
     // Scaffold + SmallTopAppBar(MiuixScrollBehavior) + LazyColumn(overScroll+nestedScroll)。
@@ -143,6 +154,7 @@ fun SettingsPage(
         saver = androidx.compose.foundation.lazy.LazyListState.Saver,
     ) { androidx.compose.foundation.lazy.LazyListState() }
     val topAppBarScrollBehavior = MiuixScrollBehavior()
+    var brandDialogOpen by remember { mutableStateOf(false) }
     /*
      * ⚠️ 这里**不用** `rememberPageBlurBackdrop()` + `layerBackdrop`。
      *
@@ -207,11 +219,17 @@ fun SettingsPage(
                 // 拆开之后只组合可见的那部分，首帧成本随**屏幕高度**增长而不是整页长度。
                 // 各分组的状态都是组内局部的（`SettingsGroup` 只画一张卡），
                 // 所以拆 item 不会打断任何 remember/动画。
-                item(key = "general", contentType = "settings-group") { SettingsGroup("通用") { GeneralPage(draft, onChange, onNavigate) } }
-                item(key = "modelService", contentType = "settings-group") {
-                    SettingsGroup("模型与服务") { ModelServicePage(draft, onChange, onNavigate) }
+                item(key = "general", contentType = "settings-group") {
+                    SettingsGroup("通用") {
+                        GeneralPage(
+                            draft = draft,
+                            onChange = onChange,
+                            onNavigate = onNavigate,
+                            brandSignature = brandSignature,
+                            onEditBrandSignature = { brandDialogOpen = true },
+                        )
+                    }
                 }
-                item(key = "context", contentType = "settings-group") { SettingsGroup("上下文与项目") { ContextProjectPage(draft, onChange, onNavigate) } }
                 item(key = "agent", contentType = "settings-group") { SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) } }
                 item(key = "extensions", contentType = "settings-group") { SettingsGroup("扩展") { ExtensionsPage(onNavigate, extensions) } }
                 /*
@@ -234,6 +252,15 @@ fun SettingsPage(
             PageFeedbackSlot(modifier = Modifier.align(Alignment.BottomCenter))
         }
     }
+    BrandSignatureDialog(
+        show = brandDialogOpen,
+        initial = brandSignature,
+        onConfirm = { next ->
+            brandDialogOpen = false
+            onBrandSignatureChange(next)
+        },
+        onDismiss = { brandDialogOpen = false },
+    )
 }
 
 // ------------------------------------------------------------------ 各分类页
@@ -256,6 +283,13 @@ fun SettingsPage(
 @Composable
 private fun AboutEntryPage(onNavigate: (String) -> Unit) {
     com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("AboutEntryPage")
+    SettingsIconEntry(
+        title = "初始引导",
+        summary = "权限授权、运行环境与模型配置向导",
+        icon = ZhiIcons.runtime,
+        plate = SettingsPlateColors.blue,
+        onClick = { onNavigate("oobe") },
+    )
     SettingsIconEntry(
         title = "关于 ZhiCode",
         summary = "版本、源码、许可证与隐私政策",
@@ -288,8 +322,26 @@ private fun GeneralPage(
     draft: SettingsDraft,
     onChange: (SettingsDraft) -> Unit,
     onNavigate: (String) -> Unit,
+    brandSignature: String,
+    onEditBrandSignature: () -> Unit,
 ) {
     com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("GeneralPage")
+    SettingsEntry(
+        title = "供应商管理",
+        valueText = "${draft.profileName} · ${draft.modelLabel}",
+        onClick = { onNavigate("apiProfiles") },
+        summary = "配置多供应商、模型能力、思考档位及上下文压缩与提示词",
+        icon = ZhiIcons.link,
+        plate = SettingsPlateColors.blue,
+    )
+    SettingsEntry(
+        title = "顶栏签名",
+        valueText = brandSignature.trim().ifBlank { "ZhiCode（默认）" },
+        onClick = onEditBrandSignature,
+        summary = "当前：${brandSignature.trim().ifBlank { "ZhiCode（默认）" }} · 替换顶部品牌名（过长自动滚动）",
+        icon = ZhiIcons.edit,
+        plate = SettingsPlateColors.purple,
+    )
     SettingsEntry(
         title = "主题设置",
         valueText = "深浅 · ${draft.themeMode.label} · 预设色 / 模糊 / 缩放",
@@ -309,62 +361,6 @@ private fun GeneralPage(
         plate = SettingsPlateColors.blue,
     )
     NetworkPage(draft, onChange, onNavigate)
-}
-
-@Composable
-private fun ModelServicePage(
-    draft: SettingsDraft,
-    onChange: (SettingsDraft) -> Unit,
-    onNavigate: (String) -> Unit,
-) {
-    com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("ModelServicePage")
-    // rikkahub hub 的「当前值行」：标题 + 当前值当副标题 + 行尾箭头，
-    // 细节进二级页。原先这里用 SettingsEntry 且写了一句「密钥不会回填」的长说明，
-    // 该说明在二级页里已有，这里按 hub 惯例收成一行当前值。
-    //
-    // 这一行**曾经特意不带行首图标**（理由："同屏只有它一个有图标会显得像另一种优先级"）。
-    // 那条理由现在不成立了：整页每一行都有图标块，缺一个反而成了唯一的例外。
-    SettingsEntry(
-        title = "API 配置",
-        valueText = "${draft.profileName} · ${draft.modelLabel}",
-        onClick = { onNavigate("apiProfiles") },
-        icon = ZhiIcons.link,
-        plate = SettingsPlateColors.blue,
-    )
-
-    // 布尔项用开关，不用下拉菜单。
-    //
-    // 之前这里是 `SettingsChoice`（两个选项的下拉），点开还要再选一次 ——
-    // 一个只有"开/关"两种状态的设置，多出两层点击是纯粹的负担，
-    // 而且行尾显示的是「开启（发送图片给模型）」这种长句，比开关本身更占地方。
-    SettingsToggle(
-        title = "视觉图片输入（Vision）",
-        checked = draft.visionEnabled,
-        onCheckedChange = { enabled -> onChange(draft.copy(visionEnabled = enabled)) },
-        summary = "发送图片给模型；模型不支持 vision 时请关闭",
-        // 与输入器里"图片附件"同一个照片字形。
-        icon = ZhiIcons.image,
-        plate = SettingsPlateColors.purple,
-    )
-
-    SettingsChoice(
-        title = "推理强度",
-        options = EffortLevel.entries.map { it.label },
-        selectedIndex = EffortLevel.entries.indexOf(draft.effort),
-        onSelect = { onChange(draft.copy(effort = EffortLevel.entries[it])) },
-        icon = ZhiIcons.tune,
-        plate = SettingsPlateColors.purple,
-    )
-
-    SettingsChoice(
-        title = "权限模式",
-        options = PermissionMode.entries.map { it.label },
-        selectedIndex = PermissionMode.entries.indexOf(draft.permissionMode),
-        onSelect = { onChange(draft.copy(permissionMode = PermissionMode.entries[it])) },
-        summary = draft.permissionMode.detail,
-        icon = ZhiIcons.lock,
-        plate = SettingsPlateColors.blue,
-    )
 }
 
 @Composable
@@ -520,117 +516,6 @@ private fun NetworkPage(
     }
 }
 
-@Composable
-private fun ContextProjectPage(
-    draft: SettingsDraft,
-    onChange: (SettingsDraft) -> Unit,
-    onNavigate: (String) -> Unit,
-) {
-    com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("ContextProjectPage")
-    SettingsIntField(
-        title = "上下文窗口",
-        value = draft.contextWindow,
-        // 上下文窗口不设人为上限：给多少就是多少，超出实际支持量由引擎侧处理。
-        // `parseTokenCount` 已经挡掉了非正数与解析失败，这里只兜住上下界。
-        min = 1,
-        max = Int.MAX_VALUE,
-        parse = ::parseTokenCount,
-        // 显示成 `200k` 而不是 `200000`：写作写法与标题里提示的 `128k / 1.5m` 一致。
-        format = ::formatTokenCountShort,
-        onValueChange = { onChange(draft.copy(contextWindow = it)) },
-        summary = "支持 128k / 1.5m 写法",
-        // 上下文 = 对话历史，"气泡"是它最直接的样子。
-        icon = ZhiIcons.chat,
-        plate = SettingsPlateColors.green,
-    )
-
-    SettingsToggle(
-        title = "上下文压缩",
-        checked = draft.autoCompact,
-        onCheckedChange = { onChange(draft.copy(autoCompact = it)) },
-        icon = ZhiIcons.compress,
-        plate = SettingsPlateColors.green,
-    )
-
-    AnimatedVisibility(
-        visible = draft.autoCompact,
-        enter = fadeIn() + expandVertically(),
-        exit = fadeOut() + shrinkVertically(),
-    ) {
-        SliderPreference(
-            title = "自动压缩上限（50-100%，安全缓冲优先）",
-            value = draft.autoCompactPercent.toFloat(),
-            onValueChange = { onChange(draft.copy(autoCompactPercent = it.toInt())) },
-            valueRange = COMPACT_PERCENT_MIN.toFloat()..COMPACT_PERCENT_MAX.toFloat(),
-            steps = COMPACT_PERCENT_MAX - COMPACT_PERCENT_MIN - 1,
-            valueText = "${draft.autoCompactPercent}%",
-            summary = "达到上下文窗口的 ${draft.autoCompactPercent}% 时触发压缩",
-            startAction = { SettingsIconPlate(icon = ZhiIcons.tune, color = SettingsPlateColors.green) },
-            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-        )
-    }
-
-    ProjectPathField(draft, onChange)
-    CustomSystemPromptField(draft, onChange)
-    // 提示词模板是**独立整页**（形态参考 rikkahub 的提示词页：一行预览 + 抽屉编辑）。
-    // 三份文案都不常用，塞进这一页会把最常用的"自定义头部提示词"挤下去。
-    SettingsEntry(
-        title = "提示词模板",
-        valueText = "自定义 /init、压缩摘要的系统提示与开场段；留空即用内置文案",
-        onClick = { onNavigate("prompts") },
-        icon = ZhiIcons.edit,
-        plate = SettingsPlateColors.purple,
-    )
-}
-
-/**
- * 自定义头部提示词。
- *
- * 这一项**已经真的生效**：`WorkspaceViewModel.engineOverrides()` 会把它塞进
- * `SessionConfig.customSystemPrompt`，每次 `startTurn` 前重新 `configure`，
- * 所以它随下一次完整任务一起发给模型。
- *
- * 因此提示语必须如实说明两件事，否则用户会误判它的权限：
- * 一是它**不能**覆盖安全规则（权限模式、工具白名单、Root 限制由引擎侧强制）；
- * 二是它**只从下一轮生效**（当前这轮已经在跑，改了对它没用）。
- * 另外要提醒不要在这里写密钥——这段文本会原样进入请求。
- */
-@Composable
-private fun CustomSystemPromptField(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
-    SettingsTextField(
-        title = "自定义头部提示词",
-        value = draft.customSystemPrompt,
-        onValueChange = { onChange(draft.copy(customSystemPrompt = it)) },
-        summary = "随请求发送，下一任务生效；不能覆盖安全规则，勿填密钥。" +
-            if (draft.customSystemPrompt.isBlank()) "" else "当前 ${draft.customSystemPrompt.length} 字。",
-        singleLine = false,
-        minLines = 5,
-        icon = ZhiIcons.edit,
-        plate = SettingsPlateColors.orange,
-    )
-}
-
-/**
- * 项目目录是自由文本，走 `BasicComponent` 的 `bottomAction` 槽位放输入框。
- *
- * ⚠️ 这里**不再**自己维护 `var text by remember(...)`：去抖与草稿已经收进
- * `SettingsTextField`（见那里的说明）。之前两处各存一份草稿，
- * 外部值变化时两个 `remember` 的 key 更新顺序不同，会互相覆盖 ——
- * 表现是"改完专项、回到设置页，目录又变回旧值"。
- */
-@Composable
-private fun ProjectPathField(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
-    SettingsTextField(
-        title = "项目目录",
-        value = draft.projectPath,
-        // `trim()` 留在这里：去抖只负责"什么时候提交"，不负责规整内容。
-        onValueChange = { onChange(draft.copy(projectPath = it.trim())) },
-        summary = "与上下文历史一一绑定，保存后可恢复该项目记录",
-        icon = ZhiIcons.directory,
-        plate = SettingsPlateColors.blue,
-    )
-}
-
 /**
  * 扩展功能。
  *
@@ -752,6 +637,61 @@ private fun SettingsIconEntry(
         startAction = { SettingsIconPlate(icon = icon, color = plate) },
         onClick = onClick,
     )
+}
+
+@Composable
+private fun BrandSignatureDialog(
+    show: Boolean,
+    initial: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember(show, initial) { mutableStateOf(initial) }
+    val scheme = MiuixTheme.colorScheme
+    OverlayDialog(
+        show = show,
+        onDismissRequest = onDismiss,
+        largeScreen = true,
+        maxWidth = ZhiDialogWidth.Compact,
+        outsideMargin = DialogWideOutsideMargin,
+        insideMargin = DialogWideInsideMargin,
+    ) {
+        DialogShell(
+            title = "顶栏签名",
+            actions = {
+                if (initial.isNotBlank() || text.isNotBlank()) {
+                    SecondaryButton(
+                        text = "恢复默认",
+                        onClick = { onConfirm("") },
+                    )
+                }
+                SecondaryButton(
+                    text = "取消",
+                    onClick = onDismiss,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+                PrimaryButton(
+                    text = "确定",
+                    onClick = { onConfirm(text.trim()) },
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            },
+        ) {
+            ZhiTextField(
+                value = text,
+                onValueChange = { text = it.replace('\n', ' ') },
+                label = "输入自定义签名（留空显示 ZhiCode）",
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            top.yukonga.miuix.kmp.basic.Text(
+                text = "顶栏展示区域有限，超出宽度时会自动横向滚动显示。",
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    }
 }
 
 // ------------------------------------------------------------------ 工具

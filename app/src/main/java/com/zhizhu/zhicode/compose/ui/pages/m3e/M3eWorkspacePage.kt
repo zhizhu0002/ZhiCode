@@ -2,10 +2,11 @@ package com.zhizhu.zhicode.compose.ui.pages.m3e
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -77,7 +78,6 @@ import androidx.compose.ui.zIndex
 import com.zhizhu.zhicode.compose.data.TabBarPosition
 import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
-import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.ui.CompactWorkspace
@@ -95,11 +95,12 @@ import com.zhizhu.zhicode.compose.ui.LocalNavBarTarget
 import com.zhizhu.zhicode.compose.ui.LocalNavBarTravelPx
 import com.zhizhu.zhicode.compose.ui.NoGlass
 import com.zhizhu.zhicode.compose.ui.PageFeedback
-import com.zhizhu.zhicode.compose.ui.TopBarState
 import com.zhizhu.zhicode.compose.ui.WideWorkspace
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiOverlayHost
 import com.zhizhu.zhicode.compose.ui.ZhiSidebarHost
+import com.zhizhu.zhicode.compose.ui.brandSignatureMarquee
 import com.zhizhu.zhicode.compose.ui.iconForTab
 import com.zhizhu.zhicode.compose.ui.pages.miuix.FileSelectionToolbar
 import com.zhizhu.zhicode.compose.ui.pages.miuix.navBarHideOnVerticalDrag
@@ -133,6 +134,14 @@ internal fun M3eWorkspacePage(
     val showBottomNavigation = !wide && themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM
     val fileSelectionActive = !wide && (state.fileSelectionMode || state.fileSelection.isNotEmpty())
     val imeOpen = LocalImeMotion.current.imeVisible
+    val imeNavAlpha by animateFloatAsState(
+        targetValue = if (imeOpen) 0f else 1f,
+        animationSpec = tween(
+            durationMillis = if (imeOpen) ZhiMotion.EXIT_MILLIS else ZhiMotion.FADE_IN_MILLIS,
+            easing = FastOutSlowInEasing,
+        ),
+        label = "m3eImeNavAlpha",
+    )
     val navBarBottomInsetDp = WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)
         .asPaddingValues().calculateBottomPadding()
     val floatingAvoidance = FloatingNavBarHeight + FloatingNavBarGap + navBarBottomInsetDp
@@ -165,7 +174,7 @@ internal fun M3eWorkspacePage(
     }
 
     val floatingNavInset = if (
-        showBottomNavigation && themeSettings.tabBarFloating && !imeOpen && !navBarCollapsed.value
+        showBottomNavigation && themeSettings.tabBarFloating && !navBarCollapsed.value
     ) {
         floatingAvoidance + FloatingNavContentGap
     } else {
@@ -202,37 +211,18 @@ internal fun M3eWorkspacePage(
                 contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout),
                 topBar = {
                     if (!wide) {
-                        val topState = TopBarState.from(state)
                         Surface(color = scheme.surfaceContainerLow, tonalElevation = 2.dp) {
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 CenterAlignedTopAppBar(
                                     title = {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        ) {
-                                            Text(
-                                                text = "ZhiCode",
-                                                style = MaterialTheme.typography.titleLarge,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1,
-                                            )
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = scheme.secondaryContainer,
-                                                contentColor = scheme.onSecondaryContainer,
-                                                modifier = Modifier.clickable {
-                                                    viewModel.requestComposerText("/usage")
-                                                    viewModel.send()
-                                                },
-                                            ) {
-                                                Text(
-                                                    text = "${formatTokenCountShort(topState.contextTokens)}/${formatTokenCountShort(topState.contextWindow)}",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                )
-                                            }
-                                        }
+                                        Text(
+                                            text = themeSettings.resolvedTopBrand,
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            modifier = Modifier.brandSignatureMarquee(),
+                                        )
                                     },
                                     navigationIcon = {
                                         FilledTonalIconButton(
@@ -404,7 +394,7 @@ internal fun M3eWorkspacePage(
                         )
                     }
 
-                    if (showBottomNavigation && themeSettings.tabBarFloating) {
+                    if (showBottomNavigation && themeSettings.tabBarFloating && imeNavAlpha > 0.005f) {
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
@@ -412,6 +402,7 @@ internal fun M3eWorkspacePage(
                                 .padding(bottom = navBarBottomInsetDp + 10.dp)
                                 .graphicsLayer {
                                     translationY = travelPx * navBarHideProgressState.value
+                                    alpha = imeNavAlpha
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
@@ -440,7 +431,7 @@ internal fun M3eWorkspacePage(
                                     compactTabs.forEach { tab ->
                                         val selected = state.tab == tab
                                         Surface(
-                                            onClick = { viewModel.selectTab(tab) },
+                                            onClick = { if (!imeOpen) viewModel.selectTab(tab) },
                                             shape = CircleShape,
                                             color = if (selected) scheme.surface else Color.Transparent,
                                             contentColor = if (selected) scheme.primary else scheme.onPrimaryContainer,

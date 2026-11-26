@@ -45,6 +45,8 @@ public final class ModelProviders {
             // 将来再加协议时，编译器会在这里拦住漏改。
             case CODEX_RESPONSES -> new OpenAIResponsesProvider();
             case ZCODE -> new ZcodeProvider();
+            case GOOGLE_GENERATIVE_AI, BEDROCK_CONVERSE_STREAM, MISTRAL_CONVERSATIONS ->
+                throw new IllegalArgumentException(UNSUPPORTED + wire);
             case DEBUG_SCRIPTED -> debugScripted();
         };
     }

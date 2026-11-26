@@ -141,13 +141,15 @@ public final class ApiSettingsStore {
     }
 
     /** 上下文压缩逻辑的版本，见 {@link #migrateCompactionRatio}。 */
-    private static final int COMPACTION_LOGIC_VERSION = 2;
+    private static final int COMPACTION_LOGIC_VERSION = 3;
 
     /** 清除内置端点的一次性标记（版本号）。 */
     private static final int BUNDLED_PURGE_VERSION = 1;
 
-    /** 第 1 版的默认压缩比例，仅用于识别「用户没动过」。 */
+    /** 旧版默认压缩比例，仅用于识别「用户没动过」。 */
     private static final double LEGACY_COMPACT_RATIO = 0.78d;
+    private static final double V2_DEFAULT_COMPACT_RATIO = 1.0d;
+    private static final double DEFAULT_COMPACT_RATIO = 0.60d;
 
     /**
      * 判定「这条记录是内置的」所用的名字片段。
@@ -389,6 +391,12 @@ public final class ApiSettingsStore {
         prefs.edit().putString(Key.ACTIVE_PROFILE, profileId).apply();
     }
 
+    /** 读取指定配置的密钥（供多供应商同步层在内存中组装运行环境，不落明文盘）。 */
+    public synchronized String apiKeyForProfile(ApiProfile profile) {
+        if (profile == null) return "";
+        return apiKeyFor(profile);
+    }
+
     /** 取某 profile 解析后的完整会话配置；profile 不存在返回 null。 */
     public synchronized SessionConfig resolveProfile(String profileId, SessionConfig base) {
         ApiProfile profile = findProfile(getProfiles(), profileId);
@@ -459,6 +467,9 @@ public final class ApiSettingsStore {
         saved.baseUrl = trimToEmpty(saved.baseUrl);
         saved.extraHeaders = trimToEmpty(saved.extraHeaders);
         saved.defaultModel = trimToEmpty(saved.defaultModel);
+        saved.providerKey = trimToEmpty(saved.providerKey);
+        saved.compatJson = trimToEmpty(saved.compatJson);
+        saved.modelsJson = trimToEmpty(saved.modelsJson);
         saved.revision = 1;
         saved.credentialRevision = 1;
         return saved;
@@ -516,6 +527,13 @@ public final class ApiSettingsStore {
         config.customSystemPrompt = sanitizePrompt(config.customSystemPrompt);
 
         List<ApiProfile> profiles = getProfiles();
+        if (profiles.isEmpty()) {
+            config.profileId = "";
+            config.baseUrl = "";
+            config.apiKey = "";
+            saveGlobal(config, durable);
+            return;
+        }
         ApiProfile profile = findProfile(profiles, config.profileId);
         if (profile == null) profile = findProfile(profiles, prefs.getString(Key.ACTIVE_PROFILE, ""));
         if (profile == null) profile = profiles.get(0);
@@ -880,17 +898,12 @@ public final class ApiSettingsStore {
         else throw new IllegalStateException("设置项 " + key + " 的类型没有对应的写入方式: " + value.getClass());
     }
 
-    /**
-     * 压缩逻辑第 1 版的默认比例是 0.78，第 2 版改成 1.0（即只在真的满了才压缩）。
-     *
-     * <p>升级时必须把「用户没动过、仍然是 0.78」的那批值改写过来，否则老用户会一直用
-     * 过时的保守比例。用户手工设过的值不动 —— 判断依据正是「等于旧默认值」。
-     * 版本号与比例一起写回，避免每次启动都重算一遍。
-     */
+    /** 将旧默认阈值（0.78 / 1.0）迁移到 0.60，保留用户手工设定值。 */
     private void migrateCompactionRatio(SessionConfig config) {
         if (prefs.getInt(Key.COMPACTION_VERSION, 0) >= COMPACTION_LOGIC_VERSION) return;
-        if (Math.abs(config.autoCompactRatio - LEGACY_COMPACT_RATIO) < 0.000001d) {
-            config.autoCompactRatio = 1.0d;
+        if (Math.abs(config.autoCompactRatio - LEGACY_COMPACT_RATIO) < 0.000001d
+                || Math.abs(config.autoCompactRatio - V2_DEFAULT_COMPACT_RATIO) < 0.000001d) {
+            config.autoCompactRatio = DEFAULT_COMPACT_RATIO;
         }
         prefs.edit()
                 .putInt(Key.COMPACTION_VERSION, COMPACTION_LOGIC_VERSION)

@@ -937,17 +937,17 @@ private fun initialSamples(): List<DebugItem> = listOf(
                     kind = ToolKind.READ,
                 ),
                 // ToolKind.OTHER：既不是搜索/读取/编辑，也不是命令的那一类
-                // （AndroidIntent / TermuxDoctor / Skill …），用来确认分组文案不会漏掉它们。
+                // （AndroidIntent / Skill …），用来确认分组文案不会漏掉它们。
                 ToolActivity(
                     id = "c-other",
-                    toolName = "TermuxDoctor",
-                    displayName = "环境自检",
-                    summary = "内置 Termux",
+                    toolName = "GitStatus",
+                    displayName = "仓库状态",
+                    summary = "Debian PRoot",
                     completed = true,
                     elapsedMs = 1_450,
                     kind = ToolKind.OTHER,
-                    output = "prefix: /data/data/com.zhizhu.code/files/usr\n" +
-                        "arch: aarch64\npackages: 337 files ok",
+                    output = "rootfs: /data/user/0/com.zhizhu.code/files/debian\n" +
+                        "arch: aarch64\ndebian 12 + node22 + pi 1.6.1",
                 ),
             ),
         ),
@@ -2412,7 +2412,7 @@ private fun WorkspaceSection(state: WorkspaceUiState, viewModel: WorkspaceViewMo
                 )
                 TextButton(
                     text = "推理 → 自动",
-                    onClick = { viewModel.setEffort(EffortLevel.AUTO) },
+                    onClick = { viewModel.setEffort(EffortLevel.HIGH) },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -2570,8 +2570,17 @@ private fun ComposerSection(state: WorkspaceUiState, viewModel: WorkspaceViewMod
             // 这里返回 null 会让芯片回退成「图标 + 文件名」形态（不影响真实输入器）。
             onAttachmentImage = { null },
             onPermissionSelected = viewModel::setPermissionMode,
-            onEffortSelected = viewModel::setEffort,
+            onModelThinkingChip = viewModel::openModelThinkingPicker,
+            onEnterModelThinkingSubmenu = viewModel::enterModelThinkingSubmenu,
+            onBackToModelThinkingList = viewModel::backToModelThinkingList,
+            onSelectModelAndEffort = viewModel::selectModelAndEffort,
+            onDismissModelThinking = viewModel::closeModelThinkingPicker,
+            onConfigureModels = viewModel::openApiConfigEditActiveProvider,
             onModelChip = viewModel::showModelPicker,
+            onSelectProvider = viewModel::selectModelPickerProfile,
+            onDismissProvider = viewModel::closeModelPicker,
+            onAddProvider = viewModel::openApiProfileFormFromModelPicker,
+            onManageProviders = viewModel::openApiConfigManageFromPicker,
             modifier = Modifier.fillMaxWidth(),
         )
     }

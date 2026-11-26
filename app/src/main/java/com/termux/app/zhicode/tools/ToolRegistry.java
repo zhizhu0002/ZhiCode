@@ -46,7 +46,7 @@ public final class ToolRegistry {
     public ToolRegistry(Context context) {
         TermuxShellExecutor shell = new TermuxShellExecutor(context);
         AndroidIntentBridge intentBridge = new AndroidIntentBridge(context);
-        McpRuntime mcp = new McpRuntime();
+        McpRuntime mcp = new McpRuntime(context);
         this.mcpRuntime = mcp;
 
         for (ZhiTool tool : builtIns(context, shell, intentBridge, mcp)) register(tool);
@@ -78,8 +78,6 @@ public final class ToolRegistry {
 
             // 诊断与联网
             new GitStatusTool(shell),
-            new TermuxDoctorTool(shell),
-            new TermuxRepairTool(shell),
             new WebSearchTool(),
             new WebFetchTool(),
 

@@ -69,10 +69,6 @@ internal fun WideWorkspace(
                 // 不透明 Surface，窄屏顶栏仍在 capture 外保留独立玻璃。
                 glass = NoGlass,
                 onOpenSidebar = viewModel::openSidebar,
-                onContextClick = {
-                    viewModel.requestComposerText("/usage")
-                    viewModel.send()
-                },
                 onSettings = viewModel::openSettings,
                 tabs = null,
             )
@@ -292,7 +288,7 @@ internal val TopBarTabRowPadding = 12.dp
 // SmallTopAppBar 官方 CollapsedHeight = 52dp；窄屏 Tab 行在 bottomContent 槽位。
 // S1 之后顶栏占布局高度、内容不再重叠 —— 但顶栏 blur 需要内容从底下滚过，
 // 所以 Scaffold 内容层不再吃 padding.top，各面板用这两个常量自己留出可见区起点。
-internal val TopBarInset = 52.dp
+internal val TopBarInset = 56.dp
 
 /**
  * 顶栏**自己消费掉的窗口 inset**（就是状态栏那一条）。
@@ -426,10 +422,16 @@ internal fun ZhiSidebarHost(
             ZhiAnchoredMenuHost(state, viewModel, anchorId, fingerOffset, renderInRootScaffold = false)
         },
         onSandbox = { viewModel.openSandbox() },
-        // 「运行环境」行现在是真实探测结果 + 真实的安装/自检窗口，
-        // 不再是把 /doctor 当普通消息发出去（那样只会得到一句 Mock 回复）。
         onRuntime = viewModel::openEnvironment,
         onSettings = viewModel::openSettings,
+        onUpdateProjectPath = viewModel::updateProjectDirectory,
+        onAddWorkspace = { path, label -> viewModel.addWorkspace(path, label, switchToIt = true) },
+        onRenameWorkspace = viewModel::renameWorkspace,
+        onRemoveWorkspace = viewModel::removeWorkspace,
+        onToggleWorkspaceExpanded = viewModel::toggleWorkspaceExpanded,
+        onSetAllWorkspacesExpanded = viewModel::setAllWorkspacesExpanded,
+        onSetSidebarOrderBy = viewModel::setSidebarOrderBy,
+        onNewSessionInWorkspace = viewModel::newSessionInWorkspace,
         modifier = modifier,
     )
 }

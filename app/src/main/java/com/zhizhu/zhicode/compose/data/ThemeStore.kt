@@ -190,7 +190,12 @@ data class ThemeSettings(
      * 互不影响，见 [MOCHI_GLASS] 的说明。
      */
     val mochiGlass: Boolean = false,
+    /** 顶部自定义品牌签名；空串时显示默认 "ZhiCode"。 */
+    val topBrandSignature: String = "",
 ) {
+    val resolvedTopBrand: String
+        get() = topBrandSignature.trim().ifBlank { "ZhiCode" }
+
     val preset get() = presetById(presetId)
 
     /**
@@ -286,6 +291,7 @@ internal object ThemeStore {
      * 开关的代价也不同 —— 液态玻璃要建取样层和模糊金字塔，比普通虚化贵得多。
      */
     private const val MOCHI_GLASS = PREFIX + "mochi_glass"
+    private const val TOP_BRAND_SIGNATURE = PREFIX + "top_brand_signature"
 
     /** 聊天字号比例的合法区间。与 `UI_SCALE_MIN/MAX` 分开：正文可以拉得比界面密度更开。 */
     const val CHAT_FONT_SCALE_MIN = 0.8f
@@ -333,6 +339,7 @@ internal object ThemeStore {
             codeLineNumbers = prefs.getBoolean(CODE_LINE_NUMBERS, false),
             pageSetId = prefs.getString(PAGE_SET, "")?.takeIf { it.isNotBlank() } ?: "miuix",
             mochiGlass = prefs.getBoolean(MOCHI_GLASS, false),
+            topBrandSignature = prefs.getString(TOP_BRAND_SIGNATURE, "")?.trim() ?: "",
         )
     }
 
@@ -374,6 +381,7 @@ internal object ThemeStore {
                 .putBoolean(CODE_LINE_NUMBERS, settings.codeLineNumbers)
                 .putString(PAGE_SET, settings.pageSetId)
                 .putBoolean(MOCHI_GLASS, settings.mochiGlass)
+                .putString(TOP_BRAND_SIGNATURE, settings.topBrandSignature.trim())
                 .commit()
         }
     }

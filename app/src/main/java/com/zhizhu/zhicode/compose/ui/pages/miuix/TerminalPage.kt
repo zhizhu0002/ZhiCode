@@ -16,8 +16,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -239,8 +240,22 @@ private fun RealTerminalPane(
      * 放进 `Surface` 而不是内部 `Column`：要缩的是**整页**，包括顶部 `PaneHeader`、
      * 终端本体、以及底部那排扩展键。只缩终端本体的话扩展键仍会被压住。
      */
+    val imeMotion = com.zhizhu.zhicode.compose.ui.LocalImeMotion.current
+    val bottomBarPx = with(LocalDensity.current) {
+        com.zhizhu.zhicode.compose.ui.LocalBottomBarInset.current.roundToPx()
+    }
     Surface(
-        modifier = modifier.fillMaxSize().imePadding(),
+        modifier = modifier
+            .fillMaxSize()
+            .layout { measurable, constraints ->
+                val imePadPx = (imeMotion.imeBottomPx - bottomBarPx).coerceAtLeast(0)
+                val maxH = (constraints.maxHeight - imePadPx).coerceAtLeast(0)
+                val minH = minOf(constraints.minHeight, maxH)
+                val placeable = measurable.measure(constraints.copy(minHeight = minH, maxHeight = maxH))
+                layout(constraints.maxWidth, constraints.maxHeight) {
+                    placeable.place(0, 0)
+                }
+            },
         color = ZhiColors.panelSurface(),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -483,9 +498,9 @@ private fun TerminalPlaceholder(
             ZhiHorizontalDivider()
             Text(
                 text = if (lines.any { it.text.contains("未就绪") || it.text.contains("尚未接入") }) {
-                    "初始化内置 Termux 环境后，这里会变成可输入的真实终端。"
+                    "初始化内置 Debian 环境后，这里会直接进入可输入的真实 Debian 终端。"
                 } else {
-                    "内置 Termux 环境未就绪，无法启动终端。"
+                    "内置 Debian 环境未就绪，无法启动终端。"
                 },
                 color = scheme.onSurfaceVariantSummary,
                 fontSize = MiuixTheme.textStyles.footnote1.fontSize,
@@ -532,7 +547,7 @@ private fun TerminalSetupAction(
                 ZhiIndeterminateBar(modifier = Modifier.fillMaxWidth())
             }
             Text(
-                text = message.ifBlank { "正在解压并配置内置 Termux 环境…" },
+                text = message.ifBlank { "正在解压并配置内置 Debian + PRoot 环境…" },
                 color = scheme.onSurfaceVariantSummary,
                 fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),

@@ -54,7 +54,7 @@ final class ContextCompactor {
     private static final int MIN_COMPACT_THRESHOLD_TOKENS = 4_000;
     /** 用户比例的下限：允许把阈值调低，但不允许低到「每轮都压缩」。 */
     private static final double MIN_AUTO_COMPACT_RATIO = 0.50;
-    private static final double DEFAULT_AUTO_COMPACT_RATIO = 0.95;
+    private static final double DEFAULT_AUTO_COMPACT_RATIO = 0.60;
     /** 保留最近多少 token 的原样消息。取窗口的 1/5，并限制在这个区间内。 */
     private static final int MIN_TARGET_RECENT_TOKENS = 8_000;
     private static final int MAX_TARGET_RECENT_TOKENS = 32_000;

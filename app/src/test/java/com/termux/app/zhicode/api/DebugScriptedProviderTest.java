@@ -41,7 +41,7 @@ public final class DebugScriptedProviderTest {
     /** 会改动工程或系统的工具：调试脚本里的"真执行"批次不许包含它们。 */
     private static final Set<String> WRITE_TOOLS = new HashSet<>(Arrays.asList(
             "Write", "Edit", "MultiEdit", "Copy", "Move", "Mkdir", "Delete",
-            "Bash", "RootBash", "TermuxRepair", "EnterWorktree", "ExitWorktree",
+            "Bash", "RootBash", "EnterWorktree", "ExitWorktree",
             "AndroidIntent", "UiCanvas", "Debug", "Agent"));
 
     // ------------------------------------------------------------------ 清单

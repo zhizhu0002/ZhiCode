@@ -5,6 +5,9 @@ import com.zhizhu.zhicode.compose.model.ApiConfigState
 import com.zhizhu.zhicode.compose.model.ApiProfile
 import com.zhizhu.zhicode.compose.model.ApiProfileDraft
 import com.zhizhu.zhicode.compose.model.ApiProtocol
+import com.zhizhu.zhicode.pi.PiCatalogAndPresets
+import com.zhizhu.zhicode.pi.PiModelConfig
+import com.zhizhu.zhicode.pi.sanitizePiProviderKey
 import com.termux.app.zhicode.model.ApiProfile as EngineProfile
 import com.termux.app.zhicode.storage.ApiSettingsStore
 
@@ -35,33 +38,56 @@ internal object ApiConfigStore {
     /** 保存（新增或编辑）。[ApiProfileDraft.isEditing] 决定是否替换密钥。 */
     fun save(context: Context, draft: ApiProfileDraft): Result<String> = runCatching {
         val store = ApiSettingsStore(context)
+        val normalizedModels = normalizeModelsForDraft(draft)
+        val defaultModel = draft.model.trim().ifEmpty { normalizedModels.firstOrNull()?.id.orEmpty() }
         val target = EngineProfile().also {
-            // 草稿的 id 为 null 表示新增：交给引擎生成（ApiProfile 的无参构造会给 id）。
             if (!draft.id.isNullOrBlank()) it.id = draft.id
             it.name = draft.name.trim()
             it.protocol = draft.protocol.toEngineProtocol()
             it.baseUrl = draft.baseUrl.trim()
-            it.defaultModel = draft.model.trim()
+            it.defaultModel = defaultModel
             it.extraHeaders = draft.extraHeaders.trim()
+            it.providerKey = sanitizePiProviderKey(
+                draft.providerKey.ifBlank { draft.name },
+                fallback = "provider",
+            )
+            it.compatJson = draft.compatJson.trim()
+            it.modelsJson = PiModelConfig.encodeList(normalizedModels)
         }
         val replaceKey = !draft.isEditing || draft.apiKey.isNotBlank()
         val saved = store.saveProfile(target, draft.apiKey, replaceKey)
         saved.id
     }
 
-    /**
-     * 只改当前生效配置的默认模型。
-     *
-     * 与 [save] 的区别：这里**必然**走 `replaceKey=false`，因为改模型名不该碰密钥，
-     * 也不该要求用户重新输入。原版 `applySelectedModel` 就是这个语义。
-     */
+    private fun normalizeModelsForDraft(draft: ApiProfileDraft): List<PiModelConfig> {
+        val list = draft.models.toMutableList()
+        val defaultId = draft.model.trim()
+        if (defaultId.isNotEmpty() && list.none { it.id == defaultId }) {
+            list.add(0, PiCatalogAndPresets.inferModelConfig(defaultId, defaultId, draft.protocol.toPiFormat()))
+        }
+        return list.distinctBy { it.id }
+    }
+
+    /** 只改当前生效配置的默认模型（若列表尚无此模型则自动按目录元数据补入）。 */
     fun setDefaultModel(context: Context, model: String): Result<String> = runCatching {
         require(model.isNotBlank()) { "模型名不能为空" }
+        val trimmed = model.trim()
         val store = ApiSettingsStore(context)
         val profile = store.getActiveProfile() ?: error("没有可用的 API 配置")
-        profile.defaultModel = model.trim()
+        val existingModels = PiModelConfig.decodeList(profile.modelsJson).toMutableList()
+        if (existingModels.none { it.id == trimmed }) {
+            existingModels.add(
+                0,
+                PiCatalogAndPresets.inferModelConfig(
+                    id = trimmed,
+                    displayName = trimmed,
+                    api = profile.protocol.toUiProtocol().toPiFormat(),
+                ),
+            )
+        }
+        profile.defaultModel = trimmed
+        profile.modelsJson = PiModelConfig.encodeList(existingModels)
         store.saveProfile(profile, "", false)
-        // 重新选中，让 store 里的 active 记录与刚保存的内容对齐（saveProfile 会按 id 覆盖）。
         store.selectProfile(profile.id)
         profile.id
     }
@@ -97,38 +123,42 @@ internal object ApiConfigStore {
 
     // ------------------------------------------------------------------
 
-    private fun EngineProfile.toUi(): ApiProfile = ApiProfile(
-        id = id,
-        name = name,
-        protocol = protocol.toUiProtocol(),
-        baseUrl = baseUrl,
-        // 密钥**故意不回填**：界面上不该出现已保存的密钥。
-        apiKey = "",
-        model = defaultModel,
-        extraHeaders = extraHeaders,
-    )
+    fun activeProfile(context: Context): ApiProfile? = runCatching {
+        val store = ApiSettingsStore(context)
+        store.getActiveProfile()?.toUi()
+    }.getOrNull()
 
-    /**
-     * 协议字符串 ↔ 枚举。
-     *
-     * 引擎里还有一个真正的历史别名 `openai-compatible`（自建/第三方网关常用）——
-     * 它与 `openai-chat` 报文完全一致，所以映射不回显式选项时归到最接近的一项，
-     * 避免把用户的旧配置显示成"未知"。
-     *
-     * ⚠️ `codex-responses` **不在此列**：它曾经也被当成别名（"报文格式与主名完全
-     * 一致"），但那是错的 —— 端点、UA、四个关联头、请求体字段都不同（见
-     * `OpenAIResponsesProvider` 的类注释）。把它归到 `OPENAI_RESPONSES` 的后果是
-     * 用户**在协议下拉里根本选不到 Codex**，于是引擎里那条已经实现并测过的分支
-     * 永远点不亮。现在是两边各有一个显式取值。
-     */
+    private fun EngineProfile.toUi(): ApiProfile {
+        val uiProto = protocol.toUiProtocol()
+        val decodedModels = PiModelConfig.decodeList(modelsJson)
+        val effectiveModels = if (decodedModels.isNotEmpty() || defaultModel.isBlank()) {
+            decodedModels
+        } else {
+            listOf(PiCatalogAndPresets.inferModelConfig(defaultModel, defaultModel, uiProto.toPiFormat()))
+        }
+        return ApiProfile(
+            id = id,
+            name = name,
+            protocol = uiProto,
+            baseUrl = baseUrl,
+            // 密钥**故意不回填**：界面上不该出现已保存的密钥。
+            apiKey = "",
+            model = defaultModel.ifBlank { effectiveModels.firstOrNull()?.id.orEmpty() },
+            extraHeaders = extraHeaders,
+            providerKey = providerKey,
+            compatJson = compatJson,
+            models = effectiveModels,
+        )
+    }
+
     private fun String.toUiProtocol(): ApiProtocol = when (lowercase()) {
-        "anthropic" -> ApiProtocol.ANTHROPIC
-        "openai-chat", "openai-compatible" -> ApiProtocol.OPENAI_CHAT
-        "codex-responses" -> ApiProtocol.CODEX_RESPONSES
+        "anthropic", "anthropic-messages" -> ApiProtocol.ANTHROPIC
+        "openai-chat", "openai-compatible", "openai-completions" -> ApiProtocol.OPENAI_CHAT
+        "google-generative-ai", "gemini" -> ApiProtocol.GOOGLE_GENERATIVE_AI
+        "bedrock-converse-stream", "bedrock" -> ApiProtocol.BEDROCK_CONVERSE_STREAM
+        "mistral-conversations", "mistral" -> ApiProtocol.MISTRAL_CONVERSATIONS
+        "codex-responses", "openai-codex-responses" -> ApiProtocol.CODEX_RESPONSES
         "zcode" -> ApiProtocol.ZCODE
-        // 调试配置在发布包里也要能**显示**出来（它可能已经被写进设置）。
-        // 认不出来会被回落成 OPENAI_RESPONSES，用户会看到一条"看着正常、
-        // 却怎么都调不通"的配置 —— 那不是更糟，而是更难查。
         "debug-scripted" -> ApiProtocol.DEBUG_SCRIPTED
         else -> ApiProtocol.OPENAI_RESPONSES
     }
@@ -137,8 +167,9 @@ internal object ApiConfigStore {
         ApiProtocol.OPENAI_RESPONSES -> "openai-responses"
         ApiProtocol.OPENAI_CHAT -> "openai-chat"
         ApiProtocol.ANTHROPIC -> "anthropic"
-        // 必须逐字是引擎的线上名，否则引擎会当作未知协议拒绝（那是一条已经
-        // 实现好的 Codex 分支，写错一个字符就永远走不到）。
+        ApiProtocol.GOOGLE_GENERATIVE_AI -> "google-generative-ai"
+        ApiProtocol.BEDROCK_CONVERSE_STREAM -> "bedrock-converse-stream"
+        ApiProtocol.MISTRAL_CONVERSATIONS -> "mistral-conversations"
         ApiProtocol.CODEX_RESPONSES -> "codex-responses"
         ApiProtocol.ZCODE -> "zcode"
         ApiProtocol.DEBUG_SCRIPTED -> "debug-scripted"

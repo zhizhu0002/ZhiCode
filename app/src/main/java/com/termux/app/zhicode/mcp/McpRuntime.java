@@ -1,10 +1,14 @@
 package com.termux.app.zhicode.mcp;
 
+import android.content.Context;
+
 import com.termux.app.zhicode.json.JsonItems;
 import com.termux.app.zhicode.model.ToolExecutionResult;
 import com.termux.app.zhicode.storage.McpConfigStore;
 import com.termux.app.zhicode.storage.ZhiMemory;
 import com.termux.shared.termux.TermuxConstants;
+import com.zhizhu.zhicode.ContainerPaths;
+import com.zhizhu.zhicode.ProotCommand;
 import com.zhizhu.zhicode.compose.BuildConfig;
 
 import org.json.JSONArray;
@@ -22,6 +26,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
@@ -86,6 +91,11 @@ public final class McpRuntime {
     /** 自增的 JSON-RPC 请求 id。 */
     private final AtomicLong nextId = new AtomicLong(1L);
     private final McpConfigStore store = new McpConfigStore();
+    private final Context appContext;
+
+    public McpRuntime(Context context) {
+        this.appContext = context == null ? null : context.getApplicationContext();
+    }
 
     // ------------------------------------------------------------------ 对外
 
@@ -253,8 +263,23 @@ public final class McpRuntime {
         if (server.command == null || server.command.trim().isEmpty()) {
             throw new IOException("MCP stdio command is empty");
         }
-        ProcessBuilder builder = new ProcessBuilder(commandLine(server));
-        applyEnvironment(builder.environment(), server.env);
+        ProcessBuilder builder;
+        if (appContext != null && ProotCommand.prootBinary(appContext).isFile()
+                && new File(ContainerPaths.rootfsDir(), "bin/bash").exists()) {
+            Map<String, String> extraEnv = new LinkedHashMap<>();
+            applyPairs(extraEnv, server.env);
+            List<String> inner = new ArrayList<>();
+            inner.add(server.command.trim());
+            inner.addAll(server.args);
+            builder = new ProcessBuilder(ProotCommand.buildArgs(
+                appContext, ContainerPaths.homeDir().getAbsolutePath(), inner, extraEnv, false));
+            File rootfs = ContainerPaths.rootfsDir();
+            if (rootfs.isDirectory()) builder.directory(rootfs);
+            ProotCommand.applyHostEnv(appContext, builder.environment());
+        } else {
+            builder = new ProcessBuilder(commandLine(server));
+            applyEnvironment(builder.environment(), server.env);
+        }
         builder.redirectError(ProcessBuilder.Redirect.PIPE);
 
         Process process;
@@ -309,18 +334,15 @@ public final class McpRuntime {
      */
     private void applyEnvironment(Map<String, String> environment, JSONObject pairs) {
         String prefix = TermuxConstants.TERMUX_PREFIX_DIR_PATH;
-        File temporary = new File(prefix, "tmp");
+        File temporary = new File(ContainerPaths.rootfsDir(), "tmp");
         if (!temporary.isDirectory()) temporary.mkdirs();
         String inherited = environment.get("PATH");
         environment.put("HOME", TermuxConstants.TERMUX_HOME_DIR_PATH);
-        environment.put("PREFIX", prefix);
         environment.put("TMPDIR", temporary.getAbsolutePath());
-        // 前缀而不是替换：系统自带的解释器（/system/bin/sh 之类）也要找得到。
         environment.put("PATH", inherited == null || inherited.isEmpty()
-            ? prefix + "/bin"
-            : prefix + "/bin:" + inherited);
-        environment.put("LD_LIBRARY_PATH", prefix + "/lib");
-        environment.put("LANG", "en_US.UTF-8");
+            ? ProotCommand.DEFAULT_PATH
+            : ProotCommand.DEFAULT_PATH + ":" + inherited);
+        environment.put("LANG", "C.UTF-8");
         applyPairs(environment, pairs);
     }
 

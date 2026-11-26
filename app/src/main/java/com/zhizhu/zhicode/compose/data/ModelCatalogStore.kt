@@ -60,8 +60,33 @@ internal object ModelCatalogStore {
      */
 
     /** 用当前生效的 API 配置拉一次模型目录（含 ZCode 的额度）。 */
-    fun fetch(context: Context): Result<Catalog> = runCatching {
-        val config = ApiSettingsStore(context).load()
+    fun fetch(context: Context): Result<Catalog> =
+        runCatching { ApiSettingsStore(context).load() }.mapCatching { fetchConfig(it).getOrThrow() }
+
+    /** 按表单草稿直连拉取模型目录（无需先保存供应商）。 */
+    fun fetchForDraft(
+        context: Context,
+        profileId: String?,
+        protocolWire: String,
+        baseUrl: String,
+        rawApiKey: String,
+        extraHeaders: String,
+    ): Result<Catalog> = runCatching {
+        val store = ApiSettingsStore(context)
+        val config = store.load()
+        config.protocol = protocolWire
+        config.baseUrl = baseUrl.trim()
+        config.extraHeaders = extraHeaders.trim()
+        if (rawApiKey.isNotBlank()) {
+            config.apiKey = rawApiKey.trim()
+        } else if (!profileId.isNullOrBlank()) {
+            val saved = store.getProfiles().firstOrNull { it.id == profileId }
+            if (saved != null) config.apiKey = store.apiKeyForProfile(saved)
+        }
+        return fetchConfig(config)
+    }
+
+    private fun fetchConfig(config: com.termux.app.zhicode.model.SessionConfig): Result<Catalog> = runCatching {
 
         // 与协议层比对**线上名**而不是 ApiProtocol 枚举：那个枚举是 api 包的包内类型
         // （compose 层看不到它，也不该看到），而线上名本来就是公开契约。

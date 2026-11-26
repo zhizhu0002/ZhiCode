@@ -237,22 +237,53 @@ data class ChatItem(
      */
     val editedFiles: List<String> = emptyList(),
     /**
-     * 本轮从提问到完成的耗时（毫秒，0 = 未知）。
+     * 本轮从提问到完成的耗时（毫秒，< 0 表示未知）。
      *
      * 写在**这一轮最后一条助手消息**上（见 `onEngineTurnComplete`）：
      * 一个回合里助手可能产出多条消息，只有最后一条才代表"整轮结束"。
      */
-    val elapsedMs: Long = 0L,
+    val elapsedMs: Long = -1L,
 )
 
 data class SessionSummary(
     val id: String,
     val title: String,
     val project: String,
+    val projectPath: String = "",
     val messageCount: Int,
     val updatedAtLabel: String,
+    val updatedAtMs: Long = 0L,
     val busy: Boolean = false,
     val note: String = "",
+)
+
+/** 侧栏注册的工作区目录项（含不可删除的「默认工作区」）。 */
+data class WorkspaceEntry(
+    val id: String,
+    val path: String,
+    val label: String,
+    val isDefault: Boolean = false,
+    val expanded: Boolean = true,
+    val createdAt: Long = 0L,
+)
+
+/** 侧栏工作区与会话排列模式。 */
+enum class SidebarOrderBy(val label: String) {
+    UPDATED("按最近活跃"),
+    MANUAL("按添加顺序"),
+}
+
+/** 侧栏工作区分组视图节点（对齐 DeepSeek Harness WorkspaceBrowser）。 */
+data class WorkspaceGroup(
+    val key: String,
+    val title: String,
+    val path: String,
+    val isDefault: Boolean,
+    val expanded: Boolean,
+    val containsActive: Boolean,
+    val totalCount: Int,
+    val hiddenCount: Int,
+    val sessions: List<SessionSummary>,
 )
 
 enum class WorkspaceTab(val label: String) {
@@ -260,16 +291,27 @@ enum class WorkspaceTab(val label: String) {
 }
 
 enum class PermissionMode(val label: String, val detail: String) {
-    ASK("每次询问", "每个工具调用都需要你确认"),
-    ACCEPT_EDITS("自动编辑", "自动允许文件编辑，其他调用仍需确认"),
-    PLAN("规划", "先产出计划，批准后再执行"),
-    AUTO("自动", "由 ZhiCode 判断哪些调用需要确认"),
-    DONT_ASK("不询问", "不再弹出确认，高风险操作仍会提示"),
-    BYPASS("跳过权限", "跳过全部权限检查，仅限受信环境"),
+    ASK("询问确认", "只读操作直接放行，写入与命令执行需你确认"),
+    PLAN("仅规划", "只读探索模式，拦截所有文件修改与命令执行"),
+    BYPASS("全部放行", "跳过工具确认，直接执行所有已启用工具"),
 }
 
-enum class EffortLevel(val label: String) {
-    LOW("低"), MEDIUM("中"), HIGH("高"), MAX("最高"), AUTO("自动")
+enum class EffortLevel(val label: String, val wire: String) {
+    OFF("off", "off"),
+    MINIMAL("minimal", "minimal"),
+    LOW("low", "low"),
+    MEDIUM("medium", "medium"),
+    HIGH("high", "high"),
+    XHIGH("xhigh", "xhigh"),
+    MAX("max", "max"),
+    ;
+
+    fun toPiLevel(): com.zhizhu.zhicode.pi.PiThinkingLevel =
+        com.zhizhu.zhicode.pi.PiThinkingLevel.fromId(wire)
+
+    companion object {
+        val DEFAULT_AVAILABLE: List<EffortLevel> = listOf(OFF, MINIMAL, LOW, MEDIUM, HIGH)
+    }
 }
 
 enum class ThemeMode(val label: String) { SYSTEM("跟随系统"), LIGHT("浅色"), DARK("深色") }
@@ -888,7 +930,8 @@ data class WorkspaceUiState(
     /** 任务详情窗口是否打开。 */
     val taskListOpen: Boolean = false,
     val permissionMode: PermissionMode = PermissionMode.ASK,
-    val effort: EffortLevel = EffortLevel.AUTO,
+    val effort: EffortLevel = EffortLevel.HIGH,
+    val availableEfforts: List<EffortLevel> = EffortLevel.DEFAULT_AVAILABLE,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     /**
      * 主题与显示设置（预设、Monet 种子色、AMOLED、四个显示开关、界面缩放）。
@@ -920,6 +963,10 @@ data class WorkspaceUiState(
     val runtimeProgress: Int = 0,
     /** 初始化过程中的当前步骤文案。 */
     val runtimeMessage: String = "",
+    /** 已注册的侧栏工作区目录清单。 */
+    val workspaces: List<WorkspaceEntry> = emptyList(),
+    /** 侧栏工作区排序方式。 */
+    val sidebarOrderBy: SidebarOrderBy = SidebarOrderBy.UPDATED,
     /** 非空即「环境自检」弹窗打开。 */
     val environmentOpen: Boolean = false,
     /** 环境自检报告全文（可复制）。 */
@@ -1090,6 +1137,7 @@ data class WorkspaceUiState(
      */
     val update: UpdateUiState = UpdateUiState(),
     val modelPicker: com.zhizhu.zhicode.compose.model.ModelPickerState? = null,
+    val modelThinkingPicker: com.zhizhu.zhicode.compose.model.ModelThinkingPickerState? = null,
     /**
      * 非空即「UI 调试」整页打开（**仅 debug 构建**有入口，见设置页的「扩展」组）。
      *
@@ -1177,6 +1225,14 @@ data class WorkspaceUiState(
      * 不能在界面里读（见 [ExtensionSummary] 的说明）。
      */
     val extensions: ExtensionSummary = ExtensionSummary(),
+    /** 首次引导（OOBE）整页是否显示。 */
+    val oobeOpen: Boolean = false,
+    /** 当前 OOBE 步骤。 */
+    val oobeStep: com.zhizhu.zhicode.compose.runtime.OobeStep =
+        com.zhizhu.zhicode.compose.runtime.OobeStep.PERMISSIONS,
+    /** 设备权限与可选增强能力实时快照。 */
+    val oobePermissions: com.zhizhu.zhicode.compose.runtime.OobePermissionsSnapshot =
+        com.zhizhu.zhicode.compose.runtime.OobePermissionsSnapshot(),
 ) {
     val activeSession: SessionSummary?
         get() = sessions.firstOrNull { it.id == activeSessionId }
@@ -1204,11 +1260,11 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/keepalive", "强制后台保活：on / off / check"),
     SlashCommand("/mcp", "配置和管理 MCP 服务器；/mcp list · add · enable · disable · remove <名称>"),
     SlashCommand("/web", "联网搜索设置；也可直接输入 /web 搜索词"),
-    SlashCommand("/terminal", "打开内置 Termux 终端"),
+    SlashCommand("/terminal", "打开内置 Debian 终端"),
     SlashCommand("/sandbox", "打开沙箱：虚拟安卓运行环境，可安装/运行/调试 APK"),
     SlashCommand("/files", "打开项目文件与代码编辑器"),
-    SlashCommand("/doctor", "检查 Termux 运行环境"),
-    SlashCommand("/repair", "修复中断的 apt/dpkg 状态"),
+    SlashCommand("/doctor", "检查 Debian / PRoot 运行环境"),
+    SlashCommand("/repair", "修复 Debian 容器配置与挂载链接"),
     SlashCommand("/skills", "为下一条任务附加本地 Skill；带名称直接附加，例如 /skills pdf"),
     SlashCommand("/status", "查看模型、项目、上下文、运行时和会话状态"),
     SlashCommand("/stats", "查看当前会话与运行状态"),
@@ -1221,7 +1277,7 @@ val SLASH_COMMANDS: List<SlashCommand> = listOf(
     SlashCommand("/tasks", "查看 Android Agent 的任务与会话文件"),
     SlashCommand("/agents", "管理内置、项目、用户和正在运行的子 Agent"),
     SlashCommand("/cancel", "停止当前正在执行的 Agent 回合"),
-    SlashCommand("/runtime", "打开内置 Termux 运行环境控制"),
+    SlashCommand("/runtime", "打开内置 Debian 运行环境控制"),
 )
 
 /**

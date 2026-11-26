@@ -52,10 +52,15 @@ public final class ApiEndpointResolver {
         String base = stripTrailingSlash(ApiUrlPolicy.requireBaseUrl(config));
         ApiProtocol protocol = protocolOf(config);
         if (protocol == null) return "";
-        if (protocol == ApiProtocol.CODEX_RESPONSES) return "";
+        if (protocol == ApiProtocol.CODEX_RESPONSES || protocol == ApiProtocol.BEDROCK_CONVERSE_STREAM) return "";
         // ZCode 的模型列表由它自己的端点提供（见 ZcodeProvider / ZcodeWire），
         // 不走通用的 /v1/models。拼一个出来只会 404，而现象只是"列表空着"。
         if (protocol == ApiProtocol.ZCODE) return "";
+        if (protocol == ApiProtocol.GOOGLE_GENERATIVE_AI) {
+            String lower = base.toLowerCase(Locale.US);
+            if (lower.endsWith("/v1beta") || lower.endsWith("/v1")) return base + "/" + MODELS_PATH;
+            return base + "/v1beta/" + MODELS_PATH;
+        }
         return withVersionSegment(base, MODELS_PATH);
     }
 
@@ -79,9 +84,12 @@ public final class ApiEndpointResolver {
         return out;
     }
 
-    /** 基址已含 {@code /v1} 时直接拼路径，否则先补上版本段。 */
+    /** 基址已含版本段（`/v1`、`/v4` 等）时直接拼路径，否则先补上 `/v1`。 */
     private static String withVersionSegment(String base, String path) {
-        boolean versioned = base.toLowerCase(Locale.US).endsWith("/" + VERSION_SEGMENT);
+        String lower = base.toLowerCase(Locale.US);
+        int lastSlash = lower.lastIndexOf('/');
+        String tail = lastSlash >= 0 ? lower.substring(lastSlash + 1) : "";
+        boolean versioned = tail.length() >= 2 && tail.charAt(0) == 'v' && Character.isDigit(tail.charAt(1));
         return versioned ? base + "/" + path : base + "/" + VERSION_SEGMENT + "/" + path;
     }
 

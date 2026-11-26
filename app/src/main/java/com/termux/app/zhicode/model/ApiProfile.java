@@ -35,6 +35,9 @@ public final class ApiProfile {
     /** 额外请求头的存盘键。键名一旦发布就不能改（改了旧配置读不回这个字段）。 */
     private static final String KEY_EXTRA_HEADERS = "extra_headers";
     private static final String KEY_DEFAULT_MODEL = "default_model";
+    private static final String KEY_PROVIDER_KEY = "provider_key";
+    private static final String KEY_COMPAT_JSON = "compat_json";
+    private static final String KEY_MODELS_JSON = "models_json";
     private static final String KEY_REVISION = "revision";
     private static final String KEY_CREDENTIAL_REVISION = "credential_revision";
 
@@ -52,6 +55,12 @@ public final class ApiProfile {
     public String extraHeaders;
     /** 新建会话时预填的模型名；用户可以为单次会话改掉它。 */
     public String defaultModel;
+    /** Pi models.json 中的供应商 key（可为空，由同步层按名称派生）。 */
+    public String providerKey;
+    /** 供应商级 compat JSON 对象文本（可为空）。 */
+    public String compatJson;
+    /** 该供应商下配置的多模型 JSON 数组文本（可为空，兼容旧单模型记录）。 */
+    public String modelsJson;
     /** 配置本身的版本号，每次修改 +1。 */
     public int revision;
     /** 密钥的版本号，指向 AndroidSecretStore 里的那个槽位。 */
@@ -67,6 +76,9 @@ public final class ApiProfile {
         // 而 null 传到请求头解析那边又会被当成"没配" —— 一路都不报错，只是很绕。
         extraHeaders = "";
         defaultModel = "";
+        providerKey = "";
+        compatJson = "";
+        modelsJson = "";
         revision = FIRST_REVISION;
         credentialRevision = FIRST_REVISION;
     }
@@ -79,6 +91,9 @@ public final class ApiProfile {
         copy.baseUrl = baseUrl;
         copy.extraHeaders = extraHeaders;
         copy.defaultModel = defaultModel;
+        copy.providerKey = providerKey;
+        copy.compatJson = compatJson;
+        copy.modelsJson = modelsJson;
         copy.revision = revision;
         copy.credentialRevision = credentialRevision;
         return copy;
@@ -94,6 +109,9 @@ public final class ApiProfile {
                 .put(KEY_BASE_URL, baseUrl)
                 .put(KEY_EXTRA_HEADERS, extraHeaders)
                 .put(KEY_DEFAULT_MODEL, defaultModel)
+                .put(KEY_PROVIDER_KEY, providerKey == null ? "" : providerKey)
+                .put(KEY_COMPAT_JSON, compatJson == null ? "" : compatJson)
+                .put(KEY_MODELS_JSON, modelsJson == null ? "" : modelsJson)
                 .put(KEY_REVISION, revision)
                 .put(KEY_CREDENTIAL_REVISION, credentialRevision);
         } catch (Exception impossible) {
@@ -117,6 +135,9 @@ public final class ApiProfile {
         profile.baseUrl = trimmed(json.optString(KEY_BASE_URL, profile.baseUrl));
         profile.extraHeaders = trimmed(json.optString(KEY_EXTRA_HEADERS, profile.extraHeaders));
         profile.defaultModel = trimmed(json.optString(KEY_DEFAULT_MODEL, profile.defaultModel));
+        profile.providerKey = trimmed(json.optString(KEY_PROVIDER_KEY, profile.providerKey));
+        profile.compatJson = trimmed(json.optString(KEY_COMPAT_JSON, profile.compatJson));
+        profile.modelsJson = trimmed(json.optString(KEY_MODELS_JSON, profile.modelsJson));
         profile.revision = Math.max(FIRST_REVISION, json.optInt(KEY_REVISION, profile.revision));
         profile.credentialRevision = Math.max(FIRST_REVISION,
             json.optInt(KEY_CREDENTIAL_REVISION, profile.credentialRevision));

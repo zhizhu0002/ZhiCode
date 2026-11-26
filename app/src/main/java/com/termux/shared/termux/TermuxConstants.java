@@ -33,6 +33,7 @@ public final class TermuxConstants {
      */
     private static final String DEFAULT_PACKAGE_NAME = BuildConfig.APPLICATION_ID;
     private static final String DEFAULT_FILES_DIR_PATH = "/data/user/0/" + DEFAULT_PACKAGE_NAME + "/files";
+    private static final String DEFAULT_DEBIAN_ROOTFS_DIR_PATH = DEFAULT_FILES_DIR_PATH + "/debian";
 
     /**
      * 品牌短标识，**整份代码里只在这里定义一次**。
@@ -57,20 +58,26 @@ public final class TermuxConstants {
     /** 数据根目录，Termux 约定为 {@code <data-dir>/files}。 */
     public static String TERMUX_FILES_DIR_PATH = DEFAULT_FILES_DIR_PATH;
 
+    /** Debian 容器根目录（`/data/user/0/<pkg>/files/debian`）。 */
+    public static String DEBIAN_ROOTFS_DIR_PATH = DEFAULT_DEBIAN_ROOTFS_DIR_PATH;
+
+    /** proot 临时目录（`/data/user/0/<pkg>/files/proot-tmp`）。 */
+    public static String PROOT_TMP_DIR_PATH = DEFAULT_FILES_DIR_PATH + "/proot-tmp";
+
     /** 数据目录，即 {@link #TERMUX_FILES_DIR_PATH} 的父目录（{@code /data/user/0/<pkg>}）。 */
     public static String TERMUX_DATA_DIR_PATH = "/data/user/0/" + DEFAULT_PACKAGE_NAME;
 
-    /** {@code $HOME}。 */
-    public static String TERMUX_HOME_DIR_PATH = DEFAULT_FILES_DIR_PATH + "/home";
+    /** {@code $HOME}，指向容器内 `/root`。 */
+    public static String TERMUX_HOME_DIR_PATH = DEFAULT_DEBIAN_ROOTFS_DIR_PATH + "/root";
 
-    /** {@code $PREFIX}。 */
-    public static String TERMUX_PREFIX_DIR_PATH = DEFAULT_FILES_DIR_PATH + "/usr";
+    /** {@code $PREFIX}，指向容器内 `/usr`。 */
+    public static String TERMUX_PREFIX_DIR_PATH = DEFAULT_DEBIAN_ROOTFS_DIR_PATH + "/usr";
 
-    /** {@code $PREFIX/bin}。 */
+    /** 容器内 `/usr/bin`。 */
     public static String TERMUX_BIN_PREFIX_DIR_PATH = TERMUX_PREFIX_DIR_PATH + "/bin";
 
-    /** {@code $PREFIX/bin/bash}，内置 shell。 */
-    public static String TERMUX_BASH_PATH = TERMUX_BIN_PREFIX_DIR_PATH + "/bash";
+    /** 容器内 `/bin/bash`。 */
+    public static String TERMUX_BASH_PATH = DEFAULT_DEBIAN_ROOTFS_DIR_PATH + "/bin/bash";
 
     // ------------------------------------------------------------ 数据目录命名
 
@@ -134,12 +141,14 @@ public final class TermuxConstants {
 
         TERMUX_PACKAGE_NAME = packageName;
         TERMUX_FILES_DIR_PATH = filesDirPath;
+        DEBIAN_ROOTFS_DIR_PATH = filesDirPath + "/debian";
+        PROOT_TMP_DIR_PATH = filesDirPath + "/proot-tmp";
         File parent = new File(filesDirPath).getParentFile();
         TERMUX_DATA_DIR_PATH = parent == null ? filesDirPath : parent.getAbsolutePath();
-        TERMUX_HOME_DIR_PATH = filesDirPath + "/home";
-        TERMUX_PREFIX_DIR_PATH = filesDirPath + "/usr";
+        TERMUX_HOME_DIR_PATH = DEBIAN_ROOTFS_DIR_PATH + "/root";
+        TERMUX_PREFIX_DIR_PATH = DEBIAN_ROOTFS_DIR_PATH + "/usr";
         TERMUX_BIN_PREFIX_DIR_PATH = TERMUX_PREFIX_DIR_PATH + "/bin";
-        TERMUX_BASH_PATH = TERMUX_BIN_PREFIX_DIR_PATH + "/bash";
+        TERMUX_BASH_PATH = DEBIAN_ROOTFS_DIR_PATH + "/bin/bash";
 
         TERMUX_HOME_DIR = new File(TERMUX_HOME_DIR_PATH);
         TERMUX_PREFIX_DIR = new File(TERMUX_PREFIX_DIR_PATH);
