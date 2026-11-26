@@ -518,6 +518,13 @@ public final class ApiSettingsStore {
         config.customSystemPrompt = sanitizePrompt(config.customSystemPrompt);
 
         List<ApiProfile> profiles = getProfiles();
+        if (profiles.isEmpty()) {
+            config.profileId = "";
+            config.baseUrl = "";
+            config.apiKey = "";
+            saveGlobal(config, durable);
+            return;
+        }
         ApiProfile profile = findProfile(profiles, config.profileId);
         if (profile == null) profile = findProfile(profiles, prefs.getString(Key.ACTIVE_PROFILE, ""));
         if (profile == null) profile = profiles.get(0);

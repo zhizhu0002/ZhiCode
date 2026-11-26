@@ -4,6 +4,7 @@ import com.termux.app.zhicode.model.SessionConfig
 import com.zhizhu.zhicode.compose.model.AppSettings
 import com.zhizhu.zhicode.compose.model.ChatItem
 import com.zhizhu.zhicode.compose.model.ChatKind
+import com.zhizhu.zhicode.compose.ui.composer.formatContextPercentLabel
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -108,5 +109,30 @@ class CompactionAndContextRestoreTest {
             }
         }
         assertEquals("/sessions/valid.jsonl", chosen)
+    }
+
+    @Test
+    fun `进程重启时跳过空白临时会话并复用有真实上下文的 Pi 文件`() {
+        val boundEmpty = tempFolder.newFile("bound-empty.jsonl")
+        boundEmpty.writeText("""{"type":"session","version":3,"id":"empty"}""")
+        val storedValid = tempFolder.newFile("stored-valid.jsonl")
+        storedValid.writeText("""{"type":"message","id":"m1","message":{"role":"user","content":[{"type":"text","text":"hi there"}]}}""")
+
+        val picked = PiRpcBackend.selectLatestUsableSessionFile(
+            listOf("/sessions/stored-valid.jsonl", "/sessions/bound-empty.jsonl"),
+        ) { path ->
+            if (path.endsWith("bound-empty.jsonl")) boundEmpty else storedValid
+        }
+        assertEquals("/sessions/stored-valid.jsonl", picked)
+    }
+
+    @Test
+    fun `上下文百分比按一位小数格式化并在非零极小值时保底 0_1`() {
+        assertEquals("0%", formatContextPercentLabel(0, 1_000_000))
+        assertEquals("0.3%", formatContextPercentLabel(2_837, 1_000_000))
+        assertEquals("0.1%", formatContextPercentLabel(120, 1_000_000))
+        assertEquals("2.6%", formatContextPercentLabel(3_315, 128_000))
+        assertEquals("60%", formatContextPercentLabel(600_000, 1_000_000))
+        assertEquals("100%", formatContextPercentLabel(1_200_000, 1_000_000))
     }
 }

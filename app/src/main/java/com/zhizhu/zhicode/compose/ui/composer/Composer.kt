@@ -871,6 +871,7 @@ private fun ContextUsageRingBadge(
     val scheme = MiuixTheme.colorScheme
     val fraction = if (window > 0) (tokens.toFloat() / window).coerceIn(0f, 1f) else 0f
     val pct = (fraction * 100f).roundToInt().coerceIn(0, 100)
+    val pctLabel = formatContextPercentLabel(tokens, window)
     val accent = when {
         pct >= 90 -> scheme.error
         pct >= 72 -> ZhiColors.amber()
@@ -897,7 +898,7 @@ private fun ContextUsageRingBadge(
             trackColor = scheme.onSurface.copy(alpha = 0.14f),
         )
         Text(
-            text = "$pct%",
+            text = pctLabel,
             color = textColor,
             fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             fontWeight = FontWeight.Medium,
@@ -905,6 +906,13 @@ private fun ContextUsageRingBadge(
             style = MiuixTheme.textStyles.footnote2.copy(fontFeatureSettings = "tnum"),
         )
     }
+}
+
+internal fun formatContextPercentLabel(used: Int, window: Int): String {
+    if (used <= 0 || window <= 0) return "0%"
+    val rawTenths = ((used.toDouble() / window.toDouble()) * 1000.0).roundToInt().coerceIn(0, 1000)
+    val tenths = if (rawTenths == 0) 1 else rawTenths
+    return if (tenths % 10 == 0) "${tenths / 10}%" else "${tenths / 10}.${tenths % 10}%"
 }
 
 @Composable
@@ -920,6 +928,7 @@ private fun ContextDetailsDialog(
     val remaining = if (window > 0) (window - used).coerceAtLeast(0) else 0
     val fraction = if (window > 0) (used.toFloat() / window).coerceIn(0f, 1f) else 0f
     val pct = (fraction * 100f).roundToInt().coerceIn(0, 100)
+    val pctLabel = formatContextPercentLabel(used, window)
     val accent = when {
         pct >= 90 -> scheme.error
         pct >= 72 -> ZhiColors.amber()
@@ -960,7 +969,7 @@ private fun ContextDetailsDialog(
                         trackColor = scheme.onSurface.copy(alpha = 0.14f),
                     )
                     Text(
-                        text = "$pct%  ·  ${formatTokenCountShort(used)} / ${formatTokenCountShort(window)}",
+                        text = "$pctLabel  ·  ${formatTokenCountShort(used)} / ${formatTokenCountShort(window)}",
                         color = scheme.onBackground,
                         fontSize = MiuixTheme.textStyles.body1.fontSize,
                         fontWeight = FontWeight.SemiBold,

@@ -79,6 +79,7 @@ internal class PiRpcBackend(
 
     private val processLock = Any()
     private val stdinLock = Any()
+    private val pendingAssistantLock = Any()
 
     @Volatile
     private var process: Process? = null
@@ -335,7 +336,7 @@ internal class PiRpcBackend(
             val contextUsage = statsResp?.optJSONObject("data")?.optJSONObject("contextUsage")
             if (contextUsage != null && !contextUsage.isNull("tokens")) {
                 val statsTokens = contextUsage.optLong("tokens", -1L)
-                if (statsTokens >= 0L) {
+                if (statsTokens > 0L) {
                     lastMeasuredContextTokens = statsTokens
                 }
             }
@@ -467,8 +468,27 @@ internal class PiRpcBackend(
                 throw IllegalStateException(err)
             }
             val sessionFile = stateResp.optJSONObject("data")?.optString("sessionFile", "") ?: ""
-            if (recordInitialSessionFile && sessionFile.isNotEmpty()) {
-                recordPiSessionFile(sessionFile, sessionStore)
+            if (recordInitialSessionFile) {
+                val existingFile = resolveExistingSessionFileForRestart()
+                if (existingFile.isNotEmpty()) {
+                    val switchResp = sendCommandBlocking(
+                        JSONObject().put("type", "switch_session").put("sessionPath", existingFile),
+                        CMD_TIMEOUT_MS,
+                    )
+                    if (!switchResp.optBoolean("success", false)) {
+                        val err = switchResp.optString("error", "恢复 Pi 会话上下文失败")
+                        stopProcessQuietly()
+                        throw IllegalStateException(err)
+                    }
+                    piSessionFile = existingFile
+                    val hostFile = File(ContainerPaths.guestToHost(existingFile).absolutePath)
+                    val estimated = estimateContextTokensFromSessionFile(hostFile)
+                    if (estimated > 0 && lastMeasuredContextTokens <= 0L) {
+                        lastMeasuredContextTokens = estimated.toLong()
+                    }
+                } else if (sessionFile.isNotEmpty()) {
+                    recordPiSessionFile(sessionFile, sessionStore)
+                }
             }
         }
     }
@@ -530,7 +550,13 @@ internal class PiRpcBackend(
     }
 
     private fun onProcessExited(exited: Process) {
-        if (process !== exited) return
+        synchronized(processLock) {
+            if (process !== exited) return
+            process = null
+            val out = stdinStream
+            stdinStream = null
+            runCatching { out?.close() }
+        }
         val wasBusy = busyFlag.getAndSet(false)
         val tail = synchronized(stderrTail) { stderrTail.joinToString("\n") }
         val err = IllegalStateException(
@@ -652,22 +678,24 @@ internal class PiRpcBackend(
 
         val content = message.optJSONArray("content")
         if (content != null) {
-            for (i in 0 until content.length()) {
-                val block = content.optJSONObject(i) ?: continue
-                when (block.optString("type", "")) {
-                    "text" -> pendingAssistantText.append(block.optString("text", ""))
-                    "thinking" -> pendingAssistantThinking.append(block.optString("thinking", ""))
-                    "toolCall" -> {
-                        val toolId = block.optString("id", "")
-                        val toolName = block.optString("name", "")
-                        val args = block.optJSONObject("arguments") ?: JSONObject()
-                        pendingAssistantToolUses.add(
-                            JSONObject()
-                                .put("type", "tool_use")
-                                .put("id", toolId)
-                                .put("name", toolName)
-                                .put("input", args),
-                        )
+            synchronized(pendingAssistantLock) {
+                for (i in 0 until content.length()) {
+                    val block = content.optJSONObject(i) ?: continue
+                    when (block.optString("type", "")) {
+                        "text" -> pendingAssistantText.append(block.optString("text", ""))
+                        "thinking" -> pendingAssistantThinking.append(block.optString("thinking", ""))
+                        "toolCall" -> {
+                            val toolId = block.optString("id", "")
+                            val toolName = block.optString("name", "")
+                            val args = block.optJSONObject("arguments") ?: JSONObject()
+                            pendingAssistantToolUses.add(
+                                JSONObject()
+                                    .put("type", "tool_use")
+                                    .put("id", toolId)
+                                    .put("name", toolName)
+                                    .put("input", args),
+                            )
+                        }
                     }
                 }
             }
@@ -797,27 +825,34 @@ internal class PiRpcBackend(
 
     private fun flushPendingAssistantToStore() {
         val store = sessionStore ?: return
-        if (pendingAssistantText.isEmpty() && pendingAssistantThinking.isEmpty() && pendingAssistantToolUses.isEmpty()) {
-            return
+        val content: JSONArray = synchronized(pendingAssistantLock) {
+            if (pendingAssistantText.isEmpty() && pendingAssistantThinking.isEmpty() && pendingAssistantToolUses.isEmpty()) {
+                return
+            }
+            JSONArray().apply {
+                if (pendingAssistantThinking.isNotEmpty()) {
+                    put(JSONObject().put("type", "thinking").put("thinking", pendingAssistantThinking.toString()))
+                }
+                if (pendingAssistantText.isNotEmpty()) {
+                    put(JSONObject().put("type", "text").put("text", pendingAssistantText.toString()))
+                }
+                for (use in pendingAssistantToolUses) {
+                    put(use)
+                }
+                pendingAssistantText.setLength(0)
+                pendingAssistantThinking.setLength(0)
+                pendingAssistantToolUses.clear()
+            }
         }
-        val content = JSONArray()
-        if (pendingAssistantThinking.isNotEmpty()) {
-            content.put(JSONObject().put("type", "thinking").put("thinking", pendingAssistantThinking.toString()))
-        }
-        if (pendingAssistantText.isNotEmpty()) {
-            content.put(JSONObject().put("type", "text").put("text", pendingAssistantText.toString()))
-        }
-        for (use in pendingAssistantToolUses) {
-            content.put(use)
-        }
-        clearPendingAssistant()
         store.appendMessage("assistant", content)
     }
 
     private fun clearPendingAssistant() {
-        pendingAssistantText.setLength(0)
-        pendingAssistantThinking.setLength(0)
-        pendingAssistantToolUses.clear()
+        synchronized(pendingAssistantLock) {
+            pendingAssistantText.setLength(0)
+            pendingAssistantThinking.setLength(0)
+            pendingAssistantToolUses.clear()
+        }
     }
 
     private fun recordToolResult(
@@ -844,6 +879,21 @@ internal class PiRpcBackend(
                     .put("deletions", deletedLines)
                     .put("diff", diff),
             )
+        }
+    }
+
+    private fun resolveExistingSessionFileForRestart(): String {
+        val sid = sessionStore?.sessionId.orEmpty()
+        val candidates = ArrayList<String>(2)
+        if (sid.isNotEmpty()) {
+            val stored = findPiSessionFile(sid)
+            if (stored.isNotEmpty()) candidates.add(stored)
+        }
+        if (piSessionFile.isNotBlank() && piSessionFile !in candidates) {
+            candidates.add(piSessionFile)
+        }
+        return selectLatestUsableSessionFile(candidates) { guestPath ->
+            File(ContainerPaths.guestToHost(guestPath).absolutePath)
         }
     }
 
