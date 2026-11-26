@@ -1,5 +1,6 @@
 package com.zhizhu.zhicode.compose.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.fadeIn
@@ -70,6 +71,8 @@ internal fun ZhiSideDrawer(
     val scrimInteraction = remember { MutableInteractionSource() }
     /** 面板自己的空动作交互源（只为吞掉空白处的点击，不带水波纹）。 */
     val panelInteraction = remember { MutableInteractionSource() }
+
+    BackHandler(enabled = open, onBack = onClose)
 
     /*
      * ⚠️ 关闭时用零尺寸 Modifier，打开时才是 fillMaxSize。

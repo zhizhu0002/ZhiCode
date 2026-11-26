@@ -68,10 +68,10 @@ fun PageFeedback(
         shownError = isError
     }
 
-    // 同一段文案反复出现（连点两次保存）也要重新计时。
-    LaunchedEffect(shown) {
-        if (shown != null) {
-            delay(if (shownError) ERROR_DURATION_MS else INFO_DURATION_MS)
+    // 用 message 做 key：同一段文案关闭后再次弹出时，message 从 null 变为非 null 才能重新计时。
+    LaunchedEffect(message) {
+        if (message != null) {
+            delay(if (isError) ERROR_DURATION_MS else INFO_DURATION_MS)
             onDismiss()
         }
     }

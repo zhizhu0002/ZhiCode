@@ -126,8 +126,10 @@ fun ZhiAppTheme(theme: ThemeSettings, content: @Composable () -> Unit) {
                      *
                      * 对现有界面无影响：Miuix 的 `overScrollVertical()` 不读这个 Local。
                      */
-                    ProvideMochiOverscroll {
-                        content()
+                    ZhiMaterial3ExpressiveTheme(theme = theme) {
+                        ProvideMochiOverscroll {
+                            content()
+                        }
                     }
                 }
             }

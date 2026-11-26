@@ -103,7 +103,9 @@ internal object SearchServiceStore {
             enabled = draft.enabled,
             // 只保留这个类型真正用得到的字段：换了类型之后旧字段留着会让列表副标题
             // 显示无关信息（从 SearXNG 改成 Tavily 后还挂着实例地址）。
-            config = draft.config.filterKeys { key -> draft.type.fields.any { it.name == key } },
+            config = draft.config
+                .filterKeys { key -> draft.type.fields.any { it.name == key } }
+                .mapValues { (_, v) -> v.trim() },
         )
 
         val next = current.services.filterNot { it.id == id } + service
@@ -111,8 +113,9 @@ internal object SearchServiceStore {
 
         // 密钥：只有用户真的输入了才覆盖。留空 = 沿用原密钥
         // （否则「改个检索深度」会把 Key 悄悄清掉）。
-        if (draft.type.needsKey && draft.apiKey.isNotBlank()) {
-            ApiSettingsStore.setSearchServiceKey(context, id, draft.apiKey)
+        val trimmedKey = draft.apiKey.trim()
+        if (draft.type.needsKey && trimmedKey.isNotEmpty()) {
+            ApiSettingsStore.setSearchServiceKey(context, id, trimmedKey)
         }
         id
     }

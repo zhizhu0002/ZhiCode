@@ -250,39 +250,34 @@ fun ThemePage(
                             /* 「预测性返回手势」开关已删除，理由见 ThemeStore 类头注释。 */
                         }
                     }
-                    /*
-                     * 「界面主题」（页面组切换）入口**暂时隐藏**。
-                     *
-                     * ## 为什么隐藏而不是留着
-                     *
-                     * 链路三段都已接好：
-                     *
-                     *     ThemeSettings.pageSetId
-                     *       → ThemeStore 读写（PAGE_SET 键）
-                     *       → ZhiAppTheme 注入 LocalZhiPageSet = ZhiPageSets.byId(...)
-                     *       → AppScaffold 每个 entry 走 pages.Xxx(...)
-                     *
-                     * 但真机上切换后**页面上看不出任何变化**（选「麻薯」再进关于页，
-                     * 仍是 Miuix 版本）。断点还没定位 —— 可能是 `TabRow` 的
-                     * `onTabSelected` 没触发、可能是 `onChange { it.copy(pageSetId=…) }`
-                     * 被别处覆盖、也可能是 `LocalZhiPageSet` 的 provide 作用域没覆盖到
-                     * `NavDisplay` 的 entry 内容。
-                     *
-                     * 查清之前界面上**不放一个点了没反应的开关** —— 那比没有这个功能更糟。
-                     *
-                     * ## 恢复方法
-                     *
-                     * 代码全部在 git 历史里（提交 696c114 起），`git show <commit>:<path>`
-                     * 可取回。数据层完全保留：`pageSetId` 字段、`ThemeStore` 的读写、
-                     * `ZhiPageSets` 注册表、`MochiPageSet` 实现都还在，恢复 UI 后
-                     * 已落盘的 `pageSetId` 会立即生效。
-                     *
-                     * ⚠️ 恢复前必须先加一行能复现的检查（例如在 `pages.Xxx` 里打当前
-                     * 组 id），确认断在哪一环，不要只是把 UI 打开再猜一次。
-                     *
-                     * 另：「效果」组里「液态玻璃」的条件是 `pageSetId == "mochi"`，
-                     * 入口隐藏后它也自然不可达。两者一起恢复。
-                     */
+                    item(key = "pageSet") {
+                        SettingsGroup("界面风格（UI 体系）") {
+                            val sets = ZhiPageSets.all
+                            sets.forEach { set ->
+                                val selected = set.id == theme.pageSetId
+                                top.yukonga.miuix.kmp.basic.BasicComponent(
+                                    title = set.name,
+                                    summary = when (set.id) {
+                                        "miuix" -> "小米风格 Miuix（当前工程默认）"
+                                        "m3_expressive" -> "Material 3 Expressive（弹性动效与分段圆角卡片）"
+                                        "mochi" -> "麻薯 Mochi（关于 / 更新 / 隐私页轻量替代）"
+                                        else -> null
+                                    },
+                                    endActions = {
+                                        if (selected) {
+                                            Icon(
+                                                painter = ZhiIcons.check,
+                                                contentDescription = "已选中",
+                                                tint = MiuixTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    },
+                                    onClick = { onChange { it.copy(pageSetId = set.id) } },
+                                    insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                )
+                            }
+                        }
+                    }
                     item(key = "scale") {
                         SettingsGroup("界面缩放") {
                             SettingsSliderRow(
@@ -362,7 +357,7 @@ private object PreviewType {
 }
 
 @Composable
-private fun ThemePreviewPhone(theme: ThemeSettings, modifier: Modifier = Modifier) {
+internal fun ThemePreviewPhone(theme: ThemeSettings, modifier: Modifier = Modifier) {
     val scheme = MiuixTheme.colorScheme
     val preset = remember(theme.presetId) { presetById(theme.presetId) }
     val pages = listOf("对话", "终端", "文件")

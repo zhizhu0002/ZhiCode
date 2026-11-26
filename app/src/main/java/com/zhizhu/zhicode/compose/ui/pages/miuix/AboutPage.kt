@@ -131,11 +131,12 @@ fun AboutPage(
 
     val enableBlur = LocalThemeSettings.current.blurEnabled
     val barBlurBackdrop = rememberPageBlurBackdrop()
-    val blurActive = barBlurBackdrop != null && scrollProgress == 1f
+    val barAlpha = ((scrollProgress - 0.35f) / 0.65f).coerceIn(0f, 1f)
+    val blurActive = barBlurBackdrop != null && barAlpha > 0f
     val barColor = if (blurActive) {
         Color.Transparent
     } else {
-        if (scrollProgress == 1f) colorScheme.surface else Color.Transparent
+        colorScheme.surface.copy(alpha = barAlpha)
     }
 
     Scaffold(

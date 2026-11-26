@@ -12,10 +12,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
@@ -250,12 +252,19 @@ internal fun SettingsIntField(
 ) {
     // 文本框自己持有一份文本：真实值是被 clamp 过的，而用户打进来的字可能还没成型。
     var text by remember { mutableStateOf(format(value)) }
+    var focused by remember { mutableStateOf(false) }
+
+    // 外部重置或程序改写 value 时，若当前未在编辑，同步刷新文本框显示。
+    LaunchedEffect(value) {
+        if (!focused) text = format(value)
+    }
 
     SettingsTextField(
         title = title,
         value = text,
         // 失焦时收敛。`value` 在每次重组时重新捕获，所以这里拿到的是**最新**的真实值。
         modifier = Modifier.onFocusChanged { focus ->
+            focused = focus.isFocused
             if (!focus.isFocused) text = format(value)
         },
         onValueChange = { raw ->
@@ -692,6 +701,19 @@ internal fun SettingsTextField(
         kotlinx.coroutines.delay(CommitDebounceMillis)
         // 期间又改了（local 已被换掉）→ 这次不提交，让新一轮去抖负责。
         if (local == pending && pending != value) onValueChange(pending)
+    }
+
+    // 离开页面时若还处于 400ms 去抖窗口内，立即冲刷未提交的草稿，避免最后几个字丢失。
+    val latestLocal by rememberUpdatedState(local)
+    val latestValue by rememberUpdatedState(value)
+    val latestOnValueChange by rememberUpdatedState(onValueChange)
+    DisposableEffect(Unit) {
+        onDispose {
+            val pending = latestLocal
+            if (pending != null && pending != latestValue) {
+                latestOnValueChange(pending)
+            }
+        }
     }
 
     BasicComponent(

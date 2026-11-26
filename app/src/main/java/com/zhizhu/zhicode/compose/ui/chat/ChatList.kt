@@ -1103,8 +1103,8 @@ fun ChatList(
                      *
                      * ⚠️ 也**只有**多选模式里才装：普通模式下长按要留给消息菜单。
                      */
-                    .pointerInput(state.multiSelectMode, blocks) {
-                        if (!state.multiSelectMode) return@pointerInput
+                    .pointerInput(state.multiSelectMode, blocks, state.transcript.isEmpty(), state.transcriptHasOlder) {
+                        if (!state.multiSelectMode || blocks.isEmpty()) return@pointerInput
                         // 块 → 成员 id。手势里要用它把一个块下标翻译成"要选哪些消息"。
                         val blockIds = blocks.map { block ->
                             when (block) {
@@ -1112,8 +1112,15 @@ fun ChatList(
                                 is TurnLayout.Block.Turn -> block.ids
                             }
                         }
+                        // blocks 之前有 header item（empty-or-loading / older-loader / transcript-start），
+                        // 必须减去 headerCount 才是 blockIds 的真实下标，否则拖选会整体错位 1 块。
+                        val headerCount = (if (state.transcript.isEmpty()) 1 else 0) +
+                            (if (state.transcriptHasOlder || state.transcript.isNotEmpty()) 1 else 0)
                         fun indexAt(y: Float): Int = listState.layoutInfo.visibleItemsInfo
-                            .firstOrNull { y >= it.offset && y < it.offset + it.size }?.index ?: -1
+                            .firstOrNull { y >= it.offset && y < it.offset + it.size }
+                            ?.let { it.index - headerCount }
+                            ?.takeIf { it in blockIds.indices }
+                            ?: -1
 
                         /*
                          * 这几个是**普通变量**，不是 State：它们只在手势协程内部读写，
@@ -1151,9 +1158,11 @@ fun ChatList(
                                     if (delta != 0f) {
                                         listState.scrollBy(delta)
                                         val visible = listState.layoutInfo.visibleItemsInfo
-                                        val end = indexAt(lastY).takeIf { it >= 0 }
-                                            ?: (if (delta < 0f) visible.firstOrNull()?.index
-                                                else visible.lastOrNull()?.index)
+                                        val edgeBlock = (if (delta < 0f) visible.firstOrNull()?.index
+                                            else visible.lastOrNull()?.index)
+                                            ?.minus(headerCount)
+                                            ?.coerceIn(0, blockIds.lastIndex)
+                                        val end = indexAt(lastY).takeIf { it >= 0 } ?: edgeBlock
                                         if (end != null) {
                                             onRangeSelect(
                                                 blockRangeSelection(blockIds, anchor, end, base, selecting),
@@ -1294,11 +1303,10 @@ fun ChatList(
                     // 是**叠放**而不是竖排 —— 直接并列会让调试条被卡片盖住。
                     Column(modifier = Modifier.fillMaxWidth()) {
                         members.forEach { item ->
-                            // 手指位置追踪：挂在这一条自己的 Box 上，于是记录到的坐标就是
-                            // 「相对这一条」的，与 anchoredMenu 的锚点是同一个坐标系。
-                            val finger = rememberFingerTracker()
-                            var fingerOffset by remember(item.id) { mutableStateOf<DpOffset?>(null) }
                             key(item.id) {
+                                // 手指位置追踪：必须放在 key(item.id) 内，才能绑定到该消息自身的 SlotLifecycle。
+                                val finger = rememberFingerTracker()
+                                var fingerOffset by remember { mutableStateOf<DpOffset?>(null) }
                                 // ⚠️ 每一位成员外面这一层 Box 是**必须**的，不是多余的嵌套：
                                 //
                                 // 1. 它承载手指追踪（`finger.modifier`），记录到的坐标因此是

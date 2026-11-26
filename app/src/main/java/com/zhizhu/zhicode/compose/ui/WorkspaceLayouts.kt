@@ -319,8 +319,11 @@ private fun topBarWindowInset(): Dp =
         WindowInsets.systemBars.only(WindowInsetsSides.Top).getTop(this).toDp()
     }
 
+internal val LocalCompactTopInsetOverride = androidx.compose.runtime.compositionLocalOf<Dp?> { null }
+
 internal val TopBarInsetCompact: Dp
     @Composable get() {
+        LocalCompactTopInsetOverride.current?.let { return it }
         // Bottom-tab mode removes the tab row from ZhiTopBar. Do not keep reserving
         // that 45dp in terminal/files/chat: it creates the conspicuous empty band
         // immediately below the header seen in the user's screenshots.

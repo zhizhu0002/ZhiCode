@@ -162,6 +162,7 @@ internal fun rememberAutoFollowHandle(
     LaunchedEffect(listState, hysteresisPx) {
         var dragging = false
         var sawBottom = false
+        var wasFollowing = true
         var startIndex = 0
         var startOffset = 0
 
@@ -176,6 +177,9 @@ internal fun rememberAutoFollowHandle(
         snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
             if (scrolling) {
                 dragging = true
+                // 先记住拖动前的跟随状态：下面会把 autoFollow 置 false 以便拖动期间让位，
+                // 直接传给 decide 的 previous 必须是拖动前的值，否则轻点暂停后若没达滞后阈值也会误判为 false。
+                wasFollowing = autoFollow.value
                 // 直接读一次当前位置：开始拖动时也可能已经贴底（用户拖了两下）。
                 sawBottom = !listState.canScrollForward
                 startIndex = listState.firstVisibleItemIndex
@@ -190,7 +194,7 @@ internal fun rememberAutoFollowHandle(
                     endOffset = listState.firstVisibleItemScrollOffset,
                     hysteresisPx = hysteresisPx,
                     sawBottomDuringDrag = sawBottom,
-                    previous = autoFollow.value,
+                    previous = wasFollowing,
                     atBottomNow = !listState.canScrollForward,
                 )
             }

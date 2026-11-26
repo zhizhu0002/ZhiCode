@@ -1134,7 +1134,7 @@ private fun SkillEditDialog(
                     singleLine = false,
                     minLines = 10,
                     textStyle = MiuixTheme.textStyles.main.copy(fontFamily = FontFamily.Monospace),
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 )
                 // 这里 touched 恒真：nameError 说的是**磁盘上那个文件名**本身不合法
                 // （不是「用户还没填」），打开就要说，否则问题会被藏到保存那一刻。
@@ -1190,8 +1190,8 @@ private fun SkillFileDialog(
     onDismiss: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    // 见 ZhiFieldError：没碰过文件名就不飘红。
-    var nameTouched by remember(draft) { mutableStateOf(false) }
+    // 见 ZhiFieldError：没碰过文件名就不飘红。用 show 作 key，避免每次敲字 draft 变化都把 touched 重置为 false。
+    var nameTouched by remember(show) { mutableStateOf(false) }
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,

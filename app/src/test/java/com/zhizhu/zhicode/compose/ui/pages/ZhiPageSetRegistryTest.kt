@@ -50,8 +50,9 @@ class ZhiPageSetRegistryTest {
         assertSame(ZhiPageSets.default, ZhiPageSets.byId("nope"))
         assertSame(ZhiPageSets.default, ZhiPageSets.byId(""))
         assertSame(ZhiPageSets.default, ZhiPageSets.byId(null))
-        // 已有的 id 必须能查到自身，不能因为兜底逻辑写错而永远返回默认。
+        // 己有的 id 必须能查到自身，不能因为兜底逻辑写错而永远返回默认。
         assertSame(ZhiPageSets.default, ZhiPageSets.byId("miuix"))
+        assertEquals("m3_expressive", ZhiPageSets.byId("m3_expressive").id)
     }
 
     @Test

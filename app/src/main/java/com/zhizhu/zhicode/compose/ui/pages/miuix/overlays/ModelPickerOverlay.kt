@@ -21,9 +21,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -577,18 +579,26 @@ private fun ModelPickerBody(
         )
 
         val profileCount = picker.profiles.size
-        val pagerState = rememberPagerState(pageCount = { maxOf(profileCount, 1) })
+        val initialPage = picker.activeProfileIndex.coerceIn(0, maxOf(profileCount - 1, 0))
+        val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { maxOf(profileCount, 1) })
         val pagerScope = rememberCoroutineScope()
         val currentActiveIndex by rememberUpdatedState(picker.activeProfileIndex)
+        val currentProfiles by rememberUpdatedState(picker.profiles)
+        var pagerInitialized by remember { mutableStateOf(false) }
         LaunchedEffect(pagerState, picker.activeProfileIndex, profileCount) {
             val target = picker.activeProfileIndex.coerceIn(0, maxOf(profileCount - 1, 0))
-            if (pagerState.currentPage != target) pagerState.springAnimateToPage(target)
+            if (!pagerInitialized) {
+                pagerInitialized = true
+                if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+            } else if (pagerState.currentPage != target) {
+                pagerState.springAnimateToPage(target)
+            }
         }
         LaunchedEffect(pagerState) {
             snapshotFlow { pagerState.currentPage to pagerState.isScrollInProgress }
                 .collect { (page, scrolling) ->
                     if (!scrolling && page != currentActiveIndex) {
-                        picker.profiles.getOrNull(page)?.let { onSelectProfile(it.id) }
+                        currentProfiles.getOrNull(page)?.let { onSelectProfile(it.id) }
                     }
                 }
         }

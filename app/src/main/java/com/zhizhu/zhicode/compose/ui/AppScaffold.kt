@@ -221,15 +221,11 @@ private fun ZhiCodeScreen(
     val glass = rememberGlass()
 
     /*
-     * 当前界面主题组（一个主题 = 一组 page.kt）。
-     *
-     * 下面每个 `entry` 都走 `pages.Xxx(...)`，而不是直接调具体页面 —— 这样
-     * 「换主题」只是换 `LocalZhiPageSet` 的值，路由层一行不动。
-     *
-     * 阶段 2 时它恒为 `MiuixPageSet`（空实现、全部回落），所以读它拿到的就是
-     * 今天这套页面。注入点在 `ZhiAppTheme`，按 `ThemeSettings.pageSetId` 选组。
+     * 页面组的解析必须落在每个 NavDisplay entry 的内部（读取 `LocalZhiPageSet.current`），
+     * 不能像以前那样在 NavDisplay 外面提前抓成局部变量 `val pages = LocalZhiPageSet.current`：
+     * NavDisplay 会按 key 缓存/复用 entry provider，提前捕获会导致用户在主题页切换
+     * `pageSetId` 后，栈上的页面仍停留在旧的 MiuixPageSet 上，看似切换无效。
      */
-    val pages = LocalZhiPageSet.current
 
     // UI 重构（S1/S2）：顶栏迁入官方 `topBar` 槽位（与 Miuix example 的
     // BlurredBar + TopAppBar 同一结构）。此前顶栏是 Scaffold 内容里手排的
@@ -398,7 +394,7 @@ private fun ZhiCodeScreen(
              * 因为它们是**外壳的职责**（窗口尺寸、玻璃捕获节点不能包含自己），
              * 不该让每个主题组各算一遍 —— 那会出现两组玻璃对象互相看不到对方。
              */
-            pages.Workspace(
+            LocalZhiPageSet.current.Workspace(
                 state = state,
                 viewModel = viewModel,
                 isDark = isDark,
@@ -410,55 +406,55 @@ private fun ZhiCodeScreen(
         // 设置页与它的二级页开启边缘滑动返回（Miuix 的 opt-in）；root 工作区不开 ——
         // 它下面没有可回退的页，而内部已经有侧栏抽屉与面板切换在横向上处理手势。
         entry<SettingsKey.Hub>(swipeDismiss = swipeBack) {
-            pages.Settings(
+            LocalZhiPageSet.current.Settings(
                 draft = settingsUi,
                 viewModel = viewModel,
                 extensions = state.extensions,
             )
         }
         entry<SettingsKey.Api>(swipeDismiss = swipeBack) {
-            pages.ApiConfig(config = apiUi, viewModel = viewModel)
+            LocalZhiPageSet.current.ApiConfig(config = apiUi, viewModel = viewModel)
         }
         entry<SettingsKey.Search>(swipeDismiss = swipeBack) {
-            pages.SearchServices(state = searchServicesUi, viewModel = viewModel)
+            LocalZhiPageSet.current.SearchServices(state = searchServicesUi, viewModel = viewModel)
         }
         entry<SettingsKey.Mcp>(swipeDismiss = swipeBack) {
-            pages.McpConfig(config = mcpUi, viewModel = viewModel)
+            LocalZhiPageSet.current.McpConfig(config = mcpUi, viewModel = viewModel)
         }
         entry<SettingsKey.Skills>(swipeDismiss = swipeBack) {
-            pages.Skills(state = skillsUi, viewModel = viewModel)
+            LocalZhiPageSet.current.Skills(state = skillsUi, viewModel = viewModel)
         }
         entry<SettingsKey.RoleCards>(swipeDismiss = swipeBack) {
-            pages.RoleCards(state = roleCardsUi, viewModel = viewModel)
+            LocalZhiPageSet.current.RoleCards(state = roleCardsUi, viewModel = viewModel)
         }
         entry<SettingsKey.Memory>(swipeDismiss = swipeBack) {
-            pages.Memory(state = memoryUi, viewModel = viewModel)
+            LocalZhiPageSet.current.Memory(state = memoryUi, viewModel = viewModel)
         }
         entry<SettingsKey.Theme>(swipeDismiss = swipeBack) {
-            pages.Theme(theme = state.themeSettings, viewModel = viewModel)
+            LocalZhiPageSet.current.Theme(theme = state.themeSettings, viewModel = viewModel)
         }
         entry<SettingsKey.ChatDisplay>(swipeDismiss = swipeBack) {
-            pages.ChatDisplay(theme = state.themeSettings, viewModel = viewModel)
+            LocalZhiPageSet.current.ChatDisplay(theme = state.themeSettings, viewModel = viewModel)
         }
         entry<SettingsKey.Prompts>(swipeDismiss = swipeBack) {
-            pages.Prompts(state = state, viewModel = viewModel)
+            LocalZhiPageSet.current.Prompts(state = state, viewModel = viewModel)
         }
         entry<AppKey.About>(swipeDismiss = swipeBack) {
-            pages.About(update = state.update, viewModel = viewModel)
+            LocalZhiPageSet.current.About(update = state.update, viewModel = viewModel)
         }
         entry<AppKey.Update>(swipeDismiss = swipeBack) {
-            pages.Update(state = state.update, viewModel = viewModel)
+            LocalZhiPageSet.current.Update(state = state.update, viewModel = viewModel)
         }
         entry<AppKey.Licenses>(swipeDismiss = swipeBack) {
-            pages.Licenses(viewModel = viewModel)
+            LocalZhiPageSet.current.Licenses(viewModel = viewModel)
         }
         entry<AppKey.Privacy>(swipeDismiss = swipeBack) {
-            pages.Privacy(viewModel = viewModel)
+            LocalZhiPageSet.current.Privacy(viewModel = viewModel)
         }
         // UI 调试整页（仅 debug 构建有入口）。它拿的是**真实 state 与 ViewModel**：
         // 页面里的输入器、各浮层入口都是真能用的，不是静态贴图。
         entry<AppKey.UiDebug>(swipeDismiss = swipeBack) {
-            pages.UiDebug(
+            LocalZhiPageSet.current.UiDebug(
                 state = state,
                 viewModel = viewModel,
                 glass = glass,

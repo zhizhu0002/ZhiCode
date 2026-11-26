@@ -508,7 +508,10 @@ internal fun FileSelectionToolbar(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
                     val attachable = selection.isNotEmpty() && entries.filter { it.path in selection }.all { !it.directory }
                     FileToolbarAction(ZhiMaterialIcons.Add, "附加", onAttach, attachable)
                     FileToolbarAction(ZhiMaterialIcons.ContentCopy, "复制", onCopy, selection.isNotEmpty())

@@ -224,7 +224,7 @@ fun McpConfigPage(
             // 这些每次都要改的字段推到几十屏之前。
             var tab by rememberSaveable { mutableIntStateOf(0) }
             val tabs = remember { MCP_FORM_TABS }
-            val pagerState = rememberPagerState(pageCount = { tabs.size })
+            val pagerState = rememberPagerState(initialPage = tab, pageCount = { tabs.size })
             val pagerScope = rememberCoroutineScope()
             val currentTab by rememberUpdatedState(tab)
             LaunchedEffect(pagerState, currentTab) {

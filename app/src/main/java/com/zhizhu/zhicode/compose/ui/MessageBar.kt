@@ -75,11 +75,12 @@ fun MessageBar(
         shownError = isError
     }
 
-    // 同一段文案反复出现（例如连点两次保存）也要重新计时，
-    // 所以 key 里带上 shown 本身；只在 shown 变化时才重启协程。
-    LaunchedEffect(shown) {
-        if (shown != null) {
-            delay(if (shownError) ERROR_DURATION_MS else INFO_DURATION_MS)
+    // 用 message 做 key（而不是 shown）：同一段文案被 dismiss 后再次出现时，
+    // shown 还留着旧值，key=shown 不会重启协程导致无法自动消失；
+    // message 从 null 变为非 null 会稳定重启计时器。
+    LaunchedEffect(message) {
+        if (message != null) {
+            delay(if (isError) ERROR_DURATION_MS else INFO_DURATION_MS)
             onDismiss()
         }
     }
@@ -120,7 +121,7 @@ fun MessageBar(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable(onClick = onDismiss)
-                        .padding(horizontal = 4.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                 ) {
                     Text(
                         text = text,

@@ -117,8 +117,8 @@ fun AttachFileOverlay(
     onDismiss: () -> Unit,
 ) {
     // 退场时 `browser` 已经被 closeAttachPicker 清成空（而 `open` 也翻了 false），
-    // 内容得靠「最后一次非空」兜住 —— 否则退场看到的是空的搜索面板。
-    val shownBrowser = rememberLastNonNull(browser.entries.ifEmpty { null })
+    // 只在 open 期间缓存最后一次非空 visibleEntries；打开时即便是空目录/无匹配也要如实展示空态。
+    val shownVisible = rememberLastNonNull(if (open) browser.visibleEntries else null)
     OverlayBottomSheet(
         show = open,
         onDismissRequest = onDismiss,
@@ -131,7 +131,7 @@ fun AttachFileOverlay(
     ) {
         // 原来这里有一句 `if (!open) return@OverlayBottomSheet`：它会在关窗那一瞬间
         // 把内容全拆掉，退场那 250~260ms 只是一张空壳在滑下去。
-        val visible = browser.visibleEntries.ifEmpty { shownBrowser.orEmpty() }
+        val visible = if (open) browser.visibleEntries else shownVisible.orEmpty()
         val scheme = MiuixTheme.colorScheme
         /*
          * 底部为悬浮导航胶囊让位。
@@ -253,7 +253,7 @@ fun AttachFileOverlay(
                                 text = emptyMessage(
                                     filter = browser.filter,
                                     note = browser.note,
-                                    whileClosing = browser.entries.isEmpty() && shownBrowser != null,
+                                    whileClosing = !open && shownVisible != null,
                                 ),
                                 color = scheme.onSurfaceVariantSummary,
                                 fontSize = MiuixTheme.textStyles.body1.fontSize,

@@ -316,14 +316,13 @@ internal fun SettingsSubPage(
      */
     val backdrop: top.yukonga.miuix.kmp.blur.LayerBackdrop? = null
 
-    // FAB 的收放判定。`previousScroll` 刻意放在 derivedStateOf 外面（每次求值时更新），
-    // 这跟参考实现的写法一致：它比较的是"这一次求值"与"上一次求值"的滚动量之差。
-    var previousScroll by remember { mutableIntStateOf(0) }
+    // FAB 的收放判定。`previousScroll` 用 IntArray(1) 避免在 derivedStateOf 求值期间写 Snapshot State。
+    val previousScroll = remember { IntArray(1) }
     val fabVisible by remember {
         derivedStateOf {
             val current = listState.firstVisibleItemIndex * 100_000 + listState.firstVisibleItemScrollOffset
-            val delta = current - previousScroll
-            previousScroll = current
+            val delta = current - previousScroll[0]
+            previousScroll[0] = current
             delta <= 0
         }
     }
