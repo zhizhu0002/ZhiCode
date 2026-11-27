@@ -56,9 +56,12 @@ internal fun WideWorkspace(
     isDark: Boolean,
     glass: Glass,
     glassMain: Glass,
+    sidebarContent: @Composable (Modifier) -> Unit = { sidebarModifier ->
+        ZhiSidebarHost(state = state, viewModel = viewModel, modifier = sidebarModifier)
+    },
 ) {
     Row(modifier = Modifier.fillMaxSize()) {
-        ZhiSidebarHost(state = state, viewModel = viewModel, modifier = Modifier.width(SidebarWidth))
+        sidebarContent(Modifier.width(SidebarWidth))
         ZhiVerticalDivider()
         Column(modifier = Modifier.weight(56f)) {
             ZhiTopBar(

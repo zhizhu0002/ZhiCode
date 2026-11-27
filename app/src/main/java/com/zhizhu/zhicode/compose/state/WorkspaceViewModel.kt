@@ -7333,6 +7333,13 @@ class WorkspaceViewModel(
         }
     }
 
+    fun selectPreviousOobeStep(step: OobeStep) {
+        val current = _state.value
+        if (step.index >= current.oobeStep.index || current.runtimeInstalling) return
+        if (step == OobeStep.PERMISSIONS) refreshOobePermissions()
+        _state.update { it.copy(oobeStep = step) }
+    }
+
     fun openApiConfigFromOobe() {
         _state.update {
             it.copy(apiConfig = ApiConfigState(profiles = emptyList(), activeId = "", loading = true))

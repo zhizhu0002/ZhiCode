@@ -4,6 +4,10 @@ import androidx.compose.runtime.Composable
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.data.ThemeSettings
 import com.zhizhu.zhicode.compose.model.ExtensionSummary
+import com.zhizhu.zhicode.compose.model.MemoryState
+import com.zhizhu.zhicode.compose.model.RoleCardsState
+import com.zhizhu.zhicode.compose.model.SearchServicesState
+import com.zhizhu.zhicode.compose.model.McpConfigState
 import com.zhizhu.zhicode.compose.model.SettingsDraft
 import com.zhizhu.zhicode.compose.model.UpdateUiState
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
@@ -81,6 +85,135 @@ object Material3ExpressivePageSet : ZhiPageSet {
     }
 
     @Composable
+    override fun Prompts(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
+        M3ePromptsPage(
+            initPrompt = state.settings.initPrompt,
+            summaryPrompt = state.settings.summaryPrompt,
+            compactPromptHead = state.settings.compactPromptHead,
+            onDismiss = viewModel::closePrompts,
+            onChange = viewModel::setPromptSlot,
+            onReset = viewModel::resetPromptSlot,
+        )
+    }
+
+    @Composable
+    override fun ApiConfig(config: com.zhizhu.zhicode.compose.model.ApiConfigState?, viewModel: WorkspaceViewModel) {
+        M3eApiConfigPage(
+            config = config,
+            onDismiss = viewModel::closeApiConfig,
+            onNew = viewModel::newApiProfile,
+            onEdit = viewModel::editApiProfile,
+            onSelect = viewModel::selectApiProfile,
+            onDelete = viewModel::deleteApiProfile,
+            onDraftChange = viewModel::updateApiProfileDraft,
+            onSave = viewModel::saveApiProfile,
+            onCancelForm = viewModel::cancelApiProfileForm,
+            onApplyPreset = viewModel::applyApiPreset,
+            onFetchDraftModels = viewModel::fetchDraftModelCatalog,
+            onUpdateContextAndPrompt = viewModel::updateContextAndPromptFromApiConfig,
+            onOpenPrompts = viewModel::openPrompts,
+        )
+    }
+
+    @Composable
+    override fun Memory(state: MemoryState?, viewModel: WorkspaceViewModel) {
+        M3eMemoryPage(
+            state = state,
+            onDismiss = viewModel::closeMemory,
+            onEdit = viewModel::editMemory,
+            onRunInit = { viewModel.closeMemory(); viewModel.runInitFromUi() },
+            onBodyChange = viewModel::updateMemoryBody,
+            onSave = viewModel::saveMemory,
+            onCancelEdit = viewModel::cancelMemoryEdit,
+        )
+    }
+
+    @Composable
+    override fun RoleCards(state: RoleCardsState?, viewModel: WorkspaceViewModel) {
+        M3eRoleCardsPage(
+            state = state,
+            onDismiss = viewModel::closeRoleCards,
+            onNew = viewModel::newRoleCard,
+            onEdit = viewModel::editRoleCard,
+            onSelect = viewModel::selectRoleCard,
+            onDisable = viewModel::disableRoleCard,
+            onDelete = viewModel::deleteRoleCard,
+            onDraftChange = viewModel::updateRoleCardDraft,
+            onSave = viewModel::saveRoleCard,
+            onCancelEditor = viewModel::cancelRoleCardEditor,
+        )
+    }
+
+    @Composable
+    override fun SearchServices(state: SearchServicesState?, viewModel: WorkspaceViewModel) {
+        M3eSearchServicesPage(
+            state = state,
+            onDismiss = viewModel::closeSearchServices,
+            onNew = viewModel::newSearchService,
+            onEdit = viewModel::editSearchService,
+            onSelect = viewModel::selectSearchService,
+            onDelete = viewModel::deleteSearchService,
+            onDraftChange = viewModel::updateSearchServiceDraft,
+            onSave = viewModel::saveSearchService,
+            onCancelForm = viewModel::cancelSearchServiceForm,
+        )
+    }
+
+    @Composable
+    override fun McpConfig(config: McpConfigState?, viewModel: WorkspaceViewModel) {
+        M3eMcpConfigPage(
+            config = config,
+            onDismiss = viewModel::closeMcpConfig,
+            onNew = viewModel::newMcpServer,
+            onEdit = viewModel::editMcpServer,
+            onToggle = viewModel::toggleMcpServer,
+            onDelete = viewModel::deleteMcpServer,
+            onDraftChange = viewModel::updateMcpDraft,
+            onSave = viewModel::saveMcpServer,
+            onCancelForm = viewModel::cancelMcpForm,
+            onTest = viewModel::testMcpServer,
+            onToolOptionsChange = viewModel::setMcpToolOptions,
+            onOpenImport = viewModel::openMcpImport,
+            onImportTextChange = viewModel::updateMcpImportText,
+            onImportConfirm = viewModel::importMcpJson,
+            onImportCancel = viewModel::cancelMcpImport,
+            onTestAll = viewModel::testAllMcpServers,
+            onQueryChange = viewModel::setMcpQuery,
+        )
+    }
+
+    @Composable
+    override fun Skills(state: com.zhizhu.zhicode.compose.model.SkillsState?, viewModel: WorkspaceViewModel) {
+        M3eSkillsPage(
+            state = state,
+            onDismiss = viewModel::closeSkills,
+            onQueryChange = viewModel::setSkillQuery,
+            onNew = viewModel::newSkill,
+            onNewUrl = viewModel::newSkillUrl,
+            onOpenDetail = viewModel::openSkillDetail,
+            onCloseDetail = viewModel::closeSkillDetail,
+            onEdit = viewModel::editSkill,
+            onAttach = viewModel::attachSkill,
+            onDelete = viewModel::deleteSkill,
+            onCreateDraftChange = viewModel::updateSkillCreateDraft,
+            onCreate = viewModel::createSkill,
+            onCancelCreate = viewModel::cancelSkillCreate,
+            onBodyChange = viewModel::updateSkillBody,
+            onSave = viewModel::saveSkill,
+            onCancelEdit = viewModel::cancelSkillEdit,
+            onNewFile = viewModel::newSkillFile,
+            onFileDraftChange = viewModel::updateSkillFileDraft,
+            onSaveFile = viewModel::saveSkillFile,
+            onCancelFile = viewModel::cancelSkillFileDraft,
+            onImportFile = viewModel::importSkillFromUri,
+            onDeleteFile = viewModel::deleteSkillFile,
+            onUrlDraftChange = viewModel::updateSkillUrlDraft,
+            onUrlImport = viewModel::importSkillFromUrl,
+            onCancelUrl = viewModel::cancelSkillUrl,
+        )
+    }
+
+    @Composable
     override fun About(update: UpdateUiState, viewModel: WorkspaceViewModel) {
         M3eAboutPage(
             update = update,
@@ -111,5 +244,27 @@ object Material3ExpressivePageSet : ZhiPageSet {
     @Composable
     override fun Privacy(viewModel: WorkspaceViewModel) {
         M3ePrivacyPage(onBack = viewModel::closePrivacy)
+    }
+
+    @Composable
+    override fun Oobe(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
+        M3eOobePage(state = state, viewModel = viewModel)
+    }
+
+    @Composable
+    override fun UiDebug(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        glass: Glass,
+        onExportSession: (String) -> Unit,
+        onImportSession: () -> Unit,
+    ) {
+        M3eUiDebugPage(
+            state = state,
+            viewModel = viewModel,
+            onBack = viewModel::closeUiDebug,
+            onExportSession = onExportSession,
+            onImportSession = onImportSession,
+        )
     }
 }
