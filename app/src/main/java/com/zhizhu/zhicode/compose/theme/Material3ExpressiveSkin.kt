@@ -51,19 +51,27 @@ fun ZhiMaterial3ExpressiveTheme(
 @Composable
 private fun rememberZhiM3eColors(theme: ThemeSettings, isDark: Boolean): ColorScheme {
     val miuix = MiuixTheme.colorScheme
+    val fixedLightPalette = !isDark && !theme.dynamicColor
+    val lightBackdrop = if (fixedLightPalette) ZhiColors.backdrop() else miuix.background
     return remember(miuix, theme.dynamicColor, theme.presetId, theme.customSeedArgb, isDark) {
         if (isDark) {
             val base = darkColorScheme()
             val surface = miuix.background
+            val fixedDarkPalette = !theme.dynamicColor
             val containerLowest = Color.Black
-            val containerLow = lerp(miuix.background, miuix.surfaceContainer, 0.55f)
-            val container = miuix.surfaceContainer
-            val containerHigh = miuix.surfaceContainerHigh
-            val containerHighest = miuix.surfaceContainerHighest
+            val containerLow = if (fixedDarkPalette) Color(0xFF303030) else lerp(miuix.background, miuix.surfaceContainer, 0.55f)
+            val container = if (fixedDarkPalette) Color(0xFF373737) else miuix.surfaceContainer
+            val containerHigh = if (fixedDarkPalette) Color(0xFF404040) else miuix.surfaceContainerHigh
+            val containerHighest = if (fixedDarkPalette) Color(0xFF494949) else miuix.surfaceContainerHighest
+            val primaryContainer = if (fixedDarkPalette) {
+                lerp(miuix.primaryContainer, miuix.primary, 0.2f)
+            } else {
+                miuix.primaryContainer
+            }
             base.copy(
                 primary = miuix.primary,
                 onPrimary = miuix.onPrimary,
-                primaryContainer = miuix.primaryContainer,
+                primaryContainer = primaryContainer,
                 onPrimaryContainer = miuix.onPrimaryContainer,
                 secondary = miuix.secondary,
                 onSecondary = miuix.onSecondary,
@@ -75,7 +83,7 @@ private fun rememberZhiM3eColors(theme: ThemeSettings, isDark: Boolean): ColorSc
                 onBackground = miuix.onBackground,
                 surface = surface,
                 onSurface = miuix.onSurface,
-                surfaceVariant = miuix.surfaceVariant,
+                surfaceVariant = if (fixedDarkPalette) Color(0xFF3A3A3A) else miuix.surfaceVariant,
                 onSurfaceVariant = miuix.onSurfaceVariantSummary,
                 surfaceContainerLowest = containerLowest,
                 surfaceContainerLow = containerLow,
@@ -91,11 +99,16 @@ private fun rememberZhiM3eColors(theme: ThemeSettings, isDark: Boolean): ColorSc
             )
         } else {
             val base = lightColorScheme()
-            val containerLow = lerp(miuix.background, miuix.surfaceContainer, 0.5f)
+            val containerLow = if (fixedLightPalette) Color.White else lerp(miuix.background, miuix.surfaceContainer, 0.5f)
+            val primaryContainer = if (fixedLightPalette) {
+                lerp(miuix.primaryContainer, miuix.primary, 0.2f)
+            } else {
+                miuix.primaryContainer
+            }
             base.copy(
                 primary = miuix.primary,
                 onPrimary = miuix.onPrimary,
-                primaryContainer = miuix.primaryContainer,
+                primaryContainer = primaryContainer,
                 onPrimaryContainer = miuix.onPrimaryContainer,
                 secondary = miuix.secondary,
                 onSecondary = miuix.onSecondary,
@@ -103,9 +116,9 @@ private fun rememberZhiM3eColors(theme: ThemeSettings, isDark: Boolean): ColorSc
                 onSecondaryContainer = miuix.onSecondaryContainer,
                 tertiaryContainer = miuix.tertiaryContainer,
                 onTertiaryContainer = miuix.onTertiaryContainer,
-                background = miuix.background,
+                background = lightBackdrop,
                 onBackground = miuix.onBackground,
-                surface = miuix.background,
+                surface = lightBackdrop,
                 onSurface = miuix.onSurface,
                 surfaceVariant = miuix.surfaceVariant,
                 onSurfaceVariant = miuix.onSurfaceVariantSummary,

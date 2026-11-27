@@ -250,17 +250,17 @@ fun SettingsPage(
             // 设置页是自动保存，但"保存失败""已切换 API 配置"这类反馈仍然要看得见。
             // 原先这些消息只落在对话页的 MessageBar 上，而在设置页里根本看不到。
             PageFeedbackSlot(modifier = Modifier.align(Alignment.BottomCenter))
+            BrandSignatureDialog(
+                show = brandDialogOpen,
+                initial = brandSignature,
+                onConfirm = { next ->
+                    brandDialogOpen = false
+                    onBrandSignatureChange(next)
+                },
+                onDismiss = { brandDialogOpen = false },
+            )
         }
     }
-    BrandSignatureDialog(
-        show = brandDialogOpen,
-        initial = brandSignature,
-        onConfirm = { next ->
-            brandDialogOpen = false
-            onBrandSignatureChange(next)
-        },
-        onDismiss = { brandDialogOpen = false },
-    )
 }
 
 // ------------------------------------------------------------------ 各分类页
@@ -338,7 +338,6 @@ private fun GeneralPage(
         title = "顶栏签名",
         valueText = brandSignature.trim().ifBlank { "ZhiCode（默认）" },
         onClick = onEditBrandSignature,
-        summary = "当前：${brandSignature.trim().ifBlank { "ZhiCode（默认）" }} · 替换顶部品牌名（过长自动滚动）",
         icon = ZhiIcons.edit,
         plate = SettingsPlateColors.purple,
     )
@@ -647,7 +646,6 @@ private fun BrandSignatureDialog(
     onDismiss: () -> Unit,
 ) {
     var text by remember(show, initial) { mutableStateOf(initial) }
-    val scheme = MiuixTheme.colorScheme
     OverlayDialog(
         show = show,
         onDismissRequest = onDismiss,
@@ -683,12 +681,6 @@ private fun BrandSignatureDialog(
                 label = "输入自定义签名（留空显示 ZhiCode）",
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-            )
-            top.yukonga.miuix.kmp.basic.Text(
-                text = "顶栏展示区域有限，超出宽度时会自动横向滚动显示。",
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
-                modifier = Modifier.padding(top = 8.dp),
             )
         }
     }

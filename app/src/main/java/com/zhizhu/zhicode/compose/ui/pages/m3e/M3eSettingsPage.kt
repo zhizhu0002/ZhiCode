@@ -100,7 +100,6 @@ fun M3eSettingsPage(
                         count = generalCount,
                         title = "顶栏签名",
                         valueText = brandSignature.trim().ifBlank { "ZhiCode（默认）" },
-                        summary = "自定义顶部显示名称（过长自动滚动）",
                         icon = ZhiIcons.edit,
                         onClick = { brandDialogOpen = true },
                     )

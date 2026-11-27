@@ -15,6 +15,10 @@ import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.EnvironmentOverlay
 import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.PermissionOverlay
 import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.PlanApprovalOverlay
 import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.TaskListOverlay
+import com.zhizhu.zhicode.compose.ui.pages.m3e.M3ePermissionOverlay
+import com.zhizhu.zhicode.compose.ui.pages.m3e.M3ePlanApprovalOverlay
+import com.zhizhu.zhicode.compose.ui.pages.m3e.M3eOverlayHost
+import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 
 /**
  * 弹窗挂载宿主：从 `ZhiCodeScreen` 原地拆出，内容逐字未改。
@@ -45,16 +49,6 @@ internal fun ZhiOverlayHost(
         state.attachPickerOpen ||
         state.taskListOpen
 
-    // 导出面板（照 rikkahub 的 ChatExportSheet）：格式与选项在这里选。
-    com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.ExportSheetOverlay(
-        sheet = state.exportSheet,
-        onDismiss = viewModel::dismissExportSheet,
-        onIncludeReasoningChange = viewModel::setExportIncludeReasoning,
-        onExpandReasoningChange = viewModel::setExportExpandReasoning,
-        onExportMarkdown = viewModel::exportSheetAsMarkdown,
-        onExportImage = viewModel::exportSheetAsImage,
-        onSelectMore = viewModel::exportSelectMore,
-    )
     // 一次性事件：把准备要分享的内容交给系统分享面板。
     // 放在这里而不是各页面里 —— 这个宿主是全局唯一的挂载点之一。
     // 导出的落盘入口：SAF（系统文件管理器）。渲染图片要真实 Activity +
@@ -65,16 +59,32 @@ internal fun ZhiOverlayHost(
         onDone = viewModel::showMessage,
     )
 
-    PermissionOverlay(
-        request = state.permissionRequest,
-        onDecision = viewModel::resolvePermission,
-    )
-    PlanApprovalOverlay(
-        plan = state.planApproval,
-        onApprove = { viewModel.resolvePlan(true) },
-        onRevise = { viewModel.resolvePlan(false) },
-        onReviseWithFeedback = viewModel::resolvePlanWithFeedback,
-    )
+    if (LocalThemeSettings.current.pageSetId == "m3_expressive") {
+        M3ePermissionOverlay(request = state.permissionRequest, onDecision = viewModel::resolvePermission)
+        M3ePlanApprovalOverlay(
+            plan = state.planApproval,
+            onApprove = { viewModel.resolvePlan(true) },
+            onRevise = { viewModel.resolvePlan(false) },
+            onReviseWithFeedback = viewModel::resolvePlanWithFeedback,
+        )
+        M3eOverlayHost(state = state, viewModel = viewModel)
+    } else {
+        PermissionOverlay(request = state.permissionRequest, onDecision = viewModel::resolvePermission)
+        PlanApprovalOverlay(
+            plan = state.planApproval,
+            onApprove = { viewModel.resolvePlan(true) },
+            onRevise = { viewModel.resolvePlan(false) },
+            onReviseWithFeedback = viewModel::resolvePlanWithFeedback,
+        )
+        com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.ExportSheetOverlay(
+            sheet = state.exportSheet,
+            onDismiss = viewModel::dismissExportSheet,
+            onIncludeReasoningChange = viewModel::setExportIncludeReasoning,
+            onExpandReasoningChange = viewModel::setExportExpandReasoning,
+            onExportMarkdown = viewModel::exportSheetAsMarkdown,
+            onExportImage = viewModel::exportSheetAsImage,
+            onSelectMore = viewModel::exportSelectMore,
+        )
     ChoicePickerOverlay(
         // 锚定菜单已经由被长按的条目自己画了，这里必须让位 ——
         // 否则长按后会出现「下拉菜单 + 居中对话框」同时可见。
@@ -130,4 +140,5 @@ internal fun ZhiOverlayHost(
         onRefresh = viewModel::refreshEnvironmentReport,
         onCopy = { viewModel.copyEnvironmentReport() },
     )
+    }
 }

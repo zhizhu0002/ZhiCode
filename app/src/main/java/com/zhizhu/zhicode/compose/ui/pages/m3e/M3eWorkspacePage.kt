@@ -59,11 +59,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -99,7 +97,6 @@ import com.zhizhu.zhicode.compose.ui.WideWorkspace
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiOverlayHost
-import com.zhizhu.zhicode.compose.ui.ZhiSidebarHost
 import com.zhizhu.zhicode.compose.ui.brandSignatureMarquee
 import com.zhizhu.zhicode.compose.ui.iconForTab
 import com.zhizhu.zhicode.compose.ui.pages.miuix.FileSelectionToolbar
@@ -181,7 +178,6 @@ internal fun M3eWorkspacePage(
         0.dp
     }
 
-    val drawerScope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(
         initialValue = if (state.sidebarOpen) DrawerValue.Open else DrawerValue.Closed,
     )
@@ -364,6 +360,9 @@ internal fun M3eWorkspacePage(
                                     isDark = isDark,
                                     glass = glass,
                                     glassMain = glassMain,
+                                    sidebarContent = { modifier ->
+                                        M3eSidebarHost(state = state, viewModel = viewModel, modifier = modifier)
+                                    },
                                 )
                             } else {
                                 CompactWorkspace(
@@ -485,7 +484,7 @@ internal fun M3eWorkspacePage(
                         drawerShape = RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp),
                         drawerContainerColor = scheme.surfaceContainerLow,
                     ) {
-                        ZhiSidebarHost(
+                        M3eSidebarHost(
                             state = state,
                             viewModel = viewModel,
                             modifier = Modifier.fillMaxSize(),
@@ -495,7 +494,6 @@ internal fun M3eWorkspacePage(
                 content = {
                     BackHandler(enabled = state.sidebarOpen || drawerState.isOpen) {
                         viewModel.closeSidebar()
-                        drawerScope.launch { drawerState.close() }
                     }
                     workspaceScaffold()
                 },
