@@ -126,6 +126,7 @@ interface EngineEvents {
     )
     fun onEngineToolBatchCompleted(toolIds: List<String>)
     fun onEnginePermissionRequest(requestId: String, tool: String, summary: String, highRisk: Boolean)
+    fun onHostPermissionClosed(requestId: String)
     fun onEngineQuestionRequest(requestId: String, questionsJson: String)
     fun onEnginePlanApprovalRequest(request: EnginePlanApproval)
     fun onEngineTasksChanged(tasks: List<AgentTask>)
@@ -261,9 +262,16 @@ internal class ZhiEngineController(
         override fun onPermissionRequest(requestId: String, toolName: String, summary: String, highRisk: Boolean) {
             val gen = generation
             onMainForGeneration(gen) {
+                if (requestId.startsWith("pi-host-") && piBackend?.isHostPermissionPending(requestId) != true) {
+                    return@onMainForGeneration
+                }
                 flushTextNow()
                 events.onEnginePermissionRequest(requestId, toolName, summary, highRisk)
             }
+        }
+
+        override fun onHostPermissionClosed(requestId: String) {
+            onMain { events.onHostPermissionClosed(requestId) }
         }
 
         override fun onResponseRetry() {
@@ -355,7 +363,12 @@ internal class ZhiEngineController(
         val fingerprint = configurationFingerprint(base)
         val changed = fingerprint != lastConfiguredFingerprint
         sessionConfig = base
-        if (usePiBackend(base)) pi().configure(base) else engine().configure(base)
+        if (usePiBackend(base)) {
+            pi().configure(base)
+        } else {
+            piBackend?.cancelHostTools()
+            engine().configure(base)
+        }
         if (changed) lastConfiguredFingerprint = fingerprint
         // ⚠️ 这里必须落盘。原先只把值写进内存与引擎，`ApiSettingsStore.save()` 在
         // 整个工程里**零调用方** —— 于是权限模式、推理档、上下文窗口、项目目录、
@@ -424,6 +437,7 @@ internal class ZhiEngineController(
      * —— 否则排在队列里的旧取消会把用户新发出的回合杀掉。
      */
     fun cancel() {
+        piBackend?.cancelHostTools()
         generation++
         synchronized(deltaLock) {
             pendingText.setLength(0)
@@ -452,6 +466,7 @@ internal class ZhiEngineController(
 
     fun resumeConversation(sessionId: String): Result<Unit> {
         require(sessionId.isNotBlank()) { "会话标识为空" }
+        piBackend?.cancelHostTools()
         generation++
         synchronized(deltaLock) {
             pendingText.setLength(0)
@@ -490,6 +505,7 @@ internal class ZhiEngineController(
     }
 
     fun resetConversation() {
+        piBackend?.cancelHostTools()
         generation++
         synchronized(deltaLock) {
             pendingText.setLength(0)

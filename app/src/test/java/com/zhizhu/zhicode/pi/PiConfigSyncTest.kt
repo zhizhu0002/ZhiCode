@@ -97,6 +97,8 @@ class PiConfigSyncTest {
         val prompt = PiConfigSync.buildAppendSystemPrompt(cfg, dir)
         assertTrue(prompt.contains("Agent Root is ENABLED"))
         assertTrue(prompt.contains("Shizuku is DISABLED"))
+        assertTrue(prompt.contains("call the `Root` tool directly"))
+        assertFalse(prompt.contains("zhi-root"))
         assertTrue(prompt.contains("Always answer in Chinese."))
         assertTrue(prompt.contains("<role_card>"))
         assertTrue(prompt.contains("Android systems engineer"))

@@ -67,9 +67,7 @@ internal fun ZhiOverlayHost(
 
     PermissionOverlay(
         request = state.permissionRequest,
-        onAllowOnce = { viewModel.resolvePermission(allow = true) },
-        onAlwaysAllow = { viewModel.resolvePermission(allow = true, alwaysAllow = true) },
-        onDeny = { viewModel.resolvePermission(allow = false) },
+        onDecision = viewModel::resolvePermission,
     )
     PlanApprovalOverlay(
         plan = state.planApproval,

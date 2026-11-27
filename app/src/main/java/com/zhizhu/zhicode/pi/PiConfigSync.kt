@@ -364,9 +364,18 @@ internal object PiConfigSync {
     internal fun buildAppendSystemPrompt(config: SessionConfig, projectDir: File): String = buildString {
         appendLine("You are running inside ZhiCode on Android (Ubuntu 24.04 arm64 PRoot container).")
         appendLine("- Normal shell commands run in Ubuntu 24.04 userland (`bash`) sharing `/root` and the visible Terminal pane.")
-        appendLine("- Agent Root is ${if (config.rootExecutionEnabled) "ENABLED" else "DISABLED"}: ${if (config.rootExecutionEnabled) "privileged host actions go through `zhi-root` when explicitly needed." else "do not attempt or claim host root access."}")
-        appendLine("- Shizuku is ${if (config.shizukuExecutionEnabled) "ENABLED" else "DISABLED"}.")
-        appendLine("- Available Android host tools: `AndroidIntent`, `Sandbox`, `Debug`, `ui_canvas`, `WebSearch`, `WebFetch`")
+        appendLine("- For Android app and system intents, call `AndroidIntent` directly.")
+        if (config.shizukuExecutionEnabled) {
+            appendLine("- Shizuku is ENABLED. For Android shell commands, call the `Shizuku` tool directly.")
+        } else {
+            appendLine("- Shizuku is DISABLED.")
+        }
+        if (config.rootExecutionEnabled) {
+            appendLine("- Agent Root is ENABLED. For explicitly requested Android root commands, call the `Root` tool directly.")
+        } else {
+            appendLine("- Agent Root is DISABLED.")
+        }
+        appendLine("- Other host tools: `Sandbox`, `Debug`, `ui_canvas`, `WebSearch`, `WebFetch`")
         if (!config.customSystemPrompt.isNullOrBlank()) {
             appendLine()
             appendLine("<custom_instructions>")

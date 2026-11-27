@@ -1,8 +1,9 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import * as fs from "node:fs";
 
 const RUNTIME_STATE_PATH = "/etc/zhicode/runtime-state.json";
+const HOST_TOOLS = new Set(["Root", "Shizuku", "AndroidIntent", "Sandbox", "Debug", "ui_canvas", "WebSearch", "WebFetch"]);
 
 interface RuntimeState {
   permissionMode: string;
@@ -54,7 +55,7 @@ function classifyTool(toolName: string, input: Record<string, unknown>): {
   summary: string;
 } {
   const lower = toolName.toLowerCase();
-  if (lower === "read" || lower === "grep" || lower === "find" || lower === "ls" || lower === "websearch" || lower === "webfetch") {
+  if (lower === "read" || lower === "grep" || lower === "find" || lower === "ls") {
     const target = String(input.path ?? input.query ?? input.url ?? "");
     return { kind: "read", highRisk: false, summary: target };
   }
@@ -65,107 +66,42 @@ function classifyTool(toolName: string, input: Record<string, unknown>): {
     const cmd = String(input.command ?? "");
     return { kind: "exec", highRisk: isRiskyCommand(cmd), summary: cmd };
   }
-  if (lower === "root") {
-    const cmd = String(input.command ?? "");
-    return { kind: "system", highRisk: true, summary: cmd };
-  }
-  if (lower === "shizuku") {
-    const cmd = String(input.command ?? "");
-    return { kind: "system", highRisk: isRiskyCommand(cmd), summary: cmd };
-  }
-  if (lower === "ui_canvas") {
-    const op = String(input.operation ?? "get");
-    const readonly = op === "get" || op === "preview" || op === "export";
-    return { kind: readonly ? "read" : "write", highRisk: false, summary: op };
-  }
-  if (lower === "sandbox") {
-    const action = String(input.action ?? "").toLowerCase();
-    const readonly = ["status", "list", "inspect", "screenshot", "dump_ui", "find_node", "debug_snapshot"].includes(action);
-    const high = action === "uninstall" || action === "clear_data";
-    return { kind: readonly ? "read" : "system", highRisk: high, summary: `${action} ${String(input.package ?? input.path ?? "")}`.trim() };
-  }
-  if (lower === "debug") {
-    const scope = String(input.scope ?? "sandbox").toLowerCase();
-    const action = String(input.action ?? "").toLowerCase();
-    const readonly = ["process_list", "process_info", "maps", "modules", "threads", "thread_dump", "frida_status", "frida_events"].includes(action);
-    const high = scope === "host" || action === "memory_write" || action === "load_library" || action === "signal";
-    return { kind: readonly && scope !== "host" ? "read" : "system", highRisk: high, summary: `${scope}:${action} ${String(input.package ?? input.pid ?? "")}`.trim() };
-  }
-  if (lower === "androidintent") {
-    const op = String(input.operation ?? "intent");
-    return { kind: "system", highRisk: op === "install_apk", summary: `${op} ${String(input.uri ?? input.package ?? input.path ?? "")}`.trim() };
-  }
   return { kind: "system", highRisk: false, summary: JSON.stringify(input).slice(0, 180) };
 }
 
 async function callBridge(
+  ctx: ExtensionContext,
+  toolCallId: string,
   tool: string,
   input: Record<string, unknown>,
   signal?: AbortSignal,
-): Promise<{
-  content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;
-  details: { exitCode: number; isError: boolean };
-}> {
-  const baseUrl = process.env.ZHICODE_BRIDGE_URL;
-  const token = process.env.ZHICODE_BRIDGE_TOKEN;
-  if (!baseUrl || !token) {
-    return {
-      content: [{ type: "text", text: `Android Host Bridge 未初始化，无法调用 ${tool}` }],
-      details: { exitCode: -1, isError: true },
-    };
-  }
-  const resp = await fetch(`${baseUrl}/invoke`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-ZhiCode-Token": token,
-    },
-    body: JSON.stringify({ tool, input }),
-    signal,
-  });
-  const payload = (await resp.json()) as {
-    ok?: boolean;
+) {
+  const raw = await ctx.ui.input("zhicode_host_tool", JSON.stringify({ toolCallId, tool, input }), { signal });
+  const payload = raw ? JSON.parse(raw) as {
     isError?: boolean;
     exitCode?: number;
     text?: string;
-    error?: string;
     images?: Array<{ data: string; mimeType?: string }>;
-  };
-  const isError = Boolean(payload.isError ?? !resp.ok);
-  const text = payload.text ?? payload.error ?? (resp.ok ? "" : `HTTP ${resp.status}`);
+  } : { isError: true, exitCode: 1, text: "Android 宿主工具调用已取消或不可用" };
+
+  const isError = payload.isError === true;
   const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
-    { type: "text", text },
+    { type: "text", text: payload.text ?? "" },
   ];
-  if (Array.isArray(payload.images)) {
-    for (const img of payload.images) {
-      if (img?.data) {
-        content.push({ type: "image", data: img.data, mimeType: img.mimeType || "image/png" });
-      }
-    }
+  for (const img of payload.images ?? []) {
+    if (img.data) content.push({ type: "image", data: img.data, mimeType: img.mimeType || "image/png" });
   }
-  return {
-    content,
-    details: { exitCode: typeof payload.exitCode === "number" ? payload.exitCode : isError ? 1 : 0, isError },
-  };
+  return { content, isError, details: { exitCode: payload.exitCode ?? (isError ? 1 : 0), isError } };
 }
 
 export default function (pi: ExtensionAPI) {
   const state = readRuntimeState();
 
   pi.on("tool_call", async (event, ctx) => {
+    if (HOST_TOOLS.has(event.toolName)) return;
     const live = readRuntimeState();
     const input = (event.input ?? {}) as Record<string, unknown>;
     const info = classifyTool(event.toolName, input);
-
-    if (event.toolName === "Root" && !live.rootEnabled) {
-      return { block: true, reason: "Agent Root 未在设置中启用。" };
-    }
-    if (event.toolName === "Shizuku" && !live.shizukuEnabled) {
-      return { block: true, reason: "Shizuku 未在设置中启用。" };
-    }
-    if ((event.toolName === "WebSearch" || event.toolName === "WebFetch") && !live.webSearchEnabled) {
-      return { block: true, reason: "联网搜索已在设置中关闭。" };
-    }
 
     if (info.kind === "read") return;
 
@@ -196,8 +132,8 @@ export default function (pi: ExtensionAPI) {
         cwd: Type.Optional(Type.String()),
         timeout_ms: Type.Optional(Type.Number()),
       }),
-      async execute(_id, params, signal) {
-        return callBridge("Root", params as unknown as Record<string, unknown>, signal);
+      async execute(id, params, signal, _onUpdate, ctx) {
+        return callBridge(ctx, id, "Root", params as unknown as Record<string, unknown>, signal);
       },
     });
   }
@@ -213,8 +149,8 @@ export default function (pi: ExtensionAPI) {
         cwd: Type.Optional(Type.String()),
         timeout_ms: Type.Optional(Type.Number()),
       }),
-      async execute(_id, params, signal) {
-        return callBridge("Shizuku", params as unknown as Record<string, unknown>, signal);
+      async execute(id, params, signal, _onUpdate, ctx) {
+        return callBridge(ctx, id, "Shizuku", params as unknown as Record<string, unknown>, signal);
       },
     });
   }
@@ -235,8 +171,8 @@ export default function (pi: ExtensionAPI) {
       categories: Type.Optional(Type.Array(Type.String())),
       flags: Type.Optional(Type.Number()),
     }),
-    async execute(_id, params, signal) {
-      return callBridge("AndroidIntent", params as unknown as Record<string, unknown>, signal);
+    async execute(id, params, signal, _onUpdate, ctx) {
+      return callBridge(ctx, id, "AndroidIntent", params as unknown as Record<string, unknown>, signal);
     },
   });
 
@@ -262,8 +198,8 @@ export default function (pi: ExtensionAPI) {
       y2: Type.Optional(Type.Number()),
       duration_ms: Type.Optional(Type.Number()),
     }),
-    async execute(_id, params, signal) {
-      return callBridge("Sandbox", params as unknown as Record<string, unknown>, signal);
+    async execute(id, params, signal, _onUpdate, ctx) {
+      return callBridge(ctx, id, "Sandbox", params as unknown as Record<string, unknown>, signal);
     },
   });
 
@@ -289,8 +225,8 @@ export default function (pi: ExtensionAPI) {
       max: Type.Optional(Type.Number()),
       timeout_ms: Type.Optional(Type.Number()),
     }),
-    async execute(_id, params, signal) {
-      return callBridge("Debug", params as unknown as Record<string, unknown>, signal);
+    async execute(id, params, signal, _onUpdate, ctx) {
+      return callBridge(ctx, id, "Debug", params as unknown as Record<string, unknown>, signal);
     },
   });
 
@@ -303,8 +239,8 @@ export default function (pi: ExtensionAPI) {
       palette: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
       operations: Type.Optional(Type.Array(Type.Record(Type.String(), Type.Unknown()))),
     }),
-    async execute(_id, params, signal) {
-      return callBridge("ui_canvas", params as unknown as Record<string, unknown>, signal);
+    async execute(id, params, signal, _onUpdate, ctx) {
+      return callBridge(ctx, id, "ui_canvas", params as unknown as Record<string, unknown>, signal);
     },
   });
 
@@ -316,8 +252,8 @@ export default function (pi: ExtensionAPI) {
       parameters: Type.Object({
         query: Type.String({ description: "Search query" }),
       }),
-      async execute(_id, params, signal) {
-        return callBridge("WebSearch", params as unknown as Record<string, unknown>, signal);
+      async execute(id, params, signal, _onUpdate, ctx) {
+        return callBridge(ctx, id, "WebSearch", params as unknown as Record<string, unknown>, signal);
       },
     });
 
@@ -328,8 +264,8 @@ export default function (pi: ExtensionAPI) {
       parameters: Type.Object({
         url: Type.String({ description: "HTTP/HTTPS URL to fetch" }),
       }),
-      async execute(_id, params, signal) {
-        return callBridge("WebFetch", params as unknown as Record<string, unknown>, signal);
+      async execute(id, params, signal, _onUpdate, ctx) {
+        return callBridge(ctx, id, "WebFetch", params as unknown as Record<string, unknown>, signal);
       },
     });
   }

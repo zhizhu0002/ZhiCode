@@ -121,9 +121,7 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
 @Composable
 fun PermissionOverlay(
     request: PermissionRequest?,
-    onAllowOnce: () -> Unit,
-    onAlwaysAllow: () -> Unit,
-    onDeny: () -> Unit,
+    onDecision: (requestId: String, allow: Boolean, alwaysAllow: Boolean) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
     // 退场那 250~260ms 里 `request` 已经是 null，内容不能跟着空掉（否则看起来是
@@ -134,7 +132,7 @@ fun PermissionOverlay(
 
     OverlayDialog(
         show = request != null,
-        onDismissRequest = onDeny,
+        onDismissRequest = { request?.let { onDecision(it.id, false, false) } },
         // 居中形态（`largeScreen = true` 是**居中**开关，不是「大屏专用」）。
         // 不传的话 Miuix 按窗口尺寸自动判：手机竖屏被判成「非大屏」，
         // 走「底部贴边 + 从下滑入」那一档 —— 而这是一个确认框，语义上就该居中。
@@ -148,10 +146,10 @@ fun PermissionOverlay(
             title = "工具授权",
             groupBody = true,
             actions = {
-                SecondaryButton(text = "拒绝", onClick = onDeny)
+                SecondaryButton(text = "拒绝", onClick = { onDecision(req.id, false, false) })
                 PrimaryButton(
                     text = "允许",
-                    onClick = { if (alwaysAllow) onAlwaysAllow() else onAllowOnce() },
+                    onClick = { onDecision(req.id, true, alwaysAllow) },
                     modifier = Modifier.padding(start = 8.dp),
                 )
             },
@@ -206,7 +204,7 @@ fun PermissionOverlay(
                     fontSize = MiuixTheme.textStyles.body2.fontSize,
                     fontFamily = FontFamily.Monospace,
                     textAlign = TextAlign.Start,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                 )
             }
 

@@ -3268,6 +3268,12 @@ class WorkspaceViewModel(
         }
     }
 
+    override fun onHostPermissionClosed(requestId: String) {
+        if (pendingPermissionId != requestId) return
+        pendingPermissionId = null
+        _state.update { it.copy(permissionRequest = null) }
+    }
+
     override fun onEngineQuestionRequest(requestId: String, questionsJson: String) {
         val questions = runCatching { JSONArray(questionsJson) }.getOrDefault(JSONArray())
         if (questions.length() == 0) {
@@ -3600,10 +3606,14 @@ class WorkspaceViewModel(
      * `PermissionGate.require()` 的闩锁上，只有真正 respond 过去它才会继续。
      * 若一直不回执，引擎会等满 30 分钟。
      */
-    fun resolvePermission(allow: Boolean, alwaysAllow: Boolean = false) {
-        val requestId = pendingPermissionId
+    fun resolvePermission(requestId: String, allow: Boolean, alwaysAllow: Boolean) {
+        if (pendingPermissionId != requestId) return
         pendingPermissionId = null
-        engine.respondPermission(requestId ?: "", allow)
+        val accepted = engine.respondPermission(requestId, allow)
+        if (!accepted && requestId.startsWith("pi-host-")) {
+            _state.update { it.copy(permissionRequest = null) }
+            return
+        }
         _state.update {
             it.copy(
                 permissionRequest = null,

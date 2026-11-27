@@ -21,8 +21,6 @@ import com.termux.terminal.TerminalSessionClient;
 import com.termux.terminal.TextStyle;
 import com.termux.view.TerminalView;
 import com.termux.view.TerminalViewClient;
-import com.zhizhu.zhicode.bridge.AndroidHostBridge;
-import com.zhizhu.zhicode.pi.PiBridgeFiles;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -432,13 +430,12 @@ public final class TermuxTerminalPane extends FrameLayout
                 hushlogin.createNewFile();
             } catch (Throwable ignored) {}
         }
-        PiBridgeFiles.ensureInstalled(getContext());
         String guestCwd = ContainerPaths.hostToGuest(nextSessionWorkingDirectory);
         List<String> prootArgs = ProotCommand.buildArgs(
             getContext(),
             guestCwd,
             Arrays.asList("/bin/bash", "-l"),
-            AndroidHostBridge.Companion.shared(getContext()).bridgeEnv(),
+            Collections.emptyMap(),
             true);
         String[] args = prootArgs.toArray(new String[0]);
 

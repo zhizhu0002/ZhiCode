@@ -54,6 +54,7 @@ internal class PiRpcBackend(
         )
         fun onToolBatchCompleted(toolIds: List<String>)
         fun onPermissionRequest(requestId: String, toolName: String, summary: String, highRisk: Boolean)
+        fun onHostPermissionClosed(requestId: String)
         fun onResponseRetry()
         fun onQueuedPromptApplied()
         fun onUsage(inputTokens: Long, outputTokens: Long)
@@ -63,13 +64,19 @@ internal class PiRpcBackend(
     }
 
     private val appContext = context.applicationContext
-    private val hostBridge = AndroidHostBridge.shared(appContext)
+    private val hostBridge by lazy { AndroidHostBridge(appContext) }
+    private val hostToolCalls = PiHostToolCalls()
+    private var hostTurn = 0L
+    private var cancelledHostProcess: Process? = null
     private val cmdSeq = AtomicLong(0L)
     private val busyFlag = AtomicBoolean(false)
     private val shutdownFlag = AtomicBoolean(false)
 
     private val ioExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "pi-rpc-io").apply { isDaemon = true }
+    }
+    private val hostToolExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "pi-host-tool").apply { isDaemon = true }
     }
 
     private val pendingRpcResponses = ConcurrentHashMap<String, CompletableFuture<JSONObject>>()
@@ -169,8 +176,6 @@ internal class PiRpcBackend(
             next.planWorkflowState = prevPlan.copy()
         }
         currentConfig = next
-        hostBridge.configSupplier = { currentConfig }
-
         val synced = PiConfigSync.syncToContainer(appContext, next)
         val envKey = processRestartKey(next, synced)
         val alive = process?.isAlive == true
@@ -246,6 +251,7 @@ internal class PiRpcBackend(
         lastAssistantDurationMs = -1L
         turnStartedAtElapsedMs = android.os.SystemClock.elapsedRealtime()
         clearPendingAssistant()
+        val turn = synchronized(hostToolCalls) { ++hostTurn }
         busyFlag.set(true)
         sink.onSessionStarted(config.model)
 
@@ -254,7 +260,10 @@ internal class PiRpcBackend(
                 ensureSessionStore(config)
                 recordUserMessage(prompt, images)
                 val synced = PiConfigSync.syncToContainer(appContext, config)
-                if (process?.isAlive == true && (needsRestartForEnvChange || activeProcessEnvKey != processRestartKey(config, synced))) {
+                val cancelledProcess = synchronized(hostToolCalls) { cancelledHostProcess }
+                if (process?.isAlive == true && (process === cancelledProcess || needsRestartForEnvChange ||
+                        activeProcessEnvKey != processRestartKey(config, synced))
+                ) {
                     stopProcessQuietly()
                 }
                 ensureProcessStarted()
@@ -280,18 +289,25 @@ internal class PiRpcBackend(
                     cmd.put("images", arr)
                 }
 
+                synchronized(hostToolCalls) {
+                    if (hostTurn != turn) return@execute
+                    hostToolCalls.beginTurn()
+                }
                 val resp = sendCommandBlocking(cmd, CMD_TIMEOUT_MS)
                 if (!resp.optBoolean("success", false)) {
+                    hostToolCalls.endTurn()
                     busyFlag.set(false)
                     sink.onError(resp.optString("error", "Pi 未接受请求"), null)
                     return@execute
                 }
                 val disposition = resp.optJSONObject("data")?.optString("disposition", "") ?: ""
                 if (disposition == "handled") {
+                    hostToolCalls.endTurn()
                     busyFlag.set(false)
                     sink.onTurnComplete("end_turn")
                 }
             } catch (t: Throwable) {
+                hostToolCalls.endTurn()
                 busyFlag.set(false)
                 sink.onError("启动或调用 Pi 失败：${t.message ?: t.javaClass.simpleName}", t)
             }
@@ -324,6 +340,7 @@ internal class PiRpcBackend(
     }
 
     fun cancel() {
+        cancelHostTools()
         busyFlag.set(false)
         turnStartedAtElapsedMs = 0L
         lastAssistantDurationMs = -1L
@@ -339,6 +356,7 @@ internal class PiRpcBackend(
     }
 
     fun resetConversation() {
+        cancelHostTools()
         busyFlag.set(false)
         sessionStore?.flush()
         sessionStore = null
@@ -436,6 +454,7 @@ internal class PiRpcBackend(
     }
 
     fun respondPermission(requestId: String, allow: Boolean): Boolean {
+        if (requestId.startsWith("pi-host-")) return hostToolCalls.respond(requestId, allow)
         if (requestId.isBlank() || process?.isAlive != true) return false
         ioExecutor.execute {
             runCatching {
@@ -448,6 +467,15 @@ internal class PiRpcBackend(
             }
         }
         return true
+    }
+
+    fun isHostPermissionPending(requestId: String): Boolean = hostToolCalls.isAwaitingApproval(requestId)
+
+    fun cancelHostTools() {
+        synchronized(hostToolCalls) {
+            ++hostTurn
+            if (hostToolCalls.endTurn()) cancelledHostProcess = process
+        }
     }
 
     fun compactContext(instructions: String): String {
@@ -500,9 +528,11 @@ internal class PiRpcBackend(
 
     fun shutdown() {
         shutdownFlag.set(true)
+        cancelHostTools()
         stopProcessQuietly()
         runCatching { sessionStore?.flush() }
         ioExecutor.shutdownNow()
+        hostToolExecutor.shutdownNow()
     }
 
     // ------------------------------------------------------------------ 进程管理与协议解析
@@ -533,11 +563,7 @@ internal class PiRpcBackend(
                 "--thinking", synced.thinkingLevel,
                 "--append-system-prompt", synced.appendSystemGuestPath,
             )
-            val env = linkedMapOf<String, String>()
-            env.putAll(hostBridge.bridgeEnv())
-            env.putAll(synced.env)
-
-            val args = ProotCommand.buildArgs(appContext, guestCwd, command, env, false)
+            val args = ProotCommand.buildArgs(appContext, guestCwd, command, synced.env, false)
             val pb = ProcessBuilder(args)
             pb.directory(rootfs)
             ProotCommand.applyHostEnv(appContext, pb.environment())
@@ -593,6 +619,7 @@ internal class PiRpcBackend(
         synchronized(processLock) {
             val running = process
             process = null
+            clearHostProcess(running)
             val out = stdinStream
             stdinStream = null
             activeProcessEnvKey = ""
@@ -619,7 +646,7 @@ internal class PiRpcBackend(
         Thread({
             try {
                 readStrictJsonLines(proc.inputStream) { line ->
-                    handleProtocolLine(line)
+                    if (process === proc) handleProtocolLine(line, proc)
                 }
             } catch (_: Throwable) {
                 // 进程退出或流关闭
@@ -654,6 +681,7 @@ internal class PiRpcBackend(
         synchronized(processLock) {
             if (process !== exited) return
             process = null
+            clearHostProcess(exited)
             val out = stdinStream
             stdinStream = null
             activeProcessEnvKey = ""
@@ -674,6 +702,13 @@ internal class PiRpcBackend(
         pendingRpcResponses.clear()
         if (wasBusy && !shutdownFlag.get()) {
             sink.onError(err.message ?: "Pi 进程意外退出", err)
+        }
+    }
+
+    private fun clearHostProcess(exited: Process?) {
+        synchronized(hostToolCalls) {
+            hostToolCalls.endTurn()
+            if (cancelledHostProcess === exited) cancelledHostProcess = null
         }
     }
 
@@ -705,7 +740,7 @@ internal class PiRpcBackend(
         }
     }
 
-    internal fun handleProtocolLine(line: String) {
+    private fun handleProtocolLine(line: String, source: Process) {
         if (line.isBlank()) return
         val event = runCatching { JSONObject(line) }.getOrNull() ?: return
         val type = event.optString("type", "")
@@ -723,7 +758,7 @@ internal class PiRpcBackend(
             "tool_execution_start" -> handleToolStart(event)
             "tool_execution_update" -> handleToolUpdate(event)
             "tool_execution_end" -> handleToolEnd(event)
-            "extension_ui_request" -> handleExtensionUiRequest(event)
+            "extension_ui_request" -> handleExtensionUiRequest(event, source)
             "auto_retry_start" -> sink.onResponseRetry()
             "compaction_start" -> sink.onStatus("正在压缩上下文…")
             "compaction_end" -> {
@@ -822,6 +857,7 @@ internal class PiRpcBackend(
         val args = event.optJSONObject("args") ?: JSONObject()
         val call = ToolCall(id, rawName, args)
         activeTools[id] = call
+        if (rawName in AndroidHostBridge.allowedTools) hostToolCalls.register(call)
         if (id.isNotEmpty()) activeToolStartMs[id] = android.os.SystemClock.elapsedRealtime()
         sink.onToolBatchStarted(listOf(id))
         sink.onToolUse(call)
@@ -841,6 +877,7 @@ internal class PiRpcBackend(
         val id = event.optString("toolCallId", "")
         val rawName = event.optString("toolName", "tool")
         val call = activeTools.remove(id) ?: ToolCall(id, rawName, JSONObject())
+        if (rawName in AndroidHostBridge.allowedTools) hostToolCalls.finish(id)
         activeToolStartMs.remove(id)
         val isError = event.optBoolean("isError", false)
         val resultObj = event.optJSONObject("result") ?: JSONObject()
@@ -859,10 +896,12 @@ internal class PiRpcBackend(
         recordToolResult(call, isError, text, diff, added, deleted)
     }
 
-    private fun handleExtensionUiRequest(event: JSONObject) {
+    private fun handleExtensionUiRequest(event: JSONObject, source: Process) {
         val reqId = event.optString("id", "")
         val method = event.optString("method", "")
-        if (method == "confirm" && reqId.isNotEmpty()) {
+        if (method == "input" && event.optString("title") == "zhicode_host_tool" && reqId.isNotEmpty()) {
+            handleHostToolRequest(source, reqId, event.optString("placeholder"))
+        } else if (method == "confirm" && reqId.isNotEmpty()) {
             val title = event.optString("title", "")
             val message = event.optString("message", "")
             val (toolName, highRisk) = parseExtensionConfirmTitle(title)
@@ -876,7 +915,53 @@ internal class PiRpcBackend(
         }
     }
 
+    private fun handleHostToolRequest(source: Process, rpcId: String, payload: String) {
+        val args = if (payload.length <= 4 * 1024 * 1024) runCatching { JSONObject(payload) }.getOrNull() else null
+        val tool = args?.optString("tool").orEmpty()
+        val input = args?.optJSONObject("input")
+        val request = if (input != null && tool in AndroidHostBridge.allowedTools && process === source) {
+            hostToolCalls.claim(args.optString("toolCallId"), tool)
+        } else null
+        if (request == null || input == null) {
+            ioExecutor.execute {
+                sendHostToolResult(source, rpcId, AndroidHostBridge.error("无效或已处理的宿主工具调用"))
+            }
+            return
+        }
+        request.submit(hostToolExecutor) {
+            val result = try {
+                hostBridge.invoke(
+                    tool, input, { currentConfig },
+                    confirm = { summary, highRisk ->
+                        try {
+                            request.awaitApproval { id -> sink.onPermissionRequest(id, tool, summary, highRisk) }
+                        } finally {
+                            sink.onHostPermissionClosed(request.permissionId)
+                        }
+                    },
+                    beginExecution = { process === source && request.beginExecution() },
+                )
+            } catch (_: InterruptedException) {
+                return@submit
+            } catch (e: Exception) {
+                AndroidHostBridge.error(e.message ?: e.javaClass.simpleName)
+            }
+            if (request.isActive()) sendHostToolResult(source, rpcId, result)
+        }
+    }
+
+    private fun sendHostToolResult(source: Process, rpcId: String, result: JSONObject) {
+        synchronized(processLock) {
+            if (process !== source) return
+            runCatching {
+                sendRawJson(JSONObject().put("type", "extension_ui_response").put("id", rpcId)
+                    .put("value", result.toString()))
+            }
+        }
+    }
+
     private fun handleAgentSettled(event: JSONObject) {
+        hostToolCalls.endTurn()
         busyFlag.set(false)
         val elapsed = when {
             turnStartedAtElapsedMs > 0L -> maxOf(1L, android.os.SystemClock.elapsedRealtime() - turnStartedAtElapsedMs)
