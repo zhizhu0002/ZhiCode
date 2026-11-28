@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose.ui.pages
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.staticCompositionLocalOf
 import com.zhizhu.zhicode.compose.ui.pages.m3e.Material3ExpressivePageSet
 import com.zhizhu.zhicode.compose.ui.pages.mochi.MochiPageSet
@@ -23,6 +24,9 @@ import com.zhizhu.zhicode.compose.ui.pages.miuix.OobePage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ApiConfigPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.AboutPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ChatDisplayPage
+import com.zhizhu.zhicode.compose.ui.pages.miuix.ChatPage
+import com.zhizhu.zhicode.compose.ui.pages.miuix.FilesPage
+import com.zhizhu.zhicode.compose.ui.pages.miuix.TerminalPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.McpConfigPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.MemoryPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.PrivacyPolicyPage
@@ -345,6 +349,117 @@ interface ZhiPageSet {
             onBack = viewModel::closeUiDebug,
             onExportSession = onExportSession,
             onImportSession = onImportSession,
+        )
+    }
+
+    // ---------------------------------------------------------- 工作区内容区
+
+    /*
+     * 下面四个是**工作区内部**的内容，不是整页。
+     *
+     * ## 为什么它们要单独成为覆写点
+     *
+     * `Workspace` 那一页只是外壳（顶栏 + 页签 + 侧栏 + 分栏），真正的对话流、
+     * 文件树、终端是 `WorkspaceLayouts` 里按页签分发的。如果接口只到 `Workspace`
+     * 这一层，那么一套新风格换完外壳之后，**里面还是原来那三个页面** ——
+     * 这正是 M3E 组此前的状态：导航栏与 17 个独立页换了样子，对话区一动没动。
+     *
+     * ## 参数为什么是 `state` + `viewModel`
+     *
+     * `FilesPage` 有三十多个参数，全部从 `state` 派生、回调全挂在 `viewModel` 上。
+     * 把它们摊进接口会让契约无法阅读，且每加一个文件操作就要改接口。
+     * 所以这里只给数据源与动作源，由各实现自己接线（与上面 17 个整页方法同一约定）。
+     *
+     * ## ⚠️ 行为逻辑不要复制
+     *
+     * 滚动锚定、吸底、前插稳定键、多选状态这些是**行为**，不是观感。它们必须继续
+     * 只有一份（在 `ChatList` 里），新风格只替换"一条消息画成什么样"。
+     * 复制一份列表逻辑的后果是：每个滚动 bug 都要在两组里各修一次。
+     */
+
+    @Composable
+    fun ChatContent(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        wide: Boolean,
+        modifier: Modifier,
+        glass: Glass,
+    ) {
+        ChatPage(
+            state = state,
+            viewModel = viewModel,
+            wide = wide,
+            modifier = modifier,
+            glass = glass,
+        )
+    }
+
+    @Composable
+    fun FilesContent(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        modifier: Modifier,
+    ) {
+        FilesPage(
+            filePath = state.filePath,
+            entries = state.fileEntries,
+            emptyNote = state.fileNote,
+            listOptions = state.fileListOptions,
+            onQueryChange = viewModel::updateFileQuery,
+            onSortChange = viewModel::updateFileSort,
+            onToggleSortDirection = viewModel::toggleFileSortDirection,
+            onOpen = viewModel::openFile,
+            onNavigate = viewModel::navigateTo,
+            root = state.fileRoot,
+            onSwitchRoot = viewModel::switchFileRoot,
+            nameForm = state.fileNameForm,
+            onNewEntry = viewModel::newFileForm,
+            onRename = viewModel::renameForm,
+            onNameDraftChange = viewModel::updateFileNameDraft,
+            onSubmitName = viewModel::submitFileNameForm,
+            onCancelName = viewModel::cancelFileNameForm,
+            deletePrompt = state.fileDeletePrompt,
+            onConfirmDelete = viewModel::confirmDelete,
+            onCancelDelete = viewModel::cancelDelete,
+            sharedStorageGranted = state.sharedStorageGranted,
+            onGrantSharedStorage = viewModel::openSharedStorageSettings,
+            active = state.tab == com.zhizhu.zhicode.compose.model.WorkspaceTab.FILES,
+            selectionMode = state.fileSelectionMode,
+            fileClipboardCount = state.fileClipboard.size,
+            fileClipboardMove = state.fileClipboardMove,
+            onPasteFiles = viewModel::pasteFilesIntoCurrentDirectory,
+            onSetSelection = viewModel::setFileSelection,
+            selection = state.fileSelection,
+            onLongPressEntry = viewModel::longPressFileEntry,
+            onToggleEntry = viewModel::toggleFileSelection,
+            onToggleSelectAll = viewModel::toggleSelectAllFiles,
+            onClearSelection = viewModel::clearFileSelection,
+            onRenameSelected = viewModel::renameSelectedEntry,
+            onDeleteSelected = viewModel::deleteSelectedEntries,
+            onAttachSelected = viewModel::attachSelectedEntries,
+            modifier = modifier,
+        )
+    }
+
+    @Composable
+    fun TerminalContent(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        modifier: Modifier,
+    ) {
+        TerminalPage(
+            lines = state.terminalLines,
+            projectName = state.projectName,
+            runtimeReady = state.runtimeReady,
+            workingDirectory = state.projectPath,
+            // 终端实例由 ViewModel 持有，**不能**在页面里 remember：
+            // 切走页签会让那段 Composable 离开组合，实例若建在那里就会连会话一起销毁。
+            terminalHolder = { ctx -> viewModel.terminalPane(ctx) },
+            installing = state.runtimeInstalling,
+            progress = state.runtimeProgress,
+            message = state.runtimeMessage,
+            onInstall = viewModel::installRuntime,
+            modifier = modifier,
         )
     }
 

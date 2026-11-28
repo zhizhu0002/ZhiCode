@@ -138,11 +138,38 @@ private fun rememberZhiM3eColors(theme: ThemeSettings, isDark: Boolean): ColorSc
     }
 }
 
+/**
+ * M3E 形状五档 —— **数值取自官方 `ShapeTokens`**。
+ *
+ * ## 原实现是错的
+ *
+ * 这里原来是 `8 / 12 / 18 / 24 / 28`，全部偏大。官方值（反编译
+ * `material3:1.5.0-alpha16` 的 `androidx.compose.material3.tokens.ShapeTokens`
+ * 的 `static {}` 初始化块）是：
+ *
+ * | 槽位 | 官方 | 原实现 | 偏差 |
+ * | --- | --- | --- | --- |
+ * | extraSmall | **4dp** | 8dp | +4 |
+ * | small | **8dp** | 12dp | +4 |
+ * | medium | **12dp** | 18dp | +6 |
+ * | large | **16dp** | 24dp | +8 |
+ * | extraLarge | **28dp** | 28dp | ✓ |
+ *
+ * 偏差随档位递增，后果是**小控件比规范圆、卡片比规范更圆**：
+ * chip 与输入框（small）多 4dp、按钮（medium）多 6dp、卡片（large）多 8dp。
+ * 而 extraLarge 恰好对上，所以"大的看起来还行、小的那一排明显偏圆"。
+ *
+ * ## 为什么不按半个档位取整
+ *
+ * 曾有人把 medium 写成 18 是"想在 12 和 24 之间取中间值"。但形状是**离散档位**，
+ * 不是连续量 —— 中间值既不对应任何组件，也让「按钮 12 / 卡片 16」这组
+ * 同心关系（16 − 16 内边距 = 0）失去参照。要用哪一档就取哪一档的官方值。
+ */
 private fun zhiM3eShapes(): Shapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(18.dp),
-    large = RoundedCornerShape(24.dp),
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
     extraLarge = RoundedCornerShape(28.dp),
 )
 
