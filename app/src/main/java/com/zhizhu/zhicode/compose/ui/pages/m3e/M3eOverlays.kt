@@ -17,6 +17,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -159,7 +160,7 @@ internal fun M3eChoiceOverlay(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun M3eTaskOverlay(tasks: List<AgentTask>, open: Boolean, onDismiss: () -> Unit) {
     if (!open) return
@@ -173,7 +174,20 @@ internal fun M3eTaskOverlay(tasks: List<AgentTask>, open: Boolean, onDismiss: ()
                         Column(Modifier.fillMaxWidth().padding(14.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 when (task.state) {
-                                    TaskState.RUNNING -> androidx.compose.material3.CircularProgressIndicator(Modifier.padding(end = 8.dp), strokeWidth = 2.dp)
+                                    /*
+                                     * 运行中用 **M3E 的 `LoadingIndicator`**，不是 MD3 的转圈。
+                                     *
+                                     * 两者都不是"转圈"，但差别是实质的：MD3 的 CircularProgressIndicator
+                                     * 是一段弧绕圆心匀速转；M3E 的 LoadingIndicator 是**形状本身不断变形**
+                                     * —— 圆 → 花 → 方 → 星，按 `MorphIntervalMillis` 切换，
+                                     * 全程还带一个整体旋转。它是 M3E 的标志性组件之一。
+                                     *
+                                     * 尺寸给 20dp 与旁边图标的视觉大小对齐；它两侧不需要额外留白，
+                                     * 因为它自己带内边距。
+                                     */
+                                    TaskState.RUNNING -> androidx.compose.material3.LoadingIndicator(
+                                        modifier = Modifier.padding(end = 8.dp),
+                                    )
                                     TaskState.DONE -> androidx.compose.material3.Icon(ZhiIcons.done, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                     TaskState.PENDING -> androidx.compose.material3.Icon(ZhiIcons.pending, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
@@ -224,7 +238,17 @@ internal fun M3eEnvironmentOverlay(
                     }
                 }
                 if (installing) {
-                    LinearProgressIndicator(progress = { progress.coerceIn(0, 100) / 100f }, modifier = Modifier.fillMaxWidth())
+                    /*
+                     * 安装进度用 M3E 的 **`WavyProgressIndicator`**：轨道是波浪形的，
+                     * 进度推进时波峰一起走。MD3 的线性进度是一条平直的填充条。
+                     *
+                     * 这是 M3E 的「表现力」在静态截图里唯一能看出来的一处 ——
+                     * 平条和波浪条一眼可分，而弹簧动效要动起来才看得出。
+                     */
+                    androidx.compose.material3.LinearWavyProgressIndicator(
+                        progress = { progress.coerceIn(0, 100) / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                     Text("$progress% · $message")
                 } else if (message.isNotBlank()) Text(message)
                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -15,9 +15,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
@@ -135,12 +136,62 @@ internal fun M3eOobePage(state: WorkspaceUiState, viewModel: WorkspaceViewModel)
                         Button(onClick = viewModel::advanceOobeStep, enabled = perms.allRequiredGranted) { Text("下一步") }
                     }
                     OobeStep.RUNTIME -> {
-                        OutlinedButton(onClick = viewModel::goBackOobeStep, enabled = !state.runtimeInstalling, modifier = Modifier.weight(1f)) { Text("上一步") }
-                        Button(onClick = viewModel::advanceOobeStep, enabled = state.runtimeReady && !state.runtimeInstalling, modifier = Modifier.weight(1f)) { Text("下一步") }
+                        /*
+                         * M3E 的**连接式按钮组**。
+                         *
+                         * ## 为什么不用 `ButtonGroup { }` 那个组合函数
+                         *
+                         * `material3` 里 `ButtonGroup` 这个名字有多个重载，公开的那个
+                         * 要求传 `overflowIndicator`（按钮超出宽度时的溢出菜单）。
+                         * 对"两个固定按钮"来说那个语义用不上，硬传一个空槽只会让
+                         * 代码更难读。
+                         *
+                         * ## 用的是官方推荐的另一条路
+                         *
+                         * `ButtonGroupDefaults.connected{Leading,Middle,Trailing}ButtonShapes()`
+                         * 给出融合形状（相邻角收窄、外侧保持圆角），配合
+                         * `Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)`
+                         * 让两块之间只留一条窄缝 —— 这正是 M3E 按钮组的观感。
+                         * 参考实现：本机 `ksu-style` 的 `ColorPaletteScreenMaterial`
+                         * 就是这么写的（那里是 4 个 ToggleButton 连成一组）。
+                         *
+                         * 收益不只是好看：形状按**位置**配对（首 / 中 / 尾），
+                         * 所以将来在中间加一项时，只要改 index 判断，首尾自动还是圆的。
+                         */
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
+                        ) {
+                            OutlinedButton(
+                                onClick = viewModel::goBackOobeStep,
+                                enabled = !state.runtimeInstalling,
+                                modifier = Modifier.weight(1f),
+                                shape = ButtonGroupDefaults.connectedLeadingButtonShape,
+                            ) { Text("上一步") }
+                            Button(
+                                onClick = viewModel::advanceOobeStep,
+                                enabled = state.runtimeReady && !state.runtimeInstalling,
+                                modifier = Modifier.weight(1f),
+                                shape = ButtonGroupDefaults.connectedTrailingButtonShape,
+                            ) { Text("下一步") }
+                        }
                     }
                     OobeStep.MODEL -> {
-                        OutlinedButton(onClick = viewModel::completeOobe, modifier = Modifier.weight(1f)) { Text(if (hasApi) "稍后" else "跳过") }
-                        Button(onClick = if (hasApi) viewModel::completeOobe else viewModel::openApiConfigFromOobe, modifier = Modifier.weight(1f)) { Text(if (hasApi) "开始使用" else "配置模型") }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
+                        ) {
+                            OutlinedButton(
+                                onClick = viewModel::completeOobe,
+                                modifier = Modifier.weight(1f),
+                                shape = ButtonGroupDefaults.connectedLeadingButtonShape,
+                            ) { Text(if (hasApi) "稍后" else "跳过") }
+                            Button(
+                                onClick = if (hasApi) viewModel::completeOobe else viewModel::openApiConfigFromOobe,
+                                modifier = Modifier.weight(1f),
+                                shape = ButtonGroupDefaults.connectedTrailingButtonShape,
+                            ) { Text(if (hasApi) "开始使用" else "配置模型") }
+                        }
                     }
                 }
             }
@@ -217,7 +268,7 @@ internal fun M3eOobePage(state: WorkspaceUiState, viewModel: WorkspaceViewModel)
                                     else -> "选择下载源"
                                 }, style = MaterialTheme.typography.titleMedium)
                                 if (state.runtimeInstalling) {
-                                    LinearProgressIndicator(progress = { state.runtimeProgress.coerceIn(0, 100) / 100f }, modifier = Modifier.fillMaxWidth())
+                                    LinearWavyProgressIndicator(progress = { state.runtimeProgress.coerceIn(0, 100) / 100f }, modifier = Modifier.fillMaxWidth())
                                     Text("${state.runtimeProgress}% · ${state.runtimeMessage}")
                                 } else if (state.runtimeMessage.isNotBlank()) Text(state.runtimeMessage)
                                 if (!state.runtimeReady) Text(RuntimeInstaller.BOOTSTRAP_SOURCE, style = MaterialTheme.typography.bodySmall)
