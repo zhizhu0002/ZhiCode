@@ -23,6 +23,7 @@ import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.model.AgentTask
 import com.zhizhu.zhicode.compose.model.TaskState
 import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -61,10 +62,10 @@ fun AgentProgressCard(
         Card(
             onClick = onExpand,
             modifier = modifier.fillMaxWidth().padding(vertical = 6.dp),
-            cornerRadius = ZhiRadius.card,
+            cornerRadius = LocalZhiPageSet.current.cardCorner,
             insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
             colors = CardDefaults.defaultColors(
-                color = ZhiColors.cardSurface(),
+                color = LocalZhiPageSet.current.cardSurface(),
                 contentColor = scheme.onSurface,
             ),
             pressFeedbackType = PressFeedbackType.Sink,

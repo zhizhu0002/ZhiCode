@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.model.SlashCommand
@@ -39,10 +40,10 @@ fun SlashPalette(
     val visible = matches.take(5)
     Card(
         modifier = modifier.fillMaxWidth().padding(bottom = 6.dp),
-        cornerRadius = ZhiRadius.card,
+        cornerRadius = LocalZhiPageSet.current.cardCorner,
         insideMargin = PaddingValues(vertical = 4.dp),
         colors = CardDefaults.defaultColors(
-            color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else ZhiColors.cardSurface(),
+            color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else LocalZhiPageSet.current.cardSurface(),
             contentColor = scheme.onSurface,
         ),
     ) {
@@ -79,10 +80,10 @@ fun SlashPalette(
                     onClick = { onPick(command) },
                     // 打字时命令集一直在收窄：命中的行要**滑上去**，落选的行淡出。
                     modifier = Modifier.animateItem().fillMaxWidth().padding(horizontal = 4.dp),
-                    cornerRadius = ZhiRadius.inner,
+                    cornerRadius = LocalZhiPageSet.current.innerCorner,
                     insideMargin = PaddingValues(horizontal = 8.dp, vertical = 9.dp),
                     colors = CardDefaults.defaultColors(
-                        color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else ZhiColors.cardSurface(),
+                        color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else LocalZhiPageSet.current.cardSurface(),
                         contentColor = scheme.onSurface,
                     ),
                     pressFeedbackType = PressFeedbackType.Sink,
@@ -121,10 +122,10 @@ fun FilePalette(
     val visible = matches.take(5)
     Card(
         modifier = modifier.fillMaxWidth().padding(bottom = 6.dp),
-        cornerRadius = ZhiRadius.card,
+        cornerRadius = LocalZhiPageSet.current.cardCorner,
         insideMargin = PaddingValues(vertical = 4.dp),
         colors = CardDefaults.defaultColors(
-            color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else ZhiColors.cardSurface(),
+            color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else LocalZhiPageSet.current.cardSurface(),
             contentColor = scheme.onSurface,
         ),
     ) {
@@ -159,7 +160,7 @@ fun FilePalette(
             Card(
                 onClick = { onPick(path) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp),
-                cornerRadius = ZhiRadius.inner,
+                cornerRadius = LocalZhiPageSet.current.innerCorner,
                 insideMargin = PaddingValues(horizontal = 10.dp, vertical = 7.dp),
                 colors = CardDefaults.defaultColors(
                     color = androidx.compose.ui.graphics.Color.Transparent,
@@ -189,10 +190,10 @@ fun QueuedPromptPanel(
     val scheme = MiuixTheme.colorScheme
     Card(
         modifier = modifier.fillMaxWidth().padding(bottom = 6.dp),
-        cornerRadius = ZhiRadius.card,
+        cornerRadius = LocalZhiPageSet.current.cardCorner,
         insideMargin = PaddingValues(vertical = 4.dp),
         colors = CardDefaults.defaultColors(
-            color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else ZhiColors.cardSurface(),
+            color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else LocalZhiPageSet.current.cardSurface(),
             contentColor = scheme.onSurface,
         ),
     ) {

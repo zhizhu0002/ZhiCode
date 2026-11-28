@@ -1,6 +1,10 @@
 package com.zhizhu.zhicode.compose.ui.pages.m3e
 
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.data.ThemeSettings
 import com.zhizhu.zhicode.compose.model.ExtensionSummary
@@ -21,6 +25,16 @@ object Material3ExpressivePageSet : ZhiPageSet {
     override val id: String = "m3_expressive"
 
     override val name: String = "MD3 Expressive"
+
+    /** M3E 的卡片圆角取 `ShapeTokens.CornerExtraLarge`。 */
+    override val cardCorner: Dp = 28.dp
+
+    /** 内嵌块取 `CornerLarge`，与 28 − 16 内边距的同心值一致。 */
+    override val innerCorner: Dp = 16.dp
+
+    /** 卡片底色取 M3E 的容器角色，而不是麻薯组的定值。 */
+    @Composable
+    override fun cardSurface(): Color = MaterialTheme.colorScheme.surfaceContainer
 
     @Composable
     override fun Workspace(

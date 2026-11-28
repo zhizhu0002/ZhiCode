@@ -3,6 +3,8 @@ package com.zhizhu.zhicode.compose.ui.pages
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import com.zhizhu.zhicode.compose.ui.pages.m3e.Material3ExpressivePageSet
 import com.zhizhu.zhicode.compose.ui.pages.mochi.MochiPageSet
 import com.zhizhu.zhicode.compose.data.ThemeSettings
@@ -19,6 +21,8 @@ import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
+import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.data.OobeStore
 import com.zhizhu.zhicode.compose.ui.pages.miuix.OobePage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ApiConfigPage
@@ -48,6 +52,21 @@ interface ZhiPageSet {
 
     /** 设置页里显示的名字。 */
     val name: String
+
+    /**
+     * 共享内容区（对话流、输入器）里卡片的圆角。
+     *
+     * 这些区域各页面组共用同一份实现，读不到各自的形状表，所以由页面组给值：
+     * 默认取 [ZhiRadius.card]（麻薯 `large` = 16dp），M3E 组覆写为 28dp。
+     */
+    val cardCorner: Dp get() = ZhiRadius.card
+
+    /** 共享内容区里卡片内部小块（代码块、diff、详情框）的圆角。 */
+    val innerCorner: Dp get() = ZhiRadius.inner
+
+    /** 共享内容区卡片底色。 */
+    @Composable
+    fun cardSurface(): Color = ZhiColors.cardSurface()
 
     // ------------------------------------------------------------------ 工作区
 

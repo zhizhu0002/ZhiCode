@@ -79,6 +79,7 @@ import com.zhizhu.zhicode.compose.model.TurnLayout
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
 import com.zhizhu.zhicode.compose.ui.LocalImeMotion
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -809,7 +810,7 @@ private fun ScrollToBottomPill(onClick: () -> Unit) {
         onClick = onClick,
         color = scheme.surfaceContainerHigh,
         contentColor = scheme.primary,
-        shape = com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle(ZhiRadius.inner),
+        shape = com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle(LocalZhiPageSet.current.innerCorner),
     ) {
         Text(
             text = "回到底部",
@@ -878,7 +879,7 @@ private fun MessageDebugStrip(item: ChatItem) {
         if (showSource) {
             Card(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                cornerRadius = ZhiRadius.inner,
+                cornerRadius = LocalZhiPageSet.current.innerCorner,
                 insideMargin = PaddingValues(8.dp),
                 colors = CardDefaults.defaultColors(
                     color = ZhiColors.cardInnerSurface(),
@@ -932,10 +933,10 @@ private fun InlineTaskList(tasks: List<AgentTask>) {
         )
         Card(
             modifier = Modifier.fillMaxWidth().padding(top = 3.dp),
-            cornerRadius = ZhiRadius.card,
+            cornerRadius = LocalZhiPageSet.current.cardCorner,
             insideMargin = PaddingValues(10.dp),
             colors = CardDefaults.defaultColors(
-                color = ZhiColors.cardSurface(),
+                color = LocalZhiPageSet.current.cardSurface(),
                 contentColor = scheme.onSurface,
             ),
         ) {
@@ -1107,7 +1108,7 @@ private fun SelectionBar(
     Surface(
         color = scheme.surfaceContainerHigh,
         contentColor = scheme.onSurface,
-        shape = com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle(ZhiRadius.card),
+        shape = com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle(LocalZhiPageSet.current.cardCorner),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),

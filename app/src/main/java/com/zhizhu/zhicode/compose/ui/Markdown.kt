@@ -2,6 +2,7 @@ package com.zhizhu.zhicode.compose.ui
 
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.data.Clipboard
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
@@ -346,7 +347,7 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        cornerRadius = ZhiRadius.inner,
+        cornerRadius = LocalZhiPageSet.current.innerCorner,
         insideMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
         colors = CardDefaults.defaultColors(
             color = scheme.surfaceContainerHighest,
@@ -558,7 +559,7 @@ private fun MdTableView(table: MdBlock.Table, fontSize: TextUnit, styles: Inline
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .background(scheme.surfaceContainerHighest, ZhiSquircle(ZhiRadius.inner))
+            .background(scheme.surfaceContainerHighest, ZhiSquircle(LocalZhiPageSet.current.innerCorner))
             .padding(horizontal = 2.dp),
     ) {
         Column(Modifier.widthIn(min = (cols * 116).dp)) {
