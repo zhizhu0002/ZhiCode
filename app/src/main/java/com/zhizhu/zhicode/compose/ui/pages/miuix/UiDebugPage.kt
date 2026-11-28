@@ -183,9 +183,7 @@ fun UiDebugPage(
                     bottom = padding.calculateBottomPadding() + 24.dp,
                 ),
             ) {
-                // 调试开关放最前面：进这一页**通常就是为了开调试**，
-                // 让它落在第一屏比让人翻半天更合理。画廊部分（色板/字阶/组件）
-                // 是"进去以后慢慢看"的东西，排在后面。
+                // 调试开关放最前面：进这一页**通常就是为了开调试**
                 item(key = "debugOverlay") { DebugOverlaySection(state, viewModel) }
                 item(key = "debugApi") { DebugApiSection(state, viewModel) }
                 item(key = "storage") { StorageSection(state, viewModel, onExportSession, onImportSession) }
@@ -1011,8 +1009,6 @@ private fun RadiusAndIconSection() {
         "square 4" to ZhiRadius.square,
     )
     // 图标**全集**：一屏逐个核对"这个图标是不是这件事该有的样子"。
-    // 换图标集之后这张表就是唯一的人工验收入口 —— 编译器能保证资源存在、
-    // 守卫能保证映射不变，但"好不好看、像不像"只能靠眼睛（见 IconSetTest 的说明）。
     val icons = listOf(
         "menu" to ZhiIcons.menu,
         "theme" to ZhiIcons.theme,
@@ -1054,9 +1050,7 @@ private fun RadiusAndIconSection() {
         "delete" to ZhiIcons.delete,
         "image" to ZhiIcons.image,
         "check" to ZhiIcons.check,
-        // 设置行的行首图标（小米设置观感）。它们单看只是普通字形，
-        // 真正的观感在 `SettingsIconPlate` 那块彩色底上 —— 所以这十张要连同
-        // 设置页一起看，而不是只看这里。
+        // 设置行的行首图标（小米设置观感）。
         "cloud" to ZhiIcons.cloud,
         "listCount" to ZhiIcons.listCount,
         "timeout" to ZhiIcons.timeout,

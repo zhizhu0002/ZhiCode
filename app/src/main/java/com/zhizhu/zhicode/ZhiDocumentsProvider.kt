@@ -41,9 +41,6 @@ class ZhiDocumentsProvider : DocumentsProvider() {
                 DocumentTree.ROOT_DOCUMENT_ID,
                 DocumentTree.ROOT_TITLE,
                 // 可在根下新建 + 支持 isChildDocument 查询。
-                // 刻意**不带** FLAG_SUPPORTS_SEARCH：没实现 querySearchDocuments。
-                // 也不带 FLAG_LOCAL_ONLY：带上它只会让部分文件管理器
-                // 多套一层"仅本地"的分组，观感更绕，而没有实际功能差异。
                 DocumentsContract.Root.FLAG_SUPPORTS_CREATE or
                     DocumentsContract.Root.FLAG_SUPPORTS_IS_CHILD,
                 "*/*",

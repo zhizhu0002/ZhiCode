@@ -74,21 +74,11 @@ fun ZhiMarkdown(
     val scheme = MiuixTheme.colorScheme
     val inlineStyles = rememberInlineStyles(bodyFontSize)
     val split = remember(source, streaming) { splitForStreaming(source, streaming) }
-    // 流式尾部会不断变化，不能写进进程级缓存；定稿正文则跨 LazyColumn 回收、
-    // 会话切换和相同内容的多个调用点复用 AST。组合级 remember 仍保留在外层，
-    // 这样热路径不需要每次触碰全局锁。
+    // 流式尾部会不断变化，不能写进进程级缓存；定稿正文则跨 LazyColumn 回收
     val blocks = remember(split.settled, streaming) {
         if (streaming) parseMarkdown(split.settled) else MarkdownBlockCache.getOrParse(split.settled)
     }
 
-    // 前沿淡入的斜坡宽度：按**到达速率**换算，目标是固定时长（见 TailFadeRate）。
-    //
-    // ⚠️ key 是 `source` 而不是 `split.tail`：速率要按**整段正文**的增长来估，
-    // 而 tail 在跨过块边界时会突然归零重算 —— 按 tail 估会在每次换段时把速率
-    // 估成负数（文本变短），于是斜坡在开新段时抖一下。整段正文的长度只增不减，
-    // 估计干净得多；而**要用宽度的地方是 tail**，两者本来就是分开的两件事。
-    //
-    // ⚠️ 这段计算只在文本真的变了时跑（`remember(source)`），所以没有额外帧。
     val fadeRate = remember { TailFadeRate() }
     val fadeRamp = remember(source) { fadeRate.widthFor(source.length, System.nanoTime()) }
 
@@ -96,11 +86,6 @@ fun ZhiMarkdown(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // ⚠️ 淡入的落点有两处，缺一不可：
-        //   · 切过（长消息）→ 淡在 `split.tail` 上；
-        //   · 没切（短于 [MinSettledChars]）→ 全部都在 `blocks` 里，
-        //     那就淡在**最后一个块**上，否则短消息一个字都不淡。
-        //   两处互斥（tail 为空时才是"没切"），所以同一时刻只有一个在淡。
         blocks.forEachIndexed { index, block ->
             MdBlockView(
                 block = block,
@@ -235,8 +220,6 @@ private fun MdBlockView(
                 if (!hasFormula) {
                     Text(
                         // 段落是在写正文最常见（也是唯一常见）的形状，所以淡入只在这里落点。
-                        // 标题/列表/引用/代码块不淡：它们在被写出来的一瞬间本来就是"跳"着出现的
-                        // （块级结构变了），给它们加前沿淡入反而看不出差别，只会多付 span 的开销。
                         text = rememberInlineFading(
                             text = block.text,
                             styles = inlineStyles,
@@ -270,9 +253,6 @@ private fun MdBlockView(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // 竖条用 drawBehind 按**实测高度**画，而不是 `height(IntrinsicSize.Min)`
-                    // + `fillMaxHeight`：后者要求 Compose 做固有测量，在滚动容器（LazyColumn）
-                    // 里属于容易踩坑的构造，而 drawBehind 拿到的是已经量好的 size，零风险。
                     .drawBehind {
                         val w = 3.dp.toPx()
                         drawRoundRect(
@@ -288,9 +268,7 @@ private fun MdBlockView(
             }
         }
 
-        // `---` 水平分割线。走 Miuix 的 Divider（不再手搓 `Box + background`）：
-        // 手搓那条 `height(1.dp).background(...)` 在 3x 屏上是 3px，
-        // 比系统自带的线粗一截；Divider 的 `Thickness` 才是 HyperOS 那一档。
+        // `---` 水平分割线。
         MdBlock.Rule -> ZhiHorizontalDivider(
             modifier = Modifier
                 .fillMaxWidth()
@@ -351,9 +329,6 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
     val context = LocalContext.current
     val settings = LocalThemeSettings.current
     // 复制反馈的**本地**状态：点击后把标签换成「已复制」，约 520ms 后复原
-    // （时长对齐参考实现 `MarkdownRenderer` 的 `postDelayed(..., 520)`）。
-    // 不往 ViewModel 里放：这个状态只影响这一个代码块，而且它随滚动回收，
-    // 放进全局 state 反而会出现"滚回来还是已复制"的残留。
     var copied by remember(block.body) { mutableStateOf(false) }
     LaunchedEffect(copied) {
         if (!copied) return@LaunchedEffect
@@ -379,32 +354,12 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
         ),
     ) {
         Column {
-            // 语言标记与「复制」同处一行：语言靠左（便于一眼看出是哪种代码），
-            // 复制按钮靠右（离拇指最近的位置）。
-            //
-            // 代码块是对话流里最常被整段拿走的东西（命令、补丁、配置），而在这之前
-            // 唯一的复制途径是长按整条消息「复制」—— 那会把整篇回答一起复制走。
+            // 语言标记与「复制」同处一行：语言靠左（便于一眼看出是哪种代码）
             if (block.lang.isNotBlank() || block.body.isNotBlank()) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // ⚠️ 语言为空时显示 `text`，**不能留空**。
-                    //
-                    // 依据是官方实现（反编译 `MarkdownRenderer.codeBlock()`）：
-                    //   `String lowerCase = (str == null || str.trim().isEmpty())
-                    //                        ? "text" : str.trim().toLowerCase(Locale.US);`
-                    //   `textView.setText(lowerCase);`   ← 永远不会是空串
-                    //
-                    // 留空的后果是这一行变成「左边一片空白 + 右边一个复制按钮」。
-                    // 它在结构上仍是表头（高度 24dp 胶囊 + 4dp 下边距），但**看起来就是
-                    // 代码块顶部多出一大块空**——用户就是这么报的：
-                    // 「为什么这个 card 顶部有这么多空」。
-                    // 多数工具输出与不带语言的围栏都走这一支（`bash`/`json` 这类标记是少数），
-                    // 所以这个空行出现在绝大多数代码块上。
-                    //
-                    // 另外，`copy`/`copied` 也是官方那两个字面量（上面 520ms 的复原节奏
-                    // 同样取自那里），语言占位沿用官方的 `text` 而不是自造词。
                     Text(
                         text = block.lang.ifBlank { "text" },
                         color = scheme.onSurfaceVariantSummary,
@@ -624,9 +579,7 @@ private fun MdTableView(table: MdBlock.Table, fontSize: TextUnit, styles: Inline
                     header = false,
                 )
                 if (index != table.rows.lastIndex) {
-                    // 行间线用更淡的一档：表头线是结构分隔，行间线只是视觉引导，
-                    // 同色同粗会让表格看起来被切成一格一格。`theme.dividerLine` 的
-                    // 半透明版本与 Miuix 自己的次级线观感一致。
+                    // 行间线用更淡的一档：表头线是结构分隔，行间线只是视觉引导
                     ZhiHorizontalDivider(
                         modifier = Modifier.fillMaxWidth(),
                         color = scheme.dividerLine.copy(alpha = 0.5f),

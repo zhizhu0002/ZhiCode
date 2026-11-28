@@ -41,8 +41,6 @@ internal object AutoFollowPolicy {
         return when {
             towardOlder -> false
             // 光往新方向拖还不够：中途得真的到过底部才算"我要追最新"。
-            // 否则用户在历史里往下挪 20px 就会被一把拽到底 —— 那正是
-            // 「手指和自动滚动在抢」的来源。
             towardNewer -> sawBottomDuringDrag || atBottomNow
             // 几乎没动（小于滞回阈值）：保持原状态；但如果已经贴底就恢复跟随
             // （内容长高把末尾顶出屏幕时，用户"抖一下"不该让跟随断掉）。
@@ -94,9 +92,7 @@ internal fun rememberAutoFollowHandle(
         var startIndex = 0
         var startOffset = 0
 
-        // 拖动过程中持续采样"是否贴底"。和下面那个流分开，是因为下面那个
-        // 一旦把 index/offset 也包进去就会**每个滚动像素**都发射一次，
-        // 而在那个分支里重置起点会把整段判定算成"没动"。
+        // 拖动过程中持续采样"是否贴底"。
         launch {
             snapshotFlow { listState.isScrollInProgress && !listState.canScrollForward }
                 .collect { atBottom -> if (atBottom) sawBottom = true }

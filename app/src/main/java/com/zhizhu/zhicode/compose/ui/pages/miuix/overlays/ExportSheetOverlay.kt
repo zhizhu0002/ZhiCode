@@ -110,10 +110,7 @@ fun ExportSheetOverlay(
                 )
             }
 
-            // ---- 单条来源时给一个扩大范围的入口 ----
-            //
-            // 从多选进来时**不显示**：那时已经在选了，再给一个入口只会让人
-            // 以为刚才的选择丢了。
+            // ---- 单条来源时给一个扩大范围的入口 
             if (shown.singleSource) {
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),

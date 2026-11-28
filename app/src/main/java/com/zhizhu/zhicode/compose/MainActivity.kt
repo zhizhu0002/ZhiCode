@@ -99,9 +99,6 @@ class MainActivity : ComponentActivity() {
         /* 保活恢复。 */
         viewModel.resumeKeepAliveIfEnabled()
         // APK 安装权限被拒绝时，AndroidIntentBridge 会把安装 Intent 暂存起来并跳去系统设置页。
-        // 用户授权后回到本页面，必须在这里把流程接上——没有这一步，
-        // 「授予权限」之后安装就永远停在半路，用户只能再让 Agent 重做一遍。
-        // 返回 null 表示当前没有待续的安装（绝大多数情况），此时什么都不做。
         val pending = runCatching { AndroidIntentBridge.resumePendingApkInstall(this) }
             .getOrElse { error ->
                 viewModel.reportExternalEvent("继续安装失败", error.message ?: "未知原因")

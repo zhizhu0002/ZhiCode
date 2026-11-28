@@ -111,8 +111,6 @@ private fun SearchServiceList(
                 SettingsLoadingHint()
             } else if (state.services.isEmpty()) {
                 // 真正走到这里只有一种情况：用户把种下的两条预设也删光了
-                // （首次进入时会自动种 DuckDuckGo + Bing RSS，见 SearchServiceStore）。
-                // 所以文案说的是"删光了"而不是"还没配过"。
                 Text(
                     text = "服务列表是空的，搜索会回落到内置的免费后端。" +
                         "点右上角「新增」可以接回 DuckDuckGo / Bing，或接入 Tavily、Exa、Brave、" +

@@ -60,13 +60,6 @@ internal fun SettingsPageStack(
     onBack: () -> Unit,
     content: @Composable (SettingsPageKey) -> Unit,
 ) {
-    // 期望栈 = 调用方给的路径。调用方仍然是唯一的状态来源，这里只把它翻译成栈，
-    // 增量 reconcile —— pop 触发弹出动画、push 触发推入动画。
-    // 与外层 AppScaffold 完全同构（那里也是先算 desiredStack、再 reconcile）。
-    //
-    // ⚠️ 调用方必须传**整条路径**（含最底下那一页），不能让这里去合成一个"根"：
-    // 根页的 id 只有调用方知道（`skills.list` / `api.list` …），
-    // 合成出来的键与 entry 对不上，页面会渲染成空白。
     val expected = path.distinctBy { it.id }
     require(expected.isNotEmpty()) { "SettingsPageStack 的路径不能为空" }
 
@@ -161,17 +154,10 @@ internal fun SettingsSubPage(
         topBar = {
             /* 顶栏底色 `scheme.surface` **纯色**，不再包 `PageBlurBar`。 */
             run {
-                // 与设置主页同款顶栏：Miuix TopAppBar 自带 largeTitle（大标题随滚动折叠），
-                // 对应 rikkahub 二级页的 LargeFlexibleTopAppBar —— 主页与二级页的
-                // 标题层级一致，返回时不会出现「标题突然变小」的断层。
+                // 与设置主页同款顶栏：Miuix TopAppBar 自带 largeTitle（大标题随滚动折叠）
                 TopAppBar(
                     title = title,
                     // Miuix TopAppBar 原生就有 subtitle 槽位，它自己负责在标题下方
-                    // 画那一行并把折叠动画一起算进去。
-                    //
-                    // 不要试图用「title 传空 + 自己塞一个 Column」去做两行 ——
-                    // 那样 Miuix 的 largeTitle 折叠动画（按 title: String 计算缩放与位移）
-                    // 就完全失效，展开/折叠时标题会突然跳一下。
                     subtitle = subtitle ?: "",
                     scrollBehavior = topAppBarScrollBehavior,
                     color = scheme.surface,
@@ -201,11 +187,7 @@ internal fun SettingsSubPage(
                 if (hideFabOnScrollDown) {
                     AnimatedVisibility(
                         visible = fabVisible,
-                        // 与设置页 FAB 同款进出：淡变 + 缩放。缩放走 [ZhiMotion] 里那两条
-                        // 抄自 Miuix 大屏弹窗的令牌（进入 = `spring(0.9, 438.6)`，
-                        // 退出 = 200ms + `DecelerateEasing(1.5)`），
-                        // 而不是 Compose 自己的 `scaleIn()/scaleOut()` 默认值 ——
-                        // 后者与库内其他缩放的节奏对不上。
+                        // 与设置页 FAB 同款进出：淡变 + 缩放。
                         enter = fadeIn() + scaleIn(animationSpec = ZhiMotion.scaleEnterSpec),
                         exit = fadeOut() + scaleOut(animationSpec = ZhiMotion.scaleExitSpec),
                     ) { fab() }
@@ -215,17 +197,6 @@ internal fun SettingsSubPage(
             }
         },
     ) { padding ->
-        // 竖向三段：固定 header（顶栏之下、不随内容滚）/ 滚动区 / 浮层。
-        // 滚动区用 weight(1f) 吃掉剩余高度，header 有多高都不会把列表挤没。
-        //
-        // ⚠️ `imePadding()` 不能省：`MainActivity` 调了 `enableEdgeToEdge()`
-        // （= `setDecorFitsSystemWindows(false)`），DecorView 不再消费系统 inset，
-        // 系统那套"把窗口缩小让出键盘"也随之失效 —— **全应用只有几处自己接了键盘**。
-        // 这一页里有 MCP 表单、技能编辑、API 配置等大量输入框，不接的话
-        // 键盘一弹就把正在编辑的字段整个盖住。
-        //
-        // 加在**整页**而不是滚动区：顶栏保持不动，页面可用高度被压到键盘上沿，
-        // 于是列表自己在剩余空间里滚，聚焦的字段会被 Compose 自动带进可视区。
         Column(modifier = Modifier.fillMaxSize().imePadding()) {
             if (header != null) {
                 Box(
@@ -247,9 +218,7 @@ internal fun SettingsSubPage(
                         // header 自己已经顶掉了顶栏高度，这里再算一次会让内容
                         // 凭空多出一段与顶栏等高的空白。
                         top = if (header == null) padding.calculateTopPadding() else 0.dp,
-                        // FAB 是悬浮的，会盖住列表最后几行 —— 底部留出它的高度 + 间距，
-                        // 否则最后一条永远被压着点不到。Scaffold 给的 bottom padding
-                        // 已经算进了 FAB（见它的 FabSpacing 分支），这里再补一点余量。
+                        // FAB 是悬浮的，会盖住列表最后几行 —— 底部留出它的高度 + 间距
                         bottom = padding.calculateBottomPadding() + 16.dp,
                     ),
                 ) {
@@ -258,9 +227,7 @@ internal fun SettingsSubPage(
                 // 浮层挂在 Scaffold 的 composition 里、LazyColumn 之外 —— 见 overlay 参数的说明。
                 overlay?.invoke()
             }
-            // 二级页的操作反馈（「保存失败」「已删除技能」…）。这六个页面都没有
-            // WorkspaceUiState，所以数据源由 AppScaffold 通过 CompositionLocal 提供；
-            // 没有提供时这一行什么也不画。
+            // 二级页的操作反馈（「保存失败」「已删除技能」…）。
             PageFeedbackSlot(modifier = Modifier.fillMaxWidth())
         }
     }

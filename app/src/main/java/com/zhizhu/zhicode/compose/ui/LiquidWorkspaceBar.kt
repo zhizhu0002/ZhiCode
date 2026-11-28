@@ -1,8 +1,4 @@
 // Copyright 2026, compose-miuix-ui contributors
-// SPDX-License-Identifier: Apache-2.0
-// Adapted from Miuix LiquidGlassNavigationBar and AndroidLiquidGlass (Apache-2.0).
-// Visual/interaction structure follows projects/ksu-style FloatingBottomBar (GPL-3.0),
-// but no KSU implementation code is copied into this MIT project.
 
 package com.zhizhu.zhicode.compose.ui
 
@@ -181,8 +177,6 @@ internal fun LiquidWorkspaceBar(
     val isDark = ZhiColors.isDark()
     val scheme = MiuixTheme.colorScheme
     // The caller passes a backdrop captured from the workspace content. This bar is mounted
-    // in Scaffold.bottomBar, a sibling of that captured content, so sampling is one-way and
-    // cannot capture itself. Honor both the user's blur toggle and platform support.
     val supportedBlur = blurEnabled && backdrop != null && isRuntimeShaderSupported()
     val shape = CircleShape
     val selectedColor = scheme.primary
@@ -192,8 +186,6 @@ internal fun LiquidWorkspaceBar(
     val navigationBottomInset = WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)
         .asPaddingValues().calculateBottomPadding()
     // KSU's FloatingBottomBar applies exactly one bottom inset in its modifier.
-    // This component is itself the bottomBar overlay, so the inset is not also
-    // supplied by Scaffold/content padding.
     val bottomPadding = 12.dp + navigationBottomInset
     val tabsBackdrop = rememberLayerBackdrop()
     val combinedBackdrop = if (backdrop != null) rememberCombinedBackdrop(backdrop, tabsBackdrop) else null
@@ -310,10 +302,6 @@ internal fun LiquidWorkspaceBar(
     }
 
     Box(
-        // 宽度与输入器**齐平**：`FloatingBottomShell` 给输入器的横向内缩是
-        // `floatingHorizontalInset(wide)`（窄屏 12dp），这里用同一个来源。
-        // 以前是 `width(IntrinsicSize.Min)`（按标签内容收窄并居中），于是胶囊
-        // 比上面的输入器短一截，两块的左右边缘对不上 —— 看起来像没对齐。
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = floatingHorizontalInset(wide = false))

@@ -138,9 +138,7 @@ internal object SessionReader {
                                     kind = ChatKind.ASSISTANT,
                                     title = "ZhiCode",
                                     body = body.toString(),
-                                    // 思考内容与实时流同一个上限：它**默认是折叠的**，
-                                    // 截断不改变屏幕上看得见的内容，但能挡住"一条回复
-                                    // 带几十万字的思考"长期占住堆。见 THINKING_PREVIEW_CHARS。
+                                    // 思考内容与实时流同一个上限：它**默认是折叠的**
                                     thinking = previewOf(thinking.toString(), THINKING_PREVIEW_CHARS),
                                 ),
                             )
@@ -162,12 +160,8 @@ internal object SessionReader {
                                     deletions = deleted,
                                     kind = kindOf(name),
                                     // 会话记录里存着原始入参，命令类工具的命令行就在里面。
-                                    // 不读出来的话，恢复历史后展开一条 Bash 只能看到
-                                    // `truncateCommand` 截过的摘要（前两行 + `…`）。
                                     command = input?.optString("command", "") ?: "",
-                                    // 折叠组副行/表头要用的两个字段。历史记录里
-                                    // 原始入参还在（存在 chunk 的 input 里），所以
-                                    // 从历史恢复出来的组也能算出正确的"读取 N 个文件"。
+                                    // 折叠组副行/表头要用的两个字段。
                                     hint = ToolText.activityHint(name, input),
                                     readRequests = ToolText.readRequestCount(name, input),
                                 )
@@ -197,9 +191,6 @@ internal object SessionReader {
                             val group = items[index]
                             val diff = toolDiffs[toolId]
                             // 只留一份有界预览：完整输出可能要几 MB，而一次会话里
-                            // 可能有几百条工具 —— 全塞进 transcript 等于把整个会话的
-                            // 工具输出常驻内存。展开某一条时再由界面按 id 取全文
-                            //（SessionStore.readToolResult）。
                             val fullOutput = block.optString("content", "")
                             items[index] = group.copy(
                                 tools = group.tools.map { tool ->
@@ -212,30 +203,14 @@ internal object SessionReader {
                                         additions = diff?.additions ?: tool.additions,
                                         deletions = diff?.deletions ?: tool.deletions,
                                         // diff 正文与增删行数同源（同一个 `tool_diff` 事件）。
-                                        // 只取行数不取正文，等于恢复历史后那块 diff 预览井是空的。
-                                        // 它同样可以是几 MB 的统一 diff（一次大重构），
-                                        // 所以与 output 用同一套有界预览规则。
                                         diff = previewOf(diff?.text ?: tool.diff),
                                     )
                                 },
                             )
                         }
-                        // 图片：引擎把用户发的图作为 image 块写在同一条 user 消息里
-                        // （见 ZhiCodeEngine.buildUserContent），这里读回来挂到气泡上。
-                        //
-                        // ⚠️ 只带**位置**，不带字节。窗口化读历史时存储层本来就没解码图片块
-                        // （见 `SessionStore.loadBlocks`），而就算带了字节也不该在这里常驻：
-                        // 一条长会话的图片 base64 是几十 MB 量级，屏幕上一次只有几张可见。
-                        // 界面画到哪一张就取哪一张（`SessionReader.imageData`）。
-                        // 这里再兜一道 `data = ""`，让"字节不常驻"这件事不依赖存储层的实现细节。
                         val images = readChatImageBlocks(content) { i ->
                             if (rowSeq < 0L) null else ImageOrigin(sessionId, rowSeq, i)
                         }.map { if (it.origin == null) it else it.copy(data = "") }
-                        // 工具结果行**不算发言**。只有"有内容且来源不是内部"才是用户说的。
-                        //
-                        // ⚠️ 判据必须包含 images：只发图、不写字的消息没有 text 块，
-                        // 早先按 `text.isNotBlank()` 判断会把这条消息**整个丢掉** ——
-                        // 用户回头翻历史，会发现自己发的那张图连带那条消息都不存在。
                         val origin = row.optString("origin", "")
                         if (!hasToolResult && (text.isNotBlank() || images.isNotEmpty()) && origin != "internal") {
                             items.add(
@@ -372,12 +347,6 @@ internal object SessionReader {
         runCatching { SessionStore.updateSessionMetadata(sessionId, note, titleOverride); true }
             .getOrDefault(false)
 
-    // ------------------------------------------------------------------
-    // 存储维护与归档
-    //
-    // 下面四个都是**重活**（读完整条会话 / 遍历文件系统 / 导入），调用方必须放在
-    // IO 线程上。它们只做转发与容错，真正的实现在 storage 层。
-    // ------------------------------------------------------------------
 
     /** 存储维护：回收孤儿大内容 + 把自由页还给文件系统。返回人可读的摘要。 */
     fun maintain(): String = runCatching { SessionStore.maintain() }
@@ -453,11 +422,6 @@ internal object SessionReader {
         }
 
     // 读图片块的那个函数**不在这里** —— 它被搬到 `model/ChatImageBlocks.kt` 了。
-    //
-    // 原因：同一个块结构有两个互不相关的来源（会话文件里的用户消息、以及工具结果里的
-    // `additionalContent`），而后者要由 `engine` 包调用，`engine` 的既有依赖方向是
-    // **只依赖 `model`**、从不 import `data`。留在 `data` 里会让引擎反向依赖数据层。
-    // 现在两边共用 `readChatImageBlocks`，也共用它的单测。
 
     // ------------------------------------------------------------------
 

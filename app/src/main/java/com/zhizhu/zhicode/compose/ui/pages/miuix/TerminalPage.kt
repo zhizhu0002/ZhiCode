@@ -134,19 +134,6 @@ private fun RealTerminalPane(
         pane.setNextSessionWorkingDirectory(workingDirectory)
     }
 
-    // 终端跟随应用主题（用户报过「终端对深浅色不适配」）。
-    //
-    // ⚠️ 方向只能是**界面 → 宿主**：应用主题的唯一权威在 Compose 这边
-    // （`LocalZhiDark`，见 `ZhiColors.isDark`），而宿主是纯 Java 的 `FrameLayout`，
-    // 读不到它。反过来在宿主里读配置会变成最底层依赖界面框架 —— 那正是宿主类注释
-    // 里明确拒绝的做法。
-    //
-    // 用 `LaunchedEffect(isDark)` 而不是 `DisposableEffect`：主题一变就要推一次，
-    // 且不需要 onDispose。主题没变时 `setDarkTheme` 自己会（同值直接返回），
-    // 所以重复组合不会做多余的工作。
-    //
-    // 默认档是深色，所以**深色模式下这条推送是空操作** —— 外观与改动前逐字节相同；
-    // 只有浅色模式会真正换表（色值取自历史上那张没人走到的浅色表）。
     val isDark = ZhiColors.isDark()
     LaunchedEffect(isDark) { pane.setDarkTheme(isDark) }
 
@@ -161,20 +148,6 @@ private fun RealTerminalPane(
     // -1 = 没在改名。存下标而不是布尔值：长按哪一行就要改哪一行。
     var renamingIndex by remember { mutableStateOf(-1) }
 
-    // 配置变化（旋转、换主题）后让终端重新对齐一次尺寸。
-    //
-    // MainActivity 声明了 configChanges，所以旋转**不会**重建 Activity，组合也不会重来；
-    // 而终端能不能画出来，取决于上游 TerminalView 内部那个 mEmulator 有没有被设上 ——
-    // 它只在 updateSize() 里被设，而 updateSize() 在尺寸为 0 时静默返回，
-    // onDraw() 在 mEmulator == null 时只画一块纯黑。真机上确实这样表现过：
-    // 旋转后终端一片空白，切到别的标签再切回来才恢复。
-    //
-    // ⚠️ 这里**不能**无条件 key(configuration) 去重建 AndroidView 节点。
-    // 试过，不行：宿主是同一个 View 实例，同一帧内从旧节点迁到新节点时，
-    // 旧节点的释放会把刚挂上的宿主再摘一次 → 宿主不在视图树上 → 没有测量/布局 →
-    // 尺寸恒为 0 → 谁都救不回来（表现仍然是「旋转后空白、切标签才恢复」）。
-    // 所以顺序反过来：先让宿主自己在原地重挂渲染（refreshTerminal），
-    // **只有当它报告自己真的不在视图树上时才重建节点**（那是它唯一无法自救的情况）。
     val configuration = LocalConfiguration.current
     var viewEpoch by remember { mutableStateOf(0) }
     LaunchedEffect(configuration) { pane.refreshTerminal() }
@@ -201,10 +174,7 @@ private fun RealTerminalPane(
         color = ZhiColors.panelSurface(),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // 只留一条头。这里原来还画的是 `PaneHeader("终端", projectName)`，紧接着
-            // 下面 RealTerminalPane 又画一条自己的工具栏（☰ / 会话名 / ⌨ / ⋮）——
-            // 于是终端比文件面板多一行标题。现在两块面板同构：
-            // 标题 + 副标题（当前会话名，没会话时退回项目名）+ 行尾动作。
+            // 只留一条头。
             PaneHeader(
                 title = "终端",
                 subtitle = state.title.ifBlank { projectName },
@@ -230,24 +200,8 @@ private fun RealTerminalPane(
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                        // ⚠️ `AnimatedContent` 的 content lambda 读的是**当前**闭包，不是
-                        // 那个 stage 当时的快照：转场期间 `failure` 已经是 null 了，
-                        // 直接用会让离场那一屏画成空文本。所以两个载荷都要过
-                        // 「最后一次非空」（见 rememberLastNonNull 的说明）。
                         val failure = rememberLastNonNull(state.failureDetail)
                         val notice = rememberLastNonNull(state.runtimeNotice)
-                        // 三态（真终端 / 失败 / 未就绪须知）之间淡变。原来是裸 `when`：
-                        // 终端就绪或崩掉那一刻整块一帧换掉。
-                        //
-                        // ⚠️ **硬性不变量：组合里最多只允许一个 `AndroidView`。**
-                        //
-                        // `AndroidView` 只出现在 `REAL` 分支，而 `AnimatedContent` 在转场期间
-                        // 同时组合的是 `initialState` 与 `targetState` **两个不同的** stage
-                        // （相等就不会有转场）—— 两者至多一个等于 `REAL`，
-                        // 所以同一个 `pane` 实例永远不会被挂到两个父容器上。
-                        // `factory` 里那句 `detachFromParent(pane)` 就是为这条不变量兜底的
-                        // （见 §28 守卫：把它挪出 `REAL` 分支、或让两个分支都能拿到
-                        // AndroidView，守卫会红）。
                         AnimatedContent(
                             targetState = when {
                                 state.failureDetail != null -> TerminalStage.FAILURE
@@ -372,18 +326,6 @@ private fun TerminalPlaceholder(
     val scheme = MiuixTheme.colorScheme
     val listState = rememberLazyListState()
 
-    // ⚠️ 用 `requestScrollToItem`（非挂起，只登记目标下标、在下次测量里生效），
-    // **不要**换回 `animateScrollToItem`。
-    //
-    // 它俩的差别在"内容连续增长"这个场景下是决定性的：`animateScrollToItem` 是挂起的，
-    // 而它的 key 是 `lines.size` —— 终端每来一行就变一次，于是 effect 被不停地取消并重启，
-    // 滚动常常在真正滚到底之前就被取消掉，只能等某个空档才追上，看起来就是"滚一下停一下"。
-    // 日志输出时本来也不该有动画（每一步都起动画会互相打断）。
-    // 完整推导见 `ui/chat/ChatList.kt` 里那段同源注释（对话流踩过同一个坑）。
-    //
-    // 跟/不跟走和对话流同一套判定（[rememberAutoFollow]）：之前这里无条件贴底，
-    // 于是一边看历史、一边有新行进来就会被一次次拽回去 —— 那是"自动滚动不顺畅"
-    // 最直接的一种。现在只有用户本来就贴底（或主动拖回底部）时才跟。
     val autoFollow by rememberAutoFollow(listState)
     LaunchedEffect(lines.size, autoFollow) {
         if (autoFollow && lines.isNotEmpty()) listState.requestScrollToItem(lines.size - 1)
@@ -407,10 +349,7 @@ private fun TerminalPlaceholder(
                         state = listState,
                         modifier = Modifier.fillMaxSize().padding(start = 10.dp, top = 8.dp, bottom = 8.dp),
                     ) {
-                        // 同 FilesPane 的正文列表：**不加** `key = { it }` —— 行号就是下标，
-                        // 拿它当 key 只是位置别名，不是身份（理由见那边的完整注释）。只挂 animateItem。
-                        // 这里本来就没几行，也不会重排，挂上主要是让「清屏 → 重新出 banner」
-                        // 这两步不再瞬移。
+                        // 同 FilesPane 的正文列表：**不加** `key = { it }` —— 行号就是下标
                         items(
                             count = lines.size,
                             key = { it },
@@ -440,8 +379,6 @@ private fun TerminalPlaceholder(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp),
             )
             // 「环境未就绪」以前只有一句话，没有任何可点的东西 —— 用户得自己
-            // 去设置里找到"安装运行环境"。这里直接把入口放在文案下面：
-            // 初始化期间显示进度并禁用按钮，失败就退回可再次点击的形态。
             TerminalSetupAction(
                 installing = installing,
                 progress = progress,

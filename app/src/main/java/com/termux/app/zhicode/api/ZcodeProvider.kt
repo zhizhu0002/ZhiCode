@@ -43,9 +43,7 @@ class ZcodeProvider : ModelProvider {
         }
 
         val endpoint = ZcodeWire.messagesEndpoint(baseUrl)
-        // 会话请求带三个**请求级**归因头（官方 `createModelRequestAttributionHeaders`）：
-        // 服务端用 x-zcode-session-type 区分主对话/子代理，另外两个用于链路追踪。
-        // 额度请求不带它们 —— 官方那边也只在模型请求上生成。
+        // 会话请求带三个**请求级**归因头（官方 `createModelRequestAttributionHeaders`）
         val conn = open(
             endpoint,
             ZcodeWire.headers(
@@ -79,11 +77,7 @@ class ZcodeProvider : ModelProvider {
             val status = conn.responseCode
             request.markResponseStarted()
             if (status < 200 || status >= 300) {
-                // 401/403 在这里最可能是"授权码不对"或"身份头没填对"，所以把响应体带上 ——
-                // 那个网关会在正文里说清是哪一个。
-                //
-                // 但 3012（风控）**不是**协议错误，见 ZcodeWire.describeHttpFailure 的说明：
-                // 它要的是一句"往哪查"的指引，而不是又一段原始 JSON。
+                // 401/403 在这里最可能是"授权码不对"或"身份头没填对"，所以把响应体带上 
                 val text = readAll(conn.errorStream)
                 ZcodeWire.describeHttpFailure(status, text)?.let { throw IllegalStateException(it) }
                 throw IllegalStateException("ZCode HTTP $status: " + truncate(text))

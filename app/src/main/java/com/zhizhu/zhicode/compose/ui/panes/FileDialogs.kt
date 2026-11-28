@@ -51,9 +51,6 @@ internal fun NewEntryDialog(
             title = shown.title,
             actions = {
                 SecondaryButton(text = "取消", onClick = onCancel)
-                // ⚠️ 两个提交按钮**必须都传出去**，而且传的是不同的值：
-                // 建文件还是建文件夹由**按下的那个按钮**决定，不再靠扩展名猜
-                // （`name.contains('.')` 会把 Makefile、LICENSE、.gitignore 建成目录）。
                 PrimaryButton(
                     text = "文件",
                     onClick = { onSubmit(false) },

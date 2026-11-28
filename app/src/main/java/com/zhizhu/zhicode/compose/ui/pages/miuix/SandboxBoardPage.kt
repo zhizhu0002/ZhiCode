@@ -224,10 +224,7 @@ internal fun SandboxBoardPage(
         action = "诊断" to { run("诊断") { openDiagnostics(); null } },
         actionEnabled = inFlight == null,
         blurTopBar = false,
-        // 诊断走 WindowDialog（独立窗口）。理由有二：
-        //  · 日志可能很长，需要一个真正能占满中间区域、自己滚动的容器；
-        //  · 它必须**盖住**页面里的一切（包括顶栏），而 overlay 系的弹层要挂在
-        //    某个 Scaffold 的宿主上，二级页那一层没有 —— 见 SettingsSubPage 的说明。
+        // 诊断走 WindowDialog（独立窗口）。
         overlay = {
             val shown = rememberLastNonNull(snapshot)
             WindowDialog(
@@ -453,9 +450,7 @@ internal fun SandboxBoardPage(
                                 run("进程 / SO 基址") {
                                     inspections[app.packageName] =
                                         repository.inspect(app.packageName).getOrThrow()
-                                    // 返回 null：这份实况已经显示在卡片里的详情块中，
-                                    // 再让 run() 把它当"操作结果"灌进底部提示条，
-                                    // 屏幕上就会出现同一段信息两份。
+                                    // 返回 null：这份实况已经显示在卡片里的详情块中
                                     null
                                 }
                             }

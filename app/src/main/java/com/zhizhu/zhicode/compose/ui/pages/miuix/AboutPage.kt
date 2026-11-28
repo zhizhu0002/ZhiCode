@@ -188,10 +188,6 @@ private fun AboutContent(
         isRuntimeShaderSupported() && enableBlur
     }
 
-    // ⚠️ 必须按明暗分开取（KSU 原文就是这样，之前漏了 `isInDark` 分支，
-    // 深色主题下卡片变成一块灰白板、把渐变整个盖掉）。
-    // `Pured_Regular_Light` 里有一条 `Color(0xB3FFFFFF) HardLight` 的强白混合，
-    // 它只适合浅色底；深色底要用 `Overlay_Thin_Light`（Luminosity + PlusDarker）。
     val blendColors = remember(isInDark) {
         if (isInDark) ColorBlendToken.Overlay_Thin_Light
         else ColorBlendToken.Pured_Regular_Light
@@ -213,11 +209,6 @@ private fun AboutContent(
     }
 
     // Hero 视差：滚动时**版本号先淡出，名字再淡出**（两段）。
-    //
-    // 原来是三段（图标 → 名字 → 版本号），图标删掉之后（用户要求去掉那张矢量图）
-    // 只剩两段。`iconY` / `iconProgress` 一并删掉 —— 留着它们的话，下面
-    // 「锚点都量到才计算」的守卫会因为 `iconY` 永远为 0 而永不通过，
-    // 表现就是视差彻底失效、名字一直不淡出。
     var logoHeightDp by remember { mutableStateOf(300.dp) }
     var logoAreaY by remember { mutableFloatStateOf(0f) }
     var projectNameY by remember { mutableFloatStateOf(0f) }
@@ -305,24 +296,6 @@ private fun AboutContent(
                 },
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // 图标已去掉（用户要求删掉那张矢量图）：只剩名字与版本号，
-            // 两者都居中 —— 名字原来没写 textAlign，单行时齐左，与下面的
-            // 版本号对不齐，看起来像错位。
-            //
-            // ⚠️ 这里**故意没有** `clickable`。
-            //
-            // 「点这个字进检查更新页」的点击目标在下面 `LazyColumn` 的
-            // `logoSpacer` 上，不在这里。原因是层级，不是写法：
-            // `BgEffectBackground` 的 content 里，这个 `Column` 与 `LazyColumn`
-            // 是**兄弟**，而 `LazyColumn` 后组合 → 画在上面；Compose 的命中测试
-            // 按 z 序反向走，`LazyColumn` 是滚动容器、自带 pointer input，
-            // 指头落在它边界内就被它接住，命中链在那里终止，
-            // **根本不会问到下面这个 `Column`**。
-            //
-            // 而 `LazyColumn` 是 fillMaxSize，它的第一项 `logoSpacer` 又刻意做成
-            // 与 Hero 等高 —— 于是"ZhiCode 这几个字"所在的整块区域实际归属于
-            // 那个透明占位项。曾经在这里挂过 `clickable`，实测点不动，
-            // 正是因为它是**被遮挡的那个节点**。
             Text(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -354,9 +327,6 @@ private fun AboutContent(
                 color = colorScheme.onBackground,
                 fontWeight = FontWeight.Bold,
                 // 字号走字阶里最大的一档（`title1` = 32sp），不硬写 sp。
-                // 原来这里是写死的 35.sp —— 那比 Miuix 最大的槽位还大 3sp，
-                // 是整套字阶之外的例外：字阶统一调整时它必然被漏掉，
-                // 而"官方组件 + 自己的字"正是本工程偏离 Miuix 规范的原因。
                 fontSize = MiuixTheme.textStyles.title1.fontSize,
                 textAlign = TextAlign.Center,
             )
@@ -388,19 +358,6 @@ private fun AboutContent(
             contentPadding = scrollPadding,
             overscrollEffect = null,
         ) {
-            // 与 Logo 等高的透明占位：让内容从 Logo 下方开始，同时给视差留长度。
-            //
-            // ⚠️ 它同时是「点 Hero 进检查更新页」的**点击目标**，这不是巧合：
-            // 它本来就覆盖着上面那一整块 Hero（名字 + 版本号），而且它在
-            // `LazyColumn` 里、位于上面那个 `Column` **之上**，所以只有它
-            // 能真正接到触摸（原因见上面 `Text` 那段注释）。
-            //
-            // 把点击挂在这里而不是给 `Text` 挂 `clickable`，是为了修掉
-            // "点了没反应"：位置不变、观感不变，只是换到了命中链真正经过的节点上。
-            //
-            // 无涟漪（`indication = null`）：这一块是背景，出涟漪会让人以为
-            // 整片区域是一个按钮。语义上仍是个可点目标，所以补了
-            // `contentDescription` —— 否则读屏用户完全不知道这里有入口。
             item(key = "logoSpacer") {
                 Box(
                     Modifier
@@ -427,9 +384,6 @@ private fun AboutContent(
             item(key = "groups") {
                 Column(
                     modifier = Modifier
-                        // ⚠️ 不能省（KSU 原文就有）。它让这一项至少和视口一样高，
-                        // 于是列表内容总高 = logoSpacer + 一屏，滚动范围才够。
-                        // 少了它，内容不足一屏时最后一张卡片会被裁掉、滑不到底。
                         .fillParentMaxHeight()
                         .padding(
                             bottom = innerPadding.calculateBottomPadding() + 12.dp,
@@ -523,8 +477,6 @@ private fun AboutGlassCard(
                     Modifier.textureBlur(
                         backdrop = backdrop,
                         // 与卡体**同源**：`Card` 不传 `cornerRadius` 时用的就是
-                        // `CardDefaults.CornerRadius`（16dp）。写死一个数迟早会和
-                        // 卡体对不上，那圈模糊就会从圆角里漏出来。
                         shape = RoundedCornerShape(CardDefaults.CornerRadius),
                         blurRadius = 60f,
                         colors = BlurColors(blendColors = blendColors),

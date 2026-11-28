@@ -174,9 +174,6 @@ object ZhiIcons {
     val image: Painter @Composable get() = vector(ZhiMaterialIcons.Image)
 
     // ── 设置行（彩色圆角块里的白字形） ────────────────────────────────────────
-    //
-    // 设置页每一行的行首都是「彩色圆角方块 + 白字形」（底色与几何见
-    // ui/settings/SettingsIconPlate.kt）。这一组是那十行专用的语义名。
 
     /** 搜索服务列表（入口行）：云。 */
     val cloud: Painter @Composable get() = vector(ZhiMaterialIcons.Cloud)

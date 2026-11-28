@@ -105,8 +105,6 @@ fun SkillsPage(
     if (state == null) return
 
     // FAB 拉起的「怎么添加」选择表，以及待确认的删除目标。
-    // **状态与浮层都在页面栈外面**：整屏浮层一旦躺进被转场动画的页面里，
-    // 宿主坐标就对不上、根本画不出来 —— 用户实测过"点加号完全没反应"，根因就是这个。
     var showAddSheet by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<SkillFile?>(null) }
 
@@ -152,9 +150,6 @@ fun SkillsPage(
                         ZhiFloatingActionButton(onClick = onNewFile, description = "新建文件")
                     },
                     hideFabOnScrollDown = true,
-                    // 浮层挂在**这一页自己的 Scaffold** 里（见 SettingsSubPage 的 overlay 参数）。
-                    // 二级页在 NavDisplay 里与工作区那个 Scaffold 是兄弟，自己这一层没有宿主，
-                    // 浮层点了也不会出现 ——「加号点不了」就是这么来的。
                     overlay = {
                         // 三个浮层都不套 `if`：常驻组合、只翻 `show`，退出动画才跑得起来（见文件头契约）。
                         // 退出期间状态已经是 null，内容用 rememberLastNonNull 兜住。
@@ -293,9 +288,6 @@ private fun AddSkillSheet(
     ) {
         Card(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            // ⚠️ 必须显式给 `secondaryContainer`：sheet 背板是 `background`，
-            // 而 `Card` 的默认色是 `surfaceContainer` —— 暗色下**是同一个值**
-            // （#242424），不传就是一张看不见的卡（本仓库已经栽过一次）。
             colors = ZhiSheetCardColors(),
         ) {
             BasicComponent(
@@ -377,9 +369,7 @@ private fun SkillListBody(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                 )
 
-                // 「筛出 0 条」与「有结果」之间淡变：敲字时结果列表会反复跨过空/非空，
-                // 硬切会像名单在抖。key 只取**布尔**（空/非空），不把 query 编进去 ——
-                // 否则每敲一个字都会重放整段转场。
+                // 「筛出 0 条」与「有结果」之间淡变：敲字时结果列表会反复跨过空/非空
                 AnimatedContent(
                     targetState = state.visibleSkills.isEmpty(),
                     transitionSpec = {
@@ -398,9 +388,7 @@ private fun SkillListBody(
                                 modifier = Modifier.fillMaxWidth()
                                     .padding(start = 16.dp, top = 4.dp, bottom = 4.dp),
                             )
-                            // 按作用域分组（项目级在前）：两级的同名技能可以共存，
-                            // 平铺时只能靠行尾的小胶囊区分，扫一眼很容易拿错。
-                            // 筛选词命中跨两级时各自成组，组的标题带数量。
+                            // 按作用域分组（项目级在前）：两级的同名技能可以共存
                             listOf(SkillScope.PROJECT, SkillScope.USER).forEach { scope ->
                                 val group = state.visibleSkills.filter { it.scope == scope }
                                 if (group.isEmpty()) return@forEach
@@ -741,9 +729,6 @@ private fun DirNodeRow(
             ),
         )
         // 展开/收起走 [AnimatedVisibility]（官方裸默认：淡变 + 竖直展开/收起）。
-        // 之前是裸 `if (expanded) content()` —— 子项在一帧内直接出现/消失，
-        // 目录多的时候像"页面闪了一下"。动画期间的离场内容由 AnimatedVisibility
-        // 自己保留，所以这里**不需要** rememberLastNonNull（content 是 lambda 不是数据）。
         AnimatedVisibility(
             visible = expanded,
             enter = fadeIn() + expandVertically(),

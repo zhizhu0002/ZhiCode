@@ -85,22 +85,13 @@ fun SettingsPage(
     brandSignature: String = "",
     onBrandSignatureChange: (String) -> Unit = {},
 ) {
-    // 整页设置，骨架全部用 Miuix 原生组件，照官方 example 的 SettingsPage 模式：
-    // Scaffold + SmallTopAppBar(MiuixScrollBehavior) + LazyColumn(overScroll+nestedScroll)。
-    // 返回键 = ZhiIcons.back + 原生 IconButton。顶栏**没有动作按钮**：改动即时生效，
-    // 没有需要用户再确认一次的东西（见文件顶部「没有保存按钮」一节）。
+    // 整页设置，骨架全部用 Miuix 原生组件，照官方 example 的 SettingsPage 模式
     if (draft == null) return
     // 重组探针：日志里 `recompose/s SettingsPage=N` 说明这一层被反复重建。
     // 没有这一行就无法区分"设置页自己重组"和"下面某个分组在重组"。
     com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("SettingsPage")
 
     val scheme = MiuixTheme.colorScheme
-    // ⚠️ 必须用 `rememberSaveable`，不能是 `rememberLazyListState()`。
-    //
-    // 设置页是 `NavDisplay` 的一个 entry：进「关于」再返回，这个 entry 会**重建**，
-    // 普通 `remember` 里的滚动位置随之丢失 —— 表现就是"从关于返回，设置回到最顶上"。
-    // `LazyListState.Saver` 是 Compose 官方为这个场景提供的：它把
-    // （首项下标, 首项偏移）写进 saveable 状态，重建时原样恢复。
     val listState = androidx.compose.runtime.saveable.rememberSaveable(
         saver = androidx.compose.foundation.lazy.LazyListState.Saver,
     ) { androidx.compose.foundation.lazy.LazyListState() }
@@ -110,8 +101,6 @@ fun SettingsPage(
     Scaffold(
         topBar = {
             // rikkahub 用 LargeFlexibleTopAppBar（大标题 + 滚动折叠）；
-            // Miuix 对应组件 = TopAppBar（自带 largeTitle 折叠行为）。
-            // 底色走 surface **纯色**：没有再捕获整页背板（见上面那段说明）。
             TopAppBar(
                 title = "设置",
                 largeTitle = "设置",
@@ -143,16 +132,7 @@ fun SettingsPage(
                     bottom = padding.calculateBottomPadding() + 16.dp,
                 ),
             ) {
-                // ---- 每个分组各自一个 item，而不是全部塞进一个 item ----
-                //
-                // 原来这里是单个 `item(key = "settingsBody") { AllSettingsPages(...) }`。
-                // `LazyColumn` 的懒加载单位是 **item**，只有一个 item 就等于没有懒加载：
-                // 整页（5 组、几百个设置行）在首次组合时被一次建完。
-                // 实测「点设置」首帧 **max=266.6ms**、avg 17.5ms、卡 2 次。
-                //
-                // 拆开之后只组合可见的那部分，首帧成本随**屏幕高度**增长而不是整页长度。
-                // 各分组的状态都是组内局部的（`SettingsGroup` 只画一张卡），
-                // 所以拆 item 不会打断任何 remember/动画。
+                // ---- 每个分组各自一个 item，而不是全部塞进一个 item 
                 item(key = "general", contentType = "settings-group") {
                     SettingsGroup("通用") {
                         GeneralPage(
@@ -172,8 +152,6 @@ fun SettingsPage(
                 }
             }
             // Miuix 原生滚动条
-            // 设置页是自动保存，但"保存失败""已切换 API 配置"这类反馈仍然要看得见。
-            // 原先这些消息只落在对话页的 MessageBar 上，而在设置页里根本看不到。
             PageFeedbackSlot(modifier = Modifier.align(Alignment.BottomCenter))
             BrandSignatureDialog(
                 show = brandDialogOpen,
@@ -340,11 +318,6 @@ private fun NetworkPage(
     )
 
     // 关闭联网搜索时后续配置全部折叠（官方 SettingsPage 的 AnimatedVisibility 模式）
-    //
-    // 官方示例那里写的是**裸默认**（`AnimatedVisibility(visible = …)`），视觉上等价：
-    // `expandIn` / `shrinkOut` 的默认展开方向就是竖直从下往上揭开，宽度本来就满。
-    // 这里显式写出来只是让「展开是竖直长出来」这件事在源码里读得到，
-    // 与 `Composer` 里那两处（斜杠面板、附件条）用同一组。
     AnimatedVisibility(
         visible = draft.webSearchEnabled,
         enter = fadeIn() + expandVertically(),
@@ -352,12 +325,6 @@ private fun NetworkPage(
     ) {
         Column {
             // 搜索服务已改成**独立整页**（RikkaHub 形态：多服务列表 + 每服务专属选项）。
-            // 这里只留入口 —— 原先是一排「类型下拉 + 一个 Key 框 + 实例地址框」，
-            // 只能配一个服务，而这一页要能配多个、每个还有自己的 depth/topic/语言。
-            // 入口行与 API 配置记录同一个形态（都是"配置对象列表"）。
-            //
-            // 这一行是裸 `BasicComponent`（不要行尾箭头），所以图标块直接挂在 `startAction`
-            // 上，没走 `SettingsEntry`。
             BasicComponent(
                 title = "搜索服务",
                 titleColor = BasicComponentDefaults.titleColor(color = scheme.onBackground),
@@ -404,12 +371,6 @@ private fun NetworkPage(
 private fun ExtensionsPage(onNavigate: (String) -> Unit, extensions: ExtensionSummary) {
     com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("ExtensionsPage")
     // rikkahub 式入口行：图标 + 标题 + 副标题；Miuix 用 ArrowPreference 的 startAction。
-    // 注意：这里不放「API 配置」——那条带当前生效值的入口留在上面的
-    // 「模型与对话」组里，同一目标只保留一条路径（hub 的规矩）。
-    //
-    // 每一行的副标题带**当前数量**（rikkahub 的扩展入口也是"标题 + 当前值"）：
-    // 之前这里是四句固定说明，想确认"那个 MCP 服务器还在不在"得点进去再退回来。
-    // 数量由 ViewModel 在打开设置时统计一次（三个存储都在磁盘上，界面里不读盘）。
     SettingsIconEntry(
         title = "Model Context Protocol（MCP）",
         summary = if (!extensions.loaded) {

@@ -189,22 +189,12 @@ fun UpdatePage(
                 }
 
                 item(key = "bottom-spacer") {
-                    // 给悬浮条让出位置。高度按参考实现的两个值之和：
-                    // `check_btn_margin_top` 9.09dp + 按钮 48dp + `check_btn_margin_bottom`
-                    // 28dp ≈ 85dp，再留一点余量防止内容被压。
+                    // 给悬浮条让出位置。
                     Spacer(Modifier.height(96.dp))
                 }
             }
 
-            // ---- 底部悬浮条 ----
-            //
-            // 参考实现把动作做成**贴底的悬浮按钮**（`no_update_fragment` 里的
-            // `Button` 用 `check_btn_margin_top` 9.09dp / `check_btn_margin_bottom`
-            // 28dp 做上下留白），而不是页面流里的一个实心蓝按钮。
-            //
-            // 这里复用工程自己的 `FloatingBottomShell`（任务卡 / 反馈条 / 输入器
-            // 都从它出）而不是另写一个：圆角、阴影、模糊半径、横向内缩都在那一个
-            // 地方定死，多处想不一致都不行。
+            // ---- 底部悬浮条 
             UpdateFloatingBar(
                 state = state,
                 checking = checking,
@@ -270,8 +260,6 @@ private fun UpdateBrandHeader() {
             modifier = Modifier.fillMaxWidth(),
             color = scheme.onBackground,
             // 字号走字阶里最大的一档（`title1`），不硬写 sp。
-            // 硬写会让这一个字成为整套字阶之外的例外：将来字阶统一调整时漏改它，
-            // 而"官方组件 + 自己的字"正是这个工程之前偏离 Miuix 规范的原因。
             fontSize = MiuixTheme.textStyles.title1.fontSize,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
@@ -369,8 +357,6 @@ private fun UpdateFloatingBar(
         }
         else -> {
             // 没有可下载的包（无更新 / 上游还没发 / 失败 / 只有源码）→ 就是"检查更新"。
-            // 标签先算好再传：内联的 `text = if (…) "…" : "…"` 在 Kotlin 里会与
-            // "没有 else 的 if 语句"产生歧义，解析器会在字符串那一列报错。
             primaryText = if (checking) "检查中…" else "检查更新"
             primaryAction = onCheck
             primaryEnabled = !checking

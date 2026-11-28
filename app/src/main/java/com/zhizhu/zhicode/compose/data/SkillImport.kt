@@ -62,9 +62,6 @@ internal object SkillImport {
             readTimeout = READ_TIMEOUT_MS
             instanceFollowRedirects = true
             requestMethod = "GET"
-            // 只要一个 UA 就够了：不自己设 Accept，让服务端按默认的"什么都接受"回内容。
-            // ⚠️ 也别往这个文件里写注释形状的字符（块注释的开头两字符）：本仓库的守卫脚本
-            // 用正则剔除注释，看到那对字符就会把它后面半段源码整块吃掉，断言于是静默失效。
             setRequestProperty("User-Agent", "ZhiCode")
         }
         try {

@@ -2,9 +2,7 @@ package com.zhizhu.zhicode.compose.model
 
 import com.termux.app.zhicode.core.FileOps
 
-// `ChatKind` 与 `ToolKind` 都在自己的文件里：它们在 `model` 包内，
-// 而本文件还拖着一整套界面状态类 —— 纯逻辑层（ToolGrouping / TurnLayout）只需要那两个
-// 枚举，不该为了它们把这一整份编译进秒级回路。
+// `ChatKind` 与 `ToolKind` 都在自己的文件里：它们在 `model` 包内
 
 
 enum class RiskLevel { NORMAL, HIGH }
@@ -56,12 +54,6 @@ data class ChatItem(
     val thinkingExpanded: Boolean = false,
     val processSteps: List<String> = emptyList(),
     val tools: List<ToolActivity> = emptyList(),
-    // ⚠️ 这里**没有**批次级的汇总标签（曾经叫 `groupLabel`：「修改 1 处代码」这类）。
-    //
-    // 它没有任何渲染位置了：参考实现里，一个批次里的工具分成两种长相 ——
-    // 单个工具就是**扁平一行**（没有标题、没有徽章），只有"连续的 read/search 且 ≥2"
-    // 才折成一组，而那一组的标题直接说明干了什么（「正在搜索 2 个模式、读取 3 个文件」，
-    // 见 `ToolGrouping.label`）。留着批次级标签只会让人以为还要在哪儿画它。
     val groupCompleted: Boolean = false,
     val expandedGroups: Set<String> = emptySet(),
     val contextTokens: Int = -1,
@@ -224,14 +216,6 @@ enum class ChoiceIntent {
     MESSAGE_ACTION,
     SESSION_ACTION,
 
-    // ⚠️ 这里**没有** TOOL_ACTION，而且不能再加回来。
-    //
-    // 它曾经存在：单个工具的 `⋯` 把菜单塞进 `choicePicker`，再由界面按 anchorId 认领。
-    // 但 [ChoicePickerState.isActionMenu] 只认上面这两个 intent，于是工具菜单**退化成
-    // 屏幕中央的对话框** —— 一个只作用于某一行的动作，弹窗出现在屏幕正中。
-    // 现在那个 `⋯` 是 Miuix 下拉菜单（与输入器底排同一组件），菜单内容仍是
-    // `ToolActions.options(...)`，选中的文案直接走 `applyToolAction(itemId, toolId, label)`。
-    // 也就是说：工具菜单不再需要经过本枚举，也不需要在这一层中转。
 
     /** 计划模式的目标澄清：选完（或自由回答）后才产出计划。 */
     PLAN_GOAL,

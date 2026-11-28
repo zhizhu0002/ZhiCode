@@ -69,9 +69,7 @@ internal object SkillStore {
             val children = rootDir.listFiles() ?: return@forEach
             children.filter { it.isDirectory }.sortedBy { it.name.lowercase() }.forEach { dir ->
                 if (!seen.add(dir.canonicalPath)) return@forEach
-                // 走同一个解析点（而不是 File(dir, FILE_NAME)）：路径解析只留一处，
-                // 以后要改规则时不会漏掉这条。这里的 dir 来自 listFiles，
-                // 但"相信上一个函数的输出"正是这类漏洞的来源。
+                // 走同一个解析点（而不是 File(dir, FILE_NAME)）：路径解析只留一处
                 val file = fileInSkillDir(dir, FILE_NAME)
                 if (!file.isFile) return@forEach
                 out += SkillEntry(

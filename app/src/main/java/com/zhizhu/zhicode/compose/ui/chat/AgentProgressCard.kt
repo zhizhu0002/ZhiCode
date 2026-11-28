@@ -56,9 +56,7 @@ fun AgentProgressCard(
 ) {
     val scheme = MiuixTheme.colorScheme
 
-    // 嵌在悬浮外壳里时不再画自己的底板与外边距，
-    // 否则一个圆角 20dp 的模糊面里再叠一个圆角 14dp 的实心卡，
-    // 两层不同圆角会明显不齐。由调用方决定用哪种形态。
+    // 嵌在悬浮外壳里时不再画自己的底板与外边距
     if (!embedded) {
         Card(
             onClick = onExpand,
@@ -76,8 +74,6 @@ fun AgentProgressCard(
         }
     } else {
         // 悬浮形态：整块壳已经提供了圆角与背景，这里只铺内容。
-        // 仍然套一层 Card 是为了保留点击与按压反馈，但底色透明、圆角与外壳一致，
-        // 所以不会再出现第二层可见的圆角矩形。
         Card(
             onClick = onExpand,
             modifier = modifier.fillMaxWidth(),
@@ -175,8 +171,6 @@ private fun CardBody(
         }
 
         // 状态行为空时整段不画：否则会留下一个"计划模式"空标签 + 一条分隔线。
-        // 悬浮卡现在只看 tasks 决定是否出现，所以 "有任务但此刻没有进行时状态"
-        // （例如任务已全部完成）是正常组合，那时就该省掉这一行。
         if (status.isNotBlank()) {
             ZhiHorizontalDivider(
                 modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),

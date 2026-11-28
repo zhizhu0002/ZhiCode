@@ -37,9 +37,7 @@ fun PaneHeader(
     val scheme = MiuixTheme.colorScheme
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
-            // 面板头不跟列表行走同一个 token：列表行是 52dp（Mochi iOS 26 基准），
-            // 而面板头是**栏**，栏高应受顶栏 48dp 的量级约束，否则一屏里两条横栏
-            // 高度差 4dp 反而更显眼。这里取 Mochi 的 controlHeight。
+            // 面板头不跟列表行走同一个 token：列表行是 52dp（Mochi iOS 26 基准）
             modifier = Modifier
                 .fillMaxWidth()
                 .height(MochiBaseline.controlHeight)

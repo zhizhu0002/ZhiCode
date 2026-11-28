@@ -38,25 +38,11 @@ fun ZhiAppTheme(theme: ThemeSettings, content: @Composable () -> Unit) {
         // 否则用户系统的「字体大小」设置会在应用里失效。
         LocalDensity provides scaledDensity(theme.uiScale),
     ) {
-        // ⚠️⚠️ 色板必须在**这两个 Local 之内**求值，这是修过的一个真实 bug。
-        //
-        // 原来 `val colors = rememberZhiColors(theme, isDark)` 写在
-        // `CompositionLocalProvider` **之前**，于是色板函数里的
-        // `ZhiColors.backdrop()` 读到的是 Provider **外层**的值：
-        //   · `LocalZhiDark` → 默认 `false`；
-        //   · 历史遗留的 AMOLED 信号已移除（Miuix 用不到纯黑）。
-        // 结果：**深色模式下整个主题的 `background` 是浅色背板 `#F1F1F3`**，
-        // 而面板/卡片（它们读的是 Provider 内的正确值）是深色 —— 板块之间的缝、
-        // 顶栏透出的底色、页面切换时露出的那一层全是浅灰；AMOLED 开关同样完全无效
-        // （因为 `background` 那一份永远按非纯黑算出来）。
-        // 用户说的「主题还是有很多问题」里最主要的一条就是这个。
         MiuixTheme(
             colors = rememberZhiColors(theme, isDark),
             textStyles = zhiTextStyles(),
         ) {
             // 麻薯（Mochi）主题再包一层，位置在这里是**有讲究的**：见 MochiSkin.kt
-            // 文件头的说明。一句话：现有调用点读 MiuixTheme 的不动，Mochi 组件读到的是
-            // 同一套种子色 / 深浅判定 / G2 圆角，两套组件混排时不会各按各的默认值排版。
             ZhiMochiTheme(
                 theme = theme,
                 /* 材质：只有 Mochi 组 + 用户显式打开时才给玻璃。 */
@@ -86,15 +72,11 @@ private val OnBrightSeed = Color(0xFF141414)
 private fun rememberZhiColors(theme: ThemeSettings, isDark: Boolean): Colors {
     val backdrop = ZhiColors.backdrop()
     if (!theme.dynamicColor) {
-        // 固定中性色 + 种子色当强调色。不经过 HCT：预设色卡上的那个颜色就该是
-        // 界面里按钮/开关/选中态的颜色，HCT 的 TonalSpot 会把它压成低饱和的中间调
-        // （默认蓝 #3482FF 会变成 #415F91 那种灰蓝），"选了绿色结果界面是灰绿"。
+        // 固定中性色 + 种子色当强调色。
         return remember(isDark, backdrop, theme.seedArgb) {
             val base = if (isDark) darkColorScheme().zhiDarkNeutrals() else lightColorScheme().zhiLightNeutrals()
             val seed = Color(theme.seedArgb)
             // 亮色种子（暖阳橙 / 樱花粉）配白字会糊，按亮度换深色字。
-            // 用命名常量而不是字面量：它是"高亮底上近乎纯黑的字"，与纯黑不同
-            // （纯黑压在饱和色上会显得脏），这个区别值得有个名字。
             val onSeed = if (seed.luminance() > 0.45f) OnBrightSeed else Color.White
             val container = if (isDark) lerp(seed, Color.Black, 0.62f) else lerp(seed, Color.White, 0.78f)
             val onContainer = if (isDark) lerp(seed, Color.White, 0.55f) else lerp(seed, Color.Black, 0.45f)
@@ -107,8 +89,6 @@ private fun rememberZhiColors(theme: ThemeSettings, isDark: Boolean): Colors {
                 primaryContainer = container,
                 onPrimaryContainer = onContainer,
                 // `secondary` 一族**不**跟着种子色走：浅色里它们被
-                // `zhiLightNeutrals()` 用作中性填充（`SoftFillLight`），
-                // 换成带色味的值会让浅色下"发灰发脏"那个老问题回来。
             )
         }
     }
@@ -132,16 +112,6 @@ private fun rememberZhiColors(theme: ThemeSettings, isDark: Boolean): Colors {
     }
     val generated = controller.currentColors()
     return remember(generated, backdrop, isDark) {
-        // Monet 的浅色板用它自己的中性色（带种子色的灰）——**不要**再套
-        // `zhiLightNeutrals()`：那套灰是为"固定色板"调的，叠在生成色板上
-        // 会让强调色与容器色对不上（生成算法保证的是它自己那一套对比度）。
-        // 同上面固定色板分支：`background` 不覆盖（它服务于底部弹层 / 对话框 / 抽屉），
-        // 页面背板由 `ZhiColors.backdrop()` 与 `surface` 负责。
-        //
-        // ⚠️ 但**弱化文字/图标**这一项要盖掉，理由与固定色板分支完全相同：
-        // Monet 生成出来的 `onBackgroundVariant` 带种子色的色相，在整屏图标上
-        // 就是一层"发灰的滤镜"。它表达的是"弱一档"，不该表达"另一种颜色"。
-        // 注意这里**只**动这两个字段，中性容器仍用生成结果。
         if (isDark) {
             generated.copy(
                 onBackgroundVariant = ZhiColors.MutedDark,

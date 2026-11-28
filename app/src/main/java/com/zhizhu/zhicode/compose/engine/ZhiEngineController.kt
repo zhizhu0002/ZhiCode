@@ -288,9 +288,6 @@ internal class ZhiEngineController(
         Thread(runnable, "zhi-engine-ops").apply { isDaemon = true }
     }
 
-    // ------------------------------------------------------------------
-    // 生命周期
-    // ------------------------------------------------------------------
 
     /** 拿到引擎，需要时创建并配置。 */
     fun engine(): ZhiCodeEngine {
@@ -315,15 +312,6 @@ internal class ZhiEngineController(
             engine().configure(base)
         }
         if (changed) lastConfiguredFingerprint = fingerprint
-        // ⚠️ 这里必须落盘。原先只把值写进内存与引擎，`ApiSettingsStore.save()` 在
-        // 整个工程里**零调用方** —— 于是权限模式、推理档、上下文窗口、项目目录、
-        // 联网搜索那一整套、自动压缩、自定义提示词，全都重启即丢。它们的存储键与
-        // 读取路径一直齐备，缺的就是这一次写入。
-        //
-        // 不需要去抖或线程转发：`save()` 内部只做 SharedPreferences.apply()
-        // （内存立即生效、磁盘异步写），唯一的重活——密钥加密——只在密钥**真的变了**
-        // 时发生，而这里的 base 来自 store.load()，密钥与库里一致，不会触发。
-        // 调用频率是「每条消息一次」，不是热路径。
         if (changed) runCatching { store.save(base) }
         return base
     }
@@ -474,9 +462,6 @@ internal class ZhiEngineController(
         engineOps.shutdownNow()
     }
 
-    // ------------------------------------------------------------------
-    // 界面回执
-    // ------------------------------------------------------------------
 
     fun respondPermission(requestId: String, allow: Boolean): Boolean =
         if (usePiBackend()) runCatching { piBackend?.respondPermission(requestId, allow) ?: false }.getOrDefault(false)
@@ -500,9 +485,6 @@ internal class ZhiEngineController(
     fun cancelPlanModeFromUi(feedback: String): ToolExecutionResult =
         if (usePiBackend()) pi().cancelPlanModeFromUi(feedback) else engine().cancelPlanModeFromUi(feedback)
 
-    // ------------------------------------------------------------------
-    // 上下文用量
-    // ------------------------------------------------------------------
 
     fun estimateContextTokens(): Int = runCatching {
         if (usePiBackend()) piBackend?.estimateContextTokens() ?: 0 else engine?.estimateContextTokens() ?: 0
@@ -608,9 +590,6 @@ internal class ZhiEngineController(
         if (usePiBackend()) piBackend?.contextPercent() ?: 0 else engine?.contextPercent() ?: 0
     }.getOrDefault(0)
 
-    // ------------------------------------------------------------------
-    // 流式文本合并（原版 queueStreamingDelta：32ms 合并成块）
-    // ------------------------------------------------------------------
 
     private fun queueText(delta: String) {
         if (delta.isEmpty()) return
@@ -661,9 +640,6 @@ internal class ZhiEngineController(
         }
     }
 
-    // ------------------------------------------------------------------
-    // ZhiCodeEngine.Listener —— 21 个回调
-    // ------------------------------------------------------------------
 
     override fun onSessionStarted(config: SessionConfig) {
         val gen = generation
@@ -770,9 +746,7 @@ internal class ZhiEngineController(
                 addedLines = result.addedLines,
                 deletedLines = result.deletedLines,
                 command = call.input?.optString("command", "") ?: "",
-                // 解析与解码是**分开**的：这里只把 base64 字符串搬进 UI 模型，
-                // 真正的 BitmapFactory 解码在界面上跑 Dispatchers.Default
-                // （见 ZhiImage.rememberDecodeState），所以这一步在主线程上是廉价的。
+                // 解析与解码是**分开**的：这里只把 base64 字符串搬进 UI 模型
                 previews = result.additionalContent()?.let { readChatImageBlocks(it) } ?: emptyList(),
             )
         }
@@ -784,10 +758,6 @@ internal class ZhiEngineController(
         val call = request.call
         val name = call?.name ?: "工具"
         // 「高风险」按**命令内容**判，不按工具种类判。
-        //
-        // 原先这里是 `kind == SYSTEM || kind == SHELL` —— 等于凡是跑 shell 的都挂红标，
-        // 于是 `ls` 和 `rm -rf /` 长得一模一样。红标天天出现就不再是信息，用户学会的
-        // 是忽略它。判定表在 RiskClassifier（纯 JVM，有单测）。
         val highRisk = runCatching { RiskClassifier.isHighRisk(name, call?.input) }
             .getOrDefault(false)
         val summary = ToolText.summary(name, call?.input) ?: ""
@@ -922,9 +892,6 @@ internal class ZhiEngineController(
     }
 }
 
-// ----------------------------------------------------------------------
-// 界面枚举 → 引擎字符串
-// ----------------------------------------------------------------------
 
 internal fun PermissionMode.toEngineMode(): String = when (this) {
     PermissionMode.ASK -> PermissionModePolicy.DEFAULT

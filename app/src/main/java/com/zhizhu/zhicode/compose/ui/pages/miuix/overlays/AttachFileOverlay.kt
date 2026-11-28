@@ -78,9 +78,7 @@ fun AttachFileOverlay(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                // 内容自适应：少时贴内容、多时才到上限。见两个常量的注释
-                // （原先这里是按窗口比例算出来的**定高**）。
-                // 上限要减掉悬浮胶囊的让位，否则面板会顶出屏幕。
+                // 内容自适应：少时贴内容、多时才到上限。
                 .heightIn(
                     min = AttachSheetHeightFloor,
                     max = (AttachSheetHeightCap - navInset).coerceAtLeast(AttachSheetHeightFloor),
@@ -102,21 +100,6 @@ fun AttachFileOverlay(
                 onNavigate = onNavigate,
             )
 
-            // 3) 目录内过滤（不滚动头部）。Miuix `InputField` = 胶囊搜索框，
-            //    与侧栏「搜索会话」同一形态。
-            //
-            // ⚠️ 横向内边距**必须**给：不给的话它会满幅横过去，比同屏的面包屑行、
-            //    根标签栏和文件行都宽（用户截图里最刺眼的就是这一处）。
-            //
-            // ⚠️ `expanded` 必须接**真实状态**，不能传常量：API ≤ 27（本工程 minSdk 24）
-            //    上 `hasFocusReassignBug` 为 true，未展开时组件是 **disabled** 的，
-            //    靠 `onExpandedChange(true)` 先展开再聚焦。传常量的话那个回调是空的，
-            //    Android 8.x 上这个框永远点不进去。（与 `Sidebar.kt` 同一处理由。）
-            //
-            // ⚠️ 代价说清：`InputField` 的 `label` 只在「未展开且为空」时当占位符显示
-            //    （源码 `labelText = if (!(query.isNotEmpty() || expanded)) label else ""`），
-            //    所以**第一次点开之后**占位文字就让位给放大镜图标。侧栏本来就是这个行为，
-            //    两处一致 —— 要的是"同一个搜索框"，不是"每处一套占位符规则"。
             InputField(
                 query = browser.filter,
                 onQueryChange = onFilterChange,
@@ -148,9 +131,6 @@ fun AttachFileOverlay(
                     ) { entry ->
                         FileListRow(
                             entry = entry,
-                            // ⚠️ 点目录是**进去**，点文件才是附加。
-                            //    这一条如果反了，用户会发现自己"附加"了一整个目录 ——
-                            //    而目录根本读不出文本，只会得到一句"不是文本文件"。
                             onOpen = { if (entry.directory) onNavigate(entry.path) else onPick(entry) },
                             modifier = Modifier.animateItem(),
                             // 尾部不给「重命名/删除」：这里是挑选附件的场景，

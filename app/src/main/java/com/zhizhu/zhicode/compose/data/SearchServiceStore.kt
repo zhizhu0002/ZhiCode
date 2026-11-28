@@ -17,10 +17,6 @@ internal object SearchServiceStore {
         val stored = ApiSettingsStore.readSearchServices(context)
         var services = parseServices(stored[0])
         var activeId = stored[1]
-        // 一条都没有时给两条**免费**预设（DuckDuckGo 可用 + Bing 备用）。
-        //
-        // 为什么不在 `AppSettings` 里预置：那样"用户删光了"与"从没配过"就分不开，
-        // 删完下次进页面又被塞回来。所以这里用一次性标记 —— 种过一次就不再种。
         if (services.isEmpty() && !ApiSettingsStore.isSearchSeedDone(context)) {
             services = SEED_SERVICES
             activeId = SEED_ACTIVE_ID

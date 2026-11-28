@@ -19,22 +19,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 fun rememberGlass(): Glass {
     val isDark = ZhiColors.isDark()
-    // 用户可以在「主题设置 → 显示 → 模糊」里关掉虚化。关掉时**连 layerBackdrop 都不建**：
-    // 那不只是"少画一层"，而是整条 RuntimeShader 采样路径都不再被走到 ——
-    // 这是本页四个显示开关里最值钱的一个（虚化每帧都要重采样一张全屏贴图）。
+    // 用户可以在「主题设置 → 显示 → 模糊」里关掉虚化。
     val enabled = LocalThemeSettings.current.blurEnabled
-    // ⚠️ 读 `liquidGlassEffective` 而不是 `liquidGlass`。
-    //
-    // 液态玻璃描述的是"悬浮层更透"，没有悬浮层时它无所指。之前只在主题页把那个开关
-    // **隐藏**了，这里仍读原始字段 —— 于是「悬浮底栏关了、液态玻璃也没得点，
-    // 但底栏以外的玻璃面板照样是透的」。门控收进数据层，这一处只认结果。
     val liquid = LocalThemeSettings.current.liquidGlassEffective
     // The blur setting is user-toggleable at runtime. Do not freeze its initial value in an
     // unkeyed remember: a false first composition would leave every Glass backdrop disabled.
     val supported = remember(enabled) { isRuntimeShaderSupported() && enabled }
     // 关键：不支持时**连 layerBackdrop 都不创建**。
-    // 只在 Modifier 上做恒等替换还不够 —— 光是把 blur 的代码路径执行到，
-    // 在 API < 33 上就可能因为 RuntimeShader 缺失而崩。
     return if (supported) {
         // 捕获前先画一层不透明背景色：文档指出 layerBackdrop 只捕获自己的内容，
         // 若内容有透明区域，模糊会把颜色扩散进透明像素、出现明显色块。
@@ -82,12 +73,7 @@ class Glass internal constructor(
     @Composable
     fun surfaceColor(color: Color): Color =
         if (backdrop != null) {
-            // 浅色也必须保留透明度：alpha=1f 会把 textureBlur 的结果完全盖住，
-            // 所以发送框和底部悬浮栏看起来就像普通白色卡片。约 78% 能保留白色
-            // 的干净感，同时让后面的消息/代码块轮廓透出，立体感由 blur + 阴影共同完成。
-            //
-            // 「液态玻璃」再压一档：那是这个开关唯一的语义（更透 + 更薄的边缘），
-            // 而它必须比不透明底线高 —— 否则面板在深色下会糊成一片读不出边界。
+            // 浅色也必须保留透明度：alpha=1f 会把 textureBlur 的结果完全盖住
             val base = if (!dark) 0.78f else 0.72f
             val alpha = if (liquid) base - 0.12f else base
             color.copy(alpha = alpha)

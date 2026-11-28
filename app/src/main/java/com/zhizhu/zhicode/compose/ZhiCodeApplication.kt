@@ -28,19 +28,13 @@ class ZhiCodeApplication : Application() {
         // 必须是第一个动作：后面所有路径都依赖它
         TermuxConstants.configure(base)
 
-        // ZCode 的设备标识要在任何请求发出之前就位。晚一步的话 provider 会回退到
-        // 进程内的临时值 —— 那个值每次启动都不同，服务端认不出是同一台设备，
-        // 额度与套餐模型就会时有时无。
+        // ZCode 的设备标识要在任何请求发出之前就位。
         ZcodeDeviceMid.install(base)
 
-        // 沙盒调试日志要在 ContentProvider 创建之前就位：
-        // `SandboxControlProvider.onCreate` 会立刻写一条事件，
-        // 那个时刻晚于 attachBaseContext、早于 Application.onCreate。
+        // 沙盒调试日志要在 ContentProvider 创建之前就位
         SandboxDebugLog.init(base)
 
         // 启动期判一次「本应用是不是跑在别的沙箱里」。
-        // 界面据此可以直接给出结论，而不是发一次 IPC 白等 30 秒超时 ——
-        // 嵌套环境下引擎结构性不可用，见 ZhiSandboxEngine.isNestedRuntime。
         ZhiSandboxEngine.noteEnvironment(base)
 
         installCrashLogger()

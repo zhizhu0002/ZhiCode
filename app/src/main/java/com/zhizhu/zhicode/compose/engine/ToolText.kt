@@ -57,15 +57,6 @@ internal object ToolText {
         if (!writesFile) return false
         if (output.isEmpty()) return false
 
-        // ⚠️ 这里**不能用 `output.split('\n')`**（曾经就是那么写的）。
-        //
-        // 展开的工具输出上限是 40 000 字符（`WorkspaceViewModel.LIVE_OUTPUT_LIMIT`），
-        // 一条 2000 行的输出就会先建出 2000 个 String，**然后**才开始找 `@@` ——
-        // 哪怕第一行就是 hunk 头也白建。而这个函数在工具行每次重组时都会被调用
-        // （滚动、状态变化、展开/收起都算），于是几百 KB 的垃圾按次计费。
-        //
-        // 改成按下标逐行扫描并**提前 return**：命中 hunk 头就结束，
-        // 最坏情况也与原来一样是 O(n)，但不产生任何中间对象。
         var sawMinus = false
         var sawPlus = false
         var start = 0

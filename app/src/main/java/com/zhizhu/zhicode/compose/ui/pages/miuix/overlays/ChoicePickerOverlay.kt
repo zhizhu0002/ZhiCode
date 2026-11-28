@@ -84,8 +84,6 @@ fun ChoicePickerOverlay(
     val shownPicker = rememberLastNonNull(picker)
     var freeForm by remember(shownPicker) { mutableStateOf("") }
     // 选项点击只改这个**本地**选中态，不回调 ViewModel。
-    // 之前点击直接调 onSelect()，ViewModel 会立刻提交并把 choicePicker 置空，
-    // 于是窗口一点就关、根本没机会按「提交」，也没法改主意。
     var localSelected by remember(shownPicker) { mutableStateOf(-1) }
     // 多选（引擎提问可能带 multiSelect）走这一份本地集合。
     var localMulti by remember(shownPicker) { mutableStateOf(emptySet<Int>()) }
@@ -141,9 +139,7 @@ fun ChoicePickerOverlay(
             },
             actions = {
                 SecondaryButton(text = p.cancelLabel, onClick = onDismiss)
-                // 提交按钮是**唯一**的提交入口；没选任何项也没填自由文本时置灰，
-                // 让"还不能提交"这件事可见，而不是点了没反应。
-                // 文案来自 [ChoicePickerState.submitLabel]：多问题的提问流程中途是「下一步」。
+                // 提交按钮是**唯一**的提交入口；没选任何项也没填自由文本时置灰
                 PrimaryButton(
                     text = p.submitLabel,
                     enabled = usingFreeForm || selectedIndices.isNotEmpty(),

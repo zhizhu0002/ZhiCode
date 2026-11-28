@@ -37,8 +37,6 @@ fun MessageBar(
 ) {
     val scheme = MiuixTheme.colorScheme
     // 淡出期间还要显示旧文案，所以要自己留一份。
-    // 直接把 message 传给 Text 的话，dismiss 的那一刻文案会先变空、再播动画，
-    // 看到的是"一截空条滑走"。
     var shown by remember { mutableStateOf(message) }
     var shownError by remember { mutableStateOf(isError) }
     if (message != null) {
@@ -46,9 +44,7 @@ fun MessageBar(
         shownError = isError
     }
 
-    // 用 message 做 key（而不是 shown）：同一段文案被 dismiss 后再次出现时，
-    // shown 还留着旧值，key=shown 不会重启协程导致无法自动消失；
-    // message 从 null 变为非 null 会稳定重启计时器。
+    // 用 message 做 key（而不是 shown）：同一段文案被 dismiss 后再次出现时
     LaunchedEffect(message) {
         if (message != null) {
             delay(if (isError) ERROR_DURATION_MS else INFO_DURATION_MS)
@@ -68,12 +64,7 @@ fun MessageBar(
             vertical = 6.dp,
         )
         if (shownError) {
-            // 错误走与沙箱页**同一个**通知条分量，见 [ZhiNoticeBar] 的说明：
-            // 原来这里是一个带投影的浮动工具栏，而沙箱页那处是一张深灰 Card 配红字 ——
-            // 同一件事两种长相。现在两处都是"贴边红底横幅"。
-            //
-            // padding 而不是 FloatingToolbar 的 outSidePadding：通知条是**贴边**的，
-            // 不需要阴影与 squircle 底，也就用不上那个外壳。
+            // 错误走与沙箱页**同一个**通知条分量，见 [ZhiNoticeBar] 的说明
             Box(modifier = Modifier.fillMaxWidth().padding(inset)) {
                 ZhiNoticeBar(
                     text = text,
@@ -82,10 +73,7 @@ fun MessageBar(
                 )
             }
         } else {
-            // 外壳走共用的 FloatingBottomShell：内缩/圆角/阴影/模糊与任务卡、
-            // 输入器同源 —— 三块在同一列上，宽度与观感必须一致
-            // （形态以之前的发送栏为准，见 Common.kt）。
-            // verticalPadding = 6dp：沿用反馈条原本的纵向呼吸空间。
+            // 外壳走共用的 FloatingBottomShell：内缩/圆角/阴影/模糊与任务卡
             FloatingBottomShell(wide = wide, glass = glass, verticalPadding = 6.dp) {
                 // 点一下就消失：错误分支走 ZhiNoticeBar 的 clickable，这里对齐。
                 Column(

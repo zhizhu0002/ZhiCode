@@ -129,17 +129,12 @@ fun McpConfigPage(
         ).filterNotNull(),
         onBack = if (form == null) onDismiss else requestCancelForm,
     ) { key ->
-        // ⚠️ 分支必须看**正在渲染的那一页**（key），不能看当前状态：
-        // 退出动画期间 key 还是 mcp.form 而 form 已经变 null，
-        // 按状态分支会让离场页画成列表，动画就废了。
         val draft = if (key.id == "mcp.form") shownForm else null
         if (draft == null) {
             SettingsSubPage(
                 title = "MCP 服务器",
                 onBack = onDismiss,
-                // 「添加」与「导入」合成一个 FAB 拉起的底栏（与技能页同一形态）：
-                // 顶栏上并排放两个入口会让"从哪开始"变成要先读两个词。
-                // 底栏里每一行都带一句说明，用户一眼能分辨"手动填"和"粘一份 JSON"。
+                // 「添加」与「导入」合成一个 FAB 拉起的底栏（与技能页同一形态）
                 floatingActionButton = {
                     ZhiFloatingActionButton(
                         onClick = { showAddSheet = true },
@@ -193,11 +188,6 @@ fun McpConfigPage(
                 )
             }
         } else {
-            // 「基本设置 / 工具」用 TAB 栏切换（参考实现也是这么分的：一个
-            // ModalBottomSheet 里两个 page）。为什么不上下排成一页：
-            // 「工具」的内容长度完全取决于服务器 —— 有的返回 3 个工具，
-            // 有的返回 40 个。排在一页里，那 40 个会把「启用 / 作用范围 / URL」
-            // 这些每次都要改的字段推到几十屏之前。
             var tab by rememberSaveable { mutableIntStateOf(0) }
             val tabs = remember { MCP_FORM_TABS }
             val pagerState = rememberPagerState(initialPage = tab, pageCount = { tabs.size })
@@ -219,12 +209,6 @@ fun McpConfigPage(
                 // 保存动作在飞时禁用顶栏按钮：连点会写两份配置（第二次走进同名分支）。
                 actionEnabled = !rememberActionBusy("mcp.save"),
                 // TAB 栏走固定 header 槽位：切到「工具」往下滚几屏之后还得能切回去。
-                //
-                // 形态用 [ZhiSegmentedTabs]（Miuix `TabRowWithContour`）而不是裸
-                // `TabRow`：工作区顶栏那一条（对话 / 终端 / 文件）用的就是这个，
-                // 两处的切换控件长得一样，用户不必学第二套。整宽等分也是照抄它
-                // （`matchWidth = true`）—— 二级页只有两项，不自适应宽度才不会
-                // 缩成中间一小撮。
                 header = {
                     Box(
                         modifier = Modifier.fillMaxWidth().padding(vertical = TopBarTabRowPadding),
@@ -271,8 +255,6 @@ fun McpConfigPage(
                         McpToolsTab(
                             draft = draft,
                             // 工具清单来自「测试连接」，按**正在编辑的这个名字**去取。
-                            // 用 draft.name 而不是 originalName：用户改名后看到的应当是
-                            // 新名字对应的结果（改名前那些设置会被 McpStore 一起搬过去）。
                             status = config.status[draft.name]
                                 ?: draft.originalName?.let { config.status[it] },
                             testing = config.testing.contains(draft.name),
@@ -328,9 +310,7 @@ private fun McpServerList(
         } else if (config.servers.isEmpty()) {
             McpEmptyState()
         } else {
-            // ---- 汇总 + 批量测试 ----
-            // 之前这一页只有一串卡片：有多少台、几台启用着、上次测过几台连上了，
-            // 全都得逐张卡自己数。rikkahub 的 MCP 页也是先给一行汇总。
+            // ---- 汇总 + 批量测试 
             Row(
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -427,9 +407,6 @@ private fun AddMcpSheet(
     ) {
         Card(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            // ⚠️ 必须显式给 `secondaryContainer`：sheet 背板是 `background`，
-            // 而 `Card` 的默认色是 `surfaceContainer` —— 暗色下**是同一个值**
-            // （#242424），不传就是一张看不见的卡（本仓库已经栽过一次）。
             colors = ZhiSheetCardColors(),
         ) {
             BasicComponent(
@@ -476,9 +453,6 @@ private fun McpEmptyState() {
     ) {
         Icon(
             // 与设置主页那一行的图标**同一个**（ZhiIcons.sandbox）：点进来时看到的
-            // 大图标和刚才点的那一行是同一个符号，才认得出"这是同一个地方"。
-            // （早先这里用了 ZhiIcons.runtime，那是一个对勾 —— 空态里一个对勾
-            //   读起来像"操作成功"，正好把"这里什么都没有"说反了。）
             painter = ZhiIcons.sandbox,
             contentDescription = null,
             tint = scheme.onSurfaceVariantSummary.copy(alpha = 0.45f),
@@ -523,10 +497,7 @@ private fun McpServerCard(
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // 左侧图标表达**连接状态**（参考 rikkahub 的 McpServerItem：状态图标在左，
-                // 启用与否是标题旁的一个小圆点）。原先这里画的是启用/停用：
-                // 于是"已启用但连不上"和"已停用"在列表上几乎一样，用户分不清该去看
-                // 地址还是该去开开关。
+                // 左侧图标表达**连接状态**（参考 rikkahub 的 McpServerItem：状态图标在左
                 Box(
                     modifier = Modifier.size(20.dp),
                     contentAlignment = Alignment.Center,
@@ -667,8 +638,6 @@ private fun McpStatusLine(
 
         else -> Text(
             // 点整行看全文并复制：超时/证书/401 这类信息截断成一行就没法排查了。
-            // 点击区域铺满整行（而不是只有文字那么大）：这一行的语义就是
-            // "点这一条看详情"。
             text = "连接失败：${status.error}（点这里看全文）",
             color = scheme.error,
             fontSize = MiuixTheme.textStyles.footnote2.fontSize,
@@ -700,8 +669,6 @@ private fun McpConnectionForm(
     // （嵌套滚动容器会拿到无限高度约束而崩溃）。
     val scheme = MiuixTheme.colorScheme
     // 「用户碰过哪一项」：没碰过就不飘红（见 FieldError 的说明）。
-    // key 取 originalName —— 换一条记录 / 新建表单时要重新归零，
-    // 否则上一条表单的红字会带到下一条上。
     var nameTouched by remember(draft.originalName) { mutableStateOf(false) }
     var commandTouched by remember(draft.originalName) { mutableStateOf(false) }
     var urlTouched by remember(draft.originalName) { mutableStateOf(false) }
@@ -790,9 +757,6 @@ private fun McpConnectionForm(
                 )
                 FieldError(draft.urlError, urlTouched)
                 // 请求头从「一整块 JSON 文本框」改成**键值行**（参考 rikkahub 的
-                // Custom headers 段）：真实配置里通常只有一两条（Authorization、
-                // X-Api-Key），手写 JSON 既容易漏引号，也没法把值遮起来。
-                // 存储格式不变（仍是 JSON 文本），所以引擎侧与已有配置完全兼容。
                 KeyValueEditor(
                     title = "请求头（可选）",
                     value = draft.headersText,
@@ -841,8 +805,6 @@ private fun McpToolsTab(
     val scheme = MiuixTheme.colorScheme
     Column {
         // 这个 TAB 是**只读**的：工具清单由服务器声明，不能在这里手工增删。
-        // 但两个开关要写盘，所以停用 / 名字没填时得先拦住 ——
-        // `setToolOptions` 是按名字找服务器的，名字对不上会"保存成功但没生效"。
         if (!draft.isEditing || !draft.saveable) {
             Card(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -987,9 +949,7 @@ private fun McpToolRow(
                 )
             },
             endActions = {
-                // 两个开关都放在**折叠行**上（参考实现 rikkahub 的 McpToolCard 同款）：
-                // 之前审批开关藏在展开区里，想给某个工具开确认要点两下（展开 → 翻到底），
-                // 而它和"启用"是同一层级的决定。
+                // 两个开关都放在**折叠行**上（参考实现 rikkahub 的 McpToolCard 同款）
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "审批",
@@ -1102,19 +1062,6 @@ private fun TextDetailDialog(show: Boolean, title: String, body: String, onDismi
                 color = scheme.onBackground,
                 fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontFamily = FontFamily.Monospace,
-                // ⚠️ 这里**既不能**套 verticalScroll，**也不能**加 heightIn 上限。
-                //
-                // DialogShell 已经把 body 放进竖向滚动容器，并在它上面用了
-                // `weight(1f)` 吃掉剩余高度（这样按钮永远留在屏幕内）。
-                // 再套一层滚动就是「滚动套滚动」：内层拿到无限高度约束，
-                // Compose 抛 IllegalStateException —— main 线程首帧即崩，
-                // 表现是点开这个弹窗直接闪退（本仓库栽过一次，
-                // 见 DialogScrollNestingTest 里那段真实的栈）。
-                //
-                // 而 heightIn 上限看着无害，其实会让长错误**被静默截断**：
-                // 文字被裁到上限高度，外层再去滚这个已经裁好的块，剩下的就没了 ——
-                // 而错误信息的价值恰恰在末尾那几行。
-                // 交给 DialogShell 的滚动区就好，多长都能滚完。
                 modifier = Modifier.fillMaxWidth(),
             )
         }

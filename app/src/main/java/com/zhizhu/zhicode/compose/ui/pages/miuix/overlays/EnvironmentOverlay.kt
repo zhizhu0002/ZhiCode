@@ -81,8 +81,6 @@ fun EnvironmentOverlay(
         insideMargin = DialogWideInsideMargin,
     ) {
         // 原来这里有一句 `if (!open) return@OverlayDialog`：它会在关窗那一瞬间把内容
-        // 全拆掉，退场那 250~260ms 能看到的就只是一张空壳在缩。`report` / `message`
-        // 这些字段关闭时并不清（见 closeEnvironment），直接让它继续画就行。
         DialogShell(
             title = "环境自检",
             fillBody = true,
@@ -195,10 +193,7 @@ fun EnvironmentOverlay(
                         text = "诊断报告",
                         color = scheme.onSurfaceVariantSummary,
                         fontSize = MiuixTheme.textStyles.body2.fontSize,
-                        // 用 weight 而不是 fillMaxWidth(0.6f)：后者是**固定比例**占位，
-                        // 和同一行里两个按钮抢宽度 —— 窄屏上「修复」放不下就把文字
-                        // 折成竖排（实测截图上就是竖着的两个字）。weight 让标签
-                        // 吃剩余宽度，按钮按内容取宽，两者不再竞争。
+                        // 用 weight 而不是 fillMaxWidth(0.6f)：后者是**固定比例**占位
                         modifier = Modifier.weight(1f),
                     )
                     TextButton(

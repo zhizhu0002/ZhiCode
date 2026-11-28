@@ -188,14 +188,6 @@ internal object UpdateChecker {
         cancellation: Cancellation = Cancellation { false },
         mirrorPrefix: String? = MIRROR_PREFIX,
     ): File {
-        // 候选地址：镜像优先，原地址兜底。
-        //
-        // ⚠️ 顺序是"先镜像、失败再原址"而不是反过来：镜像存在的理由就是
-        // 原地址在某些网络下**根本连不上**，先试原址等于让用户白等一次超时。
-        //
-        // 但如果镜像本身挂了（`ghfast.top` 是社区维护的公共服务，不保证可用），
-        // 必须能回退 —— 否则我们把"某些网络连不上 GitHub"换成了
-        // "所有网络都依赖一个第三方镜像"，那是更糟的可用性。
         val candidates = buildList {
             if (!mirrorPrefix.isNullOrBlank()) add(mirrorPrefix + url)
             add(url)

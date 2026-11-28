@@ -275,8 +275,6 @@ internal fun M3eNavigationRow(
             modifier = Modifier
                 .fillMaxWidth()
                 // 双行列表项 72dp（M3E 规范：单行 56 / 双行 72 / 三行 88）。
-                // 用 `heightIn(min)` 而不是固定 `height`：系统字号调大时文字要能长高，
-                // 硬定高会裁字。
                 .heightIn(min = M3eDimens.RowDouble)
                 .padding(horizontal = M3eDimens.RowPaddingH, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -344,8 +342,6 @@ internal fun M3eSwitchRow(
             modifier = Modifier
                 .fillMaxWidth()
                 // 有 summary 就是双行（72dp），没有就是单行（56dp）。
-                // 这两档是 M3E 规范值，不是随手挑的 —— 原先这里只有 padding，
-                // 行高由文字撑出 60 出头，与规范差 12dp，与其它行也对不齐。
                 .heightIn(min = if (summary.isNullOrBlank()) M3eDimens.RowSingle else M3eDimens.RowDouble)
                 .padding(horizontal = M3eDimens.RowPaddingH, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,

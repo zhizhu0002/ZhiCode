@@ -150,13 +150,6 @@ fun FilesPage(
     val effectiveSelectionMode = selectionMode || selection.isNotEmpty()
     BackHandler(active && effectiveSelectionMode, onClearSelection)
     Surface(modifier.fillMaxSize(), color = ZhiColors.panelSurface()) {
-        // ⚠️ `imePadding()` 不能省：`MainActivity` 关掉了系统窗口 resizing
-        // （`enableEdgeToEdge()` → `setDecorFitsSystemWindows(false)`），
-        // 键盘高度只能由应用自己接。这一页顶部有搜索框，不接的话键盘一弹
-        // 就把搜索框和下面几行文件一起盖住。
-        //
-        // 加在**面板根容器**上：这样根切换栏、搜索框、文件列表整体被压到键盘上沿，
-        // 而不是只压缩列表 —— 否则搜索框会停在原地、列表却在它下面变矮，看着像断层。
         Column(Modifier.fillMaxSize().imePadding()) {
             var pagerRoot by remember { mutableStateOf(root) }
             LaunchedEffect(root) { pagerRoot = root }

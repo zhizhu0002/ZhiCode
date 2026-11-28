@@ -109,18 +109,11 @@ internal fun FloatingBottomShell(
 ) {
     val scheme = MiuixTheme.colorScheme
     // 「悬浮底栏」开关：关闭时贴满宽度、去圆角与阴影 —— 回到传统底部栏的观感。
-    // 它不是样式偏好而是**可读性**选择：屏幕小时悬浮内缩会吃掉两侧各 12dp，
-    // 而长命令恰好最需要横向空间。
     val floating = LocalThemeSettings.current.floatingBar
     // iOS 风格：悬浮时把圆角拉到全圆（胶囊），而不是 Miuix 的中等圆角。
-    // 这是两种不同的设计语言 —— iOS 的输入条是一条胶囊，Miuix 是一张卡片。
-    // 只在**真的悬浮**时生效：贴边形态没有"形态"可谈（见 BottomBarStyle 的说明）。
     val iosStyle = floating &&
         LocalThemeSettings.current.bottomBarStyleValue == BottomBarStyle.IOS
     // 圆角走 squircle（连续曲率），与 Miuix 自带的卡片、以及这里的三块悬浮层
-    // 保持同一种轮廓语言。同一个 `shape` 对象会同时喂给
-    // `textureBlur(shape=…)`、`border(shape=…)` 与 `FloatingToolbar` 的底色 ——
-    // 所以必须是**同一个实例**，否则角上会出现两套轮廓的重影。
     val shape = ZhiSquircle(
         when {
             iosStyle -> 28.dp
@@ -169,8 +162,6 @@ fun ZhiIconButton(
 ) {
     val scheme = MiuixTheme.colorScheme
     // `onBackgroundVariant` 在浅色 Miuix 色板中是较弱的辅助色，作为通用
-    // 图标默认色会让菜单、返回和设置等可操作图标显得发灰；主文字色在深浅
-    // 主题中都保持足够对比度。明确传入的 tint（包括禁用态）仍优先保留。
     val color = if (tint == Color.Unspecified) scheme.onSurface else tint
     val content: @Composable () -> Unit = {
         Icon(
@@ -186,11 +177,7 @@ fun ZhiIconButton(
             modifier = modifier,
             enabled = enabled,
             backgroundColor = background,
-            // 触控热区兜底（规范 48dp）。Miuix 自己的 `IconButtonDefaults` 是 40dp ——
-            // 库默认值不满足无障碍规范，所以要在这里显式抬。
-            //
-            // `defaultMinSize` 会被**父约束夹住**：放进 36/40dp 高的行里时会自动
-            // 退到该行能给出的最大高度，不会把行撑破。所以无需在每个调用点分支。
+            // 触控热区兜底（规范 48dp）。
             minWidth = ZhiSpacing.minTouchTarget,
             minHeight = ZhiSpacing.minTouchTarget,
             content = content,
@@ -238,14 +225,6 @@ fun ZhiFilledIconButton(
         modifier = modifier.size(size),
         enabled = enabled,
         backgroundColor = containerColor,
-        // ⚠️ 方角用的是 `ZhiRadius.actionKey`（8dp），**不是** `ZhiRadius.square`（4dp），
-        // 也不是 `ZhiRadius.inner`（10dp）。两个都试过：
-        // 4dp 在 30dp 的键上是个硬邦邦的方块（"太方了"），
-        // 10dp 又已经偏胶囊、两个键并排像"一块被劈成两半"。
-        //
-        // 根因是**方角的观感取决于「圆角/边长」比例**，而不是圆角的绝对值：
-        // 同一个 10dp 放在 40dp 的按钮上只有 0.25、还算方，放到 30dp 上就是 0.33。
-        // 所以按钮变小必须跟着换档，不能沿用同一个绝对值。详见 ZhiRadius.actionKey。
         cornerRadius = if (square) ZhiRadius.actionKey else size / 2,
         minHeight = size,
         minWidth = size,
@@ -473,9 +452,6 @@ fun ZhiSegmentedTabs(
     // 流式状态变化都重建横向滚动位置，也让选中项自动保持在可见区。
     val tabListState = rememberLazyListState()
     // Apply the caller's width constraint outside the Miuix row. TabRowWithContour
-    // starts with fillMaxWidth internally; passing `width(160.dp)` directly to it
-    // can therefore let the internal fill win and consume the whole SettingsGroup row,
-    // leaving the label with a one-glyph column (the NavigationBar screenshot bug).
     Box(modifier = modifier) {
         TabRowWithContour(
             tabs = tabs,
@@ -547,10 +523,6 @@ fun ZhiIconDropdownMenu(
         )
     }
     // 打开菜单时先收起输入法：App 是 edge-to-edge，窗口不随键盘缩小，而 Miuix
-    // 浮层的定位（0.9.4 的 rememberListPopupLayoutInfo）只扣状态栏/导航栏、
-    // **不认识 IME** —— 键盘开着时菜单会整个落在键盘底下（用户实测"显示在下层"）。
-    // 收起键盘后锚点随 composer 上移，浮层跟着锚点走（ListPopupLayout 持续跟踪
-    // onGloballyPositioned），这也是原版 dialog 式菜单的天然行为。
     val keyboard = LocalSoftwareKeyboardController.current
     OverlayIconDropdownMenu(
         entry = entry,
@@ -639,8 +611,6 @@ fun ZhiTextField(
     val latestOnValueChange by rememberUpdatedState(onValueChange)
 
     // 外部改值：只在真不一致时写回，并把光标放到末尾。
-    // 少了这一步，点列表填值之后光标会留在旧位置，用户接着输入就插错地方
-    // ——即上面第 2 个缺陷的来源。
     LaunchedEffect(value) {
         if (fieldState.text.toString() != value) fieldState.setTextAndPlaceCursorAtEnd(value)
     }
@@ -829,8 +799,6 @@ fun ZhiAnchoredActionMenu(
 ) {
     if (labels.isEmpty()) return
     // 每次重组重建即可：OverlayDropdownPopup 内部用 rememberUpdatedState(entries)
-    // 持有它，所以不会因为新实例而丢状态；反过来若用 remember 缓存，
-    // onClick 里捕获的 onSelect 就有过期风险（这个回调会随重组变化）。
     val entries = listOf(
         DropdownEntry(
             items = labels.mapIndexed { index, label ->

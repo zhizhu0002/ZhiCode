@@ -68,8 +68,6 @@ internal fun WideWorkspace(
                 state = TopBarState.from(state),
                 wide = true,
                 // WideWorkspace 本身处于 glassMain.capture 的子树里；让这个
-                // TopBar 再采样 glassMain 会构成自引用 RenderNode。固定为 Miuix
-                // 不透明 Surface，窄屏顶栏仍在 capture 外保留独立玻璃。
                 glass = NoGlass,
                 onOpenSidebar = viewModel::openSidebar,
                 onSettings = viewModel::openSettings,
@@ -228,9 +226,7 @@ internal fun WorkspaceTabs(
     ZhiSegmentedTabs(
         tabs = labels,
         selectedIndex = selectedIndex,
-        // 点击时**不**按 `selected` 去重：高亮此时由 Pager 驱动，
-        // 而 Pager 可能还在动。去重会让"动画中点同一个 tab"变成无响应，
-        // 而那时用户的意图恰恰是"别动了，回这一页"。
+        // 点击时**不**按 `selected` 去重：高亮此时由 Pager 驱动
         onSelect = { index -> tabs.getOrNull(index)?.let(onSelect) },
         modifier = modifier.fillMaxWidth().height(WorkspaceTabRowHeight),
         matchWidth = true,
@@ -253,8 +249,6 @@ internal val TopBarTabRowPadding = 12.dp
 
 /** 悬浮头部的占位高度：宽屏只有标题行，窄屏还要加上归顺进来的 Tab 行。 */
 // SmallTopAppBar 官方 CollapsedHeight = 52dp；窄屏 Tab 行在 bottomContent 槽位。
-// S1 之后顶栏占布局高度、内容不再重叠 —— 但顶栏 blur 需要内容从底下滚过，
-// 所以 Scaffold 内容层不再吃 padding.top，各面板用这两个常量自己留出可见区起点。
 internal val TopBarInset = 56.dp
 
 @Composable
@@ -269,8 +263,6 @@ internal val TopBarInsetCompact: Dp
     @Composable get() {
         LocalCompactTopInsetOverride.current?.let { return it }
         // Bottom-tab mode removes the tab row from ZhiTopBar. Do not keep reserving
-        // that 45dp in terminal/files/chat: it creates the conspicuous empty band
-        // immediately below the header seen in the user's screenshots.
         val hasTopTabs = LocalThemeSettings.current.tabBarPositionValue == TabBarPosition.TOP
         return TopBarInset +
             (if (hasTopTabs) WorkspaceTabRowHeight + 1.dp else 0.dp) +
@@ -294,9 +286,7 @@ private fun PaneHost(
             // runtimeReady 是真实探测（见 EnvDoctor / RuntimeInstaller），不是常量。
             runtimeReady = state.runtimeReady,
             workingDirectory = state.projectPath,
-            // 终端实例由 ViewModel 持有，**不能**在这里 remember：
-            // PaneHost 用 when(tab) 切面板，切走会让这段 Composable 离开组合，
-            // 实例若建在这里就会连会话一起被销毁（见 TerminalHolder 的注释）。
+            // 终端实例由 ViewModel 持有，**不能**在这里 remember
             terminalHolder = { ctx -> viewModel.terminalPane(ctx) },
             // 环境未就绪时的三态入口：未安装 / 安装中（进度）/ 失败（可重试）。
             // 以前只有一句说明，用户得自己去设置里找"安装运行环境"。

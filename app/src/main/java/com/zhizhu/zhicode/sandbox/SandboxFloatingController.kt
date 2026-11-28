@@ -368,9 +368,7 @@ object SandboxFloatingController {
                     )
                 }
 
-                // 展开/收起都走动画：宽度由上面的 animateDpAsState 负责，
-                // 这里管按钮组的淡入淡出与横向推挤，两者时长必须一致，
-                // 否则会出现"框已经宽了但按钮还没出现"的空档。
+                // 展开/收起都走动画：宽度由上面的 animateDpAsState 负责
                 AnimatedVisibility(
                     visible = expanded,
                     enter = fadeIn(tween(ENTER_MS, easing = MiuixEasing)) +
@@ -408,8 +406,6 @@ object SandboxFloatingController {
             }
 
             // ── 日志面板（就地展开，不另起窗口）────────────────────
-            // 同样带展开/收起动画。纵向用它自己的 expandVertically ——
-            // 面板是"从无到有"的一整块，和按钮组那种横向推挤不是一回事。
             AnimatedVisibility(
                 visible = logText != null,
                 enter = expandVertically(tween(ENTER_MS, easing = MiuixEasing), expandFrom = Alignment.Top) +

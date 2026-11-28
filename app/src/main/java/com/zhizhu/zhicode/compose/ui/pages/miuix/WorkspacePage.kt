@@ -120,18 +120,8 @@ internal fun WorkspacePage(
     val floatingNavigationBlur = showBottomNavigation && themeSettings.tabBarFloating &&
         themeSettings.blurEnabled && themeSettings.floatingNavBlur && glassMain.supported
     // 底栏的模糊源必须**只**来自 `glassMain` 的层级捕获，而底栏本身位于
-    // Scaffold 的 bottomBar 槽 —— 它是内容节点的**兄弟**，不是子节点。
-    // 这条「内容录制 / 底栏采样」的单向关系就是 KSU 的 BlurredBar 结构；
-    // 反向（底栏被自己录进去）会让 HWUI 得到自引用 RenderNode 并栈溢出。
     val pageNavigationBackdrop = glassMain.backdrop
     val floatingNavigationBackdrop = glassMain.backdrop.takeIf { floatingNavigationBlur }
-    // 悬浮胶囊在底部**实际遮住**的高度：胶囊 + 与系统导航栏之间的缝 + 导航栏 inset。
-    //
-    // ⚠️ 这只是"被遮住多少"，不是"内容要让出多少布局高度"。
-    // 胶囊是浮层，内容必须一路铺到屏幕底边（KSU 那种卡片从胶囊下穿过的观感）；
-    // 各页拿这个值当**滚动内边距**用，于是"最后一行能滑到胶囊上方"和
-    // "底部不再空出一条背景色带"同时成立。以前这里给内容加布局底部 padding，
-    // 结果就是胶囊底下留出一整条纯背景色 —— 那正是用户反复说的"黑色区域"。
     val navigationBarBottomInsetDp = WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)
         .asPaddingValues().calculateBottomPadding()
     val floatingNavigationAvoidance = FloatingNavBarHeight + FloatingNavBarGap +
@@ -164,10 +154,6 @@ internal fun WorkspacePage(
     } else {
         0.dp
     }
-    // 列表滚动计数器：手势靠它判断"这一下归列表管"，避免同一段位移被算两次。
-    // ⚠️ 用 `IntArray(1)` 而不是 `mutableStateOf(0)`：这个计数器由滚动**逐像素**自增，
-    // 用 State 会每次都走一遍快照写入/失效分发；而它只在手势回调里被读（不进组合），
-    // 普通容器就够，省掉这部分开销。
     val navBarScrollTick = remember { IntArray(1) }
     val navBarProgressAnim = remember { Animatable(0f) }
     LaunchedEffect(navBarProgressAnim) {
@@ -183,20 +169,14 @@ internal fun WorkspacePage(
     val workspaceBottomAvoidance = floatingNavInset
     val anchoredActionMenu = state.choicePicker?.isActionMenu == true
     // Edge-to-edge makes the transparent system navigation area part of the app window.
-    // Paint the page backdrop at the root so that the floating bar's safe-area gap is
-    // themed background, never the window's default black surface.
     Box(modifier = Modifier.fillMaxSize().background(ZhiColors.backdrop())) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
             // This is the KSU mounting point: the bar is a Scaffold child, not a
-            // z-indexed child of the captured workspace. Scaffold measures it once and
-            // passes that exact height to the content lambda.
             if (showBottomNavigation && !themeSettings.tabBarFloating) {
                 Box(
-                    // 用来核对"导航栏实际位置与内容让位是否一致"。它每次布局变化都执行，
-                    // 而悬浮/底栏在动画期间逐帧位移 → 日志里出现 893 次 `nav-probe`。
-                    // 结论早已确认，探针删除；详见 ChatList.kt 同类注释与实测数据。
+                    // 用来核对"导航栏实际位置与内容让位是否一致"。
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     /* 固定底栏 ↔ 选择工具栏的**形变**过渡（与悬浮胶囊那一份同构）。 */
@@ -233,9 +213,7 @@ internal fun WorkspacePage(
                                         scaleY = shrink
                                         translationY = 10.dp.toPx() * navSink
                                     },
-                                // KSU 的做法：有可采样的背板时底栏底色必须是**透明**的，
-                                // 否则不透明的 surface 会把刚做好的模糊整个盖住
-                                // （表现就是"固定底栏切换后模糊没了/背板变透明"）。
+                                // KSU 的做法：有可采样的背板时底栏底色必须是**透明**的
                                 color = if (pageNavigationBackdrop != null) {
                                     Color.Transparent
                                 } else {
@@ -280,10 +258,6 @@ internal fun WorkspacePage(
                             onDismiss = viewModel::clearFileSelection,
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
-                                // ⚠️ **不要**在这里再写 `padding(horizontal = floatingHorizontalInset, vertical = 6.dp)`：
-                                // `FileSelectionToolbar` 内部已经有那一层。叠两次会让卡片比
-                                // 悬浮胶囊窄一圈、也矮一截，同时把内容挤出 `bottomBar` 槽位
-                                // —— 表现就是底部被裁（用户截图里工具栏下缘被切掉）。
                                 .graphicsLayer {
                                     alpha = toolAlpha
                                     val grow = 0.96f + 0.04f * (1f - toolRise)
@@ -297,14 +271,9 @@ internal fun WorkspacePage(
             }
         },
         // Miuix Scaffold defaults to `colorScheme.surface`. That opaque surface used to
-        // show through the transparent outer area of the floating bar as a full-width
-        // black strip. The page backdrop must be the Scaffold's own container, not only
-        // a parent behind it.
         containerColor = ZhiColors.backdrop(),
         floatingToolbar = {
-            // 文件选择工具栏**不在这里**挂：它和悬浮胶囊要共用屏幕底部同一个槽位，
-            // 而 Scaffold 的 floatingToolbar 槽位落在胶囊下面 —— 两样同挂就会叠在一起
-            // （用户截图里工具栏被胶囊压住一半）。两者现在都在根层的同一个 Box 里过渡。
+            // 文件选择工具栏**不在这里**挂：它和悬浮胶囊要共用屏幕底部同一个槽位
         },
         topBar = {
             if (wide) {
@@ -340,20 +309,6 @@ internal fun WorkspacePage(
             }
         },
     ) { padding ->
-        // KSU's Scaffold passes the measured bottomBar height to content. This is the
-        // app bar reservation (capsule + its single navigation inset), not a second
-        // system-bar padding. Without it the bar is merely painted over every pane.
-        // 顶栏 blur 需要内容从它**底下滚过**才有东西可采样：
-        // 去掉 padding.top，让内容 Box 从 y=0 铺满，各面板自己在头部留白。
-        //
-        // ⚠️ 丢掉 top 是**有代价的**，改动这里之前必须知道：
-        // 任何从 y=0 开始画、又不自己顶开的面板，头部都会被顶栏盖住。
-        // 所以每个面板必须二选一 ——
-        //   · 对话面板：用 ChatList 的 topInset（**滚动内边距**，它要能滚过顶栏）；
-        //   · 其余面板：用 `TopBarInsetCompact` 的 **padding** 顶开
-        //     （见 WorkspaceLayouts 里 PaneHost 那个分支）。
-        // **新加面板时最容易漏的就是这一步**（文件面板就这么被盖过一次，
-        // 当时这里有一句指向并不存在的常量的注释，照它做就漏了）。
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -370,28 +325,6 @@ internal fun WorkspacePage(
                     },
                 ),
         ) {
-            // 各页从这里取「胶囊遮住多高」，当作**滚动内边距**。别改回布局 padding：
-            // 布局让位会在胶囊底下留出一条纯背景色带（用户报的就是这个）。
-            //
-            // ⚠️ 这里提供的是**稳定**的 [floatingNavInset]，不是动画值。
-            //
-            // 曾经写成 `provides animatedWorkspaceBottomAvoidance`（想让列表留白
-            // 也随动画收窄），结果是**回路**：
-            //   进度变 → 留白变 → LazyColumn contentPadding 变 → 重新测量
-            //   → firstVisibleItemScrollOffset 变 → reportNavBarScroll 又写进度 → …
-            // 表现就是用户报的「偶尔下滑或上滑，组件都会弹一下」，到底部越界时最重
-            // （那时候 `overScrollVertical` 的阻尼也在动，两个扰动叠加）。
-            //
-            // 现在分工明确：留白稳定 → 不参与回路；悬浮层**只在绘制阶段位移**
-            // （见 `LocalNavBarProgress` 的消费方），所以"组件跟着滑下去"的观感仍然存在。
-            // ⚠️ 同一段位移不能既从这里出去、又在页内各自 `graphicsLayer` 一次，
-            // 那会变成两倍 —— 位移只由页内那一处负责。
-            //
-            // ⚠️⚠️ `LocalNavBarProgress` / `LocalNavBarTarget` / `LocalNavBarTravelPx`
-            // 必须**和留白一起**提供在这一层：各页（对话 / 终端 / 文件）是这里的内容子树，
-            // 只在别处提供的话它们读到的是 `compositionLocalOf` 的**默认实例**，
-            // 写进去没有任何人读（这个坑已经踩过一次：`LocalNavBarScrollHidden`
-            // 曾经只提供给悬浮栏槽位，导致「下滑隐藏」在页面上从未生效过）。
             CompositionLocalProvider(
                 LocalFloatingNavInset provides floatingNavInset,
                 /* 固定底栏的高度（悬浮模式下是 0，因为那时内容本来就不让位）。 */
@@ -411,12 +344,7 @@ internal fun WorkspacePage(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    // 三屏共用的隐藏手势。挂在内容区**外层**，所以对话 / 终端 /
-                    // 文件都生效，且**不依赖列表能不能滚** —— 会话很短、终端没输出、
-                    // 目录里只有几个文件时，`LazyListState` 的 offset 根本不会变。
-                    //
-                    // 主驱动是列表滚动（见各页的 `reportNavBarScroll`），
-                    // 手势只用来补"这一屏根本不能滚"的情况。
+                    // 三屏共用的隐藏手势。
                     .navBarHideOnVerticalDrag(
                         progress = navBarHideTarget,
                         scrollTick = navBarScrollTick,
@@ -451,10 +379,7 @@ internal fun WorkspacePage(
             }
             }
 
-            // ---- 非对话面板的反馈条 ----
-            // 对话页自己那条在输入器上方（MessageBar）；文件 / 终端页没有它，于是
-            // 「删除失败」「已复制 N 项」这类消息在屏幕上根本看不到。这里补在底部
-            // Tab 栏之上。宽屏不挂：那时对话面板常驻，MessageBar 已经在显示了。
+            // ---- 非对话面板的反馈条 
             if (!wide && state.tab != WorkspaceTab.CHAT) {
                 PageFeedback(
                     message = state.message,
@@ -463,9 +388,6 @@ internal fun WorkspacePage(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         // 8dp 的固定底距走 padding（组合期常量，不随滚动变）；
-                        // 随进度变化的那一段走 `offset { }` —— 布局阶段求值，
-                        // 滚动时不触发重组（见上面 `workspaceBottomAvoidance` 的说明）。
-                        // progress=0（胶囊可见）时上移让开胶囊，progress=1（胶囊收起）时回落到底边距。
                         .padding(bottom = 8.dp)
                         .offset {
                             val visibleAvoidance = workspaceBottomAvoidance.toPx() *
@@ -475,32 +397,13 @@ internal fun WorkspacePage(
                 )
             }
 
-            // ---- Overlay 系列 ----
-            // 弹窗挂载与模态模糊背景在 OverlayHost.kt。
-            //
-            // ---- 浮层宿主（主 Scaffold 这一份）----
-            //
-            // 只在**抽屉关闭**时组合：抽屉打开时浮层由抽屉内部那一份负责
-            // （见函数末尾 `ZhiSideDrawer(overlayHost = …)`）。
-            // 两处同时存在会让同一个对话框被两个宿主各画一次。
-            //
-            // 为什么抽屉里那份能盖住抽屉：`ChoicePickerOverlay` 传了
-            // `renderInRootScaffold = false`，走的是**离调用点最近**的
-            // `LocalPopupStates` —— 也就是抽屉自己那个 Scaffold 的宿主，
-            // 它的 popupHost 在 `ScaffoldLayout` 里最后 place。
             if (!state.sidebarOpen) {
                 ZhiOverlayHost(state = state, viewModel = viewModel, glassMain = glassMain)
             }
 
 
 
-            // ---- 全局调试浮层（debug 构建的 UI 调试页里打开）----
-            // 画在最后 = 压在所有东西之上，但只在自己那块矩形里响应手势，
-            // 其余事件原样透传给下面的工作区。
-            //
-            // `BuildConfig.DEBUG` 是硬门控：唯一能把它打开的地方是 debug 独有
-            // 的「UI 调试」页，这里再挡一道 —— 万一将来有人把开关挪到别处，
-            // 也不会有发布包里冒出调试浮层这种事。
+            // ---- 全局调试浮层（debug 构建的 UI 调试页里打开）
             if (com.zhizhu.zhicode.compose.BuildConfig.DEBUG && state.debugOverlayEnabled) {
                 ZhiDebugHud(
                     state = state,
@@ -514,15 +417,6 @@ internal fun WorkspacePage(
         }
     }
 
-    // ---- 悬浮底栏槽位（窄屏；独立于 Scaffold，避免产生全宽黑色占位层）----
-    //
-    // 这个槽位里可能出现**两块**东西：悬浮导航胶囊，和文件选择工具栏。
-    // 它们不能同时出现 —— 两者的宽度、位置、圆角语言都一样，叠在一起就是一团。
-    // 所以按"选择模式"切换，并让它们走同一组形变过渡：
-    // 底栏淡出下沉、工具栏淡入落定，看起来像是同一块东西换了个内容。
-    //
-    // ⚠️ `fileSelectionActive` 声明在 Scaffold **之前**：
-    // 固定底栏那份形变在 `bottomBar` 槽位里也要读它。
     val floatingNavSlotAvailable = !wide &&
         themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM &&
         themeSettings.tabBarFloating
@@ -624,8 +518,6 @@ internal fun WorkspacePage(
             open = state.sidebarOpen,
             onClose = viewModel::closeSidebar,
             // 宽度上限 300dp：抽屉是"导航"，不是工作区 —— 铺到 320dp/82% 时
-            // 它一打开就把后面的对话流整个盖住，用户反馈「侧栏有点太宽泛了」。
-            // 比例 0.76 兜住小屏：360dp 的机器上是 274dp，不至于挤掉 24dp 图标。
             width = (configuration.screenWidthDp * 0.76f).dp.coerceAtMost(300.dp),
             overlayHost = {
                 ZhiOverlayHost(state = state, viewModel = viewModel, glassMain = glassMain)
@@ -666,12 +558,6 @@ internal fun Modifier.navBarHideOnVerticalDrag(
                     startProgress = progress.floatValue
                     tickAtPress = scrollTick[0]
                 } else {
-                    // ⚠️ **列表优先**：本轮按住期间列表已经滚过了，就完全不碰进度。
-                    // 否则同一段手指位移会被列表和手势各加一次，
-                    // 胶囊走两倍距离 —— 用户看到的就是"抬起再滑会弹一下"。
-                    //
-                    // 让路时仍要更新锚点：等列表停下来，手势从那一刻的位置继续，
-                    // 不会把让路期间攒下的位移一次性补上。
                     val listMoved = scrollTick[0] != tickAtPress
                     if (listMoved) {
                         anchorY = y

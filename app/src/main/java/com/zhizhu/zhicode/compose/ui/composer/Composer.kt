@@ -199,8 +199,6 @@ fun Composer(
         modifier = modifier
             .fillMaxWidth()
             // 横向内缩**不在这里**做：交给 FloatingBottomShell（Common.kt）统一处理。
-            // 输入器、任务卡、反馈条是同一列，三块的横向内缩、圆角、阴影必须同源，
-            // 否则阴影档位不同会让"可见边缘"差出几 dp，看上去就是"不是同宽的"。
             .padding(top = 4.dp, bottom = 10.dp),
     ) {
 
@@ -217,20 +215,6 @@ fun Composer(
             )
         }
 
-        // 斜杠面板展开/收起走动画。
-        //
-        // ⚠️ 用**官方裸默认**（`fadeIn() + expandVertically()`），不传 animationSpec。
-        // 出处：Miuix example 的 `AppContent.kt:529` 与 `component/SwitchSection.kt:80`
-        // —— 官方所有"整块展开/收起"都是这一行，一个字都不多。
-        //
-        // 这里原先传的是 `ZhiMotion.sizeSpec`（`tween(200, DecelerateEasing(1.5))`）。
-        // 那套数字本身抄自 Miuix，但它抄的是**弹窗位移退出**那条曲线，而"展开"在
-        // Miuix 里走的是 spring —— 拿退出曲线做展开，就是用户在"很多地方该有动画的
-        // 没有/很割裂"里感受到的那种不一致。展开/收起这一类比"时长精确相等"更重要的是
-        // **与官方同一族曲线**，所以这里整体交还给官方默认。
-        //
-        // `expandFrom` 也一并去掉：`Alignment.Bottom` 正是 `expandVertically()` 的默认值，
-        // 写出来是重复。（面板位于输入框上方，从底边长出来是它该有的方向。）
         AnimatedVisibility(
             visible = state.slashQuery != null && state.slashMatches.isNotEmpty(),
             enter = fadeIn() + expandVertically(),
@@ -264,8 +248,6 @@ fun Composer(
                     .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 6.dp),
             ) {
             // 附件条随附件增减平滑展开/收起。
-            // 同样交还给官方裸默认（出处见上面斜杠面板那一处的说明）：附件条和斜杠面板
-            // 是上下相邻的两块，曲线不一致的话，先展开的那块和后展开的那块会各走各的节奏。
             AnimatedVisibility(
                 visible = state.attachments.isNotEmpty(),
                 enter = fadeIn() + expandVertically(),
@@ -282,14 +264,6 @@ fun Composer(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     // ── 文件：**横向**滚动，每个是固定宽的窄卡片 ──────────────
-                    //
-                    // 改回横向（用户要求）。中间那版是"每个占满一行、纵向堆叠"：
-                    // 选中三四个文件之后，输入器上方会被撑掉大半屏 ——
-                    // 而这里要表达的只是"我选了这几个"，不是让人逐个细读。
-                    //
-                    // 横向 + 定宽（[AttachmentChipWidth]）之后：
-                    //  · 一行放得下 2~3 个，超过就横滑，**高度恒定**；
-                    //  · 文件名在卡片内省略，体积仍显示在第二行 —— 认得出就够了。
                     if (pendingFiles.isNotEmpty()) {
                         Row(
                             modifier = Modifier
@@ -409,9 +383,7 @@ fun Composer(
             // ---- 主体调试模式：输入行下方的 Markdown 实时预览 ----
             // 用生产渲染器 ZhiMarkdown，所以这里看到的排版就是消息里会有的排版。
             if (debugMode) {
-                // 调试面板会读文字长度与内容 —— 这里**可以**在组合期读 textState，
-                // 因为它只在调试模式下渲染，而调试模式本来就是"看真实排版"的用途，
-                // 不在乎那点重组开销。生产路径上不会有这个读取。
+                // 调试面板会读文字长度与内容 —— 这里**可以**在组合期读 textState
                 val debugText = textState.text()
                 ZhiHorizontalDivider(
                     modifier = Modifier.fillMaxWidth(),
@@ -456,34 +428,9 @@ fun Composer(
                 modifier = Modifier.fillMaxWidth().height(40.dp).padding(top = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // `+` 不再直接弹相册：改成 Miuix 的动作菜单（OverlayIconDropdownMenu）。
-                //
-                // ⚠️ 它必须位于 Miuix `Scaffold` 内 —— Overlay 系列靠 Scaffold 提供的
-                // MiuixPopupHost 渲染弹出内容。本工程根部就是 Scaffold。
-                // ⚠️ 这里的 summary **必须短**（几个字，不要写成句子）。
-                // 弹出面板的宽度是**内容撑出来的**：Miuix 用
-                // `DropdownDefaults.MaxItemTextWidth`（实测 216dp）限行内容宽，
-                // 再加左右各 `InsideHorizontalPadding`（20dp），所以一条长文案
-                // 就能把面板撑到约 256dp —— 在这台 411dp 宽的设备上是 62%。
-                // 面板本身没有宽度参数可调（`OverlayIconDropdownMenu` 的
-                // `minWidth` 是给触发按钮的），所以**缩短文案是唯一不偏离库默认的收窄办法**。
-                // ⚠️ 三个图标必须在这里（组合上下文里）先取出来。
-                //
-                // 图标改成 `Painter` 之后，取值本身是 `@Composable` 的
-                // （`rememberVectorPainter` 要 `remember` 住结果），而下面
-                // `remember { }` 的 lambda 不是组合上下文，在里面取会直接编译不过
-                // （`@Composable invocations can only happen from the context of
-                // a @Composable function`）。取出来当 key 的一部分传进去，
-                // 图标变了才重建列表。
-                //
-                // ⚠️ `photoIcon` 用的是 `ZhiIcons.image`（照片），**不是**
-                // `ZhiIcons.floatingBall`（悬浮球）—— 那是两件事，见 ZhiIcons 里的说明。
                 val attachFileIcon = ZhiIcons.file
                 val photoIcon = ZhiIcons.image
-                // 「从系统文件管理器选」用**打开的文件夹**（`directory`）：
-                // 它是"去别处挑一份文件"，与上面那条 `file`（一个文档，指项目内的）
-                // 和 `files`（合口的文件夹，指我们自己的文件面板）都是不同的字形，
-                // 三者在同一张菜单里并排出现，必须一眼分得开。
+                // 「从系统文件管理器选」用**打开的文件夹**（`directory`）
                 val systemFileIcon = ZhiIcons.directory
                 ZhiIconDropdownMenu(
                     items = remember(
@@ -520,23 +467,6 @@ fun Composer(
                     )
                 }
 
-                // 两个下拉 chip 的**外观与旁边的模型药丸完全一致**（10sp / 28dp /
-                // 透明底 + 折叠箭头）。别换成 Miuix 的 OverlayDropdownPreference：
-                // 那是 16sp / 40dp 的"设置行"，放进这条 34dp 的页脚会撑高整行、
-                // 把标签挤到折行（实测过一次）。
-                //
-                // 三者共用 OverlayIconDropdownMenu：它的 content 可以是任意可组合内容，
-                // 所以 `+` 放图标、这两个放"文字 + 箭头"，弹出菜单是同一套原生样式。
-                // ⚠️ 这三个**不能**都用 `weight(1f)`（曾经就是）。
-                //
-                // 均分意味着"每个 chip 固定拿 1/3，不管它需不需要"：「每次询问」只要
-                // ~55dp，却和另外两个各占 1/3；忙时停止键再抢走 ~36dp，于是
-                // 「推理：自动」被切成人「推理: …」、模型名被切成「deepse」——
-                // 都是**词中被切**，看上去像坏了。
-                //
-                // 现在的分工：这两个标签长度固定，按**自然宽度**排（不参与分配）；
-                // 只有模型那一条吃剩余空间。它本来就是唯一可缩短的（`shorten()`），
-                // 被压缩时也会规规矩矩地打省略号，而不是把词砍一半。
                 ZhiTextDropdownChip(
                     label = state.permissionMode.label,
                     items = remember(state.permissionMode, onPermissionSelected) {

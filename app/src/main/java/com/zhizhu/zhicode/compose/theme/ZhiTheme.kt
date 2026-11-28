@@ -153,19 +153,6 @@ object ZhiColors {
     fun cardInnerSurface(): Color =
         if (isDark()) MiuixTheme.colorScheme.surfaceContainerHighest else CardInnerLight
 
-    // ------------------------------------------------------- 行首图标底色（Plate）
-    //
-    // 设置页每一行的行首是一块彩色方块（借小米「设置」的观感，见
-    // `ui/settings/SettingsIconPlate.kt`）。这六个值原来写在那**UI 文件**里，
-    // 是当时唯一一处"主题色散落在组件里"的地方 —— 按规范，字面色值只应存在于
-    // 主题层，调用方只认语义名。
-    //
-    // ⚠️ 深浅色共用一套：彩色方块在深色底上本来就是亮点，小米也这么做。
-    // ⚠️ 新增颜色必须与白色字形的对比度 ≥3:1（方块里的字形是纯白）。
-    //
-    // 它们是**常量**而不是 `@Composable` 函数（与上面的层级色不同）：plate 色不随
-    // 深浅变化，所以不需要读 CompositionLocal；写成常量才能在非组合上下文
-    // （数据类默认值、预览）里直接用。
     val plateBlue = Color(0xFF3182FF)
     val plateGreen = Color(0xFF1B9C48)
     val plateOrange = Color(0xFFD97500)

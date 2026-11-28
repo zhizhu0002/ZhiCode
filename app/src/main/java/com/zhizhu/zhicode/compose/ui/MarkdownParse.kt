@@ -240,12 +240,7 @@ internal fun parseMarkdown(source: String, depth: Int = 0): List<MdBlock> {
                 i++
             }
 
-            // ---- Setext 标题必须在 isRule 之前判断 ----
-            //
-            // `段落\n-----` 在 CommonMark 里是 2 级标题，而不是"段落 + 分隔线"。
-            // 这两条规则用的是同一批字符（整行 `-` 或 `=`），所以顺序错了就会
-            // 把标题解析成分隔线 —— 已由 kotlinc 测试用例「Setext」抓到。
-            // 只有"上面确实攒了一个段落"时才算 Setext，否则 `---` 仍是分隔线。
+            // ---- Setext 标题必须在 isRule 之前判断 
             paragraph.isNotEmpty() && setextLevel(trimmed) != null -> {
                 blocks += MdBlock.Heading(setextLevel(trimmed)!!, paragraph.toString().trim())
                 paragraph.clear()
@@ -331,12 +326,6 @@ internal fun parseMarkdown(source: String, depth: Int = 0): List<MdBlock> {
             // ---- 普通段落 ----
             else -> {
                 // 续行**保留换行**，而不是按 CommonMark 合并成一个空格。
-                //
-                // 这是个有意的偏离，理由是内容来源：
-                //  · `appendInfo` 生成的提示卡（如「会话状态」）用 `\n` 表达"一行一项"，
-                //    合并成空格会让整块糊成一段 —— 这是实测发现的回归。
-                //  · 模型的回复也大量用单换行分行（步骤、并列说明），保留更贴近它的本意。
-                // 段落内部的换行由 Text 直接渲染成换行，列表/标题等块级语法不受影响。
                 if (paragraph.isNotEmpty()) paragraph.append('\n')
                 paragraph.append(trimmed)
                 i++
@@ -356,11 +345,6 @@ internal fun settledPrefixLength(source: String): Int {
     if (n == 0) return 0
 
     // 最后一个**非空白**字符的位置。
-    //
-    // 切点的判据是「它后面还有真正要渲染的内容」。只看「后面还有字符」是不够的：
-    // 流式输出里 `"a\n\n   "`（空行之后跟了几个刚敲下的空格）会被当成可切，
-    // 而尾部渲染出来是一个空 Text —— 白切一次，还会让 `remember(settled)` 在
-    // 这几帧里提前换 key。所以先求出内容边界，切点不得超过它。
     var lastNonWs = -1
     var j = n - 1
     while (j >= 0) {

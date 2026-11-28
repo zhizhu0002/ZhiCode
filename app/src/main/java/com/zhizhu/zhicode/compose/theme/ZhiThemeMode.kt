@@ -55,8 +55,6 @@ object ZhiThemeMode {
         activity.window.statusBarColor = Color.TRANSPARENT
         activity.window.navigationBarColor = Color.TRANSPARENT
         // Android 10+ otherwise inserts an opaque contrast scrim behind the gesture area.
-        // That scrim is especially visible below the floating glass bar and looks like a
-        // second, black NavigationBar. The app already supplies its own themed surface.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             activity.window.isNavigationBarContrastEnforced = false
         }

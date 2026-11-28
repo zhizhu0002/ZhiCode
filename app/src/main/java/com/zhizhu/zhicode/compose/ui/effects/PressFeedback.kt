@@ -36,9 +36,7 @@ fun Modifier.pressHighlight(
 
     return this.then(
         Modifier.drawWithContent {
-            // 径向高光：中心点在控件中心（手指位置要额外一整套 pointerInput，
-            // 而这里的目标是"按下有反馈"，不是复刻 example 的跟手效果 ——
-            // 跟手在按钮这么小的面上肉眼也分辨不出来）。
+            // 径向高光：中心点在控件中心（手指位置要额外一整套 pointerInput
             val center = Offset(size.width / 2f, size.height / 2f)
             val radius = size.minDimension * radiusFactor
             val brush = Brush.radialGradient(
@@ -53,10 +51,6 @@ fun Modifier.pressHighlight(
                 drawRect(brush = brush, blendMode = BlendMode.Plus)
             }
             if (shape != null) {
-                // ⚠️ 必须 `addOutline` 把 Outline **灌进** Path。
-                // 原先这里写的是 `Path().also { outline }` —— 那是空操作，
-                // path 永远是空 Path，`clipPath(空)` 会把整个内容裁掉
-                // （高光不显示、按钮内容也跟着消失）。
                 val path = androidx.compose.ui.graphics.Path().apply {
                     addOutline(shape.createOutline(size, layoutDirection, this@drawWithContent))
                 }
@@ -95,10 +89,7 @@ fun Modifier.selfPressSink(pressedScale: Float = 0.97f): Modifier {
             scaleY = scale
         }
         .pointerInput(Unit) {
-            // 不用 `detectTapGestures`：它会把**整个点击**接管过去，
-            // 与组件内部自己的 onClick 打架（表现为点击不响应或响应两次）。
-            // 这里只在 Initial pass 观察按下/抬起，从不消费事件，
-            // 所以组件自己的点击逻辑照常工作。
+            // 不用 `detectTapGestures`：它会把**整个点击**接管过去
             awaitPointerEventScope {
                 while (true) {
                     val down = awaitPointerEvent(PointerEventPass.Initial)

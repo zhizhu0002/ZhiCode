@@ -181,9 +181,7 @@ fun rawOf(name: String): Triple<List<String>, String, String>? {
 
 private fun parse(text: String): JSONObject {
     val trimmed = text.trim()
-    // 空文本表示"不设置"。这里必须显式返回空对象，而不是 null：
-    // 引擎的 toJson 会在 env 为 null 时兜底，但 find/load 回来仍然会变成空对象，
-    // 索性在写入端就统一成空对象，省得两种空值形态到处传播。
+    // 空文本表示"不设置"。
     if (trimmed.isEmpty()) return JSONObject()
     return JSONObject(trimmed)
 }

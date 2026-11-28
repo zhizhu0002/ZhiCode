@@ -176,13 +176,6 @@ internal object ZhiFrameTrace {
     /** 每帧回调（由 [ZhiFrameTraceHost] 驱动）。 */
     fun onFrame(frameNs: Long) {
         val current = label ?: run {
-            // 空闲探针：**没有测量时**应用还在不在持续出帧？
-            //
-            // 这一项用来回答"为什么点什么都慢"：如果用户什么都没碰、界面完全静止，
-            // 应用却仍在以满帧渲染，说明有东西在**永久申请帧**（无限动画、
-            // `while(true) withFrameNanos` 这类泵）。那种情况下主线程永远被占着，
-            // 每一次触摸都要排队等当前帧画完 —— 表现就是"点什么都滞后"，
-            // 而且和点的是哪一页无关。
             if (idleLastNs != 0L) {
                 idleSumNs += (frameNs - idleLastNs).coerceAtLeast(0L)
                 idleFrames++
@@ -225,10 +218,7 @@ internal object ZhiFrameTrace {
 
         if (frameCount >= TRACE_FRAMES) {
             val avgMs = sumNs / frameCount.toDouble() / 1_000_000.0
-            // 三个数分开报，因为它们的病根完全不同：
-            //  · fromTouch：手指落下 → 第一帧。**这段时间大 = 触摸在排队**（主线程忙）。
-            //  · fromClick：onClick → 第一帧。大 = 状态翻转后的首次组合太重。
-            //  · span/avg/max/janks：转场本身的帧质量。max 大 = 单帧尖峰（重建/重活）。
+            // 三个数分开报，因为它们的病根完全不同
             val fromClickMs = (firstFrameNs - clickNs).coerceAtLeast(0L) / 1_000_000.0
             val fromTouchMs = if (touchDownNs > 0) {
                 (firstFrameNs - touchDownNs).coerceAtLeast(0L) / 1_000_000.0

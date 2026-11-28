@@ -34,8 +34,6 @@ class EditorActivity : ComponentActivity() {
         applyStatusBarAppearance()
 
         // 这一屏的窗口策略来自清单：adjustResize，且**不带** stateAlwaysHidden。
-        // 这里不再做任何运行时切换 —— 之前那套"进编辑页就改窗口 softInputMode"的补丁
-        // 之所以必要，正是因为编辑器和对话输入器挤在同一个窗口里。
 
         viewModel.load(intent.getStringExtra(EXTRA_PATH).orEmpty())
 

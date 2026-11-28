@@ -97,14 +97,6 @@ internal fun DialogShell(
         }
 
         // The OverlayDialog window uses Miuix `background` as its sheet/dialog
-        // backplate. Keep this shell transparent: a black Surface here would replace
-        // the dialog's themed window and make every dialog look like a black slab.
-        // 中间区域吃掉"剩余高度"（weight(fill = false)），并内部滚动。
-        //
-        // 这里**不能**写死 `heightIn(max = ...)`：弹窗总高还要加上标题、
-        // 说明、底部输入框和按钮，固定值一叠加就会超出屏幕，把按钮挤出可视区。
-        // weight 让滚动区自动收缩到真正剩下的空间，所以无论哪一层多高，
-        // 按钮区始终留在屏幕内。
         val middleModifier = Modifier.fillMaxWidth().weight(1f, fill = fillBody)
 
         val scrollableBody: @Composable () -> Unit = {
@@ -121,8 +113,6 @@ internal fun DialogShell(
             Column(modifier = middleModifier.padding(top = 8.dp)) { scrollableBody() }
         } else {
             // 显式给一层比弹窗底更明显的容器色：Miuix 的浅色方案里
-            // `background` 与 `surfaceContainer` **都是 #FFFFFF**，
-            // 用默认卡片色会与弹窗底完全同色、分组看不出来。
             Card(
                 modifier = middleModifier.padding(top = 10.dp),
                 cornerRadius = ZhiRadius.card,

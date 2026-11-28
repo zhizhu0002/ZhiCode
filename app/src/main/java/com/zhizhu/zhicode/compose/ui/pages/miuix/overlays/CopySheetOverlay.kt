@@ -55,9 +55,7 @@ fun CopySheetOverlay(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                 colors = ZhiSheetCardColors(),
             ) {
-                // 高度上限：长回复可以几千字，不设上限会把抽屉撑到顶住状态栏，
-                // 而且滚动手势要穿过整块内容才生效。留出屏幕的约六成，
-                // 超出部分在抽屉内部滚动（`enableNestedScroll` 默认为 true）。
+                // 高度上限：长回复可以几千字，不设上限会把抽屉撑到顶住状态栏
                 SelectionContainer(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -65,9 +63,7 @@ fun CopySheetOverlay(
                         .verticalScroll(rememberScrollState())
                         .padding(14.dp),
                 ) {
-                    // 原文照抄，不做 Markdown 渲染：这里的目的是**取字**，
-                    // 渲染成标题/列表反而会把 `#`、`-` 这类标记吃掉，
-                    // 用户划走的就不再是原来那份文本了。
+                    // 原文照抄，不做 Markdown 渲染：这里的目的是**取字**
                     Text(
                         text = shown.text,
                         style = MiuixTheme.textStyles.body1,

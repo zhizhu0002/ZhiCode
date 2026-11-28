@@ -93,12 +93,6 @@ fun TaskListOverlay(
         title = "任务清单",
         // 其余参数一律用 Miuix 默认值（同 ModelPickerOverlay：backgroundColor 别动）。
     ) {
-        // 「最后一位客人」常驻：`open` 翻成 false 时内容不能空掉，否则退场先缩成空壳。
-        // `tasks` 是非空列表，关面板时 ViewModel 不清它，直接去掉原来那句早退即可。
-        // 定高：任务从 1 条涨到 10 条时面板高度不跳；高度算的是**内容区**，
-        // sheet 的标题行与内边距由组件自己叠加（ModelPickerBody 同款写法）。
-        // ⚠️ 窗口高度取 LocalWindowInfo，不能取 BoxWithConstraints 的 maxHeight
-        // （sheet 量内容时给的约束不是屏幕高度，见 ModelPickerBody 的实测注释）。
         val windowHeight = LocalWindowInfo.current.containerDpSize.height
         /* 为悬浮导航胶囊让位。 */
         val navInset = floatingNavSheetInset()

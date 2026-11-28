@@ -57,12 +57,6 @@ internal object ModelCatalogStore {
         // （compose 层看不到它，也不该看到），而线上名本来就是公开契约。
         if (config.protocol == ZcodeWire.WIRE_NAME) {
             // 模型列表**先摆好**，再单独去读额度。
-            //
-            // 这两件事是分开的，理由不是"顺手"：内置模型表是**本地**的（11 项固定），
-            // 额度是一次**网络**请求。把它们绑在同一个结果上，额度一失败整张列表就没了 ——
-            // 真机上就是这样：额度接口回 400，面板里一个模型都选不到，而其实模型名
-            // 我们本来就写着。参考实现也是分开的（列表来自内置表，额度另有卡片、
-            // 失败只改那一行字）。
             val all = ZcodeWire.MODEL_NAMES.map { (id, display) ->
                 ModelOption(id = id, displayName = display)
             }

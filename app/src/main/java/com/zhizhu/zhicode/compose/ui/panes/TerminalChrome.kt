@@ -215,12 +215,6 @@ internal fun TerminalExtraKeys(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            // ⚠️ 上游 Termux 的扩展键是**方角、无间隙**的整块按键。
-                            //
-                            // 这里原本给每个键加了 `RoundedCornerShape` + `padding(horizontal = 1.dp)`，
-                            // 于是看起来像一排 Miuix 的圆角卡片按钮 —— 那是设置页的语言，
-                            // 不是终端的语言。终端是"一块键盘"，键与键之间只靠分隔线区分，
-                            // 圆角和间隙会让连续按方向键时手指落点变得不确定。
                             .background(palette.keyBg)
                             .clickable { onAction(key.action) },
                         contentAlignment = Alignment.Center,
@@ -390,10 +384,6 @@ private fun DrawerAction(label: String, palette: Chrome, onClick: () -> Unit) {
 internal fun TerminalRuntimeNotice(text: String) {
     val palette = chrome()
     Box(
-        // ⚠️ 不能写死 Color.Black：浅色模式下终端正文是浅底（见 TermuxTerminalPane
-        // 的浅色档 ANSI 表），占位却铺一块纯黑 —— 切进终端那一下会"闪一块黑"，
-        // 也就是用户报的「终端对深浅色不适配」。
-        // 用面板底色同一个令牌，它既跟随主题、又保证与终端正文底色一致。
         modifier = Modifier.fillMaxSize().background(ZhiColors.panelSurface()),
         contentAlignment = Alignment.Center,
     ) {

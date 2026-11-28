@@ -95,13 +95,9 @@ private fun decode(base64: String, reqWidth: Int, reqHeight: Int): Decoded {
 
 private val imageCache = object : LruCache<String, Decoded>(imageCacheBudgetBytes()) {
     override fun sizeOf(key: String, value: Decoded): Int {
-        // 没有位图的条目（解码失败 / 只量到尺寸）没有真实内存占用，
-        // 但不能记 0：LruCache 靠 size 决定淘汰，全 0 就永远不淘汰，
-        // 这种条目会无限积累。给一个名义值让它仍然能被挤出去。
+        // 没有位图的条目（解码失败 / 只量到尺寸）没有真实内存占用
         val bitmap = value.bitmap ?: return 1024
         // 记账用 RGB_565 的**真实**占用（2 字节/像素，见 [decode] 里的 inPreferredConfig）。
-        // 原先记 4 字节/像素是保守的（更早淘汰、更省内存），但同时让缓存能装的张数
-        // 比实际能装的一半还少 —— 那正是"滚回去就重新解码"的来源。
         return bitmap.height * bitmap.width * 2
     }
 }
@@ -194,14 +190,10 @@ internal fun ZhiImageThumb(
     modifier: Modifier = Modifier,
 ) {
     val scheme = MiuixTheme.colorScheme
-    // 传 dp 而不是 px：解码器要的是像素，但这里拿不到 density 以外的信息，
-    // 而多留一倍余量（×2）比引入 LocalDensity 更简单也更保守 —— 高密度屏上
-    // 少降一档，图更清楚，内存仍在有界范围内。
+    // 传 dp 而不是 px：解码器要的是像素，但这里拿不到 density 以外的信息
     val state = rememberDecodeState(image, (maxWidth.value * 2).toInt(), (height.value * 2).toInt())
 
     // 宽度按原图长宽比算；尺寸还没量到时先占一个方框。
-    // 占位宽度必须**稳定**：先方框、量到比例后再变宽，会让整行在两三帧内抖一下，
-    // 所以只在拿到比例时才改宽度，且在下一帧就定下来。
     val width = thumbWidthFor(height.value, state.aspect, minWidth.value, maxWidth.value).dp
 
     Box(
@@ -275,8 +267,6 @@ internal fun ZhiPendingImageChip(
             onClick = onClick,
         )
         // 删除键：走工程统一的 ZhiFilledIconButton（square = false 时 Miuix 用
-        // size/2 作圆角，就是正圆），而不是自己拼 Surface + CircleShape ——
-        // 自己拼的那个没有 Miuix 的按压反馈，点起来像没反应。
         ZhiFilledIconButton(
             icon = ZhiIcons.close,
             description = "移除图片",
@@ -304,8 +294,6 @@ internal fun ZhiImageViewer(image: ChatImage?, onDismiss: () -> Unit) {
         show = image != null,
         onDismissRequest = onDismiss,
         // 全屏：外边距 / 内边距 / 圆角全清零，背景纯黑。
-        // maxWidth 也要放开 —— 手机上虽然用不到（宽度本来就被屏幕夹住），
-        // 平板/分屏下不放开的话还是一张 560dp 的小卡。
         maxWidth = ViewerMaxDimension,
         outsideMargin = ViewerZeroInsets,
         insideMargin = ViewerZeroInsets,
@@ -452,9 +440,6 @@ internal fun ZhiAttachmentRow(
     if (attachments.isEmpty() && images.isEmpty()) return
     Column(modifier = modifier.fillMaxWidth()) {
         if (attachments.isNotEmpty()) {
-            // 横向不可滚动：文件数量通常一两个，靠换行收进气泡即可。
-            // ⚠️ 用 Column 逐条排而不是 Row：条数一多 Row 一定会溢出，
-            // 而溢出在这张卡里表现为"右边被切掉"，正是要修的那个观感。
             Column(
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),

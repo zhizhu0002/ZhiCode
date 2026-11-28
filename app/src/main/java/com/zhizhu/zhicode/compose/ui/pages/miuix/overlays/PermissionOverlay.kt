@@ -88,8 +88,6 @@ fun PermissionOverlay(
         show = request != null,
         onDismissRequest = { request?.let { onDecision(it.id, false, false) } },
         // 居中形态（`largeScreen = true` 是**居中**开关，不是「大屏专用」）。
-        // 不传的话 Miuix 按窗口尺寸自动判：手机竖屏被判成「非大屏」，
-        // 走「底部贴边 + 从下滑入」那一档 —— 而这是一个确认框，语义上就该居中。
         largeScreen = true,
         maxWidth = ZhiDialogWidth.Compact,
         outsideMargin = DialogWideOutsideMargin,
@@ -127,8 +125,6 @@ fun PermissionOverlay(
                 endActions = {
                     if (req.riskLevel == RiskLevel.HIGH) {
                         // Miuix Badge：容器/文字色走主题，浅色模式自动变浅红底 + 暗红字。
-                        // 之前是手写 Surface + Box + Text，且用固定红叠 18% alpha，
-                        // 叠在任何底色上都会变成"另一种红"，也不随主题。
                         Badge(
                             containerColor = scheme.errorContainer,
                             contentColor = scheme.error,
