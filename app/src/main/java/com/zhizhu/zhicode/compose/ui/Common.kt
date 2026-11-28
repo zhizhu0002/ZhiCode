@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.MaterialTheme
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
@@ -107,13 +108,13 @@ internal fun FloatingBottomShell(
     verticalPadding: Dp = 0.dp,
     content: @Composable () -> Unit,
 ) {
-    val scheme = MiuixTheme.colorScheme
+    val scheme = MaterialTheme.colorScheme
     // 「悬浮底栏」开关：关闭时贴满宽度、去圆角与阴影 —— 回到传统底部栏的观感。
     val floating = LocalThemeSettings.current.floatingBar
-    // iOS 风格：悬浮时把圆角拉到全圆（胶囊），而不是 Miuix 的中等圆角。
+    // iOS 风格：悬浮时把圆角拉到全圆（胶囊）。
     val iosStyle = floating &&
         LocalThemeSettings.current.bottomBarStyleValue == BottomBarStyle.IOS
-    // 圆角走 squircle（连续曲率），与 Miuix 自带的卡片、以及这里的三块悬浮层
+    // 圆角走 squircle（连续曲率），与其余悬浮层保持一致。
     val shape = ZhiSquircle(
         when {
             iosStyle -> 28.dp
@@ -122,7 +123,7 @@ internal fun FloatingBottomShell(
         },
     )
     val inset = if (floating) floatingHorizontalInset(wide) else 0.dp
-    FloatingToolbar(
+    androidx.compose.material3.Surface(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = verticalPadding)
@@ -138,13 +139,17 @@ internal fun FloatingBottomShell(
                     Modifier
                 },
             ),
+        shape = shape,
         color = glass.surfaceColor(if (ZhiColors.isDark()) scheme.surfaceContainer else ZhiColors.panelSurface()),
-        cornerRadius = if (floating) ZhiRadius.floating else 0.dp,
-        outSidePadding = PaddingValues(0.dp),
         shadowElevation = if (floating) 12.dp else 0.dp,
-        showDivider = !floating,
-        content = content,
-    )
+    ) {
+        Column {
+            if (!floating) {
+                androidx.compose.material3.HorizontalDivider(color = scheme.outlineVariant)
+            }
+            content()
+        }
+    }
 }
 
 /** 顶栏/侧栏/工具行使用的图标按钮。 */
