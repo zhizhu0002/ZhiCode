@@ -40,7 +40,7 @@ Releases 版通道 [GitHub Releases][releases]
 
 CI 构建通道 [GitHub Actions][build]
 
-以下步骤适用于最新 CI 构建。Releases 暂时未跟进 Ubuntu ( Releases 1.0 支持 Termux ) [1.1.0 发行说明](docs/release-notes-1.1.0.md)
+以下步骤适用于最新 CI 构建。Releases 暂时未跟进 Ubuntu ( Releases 1.0 支持 Termux )
 
 1. **初始化运行环境。** 安装并打开 APK，按首次启动引导选择镜像源，下载并安装 Ubuntu 24.04。此步骤需要网络和足够的解压空间。
 2. **配置模型。** 在引导页点「前往 API 配置」，选择供应商，填写对应的凭据和模型。选择协议、填写 Base URL 与模型 ID。
@@ -58,8 +58,6 @@ cd ZhiCode
 
 JVM 测试： `./gradlew :app:testDebugUnitTest`
 
-Termux 构建、Release 签名、R8 和 CI 的细节见[构建与发布文档](docs/build-and-release.md)。
-
 ## 项目结构
 
 | 路径 | 职责 |
@@ -67,10 +65,6 @@ Termux 构建、Release 签名、R8 和 CI 的细节见[构建与发布文档](d
 | [`app/`](app) | Kotlin / Jetpack Compose 界面、Java Agent 引擎、Pi 接入、模型协议、终端与沙箱宿主 |
 | [`Bcore/`](Bcore) | 基于 BlackBox 的 Android 虚拟化运行时 |
 | [`black-reflection/`](black-reflection) 与 [`compiler/`](compiler) | Bcore 的反射库和编译期注解处理器 |
-
-- [架构与代码结构](docs/architecture.md) · [Bcore 补丁与沙箱约定](docs/provenance.md)
-- [Miuix 界面开发](docs/ui-miuix.md) · [性能约定](docs/performance.md)
-- [构建与发布](docs/build-and-release.md) · [许可与来源](docs/licensing.md)
 
 ## 贡献
 
@@ -82,7 +76,7 @@ Agent 可以执行命令并修改工作区文件，请在批准前检查操作�
 
 ## 许可
 
-ZhiCode 自有代码采用 [MIT 许可](LICENSE)。APK 还包含各自授权的第三方组件。分发时请随附 [LICENSE](LICENSE)、[NOTICE](NOTICE) 和 [第三方许可文本](THIRD-PARTY-LICENSES)，并按[许可与来源](docs/licensing.md)核对组件的署名和源码提供要求。
+ZhiCode 自有代码采用 [MIT 许可](LICENSE)。APK 还包含各自授权的第三方组件。分发时请随附 [LICENSE](LICENSE)、[NOTICE](NOTICE) 和 [第三方许可文本](THIRD-PARTY-LICENSES)，并按 NOTICE 核对组件的署名和源码提供要求。
 
 ## 第三方开源项目
 
