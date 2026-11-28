@@ -20,7 +20,7 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.platform.LocalView
-import top.yukonga.miuix.kmp.material.isRuntimeShaderSupported
+import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 
 @Composable
 fun Modifier.pressHighlight(

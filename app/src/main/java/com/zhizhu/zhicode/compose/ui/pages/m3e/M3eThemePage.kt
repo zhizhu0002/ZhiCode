@@ -63,7 +63,7 @@ import com.zhizhu.zhicode.compose.theme.formatUiScale
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.pages.ZhiPageSets
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ThemePreviewPhone
-import top.yukonga.miuix.kmp.material.isRuntimeShaderSupported
+import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.ThemeColorSpec
 import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 import kotlin.math.roundToInt

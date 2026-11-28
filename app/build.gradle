@@ -267,18 +267,18 @@ dependencies {
     implementation 'androidx.activity:activity-compose:1.12.0'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4'
     implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.9.4'
-    implementation 'top.yukonga.miuix.kmp:miuix-ui:0.9.5-rc02'
-    implementation 'top.yukonga.miuix.kmp:miuix-core:0.9.5-rc02'
-    implementation 'top.yukonga.miuix.kmp:miuix-icons:0.9.5-rc02'
-    implementation 'top.yukonga.miuix.kmp:miuix-preference:0.9.5-rc02'
-    implementation 'top.yukonga.miuix.kmp:miuix-material:0.9.5-rc02'
-    implementation 'top.yukonga.miuix.kmp:miuix-squircle:0.9.5-rc02'
+    implementation 'top.yukonga.miuix.kmp:miuix-ui:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-core:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-icons:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-preference:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-shader:0.9.4'
+    implementation 'top.yukonga.miuix.kmp:miuix-squircle:0.9.4'
     // 官方导航容器：整页之间的推入/弹出动效走它的 NavTransitions.MiuixDefault 预设
     // （新页全宽从右缘滑入 + 被覆盖页 1/4 视差与亮度衰减），返回方向自动反向。
     // 之前这些整页是各自 AnimatedVisibility 硬切，层级与动效都得手工维护。
-    implementation 'top.yukonga.miuix.kmp:miuix-nav:0.9.5-rc02'
+    implementation 'top.yukonga.miuix.kmp:miuix-nav:0.9.4'
     // 模糊效果：独立 artifact，Android 需 API 33+（RuntimeShader），用 isRuntimeShaderSupported() 门控
-    implementation 'top.yukonga.miuix.kmp:miuix-blur-android:0.9.5-rc02'
+    implementation 'top.yukonga.miuix.kmp:miuix-blur-android:0.9.4'
 
     /*
      * Mochi（麻薯）—— https://github.com/feice11/mochi-compose
@@ -301,35 +301,6 @@ dependencies {
      * 是各自独立的 artifact，用到再加，别一次不全带进来。
      */
     implementation 'io.github.feice11:mochi-compose:0.3.0'
-
-    /*
-     * material-color-utilities：Mochi 的**运行期必需**依赖，而且**版本必须锁 4.1.1**。
-     *
-     * 症状一（CI 红）：`:app:minifyReleaseWithR8` 直接失败 ——
-     *
-     *   Missing class com.materialkolor.scheme.DynamicScheme$Platform
-     *     (referenced from: com.materialkolor.scheme.DynamicScheme
-     *      ui.feice.mochi.theme.MochiColorSchemeKt.buildScheme(SchemeKey))
-     *
-     * 根因不是「类缺失」，而是**包名换过**：
-     *
-     *   4.1.1 → com.materialkolor.scheme.DynamicScheme
-     *   6.0.0 → com.materialkolor.dynamiccolor.DynamicScheme
-     *
-     * Mochi 0.3.0 是按 4.1.1 编译的（POM 里也写 4.1.1），但 `scheme.*` 原本是
-     * `runtime` 作用域，进不了 compile classpath，Gradle 就按别处的传递依赖
-     * 把它提升到了 6.0.0 —— 于是 Mochi 引用的 `scheme` 包在新版里根本不存在。
-     *
-     * 为什么不能只加 `-dontwarn`：`MochiColorSchemeKt` 对 `com.materialkolor.*`
-     * 有 **72 处**实际调用（`Hct` / `TonalPalette` / `SchemeContent` /
-     * `SchemeVibrant` 等 12 个类），`lightColorScheme()` / `darkColorScheme()`
-     * 内部都走 `buildScheme()`。`-dontwarn` 只让 R8 闭嘴，类仍不进 APK，
-     * 运行到取色时就是 `NoClassDefFoundError`。
-     *
-     * 所以两件事一起做：显式提为 compile 依赖 **并锁死 4.1.1**。
-     * 升级 Mochi 时如果它的 POM 跟着换版本，这里一起改。
-     */
-    implementation 'com.materialkolor:material-color-utilities:4.1.1'
 
     /*
      * 图标：Mochi 的强制接入要求。
