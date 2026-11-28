@@ -7,11 +7,7 @@ import com.zhizhu.zhicode.pi.sanitizePiProviderKey
 
 import com.termux.app.zhicode.storage.ApiSettingsStore
 
-/**
- * 设置页的 6 个分类，对齐原版 `MainActivity.showSettings()` 的分类 Tab。
- *
- * 顺序即 Tab 顺序，`entries` 直接拿来渲染，不要在 UI 里另写一份列表。
- */
+/** 设置页的 6 个分类，对齐原版 `MainActivity.showSettings()` 的分类 Tab。 */
 enum class SettingsCategory(val label: String, val tabLabel: String) {
     APPEARANCE("外观", "外观"),
     MODEL_PERMISSION("模型与权限", "模型"),
@@ -21,21 +17,8 @@ enum class SettingsCategory(val label: String, val tabLabel: String) {
     EXTENSIONS("扩展功能", "扩展"),
 }
 
-/**
- * 搜索服务（形态参考 RikkaHub 的「搜索服务」页：免费后端与密钥制后端并列，
- * 选中哪个哪个生效；密钥按服务各存一份，切换服务不丢）。
- *
- * [needsKey]/[needsBaseUrl] 决定设置页在选中该项时追加哪些输入框：
- * 密钥制服务缺 Key 时搜索会明确报错（提示去哪里配），而不是静默回落免费后端 ——
- * 用户配了 Tavily 却拿到 DuckDuckGo 的结果才是真正的坑。
- */
-/**
- * 搜索服务配置里的字段名（**持久化契约**：改一个名字等于丢掉用户已填的配置）。
- *
- * <p>刻意放在**顶层**而不是 [SearchServiceType] 的 companion 里：枚举项的构造参数
- * 在 companion 初始化**之前**求值，`SearchFieldName.API_KEY` 在那个位置会编译失败
- * （"Companion object ... is uninitialized here"）。这不是风格问题，是语言规则。
- */
+/** 搜索服务（形态参考 RikkaHub 的「搜索服务」页：免费后端与密钥制后端并列 */
+/** 搜索服务配置里的字段名（**持久化契约**：改一个名字等于丢掉用户已填的配置）。 */
 object SearchFieldName {
     const val API_KEY = "apiKey"
     const val BASE_URL = "baseUrl"
@@ -52,25 +35,6 @@ object SearchFieldName {
     const val JSON_TEXT_PATH = "textPath"
 }
 
-/**
- * 搜索服务**类型**目录（形态参考 RikkaHub 的「搜索服务」页）。
- *
- * ## 为什么从「一个枚举」改成「类型 + 多实例」
- *
- * 上一版是一个 `enum WebSearchProvider` 下拉：只能配一个、只有 Key 与实例地址两种
- * 字段。RikkaHub 的形态是**列表**：可以同时配多个服务、每个服务有自己的 Key 与
- * 专属选项（depth / topic / 语言 / 安全搜索 / 结果数），点其中一个设为当前使用。
- * 这一版对齐它。
- *
- * ## 字段声明放在枚举里，而不是散在 UI 里
- *
- * [fields] 描述「这个类型需要哪些输入框」。设置页照着它渲染，新增一个服务类型
- * 只需要在这里加一项 + 在 [WebSearchJson]/`WebSearchTool` 加一个解析/请求分支，
- * 不用碰 UI 代码 —— 否则每加一家都要在 UI 里再写一段 if。
- *
- * [keyUrl] 是「去哪里申请 Key」。RikkaHub 每个服务都带这个指引，
- * 值得照做：没有它，用户看到一个空 Key 框只能自己去找文档。
- */
 enum class SearchServiceType(
     val label: String,
     val detail: String,
@@ -163,14 +127,7 @@ enum class SearchServiceType(
         fields = listOf(SearchField(SearchFieldName.API_KEY, "API Key", required = true, secret = true)),
     ),
 
-    /**
-     * 自定义 HTTP 检索。
-     *
-     * <p>RikkaHub 在这个位置是「Custom JS」（在沙箱里跑一段 JS）。本工程刻意**不新增
-     * 依赖**，而 Android 上没有内置 JS 引擎（{@code javax.script} 不存在，
-     * Rhino/Duktape 都是新依赖），所以换成不写代码的等价物：给一个 URL 模板
-     * （`%s` 处填查询词）+ 结果数组的 JSON 路径。覆盖绝大多数自建/内部检索 API。
-     */
+    /** 自定义 HTTP 检索。 */
     CUSTOM_HTTP(
         "自定义 HTTP",
         "自己填检索地址与结果字段名；%s 处会被替换成查询词",
@@ -202,12 +159,7 @@ data class SearchField(
     val secret: Boolean = false,
 )
 
-/**
- * 一条搜索服务配置（RikkaHub 的「已添加的服务」一条）。
- *
- * [config] 存非敏感字段（实例地址 / 深度 / 主题…），密钥单独走加密槽、不在这里，
- * 与 API 配置的密钥同一套规矩。
- */
+/** 一条搜索服务配置（RikkaHub 的「已添加的服务」一条）。 */
 data class SearchService(
     val id: String,
     val name: String,
@@ -274,25 +226,11 @@ data class SearchServicesState(
     val services: List<SearchService> = emptyList(),
     val activeId: String = "",
     val form: SearchServiceDraft? = null,
-    /**
-     * 载荷还没读完。见 `WorkspaceViewModel.openSearchServices`。
-     *
-     * 页面**先**推入（同步、在这一帧内），数据**后**读（IO 线程）。
-     * 这段时间里 `services` 是空的 —— 而「一个服务都没有」本身是个合法状态，
-     * 页面本来就得能画出来。所以 `loading` 的职责只有一个：别让用户把
-     * 「正在读」误读成「配置丢了」。
-     */
+    /** 载荷还没读完。 */
     val loading: Boolean = false,
 )
 
-/**
- * 联网搜索后端（历史类型）。
- *
- * @deprecated 已被 [SearchService] 取代：它只能配一个服务、只有 Key 与实例地址两种
- * 字段，而 RikkaHub 的形态是「多服务列表 + 每服务专属选项」。保留只是因为
- * [AppSettings.webSearchProvider] 这个**持久化键**还在被读取 ——
- * 老用户的配置会在首次启动时迁移成一条 [SearchService]。
- */
+/** 联网搜索后端（历史类型）。 */
 enum class WebSearchProvider(
     val label: String,
     val detail: String,
@@ -337,9 +275,7 @@ enum class ApiProtocol(val label: String) {
     }
 }
 
-/**
- * 一条 API 供应商配置记录（对齐 Pi 多供应商与多模型结构）。
- */
+/** 一条 API 供应商配置记录（对齐 Pi 多供应商与多模型结构）。 */
 data class ApiProfile(
     val id: String,
     val name: String,
@@ -441,9 +377,7 @@ data class ApiProfileDraft(
     }
 }
 
-/**
- * API 配置页的状态（含已整合的上下文压缩与提示词入口）。
- */
+/** API 配置页的状态（含已整合的上下文压缩与提示词入口）。 */
 data class ApiConfigState(
     val profiles: List<ApiProfile>,
     val activeId: String,
@@ -458,12 +392,7 @@ data class ApiConfigState(
 /** 模型目录里的一项。[displayName] 可能与 [id] 相同，界面据此决定要不要重复显示。 */
 data class ModelOption(val id: String, val displayName: String)
 
-/**
- * 模型选择面板里的一行套餐额度。
- *
- * 字段都是**显示用的文本**（`remaining`/`total`/`resetLabel` 已格式化）：这样界面层
- * 不需要认识单位换算与倒计时分档，那些规则只有一处实现（见 `ZcodeWire`）。
- */
+/** 模型选择面板里的一行套餐额度。 */
 data class QuotaRow(
     val name: String,
     val remaining: String,
@@ -473,13 +402,7 @@ data class QuotaRow(
     val resetLabel: String,
 )
 
-/**
- * 「测试连接」的结果：一台服务器 + 它提供的工具。
- *
- * 与 [McpServer]（配置）分开：配置是**用户写的**，它是**服务器答的**。
- * 合成一个类型的话，没测过的服务器就没有工具清单，于是要么用空列表冒充
- * "这台服务器没有工具"，要么到处都是可空字段。
- */
+/** 「测试连接」的结果：一台服务器 + 它提供的工具。 */
 data class McpServerStatus(
     val name: String,
     val connected: Boolean,
@@ -488,13 +411,7 @@ data class McpServerStatus(
     val tools: List<McpToolInfo> = emptyList(),
 )
 
-/**
- * 服务器提供的一个工具。
- *
- * [enabled] / [approval] 是**用户设置**（存在 mcp.json 的 `tools` 里），
- * 与服务器返回的描述混在一起传上来：界面上一行里要同时显示"这是什么工具"
- * 与两个开关，分两次查会让这一行的状态有两个来源。
- */
+/** 服务器提供的一个工具。 */
 data class McpToolInfo(
     val name: String,
     val description: String,
@@ -548,12 +465,7 @@ data class McpConfigState(
     val servers: List<McpServer>,
     val filePath: String,
     val form: McpServerDraft? = null,
-    /**
-     * 「测试连接」的结果，按服务器名索引。
-     *
-     * 只在用户点过测试之后才有内容 —— 引擎侧的测试会**真的起子进程/发 HTTP**，
-     * 不能在打开页面时自动跑（见 `ZhiEngineController.mcpStatus`）。
-     */
+    /** 「测试连接」的结果，按服务器名索引。 */
     val status: Map<String, McpServerStatus> = emptyMap(),
     /** 正在测试的服务器名（空集表示没有在测）。 */
     val testing: Set<String> = emptySet(),
@@ -563,12 +475,7 @@ data class McpConfigState(
     val importError: String? = null,
     /** 载荷还没读完，见 `WorkspaceViewModel.openMcpConfig`。 */
     val loading: Boolean = false,
-    /**
-     * 列表页的筛选词（名称 / 命令 / 地址都参与匹配）。
-     *
-     * 与技能页同一个理由：服务器攒到十几台之后，找某一台要看半天。
-     * 只在列表页有意义，不参与持久化。
-     */
+    /** 列表页的筛选词（名称 / 命令 / 地址都参与匹配）。 */
     val query: String = "",
 ) {
     /** 按 [query] 过滤后的服务器。 */
@@ -602,15 +509,7 @@ data class SkillEntry(
     val sizeLabel: String,
 )
 
-/**
- * 技能目录里的一个文件。
- *
- * 技能不只有 `SKILL.md`：参考文档、脚本、示例都可以放在同一目录里一起分发
- * （`SkillStore.delete` 用递归删除就是为此）。详情页把它们列出来。
- *
- * [relativePath] 是**相对技能目录**的路径（`SKILL.md`、`reference/api.md`），
- * 读写都用它当唯一标识 —— 只用 [name] 的话子目录里两个 `api.md` 会互相覆盖。
- */
+/** 技能目录里的一个文件。 */
 data class SkillFile(
     val name: String,
     val relativePath: String,
@@ -619,13 +518,6 @@ data class SkillFile(
     val primary: Boolean,
 )
 
-/**
- * 技能目录的**文件树**（详情页渲染用）。
- *
- * 参考实现的详情页就是递归树：技能可以带子目录，平铺一层会把 `reference/api.md`
- * 显示成 `api.md`，用户看不出它在哪一层。
- * ⚠️ 递归是这里的**核心能力**，不是排版细节 —— 退化成平铺就等于丢掉了子目录。
- */
 sealed interface SkillFileNode {
     /** 一个文件。 */
     data class FileNode(val file: SkillFile) : SkillFileNode
@@ -638,20 +530,7 @@ sealed interface SkillFileNode {
     ) : SkillFileNode
 }
 
-/**
- * Skill 管理面板的状态。
- *
- * 页面栈只有**两层**（列表 → 详情），靠下面这些字段区分额外形态：
- * - `detail != null` → 技能详情（该技能目录下的文件树）
- * - `detail == null && createForm != null` → 手动添加（对话框）
- * - `editing != null` → 编辑某个文件（对话框）
- * - `fileDraft != null` → 新建文件（对话框）
- * - `urlDraft != null` → 从 URL 导入（对话框）
- * - 都为 null → 技能列表
- *
- * 用多个字段而不是一个 `mode` 枚举：各态需要携带的数据完全不同，
- * 塞进一个 sealed 层级只会让调用方多写一层 when。
- */
+/** Skill 管理面板的状态。 */
 data class SkillsState(
     val skills: List<SkillEntry>,
     /** 列表页的筛选词。技能会越攒越多，找起来需要一个入口。 */
@@ -679,32 +558,11 @@ data class SkillsState(
 data class SkillDetail(
     val entry: SkillEntry,
     val tree: List<SkillFileNode>,
-    /**
-     * `SKILL.md` 的正文（打开详情时读好的那份）。
-     *
-     * 详情页此前只有文件树：想知道这个技能到底教 Agent 做什么，得先点进编辑器。
-     * 那一步在手机上要跨一次页面栈、还要等文件读盘，回看一份"我到底装了什么"很别扭。
-     * 正文放这里只用于**只读预览**（可复制），编辑仍然走编辑器。
-     *
-     * 读失败时是空串 —— 界面据此显示"读不到正文"而不是一片空白。
-     */
+    /** `SKILL.md` 的正文（打开详情时读好的那份）。 */
     val body: String = "",
 )
 
-/**
- * 「手动添加技能」的表单（**对话框**，不是整页）。
- *
- * 形状照参考实现：**一个「SKILL.md 内容」输入框 + 取消/保存**，没有独立的名字字段。
- * 内容就是 `SKILL.md` 本体，技能名（也就是目录名）由内容的 frontmatter 解析得出 ——
- * 用户手上拿到的本来就是一份完整的 SKILL.md，让它自己声明名字，
- * 目录名就不会和内容里的 `name` 不一致。
- *
- * 以前这一项是**单独一整页**、还要再开一层编辑器，加一个技能要跨两级页面；
- * 做成对话框之后一步到位。
- *
- * [name] 为空且 [content] 非空 = 「有内容但解析不出名字」，这是**错误态**：
- * 必须报出来并挡住提交，不能猜一个默认名（会建出用户没打算建的目录）。
- */
+/** 「手动添加技能」的表单（**对话框**，不是整页）。 */
 data class SkillCreateDraft(
     val content: String = "",
     val scope: SkillScope = SkillScope.PROJECT,
@@ -720,13 +578,7 @@ data class SkillCreateDraft(
     val saveable: Boolean get() = name.isNotBlank() && !nameInvalid
 }
 
-/**
- * 「新建文件」表单（详情页里往技能目录加一个附加文件）。
- *
- * 名字允许带子目录（`reference/api.md`）：技能本来就支持分组，界面不给出这个入口的话，
- * 树只能显示别处（导入、Agent）建出来的目录，用户在界面上永远造不出同样的结构。
- * 每一段仍然要过同一套字符集规则。
- */
+/** 「新建文件」表单（详情页里往技能目录加一个附加文件）。 */
 data class SkillFileDraft(
     val fileName: String = "",
     val content: String = "",
@@ -753,13 +605,7 @@ data class SkillFileDraft(
     }
 }
 
-/**
- * 「从 URL 导入」表单。
- *
- * 支持任意 http(s) 地址，不绑定某个代码托管站：地址指向**一份 SKILL.md**
- * 就进「手动添加」让用户确认；指向**一个 zip** 就把里面的每个 SKILL.md 解开逐个导入。
- * 解析与下载都在 `SkillImport` 里，这里只放界面状态。
- */
+/** 「从 URL 导入」表单。 */
 data class SkillUrlDraft(
     val url: String = "",
     val scope: SkillScope = SkillScope.PROJECT,
@@ -775,11 +621,7 @@ data class SkillUrlDraft(
         }
 }
 
-/**
- * 正在编辑的文件（**对话框**，不是整页）。
- *
- * 技能不只有 `SKILL.md`，所以这里带的是**相对路径**而不是"这个技能的内容"。
- */
+/** 正在编辑的文件（**对话框**，不是整页）。 */
 data class SkillEditTarget(
     val name: String,
     val scope: SkillScope,
@@ -787,20 +629,9 @@ data class SkillEditTarget(
     val relativePath: String,
     /** 编辑中的内容。保存前只在内存里，不落盘。 */
     val body: String,
-    /**
-     * 写 `SKILL.md` 时的名字冲突原因（null = 没问题）。
-     *
-     * 由 `WorkspaceViewModel` 在每次改动内容后重算 —— 判定要用 `SkillStore` 的
-     * frontmatter 解析，而 model 层不依赖 data 层。放在这里是为了让对话框能**实时**
-     * 提示"名字对不上"，而不是等用户点了保存才报错。
-     */
+    /** 写 `SKILL.md` 时的名字冲突原因（null = 没问题）。 */
     val nameError: String? = null,
-    /**
-     * 打开编辑器时磁盘上的那份正文（默认等于 [body] = 干净）。
-     *
-     * 只用于判断「有没有未保存的改动」：见 [dirty]。保存成功后 ViewModel 会把这份
-     * 基准同步成新内容，于是界面不会一直以为还有脏数据。
-     */
+    /** 打开编辑器时磁盘上的那份正文（默认等于 [body] = 干净）。 */
     val savedBody: String = body,
 ) {
     /** 内容长度提示用。空内容不算错误，只提示一句。 */
@@ -814,12 +645,7 @@ data class SkillEditTarget(
     val saveable: Boolean get() = nameError == null
 }
 
-/**
- * 一张角色卡。
- *
- * 内容会作为 `<role_card>` 块注入系统提示词（见引擎 `SystemPromptBuilder`），
- * 所以它是"长期生效的人设指令"，不是一次性提示词。
- */
+/** 一张角色卡。 */
 data class RoleCard(val id: String, val name: String, val content: String) {
     /** 列表副标题：显示内容摘要，让用户不必点进去就知道卡里写了什么。 */
     val summary: String
@@ -844,13 +670,7 @@ data class RoleCardEditor(
     val id: String = "",
     val name: String = "",
     val content: String = "",
-    /**
-     * 打开编辑器时那一份**已保存**的名字与内容（默认等于当前值 = 干净）。
-     *
-     * 只用于判断「有没有没保存的改动」：编辑过程中的 `updateRoleCardDraft` 只改
-     * [name] / [content]，于是 `dirty` 自然变真。没有它就只能靠"用户点过保存"
-     * 这类间接信号，而那条信号在保存失败时是错的。
-     */
+    /** 打开编辑器时那一份**已保存**的名字与内容（默认等于当前值 = 干净）。 */
     val savedName: String = name,
     val savedContent: String = content,
 ) {
@@ -870,9 +690,7 @@ enum class MemoryScope(val label: String) {
     USER("用户 ZhiCode.md"),
 }
 
-/**
- * 一个记忆文件在列表里的展示信息。
- */
+/** 一个记忆文件在列表里的展示信息。 */
 data class MemoryFile(
     val scope: MemoryScope,
     val path: String,
@@ -907,16 +725,7 @@ data class MemoryEditor(
 
 
 
-/**
- * 模型选择面板的状态。
- *
- * 原版的这个面板是**异步填充**的：先开着窗显示"正在从当前 API 获取模型…"，
- * 目录回来后再把列表填进去。所以 [loading] / [status] / [models] 必须是状态而不是
- * 一次性参数——网络慢的时候界面得先立起来。
- *
- * [query] 是手动输入框的内容。目录拉不到时用户就靠它兜底，因此它不能只在弹窗内部
- * 存活（比如转屏或重组时被清掉）。
- */
+/** 模型选择面板的状态。 */
 data class ModelPickerState(
     val profileName: String,
     val currentModel: String,
@@ -957,27 +766,9 @@ data class ModelThinkingPickerState(
     val expandedModel: PiModelConfig? = null,
 )
 
-/**
- * 首次进入时的 API 配置列表：**空**。
- *
- * <p>以前这里预置一条厂家的「官方 API」。那个做法已经取消，理由有两个：
- * 一是它等于替某个具体服务做默认入口（并且带推广参数），这该由用户自己选；
- * 二是任何内置地址都会让「请求到底发到哪里」变得不透明。
- *
- * <p>所以应用不再自带任何地址与模型名，全部由用户在设置里新增。
- * 列表允许为空：[AppSettings.apiProfiles] 与 [AppSettings.activeProfileId] 都跟着空，
- * 界面据此显示「还没有 API 配置」，而真正发请求前会由引擎侧拦下来并给出明确错误。
- */
+/** 首次进入时的 API 配置列表：**空**。 */
 val DEFAULT_API_PROFILES: List<ApiProfile> = emptyList()
 
-/**
- * 原版设置页里**新增的**持久化项。
- *
- * ⚠️ 刻意**不**在这里放 `themeMode` / `permissionMode` / `effort` / `contextWindow`
- * / `projectPath` / `modelLabel` 等字段：它们已经是 `WorkspaceUiState` 的成员，
- * 再放一份就会出现"两份真相"，保存时到底谁覆盖谁很难说清。
- * 这些字段由 [SettingsDraft] 在打开弹窗时快照、保存时写回。
- */
 data class AppSettings(
     val visionEnabled: Boolean = true,
     val rootExecutionEnabled: Boolean = false,
@@ -1000,12 +791,7 @@ data class AppSettings(
     /** 自动压缩上限，取值 50..100（百分比）。 */
     val autoCompactPercent: Int = 60,
     val customSystemPrompt: String = "",
-    /**
-     * 可自定义的提示词槽位，三份都遵循「空串 = 用默认」（见 [PromptSlot]）。
-     *
-     * <p>刻意**不**在这里放默认文案：默认值的唯一来源是 [PromptSlot.defaultValue]。
-     * 两份的话，改一处忘另一处就会出现"界面上点恢复默认、引擎用的还是旧的"。
-     */
+    /** 可自定义的提示词槽位，三份都遵循「空串 = 用默认」（见 [PromptSlot]）。 */
     val initPrompt: String = "",
     val summaryPrompt: String = "",
     val compactPromptHead: String = "",
@@ -1040,10 +826,7 @@ fun clampWebTimeoutSec(value: Int): Int = value.coerceIn(WEB_TIMEOUT_MIN_SEC, WE
 
 fun clampCompactPercent(value: Int): Int = value.coerceIn(COMPACT_PERCENT_MIN, COMPACT_PERCENT_MAX)
 
-/**
- * 解析上下文窗口输入，支持原版的 `128k` / `200k` / `1m` / `1.5m` 写法。
- * 解析不出来或非正数时返回 null，由调用方决定保留旧值。
- */
+/** 解析上下文窗口输入，支持原版的 `128k` / `200k` / `1m` / `1.5m` 写法。 */
 fun parseTokenCount(raw: String): Int? {
     val text = raw.trim().lowercase()
     if (text.isEmpty()) return null
@@ -1079,16 +862,7 @@ fun percentToFraction(percent: Int): Float = (percent / 100f).coerceIn(0f, 1f)
 fun fractionToPercent(fraction: Float): Int =
     clampCompactPercent(Math.round(fraction * 100f).toInt())
 
-/**
- * 设置弹窗的编辑草稿。
- *
- * **draft 语义**：弹窗打开时用 [from] 从当前 state 快照一份，用户所有改动都落在
- * draft 上；「保存」才用 [applyTo] 写回 state，「取消」直接丢弃 draft。
- * 这样"取消"是真正无副作用的，而不是先改后回滚。
- *
- * 这里同时持有 state 里的既有字段（主题/权限/推理/上下文/项目路径/提示词）
- * 和 [AppSettings] 里的新增字段，是为了让弹窗只读一份数据、不必到处传 state。
- */
+/** 设置弹窗的编辑草稿。 */
 data class SettingsDraft(
     val themeMode: ThemeMode,
     val permissionMode: PermissionMode,
@@ -1157,13 +931,7 @@ data class SettingsDraft(
     }
 
     /** 保存时写回 state。数值字段在这里统一 clamp，UI 层不需要各自校验。 */
-    /**
-     * 把 draft 写回 state。
-     *
-     * [keepDraft] 是给设置页的自动保存用的：那一屏的 draft 同时是显示源，
-     * 写回后不能清掉，否则页面会立刻被 onDismiss 之外的东西关掉。
-     * `false` 时清掉 draft —— 那是「提交并关闭」的旧语义，现在只剩测试与直接调用会走。
-     */
+    /** 把 draft 写回 state。 */
     fun applyTo(state: WorkspaceUiState, keepDraft: Boolean = false): WorkspaceUiState = state.copy(
         themeMode = themeMode,
         // 深浅是 `themeSettings.mode` 的缓存值（见 WorkspaceUiState.themeSettings 的说明），
@@ -1198,21 +966,6 @@ data class SettingsDraft(
     )
 }
 
-/**
- * 「设置 → 扩展」那一组要显示的数量摘要。
- *
- * ## 为什么需要它
- *
- * 扩展组此前是四条纯入口行（MCP / 技能 / 角色卡 / 记忆），一行里没有任何
- * "我现在装了什么"的信息 —— 想确认某个 MCP 服务器还在不在，得点进去再退出来。
- * 参考实现（rikkahub）的扩展入口行都带当前值，这里补上同样的信息。
- *
- * ## 为什么不是每次重组去读
- *
- * 三个存储都在磁盘上（`mcp.json` / 技能目录 walk / `role_cards.json`），
- * 在界面里读会同时命中"主线程 IO"与"每次重组都读盘"两条禁忌。所以由
- * `WorkspaceViewModel` 在打开设置时于 IO 线程统计一次，结果落进状态。
- */
 data class ExtensionSummary(
     val mcpTotal: Int = 0,
     val mcpEnabled: Int = 0,

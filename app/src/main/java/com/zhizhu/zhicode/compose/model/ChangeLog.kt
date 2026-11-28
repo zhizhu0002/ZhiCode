@@ -1,33 +1,5 @@
 package com.zhizhu.zhicode.compose.model
 
-/**
- * 更新内容（版本说明）。
- *
- * ## 为什么本地要自带一份
- *
- * 更新页在「已经是最新版本」时也要显示**当前版本的更新内容**（用户的要求：
- * 横线下面就是更新内容）。而这份内容有两个可能的来源：
- *
- * 1. **远端 Release 的 `body`** —— 只在真发了 Release 时才有；
- * 2. **本地自带** —— 本文件。
- *
- * 本仓库根目录**没有 CHANGELOG**，GitHub 上也**还没有发布过 Release**，
- * 所以"没有新版本时"没有任何远端来源可读。这不是一个可以靠兜底糊过去的情况：
- * 横线下面如果是空白，用户只会以为页面坏了。
- *
- * ## 与远端 Release 共用同一个结构
- *
- * [ChangeLogSection] / [ChangeLogItem] 这一套**同时**用于渲染远端的 Release
- * `body`（见 `data/ReleaseNotes.kt` 的 Markdown 极简分流）。两端走同一个渲染器，
- * 于是「Beta 版说明」「基础体验」这类小节在两种来源下长相一致 ——
- * 这是刻意的：用户不该能看出"这段是本地写死的"。 
- *
- * ## ⚠️ 只写真实发生过的事
- *
- * 每一条都来自本仓库 `git log` 里**已经落地**的提交，措辞对着提交内容写。
- * 不写计划中的功能、不写"优化了体验"这种无法核对的空话 ——
- * 版本说明是用户判断"要不要更新"的唯一依据，编一条就等于骗一次。
- */
 data class ChangeLogEntry(
     /** 版本号，必须与 `BuildConfig.VERSION_NAME` 逐字一致才会被取到。 */
     val version: String,
@@ -42,25 +14,13 @@ data class ChangeLogSection(
     val items: List<ChangeLogItem>,
 )
 
-/**
- * 一条说明。
- *
- * @property title 短标题（可能为空 —— 远端 Release 的正文段落就没有子标题，
- *   那时整段是一句话，不硬造一个标题）
- * @property detail 正文
- */
+/** 一条说明。 */
 data class ChangeLogItem(
     val title: String,
     val detail: String,
 )
 
-/**
- * 全部版本说明，**按版本倒序**（新的在前）。
- *
- * 只有当前版本一条 —— 历史版本在"已经是最新"的场景里用不上，
- * 而写一份我们并未逐条核对过的历史清单，正是上面警告的那种编造。
- * 将来版本再升时**往上加**一条即可，不要动已有条目的措辞。
- */
+/** 全部版本说明，**按版本倒序**（新的在前）。 */
 val CHANGE_LOG: List<ChangeLogEntry> = listOf(
     ChangeLogEntry(
         version = "1.1.0",
@@ -307,39 +267,13 @@ val CHANGE_LOG: List<ChangeLogEntry> = listOf(
     ),
 )
 
-/**
- * 按版本号取一份更新内容；**取不到返回 `null`**。
- *
- * 不返回一个"空的小节列表"也不返回最新一条：前者会让页面显示空白，
- * 后者会让用户以为"当前版本的说明就是那条旧的"。两种情况都该由页面
- * 如实说一句"这个版本没有留下更新说明"。
- */
+/** 按版本号取一份更新内容；**取不到返回 `null`**。 */
 fun changeLogFor(version: String?): ChangeLogEntry? {
     val target = version?.trim().orEmpty()
     if (target.isEmpty()) return null
     return CHANGE_LOG.firstOrNull { it.version == target }
 }
 
-/**
- * 把这一份版本说明转成 **Markdown 原文**。
- *
- * ## 为什么要转
- *
- * 更新页现在统一用工程既有的 `ZhiMarkdown` 渲染（它支持粗体/行内代码/代码块/
- * 列表/表格/链接）。远端 Release 的 `body` 本来就是 Markdown，而本地这份是
- * 结构化数据 —— 转成同一种写法，页面就只需要**一条渲染路径**。
- *
- * 上一版两端各走各的：远端走"行首标记分流"，本地走结构渲染，而那个分流
- * 完全没处理行内标记，于是 `**粗体**` 与反引号原样显示在界面上。
- *
- * ## 格式
- *
- * - 小节标题 → `## 标题`
- * - 条目 → `- **标题**：正文`（没有标题时就是 `- 正文`）
- *
- * 用的是**标准 Markdown**，不掺任何自定义标记，所以同一份文本贴到
- * Release 正文里也能正常显示。
- */
 fun ChangeLogEntry.toMarkdown(): String = buildString {
     for (section in sections) {
         append("## ").append(section.title).append('\n').append('\n')

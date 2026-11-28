@@ -1,36 +1,5 @@
 package com.zhizhu.zhicode.compose.model
 
-/**
- * 第三方组件清单（「关于 → 第三方组件许可」的数据源）。
- *
- * ## 为什么不是一个依赖
- *
- * rikkahub 与 Miuix 示例都用 `aboutlibraries` 插件在构建期扫依赖、生成 JSON。
- * 本工程**不引入**它，理由有三，且都是具体的：
- *
- * 1. 这个环境是离线的（`--offline` 构建），新插件拉不下来；
- * 2. 它只扫得到**声明在 Gradle 里**的依赖，而本工程最需要声明的几项恰恰不是依赖：
- *    `libtermux.so`、Termux bootstrap 归档、
- *    `assets/sora/textmate` 的数据文件、内联进 `ZhiMaterialIcons.kt` 的图标路径；
- * 3. 许可名仍然要人写映射（插件给的是坐标，不是中文可读的许可条款名）。
- *
- * 所以这里手写一份**可核对**的清单：每条的 [name] 必须能在根目录 `NOTICE` 里找到同名小节
- * （`LicensesTest` 会逐条比对这个字符串），[license] 必须与 `NOTICE` 里那一节声明的一致。
- * 手写的东西靠测试与源文档对齐，而不是靠"我记得"。
- *
- * ## 字段含义
- *
- * @property name 组件名（= `NOTICE` 里的小节标题，去掉编号）
- * @property license 许可（与 `NOTICE` 一致）
- * @property version 版本或"随发行物"一类的说明；没有版本的写 `—`
- * @property detail 给用户看的补充：这项为什么在这里、有没有改动、有什么已知缺口
- * @property author 上游作者/组织。列表行里与 [license] 拼成一行摘要
- *   （`author · license`），扫读时先看"谁的、什么许可"再决定点不点进去。
- * @property homepage 上游主页。**没有可核实地址时给 null**，界面就不画箭头、
- *   点击改为弹出 [detail] —— 宁可少一个箭头，也不编一个打不开的链接。
- * @property group 分组名。同一组的条目在界面上合成一张卡，组标题浮在卡片之上。
- *   分组按**首次出现顺序**渲染，所以这里的条目顺序同时决定了组顺序。
- */
 data class LicenseEntry(
     val name: String,
     val license: String,
@@ -41,12 +10,7 @@ data class LicenseEntry(
     val homepage: String? = null,
 )
 
-/**
- * 全部第三方组件。
- *
- * <p>顺序与根 `NOTICE` 的小节顺序一致 —— 这不是巧合，而是刻意的：
- * 两份文档并排看时顺序一致，核对的人就不用来回跳。
- */
+/** 全部第三方组件。 */
 val THIRD_PARTY_LICENSES: List<LicenseEntry> = listOf(
     LicenseEntry(
         name = "IQ Code",
@@ -134,14 +98,6 @@ val THIRD_PARTY_LICENSES: List<LicenseEntry> = listOf(
         homepage = "https://tukaani.org/xz/java.html",
         detail = "纯 Java XZ/LZMA2 流式解压实现，用于解压 GitHub proot-distro 源提供的 Ubuntu 24.04 `.tar.xz` 根文件系统。",
     ),
-    /*
-     * ⚠️ 这一组原来只有一条「通过 Gradle 依赖引入的组件」，把八个库糊在一段文字里。
-     * 那对用户没有用 —— 想确认"我看到的这个模糊效果是谁做的、什么许可"，
-     * 得先去读一段长句。现在按 `app/build.gradle` 里**真实声明**的依赖逐条拆开，
-     * 每条自带作者与主页。
-     *
-     * 名字必须与根 `NOTICE` 第 6 节逐条对应（`LicensesTest` 会核对）。
-     */
     LicenseEntry(
         name = "Miuix",
         license = "Apache-2.0",
@@ -297,14 +253,7 @@ val THIRD_PARTY_LICENSES: List<LicenseEntry> = listOf(
 /** 本工程自身的许可（「关于」页那一行显示它）。 */
 const val OWN_LICENSE = "MIT"
 
-/*
- * `PROJECT_URL` 已搬到 `model/ProjectRepo.kt`。
- *
- * 它原来就在这一行，和 `THIRD_PARTY_LICENSES` 摆在一起 —— 只有「关于页的外链」
- * 一个使用者时那样没问题。现在「检查更新」也要用它派生 API 地址与 owner/repo，
- * 两处各写一份迟早会指向不同仓库（比如界面指向 A、更新检查指向 B），
- * 所以收成一处。见 `ProjectRepo.kt` 头部关于「与 IQ Code 那一项的区别」的说明。
- */
+/* `PROJECT_URL` 已搬到 `model/ProjectRepo.kt`。 */
 
 /** 赞助页（爱发电）。关于页「应用」分组里的「赞助」指向这里。 */
 const val DONATE_URL = "https://afdian.com/a/zhizhu0001"

@@ -1,33 +1,5 @@
 package com.zhizhu.zhicode.compose.model
 
-/**
- * 可自定义的提示词槽位（形态参考 rikkahub 的「提示词」设置页）。
- *
- * ## 为什么只有这三个
- *
- * 本工程里"提示词"分散在四处，但只有这三处**该给用户改**：
- *
- * | 槽位 | 现状 | 为什么可以改 |
- * | --- | --- | --- |
- * | `/init` 指令 | 原先硬编码在 `WorkspaceViewModel` 的 `private const` | 它是"让模型整理项目说明"的一句话要求，写法因项目而异（有的项目只有 README） |
- * | 上下文压缩的**系统提示** | 原先硬编码在 `ZhiCodeEngine` | 它只影响摘要质量，不参与主对话，改坏了也不会影响权限与安全 |
- * | 上下文压缩的**开场段** | 原先硬编码在 `ContextCompactor` 的 `PROMPT_HEAD` | 同上；压缩结果会进上下文，用户有权决定摘要"按什么口径写" |
- *
- * **不在**这里的：主系统提示（`SystemPromptBuilder`）与权限/安全相关的任何句子。
- * 那些是行为契约 —— 允许用户改它们等于允许用户关掉「不许声称做了没做的事」，
- * 而这条恰恰是这个工具最不能松的一条。自定义诉求由"附加指令"
- * （`custom_system_prompt`，优先级最高但不能覆盖安全边界）满足。
- *
- * ## 空串 = 用默认
- *
- * 三个槽位在 `SessionConfig` 里都以**空串表示"没改过"**，而不是在设置里预填一份默认文案。
- * 理由有两层：
- * 1. 默认值将来会随版本改进。预填之后，老用户的库里就固化了一份旧文案，
- *    永远拿不到改进 —— 这与「设置没生效」是同一类伤害，只是更隐蔽。
- * 2. 空串让"恢复默认"变成一个**赋值**而不是"记得把默认文案抄回来"。
- *
- * 所以 [defaultValue] 是**唯一**的默认来源，引擎侧的常量全部指向它（或由它派生）。
- */
 enum class PromptSlot(
     /** 落盘用的稳定 id。改名 = 丢掉用户已填的内容，所以它不随展示名变。 */
     val id: String,
@@ -83,12 +55,7 @@ enum class PromptSlot(
     companion object {
         fun byId(id: String): PromptSlot? = entries.firstOrNull { it.id == id }
 
-        /**
-         * 一行预览：提示词里换行很多，压成一行才看得出实际内容（rikkahub 同款做法）。
-         *
-         * 截断放在这里而不是界面里：界面各自截断就会出现"有的地方 60 字、有的地方 80 字"，
-         * 而这一行的高度是固定的（超过一行会把行尾箭头挤上去）。
-         */
+        /** 一行预览：提示词里换行很多，压成一行才看得出实际内容（rikkahub 同款做法）。 */
         fun preview(value: String, maxChars: Int = 80): String {
             val flat = value.replace(Regex("\\s+"), " ").trim()
             if (flat.isEmpty()) return "（空）"
