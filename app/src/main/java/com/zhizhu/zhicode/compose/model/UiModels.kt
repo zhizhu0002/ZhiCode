@@ -423,6 +423,7 @@ data class WorkspaceUiState(
     /** 当前 API 配置是否已有密钥。顶栏据此提示"还不能用"，避免发出去才发现报错。 */
     val apiKeyConfigured: Boolean = false,
     val modelLabel: String = "未设置",
+    val modelProfileId: String? = null,
     val contextTokens: Int = 0,
     val contextWindow: Int = 200_000,
     val deviceStatus: String = "",

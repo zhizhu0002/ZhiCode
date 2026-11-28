@@ -78,6 +78,7 @@ import com.zhizhu.zhicode.compose.model.ExtensionSummary
 import com.zhizhu.zhicode.compose.model.EffortLevel
 import com.zhizhu.zhicode.compose.model.FileDeletePrompt
 import com.zhizhu.zhicode.pi.PiCatalogAndPresets
+import com.zhizhu.zhicode.pi.PiConfigSync
 import com.zhizhu.zhicode.pi.PiModelConfig
 import com.zhizhu.zhicode.pi.PiProviderPreset
 import com.zhizhu.zhicode.pi.PiThinkingLevel
@@ -154,6 +155,7 @@ import com.termux.app.zhicode.storage.ZhiMemory
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
@@ -162,6 +164,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -231,6 +234,8 @@ class WorkspaceViewModel(
     /** 最近一次打开会话的序号，丢弃过时切换结果。 */
     @Volatile
     private var openSessionSeq: Long = 0L
+    @Volatile
+    private var restoringSession = false
 
     /** 正在进行的「提问」流程。 */
     private class PendingQuestions(
@@ -255,11 +260,8 @@ class WorkspaceViewModel(
 
     private var modelCatalogJob: Job? = null
 
-    /** 模型选择的落盘任务。 */
-    private var modelSaveJob: Job? = null
+    private var sessionModelSave: Job? = null
     private var fileReloadJob: Job? = null
-
-    private var modelOverride: String? = null
 
     /** 会话级角色卡覆盖。 */
     private var roleCardOverride: String? = null
@@ -1829,6 +1831,7 @@ class WorkspaceViewModel(
 
     /** 从输入框的**当前文字**发送。 */
     fun sendFromComposerText(textState: com.zhizhu.zhicode.compose.ui.composer.ComposerTextState) {
+        if (restoringSession) return
         val text = textState.text()
         if (text.isBlank()) return
         requestComposerText(text)
@@ -1883,6 +1886,7 @@ class WorkspaceViewModel(
     fun sendWithoutReplyFromComposerText(
         textState: com.zhizhu.zhicode.compose.ui.composer.ComposerTextState,
     ) {
+        if (restoringSession) return
         val text = textState.text()
         if (text.isBlank()) return
         requestComposerText(text)
@@ -1892,6 +1896,7 @@ class WorkspaceViewModel(
     }
 
     private fun sendInternal(waitForReply: Boolean) {
+        if (restoringSession) return
         val text = _state.value.composerText.trim()
         if (text.isEmpty()) return
         if (text.startsWith("/")) {
@@ -2012,14 +2017,7 @@ class WorkspaceViewModel(
         turnSessionId = _state.value.activeSessionId
         // 这一轮的起点，用于在回合结束时算出耗时（见 onEngineTurnComplete）。
         turnStartedAtElapsedMs = android.os.SystemClock.elapsedRealtime()
-        val configured = runCatching { engine.configure(engineOverrides()) }
-        if (configured.isFailure) {
-            // 配置阶段就失败（例如 SharedPreferences 损坏）时不要静默：
-            // 否则界面会一直停在"正在思考…"，用户只能干等。
-            finishTurnWithError("引擎配置失败：" + (configured.exceptionOrNull()?.message ?: "未知原因"))
-            return
-        }
-        runCatching { engine.sendPrompt(prompt, extraContent) }.onFailure { error ->
+        runCatching { engine.sendPrompt(prompt, extraContent, engineOverrides()) }.onFailure { error ->
             finishTurnWithError(ToolText.friendlyError(error.message, error))
         }
     }
@@ -2070,7 +2068,8 @@ class WorkspaceViewModel(
             shizukuExecutionEnabled = s.settings.shizukuExecutionEnabled,
             forcedKeepAliveEnabled = s.settings.forcedKeepAliveEnabled,
             maxConcurrentSubagents = s.settings.maxConcurrentSubagents,
-            model = modelOverride,
+            model = configuredModelIdOrNull(s.modelLabel)?.takeIf { s.modelProfileId != null },
+            modelProfileId = s.modelProfileId,
             roleCard = roleCardOverride,
         )
     }
@@ -3011,8 +3010,8 @@ class WorkspaceViewModel(
                 }
                 // 让引擎的内存历史与库对齐。失败不致命：下一轮 sendPrompt 用的是
                 // 界面这一份 transcript，只是模型可能多看见一条已删的消息。
-                withContext(Dispatchers.IO) {
-                    runCatching { engine.resumeConversation(sessionId) }
+                if (_state.value.activeSessionId == sessionId && !restoringSession) {
+                    runCatching { engine.resumeConversation(sessionId, engineOverrides()).await() }
                 }
             }.onFailure { error ->
                 _state.update {
@@ -3492,21 +3491,43 @@ class WorkspaceViewModel(
     }
 
     fun openApiConfigEditActiveProvider() {
-        _state.update { it.copy(modelThinkingPicker = null) }
-        openApiConfig()
+        val targetProfileId = _state.value.modelProfileId
+        hideSidebarForNavigation()
+        ZhiFrameTrace.begin("page:api")
+        _state.update {
+            it.copy(
+                modelThinkingPicker = null,
+                apiConfig = ApiConfigState(
+                    profiles = emptyList(),
+                    activeId = "",
+                    loading = true,
+                    autoCompact = it.settings.autoCompact,
+                    autoCompactPercent = it.settings.autoCompactPercent,
+                    customSystemPrompt = it.settings.customSystemPrompt,
+                ),
+            )
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            val loaded = runCatching { ApiConfigStore.read(getApplication()) }.getOrNull() ?: return@launch
-            val active = loaded.profiles.firstOrNull { it.id == loaded.activeId } ?: loaded.profiles.firstOrNull()
+            val loaded = runCatching { ApiConfigStore.read(getApplication()) }.getOrNull()
+            val active = loaded?.let { cfg ->
+                cfg.profiles.firstOrNull { it.id == targetProfileId }
+                    ?: cfg.profiles.firstOrNull { it.id == cfg.activeId }
+                    ?: cfg.profiles.firstOrNull()
+            }
             _state.update { s ->
                 val current = s.apiConfig ?: return@update s
                 s.copy(
-                    apiConfig = loaded.copy(
+                    apiConfig = loaded?.copy(
                         form = active?.let { ApiProfileDraft.from(it) } ?: ApiProfileDraft.blank(),
                         autoCompact = s.settings.autoCompact,
                         autoCompactPercent = s.settings.autoCompactPercent,
                         customSystemPrompt = s.settings.customSystemPrompt,
-                    ),
+                    ) ?: current.copy(loading = false),
                 )
+            }
+            if (loaded != null) {
+                syncActiveProfile()
+                syncRoleCardFromStore()
             }
         }
     }
@@ -3769,8 +3790,7 @@ class WorkspaceViewModel(
     }
 
     fun selectApiProfile(profileId: String) {
-        // 换配置就用那份配置自己的模型，别把上一条配置的会话级覆盖带过去。
-        modelOverride = null
+        val sessionSeq = openSessionSeq
         viewModelScope.launch(Dispatchers.IO) {
             val result = ApiConfigStore.select(getApplication(), profileId)
             val state = ApiConfigStore.read(getApplication())
@@ -3783,6 +3803,14 @@ class WorkspaceViewModel(
                     ),
                     message = if (result.isSuccess) "已切换 API 配置" else "切换失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
                 )
+            }
+            if (result.isSuccess && openSessionSeq == sessionSeq) {
+                withContext(Dispatchers.Main) {
+                    val profile = state.profiles.firstOrNull { it.id == profileId }
+                    if (profile != null && openSessionSeq == sessionSeq && !restoringSession) {
+                        selectSessionModel(profile, profile.model, _state.value.effort)
+                    }
+                }
             }
             syncActiveProfile()
             syncRoleCardFromStore()
@@ -4196,38 +4224,57 @@ class WorkspaceViewModel(
         }
     }
 
+    private fun configuredModelIdOrNull(label: String): String? =
+        label.trim().takeIf { it.isNotEmpty() && it != UNSET_MODEL_LABEL }
+
     /** 把当前生效的 API 配置同步到界面摘要，并让引擎重新读取。 */
     private fun syncActiveProfile() {
-        val active = ApiConfigStore.active(getApplication())
-        val activeProfile = ApiConfigStore.activeProfile(getApplication())
-        val activeModelId = modelOverride ?: active?.model ?: ""
-        val activeModelCfg = activeProfile?.resolveModel(activeModelId)
+        val config = ApiConfigStore.read(getApplication())
+        _state.update { s ->
+            val scoped = config.profiles.firstOrNull { it.id == s.modelProfileId && !s.debugAppMode }
+            val profile = scoped ?: config.profiles.firstOrNull { it.id == config.activeId }
+            val selectedModel = if (scoped != null) {
+                val current = configuredModelIdOrNull(s.modelLabel)
+                current?.takeIf { scoped.effectiveModels().isEmpty() || scoped.resolveModel(it) != null }
+            } else {
+                null
+            }
+            s.withActiveModel(profile, selectedModel, keepProfileScope = scoped != null)
+        }
+        if (!restoringSession) runCatching { engine.configure(engineOverrides()) }
+    }
+
+    private fun WorkspaceUiState.withActiveModel(
+        profile: ApiProfile?,
+        selectedModelId: String? = null,
+        selectedEffort: EffortLevel = effort,
+        keepProfileScope: Boolean = selectedModelId != null,
+    ): WorkspaceUiState {
+        val activeModelId = selectedModelId?.let(::configuredModelIdOrNull) ?: profile?.model.orEmpty()
+        val activeModelCfg = profile?.resolveModel(activeModelId)
             ?: activeModelId.takeIf { it.isNotBlank() }?.let { id ->
-                PiCatalogAndPresets.inferModelConfig(id, id, activeProfile?.protocol?.toPiFormat() ?: com.zhizhu.zhicode.pi.PiApiFormat.OPENAI_COMPLETIONS)
+                PiCatalogAndPresets.inferModelConfig(id, id, profile?.protocol?.toPiFormat() ?: com.zhizhu.zhicode.pi.PiApiFormat.OPENAI_COMPLETIONS)
             }
         val supported = resolveSupportedThinkingLevels(activeModelCfg).map { it.toUiEffort() }
-        val prevEffort = _state.value.effort
-        val clampedEffort = clampThinkingLevel(activeModelCfg, prevEffort.toPiLevel()).toUiEffort()
-
-        _state.update {
-            it.copy(
-                profileName = active?.name ?: "未配置",
-                modelLabel = activeModelId.ifBlank { "未设置" },
-                apiKeyConfigured = active?.hasKey == true,
-                contextWindow = activeModelCfg?.contextWindow ?: it.contextWindow,
+        val clampedEffort = clampThinkingLevel(activeModelCfg, selectedEffort.toPiLevel()).toUiEffort()
+        val window = activeModelCfg?.contextWindow ?: contextWindow
+        val hasKey = profile != null && runCatching {
+            !ApiSettingsStore(getApplication()).resolveProfile(profile.id, null)?.apiKey.isNullOrBlank()
+        }.getOrDefault(false)
+        return copy(
+            profileName = profile?.name ?: "未配置",
+            modelProfileId = profile?.id?.takeIf { keepProfileScope },
+            modelLabel = activeModelId.ifBlank { UNSET_MODEL_LABEL },
+            apiKeyConfigured = hasKey,
+            contextWindow = window,
+            availableEfforts = supported,
+            effort = clampedEffort,
+            settingsDraft = settingsDraft?.copy(
+                contextWindow = window,
                 availableEfforts = supported,
                 effort = clampedEffort,
-                settingsDraft = it.settingsDraft?.copy(
-                    contextWindow = activeModelCfg?.contextWindow ?: it.contextWindow,
-                    availableEfforts = supported,
-                    effort = clampedEffort,
-                ),
-            )
-        }
-        if (clampedEffort != prevEffort) {
-            persistRuntimeChoice(effort = clampedEffort)
-        }
-        runCatching { engine.configure(engineOverrides()) }
+            ),
+        )
     }
 
     private fun PiThinkingLevel.toUiEffort(): EffortLevel =
@@ -4317,7 +4364,7 @@ class WorkspaceViewModel(
                 val config = store.load()
                 mode?.let { config.permissionMode = it.toEngineMode() }
                 effort?.let { config.effort = it.toEngineEffort() }
-                store.save(config)
+                store.saveGlobalSettings(config, false)
             }
         }
     }
@@ -4331,8 +4378,33 @@ class WorkspaceViewModel(
     }
 
     fun setEffort(level: EffortLevel) {
-        _state.update { it.copy(effort = level, message = "推理强度：${level.label}") }
-        persistRuntimeChoice(effort = level)
+        applyEffortSelection(level, closeChoicePicker = false)
+    }
+
+    private fun applyEffortSelection(level: EffortLevel, closeChoicePicker: Boolean) {
+        val snapshot = _state.value
+        val config = ApiConfigStore.read(getApplication())
+        val profileId = snapshot.modelProfileId ?: config.activeId
+        val profile = config.profiles.firstOrNull { it.id == profileId }
+        val updated = _state.updateAndGet { s ->
+            val currentModel = configuredModelIdOrNull(s.modelLabel) ?: profile?.model.orEmpty()
+            val clamped = clampThinkingLevel(profile?.resolveModel(currentModel), level.toPiLevel()).toUiEffort()
+            s.copy(
+                choicePicker = if (closeChoicePicker) null else s.choicePicker,
+                effort = clamped,
+                settingsDraft = s.settingsDraft?.copy(effort = clamped),
+                message = "推理强度：${clamped.label}",
+            )
+        }
+        val sessionId = updated.activeSessionId.ifEmpty {
+            engine.sessionId()?.takeIf { updated.composerBusy }.orEmpty()
+        }
+        if (profile != null && sessionId.isNotEmpty()) {
+            val modelId = configuredModelIdOrNull(updated.modelLabel) ?: profile.model
+            sessionModelSave = engine.saveSessionModel(sessionId, profile.id, modelId, updated.effort.toEngineEffort())
+        } else if (updated.modelProfileId == null) {
+            persistRuntimeChoice(effort = updated.effort)
+        }
         if (engine.hasEngine() && !engine.isBusy()) {
             runCatching { engine.configure(engineOverrides()) }
         }
@@ -4558,18 +4630,18 @@ class WorkspaceViewModel(
     /** 打开纯供应商切换面板（纯本地读取，不拉取在线模型目录）。 */
     fun showModelPicker() {
         val config = ApiConfigStore.read(getApplication())
-        val active = config.profiles.firstOrNull { it.id == config.activeId }
         _state.update { s ->
+            val activeId = s.modelProfileId ?: config.activeId
             s.copy(
                 modelPicker = ModelPickerState(
-                    profileName = active?.name ?: s.profileName,
-                    currentModel = active?.model?.takeIf { it.isNotBlank() } ?: s.modelLabel,
+                    profileName = s.profileName,
+                    currentModel = s.modelLabel,
                     query = "",
                     loading = false,
                     status = "",
                     models = emptyList(),
                     profiles = config.profiles.map { it.toPickerTab() },
-                    activeProfileId = config.activeId,
+                    activeProfileId = activeId,
                 ),
             )
         }
@@ -4578,46 +4650,29 @@ class WorkspaceViewModel(
     fun closeModelPicker() {
         modelCatalogJob?.cancel()
         modelCatalogJob = null
-        modelSaveJob?.cancel()
-        modelSaveJob = null
         _state.update { it.copy(modelPicker = null) }
     }
 
-    /** 直接切换激活供应商并收起纯供应商切换面板。 */
+    /** 切换当前会话的供应商。 */
     fun selectModelPickerProfile(profileId: String) {
-        modelOverride = null
+        if (_state.value.transcriptLoading) return
+        val profile = ApiConfigStore.read(getApplication()).profiles.firstOrNull { it.id == profileId } ?: return
         closeModelPicker()
-        viewModelScope.launch(Dispatchers.IO) {
-            val result = ApiConfigStore.select(getApplication(), profileId)
-            val config = ApiConfigStore.read(getApplication())
-            val active = config.profiles.firstOrNull { it.id == config.activeId }
-            syncActiveProfile()
-            syncRoleCardFromStore()
-            _state.update { s ->
-                s.copy(
-                    message = if (result.isSuccess) "已切换供应商：${active?.name ?: ""}"
-                    else "切换失败：${result.exceptionOrNull()?.message ?: "未知原因"}",
-                    messageIsError = result.isFailure,
-                )
-            }
-        }
+        selectSessionModel(profile, profile.model, _state.value.effort)
+        _state.update { it.copy(message = "已切换供应商：${profile.name}", messageIsError = false) }
     }
 
     /** 打开本地模型与思考强度两级选择菜单（完全本地配置，不发起网络请求）。 */
     fun openModelThinkingPicker() {
         val config = ApiConfigStore.read(getApplication())
-        val active = config.profiles.firstOrNull { it.id == config.activeId }
-        val models = active?.effectiveModels().orEmpty()
-        val currentId = modelOverride?.takeIf { it.isNotBlank() }
-            ?: active?.model?.takeIf { it.isNotBlank() }
-            ?: _state.value.modelLabel
         _state.update { s ->
+            val active = config.profiles.firstOrNull { it.id == (s.modelProfileId ?: config.activeId) }
             s.copy(
                 modelThinkingPicker = ModelThinkingPickerState(
                     providerId = active?.id.orEmpty(),
                     providerName = active?.name ?: s.profileName,
-                    models = models,
-                    currentModelId = currentId,
+                    models = active?.effectiveModels().orEmpty(),
+                    currentModelId = s.modelLabel,
                     currentEffort = s.effort,
                     expandedModel = null,
                 ),
@@ -4642,23 +4697,27 @@ class WorkspaceViewModel(
     }
 
     fun selectModelAndEffort(modelId: String, effort: EffortLevel) {
+        val snapshot = _state.value
         val target = modelId.trim()
-        if (target.isEmpty()) return
+        if (target.isEmpty() || snapshot.transcriptLoading) return
+        val config = ApiConfigStore.read(getApplication())
+        val profileId = snapshot.modelProfileId ?: config.activeId
+        val profile = config.profiles.firstOrNull { it.id == profileId } ?: return
+        if (profile.resolveModel(target) == null) return
         closeModelThinkingPicker()
-        modelOverride = target
-        _state.update { it.copy(effort = effort) }
-        persistRuntimeChoice(effort = effort)
-        modelSaveJob?.cancel()
-        modelSaveJob = viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { ApiConfigStore.setDefaultModel(getApplication(), target) }
-            syncActiveProfile()
-            syncRoleCardFromStore()
-            _state.update {
-                it.copy(
-                    message = if (result.isSuccess) "已切换：$target · ${effort.label}"
-                    else "已切换：$target · ${effort.label}（未能写入默认配置）",
-                )
-            }
+        selectSessionModel(profile, target, effort)
+        _state.update { it.copy(message = "已切换：$target · ${it.effort.label}", messageIsError = false) }
+    }
+
+    private fun selectSessionModel(profile: ApiProfile, modelId: String, effort: EffortLevel) {
+        val state = _state.updateAndGet {
+            it.withActiveModel(profile, modelId, effort, keepProfileScope = true)
+        }
+        val sessionId = state.activeSessionId.ifEmpty {
+            engine.sessionId()?.takeIf { state.composerBusy }.orEmpty()
+        }
+        if (sessionId.isNotEmpty()) {
+            sessionModelSave = engine.saveSessionModel(sessionId, profile.id, modelId, state.effort.toEngineEffort())
         }
     }
 
@@ -4956,14 +5015,10 @@ class WorkspaceViewModel(
                 val available = _state.value.availableEfforts.ifEmpty { EffortLevel.DEFAULT_AVAILABLE }
                 val level = available.getOrNull(index)
                 if (level != null) {
-                    _state.update {
-                        it.copy(choicePicker = null, effort = level, message = "推理强度：${level.label}")
-                    }
-                    persistRuntimeChoice(effort = level)
-                    if (engine.hasEngine() && !engine.isBusy()) {
-                        runCatching { engine.configure(engineOverrides()) }
-                    }
-                } else _state.update { it.copy(choicePicker = null) }
+                    applyEffortSelection(level, closeChoicePicker = true)
+                } else {
+                    _state.update { it.copy(choicePicker = null) }
+                }
             }
             // 这里**没有** MODEL：模型面板要异步拉目录并写回配置记录，
             // 用 5 个固定选项的通用选择器表达不了，已换成 ui/dialogs/ModelPickerOverlay。
@@ -5111,6 +5166,8 @@ class WorkspaceViewModel(
 
     /** 新建会话。 */
     fun newSession() {
+        openSessionSeq++
+        restoringSession = false
         engine.resetConversation()
         discardStreamingAssistant()
         // 上一轮即使还在跑也已经不属于任何会话了，清掉归属标记避免误拦。
@@ -5123,13 +5180,16 @@ class WorkspaceViewModel(
         // 换了会话，上一轮的停止流程不再属于任何东西：留着它会让新会话
         // 一打开就显示"正在停止"，而且看门狗还会去问一个已经作废的回合。
         resetStopTracking()
+        val defaultProfile = ApiConfigStore.activeProfile(getApplication())
+        val defaultEffort = engineEffortToUi(readEngineSettings(ApiSettingsStore(getApplication()))?.effort)
         _state.update {
-            it.copy(
+            it.withActiveModel(defaultProfile, selectedEffort = defaultEffort).copy(
                 // 占位条目的 id 用空串而不是伪造 id：它不是真实文件，
                 // 若被当成路径去打开会失败，空串能让"打不开"这件事显式化。
                 activeSessionId = "",
                 stopping = false,
                 transcript = emptyList(),
+                transcriptLoading = false,
                 transcriptHasOlder = false,
                 transcriptOldestSeq = -1L,
                 transcriptLoadingOlder = false,
@@ -5142,6 +5202,8 @@ class WorkspaceViewModel(
                 workingStatus = null,
                 tab = WorkspaceTab.CHAT,
                 sidebarOpen = false,
+                modelPicker = null,
+                modelThinkingPicker = null,
                 message = "已开始新会话，第一条消息会创建会话记录",
             )
         }
@@ -5149,6 +5211,10 @@ class WorkspaceViewModel(
 
     /** 打开一条历史会话。 */
     fun openSession(session: SessionSummary) {
+        viewModelScope.launch { restoreSession(session) }
+    }
+
+    private suspend fun restoreSession(session: SessionSummary) {
         if (session.id.isEmpty()) {
             _state.update { it.copy(message = "会话标识为空，无法打开", messageIsError = true) }
             refreshSessions()
@@ -5167,6 +5233,7 @@ class WorkspaceViewModel(
         // 见 newSession()：换会话时停止流程一并作废。
         resetStopTracking()
         val seq = ++openSessionSeq
+        restoringSession = true
 
         val targetPath = session.projectPath.takeIf { it.isNotBlank() }?.let { canonicalWorkspacePath(it) }
         val switchingProject = targetPath != null && targetPath != canonicalWorkspacePath(_state.value.projectPath)
@@ -5185,21 +5252,47 @@ class WorkspaceViewModel(
                 transcriptHasOlder = false,
                 transcriptHasNewer = false,
                 transcriptLoadingOlder = false,
+                modelPicker = null,
+                modelThinkingPicker = null,
             )
         }
-        viewModelScope.launch(Dispatchers.IO) {
+        coroutineScope {
             val startedAt = android.os.SystemClock.elapsedRealtime()
-            val pageDeferred = async { SessionReader.openPage(session.id) }
-            val fastTokensDeferred = async { engine.estimateSessionContextTokens(session.id) }
-            val engineDeferred = async<Result<Unit>> {
-                runCatching {
-                    engine.configure(engineOverrides())
-                    engine.resumeConversation(session.id).getOrThrow()
-                }
+            val pageDeferred = async(Dispatchers.IO) { runCatching { SessionReader.openPage(session.id) } }
+            val modelDeferred = async(Dispatchers.IO) {
+                sessionModelSave?.join()
+                val binding = SessionStore.loadProfileBinding(session.id)
+                val history = engine.sessionHistory(session.id)
+                val config = ApiConfigStore.read(getApplication())
+                val usedKeys = HashSet<String>()
+                val historyProfile = config.profiles.withIndex().firstOrNull { (index, profile) ->
+                    val key = PiConfigSync.allocateUniqueKey(profile.providerKey.ifBlank { profile.name }, "provider-${index + 1}", usedKeys)
+                    key == history.providerId
+                }?.value
+                val boundProfile = config.profiles.firstOrNull { it.id == binding?.profileId }
+                val savedChoice = boundProfile != null && !binding?.effort.isNullOrBlank()
+                val profile = if (savedChoice) boundProfile else historyProfile ?: boundProfile
+                val model = when {
+                    savedChoice -> binding?.model
+                    historyProfile != null -> history.modelId
+                    else -> binding?.model
+                }?.takeIf { it.isNotBlank() }
+                val effort = binding?.effort?.takeIf { savedChoice }
+                    ?: history.thinkingLevel.takeIf { historyProfile != null && it.isNotBlank() }
+                    ?: readEngineSettings(ApiSettingsStore(getApplication()))?.effort
+                val fallback = config.profiles.firstOrNull { it.id == config.activeId }
+                val modelState = _state.value.withActiveModel(
+                    profile = profile ?: fallback,
+                    selectedModelId = model.takeIf { profile != null },
+                    selectedEffort = engineEffortToUi(effort),
+                    keepProfileScope = profile != null,
+                )
+                modelState to history.contextTokens
             }
-            val page = runCatching { pageDeferred.await() }.getOrElse { error ->
-                engineDeferred.cancel()
-                if (seq != openSessionSeq) return@launch
+            val page = pageDeferred.await().getOrElse { error ->
+                modelDeferred.cancel()
+                if (seq != openSessionSeq) return@coroutineScope
+                restoringSession = false
                 _state.update {
                     it.copy(
                         transcriptLoading = false,
@@ -5208,7 +5301,7 @@ class WorkspaceViewModel(
                         messageIsError = true,
                     )
                 }
-                return@launch
+                return@coroutineScope
             }
             ZhiMemory.log(
                 "openPage session=" + session.id +
@@ -5216,15 +5309,24 @@ class WorkspaceViewModel(
                     " hasOlder=" + page.hasMore +
                     " ms=" + (android.os.SystemClock.elapsedRealtime() - startedAt),
             )
-            val fastTokens = runCatching { fastTokensDeferred.await() }.getOrDefault(0)
-            if (seq != openSessionSeq) {
-                engineDeferred.cancel()
-                return@launch
-            }
+            val (modelState, fastTokens) = modelDeferred.await()
+            if (seq != openSessionSeq) return@coroutineScope
             // SQLite 本地分页先到先展示，不阻塞用户阅读历史对话等待 PRoot / Pi 冷启动握手。
             _state.update {
                 it.copy(
                     activeSessionId = session.id,
+                    profileName = modelState.profileName,
+                    modelProfileId = modelState.modelProfileId,
+                    modelLabel = modelState.modelLabel,
+                    apiKeyConfigured = modelState.apiKeyConfigured,
+                    effort = modelState.effort,
+                    availableEfforts = modelState.availableEfforts,
+                    contextWindow = modelState.contextWindow,
+                    settingsDraft = it.settingsDraft?.copy(
+                        effort = modelState.effort,
+                        availableEfforts = modelState.availableEfforts,
+                        contextWindow = modelState.contextWindow,
+                    ),
                     transcript = page.items,
                     transcriptHasOlder = page.hasMore,
                     transcriptOldestSeq = page.oldestSeq,
@@ -5240,8 +5342,9 @@ class WorkspaceViewModel(
                     transcriptLoading = false,
                 )
             }
-            val resumed = engineDeferred.await()
-            if (seq != openSessionSeq) return@launch
+            val resumed = engine.resumeConversation(session.id, engineOverrides()).await()
+            if (seq != openSessionSeq) return@coroutineScope
+            restoringSession = false
             val footprint = engine.memoryFootprint()
             ZhiMemory.log(
                 "resumeConversation session=" + session.id +
@@ -5254,7 +5357,6 @@ class WorkspaceViewModel(
             _state.update {
                 it.copy(
                     contextTokens = finalTokens,
-                    contextWindow = engine.contextWindowTokens().takeIf { w -> w > 0 } ?: it.contextWindow,
                     message = resumed.exceptionOrNull()?.let { error ->
                         "会话历史已显示，但引擎恢复失败：" + (error.message ?: "未知原因")
                     },
@@ -5420,7 +5522,7 @@ class WorkspaceViewModel(
         val baseDraft = _state.value.settingsDraft ?: SettingsDraft.from(_state.value)
         applySettingsDraft(baseDraft.copy(projectPath = cleanPath))
         workspaceStore.saveLastActivePath(cleanPath)
-        runCatching { engine.configure(engineOverrides()) }
+        if (!restoringSession) runCatching { engine.configure(engineOverrides()) }
     }
 
     /** 在侧栏会话管理中切换项目目录并确保其已注册为一个工作区。 */
@@ -6231,14 +6333,14 @@ class WorkspaceViewModel(
 
     private fun persistSettingsNow() {
         val snapshot = _state.value
-        val overrides = engineOverrides()
+        val overrides = engineOverrides().forGlobalSettings()
         val draft = SettingsDraft.from(snapshot)
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val store = ApiSettingsStore(getApplication())
                 val config = store.load()
                 applyEngineOverrides(config, overrides)
-                store.saveDurable(config)
+                store.saveGlobalSettings(config, true)
             }
             // 主题与搜索密钥**不在** SessionConfig 里，configure() 那次落盘罩不到它们，
             // 各自补一次（密钥走加密槽，见 ApiSettingsStore.setWebSearchKey）。
@@ -6852,6 +6954,8 @@ class WorkspaceViewModel(
 
         /** 图片导出一次最多几条。 */
         private const val MaxExportItems = 50
+
+        private const val UNSET_MODEL_LABEL = "未设置"
 
         /** `/init` 的指令**搬走了**。 */
 

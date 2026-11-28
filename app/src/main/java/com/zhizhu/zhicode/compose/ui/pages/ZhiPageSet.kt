@@ -25,7 +25,6 @@ import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.data.OobeStore
 import com.zhizhu.zhicode.compose.ui.pages.miuix.OobePage
-import com.zhizhu.zhicode.compose.ui.pages.miuix.ApiConfigPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.AboutPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ChatDisplayPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ChatPage

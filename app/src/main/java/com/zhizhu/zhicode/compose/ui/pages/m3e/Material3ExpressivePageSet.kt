@@ -107,25 +107,6 @@ object Material3ExpressivePageSet : ZhiPageSet {
     }
 
     @Composable
-    override fun ApiConfig(config: com.zhizhu.zhicode.compose.model.ApiConfigState?, viewModel: WorkspaceViewModel) {
-        M3eApiConfigPage(
-            config = config,
-            onDismiss = viewModel::closeApiConfig,
-            onNew = viewModel::newApiProfile,
-            onEdit = viewModel::editApiProfile,
-            onSelect = viewModel::selectApiProfile,
-            onDelete = viewModel::deleteApiProfile,
-            onDraftChange = viewModel::updateApiProfileDraft,
-            onSave = viewModel::saveApiProfile,
-            onCancelForm = viewModel::cancelApiProfileForm,
-            onApplyPreset = viewModel::applyApiPreset,
-            onFetchDraftModels = viewModel::fetchDraftModelCatalog,
-            onUpdateContextAndPrompt = viewModel::updateContextAndPromptFromApiConfig,
-            onOpenPrompts = viewModel::openPrompts,
-        )
-    }
-
-    @Composable
     override fun Memory(state: MemoryState?, viewModel: WorkspaceViewModel) {
         M3eMemoryPage(
             state = state,

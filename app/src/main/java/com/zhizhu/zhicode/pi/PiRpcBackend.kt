@@ -27,6 +27,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /** 通过 PRoot 启动与驱动 Pi coding agent (`pi --mode rpc`)，并把流式事件、工具卡片与权限确认适配给界面。 */
+internal data class PiSessionHistory(
+    val contextTokens: Int = 0,
+    val providerId: String = "",
+    val modelId: String = "",
+    val thinkingLevel: String = "",
+)
+
 internal class PiRpcBackend(
     context: Context,
     private val sink: Sink,
@@ -146,15 +153,11 @@ internal class PiRpcBackend(
 
     fun estimateContextTokens(): Int = if (lastMeasuredContextTokens > 0L) lastMeasuredContextTokens.toInt() else 0
 
-    fun estimateContextTokensForSession(sessionId: String): Int {
-        if (sessionId.isBlank()) return 0
-        if (sessionStore?.sessionId == sessionId && lastMeasuredContextTokens > 0L) {
-            return lastMeasuredContextTokens.toInt()
-        }
+    fun sessionHistory(sessionId: String): PiSessionHistory {
         val targetFile = findPiSessionFile(sessionId)
-        if (targetFile.isEmpty()) return 0
+        if (targetFile.isEmpty()) return PiSessionHistory()
         val hostFile = File(ContainerPaths.guestToHost(targetFile).absolutePath)
-        return estimateContextTokensFromSessionFile(hostFile)
+        return readSessionHistory(hostFile)
     }
 
     fun contextPercent(): Int {
@@ -165,7 +168,7 @@ internal class PiRpcBackend(
 
     fun planWorkflowState(): PlanWorkflowState = currentConfig.planWorkflowState
 
-    fun configure(config: SessionConfig) {
+    private fun updateCurrentConfig(config: SessionConfig): SessionConfig {
         val prev = currentConfig
         val next = config.copy()
         next.permissionMode = PermissionModePolicy.normalize(next.permissionMode)
@@ -174,6 +177,12 @@ internal class PiRpcBackend(
             next.planWorkflowState = prevPlan.copy()
         }
         currentConfig = next
+        return next
+    }
+
+    fun configure(config: SessionConfig) {
+        val prev = currentConfig
+        val next = updateCurrentConfig(config)
         val synced = PiConfigSync.syncToContainer(appContext, next)
         val envKey = processRestartKey(next, synced)
         val alive = process?.isAlive == true
@@ -229,8 +238,8 @@ internal class PiRpcBackend(
         }
     }
 
-    fun sendPrompt(prompt: String, extraContent: JSONArray?) {
-        val config = currentConfig
+    fun sendPrompt(prompt: String, extraContent: JSONArray?, turnConfig: SessionConfig) {
+        val config = updateCurrentConfig(turnConfig)
         val images = extractPromptImages(extraContent, config.visionEnabled)
         if (prompt.isBlank() && images.isEmpty()) {
             sink.onError("请输入消息或附加图片", null)
@@ -255,23 +264,26 @@ internal class PiRpcBackend(
 
         ioExecutor.execute {
             try {
+                if (synchronized(hostToolCalls) { hostTurn != turn }) return@execute
                 ensureSessionStore(config)
                 recordUserMessage(prompt, images)
                 val synced = PiConfigSync.syncToContainer(appContext, config)
+                activeProviderKey = synced.providerId
+                activeModelId = synced.modelId
                 val cancelledProcess = synchronized(hostToolCalls) { cancelledHostProcess }
                 if (process?.isAlive == true && (process === cancelledProcess || needsRestartForEnvChange ||
                         activeProcessEnvKey != processRestartKey(config, synced))
                 ) {
                     stopProcessQuietly()
                 }
-                ensureProcessStarted()
+                ensureProcessStarted(config = config, prepared = synced)
                 if (appliedProviderKey != synced.providerId || appliedModelId != synced.modelId || appliedThinkingLevel != synced.thinkingLevel) {
                     val ok = runCatching {
                         applyModelAndThinkingLocked(synced.providerId, synced.modelId, synced.thinkingLevel, throwOnFailure = false)
                     }.getOrDefault(false)
                     if (!ok) {
                         stopProcessQuietly()
-                        ensureProcessStarted()
+                        ensureProcessStarted(config = config, prepared = synced)
                         applyModelAndThinkingLocked(synced.providerId, synced.modelId, synced.thinkingLevel, throwOnFailure = true)
                     }
                 }
@@ -373,21 +385,28 @@ internal class PiRpcBackend(
         }
     }
 
-    fun resumeConversation(sessionId: String) {
+    fun saveSessionModel(sessionId: String, config: SessionConfig) {
+        val store = sessionStore?.takeIf { it.sessionId == sessionId } ?: return
+        store.appendProfileBinding(config)
+        store.flush()
+    }
+
+    fun resumeConversation(sessionId: String, restoredConfig: SessionConfig) {
         cancel()
-        val store = SessionStore.resume(sessionId)
-        sessionStore = store
+        sessionStore?.flush()
+        sessionStore = SessionStore.resume(sessionId)
         val targetFile = findPiSessionFile(sessionId)
         piSessionFile = targetFile
         val hostFile = if (targetFile.isNotEmpty()) File(ContainerPaths.guestToHost(targetFile).absolutePath) else null
         val fileEstimated = if (hostFile != null && hostFile.isFile) estimateContextTokensFromSessionFile(hostFile) else 0
         lastMeasuredContextTokens = if (fileEstimated > 0) fileEstimated.toLong() else -1L
-        val synced = PiConfigSync.syncToContainer(appContext, currentConfig)
-        if (process?.isAlive == true && (needsRestartForEnvChange || activeProcessEnvKey != processRestartKey(currentConfig, synced))) {
+        val config = updateCurrentConfig(restoredConfig)
+        val synced = PiConfigSync.syncToContainer(appContext, config)
+        if (process?.isAlive == true && (needsRestartForEnvChange || activeProcessEnvKey != processRestartKey(config, synced))) {
             stopProcessQuietly()
         }
         if (hostFile != null && hostFile.isFile) {
-            ensureProcessStarted(recordInitialSessionFile = false)
+            ensureProcessStarted(recordInitialSessionFile = false, config = config, prepared = synced)
             val resp = sendCommandBlocking(
                 JSONObject().put("type", "switch_session").put("sessionPath", targetFile),
                 CMD_TIMEOUT_MS,
@@ -535,13 +554,16 @@ internal class PiRpcBackend(
 
     // ------------------------------------------------------------------ 进程管理与协议解析
 
-    private fun ensureProcessStarted(recordInitialSessionFile: Boolean = true) {
+    private fun ensureProcessStarted(
+        recordInitialSessionFile: Boolean = true,
+        config: SessionConfig = currentConfig,
+        prepared: PiConfigSync.SyncedConfig? = null,
+    ) {
         synchronized(processLock) {
             val current = process
             if (current != null && current.isAlive) return
 
-            val config = currentConfig
-            val synced = PiConfigSync.syncToContainer(appContext, config)
+            val synced = prepared ?: PiConfigSync.syncToContainer(appContext, config)
 
             val proot = ProotCommand.prootBinary(appContext)
             val loader = ProotCommand.loaderBinary(appContext)
@@ -1096,15 +1118,7 @@ internal class PiRpcBackend(
     }
 
     private fun findPiSessionFile(sessionId: String): String {
-        val rows = runCatching { SessionStore.readRows(sessionId) }.getOrNull() ?: return ""
-        val candidates = ArrayList<String>()
-        for (i in 0 until rows.length()) {
-            val row = rows.optJSONObject(i) ?: continue
-            if (row.optString("type", "") == "pi_session") {
-                val sf = row.optJSONObject("payload")?.optString("session_file", "") ?: ""
-                if (sf.isNotEmpty()) candidates.add(sf)
-            }
-        }
+        val candidates = SessionStore.loadPiSessionFiles(sessionId)
         return selectLatestUsableSessionFile(candidates) { guestPath ->
             File(ContainerPaths.guestToHost(guestPath).absolutePath)
         }
@@ -1162,8 +1176,10 @@ internal class PiRpcBackend(
         }
 
         /** 从 Pi 会话 `.jsonl` 解析当前分支最新有效上下文 token 占用，无须启动子进程。 */
-        internal fun estimateContextTokensFromSessionFile(file: File): Int {
-            if (!file.isFile) return 0
+        internal fun estimateContextTokensFromSessionFile(file: File): Int = readSessionHistory(file).contextTokens
+
+        internal fun readSessionHistory(file: File): PiSessionHistory {
+            if (!file.isFile) return PiSessionHistory()
             val entries = ArrayList<JSONObject>()
             val byId = HashMap<String, JSONObject>()
             runCatching {
@@ -1178,7 +1194,7 @@ internal class PiRpcBackend(
                     }
                 }
             }
-            if (entries.isEmpty()) return 0
+            if (entries.isEmpty()) return PiSessionHistory()
 
             val branch = extractActiveBranch(entries, byId)
             var lastCompactionSummaryTokens = 0L
@@ -1186,9 +1202,12 @@ internal class PiRpcBackend(
             var lastUsageTokens = -1L
             var trailingTokens = 0L
             var fallbackTokens = 0L
+            var thinkingLevel = ""
+            var history = PiSessionHistory()
 
             for (entry in branch) {
                 when (entry.optString("type", "")) {
+                    "thinking_level_change" -> thinkingLevel = entry.optString("thinkingLevel", "")
                     "compaction" -> {
                         lastUsageTokens = -1L
                         trailingTokens = 0L
@@ -1203,6 +1222,14 @@ internal class PiRpcBackend(
                         val msgTokens = estimateJsonMessageTokens(msg)
                         if (role == "assistant") {
                             val stopReason = msg.optString("stopReason", "")
+                            val modelId = msg.optString("model", "")
+                            if (modelId.isNotBlank() && stopReason != "aborted" && stopReason != "error") {
+                                history = PiSessionHistory(
+                                    providerId = msg.optString("provider", ""),
+                                    modelId = modelId,
+                                    thinkingLevel = thinkingLevel,
+                                )
+                            }
                             val usage = msg.optJSONObject("usage")
                             if (stopReason != "aborted" && stopReason != "error" && usage != null) {
                                 val totalInput = usage.optLong("input", 0L) +
@@ -1229,7 +1256,7 @@ internal class PiRpcBackend(
             }
 
             val total = if (lastUsageTokens > 0L) lastUsageTokens + trailingTokens else fallbackTokens
-            return total.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+            return history.copy(contextTokens = total.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt())
         }
 
         private fun extractActiveBranch(

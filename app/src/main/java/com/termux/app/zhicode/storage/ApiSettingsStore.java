@@ -854,8 +854,8 @@ public final class ApiSettingsStore {
         return config;
     }
 
-    private void saveGlobal(SessionConfig config) {
-        saveGlobal(config, false);
+    public synchronized void saveGlobalSettings(SessionConfig config, boolean durable) {
+        saveGlobal(config, durable);
     }
 
     /**
