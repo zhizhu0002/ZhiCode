@@ -63,6 +63,102 @@ data class ChangeLogItem(
  */
 val CHANGE_LOG: List<ChangeLogEntry> = listOf(
     ChangeLogEntry(
+        version = "1.1.0",
+        dateLabel = "2025-11",
+        sections = listOf(
+            ChangeLogSection(
+                title = "界面风格可切换",
+                items = listOf(
+                    ChangeLogItem(
+                        title = "三套完整界面",
+                        detail = "「主题设置 → 界面风格」现在可以在 Miuix（默认）、" +
+                            "Material 3 Expressive 与麻薯 Mochi 之间切换。" +
+                            "三套是**独立的页面组**，不是换肤：卡片、列表、设置行、" +
+                            "浮层的布局与材质各自成立。",
+                    ),
+                    ChangeLogItem(
+                        title = "页面组契约",
+                        detail = "新增 `ZhiPageSet` 接口，每个页面都有默认实现回落到 Miuix。" +
+                            "这意味着新增一套风格**不必一次写完所有页面** —— " +
+                            "只覆写想改的那几页就能装上验证，其余自动沿用默认。" +
+                            "「关于 / 更新 / 隐私」三页的麻薯版就是这样只写了三页。" +
+                            "Material 3 Expressive 覆盖全部十六页。",
+                    ),
+                    ChangeLogItem(
+                        title = "切换立即生效",
+                        detail = "选中即应用并落盘，不需要重启。选择以页面组 id 保存，" +
+                            "将来某个组被移除时自动回落到默认组，不会白屏。",
+                    ),
+                ),
+            ),
+            ChangeLogSection(
+                title = "流畅度",
+                items = listOf(
+                    ChangeLogItem(
+                        title = "上滑加载历史不再跳到顶部",
+                        detail = "往前补一页历史时，第一个助手回合的标题键会变，" +
+                            "对列表而言那是一条全新条目，之前的滚动锚点全部作废。" +
+                            "现在给每个回合一个按位置对齐的稳定键，只在前插且未切会话时启用。",
+                    ),
+                    ChangeLogItem(
+                        title = "打开设置页不再把对话流顶到底",
+                        detail = "跟随意图曾被跨页面保留，回到工作区时会把正在读的历史顶走。" +
+                            "现在恢复后的第一轮不当作「用户要继续跟随」，真正的新内容仍然跟随。",
+                    ),
+                    ChangeLogItem(
+                        title = "重组开销",
+                        detail = "开启 Compose 强跳过：状态未变时整个页面跳过重组，" +
+                            "单条消息变化时只有那一项重绘。此前工作区那个含两百多个字段的" +
+                            "状态类被判为不稳定，任何一次流式输出都会让整棵对话流重组。",
+                    ),
+                    ChangeLogItem(
+                        title = "测量可在正式包开启",
+                        detail = "帧耗时与重组计数探针此前只在调试包编译，" +
+                            "而真机问题几乎只在正式包出现 —— 等于一直拿不到数据。" +
+                            "现在用构建参数 `-PframeTrace=true` 打开，平时不传则完全编译掉。",
+                    ),
+                ),
+            ),
+            ChangeLogSection(
+                title = "修复",
+                items = listOf(
+                    ChangeLogItem(
+                        title = "顶栏与底栏的模糊",
+                        detail = "上一轮为省一次整屏录制，在页面切换期间暂停了背景捕获。" +
+                            "实际效果是模糊块在最关键的 420 毫秒里取不到背景而显示成半透明，" +
+                            "然后才变回模糊；若那次暂停没有正常结束，模糊会一直不出现。" +
+                            "该机制已整体移除，恢复为始终捕获。",
+                    ),
+                    ChangeLogItem(
+                        title = "移除麻薯导航栈",
+                        detail = "它会在转场期间同时组合上下两页，而工作区那一屏极重。" +
+                            "同时压栈的下层页始终保有组合，导致对话流的跟随逻辑在设置页打开时仍在跑。" +
+                            "已回到 Miuix 自己的页面栈。",
+                    ),
+                ),
+            ),
+            ChangeLogSection(
+                title = "其它",
+                items = listOf(
+                    ChangeLogItem(
+                        title = "侧栏工作区聚合",
+                        detail = "侧栏按工作区归并会话，切换项目时不再需要在一长串会话里找。",
+                    ),
+                    ChangeLogItem(
+                        title = "运行环境",
+                        detail = "云端镜像切到 Ubuntu 24.04，内置 Node 与 Pi；" +
+                            "修复首次启动引导流程与终端 groups 告警。",
+                    ),
+                    ChangeLogItem(
+                        title = "模型配置",
+                        detail = "多供应商预设图标、模型名滚动显示、本地双级弹窗；" +
+                            "修复重启后丢上下文、无 API 配置时保存越界、上下文窗口支持小数显示。",
+                    ),
+                ),
+            ),
+        ),
+    ),
+    ChangeLogEntry(
         version = "1.0.0",
         dateLabel = "2025-11",
         sections = listOf(

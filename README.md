@@ -40,7 +40,7 @@ Releases 版通道 [GitHub Releases][releases]
 
 CI 构建通道 [GitHub Actions][build]
 
-以下步骤适用于最新 CI 构建。Releases 暂时未跟进 Ubuntu ( Releases 1.0 支持 Termux ) [1.0.0 发行说明](docs/release-notes-1.0.0.md)
+以下步骤适用于最新 CI 构建。Releases 暂时未跟进 Ubuntu ( Releases 1.0 支持 Termux ) [1.1.0 发行说明](docs/release-notes-1.1.0.md)
 
 1. **初始化运行环境。** 安装并打开 APK，按首次启动引导选择镜像源，下载并安装 Ubuntu 24.04。此步骤需要网络和足够的解压空间。
 2. **配置模型。** 在引导页点「前往 API 配置」，选择供应商，填写对应的凭据和模型。选择协议、填写 Base URL 与模型 ID。
