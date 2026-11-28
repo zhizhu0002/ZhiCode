@@ -303,6 +303,35 @@ dependencies {
     implementation 'io.github.feice11:mochi-compose:0.3.0'
 
     /*
+     * material-color-utilities：Mochi 的**运行期必需**依赖，而且**版本必须锁 4.1.1**。
+     *
+     * 症状一（CI 红）：`:app:minifyReleaseWithR8` 直接失败 ——
+     *
+     *   Missing class com.materialkolor.scheme.DynamicScheme$Platform
+     *     (referenced from: com.materialkolor.scheme.DynamicScheme
+     *      ui.feice.mochi.theme.MochiColorSchemeKt.buildScheme(SchemeKey))
+     *
+     * 根因不是「类缺失」，而是**包名换过**：
+     *
+     *   4.1.1 → com.materialkolor.scheme.DynamicScheme
+     *   6.0.0 → com.materialkolor.dynamiccolor.DynamicScheme
+     *
+     * Mochi 0.3.0 是按 4.1.1 编译的（POM 里也写 4.1.1），但 `scheme.*` 原本是
+     * `runtime` 作用域，进不了 compile classpath，Gradle 就按别处的传递依赖
+     * 把它提升到了 6.0.0 —— 于是 Mochi 引用的 `scheme` 包在新版里根本不存在。
+     *
+     * 为什么不能只加 `-dontwarn`：`MochiColorSchemeKt` 对 `com.materialkolor.*`
+     * 有 **72 处**实际调用（`Hct` / `TonalPalette` / `SchemeContent` /
+     * `SchemeVibrant` 等 12 个类），`lightColorScheme()` / `darkColorScheme()`
+     * 内部都走 `buildScheme()`。`-dontwarn` 只让 R8 闭嘴，类仍不进 APK，
+     * 运行到取色时就是 `NoClassDefFoundError`。
+     *
+     * 所以两件事一起做：显式提为 compile 依赖 **并锁死 4.1.1**。
+     * 升级 Mochi 时如果它的 POM 跟着换版本，这里一起改。
+     */
+    implementation 'com.materialkolor:material-color-utilities:4.1.1'
+
+    /*
      * 图标：Mochi 的强制接入要求。
      *
      * `llms.txt:45` 原文：「Icons: add the mochi-icons module and use
