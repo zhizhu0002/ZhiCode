@@ -174,17 +174,7 @@ internal fun M3eTaskOverlay(tasks: List<AgentTask>, open: Boolean, onDismiss: ()
                         Column(Modifier.fillMaxWidth().padding(14.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 when (task.state) {
-                                    /*
-                                     * 运行中用 **M3E 的 `LoadingIndicator`**，不是 MD3 的转圈。
-                                     *
-                                     * 两者都不是"转圈"，但差别是实质的：MD3 的 CircularProgressIndicator
-                                     * 是一段弧绕圆心匀速转；M3E 的 LoadingIndicator 是**形状本身不断变形**
-                                     * —— 圆 → 花 → 方 → 星，按 `MorphIntervalMillis` 切换，
-                                     * 全程还带一个整体旋转。它是 M3E 的标志性组件之一。
-                                     *
-                                     * 尺寸给 20dp 与旁边图标的视觉大小对齐；它两侧不需要额外留白，
-                                     * 因为它自己带内边距。
-                                     */
+                                    // M3E LoadingIndicator：形状持续变形，非匀速转圈
                                     TaskState.RUNNING -> androidx.compose.material3.LoadingIndicator(
                                         modifier = Modifier.padding(end = 8.dp),
                                     )
@@ -238,13 +228,7 @@ internal fun M3eEnvironmentOverlay(
                     }
                 }
                 if (installing) {
-                    /*
-                     * 安装进度用 M3E 的 **`WavyProgressIndicator`**：轨道是波浪形的，
-                     * 进度推进时波峰一起走。MD3 的线性进度是一条平直的填充条。
-                     *
-                     * 这是 M3E 的「表现力」在静态截图里唯一能看出来的一处 ——
-                     * 平条和波浪条一眼可分，而弹簧动效要动起来才看得出。
-                     */
+                    // M3E 波浪形进度条，波峰随进度推进
                     androidx.compose.material3.LinearWavyProgressIndicator(
                         progress = { progress.coerceIn(0, 100) / 100f },
                         modifier = Modifier.fillMaxWidth(),

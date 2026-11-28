@@ -80,6 +80,7 @@ import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.SidebarState
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
+import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import java.io.File
 import androidx.compose.ui.unit.Dp
@@ -250,21 +251,7 @@ private fun M3eSidebar(
                 )
             }
 
-            /*
-             * 搜索框的展开/收起走 M3E 的 `motionScheme`，不用裸 `tween`。
-             *
-             * ## 为什么这样的改动不是"换个数字"
-             *
-             * `tween` 是**时长曲线**：给定 180ms，无论内容大小、无论打断了没打断，
-             * 都是那 180ms 走完。而 `motionScheme` 给的是**弹簧**：它按物理走，
-             * 被打断时从当前位置和当前速度继续（`docs/ui-m3e.md` 第 2 节）。
-             *
-             * M3E 的 spatial 组阻尼 0.80、刚度 380，比 MD3 的 0.90/700 更慢更有回弹。
-             * 同一个"展开"在两种规范下观感不同 —— 这就是为什么不能在 M3E 组里
-             * 继续用 `ZhiMotion` 的 Tween 常量，那会变成第三套手感。
-             *
-             * 分层：位置/尺寸走 spatial，透明度走 effects —— 两条轴是正交的。
-             */
+            // 搜索框进/出：位置与尺寸走 spatial，透明度走 effects
             val motion = MaterialTheme.motionScheme
             AnimatedVisibility(
                 visible = searchVisible,
@@ -949,4 +936,4 @@ private val SessionRowMinHeight = 40.dp
 private val SidebarRowIconSize = 20.dp
 private val SidebarRowCorner = 12.dp
 private val SessionRowSpacing = 2.dp
-private val ZhiSidebarMotion = tween<Color>(durationMillis = 180)
+private val ZhiSidebarMotion = ZhiMotion.colorSpec

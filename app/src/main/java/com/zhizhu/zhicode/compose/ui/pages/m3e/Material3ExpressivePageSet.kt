@@ -15,13 +15,7 @@ import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.ui.pages.ZhiPageSet
 
-/**
- * Material 3 Expressive 主题页面组。
- *
- * 与 [com.zhizhu.zhicode.compose.ui.pages.MiuixPageSet] 并列注册在 [com.zhizhu.zhicode.compose.ui.pages.ZhiPageSets] 中，
- * 共用同一套业务状态层（[WorkspaceViewModel] / [ThemeSettings]），
- * 为工作区、设置主页、主题切换、聊天显示与关于/更新/隐私/开源许可提供原生的 MD3 Expressive 实现。
- */
+/** M3E 主题页面组，与 MiuixPageSet 并列注册。 */
 object Material3ExpressivePageSet : ZhiPageSet {
 
     override val id: String = "m3_expressive"

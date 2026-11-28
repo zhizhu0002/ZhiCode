@@ -63,11 +63,7 @@ import top.yukonga.miuix.kmp.theme.ThemeColorSpec
 import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 import kotlin.math.roundToInt
 
-/**
- * Material 3 Expressive 主题设置页：
- * 与 [com.zhizhu.zhicode.compose.ui.pages.miuix.ThemePage] 共享同一份 [ThemeSettings]，
- * 并且可以在页面内直接实时在 Miuix / Material 3 Expressive / Mochi 间切换。
- */
+/** M3E 主题设置页，共享 ThemeSettings，可在三种页面组间切换。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun M3eThemePage(

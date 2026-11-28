@@ -48,12 +48,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.shizuku.ShizukuBridge
 import rikka.shizuku.Shizuku
 
-/**
- * Material 3 Expressive 设置主页：
- * - `LargeFlexibleTopAppBar` 折叠大标题；
- * - 分组分段圆角卡片（外角 `24.dp`、内角 `6.dp`）；
- * - 原生 MD3 `Switch` / `Slider` / `ModalBottomSheet` / `AlertDialog`。
- */
+/** M3E 设置主页：折叠大标题 + 分组分段卡片 + 原生 MD3 控件。 */
 @Composable
 fun M3eSettingsPage(
     draft: SettingsDraft?,

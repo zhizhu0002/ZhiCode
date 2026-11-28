@@ -136,28 +136,7 @@ internal fun M3eOobePage(state: WorkspaceUiState, viewModel: WorkspaceViewModel)
                         Button(onClick = viewModel::advanceOobeStep, enabled = perms.allRequiredGranted) { Text("下一步") }
                     }
                     OobeStep.RUNTIME -> {
-                        /*
-                         * M3E 的**连接式按钮组**。
-                         *
-                         * ## 为什么不用 `ButtonGroup { }` 那个组合函数
-                         *
-                         * `material3` 里 `ButtonGroup` 这个名字有多个重载，公开的那个
-                         * 要求传 `overflowIndicator`（按钮超出宽度时的溢出菜单）。
-                         * 对"两个固定按钮"来说那个语义用不上，硬传一个空槽只会让
-                         * 代码更难读。
-                         *
-                         * ## 用的是官方推荐的另一条路
-                         *
-                         * `ButtonGroupDefaults.connected{Leading,Middle,Trailing}ButtonShapes()`
-                         * 给出融合形状（相邻角收窄、外侧保持圆角），配合
-                         * `Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)`
-                         * 让两块之间只留一条窄缝 —— 这正是 M3E 按钮组的观感。
-                         * 参考实现：本机 `ksu-style` 的 `ColorPaletteScreenMaterial`
-                         * 就是这么写的（那里是 4 个 ToggleButton 连成一组）。
-                         *
-                         * 收益不只是好看：形状按**位置**配对（首 / 中 / 尾），
-                         * 所以将来在中间加一项时，只要改 index 判断，首尾自动还是圆的。
-                         */
+                        // M3E 连接式按钮组：首尾形状按位置配对，相邻角收窄
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),

@@ -63,13 +63,7 @@ import com.zhizhu.zhicode.compose.ui.PageFeedbackSlot
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import kotlin.math.roundToInt
 
-/**
- * 为 Material 3 Expressive 页面内部挂载的共用 Miuix 浮层（`ZhiOverlayHost`、
- * `Composer` 锚定下拉、`ZhiAnchoredMenuHost`）提供透明的 Miuix popupHost。
- *
- * Miuix 的弹窗/下拉通过 `LocalPopupStates` 注册到最近的 Miuix `Scaffold`，
- * 用零背景、无手势占位的 Miuix Scaffold 包裹即可让两套 UI 无缝共存在同一窗口内。
- */
+/** 为 M3E 页面内的 Miuix 浮层提供透明 popupHost，使两套 UI 共存于同一窗口。 */
 @Composable
 internal fun M3eMiuixPopupBridge(content: @Composable () -> Unit) {
     top.yukonga.miuix.kmp.basic.Scaffold(
@@ -83,10 +77,7 @@ internal fun M3eMiuixPopupBridge(content: @Composable () -> Unit) {
     }
 }
 
-/**
- * Material 3 Expressive 经典二级页脚手架：
- * 可折叠大标题 [LargeFlexibleTopAppBar] + Tonal 返回圆钮 + 底部 [PageFeedbackSlot]。
- */
+/** 二级页脚手架：可折叠大标题 + Tonal 返回圆钮 + 底部反馈位。 */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun M3eSubPageScaffold(
@@ -155,29 +146,7 @@ internal fun M3eSubPageScaffold(
     }
 }
 
-/**
- * M3E 的固定尺寸，集中一处。
- *
- * ## 为什么要有这个对象
- *
- * 这些值原先散在各处（`52.dp`、`40.dp`、`14.dp` 内边距），而它们分属
- * M3E 规范的**不同档位**：行高是列表项的语义尺寸，图标块是控件档位，
- * 内边距是排版节奏。散着写就看不出"这个 52 应该是 56"。
- *
- * ## 数值来源
- *
- * 全部取自官方 tokens（`material3:1.5.0-alpha16`，反编译见 `docs/ui-m3e.md`）：
- *
- * | 项 | 值 | 依据 |
- * | --- | --- | --- |
- * | 单行列表项 | 56dp | M3E list item 单行 |
- * | 双行列表项 | 72dp | M3E list item 双行 |
- * | 三行列表项 | 88dp | M3E list item 三行 |
- * | 控件高度（Medium 档） | 56dp | `ButtonMediumTokens.ContainerHeight` |
- * | 图标块 | 40dp | Small 档视觉尺寸 |
- * | 最小触控热区 | 48dp | Android 无障碍下限，与视觉高度无关 |
- * | 行内水平内边距 | 16dp | M3E 列表项左右留白 |
- */
+/** M3E 尺寸档位，数值依据见 docs/ui-m3e.md。 */
 internal object M3eDimens {
 
     /** 单行列表项高度。 */
@@ -202,14 +171,7 @@ internal object M3eDimens {
     val IconGlyph = 20.dp
 }
 
-/**
- * 分组小标题。
- *
- * ## 为什么用 `labelLarge` 而不是更大的字号
- *
- * M3E 的分组小标题属于 Label 档，是「标签」不是「标题」。用 `titleSmall`
- * 会与行内的 `titleMedium` 形成两个几乎同级的标题层，反而看不出哪个是分组。
- */
+/** 分组小标题，用 labelLarge 与行内 titleMedium 拉开层级。 */
 @Composable
 internal fun M3eSectionHeader(
     title: String,
@@ -224,30 +186,7 @@ internal fun M3eSectionHeader(
     )
 }
 
-/**
- * M3E 分段列表卡片的位置形状。
- *
- * ## 数值来源
- *
- * 外角取 M3E `CornerExtraLarge` = **28dp**，相邻内角取 `CornerSmall` = **8dp**
- * （官方 `ShapeTokens` 的字节码值，见 `docs/ui-m3e.md`）。
- *
- * ## 为什么原来是 24 / 6
- *
- * 24 与 6 都不在任何一档官方形状上 —— 24 介于 `CornerLargeIncreased`(20) 与
- * `CornerExtraLarge`(28) 之间，6 介于 `CornerExtraSmall`(4) 与 `CornerSmall`(8)
- * 之间。取中间值让这张卡**既不属于任何既有档位、也和外层的
- * `MaterialTheme.shapes` 对不上**：`extraLarge` 是 28，卡片却是 24，
- * 同一屏里两种大圆角并存。
- *
- * 现在外角与 `shapes.extraLarge` 一致，内角与 `shapes.small` 一致，
- * 于是「容器 / 内部块」的关系可以从主题形状表直接读出来，不必记特例。
- *
- * 内角 8 与外角 28 的差 20 恰好是行内水平内边距的两倍少一点 ——
- * 这不是同心公式的结果（同心要求内角 = 外角 − 内边距 = 28 − 16 = 12），
- * 而是分段卡片特有的"相邻两块之间要留出可见的缝"的取舍：
- * 12 会让缝隙看起来像一条被压扁的管子，8 才是 M3E 分段列表的实际观感。
- */
+/** 分段列表卡片形状：外角取 CornerExtraLarge，相邻内角取 CornerSmall。 */
 internal fun m3eSegmentShape(index: Int, count: Int): Shape = when {
     count <= 1 -> RoundedCornerShape(28.dp)
     index == 0 -> RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomStart = 8.dp, bottomEnd = 8.dp)

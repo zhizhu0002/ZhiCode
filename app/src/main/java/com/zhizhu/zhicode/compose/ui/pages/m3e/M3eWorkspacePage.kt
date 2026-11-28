@@ -2,10 +2,8 @@ package com.zhizhu.zhicode.compose.ui.pages.m3e
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -95,7 +93,6 @@ import com.zhizhu.zhicode.compose.ui.NoGlass
 import com.zhizhu.zhicode.compose.ui.PageFeedback
 import com.zhizhu.zhicode.compose.ui.WideWorkspace
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
-import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiOverlayHost
 import com.zhizhu.zhicode.compose.ui.brandSignatureMarquee
 import com.zhizhu.zhicode.compose.ui.iconForTab
@@ -103,14 +100,7 @@ import com.zhizhu.zhicode.compose.ui.pages.miuix.FileSelectionToolbar
 import com.zhizhu.zhicode.compose.ui.pages.miuix.navBarHideOnVerticalDrag
 import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.ZhiDebugHud
 
-/**
- * Material 3 Expressive 主工作区：
- * - `CenterAlignedTopAppBar` + Tonal 圆钮 + 用量胶囊；
- * - 顶部标签模式：连接型 `SingleChoiceSegmentedButtonRow`；
- * - 底部悬浮模式：MD3 Expressive `HorizontalFloatingToolbar` + `ToggleButton`；
- * - 底部固定模式：MD3 `NavigationBar`；
- * - 窄屏侧栏：`ModalNavigationDrawer` + `ModalDrawerSheet`。
- */
+/** M3E 主工作区，四种导航形态见实现。 */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun M3eWorkspacePage(
@@ -131,14 +121,7 @@ internal fun M3eWorkspacePage(
     val showBottomNavigation = !wide && themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM
     val fileSelectionActive = !wide && (state.fileSelectionMode || state.fileSelection.isNotEmpty())
     val imeOpen = LocalImeMotion.current.imeVisible
-    /*
-     * 输入法弹出时导航栏淡出。
-     *
-     * 透明度属于 M3E 的 **effects** 轴（不动的），不是 spatial 轴。
-     * 用 `defaultEffectsSpec()` 而不是分别给"淡入 120ms / 淡出 180ms"——
-     * effects 的阻尼是 1.0（临界阻尼，不过冲），视觉上就是干净的淡入淡出，
-     * 不需要按方向配不同时长。
-     */
+    // 输入法弹出时导航栏淡出，透明度走 effects 轴
     val imeNavAlpha by animateFloatAsState(
         targetValue = if (imeOpen) 0f else 1f,
         animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
@@ -156,12 +139,7 @@ internal fun M3eWorkspacePage(
             else if (navBarCollapsed.value && progress <= 0.85f) navBarCollapsed.value = false
         }
     }
-    /*
-     * ⚠️ `MaterialTheme.motionScheme` 必须在这里读，不能在下面的
-     * `LaunchedEffect` 里读 —— 它是 `@Composable` 属性，而 effect 的 lambda
-     * 不是组合作用域，直接调会编译失败（"@Composable invocations can only
-     * happen from the context of a @Composable function"）。
-     */
+    // motionScheme 是 @Composable 属性，必须在此读取后传入 LaunchedEffect
     val navBarMotion = MaterialTheme.motionScheme
     val navBarScrollTick = remember { IntArray(1) }
     val navBarHideAnim = remember { Animatable(0f) }
@@ -170,14 +148,7 @@ internal fun M3eWorkspacePage(
         snapshotFlow { navBarHideTarget.floatValue }.collect { target ->
             navBarHideAnim.animateTo(
                 targetValue = target,
-                /*
-                 * 导航栏随滚动收起/展开 —— 位置变化，走 spatial 的 **fast** 档。
-                 *
-                 * 这里不能用 default：滚动是连续的，收起动画必须比手指的滚动更快
-                 * 完成，否则每次滚动都会看到导航栏"追不上"内容。原实现给的是
-                 * 固定 120ms，恰好是 fast 档在同一量级上的观感；换成弹簧之后
-                 * 被打断（用户来回滚）时会从当前速度继续，不会每次都从头重播。
-                 */
+                // 导航栏随滚动收起/展开，位置变化走 spatial 的 fast 档
                 animationSpec = navBarMotion.fastSpatialSpec(),
             )
         }
