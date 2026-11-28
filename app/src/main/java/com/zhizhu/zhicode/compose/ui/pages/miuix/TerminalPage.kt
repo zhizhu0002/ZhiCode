@@ -71,21 +71,6 @@ import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 终端面板。
- *
- * 两种形态，由 [runtimeReady] 决定：
- * - **环境就绪**：挂真实的 Termux PTY（`AndroidView` 承载 [TermuxTerminalPane]），
- *   里面是真正的 bash，可以跑命令；
- * - **环境未就绪**：显示只读滚动缓冲 + 一句"为什么不能输入"，
- *   而不是给一个点了没反应的输入框。
- *
- * 为什么用 `AndroidView` 而不是纯 Compose 重写终端：
- * `TerminalView`（约 2000 行）依赖 `Canvas` 逐字符绘制、CSI 序列解析、
- * 文本选择与缩放手势，全部重写成 Compose 的收益很低、风险很高。
- * 终端的正确性来自 `TerminalEmulator`/`TerminalBuffer`（已完整移植），
- * 渲染层复用现成 View 是更稳的选择。
- */
 @Composable
 fun TerminalPage(
     lines: List<TerminalLine>,
@@ -127,43 +112,11 @@ fun TerminalPage(
     )
 }
 
-/**
- * 终端实例的取用口。
- *
- * 做成接口而不是直接把 `WorkspaceViewModel` 传进来：这个包（`ui.panes`）里其它面板
- * 都不认识 ViewModel，终端也不该是例外 —— 它需要的只是“给我一个能跨 Tab 活着的
- * `TermuxTerminalPane`”。由 `AppScaffold` 在接线处注入。
- */
+/** 终端实例的取用口。 */
 fun interface TerminalHolder {
     fun obtain(context: Context): TermuxTerminalPane
 }
 
-/**
- * 真实 PTY。
- *
- * ⚠️ **这里不能持有会话的生命周期**。
- *
- * 原来写的是 `remember { TermuxTerminalPane(...) }` + `onDispose { pane.closeAll() }`，
- * 而 `PaneHost` 用 `when(tab)` 切面板：切到别的 Tab，这段 Composable 直接离开组合，
- * `onDispose` 触发，**`closeAll()` 把每个会话（bash 进程 + PTY fd）都 finish 掉**。
- * 所以“切走再切回来”看到的永远是全新的空终端。
- *
- * 现在实例由 [TerminalHolder] 持有（实际挂在 ViewModel 上），离开组合时只把它
- * **从视图树上摘下来**，会话原封不动：
- * - 子进程不依赖 View 挂在哪里，摘下来之后 bash 照常跑，回声也照常进缓冲；
- * - 重新切回来时 [AndroidView] 的 factory 返回同一个实例，终端内容还是原来那些。
- *
- * 唯一需要防御的是“同一个 View 不能有两个父节点”：切回来时新的 AndroidView 可能
- * 先建立、旧的还没来得及 dispose，所以 attach 前再摘一次（[detachFromParent]）。
- *
- * <h3>外壳为什么是 Compose 了</h3>
- * 工具栏、抽屉、扩展键、两个对话框原来全在 `TermuxTerminalPane` 里用 Java 拼 View，
- * 与它正上方那行 Compose 标题栏割裂，而且整块和原版逐行相同（95.4%）。
- * 现在壳在 [TerminalToolbar] / [TerminalDrawer] / [TerminalExtraKeys] /
- * [TerminalQuickActionsDialog] 里，宿主只剩下 PTY 与上游 `TerminalView`
- * （由中间那个 [AndroidView] 承载）。**渲染层仍然是上游 View**：
- * `TerminalView` 靠 Canvas 逐字符绘制 + CSI 解析 + 选区手势，重写收益低风险高。
- */
 @Composable
 private fun RealTerminalPane(
     projectName: String,
@@ -229,17 +182,6 @@ private fun RealTerminalPane(
 
     val selectedIndex = state.sessions.indexOfFirst { it.selected }
 
-    /*
-     * ⚠️ `imePadding()` 必须挂在这里，否则键盘会**盖住终端最后几行**。
-     *
-     * 之前整个终端页对 IME 毫无处理：`MainActivity` 声明了 `adjustResize`，
-     * 但那只是让窗口整体缩短；Compose 这一层没人消费 `WindowInsets.ime`，
-     * 于是终端（占满剩余高度）+ 扩展键面板照旧铺到屏幕底边 ——
-     * 键盘一弹起来就压在它们上面，看不出光标在哪一行，也点不到扩展键。
-     *
-     * 放进 `Surface` 而不是内部 `Column`：要缩的是**整页**，包括顶部 `PaneHeader`、
-     * 终端本体、以及底部那排扩展键。只缩终端本体的话扩展键仍会被压住。
-     */
     val imeMotion = com.zhizhu.zhicode.compose.ui.LocalImeMotion.current
     val bottomBarPx = with(LocalDensity.current) {
         com.zhizhu.zhicode.compose.ui.LocalBottomBarInset.current.roundToPx()
@@ -412,16 +354,7 @@ private fun detachFromParent(view: View) {
     (view.parent as? ViewGroup)?.removeView(view)
 }
 
-/**
- * 真实终端区域此刻画的是三种东西中的哪一种。
- *
- * 单独列成枚举、而不是直接拿 `state.failureDetail` / `runtimeNotice` 当
- * `AnimatedContent` 的 key：那两个是**字符串**，内容一变（比如失败原因从
- * 「进程已退出」变成「重试中」）都会被当成"换了一屏"，于是原地重放一次转场。
- * 枚举只表达"是哪一种"，同一种内部的文案变化不再是转场。
- *
- * 顺序即优先级：失败 > 未就绪须知 > 真终端（与原来的 `when` 一致）。
- */
+/** 真实终端区域此刻画的是三种东西中的哪一种。 */
 private enum class TerminalStage { REAL, FAILURE, NOTICE }
 
 /** 环境未就绪时的只读占位。文案明确说明**为什么**不能输入。 */
@@ -520,12 +453,7 @@ private fun TerminalPlaceholder(
     }
 }
 
-/**
- * 占位态的「初始化运行环境」入口。
- *
- * 三态：未安装（按钮可点）/ 正在安装（进度 + 禁用）/ 失败（按钮可再点，附最后一次错误）。
- * 失败时**不假装成功**：文案来自 ViewModel 的 `runtimeMessage`，它会说明卡在哪一步。
- */
+/** 占位态的「初始化运行环境」入口。 */
 @Composable
 private fun TerminalSetupAction(
     installing: Boolean,

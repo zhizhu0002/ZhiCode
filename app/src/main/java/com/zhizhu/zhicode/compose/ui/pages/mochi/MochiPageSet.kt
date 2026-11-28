@@ -31,31 +31,6 @@ import ui.feice.mochi.list.MochiListButton
 import ui.feice.mochi.navigation.MochiBackButton
 import ui.feice.mochi.navigation.MochiCompactTitleScaffold
 
-/**
- * Mochi 页面组：**只覆写三个轻页面**，其余 13 页自动回落 Miuix。
- *
- * ## 为什么先做这三页
- *
- * 它们是全应用里**唯一不带业务状态机**的整页：只有静态文案 + 几个入口，
- * 没有列表、没有输入、没有长任务。所以它们适合验证「回落机制」这件事本身 ——
- * 如果这里的切换生效而设置页仍是 Miuix，就证明契约接线正确，再去动重页面。
- *
- * ## 为什么用 `MochiCompactTitleScaffold` 而不是大标题骨架
- *
- * `docs/zh_CN/components/navbar.md:5` 的判据是**卡片外有没有分组小标题**。
- * 这三页都有（「应用信息」「开源与许可」…），所以用紧凑骨架、只留折叠态顶栏，
- * 删掉正文里那个独立大标题 —— 用大标题会让同一屏出现两个标题层。
- *
- * ## 图标为什么全用 `MochiIonicon`
- *
- * `llms.txt:45` 明令：图标必须用 `MochiIonicon`（Ionicons），**禁止 Material
- * Icons**。本组页面若混用 `ZhiIcons`，笔画粗细与光学尺寸都对不齐 —— 而
- * `MochiIonicon` 默认还做光学归一（按墨迹面积缩放、按视觉重心居中）。
- *
- * ⚠️ 图标名写错时 release 包**静默不画**（`MochiIonicons.kt:190` 只有
- * debuggable 才抛异常）。所以这里用的名字全部核对过 `ionicons-index.txt`
- * （Ionicons 8.1.0，515 个）。
- */
 object MochiPageSet : ZhiPageSet {
 
     override val id: String = "mochi"
@@ -77,11 +52,7 @@ object MochiPageSet : ZhiPageSet {
                     value = BuildConfig.VERSION_NAME,
                     leading = { MochiIonicon("information-circle", style = MochiIconStyle.Filled) },
                 )
-                /*
-                 * 「有新版本」只在**真检测到**时出现，与 Miuix 组同一条判据：
-                 * `Available` 之外的状态一律不显示 —— 显示一个「已是最新」的行会让
-                 * 这张卡多一条永远不变的信息，而那句话更适合放在更新页（有完整语境）。
-                 */
+                /* 「有新版本」只在**真检测到**时出现，与 Miuix 组同一条判据 */
                 val newer = update.release
                 if (update.phase == UpdatePhase.Available && newer != null) {
                     MochiListRow(
@@ -180,13 +151,7 @@ object MochiPageSet : ZhiPageSet {
                 }
             }
 
-            /*
-             * 更新说明。
-             *
-             * 有新版 → 渲染那一版的 release body；没有 → 渲染本版内置的更新日志
-             * （`changeLogFor`）。这与 Miuix 组的 `updateNotesMarkdown` 是同一条取舍：
-             * 横线下面永远有内容，不会出现一块空白。
-             */
+            /* 更新说明。 */
             val notes = updateNotesMarkdown(state)
             if (notes.isNotBlank()) {
                 MochiListSection(header = "更新内容") {
@@ -274,25 +239,6 @@ object MochiPageSet : ZhiPageSet {
     }
 }
 
-/**
- * 隐私政策的一个小节。
- *
- * ## 为什么**不用** `MochiListRow` 的 `subtitle`
- *
- * `MochiListRow` 的副标题写死了 `maxLines = 2`（`MochiListRow.kt:311`）——
- * 那是给「一行标题 + 一行补充」设计的。隐私条款的正文是法律文本，被截断
- * 不仅是排版问题，等于少说了一段。
- *
- * ## 所以用文档给「信息卡」指的路
- *
- * `components/list.md:60-74`：`MochiListCard` 里可以放任意内容，用
- * `Modifier.mochiListDivider(inset)` 指定分隔线起点。这里就是一条
- * 「标题 + 正文」的自定义内容，分隔线对齐 16dp（与 `MochiListRow` 的文字起点一致，
- * 见 `design-principles.md:58`「文字从 16dp 开始」）。
- *
- * 正文用 `bodySmall` 而不是 `bodyLarge`：法律条款是**查阅型**内容，不是主阅读流，
- * 与正文同号会让整页显得没有层次。
- */
 @Composable
 private fun PrivacyEntry(title: String, body: String) {
     Column(

@@ -39,26 +39,6 @@ import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 「搜索服务」整页（形态对齐 RikkaHub）。
- *
- * ## 与上一版的差别
- *
- * 上一版是设置页里一个下拉 + 一个 Key 框：只能配**一个**服务、只有两种字段。
- * RikkaHub 的形态是**列表**——同时配多个服务，每个服务有自己的 Key 与专属选项，
- * 点其中一个设为当前使用。这一页就是那个列表 + 编辑表单。
- *
- * ## 骨架直接复用 API 配置页
- *
- * 列表 + 二级表单 + 顶栏「新增 / 保存」+ 点卡片设为当前：`ApiConfigOverlay` 已经
- * 把这套跑通了，所以这里照抄结构（连 `SettingsPageStack` 的两态转场都一样）。
- * 两个页面交互一致，用户不用学第二遍。
- *
- * ## 表单字段由服务类型声明
- *
- * 每个 [SearchServiceType] 自带 [SearchField] 列表，这里照着渲染 ——
- * 新增一家服务只需要在枚举里加一项，不用碰这个文件。这也避免了「加一家就多一段 if」。
- */
 @Composable
 fun SearchServicesPage(
     state: SearchServicesState?,

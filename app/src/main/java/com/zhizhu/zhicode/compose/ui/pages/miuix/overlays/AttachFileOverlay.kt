@@ -40,72 +40,9 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 附加文件 sheet 的高度边界。
- *
- * ⚠️ 这里原来还有一个 `AttachSheetHeightFraction = 0.5f`，面板高度是
- * `clamp(窗口高 × 0.5, 280dp, 480dp)` —— **与内容多少无关**。定高的好处是
- * chrome（根标签栏 / 面包屑 / 过滤框）的位置永远不跳，代价在用户截图里露了出来：
- * 一个只有 5 项的目录，底部空了约三分之一。
- *
- * 现在改成**内容自适应**：少时贴着内容（下限 [AttachSheetHeightFloor]），
- * 多时才长到上限 [AttachSheetHeightCap]。代价说清：从少项目录进到多项目录时，
- * 面板会看到一次高度变化 —— 这是"不留一大片空"必须付的。
- *
- * ⚠️ 光把 `.height(sheetHeight)` 换成 `.heightIn(...)` 是**不够的**：
- * 列表那边的 `weight(1f)` 默认 `fill = true`，会把 Column 一直撑到上限，
- * 等于什么都没改。必须同时写 `weight(1f, fill = false)`（见列表那一行的注释）。
- */
 private val AttachSheetHeightCap = 560.dp
 private val AttachSheetHeightFloor = 320.dp
 
-/**
- * 「附加项目文件」面板。输入器 `+` 的第一项。
- *
- * ## 它是一台**浏览器**，不是一份搜索结果
- *
- * 这一屏原先长成「搜索框 + 递归搜索出来的扁平结果」。实测的失效很难看：
- * 搜索从 HOME 起递归，而 HOME 下有 Termux 的 `storage/{pictures,dcim,…}` 软链，
- * 空查询的深度上限刚好够到 `storage/pictures/` —— 于是**面板一打开、用户一个字都没敲**，
- * 列出来的是整屏设备截图；而且 BFS 浅层优先，那些照片还排在真正的项目代码前面。
- *
- * 现在改成**浏览当前目录**：一层一层走（`FileBrowser.children`），永远不递归，
- * 而且**共用文件面板那一套外壳**（根切换条 / 面包屑 / 行 / 尺寸文案）——
- * 两边必须长得一样，所以是同一份实现（见 `ui/panes/FileChrome.kt`），不是各写一份。
- *
- * ## 交互
- *
- * - 点**目录** → 进去（`onNavigate`）；
- * - 点**文件** → 附加（`onPick`），**面板不关**：可以连着附加好几个到下一条消息；
- * - 面包屑点任一级 / 「上一级」按钮 → 回上一层，到根就停；
- * - 根切换条 → 项目 / HOME / 共享存储（与文件面板同一套语义）。
- *
- * ## 为什么过滤框只筛当前目录
- *
- * 它是**纯内存过滤**，不重扫磁盘。敲字就递归搜索正是上面那个 bug 的成因，
- * 而且每个字符都要遍历目录，手机上会明显卡顿。
- * 想找别的目录，点面包屑或根切换条过去就行。
- *
- * ## 为什么是底部 Sheet 而不是居中弹窗
- *
- * 内容是可变长的目录列表 —— 这正是居中弹窗最差的场景（完整理由见
- * `ModelPickerOverlay` 顶部注释）：竖屏可用高度小、挡住正在生成的回复、动画只有
- * fade。底部 sheet 自带上滑进场、下拉 / 点背板关闭。过滤框留在**不滚动**的头部
- * （原来就这条规则，sheet 里照样成立），列表吃掉余量并内部滚动。
- *
- * ## 过滤框：胶囊搜索框，而不是表单字段
- *
- * 原来是 `ZhiTextField`（转发 Miuix 通用 `TextField`：16dp 圆角、label 左对齐常显、
- * 默认 16dp 内边距），而且 `fillMaxWidth()` **没带横向内边距** —— 于是它成了整屏
- * 唯一满幅的元素，比下面的文件行和上面的根标签栏都宽一截，读起来还像个小标题。
- *
- * 现在换成 Miuix `InputField`（`SearchBar.kt` 那一节）：胶囊底、自带放大镜与
- * 有字时出现的清除按钮。**侧栏的「搜索会话」用的就是它**，那里的注释写着为什么
- * 不用 `ZhiTextField`；同一屏里两种搜索框长得不一样才是问题，所以统一到它。
- *
- * 标题由 [OverlayBottomSheet] 自己渲染，**不再**套 `DialogShell`（两行标题 +
- * weight 语义对不上，见 ModelPickerOverlay 的说明）。
- */
 @Composable
 fun AttachFileOverlay(
     open: Boolean,
@@ -133,17 +70,7 @@ fun AttachFileOverlay(
         // 把内容全拆掉，退场那 250~260ms 只是一张空壳在滑下去。
         val visible = if (open) browser.visibleEntries else shownVisible.orEmpty()
         val scheme = MiuixTheme.colorScheme
-        /*
-         * 底部为悬浮导航胶囊让位。
-         *
-         * 抽屉渲染在 Scaffold 的 `popupHost` 槽里，与内容区是**两个槽位** ——
-         * 内容区那份 `LocalFloatingNavInset` 在这里读到的是默认值 `0.dp`。
-         * 结果抽屉铺到屏幕底边，被胶囊压住下半截（用户截图里"复制全部"那颗按钮
-         * 正好卡在胶囊后面，点不到也看不全）。
-         *
-         * 让位同时作用于**两处**：`heightIn` 的上限要减掉它，否则面板会顶出屏幕；
-         * 底部再补同样多的内边距，列表才不会缩在胶囊下面。
-         */
+        /* 底部为悬浮导航胶囊让位。 */
         val navInset = floatingNavSheetInset()
         // 过滤框是否已展开。`InputField` 的必填参数，且承担 API ≤ 27 上的
         // 「先展开再聚焦」兼容职责（见下面那段注释），所以必须是真的状态。
@@ -201,23 +128,6 @@ fun AttachFileOverlay(
             )
 
             // 4) 一层子项。空时把**原因**说出来，别让面板空着让人以为坏了。
-            /*
-             * ⚠️ `weight(1f, fill = false)` 是这一整处改动的**关键**：默认
-             * `fill = true` 会把 Column 撑到 `heightIn` 的上限，少条目时照样是
-             * 一大片空 —— 等于没改。置 false 之后列表按内容高，
-             * Column 也就按内容高（下限由 `heightIn` 的 min 托住）。
-             *
-             * 列表装进一张 `Card`（底色走 [ZhiSheetCardColors]），卡内再滚动。
-             *
-             * `FileListRow` 自己的卡片是**透明**的（它与文件面板的整页共用，
-             * 那一页要的是"行直接铺在页面底上"）。在抽屉里那套行就直接落在背板上，
-             * 而背板的 `background` 与 `Card` 默认色在深色下同为 `#242424`
-             * （见 ZhiSheetCardColors 的说明）—— 抽屉里因此没有明显的内容区边界。
-             *
-             * 这里统一收一层 `secondaryContainer` 卡片把它们框住，与其它抽屉
-             * （导出 / 复制 / 任务清单 / 模型选择）一致。卡内不留内边距：
-             * 行自己已经控制横向留白了。
-             */
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -269,20 +179,6 @@ fun AttachFileOverlay(
     }
 }
 
-/**
- * 空态的文案。
- *
- * ⚠️ 三种原因必须分开说，不能都显示"0 项"：
- *
- * - **过滤没命中** —— 用户自己敲的字，提示他换一个词；
- * - **目录读不出来**（[note] 非空，典型是共享存储没给「所有文件访问权限」）——
- *   这时说"这个目录是空的"是**撒谎**，用户会以为是目录坏了；
- * - **目录真的是空的**。
- *
- * 还有一个只会在退场那 250ms 出现的中间态：`entries` 已被清空、而屏幕上还挂着
- * 最后一次的内容（[whileClosing]）—— 那时什么都不说，免得在滑下去的过程中
- * 闪出一行"这个目录下没有可附加的文件"。
- */
 private fun emptyMessage(filter: String, note: String, whileClosing: Boolean): String = when {
     filter.isNotBlank() -> "这个目录里没有匹配「$filter」的文件"
     note.isNotEmpty() -> note

@@ -32,27 +32,6 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 隐私政策。
- *
- * ## 版式
- *
- * 顶部一段不带底色的总述，然后若干「粗体小节标题 + 圆角卡片正文」。
- * 标题浮在底色上而不是包进卡片：卡片一多时，标题若也被包住，整页会变成
- * 一摞同等重量的方块，扫读时找不到分界。
- *
- * ## ⚠️ 内容必须是真的
- *
- * 这类文案最容易写成「本应用完全离线、不联网」——对 ZhiCode 那是**假的**：
- * `AndroidManifest.xml` 声明了 `INTERNET`，它就是 AI 客户端，必须联网。
- * 下面每一条都对应代码里能查到的实现：
- * - 出网地址全是第三方（用户自己配置的模型服务商、搜索服务商、Termux 官方源），
- *   没有自有后端；
- * - 没有统计 / 埋点 / 崩溃上报 SDK；
- * - API 密钥走 Android Keystore（AES/GCM）加密，见 `AndroidSecretStore`。
- *
- * 改文案时请继续保持「能核对」这个标准，不要写成宣传语。
- */
 @Composable
 fun PrivacyPolicyPage(onBack: () -> Unit) {
     val scheme = MiuixTheme.colorScheme

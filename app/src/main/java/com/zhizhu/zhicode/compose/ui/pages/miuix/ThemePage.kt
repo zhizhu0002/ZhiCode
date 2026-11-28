@@ -223,17 +223,7 @@ fun ThemePage(
                                 summary = if (shaderSupported) "为导航栏和悬浮层启用背景模糊" else "需要 Android 13 RuntimeShader 支持",
                                 enabled = shaderSupported, icon = ZhiIcons.layers, plate = SettingsPlateColors.blue,
                             )
-                            /*
-                             * Mochi 液态玻璃 —— 与上面那一项是**两条独立管线**。
-                             *
-                             * 上面那个开关管本工程自己的 `Glass`（miuix-blur：顶栏、悬浮栏、
-                             * 弹窗的虚化）；这一项管 Mochi 组页面里的 `MochiMaterials`
-                             * （AGSL 折射玻璃 + 模糊金字塔）。
-                             *
-                             * 默认关闭，理由是代价而不是保守：每组玻璃要建取样层 +
-                             * 4～9 级模糊金字塔，系统每帧要遍历所有渲染节点；Mochi 的
-                             * 接入规范也明确要求「打开前说明代价」。
-                             */
+                            /* Mochi 液态玻璃 —— 与上面那一项是**两条独立管线**。 */
                             if (theme.pageSetId == "mochi") SettingsToggle(
                                 title = "液态玻璃",
                                 checked = theme.mochiGlass,
@@ -329,19 +319,6 @@ private fun ColoredCascade(visible: Boolean, content: @Composable () -> Unit) {
     }
 }
 
-/**
- * 主题页那张**微型手机示意图**里的字号。
- *
- * ## 为什么这组值不读 `MiuixTheme.textStyles`
- *
- * 那张图是「把整屏按比例缩到 40% 宽」的**插图**，不是真实界面：它的"屏幕宽度"只有
- * 一百多 dp，任何真实字阶（最小 11sp）都会把三行标签挤成两行。所以它必须用一套
- * 按插图比例算出来的字号。
- *
- * 规范里的「字号只读 textStyles」约束的是**真实界面的文字**；这类比例示意图属于
- * 规则 5 里「明确注明理由的例外」。把四个数字集中在这里（而不是散在 12 个 `Text`
- * 调用点）是为了让"插图缩小了几号"在源码里只有一个答案。
- */
 private object PreviewType {
     /** 示意图顶部的应用名。 */
     val caption = 9.sp
@@ -363,18 +340,7 @@ internal fun ThemePreviewPhone(theme: ThemeSettings, modifier: Modifier = Modifi
     val pages = listOf("对话", "终端", "文件")
 
     Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        /*
-         * 三台手机并排，**各占一屏**：对话 / 终端 / 文件。
-         *
-         * 改版前是**一台**手机 + 一个内部页码状态，点下面的标签切换里面显示哪一屏。
-         * 那样有两个毛病：一是用户得逐个点才知道三套界面长什么样；二是
-         * 「标签栏位置 / 是否悬浮」这类设置会影响三屏共同的导航形态，
-         * 切换着看反而看不到"同一时刻三屏的导航是否一致"。
-         *
-         * 现在三台同时在场，一眼能比对导航栏在三屏上的位置与形态是否统一。
-         * 宽度按 1:1:1 分配，所以每台比原来窄 —— 内部字号与间距也随之等比收窄，
-         * 见 `PreviewType` 的注释。
-         */
+        /* 三台手机并排，**各占一屏**：对话 / 终端 / 文件。 */
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -406,11 +372,7 @@ internal fun ThemePreviewPhone(theme: ThemeSettings, modifier: Modifier = Modifi
     }
 }
 
-/**
- * 单台"手机"预览：固定渲染一屏，不再带内部页码。
- *
- * 圆角、描边、底色都走主题，所以换预设色卡 / 明暗时三台一起变。
- */
+/** 单台"手机"预览：固定渲染一屏，不再带内部页码。 */
 @Composable
 private fun PreviewDevice(
     page: Int,

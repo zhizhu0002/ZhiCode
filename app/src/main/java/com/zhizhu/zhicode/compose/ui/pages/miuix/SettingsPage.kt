@@ -74,62 +74,13 @@ import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * ZhiCode 设置页：标题 + 返回 / 分组设置行。
- *
- * ## 没有「保存」按钮：改动即时生效
- *
- * 原来这里有一对「取消 / 保存」，draft 只在点保存时才写回 state。实际上「保存」
- * 除了把值搬进内存 state 之外什么都没做（不落盘、不下发引擎），却让每次改一项都要
- * 先把页面拉到底点一下右上角 —— 所以改成**自动保存**：任一改动立刻写回 state，
- * 返回只是关页面。
- *
- * draft 仍然保留，但语义变了：它不再是一份“待提交副本”，而是**这一屏的显示源**
- * （见 `AppScaffold` 的 `settingsUi = state.settingsDraft ?: lastSettingsDraft`），
- * 也承载「项目目录留空 = 不改动」这类字段级语义。
- *
- * ## 设置行不是手写的
- *
- * 页面骨架（弹窗外壳、分组、标题）用 Miuix 组件搭；
- * 每一条设置项走 `ui/settings/SettingsRows.kt`，那里全部转发到 `miuix-preference`
- * 的 `*Preference` 组件（见该文件表格）。本文件只负责**把 SettingsDraft 的字段
- * 接到那些组件上**，不再自己画值框、下拉和滚轮。
- *
- * ## 容器为什么是 `OverlayDialog`
- *
- * `WindowDialog` 创建**独立 Android Window**，`Scaffold` 提供的 `popupHost` 不会被它继承，
- * 于是 `Overlay*` 系列（本页所有选择器）在里面不可靠，而且主窗口的 `LayerBackdrop`
- * 也采不到它的背景。`OverlayDialog` 参数集与它一致，是 drop-in 替换。
- *
- * ## 每一行的行首都是一块彩色图标
- *
- * 用户看过小米「设置」的截图之后明确要求：
- *
- * > 那就借鉴小米自带的设置的图标
- *
- * 参考物里没有一行是裸字形的 —— 行首一律是**彩色圆角方块 + 白色字形**。所以本页每一行
- * 都带一对 `icon` + `plate`（底色与几何见 `SettingsIconPlate.kt`）。
- *
- * 两条容易走偏的地方，`SettingsIconPlateTest` 都逐行数着：
- *
- * - **不能只给一半**。只给 `icon` 就退回改版前的单色裸字形（那就是用户说的"扁扁的"），
- *   只给 `plate` 就是一块空色块；两者都只在调用点成对出现才有意义。
- * - **不能有两行一模一样**。同一页里出现两个相同的（字形, 底色）会让人以为它们共用一条设置，
- *   所以 `推理强度`（滑杆/紫）与 `自动压缩上限`（滑杆/绿）同字形不同底色，
- *   `上下文压缩`（缩放/绿）与 `自动压缩上限`（滑杆/绿）同底色不同字形。
- */
 @Composable
 fun SettingsPage(
     draft: SettingsDraft?,
     onChange: (SettingsDraft) -> Unit,
     onDismiss: () -> Unit,
     onNavigate: (String) -> Unit,
-    /**
-     * 「扩展」组的数量摘要（MCP / 技能 / 角色卡）。
-     *
-     * 默认空摘要 = 未统计，界面显示"正在统计…"。页面自身不读盘：
-     * 三个存储都在磁盘上，在设置页里读会变成"每次重组读一次"。
-     */
+    /** 「扩展」组的数量摘要（MCP / 技能 / 角色卡）。 */
     extensions: ExtensionSummary = ExtensionSummary(),
     brandSignature: String = "",
     onBrandSignatureChange: (String) -> Unit = {},
@@ -155,23 +106,6 @@ fun SettingsPage(
     ) { androidx.compose.foundation.lazy.LazyListState() }
     val topAppBarScrollBehavior = MiuixScrollBehavior()
     var brandDialogOpen by remember { mutableStateOf(false) }
-    /*
-     * ⚠️ 这里**不用** `rememberPageBlurBackdrop()` + `layerBackdrop`。
-     *
-     * 它同时造成两个用户可见的问题：
-     *
-     * 1. **卡**：`layerBackdrop` 把整页内容录进离屏层供顶栏 `textureBlur` 取样，
-     *    而滚动时内容每个像素都在变 → **每帧重录整张设置页**（LazyColumn + 二十多行
-     *    图标底板 + 每行 squircle 路径裁剪全在内），再对那张层做一次 RuntimeShader 模糊。
-     *    实测进设置页时 `jankFrame #3 delta=183.1ms`。
-     *
-     * 2. **文字重叠**：顶栏底色是 `Color.Transparent`（要让模糊结果透出来），
-     *    所以模糊那一帧只要没跟上，下面的正文就直接从顶栏里透出来 ——
-     *    截图里「设置」标题压在第 2 行文字上、底部反馈条压住列表末行，都是这个。
-     *
-     * 参考实现（rikkahub 的 SettingPage）**不做**整页捕获：顶栏就是纯色
-     * `containerColor` + 大标题折叠。本工程照它改，两条症状一起消失。
-     */
 
     Scaffold(
         topBar = {
@@ -232,16 +166,7 @@ fun SettingsPage(
                 }
                 item(key = "agent", contentType = "settings-group") { SettingsGroup("Agent 与安全") { AgentSecurityPage(draft, onChange) } }
                 item(key = "extensions", contentType = "settings-group") { SettingsGroup("扩展") { ExtensionsPage(onNavigate, extensions) } }
-                /*
-                 * 「关于 ZhiCode」单独成组，并**给它一个标题**。
-                 *
-                 * 之前它是一张**无标题卡**，紧贴在「扩展」卡下面：两张卡之间没有任何
-                 * 文字分隔，看起来就是同一张卡被劈开了（用户报的"扩展和下面的 card
-                 * 怎么回事"）。
-                 *
-                 * 而「记忆文件」是**能点的功能入口**（编辑项目级/用户级说明文件），
-                 * 与 MCP / Skill / 角色卡同类，所以挪进「扩展」组里。
-                 */
+                /* 「关于 ZhiCode」单独成组，并**给它一个标题**。 */
                 item(key = "meta", contentType = "settings-group") {
                     SettingsGroup("关于") { AboutEntryPage(onNavigate) }
                 }
@@ -265,21 +190,6 @@ fun SettingsPage(
 
 // ------------------------------------------------------------------ 各分类页
 
-/**
- * 「关于」分组：只有一行入口。
- *
- * ## 为什么「记忆文件」不在这里了
- *
- * 它是**能点的功能入口**（编辑项目级 / 用户级说明文件），与 MCP、Skill、角色卡
- * 同类，所以挪进了「扩展」组。留在这一张卡里时，用户看到的是"扩展卡下面又冒出
- * 一张无标题卡、紧贴着、像被劈开的同一张卡"。
- *
- * ## 为什么现在有标题了
- *
- * 原来 `SettingsGroup(title = null)` 让这一组没有标题行，于是它和上一张卡之间
- * 只有卡片间距、没有任何文字分隔 —— 视觉上就是一个可疑的"断口"。
- * 现在独立成一张带「关于」标题的卡，位置本身就是这一页的收尾。
- */
 @Composable
 private fun AboutEntryPage(onNavigate: (String) -> Unit) {
     com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("AboutEntryPage")
@@ -306,17 +216,6 @@ private fun themeLabel(mode: ThemeMode): String = when (mode) {
     ThemeMode.DARK -> "夜间模式"
 }
 
-/**
- * 通用组：主题入口 + 联网搜索（rikkahub 的 generalSettings / search 合并）。
- *
- * ## 主题为什么从「三选一行」改成「入口行」
- *
- * 深浅只是主题的一个维度。这一轮起主题还有预设色、Monet 种子色、调色板风格、
- * AMOLED 与四个显示开关 —— 它们**必须**在同一页里（改一个就得看另一个的效果），
- * 而 hub 这一层塞不下那么多控件，也不该塞：主题是"改一次就不再动"的东西。
- *
- * 所以这里只留一行当前值和入口，形态与「API 配置」「搜索服务」一致。
- */
 @Composable
 private fun GeneralPage(
     draft: SettingsDraft,
@@ -365,13 +264,7 @@ private fun GeneralPage(
 @Composable
 private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) -> Unit) {
     com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("AgentSecurityPage")
-    /*
-     * 这里原本第一项是「Agent 沙箱全权调试」（sandboxAgentFullAccess）：
-     * 允许容器内安装、UI 操作与 Frida，不含真机 host 与 Root。
-     * 沙盒整体移除后这个开关已经没有作用对象 —— 它的语义是"对沙箱内的调用免去询问"，
-     * 而沙箱不存在了，留着它只会变成"点了没反应"的开关（见 ThemePage 顶部
-     * 关于「点了没用的开关比不做更糟」的那条判断）。
-     */
+    /* 这里原本第一项是「Agent 沙箱全权调试」（sandboxAgentFullAccess） */
 
     SettingsIntField(
         title = "子 Agent 最大并发数",
@@ -396,16 +289,7 @@ private fun AgentSecurityPage(draft: SettingsDraft, onChange: (SettingsDraft) ->
         plate = SettingsPlateColors.red,
     )
 
-    /*
-     * Shizuku：不 root 也能拿到 shell 身份（uid 2000）。
-     *
-     * 与 Root 并列而不是合并：两者的**前提条件完全不同** —— Root 要设备真的 root 了，
-     * Shizuku 只要用户用 adb 启动过一次它的服务。合并成一个"提权"开关，
-     * 会让「我有 Shizuku 没有 root」和「我有 root 没装 Shizuku」两种人都少一半能力。
-     *
-     * 下面那一行是授权入口，不是装饰：开关只决定模型能不能看见工具，
-     * 能不能真的跑取决于 Shizuku 那边的授权。
-     */
+    /* Shizuku：不 root 也能拿到 shell 身份（uid 2000）。 */
     SettingsToggle(
         title = "Agent Shizuku 权限",
         checked = draft.shizukuExecutionEnabled,
@@ -515,22 +399,7 @@ private fun NetworkPage(
     }
 }
 
-/**
- * 扩展功能。
- *
- * 这里只列**已经能用**的入口。原版还有两项（运行时 UI 画布、其他设置），当前处理如下：
- *
- * - 「运行时 UI 画布」：**画布的存储与工具是齐的**——`com.zhizhu.zhicode.UiCanvasStore`、
- *   `UiCanvasController`、以及已注册进 `ToolRegistry` 的 `ui_canvas` 工具都在，
- *   Agent 调用它也会正常落盘一份有界操作文档。缺的是**消费端**：
- *   `UiCanvasController.apply(View root, JSONObject document)` 是按稳定节点 id
- *   在 **Android View 树**上找 View 再改属性；Compose 这边没有这套 id，
- *   也没有任何代码读那份文档。所以现在点这个入口只会打开一个空壳面板，
- *   不如先不放入口。要接的话工作量在"给 Compose 界面定义稳定槽位 id
- *   并把文档作用上去"，不是重写存储。
- * - 「其他设置」：那一项原本只是「自定义头部提示词」的另一个入口。现在提示词输入框
- *   已经并入「上下文与项目」分类，同一个字段不需要两条路径，入口撤销。
- */
+/** 扩展功能。 */
 @Composable
 private fun ExtensionsPage(onNavigate: (String) -> Unit, extensions: ExtensionSummary) {
     com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace.countRecompose("ExtensionsPage")
@@ -584,13 +453,7 @@ private fun ExtensionsPage(onNavigate: (String) -> Unit, extensions: ExtensionSu
         plate = SettingsPlateColors.green,
         onClick = { onNavigate("roleCards") },
     )
-    /*
-     * 「记忆文件」放在这一组里。
-     *
-     * 它是一个**能点的功能入口**（编辑项目级 / 用户级说明文件），与上面三项同类：
-     * 都能配置、都能增删。之前它和「关于」挤在一张无标题卡里，位置又在「扩展」卡
-     * 正下方、没有任何文字分隔 —— 看起来就是同一张卡被劈开了。
-     */
+    /* 「记忆文件」放在这一组里。 */
     SettingsIconEntry(
         title = "记忆文件 · ZhiCode.md",
         summary = "项目级与用户级说明文件",
@@ -615,13 +478,7 @@ private fun ExtensionsPage(onNavigate: (String) -> Unit, extensions: ExtensionSu
     }
 }
 
-/**
- * 设置页的入口行：图标块 + 标题 + 副标题 + 箭头（Miuix [ArrowPreference]）。
- *
- * `plate` **不能省**：这一行原先是一个裸的单色字形（`tint = scheme.onBackground`），
- * 在一屏彩色图标块中间会显得像"少了底色"。两者必须在调用点成对出现，
- * 由 `SettingsIconPlateTest` 逐行数。
- */
+/** 设置页的入口行：图标块 + 标题 + 副标题 + 箭头（Miuix [ArrowPreference]）。 */
 @Composable
 private fun SettingsIconEntry(
     title: String,

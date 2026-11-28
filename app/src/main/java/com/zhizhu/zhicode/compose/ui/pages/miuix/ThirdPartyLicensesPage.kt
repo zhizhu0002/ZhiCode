@@ -64,26 +64,6 @@ import top.yukonga.miuix.kmp.icon.basic.ArrowRight
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 第三方开源项目。
- *
- * ## 版式（照参考实现的分组卡片）
- *
- * 顶部一段说明 → 若干 `组标题 + 一张圆角卡`。卡里每行是
- * **组件名 + `作者 · 许可`**，行尾一个 `›`。组标题浮在底色上、不进卡，
- * 这样"分了哪几类"一眼可见，而每一类内部是连续的一摞行。
- *
- * 分组来自数据里的 [LicenseEntry.group]，按**首次出现顺序**渲染
- * （见 `Licenses.kt` 的字段说明）。
- *
- * ## 点击行为
- *
- * - 有 [LicenseEntry.homepage] → 打开上游主页，去看它自己的许可原文；
- * - 没有（目前只有 IQ Code）→ 弹出 `detail`，不画箭头。
- *   宁可少一个箭头，也不编一个打不开的链接。
- * - 任何一行**长按**都弹 `detail`：那是本应用对这一项做了什么改动的说明，
- *   只给名字与许可的话，用户不如直接去看 NOTICE。
- */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ThirdPartyLicensesPage(onBack: () -> Unit) {
@@ -254,16 +234,7 @@ fun ThirdPartyLicensesPage(onBack: () -> Unit) {
     }
 }
 
-/**
- * 列表行：**项目名称在上，`作者 · 开源协议` 在下一行、小字**。
- *
- * 不用 Miuix `BasicComponent` / `ArrowPreference`：那两个的 `summary` 是
- * `body2`（与正文同档），两行排出来一样重，看不出「名称是主、作者许可是辅」。
- * 这里直接写两个 `Text`，把字号差与颜色差显式固定下来。
- *
- * 行尾箭头只在 [hasArrow] 为真时画 —— `homepage` 为 null 的条目点了是弹详情，
- * 给它一个跳转箭头会误导。
- */
+/** 列表行：**项目名称在上，`作者 · 开源协议` 在下一行、小字**。 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LicenseRow(

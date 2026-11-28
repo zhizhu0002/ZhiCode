@@ -82,26 +82,6 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import androidx.compose.ui.graphics.BlendMode as ComposeBlendMode
 
-/**
- * 关于页。
- *
- * **逐字移植自 `ksu-style` 的 `ui/screen/about/AboutMiuix.kt`。**
- * 整页 OS3 渐变底 + 随滚动淡出的视差 Logo + `DstIn` 渐变遮罩大字 +
- * `textureBlur` 磨砂玻璃卡片。唯一改动是卡片内容 —— 那边是一串外链，
- * 这里换成 ZhiCode 自己的信息行。
- *
- * ## 抄的时候不能省的三个点
- *
- * 1. **`backdrop` 只挂在 `bgModifier` 上**（背景层）。采样它的文字在同一棵
- *    `BgEffectBackground` 的 content 里，二者互为兄弟。⚠️ 曾经把
- *    `layerBackdrop` 挂到包住文字的父节点上 —— 背板包含它自己，
- *    `libhwui` 的 `RenderNode::prepareTreeImpl` 递归三百多层后**原生崩溃**。
- * 2. **文字用 `DstIn`**：字形当遮罩，采到的是被模糊并混合过的渐变。
- *    混合色 `logoBlend`（`ColorDodge` + `LinearLight` + `Lab`）负责把它提亮，
- *    否则深色渐变上的字会跟着变深、几乎隐形。
- * 3. **卡片用 `textureBlur` 但不带 `DstIn`**：那是磨砂玻璃，不是遮罩；
- *    卡片底色同时给 `Color.Transparent`，否则实色会把模糊结果盖死。
- */
 @Composable
 fun AboutPage(
     onBack: () -> Unit,
@@ -200,12 +180,7 @@ private fun AboutContent(
 
     val backdrop = rememberLayerBackdrop()
 
-    /**
-     * Hero 那块透明点击层的交互源。
-     *
-     * 只为传 `indication = null`（不要涟漪）—— 涟漪会让整片 Hero 看起来像按钮，
-     * 而那里的语义是"点背景上的名字可以进检查更新"。见 `logoSpacer` 的注释。
-     */
+    /** Hero 那块透明点击层的交互源。 */
     val brandInteraction = remember { MutableInteractionSource() }
 
     val isInDark = LocalZhiDark.current
@@ -252,23 +227,13 @@ private fun AboutContent(
     var versionCodeProgress by remember { mutableFloatStateOf(0f) }
     var initialLogoAreaY by remember { mutableFloatStateOf(0f) }
 
-    /*
-     * 进页面时把列表拉回顶部。
-     *
-     * 这是用户要的「退出关于页就重置关于页状态」：`NavDisplay` 的 saveable 状态
-     * 会记住上次的滚动位置，于是二次进入时列表停在半中间、Logo 区不见了。
-     * **只重置这一页**的滚动，设置页的状态一点不动（那是另一个 entry）。
-     */
+    /* 进页面时把列表拉回顶部。 */
     LaunchedEffect(Unit) {
         lazyListState.scrollToItem(0)
     }
 
     LaunchedEffect(lazyListState) {
-        /*
-         * 观察的**不只是** offset：三个锚点是 `onGloballyPositioned` 陆续量到的，
-         * 只盯 offset 的话，锚点到位那一刻不会触发重算，进度就停在初始值上。
-         * 把五个值打包成一个快照一起观察，任一变化都重算。
-         */
+        /* 观察的**不只是** offset：三个锚点是 `onGloballyPositioned` 陆续量到的 */
         snapshotFlow {
             listOf(
                 lazyListState.firstVisibleItemIndex.toFloat(),
@@ -285,14 +250,7 @@ private fun AboutContent(
                 val versionYNow = snapshot[3]
                 val logoAreaYNow = snapshot[4]
 
-                /*
-                 * 🔴 三个锚点都量到之前**不能**算进度。
-                 *
-                 * 它们来自 `onGloballyPositioned`，首帧还是 0；而恢复的滚动位置可能
-                 * 已经是大值。此时 stage 长度全为 0，`offset / 1f` 直接钳到 1，
-                 * `alpha = 1 - 1 = 0` —— 表现就是「进关于页，Hero 一片空白，
-                 * 只剩下面的卡片」。这正是用户报的那个偶现。
-                 */
+                /* 🔴 三个锚点都量到之前**不能**算进度。 */
                 if (nameYNow <= 0f || versionYNow <= 0f || logoAreaYNow <= 0f) {
                     if (projectNameProgress != 0f) projectNameProgress = 0f
                     if (versionCodeProgress != 0f) versionCodeProgress = 0f
@@ -479,19 +437,7 @@ private fun AboutContent(
                 ) {
                     AboutGlassCard(enableBlur, backdrop, blendColors) {
                         SettingsReadOnly(title = "版本", valueText = BuildConfig.VERSION_NAME)
-                        /*
-                         * 「有新版本 x.y.z」只在**真检测到**新版本时出现。
-                         *
-                         * 三个状态要分清：
-                         *  · `Available` → 显示这一行（用户能马上看到有新版并点进去）；
-                         *  · `UpToDate` / `NoReleases` / `Idle` → **不显示**。
-                         *    显示一个"已是最新"的行会让这张卡多一条永远不变的信息，
-                         *    而那一句更适合放在更新页里（那里有完整语境）。
-                         *    至于"还没查过"（Idle）更不能显示 —— 那时我们并不知道。
-                         *
-                         * 检查在 `openAbout()` 里触发（不是进了这一页才发请求），
-                         * 所以这里读到的是已经落地的结果。
-                         */
+                        /* 「有新版本 x.y.z」只在**真检测到**新版本时出现。 */
                         val newer = update.release
                         if (update.phase == UpdatePhase.Available && newer != null) {
                             SettingsEntry(
@@ -561,11 +507,7 @@ private fun AboutContent(
     }
 }
 
-/**
- * 磨砂玻璃卡片 —— 照 KSU 的写法：
- * `textureBlur(shape = 16dp, blurRadius = 60f)`，**不带** `DstIn`（那会变成遮罩），
- * 底色同时给 [Color.Transparent]，否则实色会把模糊结果盖死、肉眼等于没有模糊。
- */
+/** 磨砂玻璃卡片 —— 照 KSU 的写法 */
 @Composable
 private fun AboutGlassCard(
     enableBlur: Boolean,

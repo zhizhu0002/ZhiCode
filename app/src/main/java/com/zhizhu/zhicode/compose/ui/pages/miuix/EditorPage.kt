@@ -1,15 +1,4 @@
-/*
- * Zalith Launcher 2
- * Copyright (C) 2025 MovTery <movtery228@qq.com> and contributors
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This file keeps the ZL2 editor state/layout while using this project's
- * Miuix components and EditorViewModel adapters.
- */
+/* Zalith Launcher 2 */
 package com.zhizhu.zhicode.compose.ui.pages.miuix
 
 import androidx.compose.animation.AnimatedContent
@@ -142,18 +131,6 @@ internal fun EditorPage(viewModel: EditorViewModel, onExit: () -> Unit) {
         scheme = withContext(Dispatchers.IO) { SoraEditorHost.colorScheme(context, dark) }
     }
 
-    /*
-     * 保存结果用**系统 Toast** 呈现，不再自绘浮层。
-     *
-     * 为什么不用自绘：这段提示曾经塞在顶栏的 `actions` 槽里，而 `SmallTopAppBar`
-     * 会按 actions 的固有宽度给标题区让位 —— 提示一出现，文件名就被挤到左边、
-     * 与右侧按钮之间空出一大段（用户报的"名字和文本内容中间有个很大的空隙"）。
-     * 挪成浮层也只是把问题挪了个位置：它仍要参与某一层的测量。
-     * 系统 Toast 完全在应用布局之外，不参与任何测量，是这类瞬时反馈的合适载体。
-     *
-     * `notice` 每次保存都会被重新赋值（含 `null`），所以用 `state.notice` 作为
-     * LaunchedEffect 的 key —— 重复保存同一文案也会重新触发一次 Toast。
-     */
     LaunchedEffect(state.notice) {
         state.notice?.let { message ->
             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
@@ -225,26 +202,6 @@ internal fun EditorPage(viewModel: EditorViewModel, onExit: () -> Unit) {
         modifier = Modifier.fillMaxSize().imePadding(),
         topBar = {
             PageBlurBar(backdrop = pageBackdrop, blurActive = pageBackdrop != null) {
-            /*
-             * ⚠️ 这里**不用** `SmallTopAppBar`，是刻意的。
-             *
-             * Miuix 的 `SmallTopAppBar` 把标题**水平居中**（`SmallTopAppBar` 只有
-             * `titlePadding` / `navigationIconPadding` / `actionIconPadding` 三个
-             * 数值参数，**没有**标题对齐参数）。作为应用名居中没问题 —— 主界面
-             * 「ZhiCode」就是这样，看着正常。
-             *
-             * 但编辑器顶栏左边是「返回」、右边是两个图标，中间只有一串文件名。
-             * 标题一旦居中，返回箭头与文件名之间就会空出一大段（实测约屏宽的 30%），
-             * 用户报的「名字和文本内容中间有个很大的空隙」就是它。
-             *
-             * 所以这里自绘一行：**标题紧跟在返回按钮后面**，剩下的横向空间全给标题，
-             * 长文件名在右侧按钮之前自然省略。高度与内边距仍取 Miuix 官方默认值
-             * （`SmallTopAppBarCenterHeight` 50dp、导航图标起始 16dp、操作图标末尾 16dp），
-             * 因此除对齐方式外与官方栏完全一致。
-             *
-             * 状态栏 inset 由 `defaultWindowInsetsPadding = true` 交给官方栏处理；
-             * 自绘后必须自己补 `statusBarsPadding()`，否则内容会钻到状态栏底下。
-             */
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -343,16 +300,7 @@ internal fun EditorPage(viewModel: EditorViewModel, onExit: () -> Unit) {
                     },
                 )
             }
-            /*
-             * 搜索栏进出场。
-             *
-             * 改版前是裸 `if (searchVisible)` —— 搜索栏在**一帧**内就出现在编辑器上方，
-             * 没有位移也没有淡入，读起来像"闪了一下"而不是"打开了一个东西"。
-             *
-             * 方向：它是从顶部压下来的浮层，所以用垂直位移（从自身高度之上落下），
-             * 不做缩放、不做水平滑入 —— 那两种会让人误以为它是从侧面来的。
-             * 时长与曲线走 `ZhiMotion`，与全项目其他浮层同一套手感。
-             */
+            /* 搜索栏进出场。 */
             AnimatedVisibility(
                 visible = searchVisible,
                 enter = slideInVertically(ZhiMotion.enterSpec) { -it } + fadeIn(ZhiMotion.fadeInSpec),
@@ -561,14 +509,7 @@ private fun EditorSearchTopBar(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            /*
-             * 第一行：返回 · 输入框 · 匹配计数 · 上一个 · 下一个
-             *
-             * 改版前这一行还塞了「匹配计数 + 上一个 + 下一个」三块文字按钮，
-             * 360dp 宽下输入框被压到只剩半截，「上一个/下一个」被挤出屏幕边缘 ——
-             * 截图里就是这个样子。现在上/下改成**图标按钮**（固定 34dp），
-             * 计数用 `AnimatedContent` 单独占一小格，输入框吃剩余宽度。
-             */
+            /* 第一行：返回 · 输入框 · 匹配计数 · 上一个 · 下一个 */
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -590,13 +531,7 @@ private fun EditorSearchTopBar(
                         }
                     },
                 )
-                /*
-                 * 匹配计数：数字变化时**滚动替换**而不是瞬跳。
-                 *
-                 * 用 `AnimatedContent` 按整数 key 做交叉淡入 + 轻微垂直位移，
-                 * 于是「3/17」→「4/17」是一次有方向的翻动。宽度固定（`widthIn`）
-                 * 避免"无匹配"与"12/345"之间来回改变行宽、把旁边的按钮推来推去。
-                 */
+                /* 匹配计数：数字变化时**滚动替换**而不是瞬跳。 */
                 Box(modifier = Modifier.widthIn(min = 46.dp), contentAlignment = Alignment.Center) {
                     AnimatedContent(
                         targetState = if (totalMatches > 0) "$currentMatch/$totalMatches" else "无匹配",
@@ -620,13 +555,7 @@ private fun EditorSearchTopBar(
                 ZhiIconButton(ZhiIcons.expand, "下一个匹配", onNext, compact = 34.dp)
             }
 
-            /*
-             * 第二行：三个选项 chip + 替换开关。
-             *
-             * 改版前「收起替换」是四个字的文字按钮，挤到右边缘后**折成两行**。
-             * 现在开关本身也变成 chip 样式（与左边三个同一套视觉），文字缩短为
-             * 「替换」，并且整行 `softWrap = false`，窄屏下只会把 chip 压窄、不会换行。
-             */
+            /* 第二行：三个选项 chip + 替换开关。 */
             Row(
                 modifier = Modifier.fillMaxWidth().padding(start = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -645,11 +574,7 @@ private fun EditorSearchTopBar(
                 )
             }
 
-            /*
-             * 替换区：展开/收起走项目统一的 `ZhiMotion.sizeSpec`
-             * （与聊天卡片、设置子页同一套"展开/收起"曲线），
-             * 不再用裸 `fadeIn()/fadeOut()` —— 那种只有透明度、高度是瞬变的。
-             */
+            /* 替换区：展开/收起走项目统一的 `ZhiMotion.sizeSpec` */
             AnimatedVisibility(
                 visible = replaceExpanded,
                 enter = expandVertically(ZhiMotion.sizeSpec, expandFrom = Alignment.Top) + fadeIn(ZhiMotion.fadeInSpec),
@@ -677,24 +602,6 @@ private fun EditorSearchTopBar(
     }
 }
 
-/**
- * 搜索选项 chip。
- *
- * ## 为什么选中态要自己插值
- *
- * 改版前是 `color = if (checked) primary else secondaryContainer` —— 点一下颜色瞬变。
- * 三个 chip 并排时，瞬变会让人分不清"我点的是哪一个"（尤其快速连点时多个颜色一起跳）。
- * 现在底色、前景色都用 `animateColorAsState(ZhiMotion.colorSpec)` 过渡，
- * 于是点击是一次可追踪的变色，而不是闪烁。
- *
- * ## 为什么文字强制单行
- *
- * 窄屏（360dp）下「区分大小写」这类四字标签在 Row 里会被压到折行，
- * 折行后行高变化会把下面的替换区整体推移。这里 `maxLines = 1` + `softWrap = false`，
- * 空间不够时宁可被父级裁掉边缘，也不改变行高。
- *
- * @param accent 选中时用主色填充（替换开关用它，与三个筛选 chip 区分开）
- */
 @Composable
 private fun EditorSearchOption(
     label: String,
@@ -761,18 +668,7 @@ private fun EditorTextButton(label: String, enabled: Boolean, onClick: () -> Uni
     }
 }
 
-/*
- * 编辑器自绘顶栏的尺寸常量。
- *
- * 数值取自 Miuix `TopAppBarDefaults` 的公开默认值（见 `.miuix-docs/md/topappbar.md`）：
- * `SmallTopAppBarCenterHeight` 50dp、`NavigationIconPadding` 16dp、`ActionIconPadding` 16dp。
- * 抄成本地常量而不是引用库的 `TopAppBarDefaults`，是因为自绘的行不参与库的布局，
- * 引用后反而与库的内部绑定；将来要统一调整时只有这一处。
- *
- * `MiuixTopBarTitleGap` 是唯一**不属于** Miuix 的值：官方栏用 26dp 的 `titlePadding`
- * 把标题推向中间，而这里要的是"紧贴返回按钮"，26dp 会重新造出空隙。取 4dp ——
- * 既让字形与图标之间留出呼吸，又明确属于同一组。
- */
+/* 编辑器自绘顶栏的尺寸常量。 */
 private val MiuixTopBarCenterHeight = 50.dp
 private val MiuixTopBarNavPadding = 16.dp
 private val MiuixTopBarActionPadding = 16.dp

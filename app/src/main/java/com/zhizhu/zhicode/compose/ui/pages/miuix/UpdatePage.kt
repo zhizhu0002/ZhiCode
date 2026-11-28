@@ -60,39 +60,6 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 「检查更新」页。
- *
- * ## 版式（照参考图的「系统更新」）
- *
- * ```
- * 顶栏：「检查更新」+ 左返回（无右侧菜单）
- *   ┌ 居中超大「ZhiCode」
- *   │ 居中版本号
- *   ├────────── 一条 Divider ──────────
- *   │ 更新内容（小节标题 + 正文）
- *   ▼
- * 底部：只在真有新版本时出现「下载并安装」
- * ```
- *
- * ## 横线下面是"更新内容"，来源随状态切换
- *
- * - **有新版本** → 那个版本的更新内容（来自该 Release 的 `body`，经
- *   [ReleaseNotes] 分流成小节）；
- * - **没有新版本 / 上游还没发 Release / 检查失败** → **当前版本**的更新内容
- *   （本地自带的 `CHANGE_LOG`）。
- *
- * 两条路径都产出 Markdown 原文，所以用同一段渲染代码画（`ZhiMarkdown`），
- * 用户看不出这一段是远端来的还是本地写死的。
- *
- * ## 「已经是最新版本」用系统吐司，不做页面内的悬浮胶囊
- *
- * 参考图那个胶囊是系统更新应用的 Toast。这里用真 `Toast`（工程里
- * `TerminalChrome` / `EditorPage` / `UiDebugPage` 都是这个用法），
- * 于是它和其它系统提示的观感一致，也不会在页面上再占一块位置。
- * 吐司由**页面**在 [UpdatePhase] 迁移时弹，不在 ViewModel 里 ——
- * ViewModel 不该碰 `Context`。
- */
 @Composable
 fun UpdatePage(
     state: UpdateUiState,
@@ -112,15 +79,7 @@ fun UpdatePage(
     val checking = rememberActionBusy("update.check")
     val downloading = state.phase == UpdatePhase.Downloading
 
-    /*
-     * 吐司：只在**阶段真的变了**那一刻弹一次。
-     *
-     * 不能写成"看到 phase == NoReleases 就弹"—— 那样每次重组（滚动、点按）
-     * 都会再弹一次。`LaunchedEffect(phase)` 的 key 是阶段本身，所以同阶段内的
-     * 重组不会触发它，这正是我们要的语义。
-     *
-     * 失败不弹吐司：错误原因已经在页面上有一整块文字，再弹一次是重复。
-     */
+    /* 吐司：只在**阶段真的变了**那一刻弹一次。 */
     LaunchedEffect(state.phase) {
         val text = when (state.phase) {
             UpdatePhase.UpToDate -> "已经是最新版本"
@@ -171,16 +130,7 @@ fun UpdatePage(
             ) {
                 item(key = "brand") { UpdateBrandHeader() }
 
-                /*
-                 * 「有新版本」胶囊 —— 放在 hero 区里、品牌字下方居中。
-                 *
-                 * 参考图的「有新版本」就是这样一颗**居中的胶囊按钮**（不是卡片里的一行）：
-                 * 它在视觉上属于"版本信息"那一块，而不是设置列表里的一项。
-                 * 之前我把它做成关于页卡片里的一行，位置与分量都不对 ——
-                 * 那是这个页面**最主要的动作**，应该一眼看到。
-                 *
-                 * 只在真有新版本时出现；无更新/上游无 Release 时不占位。
-                 */
+                /* 「有新版本」胶囊 —— 放在 hero 区里、品牌字下方居中。 */
                 if (state.phase == UpdatePhase.Available && state.release != null) {
                     item(key = "new-version-pill") {
                         NewVersionPill(
@@ -201,40 +151,7 @@ fun UpdatePage(
                     )
                 }
 
-                /*
-                 * ⚠️ 这里**不放状态文案**。
-                 *
-                 * 解包了参考实现（`com.android.updater` 9.7.2）之后确认：
-                 * 它把"有没有新版本"拆成**两个独立 fragment**（`no_update_fragment` /
-                 * `new_update_fragment`），而两个 fragment 里**都没有**状态句 ——
-                 * 「已经是最新版本」「发现新版本」是 **Toast**
-                 * （`miui_summary_no_new_version` / `miui_summary_has_new_version`），
-                 * 不是页面内容。
-                 *
-                 * 所以横线下面**永远只有更新日志**。之前我在这里塞了一整块
-                 * 状态文案（还带一句"发布之后这里会显示新版本"的解释），
-                 * 那正是"和参考图完全不统一"的直接原因 —— 参考图里那块位置
-                 * 从头到尾都是正文。状态改走吐司，见上面那个 LaunchedEffect。
-                 */
 
-                /*
-                 * 更新内容：直接交给工程既有的 `ZhiMarkdown`。
-                 *
-                 * ## 为什么不再自己分流
-                 *
-                 * 上一版这里用 `ReleaseNotes.parse` 把正文拆成"小节 + 条目"，
-                 * 只处理了行首的 `#` / `-`，**完全没处理行内标记**。结果用户看到的是
-                 * 一屏 `**粗体**`、`` `代码` ``、`| 表格 | 列 |` 原样显示 ——
-                 * 标记语言泄漏到界面上。
-                 *
-                 * `ZhiMarkdown` 是这个工程自己的完整渲染器（粗体/斜体/行内代码/
-                 * 代码块/列表/引用/表格/可点链接，全部复用 Miuix 配色）。
-                 * 引它比自己再补一套行内解析正确得多，而且**更新说明本来就是
-                 * Markdown** —— Release 的 `body` 直接就是 Markdown 原文。
-                 *
-                 * `ReleaseNotes` 保留：它仍然负责"这条 Release 有没有说明"的判断
-                 * 与长度上限（那两道限制不该丢），只是不再负责渲染。
-                 */
                 val notes = updateNotesMarkdown(state)
                 if (notes.isBlank()) {
                     item(key = "notes-empty") {
@@ -309,20 +226,6 @@ fun UpdatePage(
     }
 }
 
-/**
- * 「有新版本」胶囊。
- *
- * 照参考图的形态：**居中的圆角胶囊**，字号与正文同级但更轻，底色是比页面亮一档的
- * 中性填充（参考图里那颗在深紫渐变上是很淡的一层）。
- *
- * ## 为什么不是 `PrimaryButton`
- *
- * `PrimaryButton` 是**实心强调色**，那是"提交/确认"的重量。这颗胶囊在参考图里
- * 只是一层很淡的填充 + 常规文字 —— 它是**入口**（点了滚到更新说明），
- * 不是危险或不可逆的动作。真正的下载按钮在底部悬浮条上，那一个才是实心的。
- *
- * 用 `surfaceContainerHigh` 而不是写死颜色：深浅色各自成立，跟随预设色。
- */
 @Composable
 private fun NewVersionPill(version: String, onClick: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
@@ -352,16 +255,7 @@ private fun NewVersionPill(version: String, onClick: () -> Unit) {
     }
 }
 
-/**
- * 顶部品牌区：居中超大「ZhiCode」+ 居中版本号。
- *
- * 不套磨砂 —— 关于页那个 Hero 之所以需要 `textureBlur` + `DstIn`，是因为它压在一层
- * 动态渐变上；这一页是纯底色，套上去只会让字变糊。
- *
- * 间距取自参考实现（`com.android.updater` 9.7.2 的 `no_update_fragment`）：
- * 品牌字距顶 `miui_white_text_logo_margin_top` = 121dp（这里取 40dp，因为我们的
- * 顶栏比它的高）、版本号距品牌字 `miui_version_summary_margin_top` = 10dp。
- */
+/** 顶部品牌区：居中超大「ZhiCode」+ 居中版本号。 */
 @Composable
 private fun UpdateBrandHeader() {
     val scheme = MiuixTheme.colorScheme
@@ -433,22 +327,6 @@ private fun DownloadProgress(state: UpdateUiState, onCancel: () -> Unit) {
     }
 }
 
-/**
- * 底部悬浮条。
- *
- * ## 为什么是悬浮条而不是页面里的按钮
- *
- * 参考实现的「检查更新 / 立即下载」是**贴底的悬浮按钮**（`no_update_fragment`
- * 里那个 `Button` 用 `check_btn_margin_top` 9.09dp、`check_btn_margin_bottom`
- * 28dp 做上下留白，横向上与内容同宽），而不是插在正文流里的一个实心块。
- *
- * 那不只是外观：悬浮条**不随内容滚走**，而"检查更新"必须随时可按 ——
- * 日志一长（真发过几个版本之后必然如此），流里的按钮会被推到几屏之外，
- * 用户得先滚到底才能点。
- *
- * 复用工程自己的 [FloatingBottomShell]（任务卡 / 反馈条 / 输入器都从它出）：
- * 圆角、阴影、模糊半径、横向内缩在那一处定死，三块想不一致都不行。
- */
 @Composable
 private fun UpdateFloatingBar(
     state: UpdateUiState,
@@ -469,11 +347,7 @@ private fun UpdateFloatingBar(
     // 只留「在浏览器打开」，而不是给一个点了没反应的按钮。
     val hasApk = !state.release?.apkUrl.isNullOrBlank()
 
-    /*
-     * 主按钮的文案与动作。**永远有一个主按钮**："检查更新"是这个页面的主要动作，
-     * 没有新版本时它就是唯一的按钮（参考实现同理 —— 无更新态那个 fragment 里
-     * 也有一个可点的按钮）。
-     */
+    /* 主按钮的文案与动作。 */
     val primaryText: String
     val primaryAction: () -> Unit
     val primaryEnabled: Boolean
@@ -557,20 +431,8 @@ private fun SectionNote(text: String) {
     )
 }
 
-/**
- * 横线下面该显示哪一份更新内容 —— 返回 **Markdown 原文**。
- *
- * 有新版就看新版的（远端 Release 的 `body`，本来就是 Markdown），
- * 否则看当前版本的（本地 `CHANGE_LOG`，由 [com.zhizhu.zhicode.compose.model.toMarkdown]
- * 转成同一套写法）。两端都是 Markdown，所以渲染只有一套 —— `ZhiMarkdown`。
- *
- * ⚠️ 上一版这里返回的是"小节 + 条目"结构，配合自己写的分流渲染，
- * 只处理了行首标记、没处理行内标记，于是 `**粗体**`、反引号、表格全部原样泄漏到界面。
- * 换成 Markdown 原文 + 既有渲染器之后，这类问题从根上不会再有。
- */
 
-/* 注：原先这里有个 `formatPublished`（把 ISO 时间截成日期），已经随
- * "更新页不再单独显示发布日期"一起去掉 —— 参考图里也没有这一行。 */
+/* 注：原先这里有个 `formatPublished`（把 ISO 时间截成日期），已经随 */
 
 /** 字节数 → 人类可读。只在两处用，不引公共工具。 */
 private fun formatSize(bytes: Long): String = when {
@@ -581,12 +443,7 @@ private fun formatSize(bytes: Long): String = when {
     else -> String.format(java.util.Locale.US, "%.2f GB", bytes / (1024.0 * 1024 * 1024))
 }
 
-/**
- * 无涟漪点击。
- *
- * 大字号文字（品牌字、整行文字动作）不是标准点按目标：加上涟漪会让人以为
- * 那是一个按钮，而这几个位置的语义就是"文字本身可以点"。
- */
+/** 无涟漪点击。 */
 @Composable
 private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier {
     val interaction = remember { MutableInteractionSource() }

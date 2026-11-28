@@ -16,23 +16,6 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 「有未保存的改动」的离开确认。
- *
- * ## 为什么需要它
- *
- * 二级页里的编辑器（技能正文、角色卡、记忆文件）都是**未提交的表单**：顶栏返回键与
- * 系统返回键都直接关页，改了一半的内容无声消失。它们此前唯一的"保护"是——
- * 用户从不指望这些页面会保留草稿，于是每次返回都先自己记住"我改了没存"。
- *
- * 现在统一拦一次：有改动就问，没有改动就直接走（不多一步确认）。
- *
- * ## 判定在哪一侧
- *
- * 「有没有改动」由各自的**表单模型**回答（`SkillEditTarget.dirty` /
- * `RoleCardEditor.dirty` / `MemoryEditor.dirty`：当前值与打开时的基准比）。
- * 界面只负责"要不要拦"，不自己记快照 —— 否则保存成功之后界面会一直以为还脏。
- */
 @Composable
 internal fun UnsavedChangesDialog(
     visible: Boolean,

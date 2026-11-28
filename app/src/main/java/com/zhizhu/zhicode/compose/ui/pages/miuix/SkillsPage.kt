@@ -74,47 +74,6 @@ import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * Skill 管理：技能列表 / 手动添加 / 从文件导入 / 从 URL 导入 / 技能详情（文件树 + 编辑）。
- *
- * ## 这里的操作是"真的"
- *
- * 技能目录与引擎 `SkillTool` 的查找路径完全一致（项目级 `<project>/.zhicode/skills`、
- * 用户级 `$HOME/.zhicode/skills`），所以在这里建好的技能，Agent 下一次就能用 `Skill`
- * 工具加载；「附加」则把内容直接拼进下一条请求。
- *
- * ## 页面栈只有**两层**，其余全是对话框
- *
- * 列表 → 详情 是 [SettingsPageStack] 里的两页；编辑文件 / 新建文件 / 手动添加 /
- * 从 URL 导入 都是**对话框**。以前编辑是一整页，于是加一个技能要跨三级页面
- * （用户报过「创建的时候她会再显示一个重复的」—— 一次推两页就是这个观感）。
- * 参考实现（rikkahub）也是这么分的：只有列表与详情是页，其余都是对话框。
- *
- * ## 与参考实现的差异
- *
- * 1. 多一个「作用域」选择。rikkahub 只有一份全局技能目录，ZhiCode 有项目级与用户级两层，
- *    这是存储层的既有语义，不能省。
- * 2. 导入的第二种形态是**从 URL 导入**而不是 GitHub 专用导入：任意 http(s) 地址，
- *    是 zip 就解包、是文本就进「手动添加」确认。能力覆盖同一件事，却不绑定某个站点
- *    （见 `SkillImport`）。
- * 3. 没有内置技能的概念，所以不做只读项与「Built-in」标签。
- *
- * ## 浮层退出动画契约（`show` 由调用方传，浮层必须常驻组合）
- *
- * Miuix 的进出场动画**不在浮层组件里**，而是 `layout` 包里那几个 `…ContentLayout` 内部的
- * `Animatable`（进入 = 遮罩 `tween(300)` + 内容弹簧；退出 = 遮罩 `tween(250)` +
- * 内容 `tween(260, DecelerateEasing(1.5))`）。它的 `show == false` 分支里有一句
- * `if (!show && !internalVisible.value) return` —— **先播完退出动画才 return**。
- *
- * 所以下面这 6 个浮层都收一个 `show` 参数、内部原样转发给 `OverlayDialog` /
- * `OverlayBottomSheet`，**调用方不许再写 `if (open) { Floating(...) }`**：
- * 那样组件一被移除，相关副作用就直接取消，退出这段 `Animatable` 根本没机会跑，
- * 关门永远是硬切。官方 demo（`DialogSection.kt` / `BottomSheetSection.kt`）
- * 也一律是 `show = <state>`，从不套 `if`。
- *
- * 数据驱动的浮层（`state.createForm` 等）退出期间字段已经变 `null`，所以内容要靠
- * [rememberLastNonNull] 兜住，否则退场那 260ms 会画成一张空卡。
- */
 @Composable
 fun SkillsPage(
     state: SkillsState?,
@@ -317,12 +276,7 @@ fun SkillsPage(
 
 // ------------------------------------------------------------------ 添加技能的选择表
 
-/**
- * FAB 拉起的「怎么添加」选择表。
- *
- * 形态照官方 demo（`OverlayBottomSheetDemo.kt`）：**一个 `Card` 包住若干行**。
- * 每行各套一张卡会让面板碎成一堆便签。
- */
+/** FAB 拉起的「怎么添加」选择表。 */
 @Composable
 private fun AddSkillSheet(
     show: Boolean,
@@ -614,13 +568,7 @@ private fun EmptyHint(text: String) {
 
 // ------------------------------------------------------------------ 详情页
 
-/**
- * 技能详情：这个技能的路径 + 它目录下的**文件树**。
- *
- * 技能不只有 `SKILL.md` —— 参考文档、脚本可以放在子目录里跟着一起分发
- * （`SkillStore.delete` 用递归删除就是为此）。所以这里把整棵树列出来，
- * 每个文件都能点进编辑器，树本身可展开折叠。
- */
+/** 技能详情：这个技能的路径 + 它目录下的**文件树**。 */
 @Composable
 private fun SkillDetailBody(
     detail: SkillDetail,
@@ -728,14 +676,6 @@ private fun SkillDetailBody(
     }
 }
 
-/**
- * 文件树的递归渲染。
- *
- * ⚠️ **递归是这个组件的核心能力**，不是排版细节：技能支持子目录，
- * 只渲染一层的话 `reference/api.md` 会整个消失（连名字都看不到）。
- * 展开状态按 [SkillFileNode.DirNode.relativePath] 存（`rememberSaveable`），
- * 因为相对路径在技能目录内唯一 —— 按名字存会让两层里同名的目录一起展开。
- */
 @Composable
 private fun SkillTree(
     nodes: List<SkillFileNode>,
@@ -875,20 +815,7 @@ private fun countFiles(nodes: List<SkillFileNode>): Int = nodes.sumOf { node ->
 
 // ------------------------------------------------------------------ 手动添加（对话框）
 
-/**
- * 「手动添加技能」对话框。
- *
- * 形状照参考实现（rikkahub 的「添加技能」）：**一个「SKILL.md 内容」框 + 取消/保存**，
- * 没有独立的名字字段 —— 技能名由内容的 frontmatter 解析得出（见 `SkillCreateDraft`）。
- *
- * 框里**预填一份示例**（`SkillStore.starterTemplate`，直接进输入框而不是在下面另起一块）：
- * 用户改一改就能存，不必先猜 frontmatter 要写什么。示例里的名字是占位符、过不了校验，
- * 所以刚打开时「保存」是禁用的。
- *
- * 下面那行小字承担两件事：解析结果回显、解析失败报错。
- * Miuix 的输入框只有 `label` / `useLabelAsPlaceholder`，没有独立的 placeholder 参数，
- * 所以按参考图那样把提示放在框外。
- */
+/** 「手动添加技能」对话框。 */
 @Composable
 private fun SkillCreateDialog(
     show: Boolean,
@@ -898,14 +825,6 @@ private fun SkillCreateDialog(
     onDismiss: () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    /*
-     * 内容为空 = 用户还没开始写。此时「保存」禁用、提示是灰字指引 —— 都不是错误。
-     *
-     * ⚠️ 模板**不再**预填进内容里（见 `WorkspaceViewModel.newSkill`）：
-     * 那样会让框里出现正常文字色的示例、并且因为 `name: <技能名>` 过不了校验
-     * 而让对话框一打开就飘一行红字（用户报的"打开就是红的"）。
-     * 现在模板是输入框的**灰色占位符**，不参与解析。
-     */
     val empty = draft.content.isBlank()
     val nameBroken = (draft.nameMissing || draft.nameInvalid) && !empty
     OverlayDialog(
@@ -932,26 +851,11 @@ private fun SkillCreateDialog(
                 ZhiTextField(
                     value = draft.content,
                     onValueChange = { value -> onChange { it.copy(content = value) } },
-                    /*
-                     * 空内容时显示为**灰色占位符**（`useLabelAsPlaceholder = true`
-                     * 时 Miuix 的 label 就是框内 hint，一输入就浮到上沿）。
-                     *
-                     * 于是示例 SKILL.md 照样看得见，但它是提示而不是内容：
-                     * 不参与解析、不影响「保存」可用性、也不会被误当成用户写的字。
-                     */
+                    /* 空内容时显示为**灰色占位符**（`useLabelAsPlaceholder = true` */
                     label = if (empty) SkillStore.starterTemplate else "SKILL.md 内容",
                     useLabelAsPlaceholder = true,
                     singleLine = false,
                     minLines = 8,
-                    /*
-                     * ⚠️ 高度上限是必须的。
-                     *
-                     * 示例模板是一段 10 行的多行文本，而 `minLines = 8` 只保证下限。
-                     * 上一版没有上限，占位符一变成多行就把框撑到弹窗可用高度的上限，
-                     * 把下面的「保存位置」和底部按钮整块挤出可视区（截图为证）。
-                     *
-                     * 12 行足够让模板完整露出来，又留出下面几行的位置。
-                     */
                     maxLines = 12,
                     textStyle = MiuixTheme.textStyles.main.copy(fontFamily = FontFamily.Monospace),
                     modifier = Modifier.fillMaxWidth(),
@@ -988,13 +892,7 @@ private fun SkillCreateDialog(
 
 // ------------------------------------------------------------------ 从 URL 导入（对话框）
 
-/**
- * 「从 URL 导入」对话框。
- *
- * 一个地址框 + 保存位置。地址可以指向一份 `SKILL.md`，也可以指向一个 zip：
- * 前者下载完会进「手动添加」让用户确认，后者直接逐个导入并把"新建了几个 /
- * 已存在几个"报出来（见 `SkillImport`）。
- */
+/** 「从 URL 导入」对话框。 */
 @Composable
 private fun SkillUrlDialog(
     show: Boolean,
@@ -1079,17 +977,6 @@ private fun ScopeDropdown(scope: SkillScope, onScopeChange: (SkillScope) -> Unit
 
 // ------------------------------------------------------------------ 编辑文件（对话框）
 
-/**
- * 编辑器（对话框，不是整页）。
- *
- * 以前它是一整页，于是"从列表页点编辑"会一次推两页（详情 + 编辑器），
- * 观感上像"凭空多出来一层"（用户报过「创建的时候她会再显示一个重复的」）。
- * 参考实现用的是对话框，这里跟它对齐：页面栈只剩列表 → 详情两层。
- *
- * ⚠️ 保存按钮受 `saveable` 控制 —— 它唯一的来源是 [SkillEditTarget.nameError]，
- * 也就是"编辑 SKILL.md 时内容里的 name 必须等于技能名"。不一致时下方会用错误色
- * 把原因写出来，并禁用保存（而不是等点了保存才报错）。
- */
 @Composable
 private fun SkillEditDialog(
     show: Boolean,
@@ -1151,16 +1038,6 @@ private fun SkillEditDialog(
     }
 }
 
-/**
- * 导入技能那个选择器接受的 MIME 类型。
- *
- * ⚠️ 「文本」那一项是**拼**出来的，不能改回字面量。字面量里含有
- * 「斜杠紧跟星号」这个序列，而 `app/tests/` 下每个测试都自带一份按正则删注释的
- * `stripComments` —— 正则不认识字符串字面量，会把那个序列当成块注释的开头，
- * **把后面一大段源码整块删掉**。实测过（`ChatArea.kt` 里同一处写法让
- * 397 行以后的内容在测试眼里全部消失）。这里一直没暴露，只是因为被删掉的那段
- * 恰好没有断言要检的 token。
- */
 /** 详情页 SKILL.md 预览的行数上限：够认出"这是哪一个技能"，又不至于把整份文档铺开。 */
 private const val SKILL_PREVIEW_LINES = 20
 
@@ -1172,15 +1049,7 @@ private val SkillImportMimeTypes = arrayOf(
 
 // ------------------------------------------------------------------ 新建文件（对话框）
 
-/**
- * 「新建文件」对话框。
- *
- * 文件名允许带子目录（`reference/api.md`）：技能本来就支持分组，界面不给出这个入口的话，
- * 树只能显示别处建出来的目录。
- *
- * 重名会被 `WorkspaceViewModel.saveSkillFile` 挡掉并提示，不在这里做校验：
- * 判重需要读文件系统，放在对话框里会让每次输入都摸一次磁盘。
- */
+/** 「新建文件」对话框。 */
 @Composable
 private fun SkillFileDialog(
     show: Boolean,

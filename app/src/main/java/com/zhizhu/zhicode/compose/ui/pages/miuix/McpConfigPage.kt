@@ -79,30 +79,6 @@ import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * MCP 服务器配置窗口：列表页与编辑表单共用一个弹窗。
- *
- * ## 为什么这里值得做
- *
- * 引擎侧 `McpRuntime` 会真的把配置里的服务器拉起来，`McpTool` 也已经注册进
- * `ToolRegistry`——也就是说这里存下去的每一条配置**当场就能被 Agent 调用**。
- * 这不是占位界面。
- *
- * ## 与参考实现（rikkahub 的 MCP 设置页）的关系
- *
- * 搬了三件事：
- * 1. **每台服务器一张卡**，卡上带启用状态点、传输类型标签，以及连接结果；
- * 2. **连接错误可展开看全文**（超时、证书、401 这类信息只看一行是没法排查的）；
- * 3. **逐工具的「启用 / 需要审批」开关**（那个表单里的「工具」页）。
- *
- * 三处**刻意不同**：
- * 1. 不做 OAuth 授权。参考实现为此有四个专门的类（发现、协调器、会话注册表、
- *    状态机）加一条浏览器回调链路，是独立的一大块。
- * 2. **不做下拉刷新**，改成显式的「测试连接」。原因是语义：测试会真的起子进程、
- *    发 HTTP，用户得先知道自己在触发什么；下拉刷新会让它变成"手滑一下就启动了
- *    一堆进程"。也正因如此，打开这一页**不会**自动测试。
- * 3. 表单是整页（与其余四个二级页一致），不是 bottom sheet。
- */
 @Composable
 fun McpConfigPage(
     config: McpConfigState?,
@@ -435,13 +411,7 @@ private fun McpServerList(
     }
 }
 
-/**
- * FAB 拉起的「怎么添加」选择表。形态与技能页那张**完全一致**：
- * 官方 demo 的 `OverlayBottomSheet` —— 一个 `Card` 包住若干行。
- *
- * 把「添加」与「导入」收进来（而不是顶栏并排两个入口）：底栏每一行都带一句说明，
- * 用户一眼能分辨"手动填一台"和"粘一份 JSON"，而顶栏上那两个词得先读懂才知道区别。
- */
+/** FAB 拉起的「怎么添加」选择表。 */
 @Composable
 private fun AddMcpSheet(
     show: Boolean,
@@ -528,15 +498,7 @@ private fun McpEmptyState() {
     }
 }
 
-/**
- * 一台服务器一张卡。
- *
- * 卡上同时要表达三件事，它们是**三个不同的维度**，不能合并：
- * - 启用（用户的选择，绿/红点）
- * - 传输方式（配置事实，类型标签）
- * - 连接结果（服务器的回答，一行状态）
- * 把"已停用"与"连接失败"画成同一个颜色，用户就分不清该去改开关还是改地址。
- */
+/** 一台服务器一张卡。 */
 @Composable
 private fun McpServerCard(
     server: McpServer,
@@ -728,12 +690,7 @@ private fun transportLabel(type: McpType): String = when (type) {
     McpType.SSE -> "SSE"
 }
 
-/**
- * 「基本设置」页：名称 / 连接方式 / 启用 + 启动参数或 HTTP 连接 + 作用范围。
- *
- * 与「工具」页分开的原因见上面的 TAB 栏注释 —— 工具清单长度不可控，
- * 而这些字段是每次都要改的。
- */
+/** 「基本设置」页：名称 / 连接方式 / 启用 + 启动参数或 HTTP 连接 + 作用范围。 */
 @Composable
 private fun McpConnectionForm(
     draft: McpServerDraft,
@@ -872,12 +829,7 @@ private fun McpConnectionForm(
     }
 }
 
-/**
- * 「工具」页：连接测试 + 逐工具开关。
- *
- * 清单来自「测试连接」—— 服务器没连上就无从知道它有哪些工具，
- * 所以这里的第一种状态是"还没测过"，而不是一个空列表。
- */
+/** 「工具」页：连接测试 + 逐工具开关。 */
 @Composable
 private fun McpToolsTab(
     draft: McpServerDraft,
@@ -1008,14 +960,7 @@ private fun McpToolsTab(
     }
 }
 
-/**
- * 一个工具一行：名称、两个开关，点开看描述与参数。
- *
- * 两个开关的语义必须**同时**说清楚，否则用户会以为「需要审批」是"更严格的启用"：
- * - 启用 = Agent 能不能看到并调用它；
- * - 需要审批 = 能调用，但每次调用前都要你确认一次。
- * 所以停用时审批开关没有意义（永远不会走到确认那一步），那一行会跟着灰掉。
- */
+/** 一个工具一行：名称、两个开关，点开看描述与参数。 */
 @Composable
 private fun McpToolRow(
     tool: McpToolInfo,
@@ -1232,38 +1177,11 @@ private fun McpImportDialog(
     }
 }
 
-/**
- * MCP 表单里的校验提示：统一走 [ZhiFieldError]（见那里的两条纪律）。
- *
- * 这个转发函数保留着只是因为本文件的调用点已经写着 `FieldError(...)`；
- * 想改缩进或颜色时**改 Common.kt 那一处**，别在这里长第二份。
- */
+/** MCP 表单里的校验提示：统一走 [ZhiFieldError]（见那里的两条纪律）。 */
 @Composable
 private fun FieldError(message: String?, touched: Boolean = true) =
     ZhiFieldError(message = message, touched = touched)
 
-/**
- * 键值对编辑器（请求头 / 环境变量）。
- *
- * ## 为什么不是 JSON 文本框
- *
- * 原来这一项是「一整块 JSON」：真实配置里通常只有一两条（`Authorization`、
- * `X-Api-Key`），用户却要记住引号与逗号，写错一个字符保存时才报错；
- * 而且值只能明文摊在屏幕上。参考实现（rikkahub 的 Custom headers 段）
- * 用的是**逐行键值 + 值的显隐切换**，这里搬同一形状。
- *
- * ## 存储格式没变
- *
- * 编辑结果仍序列化成**同一份 JSON 文本**写回 `envText` / `headersText`
- * （引擎侧 `McpConfigStore.Server.env/headers` 是 `JSONObject`）。
- * 所以已有配置完全兼容，撤销这次改动也不会产生新格式。
- *
- * ## 非法 JSON 不吞掉
- *
- * 如果打开时那份文本解析不了（用户从别处粘进来的半截 JSON），
- * 这里退回**原始文本框**而不是显示成空列表 —— 后者会让用户以为配置丢了，
- * 一保存就把原来那份覆盖成空。
- */
 @Composable
 private fun KeyValueEditor(
     title: String,
@@ -1369,12 +1287,7 @@ private fun parsePairsOrNull(text: String): List<Pair<String, String>>? {
     }.getOrNull()
 }
 
-/**
- * 键值对 → JSON 文本。
- *
- * 空名字的行**不写**（那只是"刚点了一下添加、还没填"）；全部为空时写空串，
- * 让"没有设置"仍然表示成空串（`McpServerDraft.jsonError` 认这个语义）。
- */
+/** 键值对 → JSON 文本。 */
 private fun serializePairs(pairs: List<Pair<String, String>>): String {
     val named = pairs.filter { it.first.isNotBlank() }
     if (named.isEmpty()) return ""

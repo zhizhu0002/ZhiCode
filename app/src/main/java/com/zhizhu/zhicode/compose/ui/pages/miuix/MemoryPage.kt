@@ -29,15 +29,6 @@ import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 记忆文件（`ZhiCode.md`）窗口：文件列表与编辑器共用一个弹窗。
- *
- * ## 说明文字必须诚实
- *
- * 引擎**不会**自动读 ZhiCode.md（`SystemPromptBuilder` 里没有相关引用，原版也一样）。
- * 所以顶部提示写的是"写入不会自动注入模型，它需要被读到"，而不是
- * "会自动作为记忆生效"——后者会让用户以为写完就生效了，然后困惑于模型为什么不遵守。
- */
 @Composable
 fun MemoryPage(
     state: MemoryState?,

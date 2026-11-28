@@ -69,52 +69,6 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 
-/**
- * 所有模态窗口都走 Miuix `overlay` 包的 [OverlayDialog]。
- *
- * 为什么不用 `window` 包的 `WindowDialog`：它会创建**独立 Android Window**，
- * 既不会继承 `Scaffold` 的 `popupHost`（内部再用 Miuix 弹层组件就会失效），
- * 也无法参与主窗口的 `LayerBackdrop` 背景采样 —— 弹窗背后的模糊会做不出来。
- * 两者参数集完全一致，换过来无需改调用方形状。
- *
- * ## 位置与动画都交给 Miuix
- *
- * ⚠️ `largeScreen` 只在确实需要官方中央形态的调用点显式传入；它会同时决定
- * DialogContentLayout 的定位与动画，调用点不再额外叠加 AnimatedVisibility。
- *
- * ```
- * if (isLargeScreen) {                // true：大屏规格
- *     scale = 0.8f + 0.2f * progress   //   0.8→1 缩放
- *     alpha = progress
- *     // 进场 folmeSpring(damping = 0.9, response = 0.3)
- * } else {                            // false：手机规格
- *     translationY = (1 - progress) * 屏高   // 从下往上滑入
- *     // 进场 spring(dampingRatio = 0.88, stiffness = 450)
- * }
- * ```
- *
- * 文件面板需要中央形态时，直接按官方 `CenteredOverlayDialogDemo` 传
- * `largeScreen = true`；其它长内容/列表型弹窗不强制中央，继续使用 Miuix 的自动规格。
- *
- * ## 手写降到最低
- *
- * - 列表行 → Miuix [BasicComponent]（`title` / `summary` / `startAction` / `endActions`）
- * - 选中指示 → Miuix [Checkbox]，单选与多选**共用**。不用 Miuix `RadioButton`：
- *   它在未选中时不画任何东西（只画那个勾），单选行会连"这里能点"都看不出来。
- *   单选/多选的差别在**行为**（点另一行是否清掉原来那行），不在控件长相。
- * - 主按钮 → Miuix [Button] + [ButtonDefaults.buttonColorsPrimary]
- * - 次要按钮 → Miuix [Button] + `buttonColors`（与主按钮同形状、只有配色不同）
- * - 开关 → Miuix [Switch]
- *
- * 仅保留一处自定义：左对齐标题。因为 Miuix 的 `title` 参数会把标题强制居中并染色，
- * 与参考图的白字左对齐不一致。
- *
- * 弹窗底色是 `DialogDefaults.backgroundColor` = `Colors.background`，
- * 而深色方案的 `surfaceContainerHigh` **也是同一个值**（从 0.9.4 字节码
- * `darkColorScheme$default` 读出的默认值），卡片直接放在弹窗底上会完全隐身。
- * 解决办法是 `DialogShell(groupBody = true)`：把内容区包进 Miuix `Card`，
- * 由主题提供与弹窗底色的对比度 —— 用纯黑底板会在浅色模式下直接坏掉。
- */
 
 // ---------------------------------------------------------------- 工具授权
 

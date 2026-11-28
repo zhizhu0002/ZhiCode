@@ -308,17 +308,6 @@ private fun FileBrowserList(
         )),
     )
     Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = FileRowSidePadding), verticalAlignment = Alignment.CenterVertically) {
-        /*
-         * 长按进入多选时，这一行要从"搜索框 + 新建 + 排序"整块换成"关闭 + 已选择 + 全选"。
-         *
-         * 改版前是裸 `if (selectionMode) … else …` —— 两套控件在**同一帧**里互换，
-         * 看上去就是"长按下去，工具栏啪地闪了一下"。这里用 AnimatedContent 让两态
-         * 交叉溶解并带一点位移，方向跟着状态走（进多选向左、退出向右），
-         * 于是"我进入了另一个模式"这件事有了可读的运动方向。
-         *
-         * 为什么用 `SizeTransform(clip = false)`：行高固定 64dp，两态内部高度一致，
-         * 不需要裁剪；开着 clip 反而会在切换瞬间把描边切掉一条边。
-         */
         AnimatedContent(
             targetState = selectionMode,
             transitionSpec = {
@@ -470,16 +459,6 @@ internal fun FileSelectionToolbar(
         DropdownItem("详情", onClick = { details = entries.filter { it.path in selection } }),
         DropdownItem("退出选择", onClick = onDismiss),
     ))
-    /*
-     * ⚠️ 这里**没有** `AnimatedVisibility`。
-     *
-     * 它原先自带一层「上滑 + 淡入」，而调用方（`WorkspacePage`）现在用
-     * `updateTransition` 做「胶囊 ↔ 工具栏」的形变过渡 —— 两层动画叠在一起，
-     * 内层那条会与外层的进度脱节，看起来就是"工具栏自己在抖"。
-     *
-     * 淡入淡出与位移一律由调用方管：只有它知道该和谁交接（胶囊 / 固定底栏 /
-     * 什么都没有）。本组件只负责"长什么样"。
-     */
     Surface(
         modifier = modifier
             // 横向内缩与悬浮胶囊同源（`floatingHorizontalInset`），两块边缘才能对齐。

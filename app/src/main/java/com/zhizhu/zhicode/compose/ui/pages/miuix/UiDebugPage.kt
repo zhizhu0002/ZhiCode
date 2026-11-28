@@ -128,51 +128,6 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
-/**
- * **UI 调试页**（仅 debug 构建可见，入口在设置页「扩展」组）。
- *
- * ## 它解决什么问题
- *
- * 界面问题里最难定位的一类是「看起来不对」，而验证它需要**同时**看到同一个组件在各种
- * 状态下的样子：一条工具卡在"运行中 / 成功 / 失败 / 等待授权"四态下高度差别很大，一次
- * 真的任务只会出现其中一态；同理还有流式回复、思考折叠、上下文脚注、错误卡、空状态。
- * 靠真跑一遍任务去凑齐这些状态既慢又不可复现。
- *
- * 所以这一页把**本工程真正在用的组件**按类别铺开，并用**固定的样例数据**把每种状态都
- * 摆一份：颜色/字阶/圆角/图标 → Miuix 基础组件 → 设置行（preference 全套）→ 对话流
- * 卡片 → 任务卡 → 输入器 → 面板与 chips → 各浮层入口 → 当前 state 快照。
- *
- * ## 它是**可互动的**（不是静态画廊）
- *
- * - 「对话流」是一份**可变的样例数据**：思考可展开、工具行可展开看输出、工具组可整体
- *   折叠；按钮能追加用户消息、追加一段"流式 → 完成"的回复、起一个**正在运行**的工具
- *   （秒表会真的走）并让它成功或失败。
- * - 每一条消息、每一张图片都**长按弹出动作菜单**（用的是生产组件
- *   `ZhiAnchoredActionMenu`，从手指位置长出来），选「复制」即写入剪贴板并弹
- *   **吐司**提示；图片项复制的是**图片信息**（文件名 / 尺寸 / 体积 / 类型）。
- * - 底部有「交互日志」：每次点击/长按/复制都留一行，于是"我点了它到底有没有响应"
- *   不用靠猜。
- * - 输入器与「浮层入口」接的是**真实 ViewModel**：输入、斜杠面板、页脚下拉、发送、
- *   打开 API 配置/MCP/技能/角色卡/记忆/模型选择/环境自检/附加文件都是真路径。
- * - 颜色/字阶/圆角/状态快照读的是**当前主题与当前 state**，切深浅色会跟着变。
- *
- * ## 纪律
- *
- * - 这里**不新造样式**：视觉一律取自 `Zhi*` 令牌与 Miuix 组件本身，颜色/字号/圆角
- *   必须走 `MiuixTheme.colorScheme` / `主题 textStyles` / `ZhiRadius` —— 这一页的意义
- *   就是"看到的即真实组件"，一旦自己写死数值，它就开始骗人了（由
- *   `UiDebugPageStructureTest` 守着）。
- * - 输入框走 `ZhiTextField`（工程唯一转发点，见 `TextFieldConventionTest`）。
- * - 对话流与任务卡直接调用**生产组件**，不是仿制版。
- * - 未收纳官方组件（NavigationBar / NavigationRail / BreadcrumbBar / SearchBar /
- *   ColorPicker / PullToRefresh / Snackbar / Tooltip / NumberPicker 等）：本工程没有
- *   用到它们，摆出来只会增加维护面而没有调试价值。
- *
- * ## 入口与返回
- *
- * 作为整页压在 `NavDisplay` 的栈上（`AppScaffold` 的 `AppKey.UiDebug`），所以返回键与
- * 边缘滑动返回都走官方导航运行时；从设置页进来时设置主页会留在栈底，返回即回到它。
- */
 @Composable
 fun UiDebugPage(
     state: WorkspaceUiState,
@@ -257,13 +212,7 @@ fun UiDebugPage(
 
 // ------------------------------------------------------------------ 存储诊断
 
-/**
- * 存储维护与归档入口。
- *
- * 这些按钮特意放在 UI 调试页而不是主聊天区：维护、导出、导入都是低频的运维动作，
- * 不该占据日常对话界面；但它们又必须能在 release 构建里被真实验证，所以入口不依赖
- * BuildConfig.DEBUG。
- */
+/** 存储维护与归档入口。 */
 @Composable
 private fun StorageSection(
     state: WorkspaceUiState,
@@ -332,14 +281,6 @@ internal fun DebugSection(title: String, subtitle: String? = null, content: @Com
 
 // ------------------------------------------------------------------ 剪贴板 + 吐司
 
-/**
- * 复制到剪贴板并弹**吐司**。
- *
- * 为什么不复用 `WorkspaceViewModel.copyText`：那条路径在 Android 13+ 上**刻意不弹**
- * 自己的提示（系统已经在复制时弹了"已复制"，再弹一次是重复打扰，见 `data/Clipboard.kt`）。
- * 但调试页的用途恰恰是"给我一个看得见的反馈"——点了有没有生效必须当场看见，
- * 所以这里显式弹吐司，并如实区分成功与失败（空内容/剪贴板不可用时不能谎报成功）。
- */
 private fun copyWithToast(context: android.content.Context, label: String, text: String, toast: String) {
     val ok = Clipboard.copy(context, label, text)
     val message = if (ok) toast else "复制失败：内容为空或剪贴板不可用"
@@ -403,12 +344,7 @@ private sealed interface DebugItem {
     }
 }
 
-/**
- * 可变的样例会话 + 交互日志。
- *
- * 用 `mutableStateListOf` 而不是 `List`：这一页的价值一半在"点了有反应"，
- * 而不可变列表每次改动都要重建整份数据结构，反而更容易写错。
- */
+/** 可变的样例会话 + 交互日志。 */
 private class DebugConversation {
     val items = mutableStateListOf<DebugItem>()
     val log = mutableStateListOf<String>()
@@ -474,13 +410,7 @@ private class DebugConversation {
         note("展开/折叠工具输出 · $toolId")
     }
 
-    /**
-     * 展开/收起一个折叠组（界面上是点组表头）。
-     *
-     * 展开态记在 `expandedGroups` 上，所以这里只改那一个集合 —— 不去动成员的
-     * `expanded`（那个管的是"这条工具的输出展开"）。顺便把整批的工具输出都摊开/收起，
-     * 因为调试页要的是"看清楚每一条"。
-     */
+    /** 展开/收起一个折叠组（界面上是点组表头）。 */
     fun toggleGroup(msgId: String, groupKey: String) {
         updateMsg(msgId) { item ->
             val open = groupKey in item.expandedGroups
@@ -543,10 +473,7 @@ private class DebugConversation {
         note("流式回复完成 · $id")
     }
 
-    /**
-     * 起一个**正在运行**的工具：追加到最后一个工具组上（没有就新建一个）。
-     * 运行中的行会让秒表真的走起来（见 [tickRunning]）。
-     */
+    /** 起一个**正在运行**的工具：追加到最后一个工具组上（没有就新建一个）。 */
     fun startTool(displayName: String, summary: String, kind: ToolKind) {
         val tool = ToolActivity(
             id = nextId("tool"),
@@ -580,16 +507,7 @@ private class DebugConversation {
         note("起工具 · $displayName $summary")
     }
 
-    /**
-     * 逐条改写消息项（图片项原样保留）。
-     *
-     * 刻意不用 `MutableList.replaceAll`：它是 `java.util.List` 的默认方法，在
-     * `SnapshotStateList` 上虽然能跑，但回调里无法"跳过不写"（每次都会写回，
-     * 于是没有变化也会触发重组），而且语义上容易与 `removeAll` 那类混淆。
-     * 只留这一条按索引写回的路径，返回真正改动的条数。
-     *
-     * [transform] 返回 `null` 表示这一条无需改动。
-     */
+    /** 逐条改写消息项（图片项原样保留）。 */
     private inline fun updateMsgs(transform: (ChatItem) -> ChatItem?): Int {
         var changed = 0
         for (index in items.indices) {
@@ -671,15 +589,7 @@ private class DebugConversation {
         entry is DebugItem.Msg && entry.item.tools.any { !it.completed && !it.awaitingPermission }
     }
 
-    /**
-     * 推进运行中工具的秒表。
-     *
-     * 生产代码里 `elapsedMs` 由引擎推；这里由调试页自己每 [TICK_MILLIS] 加一点，
-     * 于是"运行中 · 0.3s"这行字会真的在走 —— 静止的假数据看不出
-     * 「运行中」和「卡住了」的区别。
-     *
-     * @return 是否还有运行中的工具（false 时调用方应停下循环）。
-     */
+    /** 推进运行中工具的秒表。 */
     fun tickRunning(): Boolean = updateMsgs { item ->
         var any = false
         val tools = item.tools.map { tool ->
@@ -702,21 +612,7 @@ private class DebugConversation {
     }
 }
 
-/**
- * 出厂样例：把对话流**能渲染的每一种东西**都摆一份。
- *
- * 覆盖清单（改对话流渲染时对着这张表核对，缺一项就可能漏测一条分支）：
- *
- * | 类型 | 覆盖的形态 |
- * |---|---|
- * | USER | 短句 / 长段（窄屏折行） |
- * | 图片 | 附件卡（比例切换） |
- * | ASSISTANT | 普通 / **流式**（带光标与"正在输入"）/ 思考折叠 / **思考已展开** / 长 Markdown（表格+代码块+引用）/ **上下文接近上限**（脚注变色） |
- * | TOOL_GROUP | 单工具组 / 四态（已完成·运行中·失败带退出码·等待授权）/ 已展开输出 / **已全部完成** / 各 ToolKind（搜索·读取·编辑·命令·其他）/ diff 计数 |
- * | ERROR | 编译失败（带可操作建议） |
- * | INFO | 斜杠命令输出 |
- * | 空状态 | 对话流为空时的整屏空态 |
- */
+/** 出厂样例：把对话流**能渲染的每一种东西**都摆一份。 */
 private fun initialSamples(): List<DebugItem> = listOf(
     DebugItem.Msg(
         id = "dbg-user-0",
@@ -1505,12 +1401,7 @@ private fun AppSettingsRowsSection() {
 
 // ------------------------------------------------------------------ 全局调试浮层开关
 
-/**
- * 全局调试浮层的开关与说明。
- *
- * 这一项与其他分区不同：它改的是**整个应用**的样子（打开后工作区右上角会多出仪表盘），
- * 所以放在最前面，并且把"打开后会发生什么"写清楚。
- */
+/** 全局调试浮层的开关与说明。 */
 @Composable
 private fun DebugOverlaySection(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
     DebugSection(
@@ -1553,12 +1444,7 @@ private fun DebugOverlaySection(state: WorkspaceUiState, viewModel: WorkspaceVie
     }
 }
 
-/**
- * 「调试 API」区块：当前生效的配置 + 脚本化传输的用法。
- *
- * 内容全是**只读的真实状态**（当前配置名/协议/模型），加上一张场景对照表 ——
- * 调试时最需要知道的是"我该发什么话才会走到我想看的那条链路"。
- */
+/** 「调试 API」区块：当前生效的配置 + 脚本化传输的用法。 */
 @Composable
 private fun DebugApiSection(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
     val scheme = MiuixTheme.colorScheme
@@ -1645,17 +1531,6 @@ private val DEBUG_SCENARIOS: List<Pair<String, String>> = listOf(
 
 // ------------------------------------------------------------------ Markdown 全语法
 
-/**
- * 对话流的 Markdown **全语法**样例。
- *
- * 每一组都是「说明 + 源码 + 渲染结果」三样并排给出：源码用等宽卡、渲染结果用
- * **生产的助手气泡** [AssistantCard]。这样一屏就能回答两个问题：
- * "这段语法渲染成什么样" 与 "它为什么渲染成这样"（源码就在上面）。
- *
- * 语法清单来自 `MarkdownParse.kt` 的文件头（块级 10 项、行内 12 项），这里逐项落地；
- * 最后一组专门放**病态/边界输入**（未闭合围栏与强调、超深列表、引用里放代码块、
- * 缺分隔行的表格…），因为这一类最容易在改动解析器时悄悄退化。
- */
 @Composable
 private fun MarkdownSection() {
     DebugSection(
@@ -1730,13 +1605,6 @@ private fun MarkdownSampleBlock(sample: MarkdownSample) {
     }
 }
 
-/**
- * 样例正文。
- *
- * ⚠️ 这些是**内容里含 Markdown 的 Kotlin 原始字符串**，所以：
- * 反引号可以直接写（原始字符串的定界符是三个引号，不是反引号），
- * 而 `$` 必须避开 —— 需要字面量美元符时写 `${'$'}`。
- */
 private val MARKDOWN_SAMPLES: List<MarkdownSample> = listOf(
     MarkdownSample(
         title = "① 块级 · 标题 / Setext / 分隔线",
@@ -1921,15 +1789,7 @@ private val MARKDOWN_SAMPLES: List<MarkdownSample> = listOf(
 
 // ------------------------------------------------------------------ 对话流（可互动）
 
-/**
- * 对话流：**生产组件 + 可变的样例数据**。
- *
- * 与真实对话页的差别只有数据来源 —— 组件的调用方式、回调语义、折叠规则都照抄
- * `ui/chat/ChatList.kt`，所以在这里看到的排版就是真实排版。
- *
- * 长按任意一条（或图片）弹出的动作菜单用的是生产组件 [ZhiAnchoredActionMenu]，
- * 与真实对话页同一个锚定机制（从手指位置长出来）。
- */
+/** 对话流：**生产组件 + 可变的样例数据**。 */
 @Composable
 private fun ConversationSection(resetToken: Int) {
     val feed = remember(resetToken) { DebugConversation() }
@@ -2099,13 +1959,7 @@ private fun ConversationSection(resetToken: Int) {
     }
 }
 
-/**
- * 某一条的长按菜单。
- *
- * 选项按消息类型给：文本消息能复制内容/思考，工具组能复制摘要与全量输出，
- * 图片能复制图片信息 —— 「复制」在每一类上都必须有实际内容可复制，
- * 否则用户点了会以为复制坏了。
- */
+/** 某一条的长按菜单。 */
 @Composable
 private fun ItemActionMenu(
     open: Boolean,
@@ -2166,13 +2020,7 @@ private fun handleItemAction(
     feed.note("$label · ${entry.id}")
 }
 
-/**
- * 图片气泡。
- *
- * 真实实现里图片附件由输入器带入（`AttachmentReader` 读字节），这里用**纯主题色**画一块
- * 占位图 —— 调试页不引入图片资源（那会让它依赖具体素材），但尺寸/圆角/说明文字的排布
- * 与真实附件卡一致。长按复制的是**图片信息**（文件名 / 尺寸 / 体积 / 类型）。
- */
+/** 图片气泡。 */
 @Composable
 private fun DebugImageBubble(
     image: DebugItem.Image,
@@ -2295,12 +2143,7 @@ private fun InteractionLog(log: List<String>, onClear: () -> Unit) {
 
 // ------------------------------------------------------------------ 媒体
 
-/**
- * 媒体区：图片在**独立分区**里再摆一份，方便直接对比不同比例。
- *
- * 对话流里那张图片是"消息里的图片"（与气泡同宽）；这里额外给一张**大图**与一张
- * **错误/占位**态，用来验证 `aspectRatio` 与圆角裁切在极端比例下是否还正常。
- */
+/** 媒体区：图片在**独立分区**里再摆一份，方便直接对比不同比例。 */
 @Composable
 private fun MediaSection(resetToken: Int) {
     val context = LocalContext.current

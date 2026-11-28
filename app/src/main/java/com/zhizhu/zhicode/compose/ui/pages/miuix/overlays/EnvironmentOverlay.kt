@@ -36,15 +36,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 环境自检窗口。
- *
- * 存在的理由：真机往返验证很贵。与其在真机上逐项问"哪里不对"，不如让 App 把
- * 运行期事实（真实路径、环境是否装好、native 是否加载、权限实际授予情况）
- * 全部列出来，一键复制，一次就能定位。
- *
- * 报告正文用等宽字体：里面全是路径、字节数、权限名，等宽才对齐可读。
- */
+/** 环境自检窗口。 */
 @Composable
 fun EnvironmentOverlay(
     open: Boolean,

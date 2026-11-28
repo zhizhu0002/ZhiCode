@@ -63,40 +63,8 @@ import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import top.yukonga.miuix.kmp.basic.FloatingToolbar
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 系统文件管理器那个选择器接受的全部 MIME 类型。
- *
- * ⚠️ 这里是**拼**出来的，不是直接写那个字面量，而且不能"顺手改回去"。
- *
- * 那个字面量（任意主类型 + 斜杠 + 任意子类型）里含有**斜杠紧跟星号**这个序列。
- * 而 `app/tests/` 下 64 个测试各自复制了一份 `stripComments`，它的实现是按正则
- * 删块注释（两种注释各一条正则）。正则不认识字符串字面量，于是字面量里的那两个
- * 字符会被当成块注释的开头，一路吞到之后第一个「星号紧跟斜杠」，
- * **把中间一大段源码整块删掉**。
- *
- * 实测过：写成字面量时，本文件从那一行往后的内容在测试眼里全部消失，
- * 断言报「找不到 OpenMultipleDocuments」而源码明明就在那儿。
- * 同一个坑也存在于 `SkillsOverlay.kt`（导入技能时那组 MIME 字面量），只是它
- * 被删掉的那一段恰好没有断言要检的 token，所以一直没暴露。
- *
- * 用「两段星号 join 起来」既避开了那个序列，又保住了语义（任意主类型 / 任意子类型）。
- * 不用文本类型收窄是另一个理由：手机自带的文件管理器（含 MIUI 的）对文本类型的
- * 过滤常常把 `.md`、`.json`、无扩展名的配置文件一起藏掉，而那几个恰恰是最常见的
- * 附加对象。非文本的会被 `attachDocument` 里的 NUL 判定拒掉并说明原因 ——
- * 比"文件在选择器里根本看不见"好排查。
- *
- * ⚠️ 这段注释里**也不能**把那条正则原样写出来：它的结尾就是「星号紧跟斜杠」，
- * 会直接把这层 KDoc 提前闭合（实测过，编译器报一串 "Expecting a top level declaration"）。
- */
 private val SystemFileMimeTypes = arrayOf(listOf("*", "*").joinToString("/"))
 
-/**
- * 相册选择器接受「图片」这一大类，同样**拼**出来。
- *
- * ⚠️ 理由与 [SystemFileMimeTypes] 完全相同：图片主类型后面跟一个斜杠加星号
- * 会被那些正则当成块注释的开头，把本文件后面一大段源码整块删掉
- * （实测：`onPickImage` 之后的内容在测试眼里全部消失）。
- */
 private val ImageMimeTypes = arrayOf(listOf("image", "*").joinToString("/"))
 
 /** （从 `AppScaffold.kt` 原地拆出，内容逐字未改。） */
@@ -351,29 +319,6 @@ internal fun ChatPage(
                 // 视觉等价：`padding` 是把内容从底边内缩，`offset` 是把整块往上摆，
                 // 而这块本来就贴在 BottomCenter，所以往上摆 = 让出键盘那一段。
                 .offset {
-                    /*
-                     * ⚠️ 别把这个读操作挪到组合里（比如 `val lift by remember { … }`），
-                     * 一挪回组合就又变成每帧重组了 —— 那正是这次要修的东西。
-                     *
-                     * ## 为什么是 `max(0, lift - bottomBarPx)` 而不是 `-lift`
-                     *
-                     * 这一列贴在**内容盒**底部，而内容盒底部已经让出了底栏
-                     * （`padding(bottom = 底栏高度)`，悬浮模式下是 0）。
-                     * 所以"往上抬 lift"实际会把输入器抬到 `底栏上沿 - lift`。
-                     *
-                     * 键盘完全弹开时 `lift` 很大，这样没问题。但**键盘收起动画的末尾**
-                     * `lift` 已经回到 0，而这一列仍贴在底栏上沿 —— 看起来没毛病。
-                     * 真正的坑在另一头：键盘**刚收起、抬起量还没归零**那几帧，
-                     * 输入器会一路落到底栏上沿，而底栏本身就在屏幕最底部，
-                     * 于是输入器与键盘之间、或输入器与底栏之间会错位（用户截图：
-                     * 键盘收起瞬间输入器压在 NavigationBar 上）。
-                     *
-                     * 取 `max(0, lift - bottomBarPx)` 之后：
-                     *   · lift = 0            → 位移 0，停在底栏上沿（正确落点）；
-                     *   · lift = 底栏高度     → 位移 0，仍停在底栏上沿（键盘正好盖住底栏，二者重合）；
-                     *   · lift = 900（全开）  → 位移 900 - 182，正好贴键盘顶边。
-                     * 也就是「输入器底边 = max(键盘顶边, 底栏上沿)」，连续、无跳变。
-                     */
                     val imeBottom = if (liftByFullScreenOverlay) 0 else imeMotion.imeBottomPx
                     IntOffset(0, -maxOf(0, imeBottom - occupiedBottomPx))
                 }
@@ -432,44 +377,15 @@ internal fun ChatPage(
     }
 }
 
-/**
- * 悬浮层之上再留的余量。
- *
- * 不只是为了好看：输入器自带投影与圆角，内容贴着它上缘会显得被"压"住；
- * 留 8dp 之后最底部那条消息与输入器之间有一条干净的缝。
- */
+/** 悬浮层之上再留的余量。 */
 private val FloatingBottomGap = 8.dp
 
-/**
- * 实测值到手之前的兜底下限。
- *
- * 首帧 `onSizeChanged` 还没回调，若此时按 0 留白，用户会看到内容"先贴底、再弹上来"。
- * 取一个偏小的值（不是旧的 92dp）：宁可第一帧略紧，也不要一开始就凭空多出一大块空白。
- */
+/** 实测值到手之前的兜底下限。 */
 private val MinFloatingInset = 72.dp
 
-/**
- * IME 抬起量「停稳」的判定窗口（毫秒）。
- *
- * 列表底部留白用的是一个去抖后的 IME 值：键盘动画期间值一直在变，连续这么长时间
- * 没有新值才写一次状态。取值理由：
- * · **不能太长** —— 键盘弹起动画约 200~300ms，等太久会让"最后一条消息滑上来"明显滞后。
- * · **不能太短** —— 太短就等于没去抖，又退回每帧重组。
- *
- * 120ms 落在键盘动画的帧间隔之外（60Hz 一帧 16.7ms，120ms ≈ 7 帧没有新值才算停），
- * 键盘在动的时候绝不会被判定为停稳。
- */
+/** IME 抬起量「停稳」的判定窗口（毫秒）。 */
 
-/**
- * 悬浮的任务与状态卡。
- *
- * 原版 `AgentProgressView` 同时承载任务清单与当前工作状态
- * （`agentProgressView.update(workingStatus, ...)`，MainActivity.java:4916），
- * 所以这里只放 [AgentProgressCard] 这一张卡。
- *
- * 外壳用 Miuix 的 [FloatingToolbar]（`outSidePadding` 负责外边距、
- * `shadowElevation` 负责阴影），而不是自己拼 `Surface` + `padding`。
- */
+/** 悬浮的任务与状态卡。 */
 @Composable
 private fun FloatingAgentStatus(
     status: String,
@@ -505,25 +421,9 @@ private fun ComposerHost(
     glass: Glass,
     onFocusChanged: (Boolean) -> Unit,
 ) {
-    /*
-     * 输入框文字的所有权，提升到 `ComposerHost` 这一层。
-     *
-     * 为什么不放在 `Composer` 内部：`Composer` 会随 `state` 参数变化而重组，
-     * 内部的 `remember` 虽然能活过重组，但这里需要在**发送之后**清空它 ——
-     * 那个动作发生在 ViewModel（异步），把对象放这一层、由这里统一处理更容易看懂。
-     *
-     * ⚠️ 用 `remember`（不是 `rememberSaveable`）：`TextFieldState` 本身不提供 Saver，
-     * 而它在进程被回收时丢掉是可接受的 —— 草稿在切会话时已按会话存过。
-     */
     val textState = remember { ComposerTextState() }
 
-    /*
-     * 切会话时存旧草稿、取新草稿。
-     *
-     * `LaunchedEffect(activeSessionId)` 的 key 变化顺序是：组合先看到新 id，
-     * 才轮到 effect 重启 —— 所以**拿不到**旧 id。因此用 remember 记住上一个 id，
-     * 在 effect 里"先存旧、再取新"。
-     */
+    /* 切会话时存旧草稿、取新草稿。 */
     var lastSessionId by remember { mutableStateOf(state.activeSessionId) }
     LaunchedEffect(state.activeSessionId) {
         if (state.activeSessionId == lastSessionId) return@LaunchedEffect
@@ -614,34 +514,13 @@ private fun ComposerHost(
     )
 }
 
-/**
- * 长按动作菜单的**宿主插槽**：交给被长按的那一项去调用。
- *
- * 每一项在**自己的布局里**调用 `anchoredMenu(自己的 id)`，菜单就会锚在那一项上
- * 弹出（见 [ZhiAnchoredActionMenu]）。这里集中做三件事，避免每个调用点各写一遍：
- *
- * 1. 只有 `anchorId` 与传进来的 id 相同的那一项才认领这份菜单 —— 否则列表里
- *    每一条都会弹一个；
- * 2. 不是动作菜单（`isActionMenu` 为假）时什么都不画，交回 `ChoicePickerOverlay`；
- * 3. 点击走**原有的** [WorkspaceViewModel.onChoiceSelected]（按下标分发，详见
- *    该方法里的 intent 分支）—— 动作语义、目标记忆、错误提示全部复用。
- */
+/** 长按动作菜单的**宿主插槽**：交给被长按的那一项去调用。 */
 @Composable
 internal fun ZhiAnchoredMenuHost(
     state: WorkspaceUiState,
     viewModel: WorkspaceViewModel,
     anchorId: String,
     fingerOffset: DpOffset?,
-    /**
-     * 弹层渲染到哪个宿主。
-     *
-     * ⚠️ 侧栏必须传 `false`。侧栏抽屉是 `Scaffold` **之后**的兄弟节点、叠在它上面，
-     * 而 `renderInRootScaffold = true` 会把菜单注册进**最外层 Scaffold** 的 popupHost ——
-     * 菜单其实弹了，却被抽屉整块盖住，表现就是「长按会话没反应」。
-     * 传 `false` 时走离调用点最近的局部宿主，层级正确。
-     *
-     * 对话流保持默认 `true`：那里没有被兄弟节点覆盖的问题，走根宿主能在整屏定位。
-     */
     renderInRootScaffold: Boolean = true,
 ) {
     val picker = state.choicePicker

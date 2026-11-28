@@ -25,34 +25,6 @@ import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 提示词设置页（形态参考 rikkahub 的「提示词」页）。
- *
- * ## 与其他设置二级页用**同一套**页面栈
- *
- * 列表 ↔ 编辑走 [SettingsPageStack]，与角色卡 / API 配置 / MCP / 技能 / 记忆
- * 完全一致 —— 同一套转场、同一套返回层级、同一套边缘滑动。
- * （中间有一版为了绕开排版问题改成状态直切 + 自造动画，结果是这一页的手感
- * 和别的设置页不一样；问题在排版，不该用换容器去躲。）
- *
- * ## 只开放三个槽位
- *
- * 见 [PromptSlot] 的类注释：主系统提示与任何权限/安全句子**不**开放编辑 ——
- * 那是行为契约。能改的是「/init 指令」「压缩摘要的系统提示」「压缩摘要的开场段」，
- * 它们都只影响某一件事的措辞，不参与权限判断。
- *
- * ## 为什么是自动保存，没有「保存」按钮
- *
- * 与设置页其余各项一致：离散改动立刻落盘，自由文本走去抖（见
- * `WorkspaceViewModel.applySettingsDraft`）。所以这里**没有**脏标记与丢改动的弹窗 ——
- * 加一套"保存/取消"反而会让这一个页面与其余设置项的手感不同。
- *
- * ## 「恢复默认」写的是空串
- *
- * 不是"把默认文案抄进输入框"。空串才是"没改过"的表达，默认值的唯一来源是
- * [PromptSlot.defaultValue]（理由见那里的注释）。所以恢复默认之后，
- * 该行会显示引擎**当前实际在用**的那一份默认文案。
- */
 @Composable
 fun PromptsPage(
     initPrompt: String,
@@ -118,16 +90,6 @@ private fun PromptSlotList(
     onEdit: (PromptSlot) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
-    /*
-     * ⚠️ `fillMaxWidth()` 是必须的。
-     *
-     * 本层位于 `SettingsSubPage` 的滚动容器里，横向约束是**有界**的，
-     * 但根 `Column` 默认只按子项自然宽度撑开；而里面每张 `SettingsGroup` 的
-     * Card 又想 `fillMaxWidth` —— 两者加起来会让卡片的测量宽度与实际摆放不一致。
-     * 显式给根容器一个宽度，测量就只有一个来源。
-     *
-     * 这是「提示词页文字互相穿透」的修法之一（另一条见编辑器里的 `heightIn` 说明）。
-     */
     Column(modifier = Modifier.fillMaxWidth()) {
         SettingsFootnote(
             "这三项都只影响某一件事的措辞，不参与权限与安全判断。" +
@@ -190,17 +152,6 @@ private fun PromptSlotEditor(
                 useLabelAsPlaceholder = true,
                 singleLine = false,
                 minLines = 10,
-                /*
-                 * ⚠️ 这里**不能**再挂 `.heightIn(min = ...)`（上一版有，是重叠的直接原因）。
-                 *
-                 * 高度已经由 `minLines` 交给 `TextFieldLineLimits.MultiLine(minHeightInLines = …)`。
-                 * 外面再套一个「最小高度」会把测量拆成两个来源：外层把节点撑到某个高度、
-                 * 内部 TextField 按行数算另一个高度。两者不一致时，
-                 * `SettingsGroup` 的卡片按一个高度摆放、输入框按另一个高度绘制 ——
-                 * 于是它盖住下面的「操作」卡片。
-                 *
-                 * 用户截图里「正文」「操作」「恢复默认」三块互相穿透，就是这一条。
-                 */
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 8.dp),

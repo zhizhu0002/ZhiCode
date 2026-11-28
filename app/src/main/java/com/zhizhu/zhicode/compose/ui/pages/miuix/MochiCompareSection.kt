@@ -31,26 +31,6 @@ import ui.feice.mochi.basic.MochiButtonStyle
 import ui.feice.mochi.basic.MochiSwitch
 import ui.feice.mochi.theme.MochiTheme
 
-/**
- * 麻薯（Mochi）对照陈列：在**同一屏**里并排放两套组件，用来验收「视觉对齐 / 比例调教」。
- *
- * ## 为什么需要这一页
- *
- * `theme/MochiSkin.kt` 里的字号 / 圆角 / 行高映射是**量出来的数字**（Miuix 14 槽、
- * Mochi 20 槽，逐个从字节码的 `bipush` 实参读出）。但数字对不对只能靠并排看：
- * 同一段文字用 17sp 还是 16sp，单独看都合理，放一行里差 1sp 就看得出来；
- * 同样 14dp 圆角，普通圆弧和 G2 连续圆角在视觉上并不等价。
- *
- * 所以这一节不是"组件演示"，是**调教结果的验收台**：
- * - 每一组左右同容器、同高、同底色；
- * - 每行标出它实际用的字号 / 高度，改完立刻能对照；
- * - 字阶那几行把「期望值 vs 运行时实测值」并排打出来，映射写错会当场露出来。
- *
- * ## 边界：这里不替换任何产品界面
- *
- * 本节只挂在 `UiDebugPage` 里。产品路径（聊天 / 终端 / 文件 / 设置）仍全部走 Miuix；
- * 真正的替换按页面逐个迁移，每迁一个就在本节加一组对照 —— 不允许"一次全换再回来看"。
- */
 @Composable
 internal fun MochiCompareSection() {
     val miuix = MiuixTheme.colorScheme
@@ -172,12 +152,7 @@ private fun Group(text: String) {
     )
 }
 
-/**
- * 一格对照：固定 [MochiMetrics.rowHeight] 高的内容区 + 下面一行说明。
- *
- * 说明文字**必须**在内容区之外：放进去会把行撑高，左右两格就不再同高了，
- * 那样"行高对齐"这条就白测了。
- */
+/** 一格对照：固定 [MochiMetrics.rowHeight] 高的内容区 + 下面一行说明。 */
 @Composable
 private fun CompareCell(
     modifier: Modifier,
@@ -222,12 +197,7 @@ private fun MetricRow(name: String, expected: Int, actual: Int, color: Color) {
     }
 }
 
-/**
- * 色值对照行：`名称  Miuix=#xxxxxx  Mochi=#xxxxxx  ✓/✗`。
- *
- * 颜色"看起来差不多"是最不可靠的验收方式 —— 两列并排时人眼能容忍相当大的色差，
- * 而组件一混排立刻显脏。所以直接打 hex，相等就是相等。
- */
+/** 色值对照行：`名称  Miuix=#xxxxxx  Mochi=#xxxxxx  ✓/✗`。 */
 @Composable
 private fun MetricRow(name: String, miuixHex: String, mochiHex: String, ok: Boolean) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

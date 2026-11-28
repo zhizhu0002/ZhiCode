@@ -74,9 +74,7 @@ import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
-/**
- * 三步初始引导页：系统权限 -> Ubuntu 24.04 运行环境 -> 模型供应商配置（可跳过）。
- */
+/** 三步初始引导页：系统权限 -> Ubuntu 24.04 运行环境 -> 模型供应商配置（可跳过）。 */
 @Composable
 fun OobePage(
     state: WorkspaceUiState,

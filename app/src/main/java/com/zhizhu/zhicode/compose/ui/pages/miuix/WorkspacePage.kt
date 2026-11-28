@@ -97,42 +97,6 @@ import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.ZhiDebugHud
 import top.yukonga.miuix.kmp.basic.Scaffold
 
-/**
- * 工作区整页（导航栈的 root）。
- *
- * 这一块原先直接内联在 `AppScaffold.kt` 的 `entry<AppKey.Workspace>` 里，与主题、
- * 导航栈、Activity Result 启动器挤在同一个函数中。拆出来之后：
- *
- * - `AppScaffold` 只负责「主题 + 栈 + 每个页面的 entry」，不再关心工作区内部结构；
- * - 本页只画工作区（顶栏 / 面板 / 浮层 / 抽屉），状态与回调继续来自
- *   [WorkspaceViewModel] 与 [WorkspaceUiState]，不新增任何业务真源。
- *
- * 内容逐字搬移，行为与拆分前一致 —— 包括下面这些**不能顺手改**的约束。
- *
- * ## 顶栏在 `topBar` 槽位
- *
- * 顶栏迁入 Miuix [Scaffold] 的官方槽位后，「+」下拉菜单等 Overlay 弹层的锚点坐标
- * 与根 MiuixPopupHost 的窗口原点才一致；此前它是内容里手排的悬浮 Box，
- * 菜单整体会飞到锚点上方。
- *
- * ## 内容丢掉 `padding.top` 是刻意的
- *
- * 顶栏 blur 需要内容从它**底下**滚过才有东西可采样，所以内容 Box 从 y=0 铺满、
- * 各面板自己在头部留白。代价是：任何从 y=0 开始画、又不自己顶开的面板，头部都会
- * 被顶栏盖住。所以每个面板必须二选一 ——
- *  · 对话面板：用 ChatList 的 topInset（**滚动内边距**，它要能滚过顶栏）；
- *  · 其余面板：用 `TopBarInsetCompact` 的 **padding** 顶开（见 `WorkspaceLayouts` 的 PaneHost）。
- * **新加面板时最容易漏的就是这一步。**
- *
- * ## 抽屉画在 Scaffold 之外
- *
- * Miuix [Scaffold] 的绘制顺序是 bodyContent → topBar → popup，放在内容里的抽屉
- * 永远被顶栏压住。
- *
- * @param glass 捕获「对话列表」的玻璃层，给底部悬浮的任务卡与输入器用。
- * @param glassMain 捕获「整个工作区」的玻璃层，给顶栏 / 抽屉 / 弹窗用。
- *   两者必须分开：输入器就在对话区里面，共用整屏捕获会出现自我叠影。
- */
 @Composable
 internal fun WorkspacePage(
     state: WorkspaceUiState,
@@ -151,13 +115,6 @@ internal fun WorkspacePage(
         pageCount = { compactTabs.size },
     )
     val showBottomNavigation = !wide && themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM
-    /*
-     * 是否处于「文件选择」态（工具栏出现、底栏让位）。
-     *
-     * ⚠️ 必须声明在这里（Scaffold 之前）：固定底栏那份形变在 `bottomBar`
-     * 槽位里要读它。原先是声明在悬浮槽位附近的，而那个位置在 Scaffold 之后，
-     * 于是只有浮层那份能用、`bottomBar` 里引用不到。
-     */
     val fileSelectionActive = !wide &&
         (state.fileSelectionMode || state.fileSelection.isNotEmpty())
     val floatingNavigationBlur = showBottomNavigation && themeSettings.tabBarFloating &&
@@ -179,13 +136,6 @@ internal fun WorkspacePage(
         .asPaddingValues().calculateBottomPadding()
     val floatingNavigationAvoidance = FloatingNavBarHeight + FloatingNavBarGap +
         navigationBarBottomInsetDp
-    /*
-     * 键盘是否可见（含动画过程）。
-     *
-     * ⚠️ 取 `imeVisible` 而不是 `settledLiftPx > 0`：后者要等键盘动画**结束**才翻转，
-     * 于是动画期间让位量还是旧值，扩展键栏 / 输入器与键盘之间会裂开一条缝（用户截图）。
-     * `imeVisible` 在动画开始那一刻就翻真，且每次开合只变两次，可以安全在组合期读。
-     */
     val imeOpen = com.zhizhu.zhicode.compose.ui.LocalImeMotion.current.imeVisible
     val imeNavAlpha by animateFloatAsState(
         targetValue = if (imeOpen) 0f else 1f,
@@ -195,35 +145,8 @@ internal fun WorkspacePage(
         ),
         label = "miuixImeNavAlpha",
     )
-    /*
-     * 胶囊隐藏进度的**目标值**（`0` = 完全可见，`1` = 完全滑出）。
-     *
-     * 由滚动与手势直接写（见 `reportNavBarScroll` / `navBarHideOnVerticalDrag`）。
-     * 声明位置提前到 `navBarCollapsed` 之前 —— 后者要读它来判断"是否已收起"。
-     */
+    /* 胶囊隐藏进度的**目标值**（`0` = 完全可见，`1` = 完全滑出）。 */
     val navBarHideTarget = remember { mutableFloatStateOf(0f) }
-    /*
-     * 悬浮胶囊是否**已经完全收起**（滑出屏幕）。
-     *
-     * ## 为什么需要它
-     *
-     * 胶囊收起之后，内容底部仍然留着它的滚动留白 —— 用户看到的是屏幕最下方
-     * 多出一块用不到的空白（"收起后不应占位"）。收起意味着它不在那儿了，
-     * 就不该继续占着位置。
-     *
-     * ## 为什么用带滞后的离散状态，而不是直接读进度
-     *
-     * 留白一变 → 列表重新测量 → `scrollOffset` 变 → `reportNavBarScroll` 又写一次
-     * 进度 → 留白再变…… 连续值直接参与布局必然形成这个回路
-     * （`LocalNavBarProgress` 的注释里记过同一条教训）。
-     *
-     * 所以这里做成**离散**状态并加滞后：
-     *  · 进度 ≥ 0.995 才判定"已收起"；
-     *  · 进度 ≤ 0.85 才判定"又出来了"。
-     *
-     * 中间 0.85~0.995 是缓冲区，一次重新测量造成的轻微抖动不会让它来回翻转。
-     * 而翻转本身是离散的（一次布局变化），不会逐帧震荡。
-     */
     val navBarCollapsed = remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         snapshotFlow { navBarHideTarget.floatValue }.collect { progress ->
@@ -234,16 +157,6 @@ internal fun WorkspacePage(
             }
         }
     }
-    /*
-     * 供各页当作滚动留白的值；非悬浮模式、键盘可见、或胶囊已收起时为 0。
-     *
-     * ⚠️ 键盘弹起时必须归 0：悬浮胶囊在最底部，键盘弹出后它要么被键盘整个盖住、
-     * 要么被抬出可视区 —— 两种情况都不需要再给内容留出它的高度。若仍然留着，
-     * 键盘上方就会多出一整块空白（用户截图里终端扩展键栏与键盘之间、
-     * 输入器与键盘之间那条大缝）。
-     *
-     * ⚠️ 收起时同理：它已经滑出屏幕，留白就成了纯空白。
-     */
     val floatingNavInset = if (
         showBottomNavigation && themeSettings.tabBarFloating && !navBarCollapsed.value
     ) {
@@ -251,40 +164,11 @@ internal fun WorkspacePage(
     } else {
         0.dp
     }
-    /*
-     * 胶囊隐藏进度。
-     *
-     * 分两层，缺一不可：
-     *  · [navBarHideTarget] 是**目标**，由滚动与手势直接写（可能一次跳几像素，
-     *    甚至因为列表重置而跳一大段 —— 那部分已在 `reportNavBarScroll` 里挡掉）；
-     *  · [navBarHideProgress] 是**显示值**，用一条短 tween 追目标。
-     *
-     * 为什么要追一次：用户要求「滑动幅度就算很小也要有动画」。
-     * 直接用目标值的话，一像素的滚动就是一像素的位移，看起来是硬跳、没有过渡；
-     * 追一条 120ms 的曲线之后，极小的滚动也会走出一段平滑位移。
-     * 时长刻意取很短 —— 它是"补间"而不是"动画"，太长就跟不上手指了。
-     */
     // 列表滚动计数器：手势靠它判断"这一下归列表管"，避免同一段位移被算两次。
     // ⚠️ 用 `IntArray(1)` 而不是 `mutableStateOf(0)`：这个计数器由滚动**逐像素**自增，
     // 用 State 会每次都走一遍快照写入/失效分发；而它只在手势回调里被读（不进组合），
     // 普通容器就够，省掉这部分开销。
     val navBarScrollTick = remember { IntArray(1) }
-    /*
-     * 隐藏进度的**平滑层**。
-     *
-     * ⚠️⚠️ 这里曾经是 `animateFloatAsState(targetValue = navBarHideTarget.floatValue)`。
-     * 那是**上滑卡顿的主因**：`animateFloatAsState` 的 `targetValue` 在**组合期**读，
-     * 而 target 由滚动逐像素写入 —— 于是"滚动每一像素 → 整个 WorkspacePage 重组一次"。
-     * 一屏里它下面是对话列表、顶栏、悬浮层三大块，全部跟着白重组。
-     *
-     * 现在改成 `Animatable` + 协程里追目标：
-     *  · target 变化**不进组合**（只在 flow 里被读）；
-     *  · 动画值通过 [Animatable.asState] 暴露出去，消费方**在绘制阶段**读
-     *    （`graphicsLayer { }` / `offset { }`）；
-     *  · 结果是：滚动期间 WorkspacePage 一次都不重组，只有绘制属性在变。
-     *
-     * 时长 120ms 取短的用意是"补间"而不是"动画"：太长会跟不上手指。
-     */
     val navBarProgressAnim = remember { Animatable(0f) }
     LaunchedEffect(navBarProgressAnim) {
         snapshotFlow { navBarHideTarget.floatValue }.collect { target ->
@@ -297,30 +181,7 @@ internal fun WorkspacePage(
     val navBarHideProgressState = navBarProgressAnim.asState()
 
     val workspaceBottomAvoidance = floatingNavInset
-    /*
-     * 非对话面板的反馈条要跟着胶囊一起下沉。
-     *
-     * ⚠️ 这里**不在组合期算 Dp**。以前写的是
-     * `workspaceBottomAvoidance * (1f - navBarHideProgress)`，那会在组合期读进度，
-     * 每像素滚动都把这一层（连同页面）重组一次。改成在 `offset { }` 里读
-     * （布局阶段，且只失效布局、不重组），见下面 `PageFeedback` 处。
-     */
     val anchoredActionMenu = state.choicePicker?.isActionMenu == true
-    /*
-     * 底栏 / 悬浮胶囊**不会**因为弹窗打开而消失或让位。
-     *
-     * 这里曾经有一个 `modalOverlayOpen` 变量，含义是「当前有模态浮层」，
-     * 效果是把 NavigationBar 整块移除、把内容底距归零、把悬浮胶囊摘掉。
-     *
-     * 问题是那会造成**整块跳动**：一打开任何 dialog 或 bottom sheet，
-     * 屏幕下方那排东西就凭空消失，内容同时往下窜；关掉又跳回来。
-     * 用户报的「打开所有 dialog 都会隐藏 NavigationBar，bottomsheet 也会」
-     * 就是这条。而模态的本意只是"压暗并拦住输入"，不需要真的移除任何东西 ——
-     * Miuix 的窗口本身自带压暗层，底栏被压暗即可。
-     *
-     * 所以现在：底栏照常渲染、内容照常让位、悬浮胶囊照常存在，
-     * 由浮层自己去盖住它们。
-     */
     // Edge-to-edge makes the transparent system navigation area part of the app window.
     // Paint the page backdrop at the root so that the floating bar's safe-area gap is
     // themed background, never the window's default black surface.
@@ -338,18 +199,7 @@ internal fun WorkspacePage(
                     // 结论早已确认，探针删除；详见 ChatList.kt 同类注释与实测数据。
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    /*
-                     * 固定底栏 ↔ 选择工具栏的**形变**过渡（与悬浮胶囊那一份同构）。
-                     *
-                     * 用户要的是"从导航栏过渡成工具栏"，而不是工具栏从底下升起来、
-                     * 底栏往下退。做法与浮层那份一致：两者共享同一个落点，
-                     * 由**一个进度**驱动透明度与轻微缩放/位移，中间那一帧看起来
-                     * 就是同一块东西换了内容。
-                     *
-                     * 顺带解决了"工具栏要不要抬高"这个纠结：既然它**顶替**底栏
-                     * （而不是浮在底栏之上），就不需要任何额外抬高 —— 那个
-                     * `fileToolbarBottomPadding` 的固定底栏分支因此也用不上了。
-                     */
+                    /* 固定底栏 ↔ 选择工具栏的**形变**过渡（与悬浮胶囊那一份同构）。 */
                     val barMorph = updateTransition(
                         targetState = fileSelectionActive,
                         label = "bottomBarFileToolbarMorph",
@@ -544,17 +394,7 @@ internal fun WorkspacePage(
             // 曾经只提供给悬浮栏槽位，导致「下滑隐藏」在页面上从未生效过）。
             CompositionLocalProvider(
                 LocalFloatingNavInset provides floatingNavInset,
-                /*
-                 * 固定底栏的高度（悬浮模式下是 0，因为那时内容本来就不让位）。
-                 *
-                 * 给对话页用：键盘弹起时输入器要往上抬，但**不能**抬到屏幕最底
-                 * —— 它得停在 `max(键盘顶边, 底栏上沿)`。而底栏上沿 = 屏幕底 −
-                 * 这个值，所以对话页必须知道它。
-                 *
-                 * 之前对话页拿不到这个值，只能"键盘可见就把底栏让位归零"，
-                 * 于是键盘**收起动画**期间（此时抬起量已归零、但还没判定为收起）
-                 * 输入器直接落到屏幕最底、压在 NavigationBar 上（用户截图）。
-                 */
+                /* 固定底栏的高度（悬浮模式下是 0，因为那时内容本来就不让位）。 */
                 LocalBottomBarInset provides if (showBottomNavigation && themeSettings.tabBarFloating) {
                     0.dp
                 } else {
@@ -687,113 +527,19 @@ internal fun WorkspacePage(
         themeSettings.tabBarPositionValue == TabBarPosition.BOTTOM &&
         themeSettings.tabBarFloating
     val showFloatingNav = floatingNavSlotAvailable && !fileSelectionActive
-    /*
-     * 文件选择工具栏的底距 —— 必须按底栏形态分开算。
-     *
-     * ⚠️ 这里曾经写死 `FloatingNavBarGap + navigationBarBottomInsetDp`，
-     * 那是**悬浮胶囊**的底距。固定底栏模式下 NavigationBar 自己占了 64dp，
-     * 工具栏按同一个底距定位就正好和它**重合**，表现为「工具栏盖在 NavigationBar 上层」。
-     *
-     * 正确行为是叠在底栏之上：
-     *  · 悬浮胶囊模式 = 胶囊高度 + 间隙 + 系统栏（工具栏取代胶囊，同位置）；
-     *  · 固定底栏模式 = 底栏高度 + 系统栏 + 一点缝（工具栏浮在底栏上沿）。
-     *  · 顶栏模式（底栏不显示）= 只让系统栏。
-     */
-    /*
-     * 选择工具栏的底部抬高量 —— **只让系统导航栏**。
-     *
-     * ## 为什么不再按底栏形态分开算
-     *
-     * 三种形态现在都让工具栏**顶替**底栏，而不是浮在它上方：
-     *
-     * | 底栏形态 | 工具栏出现的位置 |
-     * | --- | --- |
-     * | 悬浮胶囊 | 同一个浮层槽位，胶囊淡出、工具栏淡入（形变） |
-     * | 底部固定导航栏 | 同一个 `bottomBar` 槽位，底栏淡出、工具栏淡入（形变） |
-     * | 顶栏模式（无底栏） | 浮层槽位，底下什么都没有 |
-     *
-     * 既然都是"顶替"，就不需要任何额外抬高。原来那条固定底栏的
-     * `64.dp + 系统栏 + 呼吸缝` 是为了"浮在底栏之上"，而现在底栏已经让位了，
-     * 再抬高就等于凭空多出一段空白（用户看到的"工具栏飘在半空中"）。
-     */
     val fileToolbarBottomPadding = navigationBarBottomInsetDp + FloatingNavBarGap
     // 选择工具栏与底栏形态**无关**：顶栏模式、固定底栏模式下它照样要出来。
     // 只有"窄屏 + 没开模态浮层"是硬条件（宽屏用侧栏与行内动作，不需要它）。
-    /*
-     * 悬浮底栏槽位里的形变：胶囊 ↔ 选择工具栏。
-     *
-     * ⚠️ 条件里**不能**再带 `|| fileSelectionActive`。
-     *
-     * 那个条件原本是为了让"顶栏模式下也要出现选择工具栏"。现在顶栏模式
-     * （`!showBottomNavigation`）仍然走这里，但**固定底栏模式**已经改成在
-     * `bottomBar` 槽位里做同一套形变了 —— 两处都渲染的话会同时出现两个工具栏。
-     *
-     * 所以判据改成"这个槽位负责这一块的时机"：
-     *  · 悬浮胶囊可用（`floatingNavSlotAvailable`）—— 它本来就在这个槽位；
-     *  · 或者根本没有底部导航（顶栏模式）且正在选择 —— 只能在浮层里出现。
-     */
-    /*
-     * ⚠️ 判据里**不能**出现 `fileSelectionActive`。
-     *
-     * 顶栏模式下原先是 `floatingNavSlotAvailable || (!showBottomNavigation && fileSelectionActive)`：
-     * 选择态是**第一次**进入这个分支的时机，于是里面那句
-     * `updateTransition(targetState = fileSelectionActive)` 一新建出来
-     * target 就已经是 `true` —— 没有从 0 到 1 的过程，工具栏直接就位。
-     * 用户看到的正是「顶栏模式没有动画」。
-     *
-     * 现在改成"这个槽位在当前形态下是否存在"：
-     *  · 悬浮胶囊可用 → 存在（胶囊平时就在这儿）；
-     *  · 没有任何底部导航（顶栏模式）→ 也存在，只是平时什么都不画。
-     * 这样过渡对象**始终在组合里**，选择态翻转时才真的走一遍动画。
-     */
     if (floatingNavSlotAvailable || !showBottomNavigation) {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.BottomCenter,
         ) {
-            /*
-             * 胶囊 ↔ 工具栏的**形变**过渡。
-             *
-             * ## 为什么不是两条独立的 `AnimatedVisibility`
-             *
-             * 原来两个组件各走一条「一个往下退、一个从下升上来」。那只是两块东西
-             * **错开**移动，看不出它们的关系 —— 用户的原话是「单纯的上升下降」。
-             *
-             * 现在改成**同一个进度**驱动的叠化：
-             *
-             *  · 两者始终处在同一个底部锚点、同样的横向内缩；
-             *  · 胶囊淡出的同时略微下沉并缩小，工具栏淡入的同时从略高处落定；
-             *  · 两条曲线同源（[ZhiMotion] 的进入/退出族），所以中间那一帧
-             *    看起来就是"同一块东西换了内容"，而不是两块各自进退。
-             *
-             * 用 `updateTransition` 而不是 `AnimatedVisibility`：后者的两个
-             * visibility 各自动画，无法保证中间的对应关系。
-             */
             val morph = updateTransition(
                 targetState = fileSelectionActive,
                 label = "navFileToolbarMorph",
             )
-            /*
-             * ⚠️ 胶囊只在**这个槽位真的有胶囊**时才能出现。
-             *
-             * 判据不能只看 `fileSelectionActive`：顶栏模式下 `floatingNavSlotAvailable`
-             * 为 false（那一档根本没有底部导航），而 `navAlpha` 只看选择态的话
-             * 目标值就是 `1f` —— 于是**顶栏模式下凭空画出一个悬浮胶囊**，
-             * 压住输入器（用户截图）。
-             *
-             * 正确判据是 `showFloatingNav`（槽位可用且不在选择态）。把槽位是否可用
-             * 单独提出来，语义上也更清楚：`slotHasNav` 描述"这个槽位在这套主题下
-             * 归不归胶囊用"，与"当前是不是选择态"是两件事。
-             */
             val slotHasNav = floatingNavSlotAvailable
-            /*
-             * 胶囊被"下滑隐藏"时还要额外移出屏幕的量。
-             *
-             * 必须补 [NavBarShadowRoom]：`LiquidWorkspaceBar` 上挂着
-             * `dropShadow(radius = 10.dp)`，阴影是从边缘向外扩散的 —— 只按
-             * "高度 + 间隙 + 系统栏"平移的话，本体出去了但阴影还露一截，
-             * 看起来就是"没藏好"。这条曾经踩过一次。
-             */
             val exitOffsetPx = with(LocalDensity.current) {
                 (FloatingNavBarHeight + FloatingNavBarGap +
                     navigationBarBottomInsetDp + NavBarShadowRoom).toPx()
@@ -873,27 +619,6 @@ internal fun WorkspacePage(
         }
 
     }
-    /*
-     * ---- 侧栏抽屉（画在主 Scaffold **之后**）----
-     *
-     * 必须排在这里，不能放进主 Scaffold 的 content：`ScaffoldLayout` 把
-     * topBar / bottomBar 作为独立槽位在 body **之后** place，content 里的东西
-     * 永远被它们压住 —— 表现为抽屉第一行「新会话」被顶栏吃掉。
-     *
-     * ⚠️ 关闭时 `ZhiSideDrawer` 内部用零尺寸 Modifier，不参与命中测试，
-     * 所以不会挡住顶栏的汉堡按钮（这个坑踩过：抽屉关闭仍 `fillMaxSize`
-     * 会吃掉全屏点击，「侧栏按钮点了没反应」）。
-     *
-     * ⚠️ 也不要改成独立 `Dialog` 窗口：窗口 attach 有延迟，进出动画会在
-     * 黑屏之后才跑，表现为「侧栏打开/关闭时背景黑化有延迟」。
-     *
-     * ## 对话框怎么盖住抽屉
-     *
-     * 抽屉内部自带一个 `Scaffold`（渲染长按菜单用），`ZhiOverlayHost` 通过
-     * `overlayHost` 槽位挂进**那个** Scaffold；同时 `ChoicePickerOverlay` 用
-     * `renderInRootScaffold = false`，走最近的 `LocalPopupStates`。
-     * 于是对话框与长按菜单同源，都画在抽屉之上。
-     */
     if (!wide) {
         ZhiSideDrawer(
             open = state.sidebarOpen,
@@ -916,58 +641,9 @@ internal fun WorkspacePage(
 }
 }
 
-/**
- * 胶囊隐藏时额外多移出的距离，用来把**阴影**也一起送出屏幕。
- *
- * `LiquidWorkspaceBar` 上挂的是 `dropShadow(radius = 10.dp)` —— 阴影是从胶囊边缘
- * **向外扩散**的，所以胶囊本体移出屏幕之后，它还剩下最多 10dp 的模糊边露在屏幕里。
- * 只算 `高度 + 间隙 + 系统栏` 会正好把本体送到边缘、把阴影留在里面，看起来就是
- * "没藏好，还是漏出来一点"。
- *
- * 取 24dp 而不是 10dp：`dropShadow` 的 `radius` 与最终模糊半径不是一比一
- * （Skia 会按 sigma 展开约 2~3 倍），留一倍余量才不会在窄屏或高缩放下又露出头发丝。
- */
+/** 胶囊隐藏时额外多移出的距离，用来把**阴影**也一起送出屏幕。 */
 private val NavBarShadowRoom = 24.dp
 
-/**
- * 手势驱动的"隐藏 / 唤出"底部悬浮栏。
- *
- * ## 为什么不能只靠列表滚动
- *
- * 原来的唯一驱动是 `reportNavBarScroll`，它观察 `LazyListState` 的
- * `firstVisibleItemIndex / ScrollOffset`。这在"内容多到能滚"时很准，但三种很常见的
- * 情况里它**永远不会触发**：
- *
- *  · 会话很短，一屏放得下 → offset 恒为 0；
- *  · 终端还没输出、目录里只有几个文件 → 同上传动为 0；
- *  · 内容顶部被 overscroll 阻尼吃掉时，手指在动而 offset 不动。
- *
- * 用户的话是"即使再不可滑动的地方也要加上这个"。
- *
- * ## 为什么在 `Initial` 段观察而不消费
- *
- * `PointerEventPass.Initial` 是**分发的最早一段**，这里只读 `change.position`，
- * **从不调用 `consume()`**。所以：
- *  · 列表照常滚动、pager 照常横滑、长按菜单照常触发；
- *  · 我们只是"旁听"手指的竖直方向。
- *
- * 只旁听不消费是这里唯一可行的做法 —— 若在父层用 `detectVerticalDragGestures`
- * 去抢手势，对话流就再也滚不动了。
- *
- * ## 方向
- *
- * **手指向下移动 → 隐藏；手指向上移动 → 唤出。**
- *
- * 这是按用户的手感要求定的（"把出入逻辑反过来"）。注意它**与列表回滚的方向相反**：
- * 列表滚动那条驱动已停用，所以两者不会打架。
- *
- * ## 抬手不回弹
- *
- * 用户要求「抬手时保留当前动画进度」：手指抬起来，胶囊就停在那个位置，
- * 既不补齐到端点、也不退回原位。下一次按下从当前位置继续累计
- * （`startProgress` 记的就是抬手时的值）——所以整体读起来是
- * "用手把这块东西推走/拽回来"，而不是"划一下触发开关"。
- */
 internal fun Modifier.navBarHideOnVerticalDrag(
     progress: androidx.compose.runtime.MutableFloatState,
     exitPx: Float,

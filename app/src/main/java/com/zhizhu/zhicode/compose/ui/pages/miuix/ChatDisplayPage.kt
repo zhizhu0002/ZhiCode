@@ -48,27 +48,6 @@ import top.yukonga.miuix.kmp.basic.CardDefaults
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 聊天显示设置页（自定义字体 + 正文字号）。
- *
- * ## 来源
- *
- * 照 rikkahub 的 `SettingPreferencesUIPage` 搬，其中字体导入那一整套
- * （`Import` 的原子替换、失败回滚、越界检查）在 [ChatFontLoader] 里，
- * 这一页只负责"选、预览、删"。
- *
- * ## 与 `uiScale` 的分工
- *
- * 主题页的「界面缩放」改的是 `LocalDensity`——按钮、间距、图标一起变。
- * 这一页的「正文字号」只改**阅读正文**的字号：用户说"字大一点但按钮别变大"时用它。
- * 两者独立存盘、互不影响，这一点写在 [ThemeSettings.chatFontScale] 的注释里。
- *
- * ## 为什么选字体要真的渲染预览
- *
- * 字体列表里的名字（"衬线""等宽"）说明不了字形长什么样。rikkahub 的做法是
- * 每个按钮用**该字体本身**写一个 `Aa`，下面再写标签 —— 一眼就能分辨。
- * 这一页照做，另外多给一块正文预览，因为它改了字号比例之后要能立刻看到效果。
- */
 @Composable
 fun ChatDisplayPage(
     theme: ThemeSettings,
@@ -301,13 +280,6 @@ fun ChatDisplayPage(
     }
 }
 
-/**
- * 一个字体选项：上面用该字体写一个 `Aa`，下面写标签。
- *
- * 为什么不是 `RadioButton` / `Chip`：那样只能用同一套字体画所有选项，
- * 而这一项要表达的恰恰是"字形不一样"。用字体本身渲染样字是唯一说得清的写法
- * （rikkahub 的 `ConnectedChoiceButtons` 也是这么做的）。
- */
 @Composable
 private fun FontChoice(
     family: ChatFontFamily,

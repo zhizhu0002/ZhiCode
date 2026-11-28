@@ -69,62 +69,6 @@ import top.yukonga.miuix.kmp.utils.PressFeedbackType
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 
-/**
- * 模态窗口默认走 Miuix `overlay` 包的 [OverlayDialog]。
- *
- * ## 本文件里那一处例外：会话重命名 / 删除确认用 `WindowDialog`
- *
- * 历史结论「不要用 `window` 包的 `WindowDialog`」有它成立的前提：
- * `WindowDialog` 创建**独立 Android Window**，既不继承 `Scaffold` 的 `popupHost`
- * （内部再用 Miuix 弹层组件会失效），也不参与主窗口的 `LayerBackdrop` 背景采样。
- *
- * 但**侧栏抽屉**这个场景把前提反了过来：抽屉必须画在主 Scaffold 之后才盖得住
- * 顶栏/底栏（那两者是 Scaffold 的独立槽位，在 body 之后 place），
- * 于是任何走 `popupHost` 的对话框都会被抽屉压住。此时代价换成收益：
- *  · 这个对话框内部**不需要**再嵌弹层组件；
- *  · 背景模糊早已按用户要求移除（见 `ZhiOverlayHost` 里 `modalOpen` 的说明），
- *    没有 backdrop 采样需求。
- * 所以「窗口级」正是这里要的特性 —— 详见下面 `WindowDialog` 处的注释。
- *
- * ## 位置与动画都交给 Miuix
- *
- * ⚠️ `largeScreen` 只在确实需要官方中央形态的调用点显式传入；它会同时决定
- * DialogContentLayout 的定位与动画，调用点不再额外叠加 AnimatedVisibility。
- *
- * ```
- * if (isLargeScreen) {                // true：大屏规格
- *     scale = 0.8f + 0.2f * progress   //   0.8→1 缩放
- *     alpha = progress
- *     // 进场 folmeSpring(damping = 0.9, response = 0.3)
- * } else {                            // false：手机规格
- *     translationY = (1 - progress) * 屏高   // 从下往上滑入
- *     // 进场 spring(dampingRatio = 0.88, stiffness = 450)
- * }
- * ```
- *
- * 文件面板需要中央形态时，直接按官方 `CenteredOverlayDialogDemo` 传
- * `largeScreen = true`；其它长内容/列表型弹窗不强制中央，继续使用 Miuix 的自动规格。
- *
- * ## 手写降到最低
- *
- * - 列表行 → Miuix [CheckboxPreference]（`checkboxLocation = Start`）。
- *   选中指示与整行的点击语义都由它自己处理，本文件不再手搓控件。
- *   单选与多选**共用同一个控件**，差别只在行为（点另一行是否清掉原来那行）。
- *   不用 Miuix `RadioButton`：它在未选中时不画任何东西（只画那个勾），
- *   单选行会连"这里能点"都看不出来。
- * - 主按钮 → Miuix [Button] + [ButtonDefaults.buttonColorsPrimary]
- * - 次要按钮 → Miuix [Button] + `buttonColors`（与主按钮同形状、只有配色不同）
- * - 开关 → Miuix [Switch]
- *
- * 仅保留一处自定义：左对齐标题。因为 Miuix 的 `title` 参数会把标题强制居中并染色，
- * 与参考图的白字左对齐不一致。
- *
- * 弹窗底色是 `DialogDefaults.backgroundColor` = `Colors.background`，
- * 而深色方案的 `surfaceContainerHigh` **也是同一个值**（从 0.9.4 字节码
- * `darkColorScheme$default` 读出的默认值），卡片直接放在弹窗底上会完全隐身。
- * 解决办法是 `DialogShell(groupBody = true)`：把内容区包进 Miuix `Card`，
- * 由主题提供与弹窗底色的对比度 —— 用纯黑底板会在浅色模式下直接坏掉。
- */
 
 // -------------------------------------------------------------- 选择窗口
 
@@ -155,20 +99,6 @@ fun ChoicePickerOverlay(
     }
     val usingFreeForm = freeForm.isNotBlank()
 
-    /*
-     * ⚠️ 关键：`renderInRootScaffold = false`。
-     *
-     * 这条与本文件顶部那段历史结论相反，是因为**结构变了**：侧栏抽屉必须画在
-     * 主 Scaffold 之后才盖得住顶栏/底栏，而抽屉内部自带一个 `Scaffold`
-     * （为了渲染长按菜单，见 `ZhiSideDrawer`）。
-     *
-     * `renderInRootScaffold = true` 时对话框注册进**最外层** Scaffold 的 root 宿主，
-     * 那个宿主在抽屉**下面** → 对话框被抽屉整块遮住，表现就是「点了没反应」。
-     *
-     * 传 `false` 后走 `LocalPopupStates`（离调用点最近的那个 Scaffold），
-     * 也就是抽屉内部那个 —— 于是对话框和长按菜单一样，画在抽屉**之上**。
-     * 抽屉关闭时最近的宿主是主 Scaffold，同样成立。
-     */
     OverlayDialog(
         show = picker != null,
         onDismissRequest = onDismiss,
@@ -259,34 +189,6 @@ fun ChoicePickerOverlay(
                             localSelected = index
                         }
                     }
-                    /*
-                     * 行首选择控件用官方 [CheckboxPreference]（`checkboxLocation = Start`）。
-                     *
-                     * ## 为什么不按"单选用 RadioButton、多选用 Checkbox"来分
-                     *
-                     * Miuix 的 `RadioButton` 只画那个勾（字节码里唯一的绘制路径是
-                     * `drawTrimmedCheck`，未选中时 alpha 动画到 0），也就是**未选中时
-                     * 整行不画任何东西** —— 一列选项看起来就是普通文字，用户看不出
-                     * "这里能点"。`Checkbox` 有 checked/unchecked 两套前景与底色，
-                     * 未选中态画得出来，所以单选行也要它，否则同一个窗口里
-                     * "能选 / 不能选"长得不一样。
-                     *
-                     * ## 为什么现在能直接用官方组件了
-                     *
-                     * 早先这里是手搓 `BasicComponent` + `startAction` 里塞一个
-                     * **缩到 0.78** 的 `Checkbox`（用 `graphicsLayer` 缩放，因为
-                     * `Checkbox` 内部是 `requiredSize(26.dp)` 且排在调用方 modifier
-                     * 之后，`Modifier.size()` 压不动它）。
-                     *
-                     * 那条限制只在"要把它缩小"时才成立。`CheckboxPreference` 自己
-                     * 管排版、勾选圈用库的原始尺寸，于是**不需要缩放**，
-                     * 也就不需要绕过任何东西 —— 直接用官方组件即可。
-                     *
-                     * ## 单选与多选的行为差异仍然保留
-                     *
-                     * 差别在**行为**（点另一行是否清掉原来那行），不在控件长相：
-                     * 见下面 `toggle` 里 `multi` 的那个分支。控件只是"看得见的入口"。
-                     */
                     CheckboxPreference(
                         title = option.label,
                         titleColor = BasicComponentDefaults.titleColor(color = titleColor),

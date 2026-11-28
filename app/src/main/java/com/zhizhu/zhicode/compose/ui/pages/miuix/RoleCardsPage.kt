@@ -41,19 +41,6 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 角色卡管理窗口。
- *
- * 与 API 配置 / MCP / 技能同一套形态：列表页与编辑页共用一个弹窗。
- *
- * ## 这里和"自定义头部提示词"的分工
- *
- * 两者都会被拼进系统提示词，但用途不同：
- * - 自定义头部提示词是**单份**的全局附加指令；
- * - 角色卡是**可切换的多份**人设，同一时刻只有一张生效（也可以一张都不启用）。
- *
- * 界面上要让人一眼看出"哪张正在生效"，所以启用中的那条打勾并高亮。
- */
 @Composable
 fun RoleCardsPage(
     state: RoleCardsState?,
@@ -163,16 +150,6 @@ private fun RoleCardList(
                 )
             }
         } else {
-            /*
-             * ⚠️ **一张角色卡 = 一张独立的 card**，不再把多张塞进同一个分组卡。
-             *
-             * 之前是 `SettingsGroup("角色卡") { forEach { BasicComponent(...) } }` ——
-             * 一张卡里叠着 N 行，行与行之间只靠分隔线，视觉上像"一条设置被劈成了几段"，
-             * 而角色卡是**互相独立的实体**（各有名字、内容、启用状态），
-             * 塞进同一张卡里既看不出边界，删错/点错也没有任何缓冲。
-             *
-             * 每张卡自己带间距，所以不能再套 `SettingsGroup`（那会多一层卡）。
-             */
             state.cards.forEach { card ->
                 val active = card.id == state.activeId
                 val titleColor by animateColorAsState(
@@ -196,18 +173,7 @@ private fun RoleCardList(
                     ),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        /*
-                         * 勾选框**就是**启用开关（点它 = 启用这张 / 停用这张）。
-                         *
-                         * 理由：角色卡同一时刻只有一张生效，所以它是一个**单选的集合** ——
-                         * 而"停用"就是"一张都不选"。用一个 Checkbox 表达这件事，
-                         * 比原来那个"行尾有个勾 + 页面底部还有一个独立的停用按钮"清楚得多：
-                         *  · 勾上 → 启用这张（自动取消其他张）；
-                         *  · 取消勾选当前这张 → 停用（不再需要底部那个按钮）。
-                         *
-                         * 仍然用 Miuix Checkbox 而不是自绘：点按区域、动画、无障碍语义
-                         * 都由库负责，自己画一个 icon 这些全要重写。
-                         */
+                        /* 勾选框**就是**启用开关（点它 = 启用这张 / 停用这张）。 */
                         Checkbox(
                             state = if (active) ToggleableState.On else ToggleableState.Off,
                             onClick = {
