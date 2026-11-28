@@ -275,28 +275,28 @@ fun M3eUpdatePage(
                     when {
                         state.phase == UpdatePhase.Downloading -> OutlinedButton(
                             onClick = onCancelDownload,
-                            modifier = Modifier.weight(1f).height(52.dp),
+                            modifier = Modifier.weight(1f).height(M3eDimens.ControlHeight),
                         ) { Text("取消下载") }
 
                         hasUpdate && hasApk && downloaded -> Button(
                             onClick = onInstall,
-                            modifier = Modifier.weight(1f).height(52.dp),
+                            modifier = Modifier.weight(1f).height(M3eDimens.ControlHeight),
                         ) { Text("立即安装") }
 
                         hasUpdate && hasApk -> Button(
                             onClick = onDownload,
-                            modifier = Modifier.weight(1f).height(52.dp),
+                            modifier = Modifier.weight(1f).height(M3eDimens.ControlHeight),
                         ) { Text("下载并安装") }
 
                         else -> Button(
                             onClick = onCheck,
                             enabled = !checking,
-                            modifier = Modifier.weight(1f).height(52.dp),
+                            modifier = Modifier.weight(1f).height(M3eDimens.ControlHeight),
                         ) { Text(if (checking) "正在检查…" else "检查更新") }
                     }
                     FilledTonalButton(
                         onClick = { runCatching { uriHandler.openUri(RELEASES_PAGE_URL) } },
-                        modifier = Modifier.height(52.dp),
+                        modifier = Modifier.height(M3eDimens.ControlHeight),
                     ) { Text("Release") }
                 }
             }

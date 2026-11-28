@@ -394,7 +394,7 @@ private fun M3eSidebar(
                             rootShortcuts.forEach { (label, rootPath) ->
                                 val activeRoot = canonicalWorkspacePath(browseDir) == canonicalWorkspacePath(rootPath)
                                 Surface(
-                                    shape = RoundedCornerShape(10.dp),
+                                    shape = RoundedCornerShape(8.dp),
                                     color = if (activeRoot) scheme.primaryContainer else scheme.secondaryContainer,
                                     modifier = Modifier.clickable {
                                         browseDir = rootPath
@@ -417,7 +417,7 @@ private fun M3eSidebar(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(8.dp))
                             .background(scheme.surfaceContainer)
                             .padding(horizontal = 10.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,

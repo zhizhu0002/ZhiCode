@@ -155,7 +155,61 @@ internal fun M3eSubPageScaffold(
     }
 }
 
-/** 分组小标题（MD3 Expressive 主色标识）。 */
+/**
+ * M3E 的固定尺寸，集中一处。
+ *
+ * ## 为什么要有这个对象
+ *
+ * 这些值原先散在各处（`52.dp`、`40.dp`、`14.dp` 内边距），而它们分属
+ * M3E 规范的**不同档位**：行高是列表项的语义尺寸，图标块是控件档位，
+ * 内边距是排版节奏。散着写就看不出"这个 52 应该是 56"。
+ *
+ * ## 数值来源
+ *
+ * 全部取自官方 tokens（`material3:1.5.0-alpha16`，反编译见 `docs/ui-m3e.md`）：
+ *
+ * | 项 | 值 | 依据 |
+ * | --- | --- | --- |
+ * | 单行列表项 | 56dp | M3E list item 单行 |
+ * | 双行列表项 | 72dp | M3E list item 双行 |
+ * | 三行列表项 | 88dp | M3E list item 三行 |
+ * | 控件高度（Medium 档） | 56dp | `ButtonMediumTokens.ContainerHeight` |
+ * | 图标块 | 40dp | Small 档视觉尺寸 |
+ * | 最小触控热区 | 48dp | Android 无障碍下限，与视觉高度无关 |
+ * | 行内水平内边距 | 16dp | M3E 列表项左右留白 |
+ */
+internal object M3eDimens {
+
+    /** 单行列表项高度。 */
+    val RowSingle = 56.dp
+
+    /** 双行（标题 + 说明）列表项高度。 */
+    val RowDouble = 72.dp
+
+    /** 三行列表项高度。 */
+    val RowTriple = 88.dp
+
+    /** 控件默认高度（M3E Medium 档）。**不是 48dp** —— 那是旧的无障碍基准。 */
+    val ControlHeight = 56.dp
+
+    /** 行内水平内边距。 */
+    val RowPaddingH = 16.dp
+
+    /** 图标块边长（视觉尺寸）。 */
+    val IconBadge = 40.dp
+
+    /** 图标块里的字形。 */
+    val IconGlyph = 20.dp
+}
+
+/**
+ * 分组小标题。
+ *
+ * ## 为什么用 `labelLarge` 而不是更大的字号
+ *
+ * M3E 的分组小标题属于 Label 档，是「标签」不是「标题」。用 `titleSmall`
+ * 会与行内的 `titleMedium` 形成两个几乎同级的标题层，反而看不出哪个是分组。
+ */
 @Composable
 internal fun M3eSectionHeader(
     title: String,
@@ -171,14 +225,34 @@ internal fun M3eSectionHeader(
 }
 
 /**
- * Material 3 Expressive 分段列表卡片位置形状：
- * 首尾外角 `24.dp`，相邻内角 `6.dp`，单项独立卡片四角均 `24.dp`。
+ * M3E 分段列表卡片的位置形状。
+ *
+ * ## 数值来源
+ *
+ * 外角取 M3E `CornerExtraLarge` = **28dp**，相邻内角取 `CornerSmall` = **8dp**
+ * （官方 `ShapeTokens` 的字节码值，见 `docs/ui-m3e.md`）。
+ *
+ * ## 为什么原来是 24 / 6
+ *
+ * 24 与 6 都不在任何一档官方形状上 —— 24 介于 `CornerLargeIncreased`(20) 与
+ * `CornerExtraLarge`(28) 之间，6 介于 `CornerExtraSmall`(4) 与 `CornerSmall`(8)
+ * 之间。取中间值让这张卡**既不属于任何既有档位、也和外层的
+ * `MaterialTheme.shapes` 对不上**：`extraLarge` 是 28，卡片却是 24，
+ * 同一屏里两种大圆角并存。
+ *
+ * 现在外角与 `shapes.extraLarge` 一致，内角与 `shapes.small` 一致，
+ * 于是「容器 / 内部块」的关系可以从主题形状表直接读出来，不必记特例。
+ *
+ * 内角 8 与外角 28 的差 20 恰好是行内水平内边距的两倍少一点 ——
+ * 这不是同心公式的结果（同心要求内角 = 外角 − 内边距 = 28 − 16 = 12），
+ * 而是分段卡片特有的"相邻两块之间要留出可见的缝"的取舍：
+ * 12 会让缝隙看起来像一条被压扁的管子，8 才是 M3E 分段列表的实际观感。
  */
 internal fun m3eSegmentShape(index: Int, count: Int): Shape = when {
-    count <= 1 -> RoundedCornerShape(24.dp)
-    index == 0 -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 6.dp, bottomEnd = 6.dp)
-    index == count - 1 -> RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-    else -> RoundedCornerShape(6.dp)
+    count <= 1 -> RoundedCornerShape(28.dp)
+    index == 0 -> RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
+    index == count - 1 -> RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 28.dp, bottomEnd = 28.dp)
+    else -> RoundedCornerShape(8.dp)
 }
 
 /** 一组间距 `2.dp` 的 MD3 Expressive 分段卡片容器。 */
@@ -226,7 +300,9 @@ internal fun M3eIconBadge(
     containerColor: Color = MaterialTheme.colorScheme.secondaryContainer,
 ) {
     Surface(
-        modifier = Modifier.size(40.dp),
+        // 视觉 40dp（M3E Small 档），字形 20dp。
+        // 40 不是触控目标 —— 可点的行由外层整行承担点击，热区远大于此。
+        modifier = Modifier.size(M3eDimens.IconBadge),
         shape = CircleShape,
         color = containerColor,
         contentColor = tint,
@@ -235,7 +311,7 @@ internal fun M3eIconBadge(
             Icon(
                 painter = painter,
                 contentDescription = null,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(M3eDimens.IconGlyph),
             )
         }
     }
@@ -259,7 +335,11 @@ internal fun M3eNavigationRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                // 双行列表项 72dp（M3E 规范：单行 56 / 双行 72 / 三行 88）。
+                // 用 `heightIn(min)` 而不是固定 `height`：系统字号调大时文字要能长高，
+                // 硬定高会裁字（`docs/ui-m3e.md` 与 `ui-miuix.md` 都记着这条）。
+                .heightIn(min = M3eDimens.RowDouble)
+                .padding(horizontal = M3eDimens.RowPaddingH, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
@@ -324,7 +404,11 @@ internal fun M3eSwitchRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                // 有 summary 就是双行（72dp），没有就是单行（56dp）。
+                // 这两档是 M3E 规范值，不是随手挑的 —— 原先这里只有 padding，
+                // 行高由文字撑出 60 出头，与规范差 12dp，与其它行也对不齐。
+                .heightIn(min = if (summary.isNullOrBlank()) M3eDimens.RowSingle else M3eDimens.RowDouble)
+                .padding(horizontal = M3eDimens.RowPaddingH, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
