@@ -1,6 +1,8 @@
 package com.zhizhu.zhicode.compose.ui.composer
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,15 +18,22 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuGroup
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenuPopup
 import androidx.compose.material3.DropdownMenuPopupPositionProvider
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -53,7 +62,11 @@ import com.zhizhu.zhicode.compose.model.EffortLevel
 import com.zhizhu.zhicode.compose.model.ModelPickerState
 import com.zhizhu.zhicode.compose.model.ModelThinkingPickerState
 import com.zhizhu.zhicode.compose.model.PermissionMode
+import com.zhizhu.zhicode.compose.model.WorkspaceUiState
+import com.zhizhu.zhicode.compose.model.formatTokenCountShort
+import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.LocalImeMotion
+import com.zhizhu.zhicode.compose.ui.ZhiIconDropdownMenu
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
 import com.zhizhu.zhicode.compose.ui.ZhiTextDropdownChip
@@ -73,6 +86,169 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private val PickerMaxHeight = 360.dp
 private val PickerGap = 4.dp
+
+@Composable
+internal fun AttachMenuPicker(
+    onAttachFile: () -> Unit,
+    onPickSystemFiles: () -> Unit,
+    onPickImage: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val attachFileIcon = ZhiIcons.file
+    val photoIcon = ZhiIcons.image
+    val systemFileIcon = ZhiIcons.directory
+    val items = remember(
+        attachFileIcon, photoIcon, systemFileIcon,
+        onAttachFile, onPickImage, onPickSystemFiles,
+    ) {
+        listOf(
+            ZhiMenuItem(
+                text = "附加项目文件",
+                summary = "浏览项目目录",
+                icon = attachFileIcon,
+                onClick = {
+                    expanded = false
+                    onAttachFile()
+                },
+            ),
+            ZhiMenuItem(
+                text = "文件管理器",
+                summary = "从系统里挑，可多选",
+                icon = systemFileIcon,
+                onClick = {
+                    expanded = false
+                    onPickSystemFiles()
+                },
+            ),
+            ZhiMenuItem(
+                text = "上传照片",
+                summary = "作为视觉输入",
+                icon = photoIcon,
+                onClick = {
+                    expanded = false
+                    onPickImage()
+                },
+            ),
+        )
+    }
+    if (LocalZhiPageSet.current !== Material3ExpressivePageSet) {
+        val scheme = MiuixTheme.colorScheme
+        ZhiIconDropdownMenu(items = items) {
+            MiuixIcon(
+                painter = ZhiIcons.attach,
+                contentDescription = "添加附件",
+                tint = scheme.onBackgroundVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        return
+    }
+
+    val keyboard = LocalSoftwareKeyboardController.current
+    ComposerPickerAnchor { maxMenuHeight ->
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .clickable {
+                    keyboard?.hide()
+                    expanded = true
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = ZhiIcons.attach,
+                contentDescription = "添加附件",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        ExpressiveComposerPicker(
+            groups = listOf(items),
+            show = expanded,
+            maxMenuHeight = maxMenuHeight,
+            onDismiss = { expanded = false },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun ExpressiveContextDetailsDialog(
+    show: Boolean,
+    state: WorkspaceUiState,
+    used: Int,
+    window: Int,
+    remaining: Int,
+    fraction: Float,
+    pct: Int,
+    pctLabel: String,
+    onCompact: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (!show) return
+    val scheme = MaterialTheme.colorScheme
+    val accent = when {
+        pct >= 90 -> scheme.error
+        pct >= 72 -> ZhiColors.amber()
+        else -> scheme.primary
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("上下文占用") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    ContextProgressRing(
+                        fraction = fraction,
+                        ringSize = 22.dp,
+                        strokeWidth = 3.dp,
+                        accentColor = accent,
+                        trackColor = scheme.onSurface.copy(alpha = 0.14f),
+                    )
+                    Text(
+                        text = "$pctLabel  ·  ${formatTokenCountShort(used)} / ${formatTokenCountShort(window)}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = scheme.onSurface,
+                    )
+                }
+                LinearWavyProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = accent,
+                    trackColor = scheme.surfaceContainerHighest,
+                )
+                Surface(
+                    color = scheme.surfaceContainerLow,
+                    shape = MaterialTheme.shapes.large,
+                ) {
+                    Text(
+                        text = "已用：${"%,d".format(used)} tokens\n" +
+                            "剩余：${"%,d".format(remaining)} tokens\n" +
+                            "窗口上限：${"%,d".format(window)} tokens\n" +
+                            "当前模型：${state.profileName} · ${state.modelLabel}\n" +
+                            "自动压缩：${if (state.settings.autoCompact) "开启（达到 ${state.settings.autoCompactPercent}% 触发）" else "关闭"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurfaceVariant,
+                        lineHeight = 20.sp,
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) { Text("关闭") }
+        },
+        dismissButton = {
+            if (!state.composerBusy && used > 0) {
+                FilledTonalButton(onClick = onCompact) { Text("压缩上下文") }
+            }
+        },
+    )
+}
 
 @Composable
 internal fun PermissionModePicker(mode: PermissionMode, onSelect: (PermissionMode) -> Unit) {
