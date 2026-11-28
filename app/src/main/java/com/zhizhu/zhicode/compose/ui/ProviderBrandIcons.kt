@@ -17,10 +17,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.R
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** CC Switch 供应商图标资源规格。 */
 data class ProviderBrandIconSpec(
@@ -152,7 +152,7 @@ fun ProviderBrandIconBox(
     modifier: Modifier = Modifier,
     size: Dp = 32.dp,
 ) {
-    val scheme = MiuixTheme.colorScheme
+    val scheme = MaterialTheme.colorScheme
     val spec = ProviderBrandIcons.resolve(icon)
     val shape = RoundedCornerShape(8.dp)
     val boxBg = when {
@@ -181,7 +181,7 @@ fun ProviderBrandIconBox(
             Text(
                 text = name.trim().take(1).uppercase().ifEmpty { "?" },
                 color = scheme.primary,
-                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
             )
         }

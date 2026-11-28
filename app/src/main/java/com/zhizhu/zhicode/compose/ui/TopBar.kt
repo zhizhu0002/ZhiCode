@@ -28,12 +28,11 @@ import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.theme.ZhiGlass
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TooltipBox
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurDefaults
 import top.yukonga.miuix.kmp.blur.textureBlur
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 限制顶栏品牌显示宽度并在超长时横向连续滚动。 */
 internal fun Modifier.brandSignatureMarquee(): Modifier = this
@@ -72,7 +71,7 @@ fun ZhiTopBar(
     selectedTab: WorkspaceTab = state.tab,
     pagerPage: Int? = null,
 ) {
-    val scheme = MiuixTheme.colorScheme
+    val scheme = MaterialTheme.colorScheme
     val brandTitle = LocalThemeSettings.current.resolvedTopBrand
 
     ZhiFrameTrace.countRecompose("TopBar")
@@ -124,7 +123,7 @@ fun ZhiTopBar(
                     Text(
                         text = brandTitle,
                         color = scheme.onSurface,
-                        fontSize = MiuixTheme.textStyles.title3.fontSize,
+                        style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         softWrap = false,
@@ -132,7 +131,7 @@ fun ZhiTopBar(
                             .align(Alignment.Center)
                             .brandSignatureMarquee(),
                     )
-                    TooltipBox(
+                    M3eTooltip(
                         text = "打开设置",
                         modifier = Modifier.align(Alignment.CenterEnd),
                     ) {
@@ -152,7 +151,7 @@ fun ZhiTopBar(
                         Text(
                             text = brandTitle,
                             color = scheme.onSurface,
-                            fontSize = MiuixTheme.textStyles.title3.fontSize,
+                            style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             softWrap = false,
@@ -161,20 +160,20 @@ fun ZhiTopBar(
                         Spacer(modifier = Modifier.weight(1f))
                         Text(
                             text = if (state.composerBusy) "工作中 · ${state.modelLabel}" else state.modelLabel,
-                            color = if (state.composerBusy) scheme.primary else scheme.onSurfaceVariantSummary,
-                            fontSize = MiuixTheme.textStyles.body2.fontSize,
+                            color = if (state.composerBusy) scheme.primary else scheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                         )
                         Text(
                             text = state.deviceStatus,
-                            color = scheme.onSurfaceVariantSummary,
-                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                            color = scheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelMedium,
                             maxLines = 1,
                             modifier = Modifier.padding(start = 8.dp),
                         )
-                        TooltipBox(text = "打开设置") {
+                        M3eTooltip(text = "打开设置") {
                             ZhiIconButton(
                                 compact = 34.dp,
                                 icon = ZhiIcons.settings,
@@ -194,7 +193,7 @@ fun ZhiTopBar(
                     pagerPage = pagerPage,
                 )
             }
-            if (state.composerBusy) ZhiIndeterminateBar() else ZhiHorizontalDivider(color = scheme.dividerLine)
+            if (state.composerBusy) ZhiIndeterminateBar() else ZhiHorizontalDivider(color = scheme.outlineVariant)
         }
     }
 }

@@ -21,13 +21,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiSpacing
 import kotlinx.coroutines.delay
-import top.yukonga.miuix.kmp.basic.Surface
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 fun PageFeedback(
@@ -36,7 +36,7 @@ fun PageFeedback(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val scheme = MiuixTheme.colorScheme
+    val scheme = MaterialTheme.colorScheme
     // 淡出期间还要显示旧文案，否则会看到"一截空条滑走"（同 MessageBar）。
     var shown by remember { mutableStateOf(message) }
     var shownError by remember { mutableStateOf(isError) }
@@ -79,7 +79,7 @@ fun PageFeedback(
                 Text(
                     text = text,
                     color = if (shownError) scheme.error else scheme.onSurface,
-                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    style = MaterialTheme.typography.labelMedium,
                     maxLines = MAX_LINES,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
