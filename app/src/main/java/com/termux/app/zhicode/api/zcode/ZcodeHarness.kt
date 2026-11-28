@@ -3,31 +3,6 @@ package com.termux.app.zhicode.api.zcode
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * ZCode 的 **harness 前言**（系统提示词的固定部分）。
- *
- * ## 为什么需要它
- *
- * 只对齐请求头不够。同一个账号在另一个应用里能正常调用，而我们的请求头已逐项对齐
- * 官方源码之后仍然被拒成 `405 / 3012 unusual activity`，两边**唯一的结构性差异**就在这里：
- * 可用的那份实现发的是 4 个 system 块 —— 三块 harness 前言（各带 `cache_control: ephemeral`）
- * 加上本应用自己的提示词；并且在 messages 最前面插一条合成的 user 消息（`<system-reminder>`
- * 里放上下文与日期），最后一条消息也带 `cache_control`。
- *
- * ## 文本来源（逐字）
- *
- * 官方客户端 `zai-org/ZCode`（Apache-2.0）的 `core/src/context/` 各 section 构造函数。
- * 已逐字核对：`sections/identity.ts` 产出等于 [STABLE_A]，`sections/desktop.ts` 等于 [STABLE_B]，
- * `dynamic-sections.ts` 的 `buildDynamicBehaviorSection()` 等于 [DYNAMIC_BEFORE_ENV]、
- * `buildContextManagementSection()` 等于 [DYNAMIC_AFTER_ENV]，`sections/env-info.ts` 等于环境块。
- *
- * ## 这里刻意**不**用真实的本机信息
- *
- * 环境块里的 `cwd` / `platform` / `shell` / `OS Version` 全部取官方 harness 的常量
- * （`/home/zcode`、`linux`、`bash`…），不用本机真实值。两个理由：一是那份跑得通的实现
- * 发的就是这些值；二是真值会把用户的工作目录与系统版本一并送出去，而这个块的用途只是
- * 声明 harness 身份，用不到真值。
- */
 object ZcodeHarness {
 
     private const val CACHE_EPHEMERAL = "ephemeral"
@@ -132,16 +107,7 @@ Before running a command that changes system state — restarts, deletes, config
 
     private const val HARNESS_OS_VERSION = """6.1.0-13-amd64 x64"""
 
-    /**
-     * harness 前言 + 本应用自己的提示词 → `system` 块数组。
-     *
-     * 次序与官方一致：前导 / 稳定段（身份 + Harness + Desktop Context）/
-     * 动态段（行为准则 + 环境 + 上下文管理），三块都带 `cache_control`，
-     * 最后才是本应用自己的提示词（**不带**缓存标记）。
-     *
-     * 我们自己的提示词仍然照发：harness 前言说明「以什么身份说话」，
-     * 而工具语义、权限规则、本仓库约定属于本应用的提示词，不能用别人的顶替。
-     */
+    /** harness 前言 + 本应用自己的提示词 → `system` 块数组。 */
     fun systemBlocks(ownPrompt: String?, model: String?): JSONArray {
         val blocks = JSONArray()
         blocks.put(ephemeral(CLI_PREFIX))
@@ -159,12 +125,7 @@ Before running a command that changes system state — restarts, deletes, config
         return blocks
     }
 
-    /**
-     * `# Environment` 块。
-     *
-     * 逐行用与官方相同的标签拼（`env-info.ts` 的 `buildEnvInfoContent`），
-     * `{provider}` / `{model}` 两个占位符替换成服务端认的 provider 名与实际模型名。
-     */
+    /** `# Environment` 块。 */
     fun envBlock(model: String?): String {
         val powered = ENV_POWERED_BY
             .replace("{provider}", PROVIDER_MODEL_ID)
@@ -181,23 +142,13 @@ Before running a command that changes system state — restarts, deletes, config
         ).joinToString("\n")
     }
 
-    /**
-     * 插在 messages 最前面的那条合成 user 消息的正文。
-     *
-     * 它是 `<system-reminder>` 包起来的上下文说明加今天的日期。官方把这类内容
-     * 作为 `meta_user` 注入（`current-date.ts` 的 `injectionTarget`）。
-     */
+    /** 插在 messages 最前面的那条合成 user 消息的正文。 */
     fun contextMessageText(date: String): String =
         REMINDER_OPEN + CONTEXT_INTRO + "\n" +
             (CONTEXT_DATE_HEADING + "\n" + CONTEXT_DATE_LINE.replace("{date}", date)) +
             "\n\n" + CONTEXT_OUTRO + REMINDER_CLOSE
 
-    /**
-     * 给最后一条消息打上 `cache_control`（官方对最后一条消息也做缓存标记）。
-     *
-     * 只处理 `content` 是块数组的情形：那是官方自己的写法。字符串形态的 content
-     * 不在这里改写 —— 把一条已有消息换成另一种结构，风险大于收益。
-     */
+    /** 给最后一条消息打上 `cache_control`（官方对最后一条消息也做缓存标记）。 */
     fun markLastMessageEphemeral(messages: JSONArray) {
         for (i in messages.length() - 1 downTo 0) {
             val message = messages.optJSONObject(i) ?: continue

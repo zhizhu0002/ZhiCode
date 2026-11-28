@@ -63,51 +63,6 @@ import com.zhizhu.zhicode.compose.theme.ZhiAppTheme
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 沙箱悬浮控制条。
- *
- * ## 它为什么必须存在
- *
- * guest 全屏之后返回键归它自己所有 —— 没有这条浮层，用户没有任何办法退出或
- * 停止一个卡死的虚拟应用。所以它不是"调试附件"，而是**逃生通道**：
- * 它不能被任何窗口盖住、不能拖出屏幕、位置不能每次都跳。
- *
- * ## 四个设计决定
- *
- * ### 1. 系统级窗口（`TYPE_APPLICATION_OVERLAY`）
- *
- * 早先它加在 guest Activity 的 DecoView 上。那条路有**结构性**上限：
- * 只要 guest 弹出任何一个独立 Window（`WindowDialog`、系统权限框、输入法候选），
- * 它就在这个 Activity 窗口之上，浮层被整块盖住 —— 用户弹出确认框之后找不到"返回"。
- * 而 `WindowDialog` 恰恰是本应用最常用的弹窗形态。所以必须提升到窗口层级。
- *
- * ### 2. 用 Compose 画，而不是手工拼 View
- *
- * 第一版是 `LinearLayout` + `TextView` + 手写的 `RippleDrawable` /
- * `GradientDrawable`。它的问题是**每一处颜色、圆角、时长都得手抄一遍主题值**，
- * 而抄错不会报错，只会看起来"不太对"：
- *  · 深浅色读的是 `iqge_ui_preferences/ui_theme` —— 那两个键在本工程里
- *    根本不存在，判断恒假，于是浅色主题下它永远是一块深色；
- *  · 强调色写死成两串绿，与用户选的种子色无关。
- *
- * 现在它是普通的 `@Composable`，直接读 `MiuixTheme` —— 与主界面同一套色板、
- * 同一套字阶、同一套圆角。主题换一下（预设色 / Monet / 深浅）它自动跟上。
- *
- * ### 3. 位置只有**一个**真实来源
- *
- * 这是上一版拖动"有问题"的根因：拖动时改 `translationX/Y`（View 相对位移），
- * 而保存/恢复时读的是 `lp.x/y`（窗口的绝对位置）。两个坐标系，改一个读另一个 ——
- * 松手后落点会跳、拖动时手感发飘。
- *
- * 现在统一用 `lp.x / lp.y`：拖动只改它，读也只读它。
- * `translation` 全程保持 0，避免两套位移叠在一起。
- *
- * ### 4. 随 guest 进出自动收放
- *
- * 系统级窗口**不归任何 Activity 管**：不主动摘的话，用户切到别的应用时会看到
- * 一条"日志/返回/停止"压在上面。所以 [detach] 必须挂在 guest Activity 离开前台
- * 的那一刻（见 `ZhiSandboxEngine` 的 `onActivityPaused`）。
- */
 object SandboxFloatingController {
 
     /** 宿主与各 guest 进程各持一份。 */
@@ -137,12 +92,7 @@ object SandboxFloatingController {
     private val BarHeight = 38.dp
     private val BarShape = RoundedCornerShape(19.dp)
 
-    /**
-     * 底板的透明度。
-     *
-     * 它压在**别人的应用**上面，完全不透明就是一块挡内容的实心板子。
-     * 0.86 是权衡：再低会让上面的字在亮色内容上读不清。
-     */
+    /** 底板的透明度。 */
     private const val BarAlpha = 0.86f
 
     /** 日志面板的透明度。比把手稍透，因为它的面积大得多。 */
@@ -155,12 +105,7 @@ object SandboxFloatingController {
     @JvmStatic
     fun attachedView(): View? = host
 
-    /**
-     * 挂上悬浮条。
-     *
-     * <p>已挂着就直接返回：`attach` 会被**每个** `onActivityResumed` 调用，
-     * 每次重建的话用户每换一个 guest 页面都会重播一遍入场动画。
-     */
+    /** 挂上悬浮条。 */
     @JvmStatic
     fun attach(activity: Activity?, pkg: String) {
         if (activity == null || activity.isFinishing()) return
@@ -173,16 +118,6 @@ object SandboxFloatingController {
     }
 
     private fun show(app: Context, pkg: String) {
-        /*
-         * ⚠️ 不能在这里 `ThemeStore.read(app)`。
-         *
-         * 这段代码跑在 **guest 进程**里，而 guest 的 `getSharedPreferences` 被
-         * BlackBox 虚拟化 —— 读宿主写的 `zhi_theme` 只会拿到一套默认值，
-         * 于是"用户选浅色、悬浮条仍是深色"这个老问题原样回来。
-         *
-         * 所以深浅由**宿主**在 `onResume` 时写进沙箱设置（同 UID 的真实文件），
-         * 这里读那一份。见 SandboxSettingsStore.publishThemeDark。
-         */
         val dark = SandboxSettingsStore.themeDark(
             app,
             (app.resources.configuration.uiMode and
@@ -202,14 +137,7 @@ object SandboxFloatingController {
             }
         }
 
-        /*
-         * **不**用 `Settings.canDrawOverlays()` 预判，而是直接试。
-         *
-         * 这段代码跑在 **guest 进程**里，而 guest 的包名被 BlackBox 虚拟化过 ——
-         * `canDrawOverlays` 内部拿 `getOpPackageName()` 去问 AppOpsManager，
-         * 在虚拟包名下可能返回 false，即使宿主（`com.zhizhu.code`，同 UID）
-         * 确实已授权。而"真的去 addView"不会被吓住：有权限就成功，没有就抛异常。
-         */
+        /* **不**用 `Settings.canDrawOverlays()` 预判，而是直接试。 */
         val wm = app.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
         val density = app.resources.displayMetrics.density
         val lp = WindowManager.LayoutParams(
@@ -234,13 +162,6 @@ object SandboxFloatingController {
         SandboxDebugLog.event("悬浮条已挂上（Compose / 系统级）: $pkg")
     }
 
-    /**
-     * 摘掉悬浮条。
-     *
-     * <p>⚠️ 系统级窗口不归任何 Activity 管。这一步不做的话，
-     * guest 退到后台之后浮层**仍然盖在别的应用上** —— 用户切到微信会看到
-     * 一条"日志/返回/停止"压在最上面。必须在 guest 离开前台时摘。
-     */
     @JvmStatic
     fun detach(activity: Activity?) {
         val wm = windowManager
@@ -261,23 +182,6 @@ object SandboxFloatingController {
         else Handler(Looper.getMainLooper()).post(remove)
     }
 
-    /**
-     * 拖动增量，**按帧合并后**才提交给窗口管理器。
-     *
-     * <h3>为什么必须合并</h3>
-     *
-     * `WindowManager.updateViewLayout` 是一次跨进程窗口事务（要过
-     * WindowManagerService，含一次 binder 往返与 WMS 侧的重新布局）。
-     * 触摸事件是按**扫描率**来的 —— 好一点的屏幕 120~240Hz，远高于刷新率。
-     * 每个事件都提交一次的话，主线程一秒要打上百次窗口事务，
-     * 结果就是浮层永远落后手指几帧：用户的原话是"比手慢"。
-     *
-     * 所以这里把增量累加，用 `postOnAnimation` 合并到**每帧一次**。
-     * 一帧一次的窗口事务与屏幕刷新同频，位移就不会再欠账。
-     *
-     * <p>注意累加必须在 `Float` 上做、到最后才取整：`lp.x` 是整数像素，
-     * 单次 0.4px 的增量直接取整会变成 0，慢慢拖就完全不动。
-     */
     private var pendingDx = 0f
     private var pendingDy = 0f
     private var frameScheduled = false
@@ -298,12 +202,7 @@ object SandboxFloatingController {
         }
     }
 
-    /**
-     * 把窗口**相对**挪一段并夹进屏幕。`lp.x/y` 是位置的唯一真值。
-     *
-     * <p>尺寸直接读 `host`，不从参数传：窗口是 `WRAP_CONTENT`，
-     * 展开/收起日志面板时它自己会变，调用方缓存的那份立刻就过期了。
-     */
+    /** 把窗口**相对**挪一段并夹进屏幕。 */
     private fun nudge(app: Context, dx: Float, dy: Float) {
         val wm = windowManager ?: return
         val lp = layoutParams ?: return
@@ -383,24 +282,6 @@ object SandboxFloatingController {
 
     // ─────────────────────────── 界面 ───────────────────────────
 
-    /**
-     * 悬浮条本体。
-     *
-     * 形态：一个可拖动的胶囊。收起态只有一个「IQ」圆点；点一下**动画**展开成
-     * 「日志 / 返回 / 停止」，再点回到圆点。日志面板在胶囊下方就地展开。
-     *
-     * ## 为什么半透明
-     *
-     * 这块浮层压在**别的应用**上面。完全不透明时它就是一块挡内容的实心板子
-     * （用户截图里那条横在黑底应用上的长条）。用 `surfaceContainerHigh` 的
-     * alpha 版本：仍能看清上面的字，底下的内容也漏得出来。
-     *
-     * ## 为什么拖动要自己合并增量
-     *
-     * `detectDragGestures` 的回调频率跟着**触摸扫描率**（120~240Hz），
-     * 而每次落位都是一次跨进程窗口事务。逐事件提交的话浮层永远落后手指几帧 ——
-     * 用户的原话是"比手慢"。所以交给 [queueMove] 合并到每帧一次。
-     */
     @Composable
     private fun FloatingBar(pkg: String) {
         val context = androidx.compose.ui.platform.LocalContext.current
@@ -410,9 +291,7 @@ object SandboxFloatingController {
         var size by remember { mutableStateOf(IntSize.Zero) }
         var placed by remember { mutableStateOf(false) }
 
-            /*
-         * 首帧还原上次落点。要等尺寸量出来才能夹取。
-         */
+            /* 首帧还原上次落点。 */
         LaunchedEffect(size) {
             if (size.width == 0 || size.height == 0) return@LaunchedEffect
             if (!placed) {
@@ -424,11 +303,7 @@ object SandboxFloatingController {
                     placeWindow(context, xr * metrics.widthPixels, yr * metrics.heightPixels)
                 }
             } else {
-                /*
-                 * 展开时窗口会变宽。若它此刻贴着右边缘，变宽就会顶出屏幕 ——
-                 * 而浮层可以贴着右边缘停（用户就是往那儿拖的）。
-                 * 所以每次尺寸变化都按**当前位置**再夹一次。
-                 */
+                /* 展开时窗口会变宽。 */
                 clampCurrent(context)
             }
         }
@@ -475,12 +350,7 @@ object SandboxFloatingController {
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    /*
-                     * 圆点里的图标跟着展开状态转 90°（横 → 竖）。
-                     *
-                     * 用旋转而不是换图标：换图标在展开动画进行到一半时太跳，
-                     * 而旋转本身就把"点一下会变"这件事说清楚了。
-                     */
+                    /* 圆点里的图标跟着展开状态转 90°（横 → 竖）。 */
                     val glyphRotation by animateFloatAsState(
                         targetValue = if (expanded) 90f else 0f,
                         animationSpec = tween(
@@ -573,14 +443,7 @@ object SandboxFloatingController {
     private fun loadLog(context: Context, onResult: (String) -> Unit) {
         Thread({
             val value = runCatching {
-                /*
-                 * 有界快照 + **不带 logcat**。
-                 *
-                 * 全量 42 万字符塞进一个 300dp 宽的浮层里没有意义，而且会让
-                 * Compose 每帧测量几十万个字形；而读 logcat 要起子进程等它
-                 * dump 完 —— 那一项比读事件流慢一个数量级，是这个浮层卡的主因。
-                 * 悬浮条要看的是"刚才那几步走到哪了"，事件流里就有。
-                 */
+                /* 有界快照 + **不带 logcat**。 */
                 SandboxDebugLog.snapshot(context, 20_000, false)
             }.getOrElse { "读取日志失败: $it" }
             Handler(Looper.getMainLooper()).post { onResult(value) }

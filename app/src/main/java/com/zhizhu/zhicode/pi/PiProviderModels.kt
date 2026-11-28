@@ -64,14 +64,7 @@ enum class PiThinkingLevel(val id: String) {
     }
 }
 
-/**
- * 单个模型的能力与 thinkingLevelMap 配置。
- *
- * `thinkingLevelMap` 遵循 Pi 语义：
- * - 键缺失：使用 Pi 默认行为（`xhigh`/`max` 默认隐藏，其余默认开启）
- * - 值为 `null`：显式禁用该档位
- * - 值为非空字符串：开启该档位并发送指定映射值
- */
+/** 单个模型的能力与 thinkingLevelMap 配置。 */
 data class PiModelConfig(
     val id: String,
     val name: String = id,

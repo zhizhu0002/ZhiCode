@@ -17,15 +17,7 @@ import com.zhizhu.zhicode.ProotCommand
 import com.zhizhu.zhicode.RuntimeInstaller
 import java.io.File
 
-/**
- * 环境自检：把定位问题需要的全部运行期事实汇总成一段可复制的纯文本。
- *
- * 存在的理由很实际：真机往返验证很贵。与其在真机上让用户逐项描述"哪里不对"，
- * 不如让 App 自己把事实全部列出来，用户复制一次就够定位。
- *
- * 报告里的每一项都必须是**实测值**，不能是推断或常量：
- * 已经装了却没装、路径不对、native 库加载失败、权限没给 —— 都要如实呈现。
- */
+/** 环境自检：把定位问题需要的全部运行期事实汇总成一段可复制的纯文本。 */
 object EnvDoctor {
 
     private const val ARCHIVE_MIN_ENTRIES = 3000
@@ -69,13 +61,7 @@ object EnvDoctor {
         sb.appendLine()
     }
 
-    /**
-     * 本应用是跑在 ZhiCode 沙箱（BlackBox）里，还是直接跑在真机上。
-     *
-     * 这一条直接决定内置 Termux 能不能装：沙箱会把数据目录虚拟化成
-     * `/data/user/0/<宿主包名>/blackbox/data/user/0/<pkg>`，前缀长度对不上，
-     * bootstrap 里 337 个 ELF 就不能安全改写。所以必须在真机上装。
-     */
+    /** 本应用是跑在 ZhiCode 沙箱（BlackBox）里，还是直接跑在真机上。 */
     private fun runtimeShape(context: Context): String {
         val dataDir = context.applicationInfo?.dataDir.orEmpty()
         return if (dataDir.contains("blackbox")) {
@@ -180,26 +166,6 @@ object EnvDoctor {
         localMountInfo(context, sb)
     }
 
-    /**
-     * 「文件管理器能不能看到 HOME」这一节。
-     *
-     * <p>为什么必须单独报：这一整条链路的每一环都可能断，而且**断在哪里从表面看不出来**
-     * —— 文件管理器里只会显示"没有这一项"或者"无法加载"。
-     *
-     * <ol>
-     *   <li>机制本身是「把 HOME 发布成 DocumentsProvider」（SAF），不是搬目录。
-     *       搬目录要付的代价是共享存储整片 `noexec`（见 [StorageLinks] 的说明）；</li>
-     *   <li>provider 必不必须在系统里注册 → 问 `PackageManager` 拿答案，而不是假设；</li>
-     *   <li>HOME 本身要可读写（权限/SELinux 拦下来时这里就会显形）。</li>
-     * </ol>
-     *
-     * <p>报告里**不写**"请去文件管理器里添加"这种固定文案当作成功证据 ——
-     * 那不是我实测到的东西。这里只报事实，怎么用由用户决定。
-     *
-     * <p>第 4 步是**真的调一遍自己**（[providerRoundTrip]）：注册查出来是"是"，
-     * 只说明清单没写错，不代表这条链路能跑通。浏览能过、新建却不能的故障恰恰
-     * 就在这两者之间，所以自检要一路走到"建一个再删掉"。
-     */
     private fun localMountInfo(context: Context, sb: StringBuilder) {
         val rootfs = ContainerPaths.rootfsDir()
         sb.appendLine("## 本地挂载（文件管理器访问 Debian 容器根目录 /）")
@@ -215,19 +181,6 @@ object EnvDoctor {
         sb.appendLine()
     }
 
-    /**
-     * 经 `ContentResolver` 走一遍完整链路：打开根 → 列根目录 → **建一个目录** → 删掉它。
-     *
-     * <p>每一步单独一行，因为断在哪一步就是问题所在：注册对了但根打不开是 ID 解析的问题，
-     * 根能打开而列表是空的又是另一回事，能列却不能建则落在写入路径上。
-     *
-     * <p>⚠️ 框架在 `DocumentsProvider.call()` 里**吞掉异常、只回 null** ——
-     * 所以 provider 抛出的原因不会出现在这里。它由 provider 自己记进日志，
-     * 由 [providerLogTail] 紧随其后贴出来，两份合起来才解释得清。
-     *
-     * <p>自检会建一个名字带时间戳的目录，然后**只删它自己建的那一个**：
-     * 自检不允许在用户目录里留下东西。
-     */
     private fun providerRoundTrip(context: Context, authority: String): List<String> {
         val out = ArrayList<String>()
         val resolver = context.contentResolver
@@ -313,14 +266,7 @@ object EnvDoctor {
     private inline fun step(label: String, body: () -> String): String =
         "$label: " + runCatching(body).getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
 
-    /**
-     * provider 自己记的日志尾巴。
-     *
-     * <p>这是"原因"的来源：框架把 provider 的异常吞成 null，只有我们自己记下的那句
-     * `FAIL FileNotFoundException: 无法创建 xxx` 能说清发生了什么。
-     * 顺带它也记录了文件管理器**实际传进来的参数**（名字是空串还是 null，
-     * mimeType 到底是什么）—— 那是复现问题时最缺的信息。
-     */
+    /** provider 自己记的日志尾巴。 */
     private fun providerLogTail(): List<String> {
         val file = File(File(TermuxConstants.TERMUX_HOME_DIR_PATH, "tmp"), ProviderLog.FILE_NAME)
         if (!file.isFile) return listOf("provider 日志: 还没有（provider 一次都没被调用过）")
@@ -330,13 +276,7 @@ object EnvDoctor {
         return listOf("provider 日志: ${file.absolutePath}（末尾 ${lines.size} 行）") + lines
     }
 
-    /**
-     * provider 是否真的被系统登记为 DocumentsProvider。
-     *
-     * <p>真因只能靠 `queryIntentContentProviders` 查：清单里的 `<provider>` 一旦
-     * 被误删、类名写错、或者 `intent-filter` 丢了，**编译与运行都不会报错**，
-     * 只是文件管理器的"添加存储"里少一项。这一条把那个静默失败变成一行可读的事实。
-     */
+    /** provider 是否真的被系统登记为 DocumentsProvider。 */
     private fun isDocumentsProviderRegistered(context: Context, authority: String): String {
         val provider = runCatching {
             context.packageManager.queryIntentContentProviders(

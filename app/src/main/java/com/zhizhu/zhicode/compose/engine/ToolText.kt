@@ -5,18 +5,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 
-/**
- * 工具与状态的**文案模板**，逐字对齐原版 `MainActivity`。
- *
- * 单独抽出来有两个原因：
- * 1. 这些模板散落在原版 5000 行里（`userFacingToolName` / `toolSummary` /
- *    `toolActivityHint` / `toolDelta` / `compactResult` / `runtimeDisplayStatus` …），
- *    混在状态机里没法核对；
- * 2. 它们是**纯函数**，可以离线用真实数据做对照测试，不需要跑起来。
- *
- * ⚠️ 这里刻意保留原版的几处"怪"写法（例如 `truncateCommand` 用字面 `\n` 而不是换行符）。
- * 改掉它们看着更"对"，但会让两版界面出现无法解释的差异；要改请单独提，别顺手改。
- */
 internal object ToolText {
 
     // ---------- 字符串裁剪 ----------
@@ -38,12 +26,6 @@ internal object ToolText {
         return s.substring(0, left) + "…" + s.substring(s.length - right)
     }
 
-    /**
-     * 折叠态的命令行：多行时只留前两行。
-     *
-     * ⚠️ 原版这里拼的是**字面两字符** `\` 和 `n`，不是换行符 —— 照抄。
-     * 折叠行是 `singleLine`，真换行会被系统吃掉，反而看不出"这里还有内容"。
-     */
     fun truncateCommand(command: String?): String {
         val raw = command ?: ""
         val lines = raw.split('\n')
@@ -69,18 +51,6 @@ internal object ToolText {
         }
     }
 
-    /**
-     * 这个工具的展开输出是**统一 diff** 吗（决定要不要逐行着色渲染）。
-     *
-     * <p>为什么不能只看工具名：写入类工具的**失败**结果是一行错误文本
-     * （`Refusing to overwrite a file larger than 20 MiB: …`），
-     * 按工具名就着色会把那行错误也画成 diff 配色 —— 那比不着色更误导。
-     * 所以两个条件都要：工具是写文件的，**而且**输出真的是 diff。
-     *
-     * <p>判据取 `@@` 块头：`UnifiedDiff` 的三个入口（create / deleted / combine）
-     * 产出的每一份 diff 都至少有一个 hunk 头，而普通文本里出现行首 `@@` 的概率可以忽略。
-     * 一并接受 `--- ` 紧跟 `+++ ` 的开头，是因为截断后的片段可能只剩文件头。
-     */
     fun isFileDiff(name: String?, output: String): Boolean {
         val tool = name?.lowercase(Locale.US) ?: return false
         val writesFile = tool == "write" || tool == "edit" || tool == "multiedit" || tool == "delete"
@@ -114,12 +84,7 @@ internal object ToolText {
         return sawMinus && sawPlus
     }
 
-    /**
-     * 区间 `[start, end)` 是否以 [prefix] 开头。
-     *
-     * 等价于 `output.substring(start, end).startsWith(prefix)`，但不建 String ——
-     * 调用点在每次重组的热路径上（见 [isFileDiff] 的说明）。
-     */
+    /** 区间 `[start, end)` 是否以 [prefix] 开头。 */
     private fun startsWithAt(text: String, start: Int, end: Int, prefix: String): Boolean {
         if (end - start < prefix.length) return false
         for (k in prefix.indices) {
@@ -164,10 +129,7 @@ internal object ToolText {
         }
     }
 
-    /**
-     * 折叠批条目的副标题。字段回退规则与 [summary] **不同**：
-     * `LS/Tree/Stat` 这里取 `path` → `file_path`，而 `summary` 取 `path` 且默认 `"."`。
-     */
+    /** 折叠批条目的副标题。 */
     fun activityHint(name: String?, input: JSONObject?): String {
         if (name == null || input == null) return ""
         val value = when (name.lowercase(Locale.US)) {
@@ -192,12 +154,7 @@ internal object ToolText {
         return shortenMiddle(value, 72)
     }
 
-    /**
-     * `ReadMany` 这一次读了几个文件（其余工具是 0）。
-     *
-     * 参考实现的 `readManyCount`：只数 `paths` 数组的长度。折叠组的表头要把它
-     * **按条数**计入"读取 N 个文件"，算成 1 的话一个读了 20 个文件的组会显示"读取 1 个文件"。
-     */
+    /** `ReadMany` 这一次读了几个文件（其余工具是 0）。 */
     fun readRequestCount(name: String?, input: JSONObject?): Int {
         if (name == null || input == null) return 0
         if (!name.equals("ReadMany", ignoreCase = true)) return 0
@@ -251,12 +208,7 @@ internal object ToolText {
 
     // ---------- 状态与错误 ----------
 
-    /**
-     * 把引擎给的英文/中文 detail 映射成界面文案。
-     *
-     * 引擎会传 `"Thinking…"` / `"Continuing after tool results…"` /
-     * `"Cancelled"` 这类英文短语，另外一部分本来就是中文，原样返回。
-     */
+    /** 把引擎给的英文/中文 detail 映射成界面文案。 */
     fun displayStatus(detail: String?, phase: String, busy: Boolean): String {
         val d = (detail ?: "").trim()
         if (d.isNotEmpty()) {
@@ -345,12 +297,7 @@ internal object ToolText {
     }
 }
 
-/**
- * 工具卡上的实时计时。
- *
- * 原版靠一个 500ms 的 ticker 去刷新"正在执行 00:07…"这行字；
- * Compose 里改成让 UI 自己按 [startedAt] 算，不需要 ViewModel 每 500ms 推一次状态。
- */
+/** 工具卡上的实时计时。 */
 internal class ToolClock {
     val startedAt: Long = SystemClock.elapsedRealtime()
 

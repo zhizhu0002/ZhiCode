@@ -5,9 +5,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 
-/**
- * 文档 ID ↔ Debian 容器根目录真实路径的映射，以及容器内软链接感知的边界校验。
- */
+/** 文档 ID ↔ Debian 容器根目录真实路径的映射，以及容器内软链接感知的边界校验。 */
 object DocumentTree {
 
     const val ROOT_DOCUMENT_ID = "debian"
@@ -63,9 +61,7 @@ object DocumentTree {
         return canonicalUnderRoot(root, File(root, relative))
     }
 
-    /**
-     * 确认 [file] 解析所有软链接后仍落在 [root] 内；兼容 Debian 容器内部的绝对路径软链接。
-     */
+    /** 确认 [file] 解析所有软链接后仍落在 [root] 内；兼容 Debian 容器内部的绝对路径软链接。 */
     @Throws(IOException::class)
     fun canonicalUnderRoot(root: File, file: File): File {
         val canonicalRoot = root.canonicalFile

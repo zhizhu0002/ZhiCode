@@ -32,13 +32,7 @@ import org.json.JSONObject
 import java.util.LinkedHashMap
 import java.util.concurrent.Executors
 
-/**
- * 界面侧覆盖项。
- *
- * 语义：`null` = **不覆盖**，沿用 [ApiSettingsStore] 里读出来的值。
- * 这样"设置页还没接线"的字段不会被这里悄悄写成默认值，
- * 造成"设置里明明开着、实际却关着"这种最难查的不一致。
- */
+/** 界面侧覆盖项。 */
 internal data class EngineOverrides(
     val permissionMode: String? = null,
     val effort: String? = null,
@@ -72,11 +66,7 @@ internal data class EngineOverrides(
     val maxConcurrentSubagents: Int? = null,
 )
 
-/**
- * 一次计划审批请求在界面侧需要的全部内容。
- *
- * 公开可见性是被迫的：[EngineEvents] 是 public 接口，它的参数类型不能是 internal。
- */
+/** 一次计划审批请求在界面侧需要的全部内容。 */
 data class EnginePlanApproval(
     val requestId: String,
     val title: String,
@@ -86,15 +76,7 @@ data class EnginePlanApproval(
     val permissionNote: String,
 )
 
-/**
- * 引擎事件。**保证在主线程回调**，实现方可以直接改界面状态。
- *
- * 之所以不让 ViewModel 直接实现 `ZhiCodeEngine.Listener`：
- * 引擎回调来自后台线程、参数是引擎内部的 Java 类型（`ToolCall` / `ToolExecutionResult` …），
- * 直接暴露会让状态机里到处散落 `post { }` 与字段解引用，也没法单独测。
- *
- * 公开可见性是被迫的：[WorkspaceViewModel] 是 public 类，它的父类型不能是 internal。
- */
+/** 引擎事件。 */
 interface EngineEvents {
     fun onEngineSessionStarted(model: String)
     fun onEngineText(delta: String)
@@ -112,16 +94,6 @@ interface EngineEvents {
         addedLines: Int,
         deletedLines: Int,
         command: String,
-        /**
-         * 工具带回来的**富内容预览**（`ToolExecutionResult.additionalContent`）。
-         *
-         * 目前只有一个来源：`Sandbox` 工具的 `screenshot` 会把沙箱截图以
-         * `{type:image, source:{type:base64,…}}` 的形式挂在这里。
-         *
-         * 这个参数**曾经不存在**，而引擎一直在把 additionalContent 发给模型
-         * （`ZhiCodeEngine` 里放进 toolResults 当 user 消息）—— 于是截图是
-         * 「模型看得到、用户看不到」。发布前它必须在签名里，否则又会被某一层丢掉。
-         */
         previews: List<ChatImage>,
     )
     fun onEngineToolBatchCompleted(toolIds: List<String>)
@@ -140,17 +112,7 @@ interface EngineEvents {
     fun onEngineError(message: String, error: Throwable?)
 }
 
-/**
- * 真实 ZhiCode 引擎的接线层。
- *
- * 职责边界（刻意收窄，避免和 ViewModel 抢状态）：
- * - **引擎生命周期**：按需创建、配置、关闭；
- * - **线程搬运**：把后台回调全部投递到主线程；
- * - **事件节流**：流式文本按 32ms 合并成块（原版 `queueStreamingDelta` 的做法）；
- * - **类型翻译**：引擎的 Java 类型 → 界面用的轻量类型。
- *
- * 它**不**持有界面状态、不碰 `ChatItem`，那些都是 ViewModel 的事。
- */
+/** 真实 ZhiCode 引擎的接线层。 */
 internal class ZhiEngineController(
     context: Context,
     private val events: EngineEvents,
@@ -321,19 +283,7 @@ internal class ZhiEngineController(
         var elapsedMs: Long,
     )
 
-    /**
-     * 引擎**生命周期**调用的串行后台线程。
-     *
-     * `cancel()` / `resetConversation()` 原本在主线程同步调引擎：前者要逐个放掉三个
-     * 询问闩、打断两条线程、通知提供方掐断在读的流，后者还要清空历史 —— 重负载下
-     * 能把主线程卡住几十毫秒，用户侧的感受是"点哪儿都慢半拍"（切会话、新会话、
-     * 停止按钮都在这条路上）。
-     *
-     * 单线程 executor 而不是各开各的协程，是因为这些调用**必须按提交顺序执行**：
-     * 「取消当前回合」后面跟着「载入历史会话」时，乱序会让载入被取消掉。
-     * `sendPrompt` 仍留在调用线程（错误要当场报给发送方，且引擎内部自己有单线程
-     * 队列），排队的取消靠 [generation] 守卫失效 —— 见 [cancel] 的说明。
-     */
+    /** 引擎**生命周期**调用的串行后台线程。 */
     private val engineOps = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "zhi-engine-ops").apply { isDaemon = true }
     }
@@ -350,12 +300,7 @@ internal class ZhiEngineController(
         return created
     }
 
-    /**
-     * 用「设置里读出来的配置」叠加界面侧的覆盖项，然后下发到引擎。
-     *
-     * 每次发消息前都调用一次：用户在设置里改了权限模式/模型后，
-     * 不需要重启应用就能在下一轮生效。
-     */
+    /** 用「设置里读出来的配置」叠加界面侧的覆盖项，然后下发到引擎。 */
     fun configure(overrides: EngineOverrides): SessionConfig {
         val store = apiStore ?: ApiSettingsStore(appContext).also { apiStore = it }
         val base = runCatching { store.load() }.getOrElse { SessionConfig() }
@@ -402,13 +347,7 @@ internal class ZhiEngineController(
     /** 当前回合已经开始（用于区分「该排队」还是「该直接发」）。 */
     fun hasEngine(): Boolean = if (usePiBackend()) piBackend != null else engine != null
 
-    /**
-     * 发送一轮请求。
-     *
-     * [extraContent] 是 Anthropic 风格的附加内容块（当前只有图片：base64 + media_type）。
-     * 引擎侧会自己按 `visionEnabled` 决定是否真的发出去（见 `VisionMessageFilter`），
-     * 所以这里不做二次判断——两处都判会出现"界面拦了但引擎其实允许"这类不一致。
-     */
+    /** 发送一轮请求。 */
     fun sendPrompt(prompt: String, extraContent: JSONArray? = null) {
         // 新回合开一代：让排队的旧取消（cancel() 的代际守卫）自行动失效，
         // 否则"停止 → 立刻再发"时，排在后台队列里的那次取消会杀掉这条新回合。
@@ -426,16 +365,7 @@ internal class ZhiEngineController(
         if (usePiBackend()) piBackend?.steer(prompt, extraContent, messageId) ?: false
         else engine?.steerPrompt(prompt, extraContent ?: JSONArray(), messageId) ?: false
 
-    /**
-     * 停止当前回合。
-     *
-     * 自增代际：引擎的 `cancel()` 之后仍可能有一两个在途回调，
-     * 不丢弃的话会在新一轮对话里插入上一轮的尾巴。
-     *
-     * 主线程只做簿记（代际、缓冲、回调清理）；引擎调用排进 [engineOps]。
-     * 提交时记下代际，执行时若代际已经变了（期间发了新回合），就**跳过**这次取消
-     * —— 否则排在队列里的旧取消会把用户新发出的回合杀掉。
-     */
+    /** 停止当前回合。 */
     fun cancel() {
         piBackend?.cancelHostTools()
         generation++
@@ -588,13 +518,7 @@ internal class ZhiEngineController(
         if (usePiBackend()) piBackend?.sessionId() else engine?.sessionId
     }.getOrNull()
 
-    /**
-     * 内存里这份引擎历史的规模 —— **只给诊断日志用**。
-     *
-     * <p>{@code historyChars} 会走一次全量序列化，所以这里刻意不把它放进任何
-     * 逐帧/循环路径：调用点只有"打开并恢复了一条会话"，一次一个数。
-     * 它回答的是这轮排查最关键的那个问题：**常驻到底是引擎的历史，还是界面那 200 条**。
-     */
+    /** 内存里这份引擎历史的规模 —— **只给诊断日志用**。 */
     fun memoryFootprint(): Pair<Int, Long> = runCatching {
         if (usePiBackend()) return@runCatching 0 to -1L
         val current = engine ?: return@runCatching 0 to -1L
@@ -609,51 +533,19 @@ internal class ZhiEngineController(
 
     fun contextWindowTokens(): Int = sessionConfig?.contextWindowTokens ?: 0
 
-    /**
-     * 引擎当前实际使用的模型名。
-     *
-     * 存在的理由：底栏那个模型标签是**界面自己**算出来的（可能带会话级覆盖），
-     * 光看标签无法区分"界面以为换了"和"引擎真的收到了"。排查"模型切了但请求还是旧的"
-     * 这类问题时需要一个直接读引擎配置的口子。
-     */
+    /** 引擎当前实际使用的模型名。 */
     fun configuredModel(): String = sessionConfig?.model.orEmpty().ifEmpty { "（引擎未配置）" }
 
-    /**
-     * 引擎当前的系统提示词。
-     *
-     * 与 [configuredModel] 同样是为了"直接问引擎"：设置页里的输入框只证明界面存下了
-     * 这段文字，不证明它被送进了请求。这一项尤其需要对照——它属于"改了看起来没事，
-     * 但可能整轮都没生效"的那类设置。
-     */
+    /** 引擎当前的系统提示词。 */
     fun configuredSystemPrompt(): String = sessionConfig?.customSystemPrompt.orEmpty()
 
-    /**
-     * 引擎侧当前是否允许联网搜索。
-     *
-     * 设置页那个开关改的是界面状态与 `SessionConfig`，中间隔了一次 `configure`，
-     * 而 `/web on|off` 最容易出的问题正是"开关变了但没下发"。
-     * 有这个读取口就能直接对照，而不是靠界面自己声明。
-     */
+    /** 引擎侧当前是否允许联网搜索。 */
     fun configuredWebSearchEnabled(): Boolean = sessionConfig?.webSearchEnabled == true
 
-    /**
-     * 引擎当前的动态角色卡内容。
-     *
-     * 角色卡最容易出的问题是"列表里勾着但请求里没有"（清单与生效内容两份数据没同步），
-     * 所以需要一个直接读引擎配置的口子来对照，而不是相信界面的勾选态。
-     */
+    /** 引擎当前的动态角色卡内容。 */
     fun configuredRoleCard(): String = sessionConfig?.roleCard.orEmpty()
 
-    /**
-     * 手动触发一次上下文压缩（`/compact`）。
-     *
-     * 引擎的 [ZhiCodeEngine.compactContext] 是**同步阻塞**的：它要调用模型生成语义摘要，
-     * 期间会走网络。所以调用方必须放在 IO 线程，并且注意它返回的是摘要文本，
-     * 不是"成功/失败"。
-     *
-     * 忙碌时直接拒绝：压缩会改写会话历史，和正在跑的回合抢同一份上下文，
-     * 两边同时动必然出错。
-     */
+    /** 手动触发一次上下文压缩（`/compact`）。 */
     fun compactContext(instructions: String): Result<String> = runCatching {
         check(!isBusy()) { "任务正在运行，完成后再压缩上下文" }
         if (usePiBackend()) {
@@ -664,19 +556,6 @@ internal class ZhiEngineController(
         }
     }
 
-    /**
-     * 列出已启用的 MCP 服务器及其工具清单（界面「测试连接」用）。
-     *
-     * ⚠️ **阻塞且昂贵**：每台服务器都要真的起一次子进程或发一轮 HTTP，单台超时 30 秒。
-     * 所以必须放 IO 线程，且**只能由用户点「测试连接」触发** ——
-     * 在打开 MCP 页时自动跑一遍，等于把"看配置"变成"把每台服务器都启动一次"，
-     * 而且在用户还没决定要改什么之前就产生了副作用。
-     *
-     * 解析在这里做（而不是把 JSON 交给界面）：界面模型应当由一处产出，
-     * 两处各自解析同一份协议 JSON 迟早会分叉。单个服务器失败**不**影响整体，
-     * 那一行会带上 `ok=false` 与错误原因 —— 让一个配错的服务器挡住其它可用的，
-     * 是最难查的一种"功能没了"。
-     */
     fun mcpStatus(): Result<List<McpServerStatus>> = runCatching {
         if (usePiBackend()) {
             parseMcpStatus(pi().mcpServers())
@@ -703,14 +582,7 @@ internal class ZhiEngineController(
         }
     }
 
-    /**
-     * 手动联网搜索（`/web 关键词`）。
-     *
-     * 直接执行 [WebSearchTool]，**不经过模型**：原版 `runManualWebSearch` 就是这么做的，
-     * 好处是用户输入后立刻拿到结果，不需要一次模型往返（也就不会消耗上下文）。
-     *
-     * 同步阻塞（走网络），调用方需放 IO 线程。
-     */
+    /** 手动联网搜索（`/web 关键词`）。 */
     fun manualWebSearch(query: String): Result<String> = runCatching {
         val config = currentConfig()
         check(config.webSearchEnabled) { "联网搜索已关闭，可输入 /web on 开启" }
@@ -719,11 +591,7 @@ internal class ZhiEngineController(
         result.content
     }
 
-    /**
-     * 手动读取网页（`/web fetch <url>`）。
-     *
-     * 与 [manualWebSearch] 同理，直接执行 [WebFetchTool]。
-     */
+    /** 手动读取网页（`/web fetch <url>`）。 */
     fun manualWebFetch(url: String): Result<String> = runCatching {
         val config = currentConfig()
         check(config.webSearchEnabled) { "联网搜索已关闭，可输入 /web on 开启" }
@@ -732,12 +600,7 @@ internal class ZhiEngineController(
         result.content
     }
 
-    /**
-     * 取当前生效的会话配置。
-     *
-     * 优先用已经 `configure` 过的那份（它带着界面覆盖项，例如界面里刚改的搜索条数）；
-     * 没有则直接从存储读——手动搜索可能在还没发过任何消息时就触发。
-     */
+    /** 取当前生效的会话配置。 */
     private fun currentConfig(): SessionConfig =
         sessionConfig ?: ApiSettingsStore(appContext).load()
 
@@ -778,12 +641,7 @@ internal class ZhiEngineController(
         events.onEngineText(chunk)
     }
 
-    /**
-     * 立即把缓冲里的文本交给界面。
-     *
-     * 工具/结束/错误事件之前**必须**调用，否则工具卡会插到还没显示的文本前面（顺序错乱）。
-     * 只能在主线程调用。
-     */
+    /** 立即把缓冲里的文本交给界面。 */
     private fun flushTextNow() {
         main.removeCallbacks(flushDelta)
         flushPendingText()
@@ -1099,23 +957,6 @@ internal fun EnginePlanApproval.toUiPlanApproval(): PlanApproval = PlanApproval(
     permissionNote = permissionNote,
 )
 
-/**
- * 把界面侧的覆盖项写进一份 `SessionConfig`。
- *
- * ## 为什么它必须是**顶层函数**而不是控制器里的私有方法
- *
- * 原来的形态是 `ZhiEngineController` 的私有方法，只有 `configure()` 一条路径会用它。
- * 于是"设置页改一项 → 落盘"这件事只能靠**顺带**发生（下一次发消息时 `configure()`）。
- * 用户改完设置直接大退，盘上还是旧值 —— 这就是「自动保存完全没修好」的本体。
- *
- * 提取出来之后，落盘路径（`WorkspaceViewModel.persistEngineSettings`）与发送路径
- * 共用**同一段映射**，两边不会再各自漂移：新增一个设置项只改这一处，
- * 不会出现"界面上能改、发消息时生效、但重启就丢"的字段。
- *
- * ⚠️ 传入的 [config] 必须来自 `ApiSettingsStore.load()`（即盘上那份），
- * 而不是凭空 `SessionConfig()`：`save()` 会整表覆盖，凭空构造会把 API 密钥槽
- * 等本函数不管的字段一起清空。
- */
 internal fun applyEngineOverrides(config: SessionConfig, o: EngineOverrides) {
     o.permissionMode?.let { config.permissionMode = PermissionModePolicy.normalize(it) }
     o.effort?.let { if (it.isNotBlank()) config.effort = it }
@@ -1146,21 +987,6 @@ internal fun applyEngineOverrides(config: SessionConfig, o: EngineOverrides) {
     o.roleCard?.let { config.roleCard = it }
 }
 
-/**
- * 反向：把盘上的 `SessionConfig` 读回界面可编辑的那几项。
- *
- * ## 为什么必须有这个方向
- *
- * 启动路径是 `restore* → syncActiveProfile() → configure()`，而 `configure()`
- * 会**落盘**，写下去的却是界面此刻的状态。界面若还是默认值，那一刻盘上刚存的
- * 用户设置就被默认值冲掉了 —— 这正是「大退后恢复成未修改的样子」的第二个成因
- * （第一个是改动根本没写盘，见 [applyEngineOverrides]）。
- *
- * 所以只读回 `permissionMode`/`effort` 两项是不够的：**凡是被 `configure()`
- * 反写的字段，都必须在它之前读回来**，否则每启动一次就被冲一次。
- *
- * 返回 null 表示盘上那份读不出来（例如首次安装），调用方保持界面原值即可。
- */
 internal fun readEngineSettings(store: ApiSettingsStore): EngineOverrides? =
     runCatching { store.load() }.getOrNull()?.let { config ->
         EngineOverrides(

@@ -14,9 +14,7 @@ import org.json.JSONObject
 import java.io.File
 import java.nio.charset.StandardCharsets
 
-/**
- * 将 ZhiCode 多供应商配置与会话参数同步到 Debian 容器内的 Pi 原生配置文件。
- */
+/** 将 ZhiCode 多供应商配置与会话参数同步到 Debian 容器内的 Pi 原生配置文件。 */
 internal object PiConfigSync {
 
     const val PROVIDER_ID = "zhicode"

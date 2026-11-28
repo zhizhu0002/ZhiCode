@@ -26,9 +26,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
-/**
- * 通过 PRoot 启动与驱动 Pi coding agent (`pi --mode rpc`)，并把流式事件、工具卡片与权限确认适配给界面。
- */
+/** 通过 PRoot 启动与驱动 Pi coding agent (`pi --mode rpc`)，并把流式事件、工具卡片与权限确认适配给界面。 */
 internal class PiRpcBackend(
     context: Context,
     private val sink: Sink,
@@ -1313,9 +1311,7 @@ internal class PiRpcBackend(
 
         private fun roughCharsToTokens(chars: Long): Long = if (chars <= 0L) 0L else (chars + 3L) / 4L
 
-        /**
-         * 严格按 0x0A (`\n`) 拆行读取 JSONL，绝不用 `BufferedReader.readLine()`（会错误切割字符串内的 `U+2028`/`U+2029`）。
-         */
+        /** 严格按 0x0A (`\n`) 拆行读取 JSONL，绝不用 `BufferedReader.readLine()`（会错误切割字符串内的 `U+2028`/`U+2029`）。 */
         internal fun readStrictJsonLines(input: InputStream, onLine: (String) -> Unit) {
             val lineBuf = ByteArrayOutputStream(1024)
             val chunk = ByteArray(8192)

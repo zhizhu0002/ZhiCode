@@ -14,28 +14,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 
-/**
- * ZCode 协议的传输实现。
- *
- * ## 为什么它这么薄
- *
- * 那个网关说的是 **Anthropic Messages**：同一个路径形状、同一套事件流
- * （`message_start` / `content_block_delta` / `message_stop`）、同一份 `tools` 语义。
- * 所以这里**不重写**任何解码逻辑 —— 直接复用
- * [AnthropicMessagesProvider.StreamDecoder] 与 [AnthropicMessagesProvider.readEvent]，
- * 它们已经处理完了这个协议最容易错的部分：SSE 分帧（`data:` 可跨行）、
- * 内容块按 index 累加、终止标记判定、以及缺终止标记时报什么错。
- *
- * 本类只做两件那两家没有的事：
- *  1. 端点与请求头**全部来自用户配置**（网关地址、授权码、额外身份头）——
- *     理由见 [ZcodeWire] 的类注释；
- *  2. 报文由 [ZcodeWire.buildRequestBody] 构造（system 是缓存块数组、
- *     工具上的 `cache_control` 剥掉、`metadata.user_id` 是 JSON 字符串）。
- *
- * 放在 `api` 这个包里而不是 `api.zcode`，是为了能用上面那两个**包内可见**的成员：
- * 与其把它们放宽成 `public`（等于给所有人开一个本不该公开的口子），
- * 不如让本类待在同一个包里，一行既有代码都不用改。
- */
 class ZcodeProvider : ModelProvider {
 
     private val requests = HttpRequestTracker()
@@ -132,19 +110,6 @@ class ZcodeProvider : ModelProvider {
 
     // ---------------------------------------------------------------- 额度
 
-    /**
-     * 读一次套餐额度。返回**已解析**的余额（解析在 [ZcodeWire] 里，可单测）。
-     *
-     * 用 GET，不读 body；失败时把响应正文带上（与 [createMessage] 同样的理由：
-     * 这个网关会在正文里说清是授权码还是头不对）。
-     *
-     * ## 一处与参考实现的不同
-     *
-     * 参考实现的额度请求会带 `X-Device-Mid`（一个设备标识）。我们**不带**：
-     * 那是替用户向对方提交一份设备指纹，而这个功能不需要它。
-     * 若实测报错说必需，再加一个**仅本应用范围**的随机安装标识（存本地，
-     * 不是硬件标识）。
-     */
     fun fetchBalance(config: SessionConfig): ZcodeWire.BalancePayload {
         val baseUrl = ApiUrlPolicy.requireBaseUrl(config)
         val apiKey = config.apiKey?.trim().orEmpty()
@@ -205,21 +170,6 @@ class ZcodeProvider : ModelProvider {
         OutputStreamWriter(conn.outputStream, StandardCharsets.UTF_8).use { it.write(body) }
     }
 
-    /**
-     * `X-Device-Mid` 与 `metadata.user_id.device_id` 的取值。
-     *
-     * 由 [ZcodeDeviceMid] 生成并落盘：一个随机 UUID，**本应用自己的**安装标识。
-     *
-     * ## 这一段以前是 `return ""`，那是错的
-     *
-     * 前面留空时的理由是"不替用户提交一份伪造的设备指纹"。那个顾虑本身没错，
-     * 但它把这个头当成了可选装饰 —— 官方源码说明它**不是**：缺它时额度接口
-     * 直接判 `parameter error`（`packages/server/src/stdioDeviceMid.ts` 注释原文）。
-     * 真机上额度卡片一直显示 `3001 parameter error`，就是这一行造成的。
-     *
-     * 现在的判断是：这个值本来就该由**客户端自己**生成（官方也是客户端生成后存本地），
-     * 它不是硬件指纹，也不需要用户知道 —— 让用户填它只会填错。
-     */
     private fun deviceId(): String = ZcodeDeviceMid.get()
 
     private fun readAll(stream: InputStream?): String {
