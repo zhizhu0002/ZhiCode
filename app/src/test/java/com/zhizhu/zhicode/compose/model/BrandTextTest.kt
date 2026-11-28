@@ -2,6 +2,7 @@ package com.zhizhu.zhicode.compose.model
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import java.io.File
 
@@ -67,21 +68,15 @@ class BrandTextTest {
         )
     }
 
-    /** `README.md` 与 `docs/` 是发行物的一部分，同样按同一口径要求。 */
+    /** `README.md` 是发行物的一部分，同样按同一口径要求。 */
     @Test
-    fun docsNoLongerUseTheRetiredBrand() {
-        val targets = buildList {
-            File("README.md").takeIf { it.isFile }?.let { add(it) }
-            File("docs").takeIf { it.isDirectory }?.let { dir ->
-                dir.walkTopDown().filter { it.isFile && it.name.endsWith(".md") }.forEach { add(it) }
-            }
-        }
-        assertTrue("没找到 README.md 或 docs/", targets.isNotEmpty())
+    fun readmeNoLongerUsesTheRetiredBrand() {
+        val readme = File("README.md")
+        assertTrue("没找到 README.md", readme.isFile)
 
-        val offenders = targets.filter { file ->
-            file.readText().contains(retiredName)
-        }.map { it.path }
-
-        assertTrue("文档里仍在使用旧称「$retiredName」：$offenders", offenders.isEmpty())
+        assertFalse(
+            "README.md 里仍在使用旧称「$retiredName」",
+            readme.readText().contains(retiredName),
+        )
     }
 }

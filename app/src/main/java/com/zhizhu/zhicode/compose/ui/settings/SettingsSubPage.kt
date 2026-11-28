@@ -166,8 +166,7 @@ internal fun SettingsSubPage(
                 // 标题层级一致，返回时不会出现「标题突然变小」的断层。
                 TopAppBar(
                     title = title,
-                    // Miuix TopAppBar **原生就有** subtitle 槽位（见
-                    // docs/miuix-ref/topappbar.md 的属性表），它自己负责在标题下方
+                    // Miuix TopAppBar 原生就有 subtitle 槽位，它自己负责在标题下方
                     // 画那一行并把折叠动画一起算进去。
                     //
                     // 不要试图用「title 传空 + 自己塞一个 Column」去做两行 ——
