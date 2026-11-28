@@ -210,8 +210,8 @@ internal fun M3eSectionHeader(
         fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier.padding(
-            start = M3eDimens.RowPaddingH + M3eDimens.RowPaddingH,
-            end = M3eDimens.RowPaddingH + M3eDimens.RowPaddingH,
+            start = M3eDimens.RowPaddingH,
+            end = M3eDimens.RowPaddingH,
             top = 16.dp,
             bottom = 8.dp,
         ),
@@ -312,12 +312,11 @@ internal fun M3eSegmentedItem(
 @Composable
 internal fun M3eIconBadge(
     painter: Painter,
-    tint: Color = MaterialTheme.colorScheme.onSecondaryContainer,
-    containerColor: Color = MaterialTheme.colorScheme.secondaryContainer,
+    tint: Color = MaterialTheme.colorScheme.onPrimaryContainer,
+    containerColor: Color = MaterialTheme.colorScheme.primaryContainer,
 ) {
     Surface(
-        // 视觉 40dp（M3E Small 档），字形 20dp。
-        // 40 不是触控目标 —— 可点的行由外层整行承担点击，热区远大于此。
+        // 视觉 40dp（ItemLeadingAvatarSize），字形 20dp（ItemLeadingIconSize）。
         modifier = Modifier.size(M3eDimens.IconBadge),
         shape = CircleShape,
         color = containerColor,
@@ -341,8 +340,8 @@ internal fun M3eNavigationRow(
     summary: String? = null,
     valueText: String? = null,
     icon: Painter? = null,
-    iconTint: Color = MaterialTheme.colorScheme.onSecondaryContainer,
-    iconContainer: Color = MaterialTheme.colorScheme.secondaryContainer,
+    iconTint: Color = MaterialTheme.colorScheme.onPrimaryContainer,
+    iconContainer: Color = MaterialTheme.colorScheme.primaryContainer,
     showChevron: Boolean = true,
     onClick: () -> Unit,
 ) {
@@ -435,7 +434,7 @@ internal fun M3eSwitchRow(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = if (enabled) scheme.onSurface else scheme.onSurface.copy(alpha = 0.45f),
+                    color = if (enabled) scheme.onSurface else scheme.onSurface.copy(alpha = 0.38f),
                 )
                 if (!summary.isNullOrBlank()) {
                     Text(
