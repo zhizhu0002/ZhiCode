@@ -102,6 +102,24 @@ internal fun M3eFilesContent(
             )
         }
     }
+    val nameForm = state.fileNameForm
+    M3eNewEntryDialog(
+        form = nameForm?.takeIf { it.target == null },
+        onDraftChange = viewModel::updateFileNameDraft,
+        onSubmit = viewModel::submitFileNameForm,
+        onCancel = viewModel::cancelFileNameForm,
+    )
+    M3eRenameEntryDialog(
+        form = nameForm?.takeIf { it.target != null },
+        onDraftChange = viewModel::updateFileNameDraft,
+        onSubmit = { viewModel.submitFileNameForm(false) },
+        onCancel = viewModel::cancelFileNameForm,
+    )
+    M3eDeleteConfirmDialog(
+        prompt = state.fileDeletePrompt,
+        onConfirm = viewModel::confirmDelete,
+        onCancel = viewModel::cancelDelete,
+    )
 }
 
 @Composable
