@@ -201,7 +201,9 @@ internal fun M3eOobePage(state: WorkspaceUiState, viewModel: WorkspaceViewModel)
                 }
             }
             // 换步骤时整块重进：滑入 + 淡入，与 ZL2 的 WelcomeScreen 同一手法。
+            // 内层 Column 保留区块间距，动画不能再吃掉 spacedBy。
             Box(modifier = Modifier.m3eStepEntrance(step)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (step) {
                 OobeStep.PERMISSIONS -> {
                     M3eSectionHeader("基础权限")
@@ -294,6 +296,7 @@ internal fun M3eOobePage(state: WorkspaceUiState, viewModel: WorkspaceViewModel)
                         )
                     }
                 }
+            }
             }
             }
         }
