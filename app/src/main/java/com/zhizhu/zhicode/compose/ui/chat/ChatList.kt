@@ -358,12 +358,11 @@ fun ChatList(
     }
 
     val transcript = state.transcript
+    val lastItem = transcript.lastOrNull()
     val transcriptStamp = TranscriptStamp(
         size = transcript.size,
         firstId = transcript.firstOrNull()?.id,
-        lastId = transcript.lastOrNull()?.id,
-        lastBodyLength = transcript.lastOrNull()?.body?.length ?: -1,
-        lastToolCount = transcript.lastOrNull()?.tools?.size ?: -1,
+        lastItem = lastItem,
         // 补页与"回到最新"是两次**原地替换**，条数可能恰好不变 ——
         // 所以这两个版本号必须进指纹。
         prepend = state.transcriptPrependRevision,
@@ -374,8 +373,8 @@ fun ChatList(
     val structureStamp = StructureStamp(
         size = transcript.size,
         firstId = transcript.firstOrNull()?.id,
-        lastId = transcript.lastOrNull()?.id,
-        lastToolCount = transcript.lastOrNull()?.tools?.size ?: -1,
+        lastId = lastItem?.id,
+        lastToolCount = lastItem?.tools?.size ?: -1,
         prepend = state.transcriptPrependRevision,
         jump = state.transcriptJumpRevision,
         session = state.activeSessionId,
@@ -744,6 +743,15 @@ fun ChatList(
                 item(key = "jump-to-latest", contentType = "jump-to-latest") {
                     JumpToLatest(onJumpToLatest = onLoadLatestState)
                 }
+            } else if (state.composerBusy && state.pendingInputs.isEmpty() && lastItem?.kind == ChatKind.USER) {
+                item(key = "awaiting-model", contentType = "awaiting-model") {
+                    Text(
+                        text = if (state.stopping) "正在停止…" else "等待模型响应…",
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
             }
             // 任务进度与工作状态**不放在滚动区**（对应原版把它们挂在固定的
             // chatBottomHost 上），改由 AppScaffold 固定在输入器上方。
@@ -1059,9 +1067,7 @@ private data class StructureStamp(
 private data class TranscriptStamp(
     val size: Int,
     val firstId: String?,
-    val lastId: String?,
-    val lastBodyLength: Int,
-    val lastToolCount: Int,
+    val lastItem: ChatItem?,
     val prepend: Int,
     val jump: Int,
     val session: String,

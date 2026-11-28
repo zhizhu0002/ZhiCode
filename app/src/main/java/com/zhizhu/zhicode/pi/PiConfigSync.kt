@@ -45,6 +45,7 @@ internal object PiConfigSync {
         val env: Map<String, String>,
     )
 
+    @Synchronized
     fun syncToContainer(context: Context, config: SessionConfig): SyncedConfig {
         PiBridgeFiles.ensureInstalled(context)
 
@@ -219,7 +220,7 @@ internal object PiConfigSync {
         )
     }
 
-    private fun allocateUniqueKey(raw: String, fallback: String, used: MutableSet<String>): String {
+    internal fun allocateUniqueKey(raw: String, fallback: String, used: MutableSet<String>): String {
         val base = sanitizePiProviderKey(raw, fallback)
         if (used.add(base)) return base
         var idx = 2
@@ -487,14 +488,18 @@ internal object PiConfigSync {
     }
 
     private fun writeAtomic(target: File, content: String) {
+        val bytes = content.toByteArray(StandardCharsets.UTF_8)
+        if (target.isFile && target.canRead() && target.canWrite() && target.length() == bytes.size.toLong() &&
+            runCatching { target.readBytes().contentEquals(bytes) }.getOrDefault(false)
+        ) return
         target.parentFile?.mkdirs()
         if (target.exists() && !target.canWrite()) {
             target.delete()
         }
         val tmp = File(target.parentFile, ".${target.name}.tmp")
-        tmp.writeText(content, StandardCharsets.UTF_8)
+        tmp.writeBytes(bytes)
         if (!tmp.renameTo(target)) {
-            target.writeText(content, StandardCharsets.UTF_8)
+            target.writeBytes(bytes)
             tmp.delete()
         }
     }

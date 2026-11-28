@@ -28,6 +28,9 @@ import com.zhizhu.zhicode.compose.model.readChatImageBlocks
 import com.termux.app.zhicode.storage.ApiSettingsStore
 import com.termux.app.zhicode.tasks.TaskStore
 import com.zhizhu.zhicode.pi.PiRpcBackend
+import com.zhizhu.zhicode.pi.PiSessionHistory
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import org.json.JSONObject
 import java.util.LinkedHashMap
 import java.util.concurrent.Executors
@@ -37,6 +40,7 @@ internal data class EngineOverrides(
     val permissionMode: String? = null,
     val effort: String? = null,
     val model: String? = null,
+    val modelProfileId: String? = null,
     val contextWindow: Int? = null,
     val projectDirectory: String? = null,
     val visionEnabled: Boolean? = null,
@@ -64,7 +68,11 @@ internal data class EngineOverrides(
     val shizukuExecutionEnabled: Boolean? = null,
     val forcedKeepAliveEnabled: Boolean? = null,
     val maxConcurrentSubagents: Int? = null,
-)
+) {
+    fun forGlobalSettings(): EngineOverrides =
+        if (modelProfileId == null) this
+        else copy(model = null, modelProfileId = null, effort = null, contextWindow = null)
+}
 
 /** 一次计划审批请求在界面侧需要的全部内容。 */
 data class EnginePlanApproval(
@@ -298,22 +306,29 @@ internal class ZhiEngineController(
     }
 
     /** 用「设置里读出来的配置」叠加界面侧的覆盖项，然后下发到引擎。 */
-    fun configure(overrides: EngineOverrides): SessionConfig {
+    fun configure(overrides: EngineOverrides): SessionConfig =
+        configure(overrides, prepareForPrompt = false)
+
+    private fun configure(overrides: EngineOverrides, prepareForPrompt: Boolean): SessionConfig {
         val store = apiStore ?: ApiSettingsStore(appContext).also { apiStore = it }
         val base = runCatching { store.load() }.getOrElse { SessionConfig() }
-        applyEngineOverrides(base, overrides)
-        val fingerprint = configurationFingerprint(base)
+        val config = overrides.modelProfileId?.let { store.resolveProfile(it, base) ?: base.copy() } ?: base
+        applyEngineOverrides(config, overrides)
+        val fingerprint = configurationFingerprint(config)
         val changed = fingerprint != lastConfiguredFingerprint
-        sessionConfig = base
-        if (usePiBackend(base)) {
-            pi().configure(base)
+        sessionConfig = config
+        if (usePiBackend(config)) {
+            if (!prepareForPrompt) pi().configure(config)
         } else {
             piBackend?.cancelHostTools()
-            engine().configure(base)
+            engine().configure(config)
         }
-        if (changed) lastConfiguredFingerprint = fingerprint
-        if (changed) runCatching { store.save(base) }
-        return base
+        if (changed) {
+            lastConfiguredFingerprint = fingerprint
+            if (config !== base) applyEngineOverrides(base, overrides.forGlobalSettings())
+            runCatching { store.saveGlobalSettings(base, false) }
+        }
+        return config
     }
 
     private fun configurationFingerprint(config: SessionConfig): String = listOf(
@@ -336,12 +351,13 @@ internal class ZhiEngineController(
     fun hasEngine(): Boolean = if (usePiBackend()) piBackend != null else engine != null
 
     /** 发送一轮请求。 */
-    fun sendPrompt(prompt: String, extraContent: JSONArray? = null) {
+    fun sendPrompt(prompt: String, extraContent: JSONArray?, overrides: EngineOverrides) {
+        val config = configure(overrides, prepareForPrompt = true)
         // 新回合开一代：让排队的旧取消（cancel() 的代际守卫）自行动失效，
         // 否则"停止 → 立刻再发"时，排在后台队列里的那次取消会杀掉这条新回合。
         generation++
-        if (usePiBackend()) {
-            pi().sendPrompt(prompt, extraContent)
+        if (usePiBackend(config)) {
+            pi().sendPrompt(prompt, extraContent, config)
             return
         }
         if (extraContent == null || extraContent.length() == 0) engine().sendPrompt(prompt)
@@ -382,7 +398,7 @@ internal class ZhiEngineController(
         }
     }
 
-    fun resumeConversation(sessionId: String): Result<Unit> {
+    fun resumeConversation(sessionId: String, overrides: EngineOverrides): Deferred<Result<Unit>> {
         require(sessionId.isNotBlank()) { "会话标识为空" }
         piBackend?.cancelHostTools()
         generation++
@@ -404,14 +420,16 @@ internal class ZhiEngineController(
             toolProgressFlushPosted = false
         }
         val genAtSubmit = generation
-        val future = java.util.concurrent.CompletableFuture<Result<Unit>>()
+        val future = CompletableDeferred<Result<Unit>>()
         engineOps.execute {
             if (generation != genAtSubmit) {
                 future.complete(Result.success(Unit))
                 return@execute
             }
             val result = runCatching {
-                if (usePiBackend()) pi().resumeConversation(sessionId) else engine().resumeConversation(sessionId)
+                val config = configure(overrides, prepareForPrompt = true)
+                if (usePiBackend(config)) pi().resumeConversation(sessionId, config)
+                else engine().resumeConversation(sessionId)
             }.onFailure { error ->
                 onMainForGeneration(genAtSubmit) {
                     events.onEngineError("恢复会话失败：${error.message ?: error}", error)
@@ -419,7 +437,22 @@ internal class ZhiEngineController(
             }
             future.complete(result)
         }
-        return future.get()
+        return future
+    }
+
+    fun saveSessionModel(sessionId: String, profileId: String, model: String, effort: String): Deferred<Unit> {
+        val saved = CompletableDeferred<Unit>()
+        engineOps.execute {
+            runCatching {
+                ApiSettingsStore(appContext).resolveProfile(profileId, null)?.let { config ->
+                    config.model = model
+                    config.effort = effort
+                    piBackend?.saveSessionModel(sessionId, config)
+                }
+            }
+            saved.complete(Unit)
+        }
+        return saved
     }
 
     fun resetConversation() {
@@ -490,10 +523,8 @@ internal class ZhiEngineController(
         if (usePiBackend()) piBackend?.estimateContextTokens() ?: 0 else engine?.estimateContextTokens() ?: 0
     }.getOrDefault(0)
 
-    fun estimateSessionContextTokens(sessionId: String): Int = runCatching {
-        if (usePiBackend()) pi().estimateContextTokensForSession(sessionId)
-        else engine?.estimateContextTokens() ?: 0
-    }.getOrDefault(0)
+    fun sessionHistory(sessionId: String): PiSessionHistory =
+        runCatching { pi().sessionHistory(sessionId) }.getOrDefault(PiSessionHistory())
 
     /** 当前会话的标识（`sessions.db` 里的 id）。引擎尚未配置或还没写过内容时为 null。 */
     fun sessionId(): String? = runCatching {

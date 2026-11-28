@@ -21,7 +21,6 @@ import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.data.OobeStore
 import com.zhizhu.zhicode.compose.ui.pages.miuix.OobePage
-import com.zhizhu.zhicode.compose.ui.pages.miuix.ApiConfigPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.AboutPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ChatDisplayPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ChatPage

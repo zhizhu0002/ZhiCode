@@ -1,4 +1,4 @@
-package com.zhizhu.zhicode.compose.ui.pages.miuix
+package com.zhizhu.zhicode.compose.ui.pages
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -24,9 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import com.zhizhu.zhicode.compose.ui.ProviderBrandIconBox
-import com.zhizhu.zhicode.compose.ui.ZhiIconDropdownMenu
 import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
-import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,23 +45,11 @@ import com.zhizhu.zhicode.compose.model.ApiProtocol
 import com.zhizhu.zhicode.compose.model.COMPACT_PERCENT_MAX
 import com.zhizhu.zhicode.compose.model.COMPACT_PERCENT_MIN
 import com.zhizhu.zhicode.compose.model.ModelOption
-import com.zhizhu.zhicode.compose.ui.ZhiFieldError
-import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
-import com.zhizhu.zhicode.compose.ui.ZhiSectionLabel
-import com.zhizhu.zhicode.compose.ui.ZhiTextField
-import com.zhizhu.zhicode.compose.ui.dialogs.SecondaryButton
-import com.zhizhu.zhicode.compose.ui.settings.SettingsEntry
-import com.zhizhu.zhicode.compose.ui.settings.SettingsGroup
-import com.zhizhu.zhicode.compose.ui.settings.SettingsIconPlate
-import com.zhizhu.zhicode.compose.ui.settings.SettingsLoadingHint
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageKey
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPageStack
 import com.zhizhu.zhicode.compose.ui.settings.SettingsPlateColors
-import com.zhizhu.zhicode.compose.ui.settings.SettingsSubPage
-import com.zhizhu.zhicode.compose.ui.settings.SettingsTextField
-import com.zhizhu.zhicode.compose.ui.settings.SettingsToggle
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import com.zhizhu.zhicode.pi.PiCatalogAndPresets
 import com.zhizhu.zhicode.pi.PiModelConfig
@@ -72,25 +58,12 @@ import com.zhizhu.zhicode.pi.PiThinkingLevel
 import com.zhizhu.zhicode.pi.resolveSupportedThinkingLevels
 import kotlinx.coroutines.launch
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.basic.BasicComponent
-import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.DropdownDefaults
-import top.yukonga.miuix.kmp.basic.HorizontalDivider
-import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
-import top.yukonga.miuix.kmp.preference.SliderPreference
-import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private const val ZCODE_GATEWAY = "https://zcode.z.ai/api/v1/zcode-plan"
 private const val ZCODE_HEADERS_JSON = """{"X-ZCode-App-Version":"3.14.3"}"""
 
-/** CC Switch 风格供应商管理（两步预设 + 模型折叠编辑器 + 高级参数 + 上下文与提示词整合）。 */
 @Composable
-fun ApiConfigPage(
+internal fun ApiConfigPage(
     config: ApiConfigState?,
     onDismiss: () -> Unit,
     onNew: () -> Unit,
@@ -107,7 +80,7 @@ fun ApiConfigPage(
     onUpdateContextAndPrompt: (Boolean, Int, String) -> Unit = { _, _, _ -> },
     onOpenPrompts: () -> Unit = {},
 ) {
-    if (config == null) return
+    if (config == null || (config.standalone && config.form == null)) return
     val form = config.form
     val shownForm = rememberLastNonNull(form)
     val standalone = config.standalone
@@ -141,7 +114,7 @@ fun ApiConfigPage(
         onBack = handleBack,
     ) { key ->
         when (key.id) {
-            "api.list" -> SettingsSubPage(
+            "api.list" -> ProviderSubPage(
                 title = "供应商与模型管理",
                 onBack = onDismiss,
                 action = "新增" to onNew,
@@ -157,7 +130,7 @@ fun ApiConfigPage(
             }
             "api.preset" -> {
                 val presetDraft = shownForm ?: ApiProfileDraft.blank()
-                SettingsSubPage(
+                ProviderSubPage(
                     title = "选择供应商模板",
                     onBack = if (standalone) onDismiss else onCancelForm,
                 ) {
@@ -169,7 +142,7 @@ fun ApiConfigPage(
             }
             else -> {
                 val draft = shownForm ?: return@SettingsPageStack
-                SettingsSubPage(
+                ProviderSubPage(
                     title = if (draft.isEditing) "编辑供应商" else "新增供应商",
                     onBack = {
                         if (!draft.isEditing) {
@@ -203,16 +176,16 @@ private fun ApiProfileList(
     onUpdateContextAndPrompt: (Boolean, Int, String) -> Unit,
     onOpenPrompts: () -> Unit,
 ) {
-    val scheme = MiuixTheme.colorScheme
+    val scheme = providerColors()
     Column {
-        SettingsGroup("已配置供应商") {
+        ProviderGroup("已配置供应商") {
             if (config.loading) {
-                SettingsLoadingHint()
+                ProviderLoading()
             } else if (config.profiles.isEmpty()) {
-                Text(
+                ProviderText(
                     text = "还没有供应商配置。点右上角「新增」选择自定义供应商或主流预设，API Key 会存进系统加密存储。",
-                    color = scheme.onSurfaceVariantSummary,
-                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    color = scheme.onSurfaceVariant,
+                    fontSize = providerFontSize(small = true),
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 )
             }
@@ -223,11 +196,11 @@ private fun ApiProfileList(
                     animationSpec = ZhiMotion.colorSpec,
                     label = "apiProfileTitle",
                 )
-                BasicComponent(
+                ProviderRow(
                     title = profile.name,
-                    titleColor = BasicComponentDefaults.titleColor(color = titleColor),
+                    titleColor = titleColor,
                     summary = "${profile.summary} · 已配 ${profile.effectiveModels().size} 个模型",
-                    summaryColor = BasicComponentDefaults.summaryColor(color = scheme.onSurfaceVariantSummary),
+                    summaryColor = scheme.onSurfaceVariant,
                     startAction = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -239,23 +212,23 @@ private fun ApiProfileList(
                                 size = 30.dp,
                             )
                             if (active) {
-                                Icon(
+                                ProviderIcon(
                                     painter = ZhiIcons.check,
                                     contentDescription = null,
                                     tint = scheme.primary,
-                                    modifier = Modifier.size(DropdownDefaults.CheckIconSize),
+                                modifier = Modifier.size(providerCheckIconSize()),
                                 )
                             }
                         }
                     },
                     endActions = {
-                        ZhiIconButton(
+                        ProviderIconButton(
                             icon = ZhiIcons.edit,
                             description = "编辑",
                             onClick = { onEdit(profile) },
                             iconSize = 15.dp,
                         )
-                        ZhiIconButton(
+                        ProviderIconButton(
                             icon = ZhiIcons.close,
                             description = "删除",
                             onClick = { onDelete(profile.id) },
@@ -268,8 +241,8 @@ private fun ApiProfileList(
             }
         }
 
-        SettingsGroup("上下文与提示词") {
-            SettingsToggle(
+        ProviderGroup("上下文与提示词") {
+            ProviderToggle(
                 title = "上下文压缩",
                 checked = config.autoCompact,
                 onCheckedChange = { enabled ->
@@ -283,7 +256,7 @@ private fun ApiProfileList(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically(),
             ) {
-                SliderPreference(
+                ProviderSlider(
                     title = "自动压缩上限（50-100%）",
                     value = config.autoCompactPercent.toFloat(),
                     onValueChange = { value ->
@@ -293,11 +266,11 @@ private fun ApiProfileList(
                     steps = COMPACT_PERCENT_MAX - COMPACT_PERCENT_MIN - 1,
                     valueText = "${config.autoCompactPercent}%",
                     summary = "达到当前模型上下文窗口的 ${config.autoCompactPercent}% 时触发压缩",
-                    startAction = { SettingsIconPlate(icon = ZhiIcons.tune, color = SettingsPlateColors.green) },
+                    startAction = { ProviderPlate(icon = ZhiIcons.tune, color = SettingsPlateColors.green) },
                     insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                 )
             }
-            SettingsTextField(
+            ProviderPromptField(
                 title = "自定义头部提示词",
                 value = config.customSystemPrompt,
                 onValueChange = { text ->
@@ -309,7 +282,7 @@ private fun ApiProfileList(
                 icon = ZhiIcons.edit,
                 plate = SettingsPlateColors.orange,
             )
-            SettingsEntry(
+            ProviderPromptLink(
                 title = "提示词模板",
                 valueText = "自定义 /init、压缩摘要与开场段；留空即用默认",
                 onClick = onOpenPrompts,
@@ -334,7 +307,7 @@ private fun PresetPickerStep(
     selectedPresetId: String,
     onPick: (PiProviderPreset) -> Unit,
 ) {
-    val scheme = MiuixTheme.colorScheme
+    val scheme = providerColors()
     val customPreset = remember {
         PiCatalogAndPresets.presets.firstOrNull { it.isCustom } ?: PiCatalogAndPresets.presets.first()
     }
@@ -370,23 +343,21 @@ private fun PresetPickerStep(
             .animateContentSize(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Card(
+        ProviderCard(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.defaultColors(
-                color = if (selectedPresetId == customPreset.id) scheme.primaryContainer else scheme.surfaceContainer,
-            ),
+            color = if (selectedPresetId == customPreset.id) scheme.primaryContainer else scheme.surfaceContainer,
         ) {
-            BasicComponent(
+            ProviderRow(
                 title = "自定义供应商",
                 summary = "手动配置接口协议、Base URL、API Key 与模型及思考档位",
                 startAction = {
-                    SettingsIconPlate(icon = ZhiIcons.tune, color = SettingsPlateColors.blue)
+                    ProviderPlate(icon = ZhiIcons.tune, color = SettingsPlateColors.blue)
                 },
                 endActions = {
-                    Icon(
+                    ProviderIcon(
                         painter = ZhiIcons.expand,
                         contentDescription = null,
-                        tint = scheme.onSurfaceVariantSummary,
+                        tint = scheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp),
                     )
                 },
@@ -395,9 +366,9 @@ private fun PresetPickerStep(
             )
         }
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+        ProviderDivider(modifier = Modifier.padding(vertical = 2.dp))
 
-        ZhiSectionLabel(
+        ProviderLabel(
             text = "内置供应商预设（共 ${builtInPresets.size} 个）",
             insideMargin = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
         )
@@ -407,7 +378,7 @@ private fun PresetPickerStep(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            ZhiTextField(
+            ProviderField(
                 value = query,
                 onValueChange = { query = it },
                 label = "搜索名称、域名或协议…",
@@ -416,7 +387,7 @@ private fun PresetPickerStep(
                 modifier = Modifier.weight(1f),
             )
             AnimatedVisibility(visible = query.isNotEmpty()) {
-                ZhiIconButton(
+                ProviderIconButton(
                     icon = ZhiIcons.close,
                     description = "清空搜索",
                     onClick = { query = "" },
@@ -455,10 +426,10 @@ private fun PresetPickerStep(
                         .clickable { selectedTab = tab }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                 ) {
-                    Text(
+                    ProviderText(
                         text = tab.label,
                         color = chipFg,
-                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                        fontSize = providerFontSize(small = true),
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                     )
                 }
@@ -466,10 +437,10 @@ private fun PresetPickerStep(
         }
 
         if (filteredPresets.isEmpty()) {
-            Text(
+            ProviderText(
                 text = "未找到匹配的供应商预设，可点顶部「自定义供应商」手动创建。",
-                color = scheme.onSurfaceVariantSummary,
-                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                color = scheme.onSurfaceVariant,
+                fontSize = providerFontSize(small = true),
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 12.dp),
             )
         } else {
@@ -502,17 +473,15 @@ private fun PresetGridCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val scheme = MiuixTheme.colorScheme
+    val scheme = providerColors()
     val domain = remember(preset.baseUrl) {
         preset.baseUrl.removePrefix("https://").removePrefix("http://").substringBefore('/').ifBlank { preset.api.label }
     }
-    Card(
+    ProviderCard(
         modifier = modifier,
-        colors = CardDefaults.defaultColors(
-            color = if (selected) scheme.primaryContainer else scheme.surfaceContainer,
-        ),
+        color = if (selected) scheme.primaryContainer else scheme.surfaceContainer,
     ) {
-        BasicComponent(
+        ProviderRow(
             title = preset.name,
             summary = domain,
             startAction = {
@@ -536,7 +505,7 @@ private fun ApiProfileForm(
     onSwitchPresetStep: () -> Unit,
     onFetchDraftModels: suspend (ApiProfileDraft) -> Result<List<ModelOption>>,
 ) {
-    val scheme = MiuixTheme.colorScheme
+    val scheme = providerColors()
     val scope = rememberCoroutineScope()
     var allowCleartext by remember(draft.id) {
         mutableStateOf(draft.baseUrl.startsWith("http://", ignoreCase = true))
@@ -565,9 +534,9 @@ private fun ApiProfileForm(
     Column {
         if (!draft.isEditing) {
             val activePreset = PiCatalogAndPresets.presets.firstOrNull { it.id == draft.presetId }
-            Card(
+            ProviderCard(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                colors = CardDefaults.defaultColors(color = scheme.surfaceContainer),
+                color = scheme.surfaceContainer,
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
@@ -580,27 +549,27 @@ private fun ApiProfileForm(
                         size = 32.dp,
                     )
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
+                        ProviderText(
                             text = "当前模板：${activePreset?.name ?: "自定义供应商"}",
                             color = scheme.onBackground,
-                            fontSize = MiuixTheme.textStyles.body2.fontSize,
+                            fontSize = providerFontSize(),
                             fontWeight = FontWeight.Medium,
                         )
                         if (activePreset != null && !activePreset.isCustom) {
-                            Text(
+                            ProviderText(
                                 text = activePreset.api.label,
-                                color = scheme.onSurfaceVariantSummary,
-                                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                                color = scheme.onSurfaceVariant,
+                                fontSize = providerFontSize(small = true),
                             )
                         }
                     }
-                    SecondaryButton(text = "更换模板", onClick = onSwitchPresetStep)
+                    ProviderButton(text = "更换模板", onClick = onSwitchPresetStep)
                 }
             }
         }
 
-        SettingsGroup("基本连接") {
-            ZhiTextField(
+        ProviderGroup("基本连接") {
+            ProviderField(
                 value = draft.providerKey,
                 onValueChange = { value ->
                     val cleaned = value.lowercase().replace(Regex("[^a-z0-9-]"), "")
@@ -611,7 +580,7 @@ private fun ApiProfileForm(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             )
-            ZhiTextField(
+            ProviderField(
                 value = draft.name,
                 onValueChange = { value ->
                     nameTouched = true
@@ -628,11 +597,10 @@ private fun ApiProfileForm(
                     !it.debugOnly || com.zhizhu.zhicode.compose.BuildConfig.DEBUG
                 }
             }
-            OverlayDropdownPreference(
+            ProviderProtocolChoice(
                 items = protocols.map { it.label },
                 selectedIndex = protocols.indexOf(draft.protocol).coerceAtLeast(0),
                 title = "接口格式",
-                summary = null,
                 onSelectedIndexChange = { index ->
                     protocols.getOrNull(index)?.let { protocol ->
                         onChange { draftNow ->
@@ -652,7 +620,7 @@ private fun ApiProfileForm(
                 },
             )
 
-            ZhiTextField(
+            ProviderField(
                 value = draft.apiKey,
                 onValueChange = { value -> onChange { it.copy(apiKey = value) } },
                 label = when {
@@ -660,12 +628,13 @@ private fun ApiProfileForm(
                     draft.protocol == ApiProtocol.ZCODE -> "ZCode 授权码"
                     else -> "API Key"
                 },
+                secret = true,
                 useLabelAsPlaceholder = true,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             )
 
-            ZhiTextField(
+            ProviderField(
                 value = draft.baseUrl,
                 onValueChange = { value ->
                     baseUrlTouched = true
@@ -678,7 +647,7 @@ private fun ApiProfileForm(
             )
 
             if (draft.protocol == ApiProtocol.ZCODE) {
-                BasicComponent(
+                ProviderRow(
                     title = "重置为 ZCode 默认值",
                     summary = "恢复默认网关地址与版本请求头",
                     onClick = {
@@ -688,7 +657,7 @@ private fun ApiProfileForm(
                 )
             }
 
-            SwitchPreference(
+            ProviderToggle(
                 title = "允许明文 HTTP",
                 summary = if (allowCleartext) "当前地址走 http（不加密）" else "仅使用 https",
                 checked = allowCleartext,
@@ -708,19 +677,19 @@ private fun ApiProfileForm(
             )
         }
 
-        SettingsGroup("模型配置") {
+        ProviderGroup("模型配置") {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
+                ProviderText(
                     text = if (draft.models.isEmpty()) "尚未添加模型" else "已添加模型（${draft.models.size}）",
-                    color = scheme.onSurfaceVariantSummary,
-                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    color = scheme.onSurfaceVariant,
+                    fontSize = providerFontSize(small = true),
                     modifier = Modifier.weight(1f),
                 )
-                SecondaryButton(
+                ProviderButton(
                     text = if (fetchingCatalog) "拉取中…" else "获取模型",
                     onClick = {
                         if (!fetchingCatalog) {
@@ -745,7 +714,7 @@ private fun ApiProfileForm(
                         }
                     },
                 )
-                SecondaryButton(
+                ProviderButton(
                     text = "+ 添加模型",
                     onClick = {
                         val suffix = draft.models.size + 1
@@ -787,27 +756,27 @@ private fun ApiProfileForm(
                     append("${modelCfg.contextWindow / 1000}K/${modelCfg.maxTokens / 1000}K")
                 }
 
-                BasicComponent(
+                ProviderRow(
                     title = modelCfg.name.ifBlank { modelCfg.id } + if (isDefault) "（默认）" else "",
                     summary = capSummary,
                     startAction = {
-                        Icon(
+                        ProviderIcon(
                             painter = if (isExpanded) ZhiIcons.collapse else ZhiIcons.expand,
                             contentDescription = "展开或收起",
-                            tint = scheme.onSurfaceVariantSummary,
+                            tint = scheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
                         )
                     },
                     endActions = {
                         if (!isDefault) {
-                            ZhiIconButton(
+                            ProviderIconButton(
                                 icon = ZhiIcons.check,
                                 description = "设为默认模型",
                                 onClick = { onChange { it.copy(model = modelCfg.id) } },
                                 iconSize = 15.dp,
                             )
                         }
-                        ZhiIconButton(
+                        ProviderIconButton(
                             icon = ZhiIcons.delete,
                             description = "删除模型",
                             onClick = {
@@ -852,6 +821,13 @@ private fun ApiProfileForm(
                         },
                         onSetDefault = { onChange { it.copy(model = modelCfg.id) } },
                         onUpdate = { updated ->
+                            if (updated.id != modelCfg.id) {
+                                val updatedKey = "${index}:${updated.id}"
+                                expandedModelKeys = expandedModelKeys - modelCfg.id - itemKey + updatedKey
+                                if (thinkingExpanded) {
+                                    expandedThinkingKeys = expandedThinkingKeys - modelCfg.id - itemKey + updatedKey
+                                }
+                            }
                             val wasDefault = draft.model.trim() == modelCfg.id
                             onChange { current ->
                                 current.copy(
@@ -865,12 +841,12 @@ private fun ApiProfileForm(
             }
 
             if (fetchedModels.isNotEmpty() || fetchStatus.isNotBlank()) {
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                ProviderDivider(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
                 if (fetchStatus.isNotBlank()) {
-                    Text(
+                    ProviderText(
                         text = fetchStatus,
-                        color = scheme.onSurfaceVariantSummary,
-                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                        color = scheme.onSurfaceVariant,
+                        fontSize = providerFontSize(small = true),
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                 }
@@ -879,14 +855,14 @@ private fun ApiProfileForm(
                     val visibleFetched = if (showAllFetched) fetchedModels else fetchedModels.take(15)
                     visibleFetched.forEach { opt ->
                         val added = opt.id in configuredIds
-                        BasicComponent(
+                        ProviderRow(
                             title = opt.displayName,
                             summary = if (added) "${opt.id} · 已在上方列表" else "${opt.id} · 点击添加并自动匹配参数",
                             endActions = {
-                                Icon(
+                                ProviderIcon(
                                     painter = if (added) ZhiIcons.check else ZhiIcons.add,
                                     contentDescription = if (added) "已添加" else "添加到列表",
-                                    tint = if (added) scheme.primary else scheme.onSurfaceVariantSummary,
+                                    tint = if (added) scheme.primary else scheme.onSurfaceVariant,
                                     modifier = Modifier.size(16.dp),
                                 )
                             },
@@ -911,7 +887,7 @@ private fun ApiProfileForm(
                         )
                     }
                     if (!showAllFetched && fetchedModels.size > 15) {
-                        BasicComponent(
+                        ProviderRow(
                             title = "展开剩余 ${fetchedModels.size - 15} 个获取到的模型",
                             onClick = { showAllFetched = true },
                             insideMargin = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
@@ -921,15 +897,15 @@ private fun ApiProfileForm(
             }
         }
 
-        SettingsGroup("高级选项") {
-            BasicComponent(
+        ProviderGroup("高级选项") {
+            ProviderRow(
                 title = "自定义请求头与兼容性参数",
                 summary = if (advancedExpanded) "点击收起 headers 与 compat" else "点击展开 headers 键值对与 compat JSON",
                 startAction = {
-                    Icon(
+                    ProviderIcon(
                         painter = if (advancedExpanded) ZhiIcons.collapse else ZhiIcons.expand,
                         contentDescription = null,
-                        tint = scheme.onSurfaceVariantSummary,
+                        tint = scheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp),
                     )
                 },
@@ -941,7 +917,7 @@ private fun ApiProfileForm(
                         rawJson = draft.extraHeaders,
                         onUpdateJson = { json -> onChange { it.copy(extraHeaders = json) } },
                     )
-                    ZhiTextField(
+                    ProviderField(
                         value = draft.compatJson,
                         onValueChange = { value -> onChange { it.copy(compatJson = value) } },
                         label = "兼容性 compat (JSON，如 {\"thinkingFormat\":\"deepseek\"})",
@@ -953,7 +929,7 @@ private fun ApiProfileForm(
             }
         }
 
-        ZhiFieldError(
+        ProviderFieldError(
             message = draft.nameError ?: draft.baseUrlError,
             touched = nameTouched || baseUrlTouched,
         )
@@ -970,7 +946,7 @@ private fun PiModelCardEditor(
     onSetDefault: () -> Unit,
     onUpdate: (PiModelConfig) -> Unit,
 ) {
-    val scheme = MiuixTheme.colorScheme
+    val scheme = providerColors()
     var ctxInput by remember(model.id, model.contextWindow) {
         mutableStateOf(model.contextWindow.toString())
     }
@@ -984,7 +960,7 @@ private fun PiModelCardEditor(
             .padding(start = 16.dp, end = 12.dp, bottom = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        ZhiTextField(
+        ProviderField(
             value = model.id,
             onValueChange = { raw ->
                 val cleaned = raw.trim()
@@ -1004,7 +980,7 @@ private fun PiModelCardEditor(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            ZhiTextField(
+            ProviderField(
                 value = model.name,
                 onValueChange = { onUpdate(model.copy(name = it)) },
                 label = "显示名称（可留空同 ID）",
@@ -1013,16 +989,16 @@ private fun PiModelCardEditor(
                 modifier = Modifier.weight(1f),
             )
             if (!isDefault) {
-                SecondaryButton(text = "设为默认", onClick = onSetDefault)
+                ProviderButton(text = "设为默认", onClick = onSetDefault)
             }
         }
 
-        SwitchPreference(
+        ProviderToggle(
             title = "支持推理 (Reasoning)",
             checked = model.reasoning,
             onCheckedChange = { checked -> onUpdate(model.copy(reasoning = checked)) },
         )
-        SwitchPreference(
+        ProviderToggle(
             title = "支持图片输入 (Vision)",
             checked = model.supportsImage,
             onCheckedChange = { checked -> onUpdate(model.copy(supportsImage = checked)) },
@@ -1032,7 +1008,7 @@ private fun PiModelCardEditor(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            ZhiTextField(
+            ProviderField(
                 value = ctxInput,
                 onValueChange = { raw ->
                     val digits = raw.filter { it.isDigit() }
@@ -1046,7 +1022,7 @@ private fun PiModelCardEditor(
                 singleLine = true,
                 modifier = Modifier.weight(1f),
             )
-            ZhiTextField(
+            ProviderField(
                 value = maxOutInput,
                 onValueChange = { raw ->
                     val digits = raw.filter { it.isDigit() }
@@ -1063,14 +1039,14 @@ private fun PiModelCardEditor(
         }
 
         if (model.reasoning) {
-            BasicComponent(
+            ProviderRow(
                 title = "推理档位映射 (thinkingLevelMap)",
                 summary = "当前可用：${resolveSupportedThinkingLevels(model).joinToString(" / ") { it.id }} · 已自定义 ${model.thinkingLevelMap.size} 项",
                 startAction = {
-                    Icon(
+                    ProviderIcon(
                         painter = if (thinkingMapExpanded) ZhiIcons.collapse else ZhiIcons.expand,
                         contentDescription = null,
-                        tint = scheme.onSurfaceVariantSummary,
+                        tint = scheme.onSurfaceVariant,
                         modifier = Modifier.size(16.dp),
                     )
                 },
@@ -1088,10 +1064,10 @@ private fun PiModelCardEditor(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     if (configuredLevels.isEmpty()) {
-                        Text(
+                        ProviderText(
                             text = "尚未单独覆盖档位，默认支持 off / minimal / low / medium / high。",
-                            color = scheme.onSurfaceVariantSummary,
-                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                            color = scheme.onSurfaceVariant,
+                            fontSize = providerFontSize(small = true),
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                         )
                     } else {
@@ -1104,7 +1080,7 @@ private fun PiModelCardEditor(
                         }
                     }
                     if (remainingLevels.isNotEmpty()) {
-                        ZhiIconDropdownMenu(
+                        ProviderDropdownMenu(
                             items = remainingLevels.map { level ->
                                 ZhiMenuItem(
                                     text = level.id,
@@ -1125,16 +1101,16 @@ private fun PiModelCardEditor(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                Icon(
+                                ProviderIcon(
                                     painter = ZhiIcons.add,
                                     contentDescription = null,
                                     tint = scheme.primary,
                                     modifier = Modifier.size(15.dp),
                                 )
-                                Text(
+                                ProviderText(
                                     text = "添加推理档位",
                                     color = scheme.primary,
-                                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                                    fontSize = providerFontSize(small = true),
                                     fontWeight = FontWeight.Medium,
                                 )
                             }
@@ -1143,6 +1119,15 @@ private fun PiModelCardEditor(
                 }
             }
         }
+
+        ProviderField(
+            value = model.compatJson,
+            onValueChange = { onUpdate(model.copy(compatJson = it)) },
+            label = "模型兼容性 compat (JSON，可留空)",
+            useLabelAsPlaceholder = true,
+            singleLine = false,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -1152,7 +1137,7 @@ private fun ThinkingLevelMapRow(
     map: Map<PiThinkingLevel, String?>,
     onChangeMap: (Map<PiThinkingLevel, String?>) -> Unit,
 ) {
-    val scheme = MiuixTheme.colorScheme
+    val scheme = providerColors()
     val mapped = map[level]
     val unsupported = mapped == null
 
@@ -1169,14 +1154,14 @@ private fun ThinkingLevelMapRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text(
+            ProviderText(
                 text = level.id,
                 color = scheme.onBackground,
-                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                fontSize = providerFontSize(),
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f),
             )
-            SecondaryButton(
+            ProviderButton(
                 text = if (unsupported) "已禁用 (null)" else "自定义值",
                 onClick = {
                     val next = map.toMutableMap()
@@ -1184,7 +1169,7 @@ private fun ThinkingLevelMapRow(
                     onChangeMap(next)
                 },
             )
-            ZhiIconButton(
+            ProviderIconButton(
                 icon = ZhiIcons.close,
                 description = "移除档位",
                 onClick = {
@@ -1196,7 +1181,7 @@ private fun ThinkingLevelMapRow(
             )
         }
         if (!unsupported) {
-            ZhiTextField(
+            ProviderField(
                 value = mapped.orEmpty(),
                 onValueChange = { value ->
                     val next = map.toMutableMap()
@@ -1226,13 +1211,13 @@ private fun RequestHeadersKvEditor(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
+            ProviderText(
                 text = "请求头 (headers)",
-                color = MiuixTheme.colorScheme.onBackground,
-                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                color = providerColors().onBackground,
+                fontSize = providerFontSize(),
                 modifier = Modifier.weight(1f),
             )
-            SecondaryButton(
+            ProviderButton(
                 text = "+ 添加请求头",
                 onClick = {
                     val next = entries + ("X-Custom-Header" to "")
@@ -1246,7 +1231,7 @@ private fun RequestHeadersKvEditor(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                ZhiTextField(
+                ProviderField(
                     value = key,
                     onValueChange = { nextKey ->
                         val next = entries.toMutableList()
@@ -1258,7 +1243,7 @@ private fun RequestHeadersKvEditor(
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
-                ZhiTextField(
+                ProviderField(
                     value = value,
                     onValueChange = { nextVal ->
                         val next = entries.toMutableList()
@@ -1270,7 +1255,7 @@ private fun RequestHeadersKvEditor(
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
-                ZhiIconButton(
+                ProviderIconButton(
                     icon = ZhiIcons.close,
                     description = "删除请求头",
                     onClick = {
