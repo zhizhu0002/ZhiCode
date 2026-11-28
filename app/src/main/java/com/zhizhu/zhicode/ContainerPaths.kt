@@ -3,9 +3,7 @@ package com.zhizhu.zhicode
 import com.termux.shared.termux.TermuxConstants
 import java.io.File
 
-/**
- * 宿主私有目录与 Debian 容器内虚拟路径的互转。
- */
+/** 宿主私有目录与 Debian 容器内虚拟路径的互转。 */
 object ContainerPaths {
 
     @JvmStatic

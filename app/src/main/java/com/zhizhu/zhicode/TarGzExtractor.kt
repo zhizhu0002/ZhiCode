@@ -13,9 +13,7 @@ import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.util.zip.GZIPInputStream
 
-/**
- * 纯 Kotlin `.tar.gz` / `.tar.xz` 流式解包器，用于解压云端 Ubuntu 根文件系统与内置 Node/Pi 包。
- */
+/** 纯 Kotlin `.tar.gz` / `.tar.xz` 流式解包器，用于解压云端 Ubuntu 根文件系统与内置 Node/Pi 包。 */
 internal object TarGzExtractor {
 
     private const val BLOCK_SIZE = 512

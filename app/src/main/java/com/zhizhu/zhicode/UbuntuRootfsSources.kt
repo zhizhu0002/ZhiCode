@@ -1,8 +1,6 @@
 package com.zhizhu.zhicode
 
-/**
- * Ubuntu 24.04 LTS (Noble, arm64) 根文件系统云端下载源。
- */
+/** Ubuntu 24.04 LTS (Noble, arm64) 根文件系统云端下载源。 */
 enum class UbuntuMirrorSource(
     val id: String,
     val displayName: String,
@@ -44,9 +42,7 @@ data class UbuntuDownloadSpec(
     val stripComponents: Int,
 )
 
-/**
- * Ubuntu 24.04 rootfs 下载清单与 `SHA256SUMS` 纯解析器。
- */
+/** Ubuntu 24.04 rootfs 下载清单与 `SHA256SUMS` 纯解析器。 */
 object UbuntuRootfsSources {
 
     const val TUNA_BASE_DIR_URL =

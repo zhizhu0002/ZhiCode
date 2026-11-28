@@ -15,51 +15,6 @@ import java.io.FileNotFoundException
 import java.io.IOException
 import java.util.Locale
 
-/**
- * 把应用的 HOME 目录**发布**给系统文件管理器（DocumentsUI / 系统「文件」/「选择文件」）。
- *
- * ## 它解决的问题
- *
- * HOME 在应用私有目录里（`/data/user/0/<pkg>/files/home`），`0700` 加 SELinux 标签
- * —— 任何第三方文件管理器都进不去，不给 root 没有例外。而把 HOME 搬到共享存储的
- * 代价很大：那一片挂载是 `noexec`（`/proc/mounts`:
- * `/dev/fuse /storage/emulated fuse rw,nosuid,nodev,noexec`），
- * 搬过去之后 `./gradlew` 这类脚本就不能直跑了 —— 而它正是本应用最主要的用法之一。
- *
- * 本类让文件管理器通过 SAF 读我们，我们按自己的规则读写私有目录里的真实文件：
- * **HOME 一个字节都不搬**，可执行权限、符号链接、apt 全部照旧。
- *
- * ## 安全边界落在清单那一行
- *
- * `android:permission="android.permission.MANAGE_DOCUMENTS"` 是必须的，
- * 它同时是功能要求与安全边界：这一档是 `signature|privileged` 权限，
- * **只有系统进程持有** —— 于是只有 DocumentsUI 调得到，普通第三方应用调不到。
- * `exported="true"` 是 SAF 的硬性要求（系统要能发现这个 provider），
- * 真正的访问控制由那一行权限完成。
- *
- * ## 本类只做机械动作
- *
- * 拼 `MatrixCursor`、把调用转发给 [DocumentTree]、把它的 `IOException` 转成
- * `FileNotFoundException`（SAF 的约定）。会算错的那一半（ID ↔ 路径、名字校验、
- * 符号链接越界）在 [DocumentTree] 里 —— 纯逻辑、无 `android.*`、有单测。
- * 这么切是因为那几类错在真机上**没有报错可查**：只表现为文件管理器里某一项打不开。
- *
- * ## 与参考实现（IQ Code）的有意分歧
- *
- * 思路来自反编译 IQ Code 的 `IqDocumentsProvider`，但这几处我们**故意不同**：
- *
- * - **目录不按修改时间排序**：不声明 `FLAG_DIR_PREFERS_LAST_MODIFIED`。
- *   那是给相册/下载目录用的；源码目录按修改时间排会看起来像被打乱了。
- *   列表按名字排（见 [queryChildDocuments]）。
- * - **名字规则与 `FileOps` 共用一个实现**：参考实现自己写了一份 `safeName`，
- *   与它应用内的文件面板没有任何关系（它也没有那样的面板）。我们两处都有，
- *   口径不一致就会出现"一边能建、另一边打不开"，所以规则只留一处。
- * - **不做 `querySearchDocuments`，也不声明 `FLAG_SUPPORTS_SEARCH`**：
- *   声明了却不实现等于给用户一个点了没反应的搜索框。
- * - **失败时如实抛**：参考实现在 `queryChildDocuments` 里对单条越界静默跳过
- *   （我们保留这一点，因为它防止一条坏项废掉整个目录），但在新建/重命名上
- *   我们连**同名前缀**的情况也会明确报错。
- */
 class ZhiDocumentsProvider : DocumentsProvider() {
 
     override fun onCreate(): Boolean = true
@@ -248,13 +203,7 @@ class ZhiDocumentsProvider : DocumentsProvider() {
 
     // ------------------------------------------------------------------ 行
 
-    /**
-     * 写一行文档。
-     *
-     * flags 分目录与文件两套 —— 混用会给出点了没反应的菜单项：
-     * - 目录：重命名 / 删除 / **在里面新建**（对目录谈"写内容"没有意义）；
-     * - 文件：重命名 / 删除 / **写**（编辑保存）。
-     */
+    /** 写一行文档。 */
     private fun MatrixCursor.include(file: File, documentId: String, displayNameOverride: String? = null) {
         val directory = file.isDirectory
         var flags = DocumentsContract.Document.FLAG_SUPPORTS_RENAME or
@@ -279,14 +228,6 @@ class ZhiDocumentsProvider : DocumentsProvider() {
         )
     }
 
-    /**
-     * 按 cursor **自己的列顺序**写一行。
-     *
-     * ⚠️ 不能改成"无条件 add 全部列名"：`MatrixCursor.RowBuilder.add(列名, 值)`
-     * 对**不在投影里**的列名会抛 `IllegalArgumentException`。SAF 的调用方
-     * （各厂商的文件管理器）会传各种子集投影，那样写会让这一项直接打不开 ——
-     * 而且异常发生在 provider 里，界面上只会看到"无法加载"。
-     */
     private fun MatrixCursor.emit(names: Array<String>, values: Array<Any?>) {
         val row = newRow()
         for (column in columnNames) {
@@ -297,21 +238,6 @@ class ZhiDocumentsProvider : DocumentsProvider() {
 
     // -------------------------------------------------------------- 调用日志
 
-    /**
-     * 记一次 provider 调用（成功与失败都记），然后原样返回/抛出。
-     *
-     * 为什么每个入口都要过这一层：**框架会吞掉这里的异常** ——
-     * `DocumentsProvider.call()` 把异常接住、写进 logcat、只回一个 `null`。
-     * 于是"新建文件夹失败"在文件管理器那一侧只剩一句它自己的通用文案
-     * （真机上见到的是 `Failed to create directory: 1`），看不到我们的原因；
-     * 而真机上取 logcat 需要 adb 或 root，两样都没有。
-     *
-     * 所以原因必须由我们自己落到**用户打得到的地方**：`~/tmp/documents-provider.log`
-     * —— 应用内的文件面板和文件管理器都读得到，诊断页也会把尾巴贴出来。
-     *
-     * 刻意不 `inline`：这几个入口每次最多一次文件追加，不值得为了省一层 lambda
-     * 把实现细节铺进每个方法；可读性在这里更重要。
-     */
     private fun <T> traced(method: String, vararg args: String?, body: () -> T): T = try {
         val result = body()
         // 查询类顺手记下行数：空列表与"查询失败"是两件事，日志里要能分开。
@@ -323,10 +249,7 @@ class ZhiDocumentsProvider : DocumentsProvider() {
         throw t
     }
 
-    /**
-     * 追加一行。**任何失败都吞掉**：日志把 provider 弄坏是最糟的结果
-     * （它的存在意义只是让人能看见问题，它自己绝不能成为问题）。
-     */
+    /** 追加一行。 */
     private fun log(method: String, args: List<String?>, outcome: String) {
         runCatching {
             val dir = File(TermuxConstants.TERMUX_HOME_DIR_PATH, "tmp")

@@ -14,9 +14,7 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
-/**
- * Ubuntu 24.04 (PRoot) 云端下载 + 内置 Node.js / Pi 运行环境安装器。
- */
+/** Ubuntu 24.04 (PRoot) 云端下载 + 内置 Node.js / Pi 运行环境安装器。 */
 class RuntimeInstaller(private val context: Context) {
 
     fun interface Progress {

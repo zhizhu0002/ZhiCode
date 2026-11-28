@@ -5,9 +5,7 @@ import android.os.Environment
 import android.system.Os
 import java.io.File
 
-/**
- * 组装在 Android 上通过 `proot` 启动 Debian 容器的命令与环境变量。
- */
+/** 组装在 Android 上通过 `proot` 启动 Debian 容器的命令与环境变量。 */
 object ProotCommand {
 
     const val DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
