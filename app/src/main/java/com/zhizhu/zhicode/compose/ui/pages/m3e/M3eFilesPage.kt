@@ -12,6 +12,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
@@ -55,6 +56,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -398,7 +400,11 @@ private fun M3eFileBrowser(
                         selected = entry.path in selection,
                         selectionMode = selectionMode,
                         onClick = {
-                            if (selectionMode) viewModel::toggleFileSelection else viewModel::openFile
+                            if (selectionMode) {
+                                viewModel.toggleFileSelection(entry)
+                            } else {
+                                viewModel.openFile(entry)
+                            }
                         },
                         onLongPress = { viewModel.longPressFileEntry(entry) },
                         modifier = Modifier.animateItem(),
@@ -521,10 +527,14 @@ private fun M3eFileRow(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = M3eFileRowMinHeight)
-            .padding(horizontal = 8.dp),
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(M3eDimens.SegmentInner + 8.dp))
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongPress,
+            ),
         shape = RoundedCornerShape(M3eDimens.SegmentInner + 8.dp),
         color = if (selected) scheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent,
-        onClick = onClick,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = M3eFileSidePadding, vertical = 12.dp),
