@@ -2,6 +2,7 @@ package com.zhizhu.zhicode.compose.ui.pages.m3e
 
 import androidx.compose.runtime.Composable
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -258,6 +259,41 @@ object Material3ExpressivePageSet : ZhiPageSet {
     @Composable
     override fun Oobe(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
         M3eOobePage(state = state, viewModel = viewModel)
+    }
+
+    @Composable
+    override fun ChatContent(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        wide: Boolean,
+        modifier: Modifier,
+        glass: Glass,
+    ) {
+        M3eChatContent(
+            state = state,
+            viewModel = viewModel,
+            wide = wide,
+            modifier = modifier,
+            glass = glass,
+        )
+    }
+
+    @Composable
+    override fun FilesContent(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        modifier: Modifier,
+    ) {
+        M3eFilesContent(state = state, viewModel = viewModel, modifier = modifier)
+    }
+
+    @Composable
+    override fun TerminalContent(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        modifier: Modifier,
+    ) {
+        M3eTerminalContent(state = state, viewModel = viewModel, modifier = modifier)
     }
 
     @Composable
