@@ -461,6 +461,32 @@ internal fun SettingsTextField(
     icon: Painter? = null,
     plate: Color? = null,
 ) {
+    SettingsTextDraft(value, onValueChange) { shown, onEdit ->
+        BasicComponent(
+            title = title,
+            summary = summary,
+            summaryColor = hintColors(warn = false),
+            startAction = plateStartAction(icon, plate),
+            insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            bottomAction = {
+                ZhiTextField(
+                    value = shown,
+                    onValueChange = onEdit,
+                    modifier = modifier.fillMaxWidth(),
+                    singleLine = singleLine,
+                    minLines = minLines,
+                )
+            },
+        )
+    }
+}
+
+@Composable
+internal fun SettingsTextDraft(
+    value: String,
+    onValueChange: (String) -> Unit,
+    content: @Composable (String, (String) -> Unit) -> Unit,
+) {
     // 行内草稿。null = 没有未提交的改动，此时显示外部真值。
     var local by remember { mutableStateOf<String?>(null) }
     val shown = local ?: value
@@ -489,24 +515,7 @@ internal fun SettingsTextField(
         }
     }
 
-    BasicComponent(
-        title = title,
-        summary = summary,
-        summaryColor = hintColors(warn = false),
-        startAction = plateStartAction(icon, plate),
-        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        bottomAction = {
-            ZhiTextField(
-                value = shown,
-                onValueChange = { local = it },
-                // [modifier] 下发给 ZhiTextField 的输入框本体，
-                // 调用点靠它挂 `onFocusChanged`（数值项失焦时要把文本收敛成真实值）。
-                modifier = modifier.fillMaxWidth(),
-                singleLine = singleLine,
-                minLines = minLines,
-            )
-        },
-    )
+    content(shown) { local = it }
 }
 
 /** 文本输入行的去抖窗口（毫秒）。 */

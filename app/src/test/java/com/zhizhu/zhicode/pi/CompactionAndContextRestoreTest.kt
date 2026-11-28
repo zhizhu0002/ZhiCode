@@ -72,6 +72,28 @@ class CompactionAndContextRestoreTest {
     }
 
     @Test
+    fun `切换会话恢复各自最后实际使用的模型与推理强度`() {
+        val deepSeek = tempFolder.newFile("deepseek.jsonl")
+        val glm = tempFolder.newFile("glm.jsonl")
+        deepSeek.writeText(
+            """{"type":"thinking_level_change","id":"d1","parentId":null,"thinkingLevel":"max"}
+               {"type":"message","id":"d2","parentId":"d1","message":{"role":"assistant","provider":"wb","model":"deepseek","stopReason":"stop"}}""".trimIndent(),
+        )
+        glm.writeText(
+            """{"type":"thinking_level_change","id":"g1","parentId":null,"thinkingLevel":"high"}
+               {"type":"message","id":"g2","parentId":"g1","message":{"role":"assistant","provider":"wb","model":"glm-5.3-flash","stopReason":"stop"}}
+               {"type":"model_change","id":"g3","parentId":"g2","provider":"wb","modelId":"deepseek"}
+               {"type":"thinking_level_change","id":"g4","parentId":"g3","thinkingLevel":"max"}""".trimIndent(),
+        )
+
+        assertEquals("deepseek", PiRpcBackend.readSessionHistory(deepSeek).modelId)
+        val restored = PiRpcBackend.readSessionHistory(glm)
+        assertEquals("glm-5.3-flash", restored.modelId)
+        assertEquals("high", restored.thinkingLevel)
+        assertEquals("deepseek", PiRpcBackend.readSessionHistory(deepSeek).modelId)
+    }
+
+    @Test
     fun `压缩之后的失效旧 usage 不应计入重进后的上下文用量`() {
         val file = tempFolder.newFile("compacted.jsonl")
         file.writeText(

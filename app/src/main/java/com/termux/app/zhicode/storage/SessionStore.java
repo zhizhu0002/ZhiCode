@@ -298,6 +298,7 @@ public final class SessionStore {
         public final String protocol;
         public final String baseUrl;
         public final String model;
+        public final String effort;
 
         ProfileBinding(JSONObject payload) {
             profileId = payload.optString(Field.PROFILE_ID, "");
@@ -306,6 +307,7 @@ public final class SessionStore {
             protocol = payload.optString(Field.PROTOCOL, "");
             baseUrl = payload.optString(Field.BASE_URL, "");
             model = payload.optString(Field.MODEL, "");
+            effort = payload.optString("effort", "");
         }
     }
 
@@ -1778,22 +1780,31 @@ public final class SessionStore {
     /** 最后一次记录下来的 API 配置绑定；没有就返回 null。 */
     public static ProfileBinding loadProfileBinding(String sessionId) {
         ProfileBinding binding = null;
+        long latestSeq = -1L;
         try {
-            for (Row row : loadRows(sessionId, -1L, false)) {
-                JSONObject value = row.json;
-                if (value == null) continue;
-                String type = value.optString(Field.TYPE, "");
-                if (!RowType.PROFILE_BINDING.equals(type) && !RowType.TURN_CONFIG.equals(type)) continue;
-                JSONObject payload = value.optJSONObject(Field.PAYLOAD);
-                // 取最后一条有效绑定：中途换过配置时以最新那次为准。
-                if (payload != null && !payload.optString(Field.PROFILE_ID, "").isEmpty()) {
-                    binding = new ProfileBinding(payload);
+            for (String type : new String[]{RowType.PROFILE_BINDING, RowType.TURN_CONFIG}) {
+                for (Row row : loadRows(sessionId, latestSeq, Long.MAX_VALUE, false, type, false)) {
+                    JSONObject payload = row.json == null ? null : row.json.optJSONObject(Field.PAYLOAD);
+                    if (payload != null && !payload.optString(Field.PROFILE_ID, "").isEmpty()) {
+                        binding = new ProfileBinding(payload);
+                        latestSeq = row.seq;
+                    }
                 }
             }
         } catch (Exception ignored) {
             return null;
         }
         return binding;
+    }
+
+    public static List<String> loadPiSessionFiles(String sessionId) {
+        List<String> files = new ArrayList<>();
+        for (Row row : loadRows(sessionId, -1L, Long.MAX_VALUE, false, "pi_session", false)) {
+            JSONObject payload = row.json == null ? null : row.json.optJSONObject(Field.PAYLOAD);
+            String file = payload == null ? "" : payload.optString("session_file", "");
+            if (!file.isEmpty()) files.add(file);
+        }
+        return files;
     }
 
     /** 计划流程状态：取最后一条 {@code plan_*} 事件。 */
@@ -2277,6 +2288,7 @@ public final class SessionStore {
             payload.put(Field.PROTOCOL, orEmpty(config.protocol));
             payload.put(Field.BASE_URL, orEmpty(config.baseUrl));
             payload.put(Field.MODEL, orEmpty(config.model));
+            payload.put("effort", orEmpty(config.effort));
         } catch (Exception ignored) {
             // 组装失败时返回已放进去的字段；调用方按缺字段处理。
         }

@@ -56,16 +56,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.zhizhu.zhicode.compose.model.ModelPickerState
-import com.zhizhu.zhicode.compose.model.ModelThinkingPickerState
-import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import com.zhizhu.zhicode.pi.PiModelConfig
-import com.zhizhu.zhicode.pi.clampThinkingLevel
-import com.zhizhu.zhicode.pi.resolveMenuThinkingLevels
-import top.yukonga.miuix.kmp.basic.DropdownDefaults
-import top.yukonga.miuix.kmp.basic.DropdownEntry
-import top.yukonga.miuix.kmp.basic.DropdownItem
-import top.yukonga.miuix.kmp.popup.OverlayDropdownPopup
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.model.Attachment
 import com.zhizhu.zhicode.compose.model.ChatImage
@@ -93,7 +84,6 @@ import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
 import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
-import com.zhizhu.zhicode.compose.ui.ZhiTextDropdownChip
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
@@ -467,19 +457,7 @@ fun Composer(
                     )
                 }
 
-                ZhiTextDropdownChip(
-                    label = state.permissionMode.label,
-                    items = remember(state.permissionMode, onPermissionSelected) {
-                        PermissionMode.entries.map { mode ->
-                            ZhiMenuItem(
-                                text = mode.label,
-                                summary = mode.detail,
-                                selected = mode == state.permissionMode,
-                                onClick = { onPermissionSelected(mode) },
-                            )
-                        }
-                    },
-                )
+                PermissionModePicker(mode = state.permissionMode, onSelect = onPermissionSelected)
                 val keyboard = LocalSoftwareKeyboardController.current
                 val efforts = remember(state.availableEfforts) {
                     state.availableEfforts.ifEmpty { EffortLevel.DEFAULT_AVAILABLE }
@@ -487,7 +465,7 @@ fun Composer(
                 val modelChipLabel = remember(state.modelLabel, state.effort, efforts) {
                     if (efforts.size > 1) "${state.modelLabel} · ${state.effort.label}" else state.modelLabel
                 }
-                Box(modifier = Modifier.weight(1f)) {
+                ComposerPickerAnchor(modifier = Modifier.weight(1f)) { maxMenuHeight ->
                     ZhiSmallPill(
                         label = modelChipLabel,
                         marquee = true,
@@ -499,6 +477,7 @@ fun Composer(
                     )
                     ModelThinkingPopupMenu(
                         picker = state.modelThinkingPicker,
+                        maxMenuHeight = maxMenuHeight,
                         onDismiss = onDismissModelThinking,
                         onEnterSubmenu = onEnterModelThinkingSubmenu,
                         onBackToModels = onBackToModelThinkingList,
@@ -506,7 +485,7 @@ fun Composer(
                         onConfigureModels = onConfigureModels,
                     )
                 }
-                Box {
+                ComposerPickerAnchor { maxMenuHeight ->
                     ZhiSmallPill(
                         label = shorten(state.profileName.ifBlank { "未配置" }, if (wide) 18 else 10),
                         onClick = {
@@ -516,6 +495,8 @@ fun Composer(
                     )
                     ProviderPopupMenu(
                         picker = state.modelPicker,
+                        maxMenuHeight = maxMenuHeight,
+                        configurationOpen = state.apiConfig != null,
                         onDismiss = onDismissProvider,
                         onSelectProfile = onSelectProvider,
                         onAddProvider = onAddProvider,
@@ -698,169 +679,6 @@ internal fun formatContextPercentLabel(used: Int, window: Int): String {
     val rawTenths = ((used.toDouble() / window.toDouble()) * 1000.0).roundToInt().coerceIn(0, 1000)
     val tenths = if (rawTenths == 0) 1 else rawTenths
     return if (tenths % 10 == 0) "${tenths / 10}%" else "${tenths / 10}.${tenths % 10}%"
-}
-
-/** 锚定在模型芯片上的本地模型 + 推理强度两级悬浮菜单（非底部抽屉）。 */
-@Composable
-private fun ModelThinkingPopupMenu(
-    picker: ModelThinkingPickerState?,
-    onDismiss: () -> Unit,
-    onEnterSubmenu: (PiModelConfig) -> Unit,
-    onBackToModels: () -> Unit,
-    onSelectModelAndEffort: (String, EffortLevel) -> Unit,
-    onConfigureModels: () -> Unit,
-) {
-    val shown = rememberLastNonNull(picker) ?: return
-    val scheme = MiuixTheme.colorScheme
-    val subModel = shown.expandedModel
-    val entries = if (subModel == null) {
-        if (shown.models.isEmpty()) {
-            listOf(
-                DropdownEntry(
-                    items = listOf(
-                        DropdownItem(
-                            text = "当前供应商暂无本地模型",
-                            summary = "点击前往供应商设置添加模型",
-                            onClick = onConfigureModels,
-                        ),
-                    ),
-                ),
-            )
-        } else {
-            val modelItems = shown.models.map { model ->
-                val levels = resolveMenuThinkingLevels(model)
-                val multiTier = levels.size > 1
-                val isCurrent = model.id == shown.currentModelId
-                val summary = buildString {
-                    append("${model.contextWindow / 1000}K")
-                    if (model.supportsImage) append(" · 视觉")
-                    if (multiTier) {
-                        val active = if (isCurrent) clampThinkingLevel(levels, shown.currentEffort.toPiLevel()).id else levels.joinToString("/") { it.id }
-                        append(" · ").append(active)
-                    } else {
-                        append(" · 非推理")
-                    }
-                }
-                DropdownItem(
-                    text = model.name.ifBlank { model.id },
-                    summary = summary,
-                    selected = isCurrent,
-                    icon = if (multiTier) {
-                        { m -> Icon(painter = ZhiIcons.expand, contentDescription = null, tint = scheme.onSurfaceVariantSummary, modifier = m) }
-                    } else null,
-                    onClick = {
-                        if (multiTier) {
-                            onEnterSubmenu(model)
-                        } else {
-                            onSelectModelAndEffort(model.id, EffortLevel.entries.firstOrNull { it.wire == levels.firstOrNull()?.id } ?: EffortLevel.OFF)
-                        }
-                    },
-                )
-            }
-            listOf(
-                DropdownEntry(items = modelItems),
-                DropdownEntry(
-                    items = listOf(
-                        DropdownItem(
-                            text = "配置此供应商模型",
-                            icon = { m -> Icon(painter = ZhiIcons.edit, contentDescription = null, tint = scheme.primary, modifier = m) },
-                            onClick = onConfigureModels,
-                        ),
-                    ),
-                ),
-            )
-        }
-    } else {
-        val levels = resolveMenuThinkingLevels(subModel)
-        val clampedActive = if (subModel.id == shown.currentModelId) {
-            clampThinkingLevel(levels, shown.currentEffort.toPiLevel())
-        } else null
-        listOf(
-            DropdownEntry(
-                items = listOf(
-                    DropdownItem(
-                        text = "← 返回模型列表",
-                        summary = subModel.name.ifBlank { subModel.id },
-                        onClick = onBackToModels,
-                    ),
-                ),
-            ),
-            DropdownEntry(
-                items = levels.map { piLevel ->
-                    val uiEffort = EffortLevel.entries.firstOrNull { it.wire == piLevel.id } ?: EffortLevel.HIGH
-                    DropdownItem(
-                        text = uiEffort.label,
-                        summary = subModel.thinkingLevelMap[piLevel]?.let { "映射：$it" },
-                        selected = piLevel == clampedActive,
-                        onClick = { onSelectModelAndEffort(subModel.id, uiEffort) },
-                    )
-                },
-            ),
-        )
-    }
-
-    OverlayDropdownPopup(
-        entries = entries,
-        show = picker != null,
-        onDismiss = onDismiss,
-        onDismissFinished = {},
-        maxHeight = 360.dp,
-        dropdownColors = DropdownDefaults.dropdownColors(),
-        renderInRootScaffold = true,
-        collapseOnSelection = false,
-    )
-}
-
-/** 锚定在供应商药丸上的纯供应商切换悬浮菜单（非底部抽屉）。 */
-@Composable
-private fun ProviderPopupMenu(
-    picker: ModelPickerState?,
-    onDismiss: () -> Unit,
-    onSelectProfile: (String) -> Unit,
-    onAddProvider: () -> Unit,
-    onManageProviders: () -> Unit,
-) {
-    val shown = rememberLastNonNull(picker) ?: return
-    val scheme = MiuixTheme.colorScheme
-    val providerItems = shown.profiles.map { profile ->
-        val summary = buildList {
-            if (profile.protocolLabel.isNotBlank()) add(profile.protocolLabel)
-            if (profile.models.isNotEmpty()) add("${profile.models.size} 个模型")
-        }.joinToString(" · ")
-        DropdownItem(
-            text = profile.name,
-            summary = summary.ifBlank { null },
-            selected = profile.id == shown.activeProfileId,
-            onClick = { onSelectProfile(profile.id) },
-        )
-    }
-    val actionItems = listOf(
-        DropdownItem(
-            text = "新增供应商",
-            icon = { m -> Icon(painter = ZhiIcons.add, contentDescription = null, tint = scheme.primary, modifier = m) },
-            onClick = onAddProvider,
-        ),
-        DropdownItem(
-            text = "供应商管理",
-            icon = { m -> Icon(painter = ZhiIcons.settings, contentDescription = null, tint = scheme.primary, modifier = m) },
-            onClick = onManageProviders,
-        ),
-    )
-    val entries = buildList {
-        if (providerItems.isNotEmpty()) add(DropdownEntry(items = providerItems))
-        add(DropdownEntry(items = actionItems))
-    }
-
-    OverlayDropdownPopup(
-        entries = entries,
-        show = picker != null,
-        onDismiss = onDismiss,
-        onDismissFinished = {},
-        maxHeight = 360.dp,
-        dropdownColors = DropdownDefaults.dropdownColors(),
-        renderInRootScaffold = true,
-        collapseOnSelection = true,
-    )
 }
 
 @Composable
