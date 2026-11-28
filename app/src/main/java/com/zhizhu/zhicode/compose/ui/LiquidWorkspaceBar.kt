@@ -85,16 +85,16 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.blur
 import top.yukonga.miuix.kmp.blur.drawBackdrop
-import top.yukonga.miuix.kmp.blur.highlight.BloomStroke
-import top.yukonga.miuix.kmp.blur.highlight.Highlight
-import top.yukonga.miuix.kmp.blur.highlight.LightPosition
-import top.yukonga.miuix.kmp.blur.highlight.LightSource
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
-import top.yukonga.miuix.kmp.blur.sensor.rememberDeviceTilt
+import top.yukonga.miuix.kmp.material.EdgeLightSource
+import top.yukonga.miuix.kmp.material.EdgePeak
+import top.yukonga.miuix.kmp.material.EdgeStroke
+import top.yukonga.miuix.kmp.material.edgeStroke
+import top.yukonga.miuix.kmp.material.sensor.rememberDeviceTilt
 import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
+import top.yukonga.miuix.kmp.material.isRuntimeShaderSupported
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -105,16 +105,13 @@ import kotlin.math.sin
 
 private val LocalLiquidTabScale = staticCompositionLocalOf { { 1f } }
 
-private val LiquidSpecular = Highlight(
+private val LiquidSpecular = EdgeStroke(
     width = 1.dp,
-    alpha = 1f,
-    style = BloomStroke(
-        color = Color.White.copy(alpha = 0.12f),
-        innerBlurRadius = 2.dp,
-        primaryLight = LightSource(LightPosition(0.5f, -0.3f, -0.05f), Color.White, 1f),
-        secondaryLight = LightSource(LightPosition(0.5f, 0.8f, -0.5f), Color.White, 0.4f),
-        dualPeak = true,
-    ),
+    bevel = 2.dp,
+    color = Color.White.copy(alpha = 0.12f),
+    primary = EdgeLightSource(0.5f, -0.3f, -0.05f, Color.White, 1f),
+    secondary = EdgeLightSource(0.5f, 0.8f, -0.5f, Color.White, 0.4f),
+    peak = EdgePeak.Dual,
 )
 
 private const val LIQUID_LIGHT_REF_X = 0.5f
@@ -124,7 +121,7 @@ private val GRAVITY_STEP = (3.0 * PI / 180.0).toFloat()
 
 /** High-frequency sensor state is quantized and only read while drawing the highlight. */
 @Composable
-private fun rememberGravityHighlight(base: Highlight, extraDegrees: Float): androidx.compose.runtime.State<Highlight> {
+private fun rememberGravityHighlight(base: EdgeStroke, extraDegrees: Float): androidx.compose.runtime.State<EdgeStroke> {
     val tiltState = rememberDeviceTilt()
     val gravityAngle = remember(tiltState) {
         derivedStateOf {
@@ -140,18 +137,12 @@ private fun rememberGravityHighlight(base: Highlight, extraDegrees: Float): andr
     }
     return remember(base, gravityAngle, extraDegrees) {
         derivedStateOf {
-            val style = base.style as BloomStroke
-            val primary = style.primaryLight
+            val primary = base.primary
             val radians = gravityAngle.value + extraDegrees * PI.toFloat() / 180f
             base.copy(
-                style = style.copy(
-                    primaryLight = primary.copy(
-                        position = LightPosition(
-                            x = LIQUID_LIGHT_REF_X + cos(radians),
-                            y = LIQUID_LIGHT_REF_Y + sin(radians),
-                            z = primary.position.z,
-                        ),
-                    ),
+                primary = primary.copy(
+                    x = LIQUID_LIGHT_REF_X + cos(radians),
+                    y = LIQUID_LIGHT_REF_Y + sin(radians),
                 ),
             )
         }
@@ -328,12 +319,15 @@ internal fun LiquidWorkspaceBar(
                                     blur(4.dp.toPx(), 4.dp.toPx())
                                     lens(refractionHeight = 24.dp.toPx(), refractionAmount = 24.dp.toPx())
                                 },
-                                highlight = { baseHighlight.value.copy(alpha = 0.75f) },
                                 layerBlock = {
                                     val s = lerp(1f, 1f + 16.dp.toPx() / size.width.coerceAtLeast(1f), drag.pressProgress)
                                     scaleX = s; scaleY = s
                                 },
                                 onDrawSurface = { drawRect(containerColor) },
+                            ).edgeStroke(
+                                shape = shape,
+                                stroke = { baseHighlight.value },
+                                alpha = { 0.75f },
                             ) else Modifier.background(surface, shape)
                         )
                         .then(if (supportedBlur) interactive.modifier.then(interactive.gestureModifier) else Modifier)
@@ -392,7 +386,6 @@ internal fun LiquidWorkspaceBar(
                                     val p = drag.pressProgress
                                     lens(refractionHeight = 10.dp.toPx() * p, refractionAmount = 14.dp.toPx() * p, depthEffect = true, chromaticAberration = 0.5f)
                                 },
-                                highlight = { pillHighlight.value.copy(alpha = drag.pressProgress) },
                                 layerBlock = {
                                     scaleX = drag.scaleX; scaleY = drag.scaleY
                                     val velocity = drag.velocity / 10f
@@ -404,6 +397,11 @@ internal fun LiquidWorkspaceBar(
                                     drawRect(if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.1f), alpha = 1f - p)
                                     drawRect(Color.Black.copy(alpha = 0.03f * p))
                                 },
+                            )
+                            .edgeStroke(
+                                shape = shape,
+                                stroke = { pillHighlight.value },
+                                alpha = { drag.pressProgress },
                             )
                             .innerShadow(shape) {
                                 InnerShadow(radius = 8.dp * drag.pressProgress, color = Color.Black.copy(alpha = 0.15f), alpha = drag.pressProgress)
