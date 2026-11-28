@@ -28,12 +28,13 @@ import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiUsageBar
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 internal fun List<AgentTask>.currentWindow(max: Int): List<AgentTask> {
     if (max <= 0) return emptyList()
@@ -54,33 +55,39 @@ fun AgentProgressCard(
     /** 为真时表示外层已经有悬浮外壳（`FloatingToolbar`），本卡不再画自己的底板。 */
     embedded: Boolean = false,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
 
     // 嵌在悬浮外壳里时不再画自己的底板与外边距
     if (!embedded) {
-        Surface(
+        Card(
             onClick = onExpand,
             modifier = modifier.fillMaxWidth().padding(vertical = 6.dp),
-            shape = RoundedCornerShape(LocalZhiPageSet.current.cardCorner),
-            color = LocalZhiPageSet.current.cardSurface(),
-            contentColor = scheme.onSurface,
+            cornerRadius = LocalZhiPageSet.current.cardCorner,
+            insideMargin = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+            colors = CardDefaults.defaultColors(
+                color = LocalZhiPageSet.current.cardSurface(),
+                contentColor = scheme.onSurface,
+            ),
+            pressFeedbackType = PressFeedbackType.Sink,
+            holdDownState = true,
         ) {
-            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-                CardBody(status = status, tasks = tasks, maxTasks = maxTasks)
-            }
+            CardBody(status = status, tasks = tasks, maxTasks = maxTasks)
         }
     } else {
         // 悬浮形态：整块壳已经提供了圆角与背景，这里只铺内容。
-        Surface(
+        Card(
             onClick = onExpand,
             modifier = modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(ZhiRadius.floating),
-            color = Color.Transparent,
-            contentColor = scheme.onSurface,
+            cornerRadius = ZhiRadius.floating,
+            insideMargin = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+            colors = CardDefaults.defaultColors(
+                color = Color.Transparent,
+                contentColor = scheme.onSurface,
+            ),
+            pressFeedbackType = PressFeedbackType.Sink,
+            holdDownState = true,
         ) {
-            Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)) {
-                CardBody(status = status, tasks = tasks, maxTasks = maxTasks, compact = true)
-            }
+            CardBody(status = status, tasks = tasks, maxTasks = maxTasks, compact = true)
         }
     }
 }
@@ -92,7 +99,7 @@ private fun CardBody(
     maxTasks: Int,
     compact: Boolean = false,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val done = tasks.count { it.state == TaskState.DONE }
     // 悬浮形态同样要露任务行（只是条数少、每条一行）：它不是"只有总数"的进度条，
     // 而是"我现在做到哪一条了"。所以 compact 只改**条数**与**每条的详略**，不改"画不画"。
@@ -104,14 +111,14 @@ private fun CardBody(
             Text(
                 text = "任务进度",
                 color = scheme.onSurface,
-                style = MaterialTheme.typography.bodyLarge,
+                fontSize = MiuixTheme.textStyles.body1.fontSize,
                 fontWeight = FontWeight.Bold,
             )
             Box(modifier = Modifier.weight(1f))
             Text(
                 text = "$done / ${tasks.size}",
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             )
         }
         // 进度条平滑推进
@@ -132,8 +139,8 @@ private fun CardBody(
                 Column(modifier = Modifier.padding(start = 8.dp)) {
                     Text(
                         text = task.title,
-                        color = if (task.state == TaskState.PENDING) scheme.onSurfaceVariant else scheme.onSurface,
-                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (task.state == TaskState.PENDING) scheme.onSurfaceVariantSummary else scheme.onSurface,
+                        fontSize = MiuixTheme.textStyles.body1.fontSize,
                         fontWeight = if (task.state == TaskState.RUNNING) FontWeight.Medium else FontWeight.Normal,
                     )
                     // 悬浮形态不给详情：它是"贴一条注记"，不是详情面板（全量在任务清单窗口里）。
@@ -144,8 +151,8 @@ private fun CardBody(
                         if (firstLine.isNotBlank()) {
                             Text(
                                 text = firstLine,
-                                color = scheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.labelMedium,
+                                color = scheme.onSurfaceVariantSummary,
+                                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                             )
                         }
                     }
@@ -159,7 +166,7 @@ private fun CardBody(
             Text(
                 text = "还有 $hidden 条 · 点按查看全部",
                 color = scheme.primary,
-                style = MaterialTheme.typography.labelMedium,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
@@ -174,14 +181,14 @@ private fun CardBody(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "计划模式",
-                    color = scheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                 )
                 Box(modifier = Modifier.weight(1f))
                 Text(
                     text = status,
                     color = scheme.primary,
-                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     fontWeight = FontWeight.Medium,
                 )
             }
@@ -199,7 +206,7 @@ internal fun TaskState.contentDescription(): String = when (this) {
 /** 任务状态指示器，任务卡与任务详情窗口共用。 */
 @Composable
 internal fun TaskStatusIndicator(state: TaskState, size: Dp = 13.dp) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     when (state) {
         TaskState.DONE -> Icon(
             painter = ZhiIcons.done,
@@ -207,11 +214,11 @@ internal fun TaskStatusIndicator(state: TaskState, size: Dp = 13.dp) {
             tint = ZhiColors.green(),
             modifier = Modifier.size(size),
         )
-        TaskState.RUNNING -> CircularProgressIndicator(modifier = Modifier.size(size), color = scheme.primary, strokeWidth = 2.dp)
+        TaskState.RUNNING -> InfiniteProgressIndicator(size = size, color = scheme.primary)
         TaskState.PENDING -> Icon(
             painter = ZhiIcons.pending,
             contentDescription = state.contentDescription(),
-            tint = scheme.onSurfaceVariant,
+            tint = scheme.onSurfaceVariantSummary,
             modifier = Modifier.size(size),
         )
     }

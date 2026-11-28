@@ -48,11 +48,10 @@ import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 
 /** 目标边长与降采样倍数。 */
@@ -190,7 +189,7 @@ internal fun ZhiImageThumb(
     onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     // 传 dp 而不是 px：解码器要的是像素，但这里拿不到 density 以外的信息
     val state = rememberDecodeState(image, (maxWidth.value * 2).toInt(), (height.value * 2).toInt())
 
@@ -224,14 +223,14 @@ internal fun ZhiImageThumb(
 /** 解码不出来时的兜底：文件名 + （失败时）一行说明。 */
 @Composable
 private fun FallbackLabel(name: String, failed: Boolean, maxWidth: Dp, modifier: Modifier = Modifier) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Column(
         modifier = modifier.padding(horizontal = 10.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
             text = name,
-            style = MaterialTheme.typography.labelMedium,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             color = scheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -240,8 +239,8 @@ private fun FallbackLabel(name: String, failed: Boolean, maxWidth: Dp, modifier:
         if (failed) {
             Text(
                 text = "图片无法显示",
-                style = MaterialTheme.typography.bodyMedium,
-                color = scheme.onSurfaceVariant,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                color = scheme.onSurfaceVariantSummary,
             )
         }
     }
@@ -256,7 +255,7 @@ internal fun ZhiPendingImageChip(
     onRemove: () -> Unit,
     onClick: (() -> Unit)? = null,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Box(modifier = Modifier.size(PendingImageSize)) {
         ZhiImageThumb(
             image = image,
@@ -291,13 +290,21 @@ private val PendingImageSize = 56.dp
 internal fun ZhiImageViewer(image: ChatImage?, onDismiss: () -> Unit) {
     // 退场时 `image` 已经是 null，内容不能跟着空掉（见 rememberLastNonNull）。
     val shownImage = rememberLastNonNull(image)
-    if (image == null) return
-    // 全屏：不走平台默认宽度，铺满整屏做纯黑看图。
-    Dialog(
+    OverlayDialog(
+        show = image != null,
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        // 全屏：外边距 / 内边距 / 圆角全清零，背景纯黑。
+        maxWidth = ViewerMaxDimension,
+        outsideMargin = ViewerZeroInsets,
+        insideMargin = ViewerZeroInsets,
+        cornerRadius = 0.dp,
+        backgroundColor = Color.Black,
+        enableWindowDim = false,
+        // 状态栏/导航栏的避让由下面自己的 padding 负责：全屏看图时
+        // 内容顶到状态栏下面才是"全屏"，× 按钮单独避让即可。
+        defaultWindowInsetsPadding = false,
     ) {
-        val shown = shownImage ?: return@Dialog
+        val shown = shownImage ?: return@OverlayDialog
         // 放大查看不做降采样上限（按 2048 解），但仍是 Fit：长截图在屏幕上
         // 本来就只能看到缩略形态，硬裁会把内容藏起来。
         val state = rememberDecodeState(shown, 2048, 2048)
@@ -375,7 +382,7 @@ internal fun ZhiAttachmentCard(
     attachment: ChatAttachment,
     modifier: Modifier = Modifier,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Row(
         modifier = modifier
             .clip(ZhiSquircle(ZhiRadius.inner))
@@ -403,7 +410,7 @@ internal fun ZhiAttachmentCard(
         ) {
             Text(
                 text = attachment.label,
-                style = MaterialTheme.typography.labelMedium,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 color = scheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -412,8 +419,8 @@ internal fun ZhiAttachmentCard(
             if (attachment.detail.isNotBlank()) {
                 Text(
                     text = attachment.detail,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = scheme.onSurfaceVariant,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
+                    color = scheme.onSurfaceVariantSummary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = 150.dp),

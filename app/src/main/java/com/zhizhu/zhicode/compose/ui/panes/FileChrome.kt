@@ -1,11 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -39,11 +34,13 @@ import com.zhizhu.zhicode.compose.ui.ZhiSegmentedTabs
 import com.zhizhu.zhicode.compose.ui.WorkspaceTabRowHeight
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.BreadcrumbBar
+import top.yukonga.miuix.kmp.basic.BreadcrumbItem
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.preference.CheckboxLocation
 import top.yukonga.miuix.kmp.preference.CheckboxPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -90,33 +87,16 @@ internal fun fileCountSummary(entries: List<FileEntry>): String {
 @Composable
 internal fun FileBreadcrumbBar(filePath: String, onNavigate: (String) -> Unit, modifier: Modifier = Modifier) {
     val items = remember(filePath) { breadcrumbItems(filePath) }
-    val scheme = MaterialTheme.colorScheme
-    Row(
-        modifier = modifier.horizontalScroll(rememberScrollState()),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        items.forEachIndexed { index, item ->
-            val isLast = index == items.lastIndex
-            Surface(
-                shape = CircleShape,
-                color = if (isLast) scheme.secondaryContainer else scheme.surfaceContainer,
-                contentColor = if (isLast) scheme.onSecondaryContainer else scheme.onSurfaceVariant,
-                onClick = { onNavigate(item.path) },
-            ) {
-                Text(
-                    text = item.text,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                )
-            }
-        }
-    }
+    BreadcrumbBar(
+        items = items,
+        onItemClick = { index -> items.getOrNull(index)?.let { onNavigate(it.path) } },
+        highlightIndex = items.lastIndex,
+        modifier = modifier,
+        insideMargin = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+    )
 }
-internal data class ZhiBreadcrumbItem(val path: String, val text: String)
 
-internal fun breadcrumbItems(filePath: String): List<ZhiBreadcrumbItem> {
+internal fun breadcrumbItems(filePath: String): List<BreadcrumbItem> {
     val normalized = filePath.trimEnd('/').ifEmpty { "/" }
     val appRoot = TermuxConstants.TERMUX_DATA_DIR_PATH.trimEnd('/')
     val sharedRoot = "/storage/emulated/0"
@@ -128,11 +108,11 @@ internal fun breadcrumbItems(filePath: String): List<ZhiBreadcrumbItem> {
     }
     val rest = if (normalized == start) "" else normalized.removePrefix(if (start == "/") "/" else "$start/")
     val startLabel = if (start == sharedRoot) "sdcard" else start.substringAfterLast('/').ifEmpty { "/" }
-    val items = mutableListOf(ZhiBreadcrumbItem(start, startLabel))
+    val items = mutableListOf(BreadcrumbItem(start, startLabel))
     var path = if (start == "/") "" else start
     rest.split('/').filter(String::isNotEmpty).forEach {
         path += "/$it"
-        items += ZhiBreadcrumbItem(path, it)
+        items += BreadcrumbItem(path, it)
     }
     return items
 }

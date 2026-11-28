@@ -2,20 +2,19 @@
 package com.zhizhu.zhicode.compose.ui.panes
 
 import android.graphics.Typeface
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
+import top.yukonga.miuix.kmp.basic.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -48,21 +47,22 @@ internal fun SoraEditor(
     overlay: (@Composable BoxScope.() -> Unit)? = null,
     containerColor: Color = Color.Transparent,
 ) {
-    Column(
+    Scaffold(
         modifier = modifier.fillMaxSize().imePadding(),
-    ) {
-        topBar()
+        containerColor = containerColor,
+        topBar = topBar,
+    ) { paddingValues ->
         var view by remember { mutableStateOf<CodeEditor?>(null) }
         val currentOnTextChange = rememberUpdatedState(onTextChange)
         val currentOnSearchResult = rememberUpdatedState(onSearchResult)
         val currentOnEditorCreated = rememberUpdatedState(onEditorCreated)
 
         Box(
-            modifier = Modifier.fillMaxSize().background(containerColor),
+            modifier = Modifier.fillMaxSize().padding(paddingValues),
             contentAlignment = Alignment.Center,
         ) {
             if (content == null) {
-                CircularProgressIndicator()
+                InfiniteProgressIndicator()
             } else {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),

@@ -16,11 +16,11 @@ import androidx.compose.ui.Modifier
 import java.util.LinkedHashMap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiColors
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 工具输出的有界、懒渲染文本视图。 */
 
@@ -83,7 +83,7 @@ private fun OutputWindow(text: String, diffMode: Boolean) {
                     } else {
                         Text(
                             text = line.ifEmpty { " " },
-                            style = MaterialTheme.typography.labelMedium,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                             fontFamily = FontFamily.Monospace,
                         )
                     }
@@ -99,21 +99,21 @@ private fun OutputWindow(text: String, diffMode: Boolean) {
 
 @Composable
 private fun DiffLine(line: String) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val (foreground, background) = when {
         line.startsWith("+++") || line.startsWith("---") ->
-            scheme.onSurfaceVariant to Color.Transparent
+            scheme.onSurfaceVariantSummary to Color.Transparent
         line.startsWith("+") -> ZhiColors.green() to ZhiColors.greenContainer()
         line.startsWith("-") -> ZhiColors.red() to ZhiColors.redContainer()
         line.startsWith("@@") -> scheme.primary to Color.Transparent
         line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("new file") ->
-            scheme.onSurfaceVariant to Color.Transparent
+            scheme.onSurfaceVariantSummary to Color.Transparent
         else -> scheme.onSurface to Color.Transparent
     }
     Text(
         text = line.ifEmpty { " " },
         color = foreground,
-        style = MaterialTheme.typography.labelMedium,
+        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
         fontFamily = FontFamily.Monospace,
         modifier = Modifier
             .fillMaxWidth()
@@ -124,17 +124,17 @@ private fun DiffLine(line: String) {
 
 @Composable
 private fun MoreLinesRow(hidden: Int, onClick: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         color = Color.Transparent,
-        contentColor = scheme.onSurfaceVariant,
+        contentColor = scheme.onSurfaceVariantSummary,
     ) {
         Text(
             text = "还有 $hidden 行 · 点按显示全部",
-            color = scheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelMedium,
+            color = scheme.onSurfaceVariantSummary,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             fontFamily = FontFamily.Monospace,
             modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
         )

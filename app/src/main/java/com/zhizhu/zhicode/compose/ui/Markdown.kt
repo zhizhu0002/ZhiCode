@@ -56,10 +56,11 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.util.LinkedHashMap
 
 @Composable
@@ -71,7 +72,7 @@ fun ZhiMarkdown(
     /** 正文字体族。 */
     bodyFontFamily: FontFamily? = null,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val inlineStyles = rememberInlineStyles(bodyFontSize)
     val split = remember(source, streaming) { splitForStreaming(source, streaming) }
     // 流式尾部会不断变化，不能写进进程级缓存；定稿正文则跨 LazyColumn 回收
@@ -175,7 +176,7 @@ private fun MdBlockView(
     fadeTail: Boolean = false,
     fadeRamp: Int = TailFadeMinChars,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val inlineStyles = rememberInlineStyles(fontSize)
 
     when (block) {
@@ -283,7 +284,7 @@ private fun MdBlockView(
 
 @Composable
 private fun BulletRow(block: MdBlock.Bullet, fontSize: TextUnit, styles: InlineStyles) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     // 每层缩进 12dp；太深时收敛，避免把正文挤成一条窄柱
     val indent = (block.depth * 12).coerceAtMost(48).dp
 
@@ -296,13 +297,13 @@ private fun BulletRow(block: MdBlock.Bullet, fontSize: TextUnit, styles: InlineS
             Icon(
                 painter = if (block.task) ZhiIcons.done else ZhiIcons.pending,
                 contentDescription = if (block.task) "已完成" else "未完成",
-                tint = if (block.task) ZhiColors.green() else scheme.onSurfaceVariant,
+                tint = if (block.task) ZhiColors.green() else scheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(top = 2.dp).size(fontSize.value.dp + 2.dp),
             )
         } else {
             Text(
                 text = block.marker,
-                color = scheme.onSurfaceVariant,
+                color = scheme.onSurfaceVariantSummary,
                 fontSize = fontSize,
                 // 有序列表的编号用等宽，位数不同也对得齐
                 fontFamily = if (block.marker == "•" || block.marker == "◦") {
@@ -325,7 +326,7 @@ private fun BulletRow(block: MdBlock.Bullet, fontSize: TextUnit, styles: InlineS
 
 @Composable
 private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val context = LocalContext.current
     val settings = LocalThemeSettings.current
     // 复制反馈的**本地**状态：点击后把标签换成「已复制」，约 520ms 后复原
@@ -344,13 +345,16 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
     val collapsed = collapsible && !expanded
     val shownLines = if (collapsed) lines.take(CodeCollapseLines) else lines
 
-    Surface(
+    Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(LocalZhiPageSet.current.innerCorner),
-        color = scheme.surfaceContainerHighest,
-        contentColor = scheme.onSurface,
+        cornerRadius = LocalZhiPageSet.current.innerCorner,
+        insideMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+        colors = CardDefaults.defaultColors(
+            color = scheme.surfaceContainerHighest,
+            contentColor = scheme.onSurface,
+        ),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Column {
             // 语言标记与「复制」同处一行：语言靠左（便于一眼看出是哪种代码）
             if (block.lang.isNotBlank() || block.body.isNotBlank()) {
                 Row(
@@ -359,8 +363,8 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
                 ) {
                     Text(
                         text = block.lang.ifBlank { "text" },
-                        color = scheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.weight(1f),
                     )
@@ -375,7 +379,7 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
                 }
             }
 
-            val bodyText = remember(shownLines, settings.codeLineNumbers, scheme.onSurfaceVariant) {
+            val bodyText = remember(shownLines, settings.codeLineNumbers, scheme.onSurfaceVariantSummary) {
                 if (settings.codeLineNumbers) {
                     // 行号宽度按**总行数**的位数算（不是当前显示的行数）：
                     // 折叠时若按显示行数算，展开那一刻整体会横向跳一下。
@@ -385,7 +389,7 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
                             if (index > 0) append('\n')
                             val number = (index + 1).toString().padStart(digits)
                             withStyle(
-                                SpanStyle(color = scheme.onSurfaceVariant.copy(alpha = 0.65f)),
+                                SpanStyle(color = scheme.onSurfaceVariantSummary.copy(alpha = 0.65f)),
                             ) {
                                 append(number)
                             }
@@ -427,8 +431,8 @@ private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
                 ) {
                     Text(
                         text = if (collapsed) "已折叠 ${lines.size - CodeCollapseLines} 行" else "",
-                        color = scheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         modifier = Modifier.weight(1f),
                     )
                     ZhiSmallPill(
@@ -455,7 +459,7 @@ private fun InlineLatexText(
     color: Color,
     bodyFontFamily: FontFamily?,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val density = androidx.compose.ui.platform.LocalDensity.current
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -547,7 +551,7 @@ private const val FormulaInlineContentTag = "androidx.compose.foundation.text.in
 /** 表格。 */
 @Composable
 private fun MdTableView(table: MdBlock.Table, fontSize: TextUnit, styles: InlineStyles) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val cols = maxOf(table.header.size, table.rows.maxOfOrNull { it.size } ?: 0)
     if (cols == 0) return
 
@@ -579,7 +583,7 @@ private fun MdTableView(table: MdBlock.Table, fontSize: TextUnit, styles: Inline
                     // 行间线用更淡的一档：表头线是结构分隔，行间线只是视觉引导
                     ZhiHorizontalDivider(
                         modifier = Modifier.fillMaxWidth(),
-                        color = scheme.outlineVariant.copy(alpha = 0.5f),
+                        color = scheme.dividerLine.copy(alpha = 0.5f),
                     )
                 }
             }
@@ -595,7 +599,7 @@ private fun TableRow(
     styles: InlineStyles,
     header: Boolean,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
@@ -623,7 +627,7 @@ private class InlineStyles(
 
 @Composable
 private fun rememberInlineStyles(fontSize: TextUnit): InlineStyles {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     return remember(fontSize, scheme) {
         InlineStyles(
             codeColor = scheme.primary,

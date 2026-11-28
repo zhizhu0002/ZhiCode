@@ -72,13 +72,16 @@ import com.zhizhu.zhicode.compose.ui.ZhiImageViewer
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
 import com.zhizhu.zhicode.compose.ui.ZhiNoticeBar
 import com.zhizhu.zhicode.compose.ui.ZhiNoticeTone
-import androidx.compose.material3.CircularProgressIndicator
+import top.yukonga.miuix.kmp.anim.SinOutEasing
+import top.yukonga.miuix.kmp.basic.Badge
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /** 对话流里的卡片全部改用 Miuix [Card] */
 private val BubbleMargin = PaddingValues(horizontal = 10.dp, vertical = 5.dp)
@@ -95,7 +98,7 @@ private val RowMargin = PaddingValues(horizontal = 9.dp, vertical = 7.dp)
 /** 空态，对应原版 addEmptyState()。 */
 @Composable
 fun EmptyState() {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 82.dp, bottom = 40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -108,8 +111,8 @@ fun EmptyState() {
         )
         Text(
             text = "ZhiCode 可以读取项目、编辑文件、运行命令，并在内置 Debian 容器中验证修改。",
-            color = scheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyLarge,
+            color = scheme.onBackgroundVariant,
+            fontSize = MiuixTheme.textStyles.body1.fontSize,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp),
         )
     }
@@ -118,20 +121,20 @@ fun EmptyState() {
 /** 会话正在载入时的占位。 */
 @Composable
 fun TranscriptLoadingState() {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 82.dp, bottom = 40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
             text = "正在载入会话…",
-            color = scheme.onSurfaceVariant,
+            color = scheme.onBackgroundVariant,
             fontSize = MiuixTheme.textStyles.title2.fontSize,
         )
         Text(
             text = "内容较多时需要几秒。正在读取最近的若干条消息。",
-            color = scheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyLarge,
+            color = scheme.onSurfaceVariantSummary,
+            fontSize = MiuixTheme.textStyles.body1.fontSize,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 10.dp),
         )
     }
@@ -140,7 +143,7 @@ fun TranscriptLoadingState() {
 /** 列表顶部「上面还有更早的历史」的占位。 */
 @Composable
 fun OlderLoader(loading: Boolean) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     // 文案里写出**具体条数**：只说"更早的消息"时用户不知道一次补多少，
     // 也就无法判断"要不要为了找某一条一直往下拉"。
     val count = com.zhizhu.zhicode.compose.data.SessionReader.PAGE_MESSAGES
@@ -151,8 +154,8 @@ fun OlderLoader(loading: Boolean) {
     ) {
         Text(
             text = if (loading) "正在加载更早的 $count 条…" else "下拉或继续上滑，加载更早的 $count 条",
-            color = scheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelMedium,
+            color = scheme.onBackgroundVariant,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
         )
     }
 }
@@ -160,15 +163,15 @@ fun OlderLoader(loading: Boolean) {
 /** 「已经到会话开头」的终点提示。 */
 @Composable
 fun TranscriptStartHint() {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp, end = 14.dp),
         horizontalArrangement = Arrangement.Center,
     ) {
         Text(
             text = "已经到会话开头",
-            color = scheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelSmall,
+            color = scheme.onBackgroundVariant,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
         )
     }
 }
@@ -176,7 +179,7 @@ fun TranscriptStartHint() {
 /** 列表末尾的「回到最新」。 */
 @Composable
 fun JumpToLatest(onJumpToLatest: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp, end = 14.dp),
         horizontalArrangement = Arrangement.Center,
@@ -189,7 +192,7 @@ fun JumpToLatest(onJumpToLatest: () -> Unit) {
         ) {
             Text(
                 text = "回到最新",
-                style = MaterialTheme.typography.labelMedium,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
             )
@@ -200,7 +203,7 @@ fun JumpToLatest(onJumpToLatest: () -> Unit) {
 /** 用户消息气泡，右对齐。长按触发操作菜单。 */
 @Composable
 fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     // 放大查看的当前图。
     var viewing by remember { mutableStateOf<ChatImage?>(null) }
 
@@ -210,17 +213,19 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.End,
     ) {
-        Surface(
+        Card(
+            onLongPress = onLongPress,
             // 宽度 = 「内容自适应，上限 86%」：先按可用宽取 86% 作为**上限**
-            modifier = Modifier
-                .widthIn(max = 420.dp)
-                .combinedClickable(onClick = {}, onLongClick = onLongPress),
-            shape = RoundedCornerShape(ZhiRadius.floating),
-            /* 用户气泡：**蓝底白字**（用户明确要求）。 */
-            color = scheme.primary,
-            contentColor = scheme.onPrimary,
+            modifier = Modifier.widthIn(max = 420.dp),
+            cornerRadius = ZhiRadius.floating,
+            insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            colors = CardDefaults.defaultColors(
+                /* 用户气泡：**蓝底白字**（用户明确要求）。 */
+                color = scheme.primary,
+                contentColor = scheme.onPrimary,
+            ),
+            pressFeedbackType = PressFeedbackType.None,
         ) {
-            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             // 附件画在正文**上方**：一条「图 + 一句话」的消息，图是主体
             ZhiAttachmentRow(
                 attachments = item.attachments,
@@ -230,13 +235,12 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
             if (item.body.isNotBlank()) {
                 Text(
                     text = item.body,
-                    style = MaterialTheme.typography.titleMedium,
+                    fontSize = MiuixTheme.textStyles.title4.fontSize,
                     fontWeight = FontWeight.Normal,
                 )
             }
-            }
         }
-    }
+        }
 
     // 放大查看：浮层挂在气泡之外（OverlayDialog 画在主窗口里）。
     ZhiImageViewer(image = viewing, onDismiss = { viewing = null })
@@ -249,7 +253,7 @@ fun AssistantCard(
     onToggleThinking: () -> Unit,
     onLongPress: () -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val chatSettings = LocalThemeSettings.current
     val chatFontScale = chatSettings.chatFontScale
     val chatFontFamily = ChatFontLoader.rememberChatFontFamily(chatSettings)
@@ -260,21 +264,23 @@ fun AssistantCard(
     } else {
         item.body
     }
-    // 与 UserBubble 用同一套容器参数（同样的圆角与内边距）
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp, horizontal = 2.dp)
-            .combinedClickable(onClick = {}, onLongClick = onLongPress),
-        shape = RoundedCornerShape(LocalZhiPageSet.current.cardCorner),
+    // 与 UserBubble 用同一套容器参数（同样的 ZhiRadius.card 圆角与 BubbleMargin 内边距）
+    Card(
+        onLongPress = onLongPress,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 2.dp),
+        cornerRadius = LocalZhiPageSet.current.cardCorner,
+        insideMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
         // 助手正文使用极轻的容器底，保留阅读连续性，同时与用户气泡形成清晰层级。
-        color = LocalZhiPageSet.current.cardSurface(),
-        contentColor = scheme.onSurface,
+        colors = CardDefaults.defaultColors(
+            // 使用当前主题的独立容器层，不再把浅色 surface 以低 alpha 叠在背板上。
+            color = LocalZhiPageSet.current.cardSurface(),
+            contentColor = scheme.onSurface,
+        ),
+        pressFeedbackType = PressFeedbackType.None,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp)
                 // clip 在 animateContentSize **外侧**：思考面板展开/收起时文字
                 // 按自然高度绘制、被逐帧露出来（详见 ToolGroupCard 的注释）。
                 .clipToBounds()
@@ -301,7 +307,7 @@ fun AssistantCard(
                     Text(
                         text = "正文较长，已显示前 ${MaxInitialMarkdownChars / 1000} KB · 点按展开全部",
                         color = scheme.primary,
-                        style = MaterialTheme.typography.labelMedium,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     )
                 }
             }
@@ -311,15 +317,15 @@ fun AssistantCard(
                     initialValue = 1f,
                     targetValue = 0.15f,
                     animationSpec = infiniteRepeatable(
-                        animation = tween(ZhiMotion.FADE_IN_MILLIS, easing = androidx.compose.animation.core.LinearOutSlowInEasing),
+                        animation = tween(ZhiMotion.FADE_IN_MILLIS, easing = SinOutEasing),
                         repeatMode = RepeatMode.Reverse,
                     ),
                     label = "stream-cursor-alpha",
                 )
                 Text(
                     text = "▍",
-                    color = scheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyLarge,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.body1.fontSize,
                     modifier = Modifier
                         .padding(top = 1.dp)
                         .graphicsLayer { alpha = cursorAlpha.value },
@@ -335,24 +341,24 @@ fun AssistantCard(
                     if (item.elapsedMs >= 0) {
                         Text(
                             text = formatElapsed(item.elapsedMs),
-                            color = scheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                             fontFamily = FontFamily.Monospace,
                         )
                     }
                     if (item.editedFiles.isNotEmpty()) {
                         Text(
                             text = if (item.elapsedMs >= 0) " · " else "",
-                            color = scheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         )
                         Text(
                             // 只列前几个 + 计数：一屏里改二十个文件时，
                             // 把它们全写出来会把卡片撑得很长。
                             text = "改了 " + item.editedFiles.take(2).joinToString("、") +
                                 if (item.editedFiles.size > 2) " 等 ${item.editedFiles.size} 个文件" else "",
-                            color = scheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -377,21 +383,21 @@ fun AssistantCard(
 /** 上下文页脚，复刻原版 `addContextFooter`（`MainActivity.java:2152-2166`） */
 @Composable
 private fun ContextFooter(tokens: Int, window: Int) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val safeWindow = if (window > 0) window else 200_000
     val usedPct = Math.round(tokens * 100.0 / safeWindow).toInt().coerceIn(0, 999)
     val remaining = (100 - usedPct.coerceAtMost(100)).coerceAtLeast(0)
     val color = when {
         usedPct >= 90 -> ZhiColors.red()
         usedPct >= 72 -> scheme.primary
-        else -> scheme.onSurfaceVariant
+        else -> scheme.onSurfaceVariantSummary
     }
     val label = "上下文 " + WorkspaceViewModel.formatTokens(tokens) + " / " +
         WorkspaceViewModel.formatTokens(safeWindow) + " · 剩余 " + remaining + "%"
     Text(
         text = label,
         color = color,
-        style = MaterialTheme.typography.labelSmall,
+        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
         fontFamily = FontFamily.Monospace,
         modifier = Modifier.padding(top = 5.dp, end = 3.dp),
     )
@@ -400,7 +406,7 @@ private fun ContextFooter(tokens: Int, window: Int) {
 /** 思考过程折叠面板，对应原版 refreshAssistantThinking()。 */
 @Composable
 private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     // 点击区域覆盖**整块**面板（表头 + 展开后的正文 + 折叠时的一行摘要）
     Surface(
         onClick = onToggle,
@@ -422,7 +428,7 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                 Text(
                     text = "思考过程" + (if (item.streaming) " · 进行中" else ""),
                     color = scheme.primary,
-                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     modifier = Modifier.padding(start = 5.dp),
                 )
             }
@@ -442,8 +448,8 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                         item.processSteps.forEach { step ->
                             Text(
                                 text = "· $step",
-                                color = scheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodyMedium,
+                                color = scheme.onSurfaceVariantSummary,
+                                fontSize = MiuixTheme.textStyles.body2.fontSize,
                                 modifier = Modifier.padding(start = 6.dp, top = 2.dp),
                             )
                         }
@@ -451,8 +457,8 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
                     if (item.thinking.isNotEmpty()) {
                         Text(
                             text = item.thinking,
-                            color = scheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium,
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = MiuixTheme.textStyles.body2.fontSize,
                             modifier = Modifier.padding(start = 6.dp, top = 4.dp),
                         )
                     }
@@ -460,8 +466,8 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
             } else if (item.thinking.isNotEmpty()) {
                 Text(
                     text = item.thinking,
-                    color = scheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 6.dp),
@@ -480,7 +486,7 @@ fun ToolBatch(
     onToggleGroup: (String) -> Unit,
     onToolAction: (String, String) -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val toolById = remember(item.tools) { item.tools.associateBy { it.id } }
     val segments = remember(item.tools) {
         ToolGrouping.group(item.tools.map { it.toGroupingEntry() })
@@ -500,13 +506,15 @@ fun ToolBatch(
                 is ToolGrouping.Segment.Single -> {
                     val tool = toolById[segment.entry.toolId] ?: return@forEach
                     key(tool.id) {
-                        Surface(
+                        Card(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
-                            shape = RoundedCornerShape(LocalZhiPageSet.current.cardCorner),
-                            color = LocalZhiPageSet.current.cardSurface(),
-                            contentColor = scheme.onSurface,
+                            cornerRadius = LocalZhiPageSet.current.cardCorner,
+                            insideMargin = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
+                            colors = CardDefaults.defaultColors(
+                                color = LocalZhiPageSet.current.cardSurface(),
+                                contentColor = scheme.onSurface,
+                            ),
                         ) {
-                        Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp)) {
                         ToolRow(
                             activity = tool,
                             nowMs = runningClock,
@@ -515,7 +523,6 @@ fun ToolBatch(
                             onToolAction = { label -> onToolAction(tool.id, label) },
                             onImageOpen = { viewing = it },
                         )
-                        }
                         }
                     }
                 }
@@ -565,7 +572,7 @@ private fun ToolGroupCard(
     /** 某一行里的预览图被点开（需要全屏查看）。宿主在 [ToolBatch]。 */
     onImageOpen: (ChatImage) -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     // 这张卡片只需要"这一组"自己的判据，所以在这里重建一份 Segment.Group —
     // 判据仍然出自 ToolGrouping，不在这里另写一套计数。
     val group = remember(members) {
@@ -577,14 +584,17 @@ private fun ToolGroupCard(
     val done = ToolGrouping.isDone(group)
     val failed = ToolGrouping.hasFailure(group)
 
-    Surface(
+    Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
-        shape = RoundedCornerShape(LocalZhiPageSet.current.cardCorner),
-        color = LocalZhiPageSet.current.cardSurface(),
-        contentColor = scheme.onSurface,
+        cornerRadius = LocalZhiPageSet.current.cardCorner,
+        insideMargin = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
+        colors = CardDefaults.defaultColors(
+            color = LocalZhiPageSet.current.cardSurface(),
+            contentColor = scheme.onSurface,
+        ),
     ) {
     Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 5.dp),
+        modifier = Modifier.fillMaxWidth(),
     ) {
         // 表头点击走 Miuix Surface(onClick)：不再手写 Modifier.clickable。
         // 传的是"切换"：展开态由 `ChatItem.expandedGroups` 记账，这一层不去推目标状态。
@@ -619,7 +629,7 @@ private fun ToolGroupCard(
             Text(
                 text = ToolGrouping.label(group, batchDone = done),
                 color = scheme.onSurface,
-                style = MaterialTheme.typography.bodyLarge,
+                fontSize = MiuixTheme.textStyles.body1.fontSize,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -629,8 +639,8 @@ private fun ToolGroupCard(
         } // Surface(onClick) 表头
         Text(
             text = ToolGrouping.subtitle(group, expanded = expanded, batchDone = done),
-            color = if (failed) ZhiColors.red() else scheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodyMedium,
+            color = if (failed) ZhiColors.red() else scheme.onSurfaceVariantSummary,
+            fontSize = MiuixTheme.textStyles.body2.fontSize,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = 21.dp, top = 2.dp),
@@ -669,7 +679,7 @@ private fun ToolRow(
     /** 展开态里的预览图被点开。 */
     onImageOpen: (ChatImage) -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val isCommand = activity.kind == ToolKind.COMMAND
     // 引擎单独算好的统一 diff（写文件类工具才有）。它是**另一块井**，
     // 和 output 并列显示，不是二选一 —— 见下面 EXPANDED 分支。
@@ -735,7 +745,7 @@ private fun ToolRow(
             Text(
                 text = activity.displayName,
                 color = scheme.onSurface,
-                style = MaterialTheme.typography.bodyMedium,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -745,8 +755,8 @@ private fun ToolRow(
             if (!isCommand && activity.summary.isNotEmpty()) {
                 Text(
                     text = "  " + activity.summary,
-                    color = scheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelMedium,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -776,7 +786,7 @@ private fun ToolRow(
                 Icon(
                     painter = ZhiIcons.more,
                     contentDescription = "工具操作",
-                    tint = scheme.onSurfaceVariant,
+                    tint = scheme.onSurfaceVariantSummary,
                     modifier = Modifier.size(18.dp),
                 )
             }
@@ -786,8 +796,8 @@ private fun ToolRow(
         if (isCommand && commandLine.isNotEmpty()) {
             Text(
                 text = "  " + commandLine,
-                color = if (activity.expanded) scheme.onSurface else scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = if (activity.expanded) scheme.onSurface else scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontFamily = FontFamily.Monospace,
                 // 展开时**不限制行数**：完整命令是用户主动要求看的，再截就等于没展开。
                 maxLines = if (activity.expanded) Int.MAX_VALUE else 2,
@@ -812,8 +822,8 @@ private fun ToolRow(
                 ToolStatusRegion.RUNNING -> RunningPanel(activity, nowMs, isCommand = isCommand)
                 ToolStatusRegion.COLLAPSED -> Text(
                     text = "  ⎿  " + collapsedSummary,
-                    color = if (activity.failed) ZhiColors.red() else scheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelMedium,
+                    color = if (activity.failed) ZhiColors.red() else scheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.padding(start = 22.dp, bottom = 2.dp),
                 )
@@ -828,28 +838,31 @@ private fun ToolRow(
                     }
                     val diffText = if (hasDiff) activity.diff else if (isFileDiff) activity.output else ""
                     if (diffText.isNotBlank()) {
-                        Surface(
+                        Card(
                             modifier = Modifier.padding(start = 23.dp, top = 5.dp),
-                            shape = RoundedCornerShape(LocalZhiPageSet.current.innerCorner),
-                            color = ZhiColors.terminalSurface(),
-                            contentColor = scheme.onSurfaceVariant,
+                            // 反编译版这里用的是 `round(TERMINAL_BG, 10)` —— `ZhiRadius.inner` 正是 10dp
+                            cornerRadius = LocalZhiPageSet.current.innerCorner,
+                            insideMargin = PaddingValues(vertical = 6.dp),
+                            colors = CardDefaults.defaultColors(
+                                color = ZhiColors.terminalSurface(),
+                                contentColor = scheme.onSurfaceVariantSummary,
+                            ),
                         ) {
-                            Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                                DiffLines(diffText)
-                            }
+                            DiffLines(diffText)
                         }
                     }
                     if (activity.output.isNotBlank()) {
-                        Surface(
+                        Card(
                             modifier = Modifier.padding(start = 23.dp, top = 5.dp),
-                            shape = RoundedCornerShape(LocalZhiPageSet.current.innerCorner),
-                            color = ZhiColors.terminalSurface(),
-                            contentColor = scheme.onSurfaceVariant,
+                            cornerRadius = LocalZhiPageSet.current.innerCorner,
+                            insideMargin = PaddingValues(8.dp),
+                            colors = CardDefaults.defaultColors(
+                                color = ZhiColors.terminalSurface(),
+                                contentColor = scheme.onSurfaceVariantSummary,
+                            ),
                         ) {
-                            Column(modifier = Modifier.padding(8.dp)) {
-                                // OutputLines 与 DiffLines 共用同一套「最多渲染 300 行 + 点按显示全部」
-                                OutputLines(activity.output)
-                            }
+                            // OutputLines 与 DiffLines 共用同一套「最多渲染 300 行 + 点按显示全部」
+                            OutputLines(activity.output)
                         }
                     }
                 }
@@ -862,7 +875,7 @@ private fun ToolRow(
 
 @Composable
 private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val live = remember(activity.kind, activity.output) { liveOutputPreview(activity) }
     val label = runningToolLabel(activity, nowMs)
 
@@ -872,45 +885,46 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
         Column(modifier = Modifier.padding(start = 23.dp, top = 2.dp)) {
             Text(
                 text = label,
-                color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelSmall,
+                color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 fontFamily = FontFamily.Monospace,
             )
             if (live.isNotEmpty()) {
-                Surface(
+                Card(
                     modifier = Modifier.padding(top = 3.dp, bottom = 3.dp),
-                    shape = RoundedCornerShape(LocalZhiPageSet.current.innerCorner),
-                    color = ZhiColors.terminalSurface(),
-                    contentColor = scheme.onSurfaceVariant,
+                    cornerRadius = LocalZhiPageSet.current.innerCorner,
+                    insideMargin = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                    colors = CardDefaults.defaultColors(
+                        color = ZhiColors.terminalSurface(),
+                        contentColor = scheme.onSurfaceVariantSummary,
+                    ),
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
                     Text(
                         text = live,
-                        color = scheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         fontFamily = FontFamily.Monospace,
                         maxLines = 12,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    }
                 }
             }
         }
         return
     }
 
-    Surface(
+    Card(
         // margins(23, 4, 0, 4)
         modifier = Modifier.padding(start = 23.dp, top = 4.dp, bottom = 4.dp),
-        shape = RoundedCornerShape(LocalZhiPageSet.current.innerCorner),
-        color = ZhiColors.terminalSurface(),
-        contentColor = scheme.onSurfaceVariant,
+        cornerRadius = LocalZhiPageSet.current.innerCorner,
+        // padding(10, 7, 10, 8)
+        insideMargin = PaddingValues(start = 10.dp, top = 7.dp, end = 10.dp, bottom = 8.dp),
+        colors = CardDefaults.defaultColors(
+            color = ZhiColors.terminalSurface(),
+            contentColor = scheme.onSurfaceVariantSummary,
+        ),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 10.dp, top = 7.dp, end = 10.dp, bottom = 8.dp),
-        ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth().height(22.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -923,7 +937,7 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
                         initialValue = 1f,
                         targetValue = 0.45f,
                         animationSpec = infiniteRepeatable(
-                            animation = tween(900, easing = androidx.compose.animation.core.LinearOutSlowInEasing),
+                            animation = tween(900, easing = SinOutEasing),
                             repeatMode = RepeatMode.Reverse,
                         ),
                         label = "runningDotAlpha",
@@ -935,7 +949,7 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
                         .size(7.dp)
                         .graphicsLayer { alpha = dotAlpha }
                         .background(
-                            color = if (activity.awaitingPermission) scheme.onSurfaceVariant else scheme.primary,
+                            color = if (activity.awaitingPermission) scheme.onSurfaceVariantSummary else scheme.primary,
                             // 7dp 的状态圆点：直径小于 10dp 时 G2 与圆弧在屏幕上无法分辨，
                             // 而每个 squircle 都要开一次离屏层。这里保持圆弧是有意的。
                             shape = RoundedCornerShape(4.dp),
@@ -943,8 +957,8 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
                 )
                 Text(
                     text = activity.displayName,
-                    color = scheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -953,8 +967,8 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
                 Box(modifier = Modifier.weight(1f))
                 Text(
                     text = if (activity.awaitingPermission) "等待授权…" else label,
-                    color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelSmall,
+                    color = if (activity.awaitingPermission) scheme.primary else scheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                 )
@@ -965,7 +979,7 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
                 Text(
                     text = ToolText.truncateCommand(activity.command),
                     color = scheme.onSurface,
-                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -978,8 +992,8 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
             else "等待程序输出…"
             Text(
                 text = body,
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelSmall,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 fontFamily = FontFamily.Monospace,
                 // 实时区只按行数控制高度（见 `LiveOutput.preview`）
                 maxLines = 12,
@@ -998,7 +1012,7 @@ private fun ToolActivity.isFileDiff(): Boolean = ToolText.isFileDiff(toolName, o
 /** 行首状态字形，复刻原版 `addToolCard()` 的 `statusGlyph` */
 @Composable
 private fun ToolStatusGlyph(activity: ToolActivity) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     // 状态用 Miuix 图标 / 进度指示器表达，不再手写 ✓ × ○ ● 这些字符：
     // 字符字形依赖字体，等宽字体缺字时会显示成方块，而且颜色/粗细无法统一。
     Box(modifier = Modifier.width(23.dp), contentAlignment = Alignment.Center) {
@@ -1022,7 +1036,7 @@ private fun ToolStatusGlyph(activity: ToolActivity) {
                 modifier = Modifier.size(13.dp),
             )
             // 运行中：不确定态转圈，而不是一个静止的 ●（静止字符看不出"在进行"）
-            else -> CircularProgressIndicator(modifier = Modifier.size(12.dp), color = scheme.primary, strokeWidth = 2.dp)
+            else -> InfiniteProgressIndicator(size = 12.dp, color = scheme.primary)
         }
     }
 }
@@ -1124,7 +1138,7 @@ private fun DiffCount(label: String, color: Color) {
     Text(
         text = label,
         color = color,
-        style = MaterialTheme.typography.labelSmall,
+        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
         fontFamily = FontFamily.Monospace,
         modifier = Modifier.padding(horizontal = 5.dp),
     )

@@ -38,10 +38,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.DpSize
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.TermuxTerminalPane
@@ -67,6 +63,13 @@ import com.zhizhu.zhicode.compose.ui.panes.TerminalRuntimeNotice
 import com.zhizhu.zhicode.compose.ui.panes.rememberTerminalState
 import com.zhizhu.zhicode.compose.ui.panes.toast
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 fun TerminalPage(
@@ -180,7 +183,7 @@ private fun RealTerminalPane(
                         icon = ZhiIcons.menu,
                         description = "会话列表",
                         onClick = { drawerOpen = true },
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        tint = MiuixTheme.colorScheme.onSurface,
                         compact = 30.dp,
                         iconSize = 16.dp,
                     )
@@ -320,7 +323,7 @@ private fun TerminalPlaceholder(
     message: String = "",
     onInstall: (() -> Unit)? = null,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val listState = rememberLazyListState()
 
     val autoFollow by rememberAutoFollow(listState)
@@ -356,7 +359,7 @@ private fun TerminalPlaceholder(
                             Text(
                                 text = line.text.ifEmpty { " " },
                                 color = toneColor(line.tone, scheme.onSurface),
-                                style = MaterialTheme.typography.bodyMedium,
+                                fontSize = MiuixTheme.textStyles.body2.fontSize,
                                 fontFamily = FontFamily.Monospace,
                                 modifier = Modifier.animateItem(),
                             )
@@ -371,8 +374,8 @@ private fun TerminalPlaceholder(
                 } else {
                     "内置 Debian 环境未就绪，无法启动终端。"
                 },
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp),
             )
             // 「环境未就绪」以前只有一句话，没有任何可点的东西 —— 用户得自己
@@ -397,7 +400,7 @@ private fun TerminalSetupAction(
     modifier: Modifier = Modifier,
 ) {
     if (onInstall == null) return
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Column(modifier = modifier) {
         if (installing) {
             if (progress in 1..99) {
@@ -410,15 +413,15 @@ private fun TerminalSetupAction(
             }
             Text(
                 text = message.ifBlank { "正在解压并配置内置 Debian + PRoot 环境…" },
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
             )
         } else {
             Button(
                 onClick = onInstall,
                 modifier = Modifier.fillMaxWidth(),
-                
+                colors = ButtonDefaults.buttonColorsPrimary(),
             ) {
                 Text(text = "初始化运行环境", color = scheme.onPrimary)
             }
@@ -426,7 +429,7 @@ private fun TerminalSetupAction(
                 Text(
                     text = message,
                     color = scheme.error,
-                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
             }
@@ -436,10 +439,10 @@ private fun TerminalSetupAction(
 
 @Composable
 private fun toneColor(tone: TerminalTone, fallback: Color): Color {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     return when (tone) {
         TerminalTone.NORMAL -> fallback
-        TerminalTone.DIM -> scheme.onSurfaceVariant
+        TerminalTone.DIM -> scheme.onSurfaceVariantSummary
         TerminalTone.PROMPT -> scheme.primary
         TerminalTone.ERROR -> ZhiColors.red()
         TerminalTone.SUCCESS -> ZhiColors.green()

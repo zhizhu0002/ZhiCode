@@ -20,6 +20,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.clickable
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.slideInVertically
+import top.yukonga.miuix.kmp.basic.Surface
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.scaleIn
@@ -40,6 +41,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import top.yukonga.miuix.kmp.basic.PullToRefresh
+import top.yukonga.miuix.kmp.basic.rememberPullToRefreshState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
@@ -85,12 +88,14 @@ import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import com.zhizhu.zhicode.compose.ui.rememberFingerTracker
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import top.yukonga.miuix.kmp.anim.SinOutEasing
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
+import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 /** 对话内容的指纹。 */
 private data class ContentStamp(
@@ -163,7 +168,7 @@ fun ChatList(
     val onLoadOlderState by rememberUpdatedState(onLoadOlder)
     val onLoadLatestState by rememberUpdatedState(onLoadLatest)
     // 顶部下拉的刷新指示器状态。`remember` 一次即可：它只在内部驱动那圈动画。
-    val pullToRefreshState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+    val pullToRefreshState = rememberPullToRefreshState()
 
     // 长驻 effect 读取 State 的最新值，不能冻结首次组合时的 Boolean。
     val autoFollowState = rememberAutoFollowHandle(listState, forceFollowToken = state.scrollToBottomToken)
@@ -474,18 +479,26 @@ fun ChatList(
                     }
                 },
         ) {
-            PullToRefreshBox(
-                isRefreshing = state.transcriptLoadingOlder,
-                onRefresh = loadOlderWithAnchor,
-                state = pullToRefreshState,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(start = 14.dp)
-                        .pointerInput(state.multiSelectMode, blocks, state.transcript.isEmpty(), state.transcriptHasOlder) {
+            PullToRefresh(
+            isRefreshing = state.transcriptLoadingOlder,
+            onRefresh = loadOlderWithAnchor,
+            pullToRefreshState = pullToRefreshState,
+            // 文案里带具体条数：只说"更早的消息"时用户不知道一次补多少。
+            refreshTexts = listOf(
+                "下拉加载更早的 ${com.zhizhu.zhicode.compose.data.SessionReader.PAGE_MESSAGES} 条",
+                "松开加载",
+                "正在加载…",
+            ),
+            contentPadding = PaddingValues(top = topInset),
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 14.dp)
+                    .overScrollVertical()
+                    .scrollEndHaptic()
+                    .pointerInput(state.multiSelectMode, blocks, state.transcript.isEmpty(), state.transcriptHasOlder) {
                         if (!state.multiSelectMode || blocks.isEmpty()) return@pointerInput
                         // 块 → 成员 id。手势里要用它把一个块下标翻译成"要选哪些消息"。
                         val blockIds = blocks.map { block ->
@@ -792,7 +805,7 @@ fun ChatList(
 /** 悬浮的「回到底部」胶囊。 */
 @Composable
 private fun ScrollToBottomPill(onClick: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Surface(
         onClick = onClick,
         color = scheme.surfaceContainerHigh,
@@ -801,7 +814,7 @@ private fun ScrollToBottomPill(onClick: () -> Unit) {
     ) {
         Text(
             text = "回到底部",
-            style = MaterialTheme.typography.labelMedium,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
         )
@@ -810,7 +823,7 @@ private fun ScrollToBottomPill(onClick: () -> Unit) {
 
 @Composable
 private fun MessageDebugStrip(item: ChatItem) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     var showSource by remember(item.id) { mutableStateOf(false) }
     val running = item.tools.count { !it.completed && !it.awaitingPermission }
     val failed = item.tools.count { it.failed }
@@ -823,7 +836,7 @@ private fun MessageDebugStrip(item: ChatItem) {
         ) {
             Text(
                 text = item.kind.name,
-                style = MaterialTheme.typography.labelSmall,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 fontWeight = FontWeight.Bold,
                 color = when (item.kind) {
                     ChatKind.ERROR -> ZhiColors.red()
@@ -845,9 +858,9 @@ private fun MessageDebugStrip(item: ChatItem) {
                     if (item.contextTokens >= 0) append(" ctx").append(item.contextTokens)
                     append("  ").append(item.id)
                 },
-                style = MaterialTheme.typography.labelSmall,
+                fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                 fontFamily = FontFamily.Monospace,
-                color = scheme.onSurfaceVariant,
+                color = scheme.onSurfaceVariantSummary,
                 // 元信息是**单行且不换行**的：它不该把消息卡往下推，
                 // 超长时截断即可（要看全的在调试浮层的「对话条目」里）。
                 maxLines = 1,
@@ -864,19 +877,20 @@ private fun MessageDebugStrip(item: ChatItem) {
             )
         }
         if (showSource) {
-            Surface(
+            Card(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                shape = RoundedCornerShape(LocalZhiPageSet.current.innerCorner),
-                color = ZhiColors.cardInnerSurface(),
-                contentColor = scheme.onSurfaceVariant,
+                cornerRadius = LocalZhiPageSet.current.innerCorner,
+                insideMargin = PaddingValues(8.dp),
+                colors = CardDefaults.defaultColors(
+                    color = ZhiColors.cardInnerSurface(),
+                    contentColor = scheme.onSurfaceVariantSummary,
+                ),
             ) {
-                Column(modifier = Modifier.padding(8.dp)) {
-                    Text(
-                        text = item.body,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                }
+                Text(
+                    text = item.body,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    fontFamily = FontFamily.Monospace,
+                )
             }
         }
     }
@@ -905,25 +919,28 @@ private fun ChatItem.fullyExpanded(): ChatItem = when (kind) {
 /** 内联的**完整**任务清单（调试模式专用）。 */
 @Composable
 private fun InlineTaskList(tasks: List<AgentTask>) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val done = tasks.count { it.state == TaskState.DONE }
     Column(
         modifier = Modifier.fillMaxWidth().padding(end = 14.dp, top = 6.dp, bottom = 4.dp),
     ) {
         Text(
             text = "TASK_LIST  $done/${tasks.size}  （调试模式 · 完整清单）",
-            style = MaterialTheme.typography.labelSmall,
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
             color = scheme.primary,
         )
-        Surface(
+        Card(
             modifier = Modifier.fillMaxWidth().padding(top = 3.dp),
-            shape = RoundedCornerShape(LocalZhiPageSet.current.cardCorner),
-            color = LocalZhiPageSet.current.cardSurface(),
-            contentColor = scheme.onSurface,
+            cornerRadius = LocalZhiPageSet.current.cardCorner,
+            insideMargin = PaddingValues(10.dp),
+            colors = CardDefaults.defaultColors(
+                color = LocalZhiPageSet.current.cardSurface(),
+                contentColor = scheme.onSurface,
+            ),
         ) {
-            Column(modifier = Modifier.padding(10.dp)) {
+            Column {
                 tasks.forEachIndexed { index, task ->
                     if (index > 0) {
                         ZhiHorizontalDivider(modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp))
@@ -939,21 +956,21 @@ private fun InlineTaskList(tasks: List<AgentTask>) {
                             tint = when (task.state) {
                                 TaskState.DONE -> ZhiColors.green()
                                 TaskState.RUNNING -> scheme.primary
-                                TaskState.PENDING -> scheme.onSurfaceVariant
+                                TaskState.PENDING -> scheme.onSurfaceVariantSummary
                             },
                             modifier = Modifier.size(13.dp),
                         )
                         Text(
                             text = task.title,
-                            style = MaterialTheme.typography.bodyLarge,
+                            fontSize = MiuixTheme.textStyles.body1.fontSize,
                             fontWeight = if (task.state == TaskState.RUNNING) FontWeight.Medium else FontWeight.Normal,
                             modifier = Modifier.padding(start = 7.dp).weight(1f),
                         )
                         Text(
                             text = task.state.name,
-                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                             fontFamily = FontFamily.Monospace,
-                            color = scheme.onSurfaceVariant,
+                            color = scheme.onSurfaceVariantSummary,
                         )
                     }
                     // 详情是 Markdown（真实任务清单窗口里也是这么渲染的），
@@ -961,7 +978,7 @@ private fun InlineTaskList(tasks: List<AgentTask>) {
                     if (task.detail.isNotBlank()) {
                         ZhiMarkdown(
                             source = task.detail,
-                            bodyFontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                            bodyFontSize = MiuixTheme.textStyles.body2.fontSize,
                             modifier = Modifier.padding(start = 20.dp, top = 3.dp),
                         )
                     }
@@ -1007,7 +1024,7 @@ private fun AnimatedMember(
     LaunchedEffect(Unit) {
         progress.animateTo(
             1f,
-            animationSpec = tween(ZhiMotion.FADE_IN_MILLIS, easing = androidx.compose.animation.core.LinearOutSlowInEasing),
+            animationSpec = tween(ZhiMotion.FADE_IN_MILLIS, easing = SinOutEasing),
         )
         done = true
     }
@@ -1055,7 +1072,7 @@ private data class TranscriptStamp(
 /** 多选模式下每条消息左侧的勾选框。 */
 @Composable
 private fun SelectionCheckbox(checked: Boolean, onToggle: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Box(
         modifier = Modifier
             .padding(start = 2.dp, top = 14.dp, end = 4.dp)
@@ -1063,10 +1080,12 @@ private fun SelectionCheckbox(checked: Boolean, onToggle: () -> Unit) {
             .clickable(onClick = onToggle),
         contentAlignment = Alignment.Center,
     ) {
-        // M3E 勾选框：与文件页多选、输入器底排同一套视觉。
-        Checkbox(
-            checked = checked,
-            onCheckedChange = { onToggle() },
+        // 用 Miuix Checkbox，与输入器底排、选择器里的行首控件同一套视觉。
+        // 26dp 是库里的固定尺寸，这里缩到 0.84 让它不把消息卡挤得太窄。
+        top.yukonga.miuix.kmp.basic.Checkbox(
+            state = if (checked) androidx.compose.ui.state.ToggleableState.On
+            else androidx.compose.ui.state.ToggleableState.Off,
+            onClick = onToggle,
             modifier = Modifier.graphicsLayer {
                 val s = 0.84f
                 scaleX = s
@@ -1085,7 +1104,7 @@ private fun SelectionBar(
     onCancel: () -> Unit,
     onExport: () -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     Surface(
         color = scheme.surfaceContainerHigh,
         contentColor = scheme.onSurface,
@@ -1097,23 +1116,23 @@ private fun SelectionBar(
         ) {
             Text(
                 text = if (count == 0) "选择要导出的消息" else "已选 $count / $total 条",
-                style = MaterialTheme.typography.labelMedium,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f),
             )
             // 全选 / 取消全选：同一个入口来回切。
             Text(
                 text = if (total > 0 && count >= total) "取消全选" else "全选",
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 modifier = Modifier
                     .clickable(enabled = total > 0, onClick = onToggleAll)
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             )
             Text(
                 text = "取消",
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 modifier = Modifier
                     .clickable(onClick = onCancel)
                     .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -1121,8 +1140,8 @@ private fun SelectionBar(
             Text(
                 text = "导出",
                 // 没勾选时用禁用色而不是隐藏：用户要知道"这一步可以做，只是还没满足条件"。
-                color = if (count == 0) scheme.onSurfaceVariant else scheme.primary,
-                style = MaterialTheme.typography.labelMedium,
+                color = if (count == 0) scheme.onSurfaceVariantSummary else scheme.primary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier
                     .clickable(enabled = count > 0, onClick = onExport)

@@ -20,11 +20,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import kotlinx.coroutines.delay
+import top.yukonga.miuix.kmp.basic.FloatingToolbar
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 fun MessageBar(
@@ -34,7 +35,7 @@ fun MessageBar(
     wide: Boolean,
     glass: Glass,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     // 淡出期间还要显示旧文案，所以要自己留一份。
     var shown by remember { mutableStateOf(message) }
     var shownError by remember { mutableStateOf(isError) }
@@ -83,7 +84,7 @@ fun MessageBar(
                 ) {
                     Text(
                         text = text,
-                        style = MaterialTheme.typography.labelMedium,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                         color = scheme.onSurface,
                         maxLines = MAX_LINES,
                         overflow = TextOverflow.Ellipsis,

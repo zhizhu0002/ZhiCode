@@ -31,7 +31,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -64,6 +63,10 @@ import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import com.zhizhu.zhicode.pi.PiModelConfig
 import com.zhizhu.zhicode.pi.clampThinkingLevel
 import com.zhizhu.zhicode.pi.resolveMenuThinkingLevels
+import top.yukonga.miuix.kmp.basic.DropdownDefaults
+import top.yukonga.miuix.kmp.basic.DropdownEntry
+import top.yukonga.miuix.kmp.basic.DropdownItem
+import top.yukonga.miuix.kmp.popup.OverlayDropdownPopup
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.model.Attachment
 import com.zhizhu.zhicode.compose.model.ChatImage
@@ -73,6 +76,7 @@ import com.zhizhu.zhicode.compose.model.SlashCommand
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.ui.Glass
 import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.ui.ZhiFilledIconButton
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogShell
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideInsideMargin
 import com.zhizhu.zhicode.compose.ui.dialogs.DialogWideOutsideMargin
@@ -84,24 +88,25 @@ import com.zhizhu.zhicode.compose.ui.FloatingBottomShell
 import com.zhizhu.zhicode.compose.ui.ZhiPendingImageChip
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
+import com.zhizhu.zhicode.compose.ui.ZhiIconDropdownMenu
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
+import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
+import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
+import com.zhizhu.zhicode.compose.ui.ZhiTextDropdownChip
+import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import kotlin.math.roundToInt
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.TextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.foundation.text.input.TextFieldLineLimits
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextFieldDefaults
+import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** 输入器，对应原版 buildComposer() */
 @Composable
@@ -153,7 +158,7 @@ fun Composer(
     onFocusChanged: (Boolean) -> Unit = {},
 ) {
     ZhiFrameTrace.countRecompose("Composer")
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     var contextDetailOpen by remember { mutableStateOf(false) }
 
     /* 发送键可用性：从输入框状态派生，只在"空/非空"翻转时让读它的地方失效。 */
@@ -298,28 +303,29 @@ fun Composer(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                TextField(
+                ZhiTextField(
                     // 文字归 ComposerTextState 所有（见参数说明）。
                     state = textState.field,
-                    placeholder = {
-                        Text(
-                            text = "描述任务或向 ZhiCode 提问",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = scheme.onSurfaceVariant,
-                        )
-                    },
-                    // 透明容器 + 无描边：只留外层 M3E 药丸框
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent,
+                    label = "描述任务或向 ZhiCode 提问",
+                    useLabelAsPlaceholder = true,
+                    // 透明容器 + 透明描边：只留外层方角框
+                    colors = TextFieldDefaults.textFieldColors(
+                        // 浅色模式下不再用半透明的最高层容器，否则输入框会变成
+                        // 一块偏灰的脏色；使用主题明确提供的输入容器层。
+                        backgroundColor = if (ZhiColors.isDark()) scheme.surfaceContainerHighest else ZhiColors.panelSurface(),
+                        labelColor = scheme.onSurfaceVariantSummary,
+                        borderColor = Color.Transparent,
                     ),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Normal),
-                    // 只占一行起，随内容长高
-                    lineLimits = TextFieldLineLimits.MultiLine(minHeightInLines = 1, maxHeightInLines = 5),
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
+                    // 收紧 Miuix TextField 的内部留白，让输入区更矮
+                    insideMargin = DpSize(6.dp, 1.dp),
+                    // 常规字重的正文样式：Miuix 主题默认文字样式偏粗，会显得比原版重
+                    textStyle = MiuixTheme.textStyles.main.copy(
+                        fontSize = MiuixTheme.textStyles.title4.fontSize,
+                        fontWeight = FontWeight.Normal,
+                    ),
+                    // 比原版的 minLines = 2 更矮，只占一行起，随内容长高
+                    minLines = 1,
+                    maxLines = 5,
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 36.dp)
@@ -332,28 +338,21 @@ fun Composer(
                     enter = fadeIn(ZhiMotion.fadeInSpec) + expandHorizontally(ZhiMotion.sizeSpec),
                     exit = fadeOut(ZhiMotion.fadeOutSpec) + shrinkHorizontally(ZhiMotion.sizeSpec),
                 ) {
-                    FilledIconButton(
+                    ZhiFilledIconButton(
+                        icon = ZhiIcons.stop,
+                        description = if (state.stopping) {
+                            "停止指令已发出，再次点击会重发中断"
+                        } else {
+                            "立即停止当前任务"
+                        },
                         onClick = onStop,
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = scheme.error,
-                            contentColor = scheme.onError,
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .padding(start = 6.dp, bottom = 2.dp)
-                            .size(ComposerActionSize)
-                            .selfPressSink(),
-                    ) {
-                        Icon(
-                            painter = ZhiIcons.stop,
-                            contentDescription = if (state.stopping) {
-                                "停止指令已发出，再次点击会重发中断"
-                            } else {
-                                "立即停止当前任务"
-                            },
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
+                        containerColor = scheme.error,
+                        contentColor = scheme.onError,
+                        square = true,
+                        iconSize = 12.dp,
+                        size = ComposerActionSize,
+                        modifier = Modifier.padding(start = 6.dp, bottom = 2.dp).selfPressSink(),
+                    )
                 }
 
                 Box(
@@ -366,24 +365,19 @@ fun Composer(
                             onLongClick = onSendWithoutReply,
                         ),
                 ) {
-                    FilledIconButton(
+                    ZhiFilledIconButton(
+                        description = "发送消息（长按：只发送不等待回复）",
+                        icon = ZhiIcons.send,
+                        iconSize = 16.dp,
+                        // 点击必须**真的**接在这里：见上面那段说明，
+                        // 交给外层是收不到的。
                         onClick = onSend,
+                        containerColor = scheme.primary,
+                        contentColor = scheme.onPrimary,
                         enabled = canSend,
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = scheme.primary,
-                            contentColor = scheme.onPrimary,
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.size(ComposerActionSize),
-                    ) {
-                        Icon(
-                            painter = ZhiIcons.send,
-                            // 点击必须**真的**接在这里：见上面那段说明，
-                            // 交给外层是收不到的。
-                            contentDescription = "发送消息（长按：只发送不等待回复）",
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
+                        square = true,
+                        size = ComposerActionSize,
+                    )
                 }
             }
 
@@ -403,28 +397,28 @@ fun Composer(
                     Text(
                         text = "M↓ 实时预览",
                         color = scheme.primary,
-                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
                         text = "  ${debugText.length} 字 · ${state.attachments.size} 附件 · " +
                             (state.slashQuery?.let { "斜杠「$it」" } ?: "无斜杠"),
-                        color = scheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         fontFamily = FontFamily.Monospace,
                     )
                 }
                 if (debugText.isBlank()) {
                     Text(
                         text = "输入框为空；在上面写点 Markdown（# 标题 / - 列表 / **粗体** / `代码` / 表格）即会在此渲染。",
-                        color = scheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariantSummary,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
                         modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
                     )
                 } else {
                     ZhiMarkdown(
                         source = debugText,
-                        bodyFontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                        bodyFontSize = MiuixTheme.textStyles.body2.fontSize,
                         modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
                     )
                 }
@@ -439,62 +433,52 @@ fun Composer(
                 val photoIcon = ZhiIcons.image
                 // 「从系统文件管理器选」用**打开的文件夹**（`directory`）
                 val systemFileIcon = ZhiIcons.directory
-                M3eAnchorMenu(
-                    groups = remember(
+                ZhiIconDropdownMenu(
+                    items = remember(
                         attachFileIcon, photoIcon, systemFileIcon,
                         onAttachFile, onPickImage, onPickSystemFiles,
                     ) {
                         listOf(
-                            M3eMenuGroup(
-                                items = listOf(
-                                    M3eMenuItem(
-                                        text = "附加项目文件",
-                                        summary = "浏览项目目录",
-                                        icon = attachFileIcon,
-                                        onClick = onAttachFile,
-                                    ),
-                                    M3eMenuItem(
-                                        text = "文件管理器",
-                                        summary = "从系统里挑，可多选",
-                                        icon = systemFileIcon,
-                                        onClick = onPickSystemFiles,
-                                    ),
-                                    M3eMenuItem(
-                                        text = "上传照片",
-                                        summary = "作为视觉输入",
-                                        icon = photoIcon,
-                                        onClick = onPickImage,
-                                    ),
-                                ),
+                            ZhiMenuItem(
+                                text = "附加项目文件",
+                                summary = "浏览项目目录",
+                                icon = attachFileIcon,
+                                onClick = onAttachFile,
+                            ),
+                            ZhiMenuItem(
+                                text = "文件管理器",
+                                summary = "从系统里挑，可多选",
+                                icon = systemFileIcon,
+                                onClick = onPickSystemFiles,
+                            ),
+                            ZhiMenuItem(
+                                text = "上传照片",
+                                summary = "作为视觉输入",
+                                icon = photoIcon,
+                                onClick = onPickImage,
                             ),
                         )
                     },
-                ) { toggle ->
-                    IconButton(onClick = toggle, modifier = Modifier.size(M3eChipHeight)) {
-                        Icon(
-                            painter = ZhiIcons.attach,
-                            contentDescription = "添加附件",
-                            tint = scheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
+                ) {
+                    Icon(
+                        painter = ZhiIcons.attach,
+                        contentDescription = "添加附件",
+                        tint = scheme.onBackgroundVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
 
-                M3eTextMenuChip(
+                ZhiTextDropdownChip(
                     label = state.permissionMode.label,
-                    groups = remember(state.permissionMode, onPermissionSelected) {
-                        listOf(
-                            M3eMenuGroup(
-                                items = PermissionMode.entries.map { mode ->
-                                    M3eMenuItem(
-                                        text = mode.label,
-                                        summary = mode.detail,
-                                        selected = mode == state.permissionMode,
-                                        onClick = { onPermissionSelected(mode) },
-                                    )
-                                },
-                            ),
-                        )
+                    items = remember(state.permissionMode, onPermissionSelected) {
+                        PermissionMode.entries.map { mode ->
+                            ZhiMenuItem(
+                                text = mode.label,
+                                summary = mode.detail,
+                                selected = mode == state.permissionMode,
+                                onClick = { onPermissionSelected(mode) },
+                            )
+                        }
                     },
                 )
                 val keyboard = LocalSoftwareKeyboardController.current
@@ -505,8 +489,9 @@ fun Composer(
                     if (efforts.size > 1) "${state.modelLabel} · ${state.effort.label}" else state.modelLabel
                 }
                 Box(modifier = Modifier.weight(1f)) {
-                    M3ePill(
+                    ZhiSmallPill(
                         label = modelChipLabel,
+                        marquee = true,
                         onClick = {
                             keyboard?.hide()
                             onModelThinkingChip()
@@ -523,7 +508,7 @@ fun Composer(
                     )
                 }
                 Box {
-                    M3ePill(
+                    ZhiSmallPill(
                         label = shorten(state.profileName.ifBlank { "未配置" }, if (wide) 18 else 10),
                         onClick = {
                             keyboard?.hide()
@@ -562,19 +547,19 @@ fun Composer(
 
 @Composable
 private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
-    Surface(
+    val scheme = MiuixTheme.colorScheme
+    Card(
         // 横向排布所以是**定宽**。160dp 是"一行放两个半"的折中：
         // 文件名能显示 8~10 个汉字，再窄就只剩图标；超过就横滑（见调用点）。
         modifier = Modifier.width(AttachmentChipWidth),
-        shape = RoundedCornerShape(LocalZhiPageSet.current.innerCorner),
-        color = scheme.surfaceContainerHigh,
-        contentColor = scheme.onSurface,
+        cornerRadius = LocalZhiPageSet.current.innerCorner,
+        insideMargin = PaddingValues(start = 6.dp, end = 2.dp, top = 5.dp, bottom = 5.dp),
+        colors = CardDefaults.defaultColors(
+            color = scheme.surfaceContainerHigh,
+            contentColor = scheme.onSurface,
+        ),
     ) {
-        Row(
-            modifier = Modifier.padding(start = 6.dp, end = 2.dp, top = 5.dp, bottom = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
                     .size(30.dp)
@@ -595,7 +580,7 @@ private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
             ) {
                 Text(
                     text = attachment.label,
-                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     color = scheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -605,8 +590,8 @@ private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
                 if (attachment.sizeLabel.isNotBlank()) {
                     Text(
                         text = attachment.sizeLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = scheme.onSurfaceVariant,
+                        fontSize = MiuixTheme.textStyles.footnote2.fontSize,
+                        color = scheme.onSurfaceVariantSummary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -669,7 +654,7 @@ private fun ContextUsageRingBadge(
     window: Int,
     onClick: () -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val fraction = if (window > 0) (tokens.toFloat() / window).coerceIn(0f, 1f) else 0f
     val pct = (fraction * 100f).roundToInt().coerceIn(0, 100)
     val pctLabel = formatContextPercentLabel(tokens, window)
@@ -681,7 +666,7 @@ private fun ContextUsageRingBadge(
     val textColor = when {
         pct >= 90 -> scheme.error
         pct >= 72 -> ZhiColors.amber()
-        else -> scheme.onSurfaceVariant
+        else -> scheme.onSurfaceVariantSummary
     }
     Row(
         modifier = Modifier
@@ -701,9 +686,10 @@ private fun ContextUsageRingBadge(
         Text(
             text = pctLabel,
             color = textColor,
-            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+            fontSize = MiuixTheme.textStyles.footnote2.fontSize,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
+            style = MiuixTheme.textStyles.footnote2.copy(fontFeatureSettings = "tnum"),
         )
     }
 }
@@ -726,14 +712,14 @@ private fun ModelThinkingPopupMenu(
     onConfigureModels: () -> Unit,
 ) {
     val shown = rememberLastNonNull(picker) ?: return
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val subModel = shown.expandedModel
-    val groups = if (subModel == null) {
+    val entries = if (subModel == null) {
         if (shown.models.isEmpty()) {
             listOf(
-                M3eMenuGroup(
+                DropdownEntry(
                     items = listOf(
-                        M3eMenuItem(
+                        DropdownItem(
                             text = "当前供应商暂无本地模型",
                             summary = "点击前往供应商设置添加模型",
                             onClick = onConfigureModels,
@@ -756,11 +742,13 @@ private fun ModelThinkingPopupMenu(
                         append(" · 非推理")
                     }
                 }
-                M3eMenuItem(
+                DropdownItem(
                     text = model.name.ifBlank { model.id },
                     summary = summary,
                     selected = isCurrent,
-                    icon = if (multiTier) ZhiIcons.expand else null,
+                    icon = if (multiTier) {
+                        { m -> Icon(painter = ZhiIcons.expand, contentDescription = null, tint = scheme.onSurfaceVariantSummary, modifier = m) }
+                    } else null,
                     onClick = {
                         if (multiTier) {
                             onEnterSubmenu(model)
@@ -771,12 +759,12 @@ private fun ModelThinkingPopupMenu(
                 )
             }
             listOf(
-                M3eMenuGroup(items = modelItems),
-                M3eMenuGroup(
+                DropdownEntry(items = modelItems),
+                DropdownEntry(
                     items = listOf(
-                        M3eMenuItem(
+                        DropdownItem(
                             text = "配置此供应商模型",
-                            icon = ZhiIcons.edit,
+                            icon = { m -> Icon(painter = ZhiIcons.edit, contentDescription = null, tint = scheme.primary, modifier = m) },
                             onClick = onConfigureModels,
                         ),
                     ),
@@ -789,19 +777,19 @@ private fun ModelThinkingPopupMenu(
             clampThinkingLevel(levels, shown.currentEffort.toPiLevel())
         } else null
         listOf(
-            M3eMenuGroup(
+            DropdownEntry(
                 items = listOf(
-                    M3eMenuItem(
+                    DropdownItem(
                         text = "← 返回模型列表",
                         summary = subModel.name.ifBlank { subModel.id },
                         onClick = onBackToModels,
                     ),
                 ),
             ),
-            M3eMenuGroup(
+            DropdownEntry(
                 items = levels.map { piLevel ->
                     val uiEffort = EffortLevel.entries.firstOrNull { it.wire == piLevel.id } ?: EffortLevel.HIGH
-                    M3eMenuItem(
+                    DropdownItem(
                         text = uiEffort.label,
                         summary = subModel.thinkingLevelMap[piLevel]?.let { "映射：$it" },
                         selected = piLevel == clampedActive,
@@ -812,10 +800,15 @@ private fun ModelThinkingPopupMenu(
         )
     }
 
-    M3eAnchoredMenu(
-        expanded = picker != null,
+    OverlayDropdownPopup(
+        entries = entries,
+        show = picker != null,
         onDismiss = onDismiss,
-        groups = groups,
+        onDismissFinished = {},
+        maxHeight = 360.dp,
+        dropdownColors = DropdownDefaults.dropdownColors(),
+        renderInRootScaffold = true,
+        collapseOnSelection = false,
     )
 }
 
@@ -829,12 +822,13 @@ private fun ProviderPopupMenu(
     onManageProviders: () -> Unit,
 ) {
     val shown = rememberLastNonNull(picker) ?: return
+    val scheme = MiuixTheme.colorScheme
     val providerItems = shown.profiles.map { profile ->
         val summary = buildList {
             if (profile.protocolLabel.isNotBlank()) add(profile.protocolLabel)
             if (profile.models.isNotEmpty()) add("${profile.models.size} 个模型")
         }.joinToString(" · ")
-        M3eMenuItem(
+        DropdownItem(
             text = profile.name,
             summary = summary.ifBlank { null },
             selected = profile.id == shown.activeProfileId,
@@ -842,26 +836,31 @@ private fun ProviderPopupMenu(
         )
     }
     val actionItems = listOf(
-        M3eMenuItem(
+        DropdownItem(
             text = "新增供应商",
-            icon = ZhiIcons.add,
+            icon = { m -> Icon(painter = ZhiIcons.add, contentDescription = null, tint = scheme.primary, modifier = m) },
             onClick = onAddProvider,
         ),
-        M3eMenuItem(
+        DropdownItem(
             text = "供应商管理",
-            icon = ZhiIcons.settings,
+            icon = { m -> Icon(painter = ZhiIcons.settings, contentDescription = null, tint = scheme.primary, modifier = m) },
             onClick = onManageProviders,
         ),
     )
-    val groups = buildList {
-        if (providerItems.isNotEmpty()) add(M3eMenuGroup(items = providerItems))
-        add(M3eMenuGroup(items = actionItems))
+    val entries = buildList {
+        if (providerItems.isNotEmpty()) add(DropdownEntry(items = providerItems))
+        add(DropdownEntry(items = actionItems))
     }
 
-    M3eAnchoredMenu(
-        expanded = picker != null,
+    OverlayDropdownPopup(
+        entries = entries,
+        show = picker != null,
         onDismiss = onDismiss,
-        groups = groups,
+        onDismissFinished = {},
+        maxHeight = 360.dp,
+        dropdownColors = DropdownDefaults.dropdownColors(),
+        renderInRootScaffold = true,
+        collapseOnSelection = true,
     )
 }
 
@@ -872,7 +871,7 @@ private fun ContextDetailsDialog(
     onCompact: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val used = state.contextTokens.coerceAtLeast(0)
     val window = state.contextWindow.coerceAtLeast(0)
     val remaining = if (window > 0) (window - used).coerceAtLeast(0) else 0
@@ -885,11 +884,30 @@ private fun ContextDetailsDialog(
         else -> scheme.primary
     }
 
-    if (!show) return
-    AlertDialog(
+    OverlayDialog(
+        show = show,
         onDismissRequest = onDismiss,
-        title = { Text("上下文占用") },
-        text = {
+        largeScreen = true,
+        maxWidth = ZhiDialogWidth.Compact,
+        outsideMargin = DialogWideOutsideMargin,
+        insideMargin = DialogWideInsideMargin,
+    ) {
+        DialogShell(
+            title = "上下文占用",
+            actions = {
+                if (!state.composerBusy && used > 0) {
+                    SecondaryButton(
+                        text = "压缩上下文",
+                        onClick = onCompact,
+                    )
+                }
+                PrimaryButton(
+                    text = "关闭",
+                    onClick = onDismiss,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            },
+        ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     ContextProgressRing(
@@ -901,8 +919,8 @@ private fun ContextDetailsDialog(
                     )
                     Text(
                         text = "$pctLabel  ·  ${formatTokenCountShort(used)} / ${formatTokenCountShort(window)}",
-                        color = scheme.onSurface,
-                        style = MaterialTheme.typography.bodyLarge,
+                        color = scheme.onBackground,
+                        fontSize = MiuixTheme.textStyles.body1.fontSize,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -912,21 +930,11 @@ private fun ContextDetailsDialog(
                         "窗口上限：${"%,d".format(window)} tokens\n" +
                         "当前模型：${state.profileName} · ${state.modelLabel}\n" +
                         "自动压缩：${if (state.settings.autoCompact) "开启（达到 ${state.settings.autoCompactPercent}% 触发）" else "关闭"}",
-                    color = scheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelMedium,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     lineHeight = 20.sp,
                 )
             }
-        },
-        confirmButton = {
-            if (!state.composerBusy && used > 0) {
-                SecondaryButton(text = "压缩上下文", onClick = onCompact)
-            }
-            PrimaryButton(
-                text = "关闭",
-                onClick = onDismiss,
-                modifier = Modifier.padding(start = 8.dp),
-            )
-        },
-    )
+        }
+    }
 }

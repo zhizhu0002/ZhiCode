@@ -13,11 +13,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -29,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.rememberScrollState
@@ -64,6 +58,11 @@ import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.LocalImeMotion
 import androidx.compose.ui.unit.IntOffset
+import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Surface
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 
 /** 终端外壳的一套配色。取值来自原 `applyPaletteValues` 的深/浅两档。 */
@@ -81,15 +80,15 @@ private class Chrome(
 
 @Composable
 private fun chrome(): Chrome {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     return Chrome(
-        bar = scheme.surfaceContainer,
+        bar = scheme.surface,
         keyBg = LocalZhiPageSet.current.cardSurface(),
         drawer = ZhiColors.panelSurface(),
-        divider = scheme.outlineVariant,
+        divider = scheme.dividerLine,
         selected = ZhiColors.cardInnerSurface(),
         text = scheme.onSurface,
-        muted = scheme.onSurfaceVariant,
+        muted = scheme.onSurfaceVariantSummary,
         accent = scheme.primary,
         error = ZhiColors.red(),
     )
@@ -138,7 +137,7 @@ internal fun RowScope.TerminalHeaderActions(
     )
 }
 
-/** 文字字形按钮（⌨ 这类图标库里没有的键）。 */
+/** 文字字形按钮（⌨ 这类 Miuix 图标库里没有的键）。 */
 @Composable
 private fun GlyphButton(
     glyph: String,
@@ -147,12 +146,17 @@ private fun GlyphButton(
 ) {
     IconButton(
         onClick = onClick,
-        modifier = Modifier.size(34.dp),
+        backgroundColor = Color.Transparent,
+        // 方角：终端的工具栏用的是上游 Termux 的语言（平面、直角），
+        // 圆角按钮属于设置页那一套。
+        cornerRadius = 0.dp,
+        minHeight = 34.dp,
+        minWidth = 34.dp,
     ) {
         Text(
             text = glyph,
             color = color,
-            style = MaterialTheme.typography.titleMedium,
+            fontSize = MiuixTheme.textStyles.title3.fontSize,
             textAlign = TextAlign.Center,
         )
     }
@@ -219,7 +223,7 @@ internal fun TerminalExtraKeys(
                         Text(
                             text = key.display,
                             color = keyColor,
-                            style = MaterialTheme.typography.labelMedium,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             textAlign = TextAlign.Center,
@@ -277,7 +281,7 @@ internal fun BoxScope.TerminalDrawer(
                 Text(
                     text = "终端会话",
                     color = palette.text,
-                    style = MaterialTheme.typography.titleMedium,
+                    fontSize = MiuixTheme.textStyles.title4.fontSize,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.fillMaxWidth().height(44.dp).padding(top = 12.dp),
                 )
@@ -341,7 +345,7 @@ private fun SessionRow(
             text = (if (session.selected) "●  " else "○  ") + session.name +
                 "\n    " + (if (session.running) "运行中" else "已结束"),
             color = rowText,
-            style = MaterialTheme.typography.bodyLarge,
+            fontSize = MiuixTheme.textStyles.body1.fontSize,
             fontWeight = if (session.selected) FontWeight.Bold else FontWeight.Normal,
             lineHeight = 17.sp,
             maxLines = 2,
@@ -350,7 +354,7 @@ private fun SessionRow(
         Text(
             text = "×",
             color = palette.muted,
-            style = MaterialTheme.typography.headlineSmall,
+            fontSize = MiuixTheme.textStyles.title2.fontSize,
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .width(38.dp)
@@ -367,7 +371,7 @@ private fun DrawerAction(label: String, palette: Chrome, onClick: () -> Unit) {
     Text(
         text = label,
         color = palette.text,
-        style = MaterialTheme.typography.bodyLarge,
+        fontSize = MiuixTheme.textStyles.body1.fontSize,
         maxLines = 1,
         modifier = Modifier
             .fillMaxWidth()
@@ -387,7 +391,7 @@ internal fun TerminalRuntimeNotice(text: String) {
         Text(
             text = text,
             color = palette.muted,
-            style = MaterialTheme.typography.bodyLarge,
+            fontSize = MiuixTheme.textStyles.main.fontSize,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(24.dp),
         )
@@ -407,23 +411,22 @@ internal fun TerminalFailure(detail: String, onRetry: () -> Unit) {
         Text(
             text = TermuxTerminalPane.FAILURE_TITLE,
             color = palette.error,
-            style = MaterialTheme.typography.titleLarge,
+            fontSize = MiuixTheme.textStyles.title3.fontSize,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
         Text(
             text = detail + TermuxTerminalPane.FAILURE_FOOTNOTE,
             color = palette.muted,
-            style = MaterialTheme.typography.bodyMedium,
+            fontSize = MiuixTheme.textStyles.body2.fontSize,
             fontFamily = FontFamily.Monospace,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 8.dp),
         )
         TextButton(
+            text = "↻  重试终端",
             onClick = onRetry,
             modifier = Modifier.padding(top = 16.dp),
-        ) {
-            Text("↻  重试终端")
-        }
+        )
     }
 }

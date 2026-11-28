@@ -2,7 +2,6 @@ package com.zhizhu.zhicode.compose.ui.composer
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,10 +13,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -28,6 +23,11 @@ import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.model.SlashCommand
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /** "/" 命令面板，对应原版 updateSlashPalette()。 */
 @Composable
@@ -36,30 +36,32 @@ fun SlashPalette(
     onPick: (SlashCommand) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val visible = matches.take(5)
-    Surface(
+    Card(
         modifier = modifier.fillMaxWidth().padding(bottom = 6.dp),
-        shape = RoundedCornerShape(LocalZhiPageSet.current.cardCorner),
-        color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else LocalZhiPageSet.current.cardSurface(),
-        contentColor = scheme.onSurface,
+        cornerRadius = LocalZhiPageSet.current.cardCorner,
+        insideMargin = PaddingValues(vertical = 4.dp),
+        colors = CardDefaults.defaultColors(
+            color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else LocalZhiPageSet.current.cardSurface(),
+            contentColor = scheme.onSurface,
+        ),
     ) {
-        Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = "斜杠命令",
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontWeight = FontWeight.Bold,
             )
             Box(modifier = Modifier.weight(1f))
             Text(
                 text = "${matches.size} 条匹配",
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             )
         }
         LazyColumn(
@@ -74,27 +76,30 @@ fun SlashPalette(
                 key = { it.name },
                 contentType = { "slash-command" },
             ) { command ->
-                Surface(
+                Card(
                     onClick = { onPick(command) },
                     // 打字时命令集一直在收窄：命中的行要**滑上去**，落选的行淡出。
                     modifier = Modifier.animateItem().fillMaxWidth().padding(horizontal = 4.dp),
-                    shape = RoundedCornerShape(LocalZhiPageSet.current.innerCorner),
-                    color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else LocalZhiPageSet.current.cardSurface(),
-                    contentColor = scheme.onSurface,
+                    cornerRadius = LocalZhiPageSet.current.innerCorner,
+                    insideMargin = PaddingValues(horizontal = 8.dp, vertical = 9.dp),
+                    colors = CardDefaults.defaultColors(
+                        color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else LocalZhiPageSet.current.cardSurface(),
+                        contentColor = scheme.onSurface,
+                    ),
+                    pressFeedbackType = PressFeedbackType.Sink,
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 9.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = command.name,
-                            style = MaterialTheme.typography.bodyMedium,
+                            fontSize = MiuixTheme.textStyles.body2.fontSize,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.width(112.dp),
                         )
                         Text(
                             text = command.hint,
-                            color = scheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.labelMedium,
+                            color = scheme.onSurfaceVariantSummary,
+                            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -103,8 +108,6 @@ fun SlashPalette(
             }
         }
     }
-        }
-        }
 }
 
 /** "@" 文件引用面板。 */
@@ -115,54 +118,58 @@ fun FilePalette(
     onPick: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val scheme = MiuixTheme.colorScheme
     val visible = matches.take(5)
-    Surface(
+    Card(
         modifier = modifier.fillMaxWidth().padding(bottom = 6.dp),
-        shape = RoundedCornerShape(LocalZhiPageSet.current.cardCorner),
-        color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else LocalZhiPageSet.current.cardSurface(),
-        contentColor = scheme.onSurface,
+        cornerRadius = LocalZhiPageSet.current.cardCorner,
+        insideMargin = PaddingValues(vertical = 4.dp),
+        colors = CardDefaults.defaultColors(
+            color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else LocalZhiPageSet.current.cardSurface(),
+            contentColor = scheme.onSurface,
+        ),
     ) {
-        Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = "引用文件",
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontWeight = FontWeight.Bold,
             )
             Box(modifier = Modifier.weight(1f))
             Text(
                 // 把查询串显示出来：用户需要确认"我 @ 的是不是这个"。
                 text = if (query.isEmpty()) "${matches.size} 项" else "@$query · ${matches.size} 项",
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             )
         }
         if (visible.isEmpty()) {
             Text(
                 // 空结果也要说清楚：静默不显示面板会让人以为 @ 没生效。
                 text = "当前目录里没有匹配的文件",
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             )
         }
         visible.forEach { path ->
-            Surface(
+            Card(
                 onClick = { onPick(path) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 1.dp),
-                shape = RoundedCornerShape(LocalZhiPageSet.current.innerCorner),
-                color = androidx.compose.ui.graphics.Color.Transparent,
-                contentColor = scheme.onSurface,
+                cornerRadius = LocalZhiPageSet.current.innerCorner,
+                insideMargin = PaddingValues(horizontal = 10.dp, vertical = 7.dp),
+                colors = CardDefaults.defaultColors(
+                    color = androidx.compose.ui.graphics.Color.Transparent,
+                    contentColor = scheme.onSurface,
+                ),
             ) {
-                Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
                 Text(
                     text = path,
-                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -170,8 +177,6 @@ fun FilePalette(
             }
         }
     }
-        }
-        }
 }
 
 /** 排队中的预输入列表。 */
@@ -182,30 +187,32 @@ fun QueuedPromptPanel(
     onEdit: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val scheme = MaterialTheme.colorScheme
-    Surface(
+    val scheme = MiuixTheme.colorScheme
+    Card(
         modifier = modifier.fillMaxWidth().padding(bottom = 6.dp),
-        shape = RoundedCornerShape(LocalZhiPageSet.current.cardCorner),
-        color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else LocalZhiPageSet.current.cardSurface(),
-        contentColor = scheme.onSurface,
+        cornerRadius = LocalZhiPageSet.current.cardCorner,
+        insideMargin = PaddingValues(vertical = 4.dp),
+        colors = CardDefaults.defaultColors(
+            color = if (ZhiColors.isDark()) scheme.surfaceContainerHigh else LocalZhiPageSet.current.cardSurface(),
+            contentColor = scheme.onSurface,
+        ),
     ) {
-        Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = "已排队",
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                 fontWeight = FontWeight.Bold,
             )
             Box(modifier = Modifier.weight(1f))
             Text(
                 // 说清"为什么还没发出去"，否则用户会以为卡住了。
                 text = "${items.size} 条 · 当前回复完成后发送",
-                color = scheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                color = scheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.footnote1.fontSize,
             )
         }
         items.forEach { queued ->
@@ -216,7 +223,7 @@ fun QueuedPromptPanel(
                 Text(
                     text = queued.text,
                     color = scheme.onSurface,
-                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -226,7 +233,7 @@ fun QueuedPromptPanel(
                 Text(
                     text = "取回",
                     color = scheme.primary,
-                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier
                         .padding(start = 8.dp)
@@ -235,8 +242,8 @@ fun QueuedPromptPanel(
                 )
                 Text(
                     text = "取消",
-                    color = scheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelMedium,
+                    color = scheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
                     modifier = Modifier
                         .padding(start = 4.dp)
                         .clickable { onRemove(queued.chatItemId) }
@@ -244,6 +251,5 @@ fun QueuedPromptPanel(
                 )
             }
         }
-    }
     }
 }
