@@ -62,14 +62,12 @@ internal fun WideWorkspace(
         sidebarContent(Modifier.width(SidebarWidth))
         ZhiVerticalDivider()
         Column(modifier = Modifier.weight(56f)) {
-            ZhiTopBar(
-                state = TopBarState.from(state),
-                wide = true,
-                // WideWorkspace 本身处于 glassMain.capture 的子树里；让这个
-                glass = NoGlass,
+            LocalZhiPageSet.current.WideTopBar(
+                state = state,
+                viewModel = viewModel,
                 onOpenSidebar = viewModel::openSidebar,
                 onSettings = viewModel::openSettings,
-                tabs = null,
+                modifier = Modifier,
             )
             LocalZhiPageSet.current.ChatContent(state, viewModel, true, Modifier.weight(1f), glass)
         }

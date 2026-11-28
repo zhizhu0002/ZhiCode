@@ -44,6 +44,9 @@ import com.zhizhu.zhicode.compose.ui.pages.miuix.ThirdPartyLicensesPage
 import com.zhizhu.zhicode.compose.editor.EditorViewModel
 import com.zhizhu.zhicode.compose.ui.pages.miuix.EditorPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.SandboxBoardPage
+import com.zhizhu.zhicode.compose.ui.NoGlass
+import com.zhizhu.zhicode.compose.ui.TopBarState
+import com.zhizhu.zhicode.compose.ui.ZhiTopBar
 import com.zhizhu.zhicode.compose.ui.pages.miuix.UiDebugPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.UpdatePage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.WorkspacePage
@@ -320,6 +323,26 @@ interface ZhiPageSet {
     }
 
     // ------------------------------------------------------------------ 独立页面
+
+    /** 宽屏左栏顶栏。 */
+    @Composable
+    fun WideTopBar(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        onOpenSidebar: () -> Unit,
+        onSettings: () -> Unit,
+        modifier: Modifier,
+    ) {
+        ZhiTopBar(
+            state = TopBarState.from(state),
+            wide = true,
+            glass = NoGlass,
+            onOpenSidebar = onOpenSidebar,
+            onSettings = onSettings,
+            tabs = null,
+            modifier = modifier,
+        )
+    }
 
     /** 沙箱看板（独立 Activity）。 */
     @Composable

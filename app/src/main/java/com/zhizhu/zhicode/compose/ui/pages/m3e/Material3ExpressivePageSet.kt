@@ -257,6 +257,23 @@ object Material3ExpressivePageSet : ZhiPageSet {
     }
 
     @Composable
+    override fun WideTopBar(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        onOpenSidebar: () -> Unit,
+        onSettings: () -> Unit,
+        modifier: Modifier,
+    ) {
+        M3eWideTopBar(
+            state = state,
+            viewModel = viewModel,
+            onOpenSidebar = onOpenSidebar,
+            onSettings = onSettings,
+            modifier = modifier,
+        )
+    }
+
+    @Composable
     override fun Oobe(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
         M3eOobePage(state = state, viewModel = viewModel)
     }
