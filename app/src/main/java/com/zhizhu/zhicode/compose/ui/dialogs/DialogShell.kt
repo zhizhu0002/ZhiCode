@@ -19,14 +19,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import top.yukonga.miuix.kmp.basic.Button
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import top.yukonga.miuix.kmp.basic.CardColors
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.Surface
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 
@@ -57,7 +56,7 @@ internal fun ZhiSheetCardColors(): CardColors = CardDefaults.defaultColors(
 @Composable
 internal fun DialogShell(
     title: String,
-    titleColor: Color = MiuixTheme.colorScheme.onBackground,
+    titleColor: Color = MaterialTheme.colorScheme.onSurface,
     titleAction: (@Composable () -> Unit)? = null,
     header: (@Composable () -> Unit)? = null,
     prompt: (@Composable () -> Unit)? = null,
@@ -80,8 +79,8 @@ internal fun DialogShell(
             Text(
                 text = title,
                 color = titleColor,
-                fontSize = MiuixTheme.textStyles.title2.fontSize,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Start,
                 modifier = Modifier.weight(1f),
             )
@@ -112,15 +111,11 @@ internal fun DialogShell(
         if (!groupBody) {
             Column(modifier = middleModifier.padding(top = 8.dp)) { scrollableBody() }
         } else {
-            // 显式给一层比弹窗底更明显的容器色：Miuix 的浅色方案里
-            Card(
+            Surface(
                 modifier = middleModifier.padding(top = 10.dp),
-                cornerRadius = ZhiRadius.card,
-                insideMargin = PaddingValues(0.dp),
-                colors = CardDefaults.defaultColors(
-                    color = MiuixTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = MiuixTheme.colorScheme.onSurfaceContainerHigh,
-                ),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = MaterialTheme.colorScheme.onSurface,
             ) {
                 Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)) {
                     scrollableBody()
@@ -149,28 +144,22 @@ internal fun PrimaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
-    val scheme = MiuixTheme.colorScheme
-    // S4：圆角回归官方 ButtonDefaults 默认（16dp），不再覆写。
     Button(
         onClick = onClick,
         enabled = enabled,
-        colors = ButtonDefaults.buttonColorsPrimary(
-            color = scheme.primary,
-            contentColor = scheme.onPrimary,
-        ),
         modifier = modifier,
     ) {
-        Text(text = text, fontSize = MiuixTheme.textStyles.body1.fontSize)
+        Text(text = text)
     }
 }
 
-/** 次要按钮：直接走 Miuix [TextButton] 的**默认配色** */
+/** 次要按钮：走 M3E 的文字按钮默认配色。 */
 @Composable
 internal fun SecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    // S4：圆角回归官方默认（16dp），不再覆写。
     TextButton(
-        text = text,
         onClick = onClick,
         modifier = modifier,
-    )
+    ) {
+        Text(text = text)
+    }
 }

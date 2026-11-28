@@ -1,20 +1,15 @@
 package com.zhizhu.zhicode.compose.theme
 
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
-import androidx.compose.material3.Shapes
-import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.data.ThemeSettings
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -27,14 +22,12 @@ fun ZhiMaterial3ExpressiveTheme(
 ) {
     val isDark = ZhiThemeMode.rememberCurrentDark(theme.mode)
     val colors = rememberZhiM3eColors(theme = theme, isDark = isDark)
-    val shapes = remember { zhiM3eShapes() }
-    val typography = remember { zhiM3eTypography() }
 
+    // 字体与形状一律用 M3E 默认值：官方 ListTokens/ShapeTokens 已定义好，
+    // 再叠一层自定义字重与圆角只会把 Expressive 拉回旧观感。
     MaterialExpressiveTheme(
         colorScheme = colors,
         motionScheme = MotionScheme.expressive(),
-        shapes = shapes,
-        typography = typography,
         content = content,
     )
 }
@@ -129,23 +122,3 @@ private fun rememberZhiM3eColors(theme: ThemeSettings, isDark: Boolean): ColorSc
     }
 }
 
-private fun zhiM3eShapes(): Shapes = Shapes(
-    extraSmall = RoundedCornerShape(4.dp),
-    small = RoundedCornerShape(8.dp),
-    medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(28.dp),
-)
-
-private fun zhiM3eTypography(): Typography {
-    val base = Typography()
-    return base.copy(
-        displayLarge = base.displayLarge.copy(fontWeight = FontWeight.Bold),
-        displayMedium = base.displayMedium.copy(fontWeight = FontWeight.Bold),
-        headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Bold),
-        headlineMedium = base.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
-        headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
-        titleLarge = base.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-        titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold),
-    )
-}

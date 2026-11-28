@@ -69,48 +69,48 @@ internal fun ZhiOverlayHost(
             onExportImage = viewModel::exportSheetAsImage,
             onSelectMore = viewModel::exportSelectMore,
         )
-    ChoicePickerOverlay(
-        // 锚定菜单已经由被长按的条目自己画了，这里必须让位 ——
-        // 否则长按后会出现「下拉菜单 + 居中对话框」同时可见。
-        picker = if (anchoredActionMenu) null else state.choicePicker,
-        onSubmit = viewModel::onSubmitSelection,
-        onDismiss = viewModel::closeChoicePicker,
-        onSubmitFreeForm = viewModel::onSubmitFreeForm,
-    )
-    // 「自由复制」底部抽屉：把一条消息的原文摊开让人划词。
-    CopySheetOverlay(
-        sheet = state.copySheet,
-        onDismiss = viewModel::closeCopySheet,
-        onCopyAll = viewModel::copySheetAll,
-    )
-    AttachFileOverlay(
-        open = state.attachPickerOpen,
-        browser = state.attachBrowser,
-        onFilterChange = viewModel::updateAttachFilter,
-        onNavigate = viewModel::attachNavigateTo,
-        onSwitchRoot = viewModel::attachSwitchRoot,
-        onPick = { entry -> viewModel.attachProjectFile(entry.path) },
-        onDismiss = viewModel::closeAttachPicker,
-    )
-    TaskListOverlay(
-        tasks = state.tasks,
-        open = state.taskListOpen,
-        onDismiss = viewModel::closeTaskList,
-    )
-    EnvironmentOverlay(
-        open = state.environmentOpen,
-        report = state.environmentReport,
-        runtimeReady = state.runtimeReady,
-        installing = state.runtimeInstalling,
-        progress = state.runtimeProgress,
-        message = state.runtimeMessage,
-        selectedMirrorId = state.ubuntuMirrorId,
-        onSelectMirror = viewModel::selectUbuntuMirror,
-        onDismiss = viewModel::closeEnvironment,
-        onInstall = viewModel::installRuntime,
-        onRepair = viewModel::repairRuntime,
-        onRefresh = viewModel::refreshEnvironmentReport,
-        onCopy = { viewModel.copyEnvironmentReport() },
-    )
+        ChoicePickerOverlay(
+            // 锚定菜单已经由被长按的条目自己画了，这里必须让位 ——
+            // 否则长按后会出现「下拉菜单 + 居中对话框」同时可见。
+            picker = if (anchoredActionMenu) null else state.choicePicker,
+            onSubmit = viewModel::onSubmitSelection,
+            onDismiss = viewModel::closeChoicePicker,
+            onSubmitFreeForm = viewModel::onSubmitFreeForm,
+        )
+        // 「自由复制」底部抽屉：把一条消息的原文摊开让人划词。
+        CopySheetOverlay(
+            sheet = state.copySheet,
+            onDismiss = viewModel::closeCopySheet,
+            onCopyAll = viewModel::copySheetAll,
+        )
+        AttachFileOverlay(
+            open = state.attachPickerOpen,
+            browser = state.attachBrowser,
+            onFilterChange = viewModel::updateAttachFilter,
+            onNavigate = viewModel::attachNavigateTo,
+            onSwitchRoot = viewModel::attachSwitchRoot,
+            onPick = { entry -> viewModel.attachProjectFile(entry.path) },
+            onDismiss = viewModel::closeAttachPicker,
+        )
+        TaskListOverlay(
+            tasks = state.tasks,
+            open = state.taskListOpen,
+            onDismiss = viewModel::closeTaskList,
+        )
+        EnvironmentOverlay(
+            open = state.environmentOpen,
+            report = state.environmentReport,
+            runtimeReady = state.runtimeReady,
+            installing = state.runtimeInstalling,
+            progress = state.runtimeProgress,
+            message = state.runtimeMessage,
+            selectedMirrorId = state.ubuntuMirrorId,
+            onSelectMirror = viewModel::selectUbuntuMirror,
+            onDismiss = viewModel::closeEnvironment,
+            onInstall = viewModel::installRuntime,
+            onRepair = viewModel::repairRuntime,
+            onRefresh = viewModel::refreshEnvironmentReport,
+            onCopy = { viewModel.copyEnvironmentReport() },
+        )
     }
 }
