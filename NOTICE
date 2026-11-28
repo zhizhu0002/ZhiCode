@@ -419,11 +419,10 @@ ZhiCode 自身的代码（Compose 界面层、沙箱宿主层、引擎与工具�
   LICENSE                    本工程自身代码的 MIT 条款 + 范围说明
   NOTICE                     本文件：第三方组件声明（来源 / 许可 / 对应文件 / 修改）
   THIRD-PARTY-LICENSES/      许可原文（含 README.md 说明每个文件覆盖什么、是否可改）
-  docs/licensing.md          判断依据、复核命令、未确证事项与开放项
   
   Bcore/、black-reflection/、
   compiler/ 下的 NOTICE      各模块的 Apache-2.0 第 4(b) 条修改声明
 ```
 
 以上各文件**都没有自动化检查**（原来的 `LicenseNoticeStructureTest` 已随 app/tests/ 删除），
-改动它们之后请按 docs/licensing.md 的清单人工复核。
+改动它们之后请按本文件的分工说明人工复核。

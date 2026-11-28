@@ -146,7 +146,7 @@ internal fun M3eSubPageScaffold(
     }
 }
 
-/** M3E 尺寸档位，数值依据见 docs/ui-m3e.md。 */
+/** M3E 尺寸档位，数值取自 material3 官方 tokens。 */
 internal object M3eDimens {
 
     /** 单行列表项高度。 */
@@ -276,7 +276,7 @@ internal fun M3eNavigationRow(
                 .fillMaxWidth()
                 // 双行列表项 72dp（M3E 规范：单行 56 / 双行 72 / 三行 88）。
                 // 用 `heightIn(min)` 而不是固定 `height`：系统字号调大时文字要能长高，
-                // 硬定高会裁字（`docs/ui-m3e.md` 与 `ui-miuix.md` 都记着这条）。
+                // 硬定高会裁字。
                 .heightIn(min = M3eDimens.RowDouble)
                 .padding(horizontal = M3eDimens.RowPaddingH, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
