@@ -82,7 +82,7 @@ val CHANGE_LOG: List<ChangeLogEntry> = listOf(
                             "这意味着新增一套风格**不必一次写完所有页面** —— " +
                             "只覆写想改的那几页就能装上验证，其余自动沿用默认。" +
                             "「关于 / 更新 / 隐私」三页的麻薯版就是这样只写了三页。" +
-                            "Material 3 Expressive 覆盖全部十六页。",
+                            "Material 3 Expressive 覆盖全部十七页。",
                     ),
                     ChangeLogItem(
                         title = "切换立即生效",
