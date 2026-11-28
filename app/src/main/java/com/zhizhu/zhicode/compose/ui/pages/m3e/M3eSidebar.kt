@@ -80,7 +80,6 @@ import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.SidebarState
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
-import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import java.io.File
 import androidx.compose.ui.unit.Dp
@@ -524,7 +523,7 @@ private fun M3eSidebar(
                                         Text(
                                             text = entry.name,
                                             color = scheme.onSurface,
-                                            style = MaterialTheme.typography.bodySmall,
+                                            style = MaterialTheme.typography.bodyMedium,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.weight(1f),
@@ -621,7 +620,7 @@ private fun SidebarSearchField(
 ) {
     val scheme = MaterialTheme.colorScheme
     Surface(
-        modifier = modifier.heightIn(min = 44.dp),
+        modifier = modifier.heightIn(min = M3eDimens.ControlHeight),
         shape = RoundedCornerShape(12.dp),
         color = scheme.surfaceContainer,
     ) {
@@ -679,7 +678,7 @@ private fun WorkspaceHeaderRow(
     val scheme = MaterialTheme.colorScheme
     val titleColor by animateColorAsState(
         targetValue = if (group.containsActive) scheme.primary else scheme.onSurfaceVariant,
-        animationSpec = ZhiSidebarMotion,
+        animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
         label = "workspaceHeaderColor",
     )
     val arrowRotation by animateFloatAsState(
@@ -847,7 +846,7 @@ private fun SessionRow(
     val scheme = MaterialTheme.colorScheme
     val background by animateColorAsState(
         targetValue = if (active) scheme.secondaryContainer.copy(alpha = 0.78f) else Color.Transparent,
-        animationSpec = ZhiSidebarMotion,
+        animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
         label = "sessionRowBackground",
     )
     val titleColor = when {
@@ -931,9 +930,8 @@ private fun SessionActionMenu(
 
 private val SidebarInset = 12.dp
 private val SidebarRowInsideMargin = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 4.dp)
-private val SidebarRowMinHeight = 44.dp
-private val SessionRowMinHeight = 40.dp
+private val SidebarRowMinHeight = M3eDimens.RowSingle
+private val SessionRowMinHeight = M3eDimens.RowSingle
 private val SidebarRowIconSize = 20.dp
 private val SidebarRowCorner = 12.dp
 private val SessionRowSpacing = 2.dp
-private val ZhiSidebarMotion = ZhiMotion.colorSpec

@@ -37,9 +37,7 @@ import com.zhizhu.zhicode.compose.model.WorkspaceTab
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
-import com.zhizhu.zhicode.compose.ui.pages.miuix.ChatPage
-import com.zhizhu.zhicode.compose.ui.pages.miuix.FilesPage
-import com.zhizhu.zhicode.compose.ui.pages.miuix.TerminalPage
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ZhiAnchoredMenuHost
 import top.yukonga.miuix.kmp.utils.PagerNavigationSpringSpec
 import top.yukonga.miuix.kmp.utils.springAnimateToPage
@@ -73,7 +71,7 @@ internal fun WideWorkspace(
                 onSettings = viewModel::openSettings,
                 tabs = null,
             )
-            ChatPage(state = state, viewModel = viewModel, wide = true, modifier = Modifier.weight(1f), glass = glass)
+            LocalZhiPageSet.current.ChatContent(state, viewModel, true, Modifier.weight(1f), glass)
         }
         ZhiVerticalDivider()
         Column(modifier = Modifier.weight(44f)) {
@@ -184,26 +182,17 @@ private fun WorkspacePager(
         flingBehavior = flingBehavior,
         key = { tabs[it] },
         pageContent = { page ->
-            when (tabs[page]) {
-                WorkspaceTab.CHAT -> ChatPage(
-                    state = state,
-                    viewModel = viewModel,
-                    wide = !compact,
-                    modifier = Modifier.fillMaxSize(),
-                    glass = glass,
-                )
-                else -> PaneHost(
-                    state = state,
-                    viewModel = viewModel,
-                    isDark = isDark,
-                    glass = glass,
-                    tabOverride = tabs[page],
-                    modifier = if (compact) {
-                        Modifier.fillMaxSize().padding(top = TopBarInsetCompact)
-                    } else {
-                        Modifier.fillMaxSize()
-                    },
-                )
+            val pageSet = LocalZhiPageSet.current
+            val tab = tabs[page]
+            val pageModifier = if (compact && tab != WorkspaceTab.CHAT) {
+                Modifier.fillMaxSize().padding(top = TopBarInsetCompact)
+            } else {
+                Modifier.fillMaxSize()
+            }
+            when (tab) {
+                WorkspaceTab.CHAT -> pageSet.ChatContent(state, viewModel, !compact, pageModifier, glass)
+                WorkspaceTab.FILES -> pageSet.FilesContent(state, viewModel, pageModifier)
+                WorkspaceTab.TERMINAL -> pageSet.TerminalContent(state, viewModel, pageModifier)
             }
         },
     )
@@ -268,79 +257,6 @@ internal val TopBarInsetCompact: Dp
             (if (hasTopTabs) WorkspaceTabRowHeight + 1.dp else 0.dp) +
             topBarWindowInset()
     }
-
-@Composable
-private fun PaneHost(
-    state: WorkspaceUiState,
-    viewModel: WorkspaceViewModel,
-    isDark: Boolean,
-    glass: Glass,
-    modifier: Modifier = Modifier,
-    tabOverride: WorkspaceTab? = null,
-) {
-    when (val tab = tabOverride ?: state.tab) {
-        WorkspaceTab.TERMINAL -> TerminalPage(
-            lines = state.terminalLines,
-            projectName = state.projectName,
-            // 内置 Termux 环境是否就绪决定这个是"真终端"还是"只读占位"。
-            // runtimeReady 是真实探测（见 EnvDoctor / RuntimeInstaller），不是常量。
-            runtimeReady = state.runtimeReady,
-            workingDirectory = state.projectPath,
-            // 终端实例由 ViewModel 持有，**不能**在这里 remember
-            terminalHolder = { ctx -> viewModel.terminalPane(ctx) },
-            // 环境未就绪时的三态入口：未安装 / 安装中（进度）/ 失败（可重试）。
-            // 以前只有一句说明，用户得自己去设置里找"安装运行环境"。
-            installing = state.runtimeInstalling,
-            progress = state.runtimeProgress,
-            message = state.runtimeMessage,
-            onInstall = viewModel::installRuntime,
-            modifier = modifier,
-        )
-        WorkspaceTab.FILES -> FilesPage(
-            filePath = state.filePath,
-            entries = state.fileEntries,
-            emptyNote = state.fileNote,
-            listOptions = state.fileListOptions,
-            onQueryChange = viewModel::updateFileQuery,
-            onSortChange = viewModel::updateFileSort,
-            onToggleSortDirection = viewModel::toggleFileSortDirection,
-            onOpen = viewModel::openFile,
-            onNavigate = viewModel::navigateTo,
-            root = state.fileRoot,
-            onSwitchRoot = viewModel::switchFileRoot,
-            nameForm = state.fileNameForm,
-            // 只有一个「新建」入口：建文件还是建文件夹由弹窗里按下的那个按钮决定
-            // （见 WorkspaceViewModel.submitFileNameForm 的 KDoc）。
-            onNewEntry = viewModel::newFileForm,
-            onRename = viewModel::renameForm,
-            onNameDraftChange = viewModel::updateFileNameDraft,
-            onSubmitName = viewModel::submitFileNameForm,
-            onCancelName = viewModel::cancelFileNameForm,
-            deletePrompt = state.fileDeletePrompt,
-            onConfirmDelete = viewModel::confirmDelete,
-            onCancelDelete = viewModel::cancelDelete,
-            sharedStorageGranted = state.sharedStorageGranted,
-            onGrantSharedStorage = viewModel::openSharedStorageSettings,
-            // 长按多选。
-            active = state.tab == WorkspaceTab.FILES,
-            selectionMode = state.fileSelectionMode,
-            fileClipboardCount = state.fileClipboard.size,
-            fileClipboardMove = state.fileClipboardMove,
-            onPasteFiles = viewModel::pasteFilesIntoCurrentDirectory,
-            onSetSelection = viewModel::setFileSelection,
-            selection = state.fileSelection,
-            onLongPressEntry = viewModel::longPressFileEntry,
-            onToggleEntry = viewModel::toggleFileSelection,
-            onToggleSelectAll = viewModel::toggleSelectAllFiles,
-            onClearSelection = viewModel::clearFileSelection,
-            onRenameSelected = viewModel::renameSelectedEntry,
-            onDeleteSelected = viewModel::deleteSelectedEntries,
-            onAttachSelected = viewModel::attachSelectedEntries,
-            modifier = modifier,
-        )
-        WorkspaceTab.CHAT -> ChatPage(state = state, viewModel = viewModel, wide = false, modifier = modifier, glass = glass)
-    }
-}
 
 @Composable
 internal fun ZhiSidebarHost(

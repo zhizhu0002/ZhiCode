@@ -1,4 +1,9 @@
 package com.zhizhu.zhicode.compose.ui.pages.m3e
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material3.ripple
 
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -414,7 +419,7 @@ fun M3ePrivacyPage(onBack: () -> Unit) {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                        .padding(horizontal = M3eDimens.RowPaddingH, vertical = M3eDimens.RowSpaceV),
                                     verticalArrangement = Arrangement.spacedBy(4.dp),
                                 ) {
                                     Text(title, style = MaterialTheme.typography.titleMedium)
@@ -553,19 +558,34 @@ fun M3eChatDisplayPage(
                                         ChatFontFamily.MONOSPACE -> FontFamily.Monospace
                                         ChatFontFamily.CUSTOM -> resolvedFamily
                                     }
+                                    val interaction = remember { MutableInteractionSource() }
+                                    val pressed by interaction.collectIsPressedAsState()
+                                    val cellCorner by animateDpAsState(
+                                        targetValue = if (pressed) 20.dp else 16.dp,
+                                        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+                                        label = "fontCellCorner",
+                                    )
+                                    val cellColor by animateColorAsState(
+                                        targetValue = if (selected) scheme.secondaryContainer else scheme.surfaceContainerHigh,
+                                        animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+                                        label = "fontCellColor",
+                                    )
                                     Surface(
                                         modifier = Modifier
                                             .weight(1f)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .clickable {
+                                            .clip(RoundedCornerShape(cellCorner))
+                                            .clickable(
+                                                interactionSource = interaction,
+                                                indication = ripple(),
+                                            ) {
                                                 if (family == ChatFontFamily.CUSTOM && theme.customFontPath.isBlank()) {
                                                     fontPicker.launch(ChatFontLoader.MIME_TYPES)
                                                 } else {
                                                     onChange { it.copy(chatFont = family.name) }
                                                 }
                                             },
-                                        shape = RoundedCornerShape(16.dp),
-                                        color = if (selected) scheme.secondaryContainer else scheme.surfaceContainerHigh,
+                                        shape = RoundedCornerShape(cellCorner),
+                                        color = cellColor,
                                         border = if (selected) BorderStroke(1.5.dp, scheme.primary) else null,
                                     ) {
                                         Column(

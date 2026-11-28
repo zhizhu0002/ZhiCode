@@ -1,4 +1,10 @@
 package com.zhizhu.zhicode.compose.ui.pages.m3e
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material3.ripple
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.lerp
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -146,7 +152,7 @@ internal fun M3eSubPageScaffold(
     }
 }
 
-/** M3E 尺寸档位，数值取自 material3 官方 tokens。 */
+/** M3E 尺寸档位，数值取自 material3 tokens。 */
 internal object M3eDimens {
 
     /** 单行列表项高度。 */
@@ -169,9 +175,30 @@ internal object M3eDimens {
 
     /** 图标块里的字形。 */
     val IconGlyph = 20.dp
+
+    /** 列表项上下留白。 */
+    val RowSpaceV = 10.dp
+
+    /** 图标与文字的间距。 */
+    val LeadingSpace = 16.dp
+
+    /** 内容与尾随元素的间距。 */
+    val TrailingSpace = 16.dp
+
+    /** 分段列表项之间的缝。 */
+    val SegmentGap = 2.dp
+
+    /** 分段列表外角。 */
+    val SegmentOuter = 16.dp
+
+    /** 分段列表内角。 */
+    val SegmentInner = 4.dp
+
+    /** 分段列表项按下时的圆角。 */
+    val SegmentPressed = 16.dp
 }
 
-/** 分组小标题，用 labelLarge 与行内 titleMedium 拉开层级。 */
+/** 分组小标题，与分段卡片的左边界对齐。 */
 @Composable
 internal fun M3eSectionHeader(
     title: String,
@@ -181,17 +208,38 @@ internal fun M3eSectionHeader(
         text = title,
         style = MaterialTheme.typography.labelLarge,
         fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = modifier.padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 8.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier.padding(
+            start = M3eDimens.RowPaddingH + M3eDimens.RowPaddingH,
+            end = M3eDimens.RowPaddingH + M3eDimens.RowPaddingH,
+            top = 16.dp,
+            bottom = 8.dp,
+        ),
     )
 }
 
-/** 分段列表卡片形状：外角取 CornerExtraLarge，相邻内角取 CornerSmall。 */
-internal fun m3eSegmentShape(index: Int, count: Int): Shape = when {
-    count <= 1 -> RoundedCornerShape(28.dp)
-    index == 0 -> RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomStart = 8.dp, bottomEnd = 8.dp)
-    index == count - 1 -> RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 28.dp, bottomEnd = 28.dp)
-    else -> RoundedCornerShape(8.dp)
+/** 分段列表项形状：外角取 ContainerShape，内部角取 ItemContainerExpressiveShape。 */
+internal fun m3eSegmentShape(index: Int, count: Int): Shape {
+    val outer = M3eDimens.SegmentOuter
+    val inner = M3eDimens.SegmentInner
+    return when {
+        count <= 1 -> RoundedCornerShape(outer)
+        index == 0 -> RoundedCornerShape(topStart = outer, topEnd = outer, bottomStart = inner, bottomEnd = inner)
+        index == count - 1 -> RoundedCornerShape(topStart = inner, topEnd = inner, bottomStart = outer, bottomEnd = outer)
+        else -> RoundedCornerShape(inner)
+    }
+}
+
+/** 与 [m3eSegmentShape] 对应的四角值，供按压形变插值。 */
+private fun m3eSegmentCorners(index: Int, count: Int): List<Dp> {
+    val outer = M3eDimens.SegmentOuter
+    val inner = M3eDimens.SegmentInner
+    return when {
+        count <= 1 -> listOf(outer, outer, outer, outer)
+        index == 0 -> listOf(outer, outer, inner, inner)
+        index == count - 1 -> listOf(inner, inner, outer, outer)
+        else -> listOf(inner, inner, inner, inner)
+    }
 }
 
 /** 一组间距 `2.dp` 的 MD3 Expressive 分段卡片容器。 */
@@ -218,12 +266,41 @@ internal fun M3eSegmentedItem(
     containerColor: Color = MaterialTheme.colorScheme.surfaceContainerLow,
     content: @Composable () -> Unit,
 ) {
-    val shape = m3eSegmentShape(index, count)
+    val baseCorners = m3eSegmentCorners(index, count)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    // 按下时四角一起收到 CornerLarge，这是 M3E 列表项的按压形变。
+    val cornerProgress by animateFloatAsState(
+        targetValue = if (pressed) 1f else 0f,
+        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+        label = "segmentCorner",
+    )
+    val pressedCorner = M3eDimens.SegmentPressed
+    val shape: Shape = if (cornerProgress == 0f) {
+        m3eSegmentShape(index, count)
+    } else {
+        RoundedCornerShape(
+            topStart = lerp(baseCorners[0], pressedCorner, cornerProgress),
+            topEnd = lerp(baseCorners[1], pressedCorner, cornerProgress),
+            bottomStart = lerp(baseCorners[2], pressedCorner, cornerProgress),
+            bottomEnd = lerp(baseCorners[3], pressedCorner, cornerProgress),
+        )
+    }
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = interaction,
+                        indication = ripple(),
+                        onClick = onClick,
+                    )
+                } else {
+                    Modifier
+                },
+            ),
         shape = shape,
         color = containerColor,
         contentColor = MaterialTheme.colorScheme.onSurface,
@@ -270,26 +347,27 @@ internal fun M3eNavigationRow(
     onClick: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val desc = valueText ?: summary
     M3eSegmentedItem(index = index, count = count, onClick = onClick) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // 双行列表项 72dp（M3E 规范：单行 56 / 双行 72 / 三行 88）。
-                .heightIn(min = M3eDimens.RowDouble)
-                .padding(horizontal = M3eDimens.RowPaddingH, vertical = 14.dp),
+                .heightIn(
+                    min = if (desc.isNullOrBlank()) M3eDimens.RowSingle else M3eDimens.RowDouble,
+                )
+                .padding(horizontal = M3eDimens.RowPaddingH, vertical = M3eDimens.RowSpaceV),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
                 M3eIconBadge(icon, tint = iconTint, containerColor = iconContainer)
-                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(M3eDimens.LeadingSpace))
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.bodyLarge,
                     color = scheme.onSurface,
                 )
-                val desc = valueText ?: summary
                 if (!desc.isNullOrBlank()) {
                     Text(
                         text = desc,
@@ -301,19 +379,19 @@ internal fun M3eNavigationRow(
                 if (valueText != null && !summary.isNullOrBlank()) {
                     Text(
                         text = summary,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = scheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
             }
             if (showChevron) {
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(M3eDimens.TrailingSpace))
                 Icon(
                     painter = ZhiIcons.arrowRight,
                     contentDescription = null,
                     tint = scheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(M3eDimens.IconGlyph),
                 )
             }
         }
@@ -341,9 +419,8 @@ internal fun M3eSwitchRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // 有 summary 就是双行（72dp），没有就是单行（56dp）。
                 .heightIn(min = if (summary.isNullOrBlank()) M3eDimens.RowSingle else M3eDimens.RowDouble)
-                .padding(horizontal = M3eDimens.RowPaddingH, vertical = 12.dp),
+                .padding(horizontal = M3eDimens.RowPaddingH, vertical = M3eDimens.RowSpaceV),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
@@ -352,24 +429,24 @@ internal fun M3eSwitchRow(
                     tint = if (warn) scheme.onErrorContainer else scheme.onPrimaryContainer,
                     containerColor = if (warn) scheme.errorContainer else scheme.primaryContainer,
                 )
-                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(M3eDimens.LeadingSpace))
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.bodyLarge,
                     color = if (enabled) scheme.onSurface else scheme.onSurface.copy(alpha = 0.45f),
                 )
                 if (!summary.isNullOrBlank()) {
                     Text(
                         text = summary,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = if (warn) scheme.error else scheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(M3eDimens.TrailingSpace))
             Switch(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
@@ -437,7 +514,7 @@ internal fun M3eChoiceRow(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    .padding(horizontal = M3eDimens.RowPaddingH, vertical = M3eDimens.RowSpaceV),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 RadioButton(selected = picked, onClick = null)
@@ -475,7 +552,7 @@ internal fun M3eSliderRow(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = M3eDimens.RowPaddingH, vertical = M3eDimens.RowSpaceV),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -494,7 +571,7 @@ internal fun M3eSliderRow(
                     if (!summary.isNullOrBlank()) {
                         Text(
                             text = summary,
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = scheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 2.dp),
                         )
@@ -558,7 +635,7 @@ internal fun M3eTextFieldDialogRow(
                     if (!summary.isNullOrBlank()) {
                         Text(
                             text = summary,
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -626,7 +703,7 @@ internal fun M3eIntDialogRow(
                     if (!summary.isNullOrBlank()) {
                         Text(
                             text = summary,
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }

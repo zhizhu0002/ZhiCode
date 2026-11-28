@@ -1,4 +1,9 @@
 package com.zhizhu.zhicode.compose.ui.pages.m3e
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material3.ripple
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -116,7 +121,7 @@ fun M3eThemePage(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    .padding(horizontal = M3eDimens.RowPaddingH, vertical = M3eDimens.RowSpaceV),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 RadioButton(selected = selected, onClick = null)
@@ -228,7 +233,7 @@ fun M3eThemePage(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                                .padding(horizontal = M3eDimens.RowPaddingH, vertical = M3eDimens.RowSpaceV),
                         ) {
                             Text(
                                 text = "导航栏位置",
@@ -251,8 +256,10 @@ fun M3eThemePage(
                     }
                     AnimatedVisibility(
                         visible = bottomMode,
-                        enter = fadeIn() + expandVertically(),
-                        exit = fadeOut() + shrinkVertically(),
+                        enter = fadeIn(MaterialTheme.motionScheme.defaultEffectsSpec()) +
+                            expandVertically(MaterialTheme.motionScheme.defaultSpatialSpec()),
+                        exit = fadeOut(MaterialTheme.motionScheme.fastEffectsSpec()) +
+                            shrinkVertically(MaterialTheme.motionScheme.fastSpatialSpec()),
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             M3eSwitchRow(
@@ -378,7 +385,7 @@ private fun M3ePresetPaletteCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = M3eDimens.RowPaddingH, vertical = M3eDimens.RowSpaceV),
         ) {
             Text(
                 text = "预设强调色",
@@ -395,11 +402,27 @@ private fun M3ePresetPaletteCard(
                 ) {
                     row.forEach { preset ->
                         val picked = preset.id == selectedId
+                        val interaction = remember { MutableInteractionSource() }
+                        val pressed by interaction.collectIsPressedAsState()
+                        val corner by animateDpAsState(
+                            targetValue = if (pressed) 20.dp else 16.dp,
+                            animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+                            label = "presetCorner",
+                        )
+                        val ringAlpha by animateFloatAsState(
+                            targetValue = if (picked) 1f else 0f,
+                            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+                            label = "presetRing",
+                        )
                         Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable { onSelect(preset) }
+                                .clip(RoundedCornerShape(corner))
+                                .clickable(
+                                    interactionSource = interaction,
+                                    indication = ripple(),
+                                    onClick = { onSelect(preset) },
+                                )
                                 .padding(vertical = 4.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
@@ -409,8 +432,12 @@ private fun M3ePresetPaletteCard(
                                     .clip(CircleShape)
                                     .background(Color(preset.seedArgb))
                                     .then(
-                                        if (picked) {
-                                            Modifier.border(2.5.dp, scheme.onSurface, CircleShape)
+                                        if (ringAlpha > 0f) {
+                                            Modifier.border(
+                                                2.5.dp,
+                                                scheme.onSurface.copy(alpha = ringAlpha),
+                                                CircleShape,
+                                            )
                                         } else {
                                             Modifier
                                         },
