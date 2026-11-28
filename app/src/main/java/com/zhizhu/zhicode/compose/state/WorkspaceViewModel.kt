@@ -168,17 +168,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * 主界面状态机。
- *
- * 数据来自 [WorkspaceRepository]（现在只剩终端占位横幅项）；对话流、工具执行、会话存储
- * 后续换成真实引擎实现即可，UI 层不用改。
- *
- * 继承 [AndroidViewModel] 而不是 `ViewModel`，是为了拿到 `Application`：
- * 内置 Termux 环境的安装与自检都需要 Context。
- * 这样做还有一个实际好处 —— `viewModel()` 的默认工厂本来就支持 `AndroidViewModel`，
- * 所以 `ZhiCodeApp()` 里那行默认参数不用改、也不用自己写 Factory。
- */
+/** 主界面状态机。 */
 class WorkspaceViewModel(
     application: Application,
     private val repo: WorkspaceRepository = MockWorkspaceRepository(),
@@ -196,20 +186,10 @@ class WorkspaceViewModel(
     private var lastStorageMaintenanceAt = 0L
     private val storageMaintenanceIntervalMs = 24L * 60L * 60L * 1000L
 
-    /**
-     * 停止看门狗；每次按停止重建，收到引擎的回合结束确认时取消。
-     *
-     * <p>用协程而不是 Handler：它跟着 viewModelScope 一起死，
-     * ViewModel 清掉之后不会有回调再落到已经销毁的界面上。
-     */
+    /** 停止看门狗；每次按停止重建，收到引擎的回合结束确认时取消。 */
     private var stopWatchdog: Job? = null
 
-    /**
-     * 这一轮已经按了几次停止。0 = 不在停止流程里。
-     *
-     * <p>进内存而不是进 StateFlow：界面只用得到"在不在停止中"（`stopping`），
-     * 次数只影响状态文案与"要不要清缓冲"，那是这一次调用内部的事。
-     */
+    /** 这一轮已经按了几次停止。 */
     private var stopAttempts = 0
 
     /** 低频维护：打开侧栏时最多每天跑一次，重活始终在 IO 线程。 */
@@ -237,31 +217,14 @@ class WorkspaceViewModel(
 
     private val liveTools = mutableMapOf<String, LiveTool>()
 
-    /**
-     * 工具实时输出的合并缓冲。
-     *
-     * `onToolProgress` 的粒度是"每次进程写出一点"，Bash 跑一条 `apt install` 能到几千次。
-     * 每次都改 StateFlow 会把界面拖垮，所以按 [PROGRESS_FLUSH_MS] 合并后再落盘。
-     *
-     * 值类型是 [LiveOutput.Buffer] 而不是 `StringBuilder`：除了文本，它还要记住
-     * stdout / stderr 各自的字符数，以及**上一块来自哪个流** —— 后者决定要不要插
-     * `[stdout]` / `[stderr]` 标记行（只在切换时插一次，见 [LiveOutput.append]）。
-     */
+    /** 工具实时输出的合并缓冲。 */
     private val progressBuffers = mutableMapOf<String, LiveOutput.Buffer>()
     private val progressLastFlush = mutableMapOf<String, Long>()
 
     /** 正在等待用户回执的权限请求 id。 */
     private var pendingPermissionId: String? = null
 
-    /**
-     * 当前这一轮属于哪个会话（`activeSessionId` 的快照）。
-     *
-     * 用途只有一个：错误迟到时判断它该不该落到**现在**这个会话里。
-     * 用户在等待回复时切走会话，这一轮会被 `engine.cancel()` 打断，但错误回调
-     * 仍可能之后到达；没有这个标记就会把错误卡写进新会话（详见 [finishTurnWithError]）。
-     *
-     * 为 null 表示"当前没有归属待判定的回合"，此时不拦截。
-     */
+    /** 当前这一轮属于哪个会话（`activeSessionId` 的快照）。 */
     private var turnSessionId: String? = null
     /** 这一轮的起点（`elapsedRealtime`）。0 = 当前没有进行中的回合。 */
     private var turnStartedAtElapsedMs: Long = 0L
@@ -272,13 +235,7 @@ class WorkspaceViewModel(
     @Volatile
     private var openSessionSeq: Long = 0L
 
-    /**
-     * 正在进行的「提问」流程。
-     *
-     * 引擎的 `AskUserQuestion` 可以一次带多个问题，界面是**分步**展示的，
-     * 所以必须把请求 id、问题列表、当前步骤、已收集的答案都留着 ——
-     * 只存"当前这一步"的话，走到第二步就丢了前面的答案。
-     */
+    /** 正在进行的「提问」流程。 */
     private class PendingQuestions(
         val requestId: String,
         val questions: JSONArray,
@@ -291,21 +248,10 @@ class WorkspaceViewModel(
 
 
 
-    /**
-     * 会话操作的目标。
-     *
-     * `showSessionActions(session)` 只负责弹选择器，真正的动作在选择器回调里执行；
-     * 那时只能拿到选项文案，拿不到是哪条会话。所以必须把目标记住 ——
-     * 否则会出现"想删 A 结果删了当前会话"这类错删。
-     */
+    /** 会话操作的目标。 */
     private var pendingSessionAction: SessionSummary? = null
 
-    /**
-     * 待执行（去抖中）的设置落盘。
-     *
-     * 见 [scheduleSettingsPersist]：只有自由文本输入才走这条路，
-     * 非空表示"有一次改动还躺在去抖窗口里"。
-     */
+    /** 待执行（去抖中）的设置落盘。 */
     private var settingsPersistJob: Job? = null
     private var pendingMessageAction: ChatItem? = null
 
@@ -315,37 +261,13 @@ class WorkspaceViewModel(
 
     private var modelCatalogJob: Job? = null
 
-    /**
-     * 模型选择的落盘任务。
-     *
-     * 单独一个（而不是共用 `modelCatalogJob`）：两者生命周期完全不同 —— 拉目录是
-     * "开面板时一次、切配置时一次"，而选模型是"每点一行一次"，共用一个句柄会让
-     * 选模型把正在进行的目录请求取消掉（列表就此停在加载中）。
-     */
+    /** 模型选择的落盘任务。 */
     private var modelSaveJob: Job? = null
     private var fileReloadJob: Job? = null
 
-    /**
-     * 会话级模型覆盖。
-     *
-     * 为什么不只写配置记录：选模型与“本轮对话用哪个模型”是两个作用域。
-     * 配置记录是跨会话的默认值，而 [modelOverride] 只影响当前这轮 ——
-     * 用户临时换一下模型试效果，不应该把他的默认配置也改掉。
-     *
-     * 所以这里是“两边都写”：持久化那份写进配置记录（下次打开设置能看到），
-     * 即时生效靠这个覆盖值再 `engine.configure()`。
-     *
-     * 切换 API 配置时清空——换了配置就该用那份配置自己的模型。
-     */
     private var modelOverride: String? = null
 
-    /**
-     * 会话级角色卡覆盖。
-     *
-     * 与 [modelOverride] 同理：磁盘上的卡片清单与"实际生效内容"是两份数据，
-     * 引擎的 SessionConfig 只认后者。空串 ≠ null —— 空串表示"确实停用了"（要覆盖掉
-     * 配置里的旧值），null 表示"本轮不覆盖"（会退回旧值，于是停用看起来没生效）。
-     */
+    /** 会话级角色卡覆盖。 */
     private var roleCardOverride: String? = null
 
 
@@ -382,24 +304,10 @@ class WorkspaceViewModel(
 
     val state: StateFlow<WorkspaceUiState> = _state.asStateFlow()
 
-    /**
-     * 页面动作的在飞登记表（见 [ActionBusy]）。
-     *
-     * 与 [_state] 分开：判定互斥时读它（不产生 Snapshot 快照），界面读
-     * `state.inFlight` 那份快照。两者由 [runBusy] 一并维护。
-     */
+    /** 页面动作的在飞登记表（见 [ActionBusy]）。 */
     private val actions = ActionBusy()
 
-    /**
-     * 跑一个**有互斥语义**的页面动作。
-     *
-     * - 同一个 [key] 已在跑时直接返回：用户双击保存 / 粘贴 / 删除不会做两遍；
-     * - 动作体在 [Dispatchers.IO] 上跑（保存类动作基本都是文件 IO），
-     *   因此 `_state.update` 也允许在动作体里直接调用（它是线程安全的）；
-     * - 结束（含异常）一定释放登记，不会留下永远转圈的按钮。
-     *
-     * 这不替代取消：用户仍可以用"停止"打断 Agent 回合；它只保证**同一次点击不会被放大成两次**。
-     */
+    /** 跑一个**有互斥语义**的页面动作。 */
     private fun runBusy(key: String, block: suspend () -> Unit) {
         if (!actions.acquire(key)) {
             if (com.zhizhu.zhicode.compose.BuildConfig.DEBUG) {
@@ -438,42 +346,13 @@ class WorkspaceViewModel(
 
     // ------------------------------------------------------------ 终端保活
 
-    /**
-     * 终端面板实例。**持有它就是为了跨 Tab 保活**。
-     *
-     * ## 为什么必须挂在这里
-     *
-     * 原来的写法是 `TerminalPane` 里 `remember { TermuxTerminalPane(...) }` +
-     * `onDispose { pane.closeAll() }`，而 `PaneHost` 用的是 `when(tab) { … }`：
-     * 切到别的 Tab，终端这段 Composable 直接离开组合 → `onDispose` 触发 →
-     * **`closeAll()` 把每个会话（bash 进程 + PTY fd）都 finish 掉**。
-     * 于是"切走再切回来"看到的永远是全新的空终端，之前跑的命令、工作目录全没了。
-     *
-     * 把实例放到 ViewModel 上就解决了：Composable 进出组合只影响"挂到界面上"这一步，
-     * 会话本身一直在。
-     *
-     * ## 为什么放 ViewModel 不会泄漏 Activity
-     *
-     * `TermuxTerminalPane` 是 `FrameLayout`，构造时用的是 Activity 的 Context。
-     * ViewModel 比 Activity 活得久本来是泄漏的经典形态，但本工程的 MainActivity
-     * 声明了 `configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"`，
-     * **不会因旋转/换主题重建** —— Activity 实例与 ViewModel 同生共死，没有间隙。
-     *
-     * 真正要释放的时机是 [onCleared]（Activity 真正销毁）：那时必须 `closeAll()`，
-     * 否则每开一次应用就漏一批 bash 进程。
-     */
     private var terminalPane: TermuxTerminalPane? = null
 
     /** 取（或首次创建）终端面板实例。同一进程内只会有一个。 */
     fun terminalPane(context: Context): TermuxTerminalPane =
         terminalPane ?: TermuxTerminalPane(context, installer).also { terminalPane = it }
 
-    /**
-     * 关掉终端里的所有会话并丢弃实例。
-     *
-     * 只在两个地方调用：Activity 真正销毁（[onCleared]），以及**重装环境之前** ——
-     * 重装会把整个 `usr` 目录 rename 换掉，正在跑的 bash 会指向一个已不存在的前缀。
-     */
+    /** 关掉终端里的所有会话并丢弃实例。 */
     fun releaseTerminalPane() {
         val pane = terminalPane ?: return
         terminalPane = null
@@ -490,33 +369,6 @@ class WorkspaceViewModel(
         super.onCleared()
     }
 
-    /**
-     * 启动时检查内置 Termux 环境是否为**当前 APK 内置的那一版**，不是就自动重装。
-     *
-     * ## 为什么需要它
-     *
-     * marker 里一直存着"版本三元组"（版本 / sha256 / 来源），最初就是为这件事写的，
-     * 但此前**没有任何地方读它**。后果是：换了内置 bootstrap 的 APK 装上去以后，
-     * `usr` 永远停在旧的那份 —— `isInstalled()` 只查文件存不存在，照样返回 true，
-     * 于是谁都不会去重装，只能手动卸载重来（会连 HOME 一起丢）。
-     *
-     * ## 与手动触发的区别
-     *
-     * 不弹「环境自检」窗口、也不问一句：用户装 APK 的意图就是要用新的那版。
-     * 进度照常回灌到状态里，打开环境自检就能看到。
-     *
-     * ## HOME 不受影响
-     *
-     * [RuntimeInstaller.install] 只换 `usr`（`activatePrefix` 把旧前缀 rename 到
-     * `usr-backup` 再删），`home` 从头到尾没动过 —— 会话历史、项目文件都在。
-     * 但**用 apt 装过的包会丢**（它们装在 `usr` 里）。
-     *
-     * ## 为什么每一步都写日志
-     *
-     * 这条路径是**静默**的：没有弹窗、失败也只进状态。第一版就是这样被反馈
-     * "启动后没有自动重装" 而无法判断到底走到了哪一步。现在每次判定与结果都追加到
-     * `$HOME/.zhicode/runtime.log`（终端里 `cat ~/.zhicode/runtime.log` 就能看）。
-     */
     private fun autoInstallRuntimeIfStale() {
         // IO 线程：读 marker、比对 sha256、写日志都是磁盘操作
         viewModelScope.launch(Dispatchers.IO) {
@@ -567,14 +419,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把一行诊断写进 `$HOME/.zhicode/runtime.log`。
-     *
-     * 只保留最后 [RUNTIME_LOG_MAX_LINES] 行：这是个排障用的滚动日志，
-     * 不是审计记录，无限增长会把用户的家目录塞满。
-     *
-     * 绝不抛异常 —— 日志写不进去（磁盘满、权限）不该影响安装本身。
-     */
+    /** 把一行诊断写进 `$HOME/.zhicode/runtime.log`。 */
     private fun appendRuntimeLog(line: String) {
         runCatching {
             val dir = TermuxConstants.dataDir()
@@ -590,22 +435,10 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 首次载入：列出磁盘上的真实会话，有历史就把最近一条打开。
-     *
-     * 「自动打开最近一条」是刻意保留的行为：否则用户每次启动都看到空对话流，
-     * 会以为历史丢了（历史其实在侧栏里，但要自己去点）。
-     */
+    /** 首次载入：列出磁盘上的真实会话，有历史就把最近一条打开。 */
     private fun initSessionState() {
         viewModelScope.launch(Dispatchers.IO) {
             restoreUiSettings()
-            /*
-             * ⚠️ 这一步必须在 `syncActiveProfile()`（它会 `configure()` 并**落盘**）之前。
-             *
-             * 理由见 [restoreRuntimeChoices]：那个 configure 会把界面那份权限模式
-             * 写回 SessionConfig。界面此刻还是默认值，于是"先 configure 再读盘"
-             * 的顺序等于每次启动都把用户的权限设置冲掉。
-             */
             restoreRuntimeChoices()
             // 顶栏的模型名/密钥状态要反映**真实生效**的配置，
             // 否则用户会看到一个跟实际请求无关的模型名。
@@ -614,17 +447,7 @@ class WorkspaceViewModel(
             // 共享存储的授权状态要**实测**：文件面板切到「共享存储」时，
             // 没授权只会看到"0 项"，而原因（没给「所有文件访问权限」）必须说出来。
             refreshSharedStoragePermission()
-            /*
-             * `~/storage` 的六个链接**在每次启动的路径上**补一次。
-             *
-             * 幂等且只增不删（见 StorageLinks.setup），所以重复调用没有副作用；
-             * 而它是"老环境缺这一块"的唯一补救途径 —— 之前只在手动点「修复」时才跑，
-             * 结果是早先装好的环境永远没有 ~/storage，用户看到的是 `cd ~/storage/shared`
-             * 失败，看不出是"这个版本才加的"。
-             *
-             * 门控在 isInstalled()：环境还没装出来时 HOME 可能都还不存在，
-             * 这时候建链接没有意义（安装流程自己会建）。
-             */
+            /* `~/storage` 的六个链接**在每次启动的路径上**补一次。 */
             if (runCatching { installer.isInstalled() }.getOrDefault(false)) {
                 installer.setupStorageLinks()
             }
@@ -651,19 +474,6 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 读回**不在 SessionConfig 里**的那几项界面设置（主题、搜索服务密钥）。
-     *
-     * 其余设置（权限模式、推理档、上下文窗口、项目目录、联网搜索一整套、自动压缩、
-     * 自定义提示词、沙箱全权、Root、保活）都是 [SessionConfig] 的字段，
-     * 由引擎侧的持久化表负责，这里不重复。
-     *
-     * ⚠️ 但**每次启动仍要把它们读回界面一次**：引擎存了不等于界面知道，
-     * 而界面不知道就会在下一次 `configure()` 里用自己的默认值把盘上的值冲掉。
-     * 见 [restoreRuntimeChoices]。
-     *
-     * 密钥从**加密槽**读回，与 API 配置的密钥同一套保护。
-     */
     private suspend fun restoreUiSettings() = withContext(Dispatchers.IO) {
         val stored = runCatching {
             ApiSettingsStore.getThemeMode(getApplication(), ThemeMode.SYSTEM.name.lowercase())
@@ -715,13 +525,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 确保当前项目目录存在。
-     *
-     * 两个时机都需要：运行环境刚装好（home 此时才出现）、以及每次启动
-     * （环境是上次装的）。**必须在列会话之前调用** —— 会话按项目目录分键存储，
-     * 目录不存在时会话会落在一个"幽灵项目"键下，之后换了路径就找不回来了。
-     */
+    /** 确保当前项目目录存在。 */
     private fun ensureWorkspace() {
         val path = _state.value.projectPath
         // 目录已存在：只需按真实文件系统算出列表与说明。
@@ -787,25 +591,7 @@ class WorkspaceViewModel(
 
     fun closeTaskList() = _state.update { it.copy(taskListOpen = false) }
 
-    /**
-     * 输入框里出现/消失斜杠查询时由界面调用。
-     *
-     * ⚠️ 它**不再**接收整段文字，也**不再**写 `composerText`。
-     *
-     * 文字归界面层（`ComposerTextState`）所有，这样按键不会让
-     * `WorkspaceUiState`（内含整份 transcript）换实例，也就不会连带整个对话流重组。
-     * 状态层这里只需要知道"要不要显示斜杠面板、匹配到哪些命令"。
-     *
-     * `null` = 当前文字不是斜杠查询（不以 `/` 开头，或已经打了空格）。
-     */
-    /**
-     * 输入框里出现/消失 `@` 文件引用查询时由界面调用。
-     *
-     * `query` 是 `@` **之后**的那一段（不含 `@` 本身）。匹配源是当前目录的
-     * [WorkspaceUiState.fileEntries] —— 见 `fileQuery` 字段里对边界的说明。
-     *
-     * 与 [onSlashQueryChanged] 互斥使用：界面侧只会有一个处于活动状态。
-     */
+    /** 输入框里出现/消失 `@` 文件引用查询时由界面调用。 */
     fun onFileQueryChanged(query: String?) {
         if (query == null) {
             _state.update {
@@ -840,12 +626,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 外部动作往输入框里写字（编辑后发送、恢复草稿、引用、命令补全…）。
-     *
-     * `composerTextEpoch` 必须一起 +1：界面按"版本号变了"单向灌入，
-     * 见 `WorkspaceUiState.composerTextEpoch` 的说明。
-     */
+    /** 外部动作往输入框里写字（编辑后发送、恢复草稿、引用、命令补全…）。 */
     fun requestComposerText(text: String) {
         _state.update {
             it.copy(composerText = text, composerTextEpoch = it.composerTextEpoch + 1)
@@ -867,59 +648,17 @@ class WorkspaceViewModel(
         _state.update { it.copy(slashQuery = null, slashMatches = emptyList()) }
     }
 
-    /**
-     * 附件载荷。
-     *
-     * **故意不放进 `WorkspaceUiState`**：图片是几 MB 的字节数组，塞进不可变状态里会让
-     * 每次 `copy()` 都拖着它，而且 Compose 判断状态是否变化时要对它做 `equals`——
-     * 每帧比较几 MB 是纯粹的浪费。界面只需要名字和大小，真正的字节留在这里，
-     * 发送时再取。
-     *
-     * [image] 是 base64（界面显示缩略图用）。**在这里编码一次**而不是每次要用时现编：
-     * 一张 10 MB 的图 base64 是 13 MB 的字符串，编码本身要遍历全部字节 ——
-     * 缩略图与消息气泡、引擎请求三处都要它，各编一次就是三倍开销。
-     * 它也不进 state（同样是不让几 MB 的字符串跟着每次 copy 走），
-     * 由 [currentAttachmentImage] 按 id 取。
-     */
+    /** 附件载荷。 */
     private class AttachmentPayload(val bytes: ByteArray?, val mimeType: String, val image: ChatImage?)
 
     private val attachmentPayloads = mutableMapOf<String, AttachmentPayload>()
 
-    /**
-     * 取某个待发附件的图片（给输入器的缩略图用）。
-     *
-     * 返回值里的大字符串与载荷共享**同一个引用**，不会复制字节；
-     * 之所以不做成 `WorkspaceUiState` 的字段，理由见 [AttachmentPayload] 的注释。
-     */
+    /** 取某个待发附件的图片（给输入器的缩略图用）。 */
     fun currentAttachmentImage(id: String): ChatImage? = attachmentPayloads[id]?.image
 
-    /**
-     * 附加一张图片（来自系统选择器）。
-     *
-     * 读盘与大小校验都在 IO 线程：10 MB 的图片读进来是实打实的耗时。
-     */
+    /** 附加一张图片（来自系统选择器）。 */
     fun attachImage(uri: android.net.Uri) = attachImages(listOf(uri))
 
-    /**
-     * 一次附加多张图片（多选）。
-     *
-     * ## 为什么是"全部读完再更新一次状态"而不是每张各更新一次
-     *
-     * 五张图各发一次 `_state.update` 会让附件条闪四下、每次都重新测量布局
-     * （`animateContentSize` 会为每一次变化播一段动画）。攒起来一次性落地，
-     * 用户看到的是"五张一起出现"。
-     *
-     * ## 为什么一张失败不放弃其它张
-     *
-     * 选五张图时有了一张超大/损坏的，把其余四张一起丢掉是最糟的结果 ——
-     * 用户还得重新去相册挑一遍。所以逐张读、逐张记失败原因，
-     * **成功的照样进附件条**，失败的在提示里报出来。
-     *
-     * ## 部分失败为什么只吃一条提示
-     *
-     * 复用 `message` 那条通道（同一时刻只显示一条），用「N 张失败」汇总而不是
-     * 每张各弹一条：连弹五条提示会把真正成功的那几张也淹没掉。
-     */
     fun attachImages(uris: List<android.net.Uri>) {
         if (uris.isEmpty()) return
         viewModelScope.launch {
@@ -976,13 +715,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把待发图片编成引擎要的内容块。
-     *
-     * 结构对齐原版 `buildImageBlocks()`：`{type:image, source:{type:base64, media_type, data}, name}`。
-     * 是否真的发给模型由引擎按 `visionEnabled` 决定（`VisionMessageFilter`），
-     * 这里不重复判断——两处都判会出现"界面拦了但引擎其实允许"这类不一致。
-     */
+    /** 把待发图片编成引擎要的内容块。 */
     private fun buildImageBlocks(): JSONArray {
         val blocks = JSONArray()
         _state.value.attachments.filter { it.isImage }.forEach { attachment ->
@@ -1007,30 +740,11 @@ class WorkspaceViewModel(
         return blocks
     }
 
-    /**
-     * 把待发图片编成**界面模型**（挂到用户气泡上）。
-     *
-     * 与 [buildImageBlocks] 读的是同一份 `attachmentPayloads`，但两者不能合并：
-     *
-     * - [buildImageBlocks] 给**引擎**，结构必须是 Anthropic 的 `source.base64`；
-     * - 这里给**界面**，只要 base64 字符串本身。
-     *
-     * 合并成一个函数再各取所需，就得让界面层认识 `JSONObject` 结构；分开反而是
-     * 两个都很小的纯函数。唯一要守住的是**调用时机**：必须在 `clearAttachments()`
-     * **之前**调用，两处调用点都写了这条注释。
-     */
+    /** 把待发图片编成**界面模型**（挂到用户气泡上）。 */
     private fun currentImages(): List<ChatImage> = _state.value.attachments
         .filter { it.isImage }
         .mapNotNull { currentAttachmentImage(it.id) }
 
-    /**
-     * 这条消息要挂到气泡上的**非图片**附件。
-     *
-     * 只摘「叫什么、多大」两个字段 —— 正文留在 [Attachment.textBody] 里走提示词那条路，
-     * 不进 `ChatItem`（见 `ChatAttachment` 的说明）。
-     *
-     * ⚠️ 与 [currentImages] 同一条约束：必须在 `clearAttachments()` **之前**调用。
-     */
     private fun currentFiles(): List<ChatAttachment> = _state.value.attachments
         .filter { !it.isImage }
         .map { ChatAttachment(id = it.id, label = it.label, detail = it.sizeLabel) }
@@ -1041,17 +755,7 @@ class WorkspaceViewModel(
         _state.update { it.copy(attachments = emptyList()) }
     }
 
-    /**
-     * 把待发的**文本**附件拼进提示词。
-     *
-     * 结构照抄原版 `buildPromptWithAttachments`：包成 `<attached_context>` 块，
-     * 每个附件一个 `<attachment name="...">`。用 XML 风格的包裹是有意的——
-     * 模型对"这段是附带资料、不是用户指令"的分界需要明确标记，
-     * 直接把技能内容贴在提示词后面会让它读成用户要求。
-     *
-     * 只有存在文本附件时才加包裹层；一个都没有就原样返回，
-     * 避免每条消息都拖着空标签。
-     */
+    /** 把待发的**文本**附件拼进提示词。 */
     private fun buildPromptWithTextAttachments(prompt: String): String {
         val texts = _state.value.attachments.filter { !it.isImage && it.textBody != null }
         if (texts.isEmpty()) return prompt
@@ -1069,12 +773,7 @@ class WorkspaceViewModel(
 
     // ---------- Skill ----------
 
-    /**
-     * 导入 SKILL.md 的体积上限。
-     *
-     * 256 KB 对 SKILL.md 来说已经很宽松（真实技能通常几 KB），但足以挡住
-     * "用户误选了一个几十兆的文件、`readText()` 把内存吃光"这条路径。
-     */
+    /** 导入 SKILL.md 的体积上限。 */
     private val SKILL_IMPORT_LIMIT_BYTES = 256 * 1024
 
     fun openSkills() {
@@ -1117,12 +816,7 @@ class WorkspaceViewModel(
         it.copy(skills = it.skills?.copy(query = query))
     }
 
-    /**
-     * 打开技能详情。
-     *
-     * 详情页同时承担两件事：看这个技能有哪些文件、以及从这里进编辑。
-     * 文件列表每次进入都重读 —— 用户可能刚用 Agent 往目录里加了参考文档。
-     */
+    /** 打开技能详情。 */
     fun openSkillDetail(entry: SkillEntry) {
         val s = _state.value
         // 先推页、后读盘：`listTree` 要 walk 整个技能目录并逐文件取大小，
@@ -1181,17 +875,7 @@ class WorkspaceViewModel(
         it.copy(skills = it.skills?.copy(fileDraft = null))
     }
 
-    /**
-     * 在技能目录里新建一个附加文件。
-     *
-     * 重名**直接拒绝**而不是覆盖：这里建的是参考文档、脚本这类手写内容，
-     * 覆盖等于丢数据。技能本体（SKILL.md）也不允许用这个入口建 ——
-     * 那是 [createSkill] 的事，而且空内容过不了名字一致性校验，
-     * 所以 `SkillFileDraft.nameError` 在输入阶段就把它挡掉了。
-     *
-     * 文件名允许带子目录（`reference/api.md`）：技能本来就支持分组，
-     * 界面不给出这个入口的话，树只能显示别处建出来的目录。
-     */
+    /** 在技能目录里新建一个附加文件。 */
     fun saveSkillFile() {
         val s = _state.value
         val skills = s.skills ?: return
@@ -1237,13 +921,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 删除技能目录里的一个附加文件。
-     *
-     * `SKILL.md` 由 `SkillStore.deleteFile` 拒绝（它是技能本体，删掉会留下一个
-     * 列表里看得见、点不开的幽灵技能），所以界面不额外挡一遍 —— 一处校验就够，
-     * 两处会分叉。
-     */
+    /** 删除技能目录里的一个附加文件。 */
     fun deleteSkillFile(relativePath: String) {
         val s = _state.value
         val detail = s.skills?.detail ?: return
@@ -1265,25 +943,6 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 打开发起「手动添加」对话框。
-     *
-     * 表单**内容留空**，示例 SKILL.md 以**灰色占位符**的形式显示在输入框里
-     * （见 `SkillsPage` 里那个 `ZhiTextField` 的 `label`）。
-     *
-     * ## 为什么不再把模板填进内容里
-     *
-     * 上一版是把模板当**真实内容**预填，理由是"改一改就能存，不用面对空框猜格式"。
-     * 但那样做有两个副作用：
-     *
-     *  · 框里是**正常文字色**的模板，看起来像用户自己写的，用户得先全删再写；
-     *  · 模板里的 `name: <技能名>` 过不了校验 → 一打开对话框就是**一行红字**，
-     *    像是页面坏了，而用户其实什么都还没做。
-     *
-     * 改成占位符之后：灰字、一输入就浮到框上沿消失、不参与解析 ——
-     * 于是「保存」在用户打字之前一直是禁用的（因为内容为空），
-     * 而这正是想要的效果，且不需要靠"模板故意写非法"来实现。
-     */
     fun newSkill() {
         _state.update {
             it.copy(
@@ -1313,17 +972,6 @@ class WorkspaceViewModel(
         it.copy(skills = it.skills?.copy(createForm = null))
     }
 
-    /**
-     * 手动添加：把表单内容写进以 frontmatter 里的 `name` 命名的新目录。
-     *
-     * 名字解析不出来时**不提交**（`saveable` 为假）—— 猜一个目录名会建出
-     * 用户没打算建的东西。同名目录不覆盖，直接打开现有内容（`SkillStore.create`
-     * 的返回值即此语义）。
-     *
-     * ⚠️ 创建后只推**一层**页面（详情），**不能**同时设 `editing`：
-     * 那样页面栈会一次加两页（列表→详情→编辑器），视觉上就是"出现一个重复的"
-     * （用户报过的现象）。要改内容在详情页点 SKILL.md 即可。
-     */
     fun createSkill() = runBusy("skills.create") {
         val s = _state.value
         val form = s.skills?.createForm ?: return@runBusy
@@ -1361,15 +1009,7 @@ class WorkspaceViewModel(
         )
     }
 
-    /**
-     * 从本机文件导入一份 SKILL.md。
-     *
-     * 读完**不直接建技能**，而是填进「手动添加」表单让用户确认：名字解析出来对不对、
-     * 作用域选哪个，都还要用户看一眼。直接建会绕掉这两个决定。
-     *
-     * 加了一道体积上限：`readText()` 对超大文件会直接把内存吃光（用户完全可能误选一个
-     * 几十兆的文件），而 SKILL.md 本身只有几 KB。
-     */
+    /** 从本机文件导入一份 SKILL.md。 */
     fun importSkillFromUri(uri: Uri) {
         viewModelScope.launch {
             val result = runCatching {
@@ -1418,9 +1058,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 打开「从 URL 导入」对话框。
-     */
+    /** 打开「从 URL 导入」对话框。 */
     fun newSkillUrl() = _state.update {
         it.copy(skills = it.skills?.copy(urlDraft = SkillUrlDraft(), editing = null, createForm = null))
     }
@@ -1435,19 +1073,7 @@ class WorkspaceViewModel(
         it.copy(skills = it.skills?.copy(urlDraft = null))
     }
 
-    /**
-     * 从 URL 导入。
-     *
-     * 两条分支（见 `SkillImport`）：
-     * - **zip** → 把里面每个 `SKILL.md` 解开逐个建技能（子目录也认），一次可以导入一整包；
-     * - **文本** → 不直接建，而是填进「手动添加」对话框让用户确认名字与作用域。
-     *
-     * 下载在 IO 线程，期间把表单标成 `loading` 并禁用按钮：不标的话用户会以为没反应，
-     * 连点几下就是几次并发下载。
-     *
-     * 所有失败原因都如实上报（不是 http(s) / HTTP 非 200 / 太大 / 既不是文本也不是 zip），
-     * 因为这四种的下一步动作完全不同。
-     */
+    /** 从 URL 导入。 */
     fun importSkillFromUrl() {
         val s = _state.value
         val draft = s.skills?.urlDraft ?: return
@@ -1511,13 +1137,7 @@ class WorkspaceViewModel(
         )
     }
 
-    /**
-     * 把 zip 里解出来的技能逐个落盘。
-     *
-     * 同名**不覆盖**（`SkillStore.create` 的既有语义）：用户可能已经在本地改过那份，
-     * 静默覆盖等于丢数据。结果里分别报"新建了几个 / 已存在几个"，
-     * 而不是笼统说一句"导入完成"——用户要能一眼看出哪个没进来。
-     */
+    /** 把 zip 里解出来的技能逐个落盘。 */
     private fun createImportedSkills(imported: List<SkillImport.ImportedSkill>, scope: SkillScope) {
         val path = _state.value.projectPath
         var created = 0
@@ -1545,16 +1165,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 打开某个技能文件的编辑器（对话框）。
-     *
-     * [relativePath] 默认 `SKILL.md`（列表页的快捷「编辑」直接进本体）；
-     * 详情页里点某个附加文件时传那条相对路径（可能是 `reference/api.md`）。
-     *
-     * 还没进过详情时顺手把详情也置上：详情页是编辑对话框的**宿主页**
-     * （浮层挂在它的 Scaffold 里，见 `SettingsSubPage` 的 overlay 参数），
-     * 不置的话对话框没有宿主、点了也不会出现。
-     */
+    /** 打开某个技能文件的编辑器（对话框）。 */
     fun editSkill(entry: SkillEntry, relativePath: String = "SKILL.md") {
         val s = _state.value
         // 打开编辑器要**先把整个文件读进内存**（正文直接进 `SkillEditTarget.body`），
@@ -1609,16 +1220,6 @@ class WorkspaceViewModel(
         it.copy(skills = it.skills?.copy(editing = null))
     }
 
-    /**
-     * 保存正在编辑的文件。
-     *
-     * 保存后**回到原来那一页**（详情页还在就回详情页并刷新文件树），
-     * 而不是一路弹回列表 —— 那样用户想接着改第二个文件就得重新点进去。
-     *
-     * ⚠️ 失败时**不关对话框**：`SKILL.md` 的 `name` 与目录名不一致是这里最容易
-     * 踩到的错误（`SkillStore.writeFile` 会拒绝），关掉对话框等于让用户重新输入一遍。
-     * 保持打开、把原因显示出来，用户改一行就能再存。
-     */
     fun saveSkill() = runBusy("skills.save") {
         val s = _state.value
         val editing = s.skills?.editing ?: return@runBusy
@@ -1662,13 +1263,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把技能附加到下一步任务。
-     *
-     * 走**文本附件**路径而不是直接塞进输入框：输入框是用户的编辑区，
-     * 往里面灌几百行技能内容会让人没法继续写自己的话。
-     * 附加后内容由 [buildPromptWithTextAttachments] 在发送时包进 `<attached_context>`。
-     */
+    /** 把技能附加到下一步任务。 */
     fun attachSkill(entry: SkillEntry) {
         val body = SkillStore.read(_state.value.projectPath, entry.scope, entry.name).getOrElse { error ->
             _state.update { it.copy(message = "附加失败：${error.message ?: "未知原因"}", messageIsError = true) }
@@ -1695,13 +1290,7 @@ class WorkspaceViewModel(
 
     // ---------- 角色卡 ----------
 
-    /**
-     * 打开角色卡管理器。
-     *
-     * 角色卡与技能的区别值得说清楚：技能是"按需加载的资料"（Agent 主动调用
-     * `Skill` 工具，或用户手动附加一次），角色卡是**长期生效的人设指令**——
-     * 引擎把启用中的内容作为 `<role_card>` 块拼进每一次系统提示词。
-     */
+    /** 打开角色卡管理器。 */
     fun openRoleCards() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
@@ -1755,13 +1344,7 @@ class WorkspaceViewModel(
         it.copy(roleCards = it.roleCards?.copy(editor = null))
     }
 
-    /**
-     * 保存角色卡并**立即启用**。
-     *
-     * 与原版一致：保存一张卡就意味着"我现在要用它"，所以同时写清单、写 activeId、
-     * 并把内容灌进引擎配置。分三步做是必须的——只写清单不写 activeId 的话，
-     * 用户会看到卡保存成功却没有任何效果。
-     */
+    /** 保存角色卡并**立即启用**。 */
     fun saveRoleCard() = runBusy("roleCards.save") {
         val editor = _state.value.roleCards?.editor ?: return@runBusy
         if (!editor.saveable) return@runBusy
@@ -1837,13 +1420,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把磁盘上启用中的角色卡内容读进会话覆盖值。
-     *
-     * 启动时调用一次：`SessionConfig.load()` 不带 roleCard（引擎只按 `applyProfile`
-     * 填协议/地址/模型），所以不主动读的话，重启后角色卡在列表里显示"已启用"
-     * 却不会被注入请求——正是那种"看起来配好了其实没生效"的状态。
-     */
+    /** 把磁盘上启用中的角色卡内容读进会话覆盖值。 */
     private fun syncRoleCardFromStore() {
         val content = runCatching { RoleCardStore.activeContent(getApplication()) }.getOrDefault("")
         // 空串表示"确实没有启用的卡"，也要覆盖掉配置里的旧值，所以这里不能判空就跳过。
@@ -1878,31 +1455,6 @@ class WorkspaceViewModel(
 
     fun closeMemory() = _state.update { it.copy(memory = null) }
 
-    /**
-     * 打开 IQ 沙箱管理页。
-     *
-     * ## 为什么是跨进程的 Activity，而不是主界面里的一页
-     *
-     * 沙盒引擎（BlackBox）**只在 `:iqsandbox` / `:black` / `:pN` 进程里加载**
-     * （判定见 `SandboxProcessRole.shouldAttachBlackBox`）。管理页本身在主进程，
-     * 它只是通过 `SandboxHostClient`（ContentProvider）与
-     * `SandboxAgentBridge`（定向广播）发号施令。
-     *
-     * 把这一屏放进主界面的 `NavDisplay` 会有两个后果：
-     * 1. **返回栈里混进虚拟应用** —— guest Activity 是另一个进程的窗口，
-     *    返回键该回到哪一页没有人能讲清；
-     * 2. 主界面的 `Scaffold` 会把这一屏和对话、终端挤在同一个窗口里，
-     *    而沙盒页需要独占一次「导入 APK」的 `OpenDocument` 结果回调。
-     *
-     * 独立 Activity 之后，返回键只有一个主人，文件选择器的结果也只有一个接收者。
-     *
-     * ## 为什么必须带 NEW_TASK
-     *
-     * ViewModel 手里只有 `Application` 上下文（见 `WorkspaceViewModelFactory`），
-     * 非 Activity 上下文启动 Activity 必须带这个标志，否则直接
-     * `AndroidRuntimeException: Calling startActivity() from outside of an
-     * Activity context requires the FLAG_ACTIVITY_NEW_TASK flag`。
-     */
     fun openSandbox() {
         hideSidebarForNavigation()
         val context: android.content.Context = getApplication()
@@ -1961,18 +1513,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * `/init`：让 Agent 直接创建或完善项目 ZhiCode.md。
-     *
-     * 指令照抄原版：明确要求**不要**进计划模式、不建任务、不起子 Agent、不做大范围调研，
-     * 只读现有的 ZhiCode.md / CLAUDE.md / README 与主构建清单，然后直接写 ZhiCode.md。
-     *
-     * 两个细节都保留：
-     * - 先退出计划模式。计划模式下引擎只产出计划不落盘，`/init` 会变成"只给我一份计划"，
-     *   而那显然不是用户想要的。
-     * - 对话流里放一条可见的 `/init` 用户气泡：这条请求是应用自己发的，
-     *   不显示出来的话用户会看到一条自己没写过的消息引发的回复。
-     */
+    /** `/init`：让 Agent 直接创建或完善项目 ZhiCode.md。 */
     /** 界面入口：记忆面板里的「让 ZhiCode 完善」按钮（`ui/dialogs/MemoryOverlay.kt`）。 */
     fun runInitFromUi() = runInitPrompt()
 
@@ -1994,12 +1535,7 @@ class WorkspaceViewModel(
         startTurn(PromptSlot.INIT.resolve(_state.value.settings.initPrompt))
     }
 
-    /**
-     * 写入一个提示词槽位（空串 = 恢复默认）。
-     *
-     * <p>三个槽位走同一个入口：它们的语义完全一样（空串=默认），
-     * 各写一个 setter 只会让"恢复默认"这条逻辑出现三份。
-     */
+    /** 写入一个提示词槽位（空串 = 恢复默认）。 */
     fun setPromptSlot(slot: PromptSlot, value: String) {
         val draft = _state.value.settingsDraft ?: SettingsDraft.from(_state.value)
         val updated = when (slot) {
@@ -2013,12 +1549,7 @@ class WorkspaceViewModel(
     /** 编辑页里「恢复默认」：把该槽位清成空串。 */
     fun resetPromptSlot(slot: PromptSlot) = setPromptSlot(slot, "")
 
-    /**
-     * 打开「提示词」整页。
-     *
-     * <p>只置一个布尔：这一页要的三份文案都在 `state.settings` 里，没有要读盘的东西，
-     * 所以不需要像记忆页那样先推页面再异步取载荷。
-     */
+    /** 打开「提示词」整页。 */
     fun openPrompts() {
         _state.update { it.copy(settingsOpen = true, sidebarOpen = false, promptsOpen = true) }
     }
@@ -2050,12 +1581,7 @@ class WorkspaceViewModel(
         _state.update { it.copy(chatDisplayOpen = false) }
     }
 
-    /**
-     * 打开「关于」。
-     *
-     * 入口有两个（侧栏「更多」组、设置页底部），所以这里**不**顺带打开设置页 ——
-     * 从侧栏进来时它就该是一个独立的整页，返回直接回工作区。
-     */
+    /** 打开「关于」。 */
     fun openAbout() {
         _state.update { it.copy(aboutOpen = true, sidebarOpen = false) }
         // 关于页要决定「有新版本 x.y.z」那一行显不显示，而这只有在真的查过之后才知道。
@@ -2081,13 +1607,7 @@ class WorkspaceViewModel(
 
     // ---------- 检查更新 ----------
 
-    /**
-     * 打开「检查更新」页。
-     *
-     * 入口有两个：关于页 Hero 里那个大 ZhiCode 字（**常驻** —— 就算没有新版本，
-     * 用户也该能进来看当前版本的更新内容），以及关于页底部那一行
-     * （只在真有新版本时出现）。
-     */
+    /** 打开「检查更新」页。 */
     fun openUpdate() {
         _state.update { it.copy(updatePageOpen = true) }
         // 进页面时自动查一次（若还没查过）。这样"打开就该看到状态"，
@@ -2099,19 +1619,6 @@ class WorkspaceViewModel(
         _state.update { it.copy(updatePageOpen = false) }
     }
 
-    /**
-     * 检查更新（用户主动点，或 [openUpdate] / [openAbout] 自动触发）。
-     *
-     * ## 为什么"没查过才自动查"而不是每次进页都查
-     *
-     * 每次进页都请求 GitHub 会让"打开关于页"这个纯本地动作**依赖网络** ——
-     * 断网时页面会卡一下再显示一句错误。而 GitHub 的匿名 API 有速率限制
-     * （每小时 60 次），反复进进出出很容易把它耗光，那时用户看到的是
-     * "检查更新失败"，原因却只是"你自己刚才点了太多次"。
-     *
-     * 所以自动查只在 [UpdateUiState.hasChecked] 为假时发生；
-     * 用户想再查一次就点「检查更新」那个按钮，[force] = true。
-     */
     fun checkForUpdates(force: Boolean = true) {
         runBusy(ACTION_CHECK_UPDATE) {
             val current = _state.value.update
@@ -2182,18 +1689,6 @@ class WorkspaceViewModel(
         checkForUpdates(force = false)
     }
 
-    /**
-     * 挑出"最新的"那条 release。
-     *
-     * ## 为什么不直接取列表第一条
-     *
-     * GitHub 的 `/releases` **按创建时间倒序、而不是按版本号**。打了新 tag
-     * 但把旧版本的 release 重新编辑一次，顺序就会变。所以这里按**版本号**
-     * 比一遍 —— 这是唯一能保证"挑出来的确实是最新版本"的判据。
-     *
-     * 版本号解析不了的那些条目被跳过（`VersionCompare` 对非法输入返回 false），
-     * 而不是当成 0 参与比较。
-     */
     private fun pickNewest(releases: List<UpdateChecker.Release>): UpdateChecker.Release? =
         releases.filter { !it.prerelease }.maxWithOrNull { a, b ->
             if (VersionCompare.isNewer(a.tag, b.tag)) 1 else -1
@@ -2211,13 +1706,7 @@ class WorkspaceViewModel(
         apkSize = release.apkSize,
     )
 
-    /**
-     * 下载安装包。
-     *
-     * 落到 `cacheDir/update/` 下 —— 那个根**已经**在 `ZhiFileProvider` 的白名单里
-     * （见 `ZhiFileProvider.java` 的"允许分享的三个根"），所以下载完可以直接换成
-     * `content://` 交给系统安装器，不需要额外开目录、也不需要申请存储权限。
-     */
+    /** 下载安装包。 */
     fun downloadUpdate() {
         runBusy(ACTION_DOWNLOAD_UPDATE) {
             val release = _state.value.update.release ?: return@runBusy
@@ -2310,14 +1799,7 @@ class WorkspaceViewModel(
         downloadUpdateCancellation = null
     }
 
-    /**
-     * 把已下载的安装包交给系统安装器。
-     *
-     * 走 `AndroidIntentBridge.installApkFile` —— 它内部就是"安装 APK"那个工具的
-     * 同一段实现（`ZhiFileProvider` 换 URI → 未授权先进「未知来源」授权页 →
-     * 启动系统安装器），而 `MainActivity.onResume` 会在用户授权返回后
-     * 自动续装。自己再写一遍这段流程只会让两边慢慢长歪。
-     */
+    /** 把已下载的安装包交给系统安装器。 */
     fun installDownloadedUpdate() {
         val release = _state.value.update.release ?: return
         val apk = updateApkFile(release)
@@ -2337,12 +1819,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 安装包在缓存里的落点。
-     *
-     * 文件名带上 tag 并做一次消毒：tag 来自远端，可能含 `/` 或 `..`。
-     * 直接拼进路径等于给了一个任意路径写入的口子。
-     */
+    /** 安装包在缓存里的落点。 */
     private fun updateApkFile(release: UpdateReleaseInfo): File {
         val safeTag = release.tag.replace(Regex("[^A-Za-z0-9._-]"), "_").take(64)
         val dir = File(getApplication<android.app.Application>().cacheDir, "update")
@@ -2393,17 +1870,7 @@ class WorkspaceViewModel(
 
     // ---------- 发送 / 停止 ----------
 
-    /**
-     * 从输入框的**当前文字**发送。
-     *
-     * 之所以要这个方法：文字现在归界面层（`ComposerTextState`）所有，状态层里的
-     * `composerText` 只是"最后一次外部写入的值"，**不代表用户刚打的内容**。
-     * 发送语义必须用界面那一份，否则会出现"打完一句话点发送，发出去的是上一次的内容"。
-     *
-     * 做法：先把文字灌进状态层（走 `requestComposerText`，于是 epoch +1、
-     * 界面那边不会被打断 —— 它随后会自己 `clear()`），再走原来的 [send]。
-     * 这样斜杠命令、预输入、附件等所有既有分支都复用同一套逻辑，不需要第二份实现。
-     */
+    /** 从输入框的**当前文字**发送。 */
     fun sendFromComposerText(textState: com.zhizhu.zhicode.compose.ui.composer.ComposerTextState) {
         val text = textState.text()
         if (text.isBlank()) return
@@ -2415,19 +1882,7 @@ class WorkspaceViewModel(
         send()
     }
 
-    /**
-     * 从输入框发送，并**等待回复**（普通点按发送键）。
-     */
-    /**
-     * 从队列里删掉一条预输入。
-     *
-     * 同时把那条**已经进了对话流的用户气泡**也移除：预输入的实现是
-     * "气泡立刻进 transcript + 文字排队等引擎"（见 `sendInternal` 的预输入分支），
-     * 所以取消排队时如果只清队列，列表里会留下一条永远不会有回复的孤零零的气泡。
-     *
-     * ⚠️ 这里**不**动库：那条气泡还没落盘（引擎在把预输入并入对话时才写），
-     * 所以只需要改内存里的 transcript 与队列。
-     */
+    /** 从输入框发送，并**等待回复**（普通点按发送键）。 */
     fun removeQueuedPrompt(chatItemId: String) {
         _state.update { s ->
             val remaining = s.pendingInputs.filterNot { it.chatItemId == chatItemId }
@@ -2450,11 +1905,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把队列里的一条取回输入框（编辑后重新发送）。
-     *
-     * 与 [removeQueuedPrompt] 同样的清理，只是多一步把文字写回输入框。
-     */
+    /** 把队列里的一条取回输入框（编辑后重新发送）。 */
     fun editQueuedPrompt(chatItemId: String) {
         val queued = _state.value.pendingInputs.firstOrNull { it.chatItemId == chatItemId } ?: return
         removeQueuedPrompt(chatItemId)
@@ -2469,23 +1920,9 @@ class WorkspaceViewModel(
 
     fun send() = sendInternal(waitForReply = true)
 
-    /**
-     * 只把消息发进对话流，**不让模型回复**（长按发送键）。
-     *
-     * 用途：把自己的一条说明/占位先记进会话（例如"接下来我要手动改这个文件"），
-     * 不想因此触发一次模型往返。用户气泡照常进列表、落盘照常，只是不发 `startTurn`。
-     *
-     * ⚠️ 斜杠命令不适用：那些命令本身就是动作，无所谓"等不等回复"，
-     * 所以这里和其它分支一样直接走 `send()`，共享同一条实现。
-     */
     fun sendWithoutReply() = sendInternal(waitForReply = false)
 
-    /**
-     * 长按发送键的入口：从界面持有的文字发送，**不**触发模型。
-     *
-     * 与 [sendFromComposerText] 同一套准备动作（灌进状态层 → 清空输入框），
-     * 区别只在最后调的是 [sendWithoutReply]。
-     */
+    /** 长按发送键的入口：从界面持有的文字发送，**不**触发模型。 */
     fun sendWithoutReplyFromComposerText(
         textState: com.zhizhu.zhicode.compose.ui.composer.ComposerTextState,
     ) {
@@ -2505,10 +1942,7 @@ class WorkspaceViewModel(
             runSlashCommand(text)
             return
         }
-        /*
-         * 「只发不回复」在引擎忙的时候**没有意义**：那时本来就不发 startTurn，
-         * 走预输入分支才是对的（用户还是想让内容排上队）。所以只在不忙时特判。
-         */
+        /* 「只发不回复」在引擎忙的时候**没有意义**：那时本来就不发 startTurn */
         if (!waitForReply && !engine.isBusy()) {
             val userItem = ChatItem(
                 id = nextId("u"),
@@ -2626,12 +2060,7 @@ class WorkspaceViewModel(
         startTurn(buildPromptWithTextAttachments(text), imageBlocks)
     }
 
-    /**
-     * 把一条提示词交给真实引擎。
-     *
-     * 会话配置**每一轮都重新下发**：用户在设置里改了权限模式/推理强度/上下文窗口后，
-     * 不需要重启应用就能在下一轮生效。
-     */
+    /** 把一条提示词交给真实引擎。 */
     private fun startTurn(prompt: String, extraContent: JSONArray? = null) {
         // 记下这一轮属于哪个会话。放在这里而不是各调用点：`startTurn` 是**唯一漏斗**
         // （普通消息与 /init 都走它），只需维护一处；错误迟到时靠它判断该不该落地。
@@ -2650,13 +2079,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把当前界面状态翻译成引擎覆盖项。
-     *
-     * `model` **故意留空**：界面上的 `modelLabel` 目前还是演示标签，真正生效的模型
-     * 来自 API 配置记录（`ApiSettingsStore`）。在这里覆盖会用一个不存在的模型名把请求打挂；
-     * 等设置页接线（Phase 5）之后再把模型选择器接上。
-     */
+    /** 把当前界面状态翻译成引擎覆盖项。 */
     private fun engineOverrides(): EngineOverrides {
         val s = _state.value
         // 搜索后端：**有生效的服务就用它**，否则回落到免费后端（auto）。
@@ -2711,23 +2134,6 @@ class WorkspaceViewModel(
         )
     }
 
-    /**
-     * 停止当前回合（也是**唯一的重试入口**）。
-     *
-     * <h3>为什么不能按一下就宣布"已停止"</h3>
-     * `engine.cancel()` 只是把中断送到 agent 线程。真正把命令停掉要等工具执行栈收尾：
-     * 先读 pid、再对整个进程组发信号、确认退出、不行再强制杀（见 `TermuxShellExecutor`）。
-     * 这段收尾是**异步**的，而且可能很久 —— 命令正卡在一次不可中断的 IO 上时，
-     * 要等它自己的超时（HTTP/MCP 30 秒起，包管理器 1 小时）。
-     *
-     * <p>所以这里不再当场清 `composerBusy`（那会让停止键在按下的同一帧消失，
-     * 用户再也没有第二个能按的东西，最后只能清后台），而是进入 [WorkspaceUiState.stopping]：
-     * 停止键留在原地、状态写"正在停止…"，由引擎的 `onTurnComplete` 来收尾。
-     *
-     * <h3>再按一次是"重发中断"，不是重复动作</h3>
-     * 第二次之后不再清缓冲、不再重复把预输入放回输入框，只重发一次中断 ——
-     * 第一次的中断可能正好被一次在途 IO 吃掉（那正是"按了没反应"的常见成因）。
-     */
     fun stop() {
         val snapshot = _state.value
         // 什么都没跑时不进停止流程：否则会点亮一个"正在停止…"，
@@ -2780,21 +2186,7 @@ class WorkspaceViewModel(
         armStopWatchdog()
     }
 
-    /**
-     * 停止看门狗：等待引擎的收尾确认，并且**不把界面锁死**。
-     *
-     * <p>正常情况几毫秒内就会回调 `onEngineTurnComplete`，这里只是兜底。
-     * 分两档，因为两种"慢"要区别对待：
-     *
-     * <ol>
-     *   <li>[STOP_CONFIRM_MS] 之后还在忙 —— 大概率是工具卡在一次不可中断的 IO 上。
-     *       只改状态文案，**保留**停止键，让用户能再按一次重发中断。</li>
-     *   <li>再等 [STOP_UNLOCK_MS] 仍未确认 —— 解锁输入框（`composerBusy = false`），
-     *       但仍然保留停止键（`stopping` 不变）。宁可让用户能继续打字，
-     *       也不要因为一次卡住的回合把整个界面冻住；也绝不说"已停止"，
-     *       因为那时候我们并不知道。</li>
-     * </ol>
-     */
+    /** 停止看门狗：等待引擎的收尾确认，并且**不把界面锁死**。 */
     private fun armStopWatchdog() {
         stopWatchdog?.cancel()
         stopWatchdog = viewModelScope.launch {
@@ -2840,12 +2232,7 @@ class WorkspaceViewModel(
         stopAttempts = 0
     }
 
-    /**
-     * 停止流程结束（引擎确认收尾、或者看门狗判定它已经不忙了）。
-     *
-     * <p>[message] 为 null 表示不要动提示语 —— 正常完成的回合也走这里，
-     * 那时候说一句"已停止当前任务"就是假话。
-     */
+    /** 停止流程结束（引擎确认收尾、或者看门狗判定它已经不忙了）。 */
     private fun clearStopState(message: String? = null) {
         resetStopTracking()
         _state.update {
@@ -2892,17 +2279,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 取当前流式气泡的 id；没有就建一个。
-     *
-     * <p>原本只有 [onEngineText] 会建气泡。现在思考也要走这里 ——
-     * 工具批次结束后模型**先思考再说话**，如果思考不建气泡，那一段思考会被
-     * 静默丢掉（[onEngineThinking] 拿不到 id 就直接 return）。
-     *
-     * <p>「首个 delta 才创建」这件事没变。原版是回合开始时就插一个空气泡、
-     * 结束时再丢弃空的；Compose 里那样会先闪一个空白块，观感更差 ——
-     * 语义等价（空回复同样不会留下气泡，见 [finalizeStreaming] 的 keepIfEmpty）。
-     */
+    /** 取当前流式气泡的 id；没有就建一个。 */
     private fun ensureStreamingAssistant(): String {
         streamingAssistantId?.let { return it }
         val id = nextId("a")
@@ -2922,19 +2299,6 @@ class WorkspaceViewModel(
         return id
     }
 
-    /**
-     * 把当前流式气泡**封口**（定稿，不再往里追加），但不丢弃。
-     *
-     * <p>⚠️ 这是「正文与工具卡按时序穿插」的唯一支点：工具批次开始时必须先封口，
-     * 否则工具结束后模型继续说的那段会被追加到**工具之前**的同一个气泡里 ——
-     * 界面上的表现就是"正文全在最上面、工具卡全挤在下面"，时序完全是平的。
-     *
-     * <p>封口 ≠ 结束回合：正文气泡和工具卡都留在原位、顺序不变，
-     * 后续正文会开一个**新的**气泡接在工具卡后面（[ensureStreamingAssistant]）。
-     *
-     * <p>还在转圈的东西不受影响：[currentGroupId] 归 [onEngineToolBatchCompleted]
-     * 管，工具行自己的状态由 `ToolActivity.completed` 管。
-     */
     private fun sealStreamingAssistant() {
         val id = streamingAssistantId ?: return
         streamingAssistantId = null
@@ -3174,17 +2538,7 @@ class WorkspaceViewModel(
         }
         appendProcessStep("工具完成：$name")
 
-        /*
-         * 收集"这一轮改了哪些文件"，写到最后一条助手消息上（元信息行用）。
-         *
-         * 判据是**工具真的产生了改动**，而不是看工具名白名单：
-         *  · `diff` 非空  → 引擎明确报了改动（写文件类工具都走这条）；
-         *  · `addedLines/deletedLines > 0` → 同上，另一个信号。
-         *
-         * 用白名单去猜工具名会漏掉自定义工具，而这两个信号来自引擎本身。
-         * 文件名从 liveTools 里那一份的 summary 取 —— 它在 `onEngineToolUse`
-         * 时已经生成好（形如 `写 src/A.kt`），不需要在这里再解析一次参数。
-         */
+        /* 收集"这一轮改了哪些文件"，写到最后一条助手消息上（元信息行用）。 */
         val changedFile = runCatching {
             if (diff.isNotBlank() || addedLines > 0 || deletedLines > 0) {
                 // ⚠️ 不能用上面那个 `live`：它在方法开头就被 `liveTools.remove(id)`
@@ -3285,13 +2639,7 @@ class WorkspaceViewModel(
         showQuestionStep()
     }
 
-    /**
-     * 展示提问流程的第 [step] 步。
-     *
-     * 引擎的 `AskUserQuestion` 有两种形态：单问题（直接提交）与多问题（分步，
-     * 每步一个窗口，按钮是「下一步」，最后一步才是「提交」）。
-     * 答案按**问题原文**为键累积（与引擎的约定一致）。
-     */
+    /** 展示提问流程的第 [step] 步。 */
     private fun showQuestionStep() {
         val flow = pendingQuestions ?: return
         val question = flow.questions.optJSONObject(flow.index)
@@ -3467,13 +2815,7 @@ class WorkspaceViewModel(
         syncActiveSessionFromDisk()
     }
 
-    /**
-     * 回合结束后把当前会话对齐到库里状态。
-     *
-     * 做两件事：
-     * 1. 重读会话列表 —— 让刚创建的会话出现、让标题/消息数/时间刷新；
-     * 2. 如果当前还没有 activeSessionId（刚 /new 过），把引擎刚创建的会话认领为当前会话。
-     */
+    /** 回合结束后把当前会话对齐到库里状态。 */
     private fun syncActiveSessionFromDisk() {
         viewModelScope.launch(Dispatchers.IO) {
             val sessions = SessionReader.listAll()
@@ -3495,22 +2837,6 @@ class WorkspaceViewModel(
 
     // ---------- 引擎事件用到的内部工具 ----------
 
-    /**
-     * 一轮以错误收尾：收尾气泡、落一条错误卡、把忙碌态清干净。
-     *
-     * ## 为什么开头要校验会话归属
-     *
-     * 报错可能是**迟到**的：用户在等待回复时切到了别的会话（或点了新会话），
-     * 这一轮随即被 `engine.cancel()` 打断，而错误回调仍可能在之后到达。
-     * `ZhiEngineController` 的代际校验能挡掉一部分，但 `startTurn` 这条路径是
-     * 同步调用的、不经过代际门，而且 `_state` 此刻已经是**新会话**的 ——
-     * 于是错误卡会落到新会话里，看起来像"串台"。
-     *
-     * 所以这里再按会话 id 兜一道：本轮所属的会话已经不是当前会话时，直接丢弃，
-     * 不去污染新会话。（用户的预期是"错误应当出现在出问题的那个会话里"，
-     * 但它已经不在前台、内存里也没有它的 transcript，落不进去；
-     * 丢掉比串台正确 —— 那个会话下次打开时会从自己的记录重建。）
-     */
     private fun finishTurnWithError(text: String) {
         val owner = turnSessionId
         turnSessionId = null
@@ -3599,13 +2925,7 @@ class WorkspaceViewModel(
     private fun queuedStatus(count: Int): String =
         if (count <= 1) "已预输入，等待当前回复完成…" else "已预输入 $count 条，等待当前回复完成…"
 
-    /**
-     * 回执一次权限请求。
-     *
-     * 回执对象是**引擎**而不是界面上的临时对象：引擎的工具线程正阻塞在
-     * `PermissionGate.require()` 的闩锁上，只有真正 respond 过去它才会继续。
-     * 若一直不回执，引擎会等满 30 分钟。
-     */
+    /** 回执一次权限请求。 */
     fun resolvePermission(requestId: String, allow: Boolean, alwaysAllow: Boolean) {
         if (pendingPermissionId != requestId) return
         pendingPermissionId = null
@@ -3651,16 +2971,6 @@ class WorkspaceViewModel(
 
     // ---------- 斜杠命令 ----------
 
-    /**
-     * 斜杠命令路由。
-     *
-     * ## 两条原则
-     *
-     * 1. **能接真功能的就接真功能**，不要保留"看起来执行了"的假回执。
-     * 2. **没实现的就直说没实现**。原来兜底分支会打印"已执行 `xxx`（Mock）"，
-     *    这是最糟的一种反馈：用户以为命令生效了，于是去做下一件事。
-     *    现在的兜底是明确列出"这条还没移植"以及可用的替代指令。
-     */
     private fun runSlashCommand(raw: String) {
         val command = raw.substringBefore(' ').lowercase(Locale.US)
         val arg = raw.substringAfter(' ', "").trim()
@@ -3753,12 +3063,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 重新估算上下文用量。
-     *
-     * 压缩之后必须重算：`contextTokens` 平时是**累加**出来的（每轮加上 API 上报的用量），
-     * 压缩会真的丢掉一部分历史，累加值只会越走越大，不重算就会显示一个虚高的占用。
-     */
+    /** 重新估算上下文用量。 */
     private fun syncContextUsage() {
         _state.update { s ->
             val window = maxOf(16_000, engine.contextWindowTokens().takeIf { it > 0 } ?: s.contextWindow)
@@ -3766,12 +3071,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * `/context 1m` 这类参数。
-     *
-     * 返回 null 表示格式不合法（而不是抛异常）——调用方要的是"给一句提示"，
-     * 不是错误处理。边界与原版一致：16k–2m，超出范围会让引擎按无效窗口处理。
-     */
+    /** `/context 1m` 这类参数。 */
     private fun parseTokenCount(raw: String): Int? {
         var s = raw.trim().lowercase(Locale.US).replace(",", "").replace("_", "")
         if (s.isEmpty()) return null
@@ -3785,28 +3085,7 @@ class WorkspaceViewModel(
         return value.toInt()
     }
 
-    /**
-     * 「重试上一问」：把**被点那条消息之前**最近的一条用户消息重新发一次。
-     *
-     * 注意重发**不会**撤回上一轮的结果，所以它会作为新一轮追加在对话末尾
-     * （与原版行为一致：原版也是重发，而不是回滚历史）。
-     *
-     * ## 为什么必须从"被点的那条"往前找
-     *
-     * 以前这里取的是整条对话的**最后一条**用户消息。于是用户翻到很早以前的一轮回复、
-     * 对它点「重试上一问」时，重发的却是**最新**那个问题 —— 点 A 发了 B，
-     * 而界面上看不出任何异常。参考实现同样是 `for (i = index - 1; i >= 0; i--)`，
-     * 从被点的那条往前找。
-     *
-     * @param from 被点的那条消息。为空时退回"最后一条用户消息"（正常不会发生）。
-     */
-    /**
-     * 删除一条历史消息 —— 先二次确认。
-     *
-     * 删除是不可逆的：库里那一行连同它的大内容块一起没了，没有回收站。
-     * 所以和「删除会话」一样走确认对话框（[ChoiceIntent.MESSAGE_DELETE_CONFIRM]），
-     * 目标 id 记在 `anchorId` 上，确认回调里才真正执行。
-     */
+    /** 删除一条历史消息 —— 先二次确认。 */
     private fun confirmDeleteTranscriptMessage(item: ChatItem) {
         _state.update {
             it.copy(
@@ -3824,13 +3103,6 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 真正删除一条消息：落库 → 从界面移除 → 让引擎重读历史。
-     *
-     * ⚠️ 最后那一步不能省。引擎在 `resumeConversation` 时把整条会话的上下文读进内存，
-     * 删除只改了库。不重读的话，用户删掉了这条、模型下一轮**还能看见它**，
-     * 于是会出现"我已经删了，它怎么还在引用"。
-     */
     private fun deleteTranscriptMessage(item: ChatItem,
     ) {
         val sessionId = _state.value.activeSessionId
@@ -3865,11 +3137,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 从消息菜单进入导出：先打开导出面板让人选格式与选项。
-     *
-     * 面板里点了格式之后，落盘由界面层用 SAF 做（见 `ExportPayload` 的说明）。
-     */
+    /** 从消息菜单进入导出：先打开导出面板让人选格式与选项。 */
     private fun shareTranscriptMessage(item: ChatItem) {
         _state.update {
             it.copy(
@@ -3905,12 +3173,7 @@ class WorkspaceViewModel(
 
     fun dismissExportSheet() = _state.update { it.copy(exportSheet = null) }
 
-    /**
-     * 面板里点「选择更多消息」：关掉面板，进入多选并预先勾上那一条。
-     *
-     * 预先勾上是必要的 —— 用户是从那条消息进来的，让他进去后再点一次同一条
-     * 才叫"选中"，等于把刚才的意图丢掉。
-     */
+    /** 面板里点「选择更多消息」：关掉面板，进入多选并预先勾上那一条。 */
     fun exportSelectMore() {
         val seed = _state.value.exportSheet?.seedId ?: return
         _state.update { it.copy(exportSheet = null) }
@@ -3925,30 +3188,9 @@ class WorkspaceViewModel(
         _state.update { s -> s.copy(exportSheet = s.exportSheet?.copy(expandReasoning = expand)) }
     }
 
-    /**
-     * 面板里点「导出为 Markdown」。
-     *
-     * 只**准备内容**，不写盘：落盘交给界面用 SAF（系统文件管理器）做。
-     * 见 `ExportPayload` 的说明 —— 分享那条路（FileProvider + 分享面板）
-     * 在这台设备上反复失败，SAF 反过来由系统授权，链路短得多。
-     *
-     * ⚠️ 注释里**不能**出现「斜杠紧跟星号」。Kotlin 的块注释是**可嵌套**的，
-     * 那个序列会开启一层新注释，把后面的源码整块吃掉 —— 编译器报的是
-     * 最后一行 `Unclosed comment`，离真正原因很远。
-     */
     fun exportSheetAsMarkdown() {
         val sheet = _state.value.exportSheet ?: return
-        /*
-         * 与其他导出一样**限制条数**。
-         *
-         * 原先这条没有上限：用户可以全选几千条消息再导 Markdown，正文能到几十 MB。
-         * 那不只是文件大 —— 图片导出那条路（同一份 `items`）会因此渲染不出结果，
-         * 用户的原话是"导出功能有问题，信息过多导致导出截图出问题"。
-         *
-         * 用同一个 `MaxExportItems` 而不是给 Markdown 单开一个数：两种导出
-         * 面对的是同一批内容，上限不同只会让人以为"选 60 条时截图失败但 Markdown 成功"
-         * 是另一个 bug。
-         */
+        /* 与其他导出一样**限制条数**。 */
         val capped = sheet.items.take(MaxExportItems)
         val markdown = buildString {
             append("# ").append(sheet.title).append("\n\n")
@@ -4010,12 +3252,7 @@ class WorkspaceViewModel(
             .format(java.util.Date())
         return "chat-export-$stamp.$extension"
     }
-    /**
-     * 进入多选模式，并把触发它的那条消息预先勾上。
-     *
-     * 预先勾上是主流做法：用户点「导出 → 选择更多消息」时心里已经有"从这条开始"的意图，
-     * 再让他点一次同一条是多余的一步。
-     */
+    /** 进入多选模式，并把触发它的那条消息预先勾上。 */
     fun beginMultiSelect(anchorId: String) {
         _state.update {
             it.copy(
@@ -4033,25 +3270,14 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 拖动对选：**整段替换**选中集合。
-     *
-     * 与 [toggleMultiSelect] 的区别：拖动每一帧都会重算"从起点到当前手指"的区间，
-     * 用 toggle 会变成按帧反复加减，最终结果取决于调用次数 —— 完全不可控。
-     * 这里直接覆盖，所以无论划得多快，结果都只取决于最后那次区间。
-     */
+    /** 拖动对选：**整段替换**选中集合。 */
     fun setMultiSelectRange(ids: Set<String>) {
         _state.update { if (it.multiSelectedIds == ids) it else it.copy(multiSelectedIds = ids) }
     }
 
     /** 界面落盘完成后清空请求。 */
 
-    /**
-     * 界面层发生、但需要显示成"应用提示条"的错误（例如图片导出失败）。
-     *
-     * 这些失败发生在 Compose 的 effect 里，ViewModel 看不到；又不能直接弹 Toast
-     * （本项目统一的反馈入口是那条提示条），所以开一个窄入口让界面回报。
-     */
+    /** 界面层发生、但需要显示成"应用提示条"的错误（例如图片导出失败）。 */
     fun showMessage(text: String, isError: Boolean = false) {
         _state.update { it.copy(message = text, messageIsError = isError) }
     }
@@ -4060,14 +3286,7 @@ class WorkspaceViewModel(
         _state.update { it.copy(multiSelectMode = false, multiSelectedIds = emptySet()) }
     }
 
-    /**
-     * 全选 / 取消全选。
-     *
-     * 同一个入口来回切，是因为这两个动作互斥且都只作用于"当前列表全部"：
-     * 分成两个函数会让界面还得自己判断该显示哪个，而判断逻辑早晚会和状态跑偏。
-     *
-     * 只取 `transcript` 里实际存在的 id —— 被删除的消息不该留在选中集合里。
-     */
+    /** 全选 / 取消全选。 */
     fun toggleSelectAll() {
         _state.update {
             val all = it.transcript.map { item -> item.id }.toSet()
@@ -4125,18 +3344,7 @@ class WorkspaceViewModel(
         send()
     }
 
-    /**
-     * `/web`：联网搜索。
-     *
-     * 四种形态（与原版 `handleWebSlash` 一致）：
-     * - 无参数 → 打开联网设置
-     * - `on` / `off` → 开关，**真的写进设置并重配引擎**（否则下一轮请求还按旧值走）
-     * - `fetch <url>` → 直接读网页
-     * - 其它 → 当作搜索词直接搜
-     *
-     * 后两种走 [ZhiEngineController.manualWebSearch]，**不经过模型**：
-     * 用户输入后立刻拿到结果，省掉一次模型往返与相应的上下文消耗。
-     */
+    /** `/web`：联网搜索。 */
     private fun handleWebSlash(arg: String) {
         when {
             arg.isEmpty() -> {
@@ -4166,16 +3374,6 @@ class WorkspaceViewModel(
         runCatching { engine.configure(engineOverrides()) }
     }
 
-    /**
-     * `/shizuku`：Agent Shizuku（无 Root 的 shell 身份）。
-     *
-     * 四种形态与原版的 `handleShizukuSlash` 一致：无参数 → 打开设置里的那一组，
-     * `on` / `off` → 开关（真的落盘并重配引擎），`status` → 报告状态。
-     *
-     * <h3>为什么 status 要同时报两件事</h3>
-     * 「工具开关」与「Shizuku 授权」是**两个独立的前提**：开着工具但没授权，
-     * 模型一调用就会收到一条授权错误；只报其中一个，用户会以为另一半已经好了。
-     */
     private fun handleShizukuSlash(arg: String) {
         when {
             arg.isEmpty() -> {
@@ -4200,13 +3398,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 开关 Shizuku 工具，并**立刻**落盘 + 重配引擎。
-     *
-     * 直接用 [applySettingsDraft]：它既是设置页那套自动保存的入口，
-     * 也就顺带保证了「斜杠命令改的值」与「设置页改的值」走同一条持久化路径 ——
-     * 两条各自写盘的话，后写的那条会把另一条的新值冲掉。
-     */
+    /** 开关 Shizuku 工具，并**立刻**落盘 + 重配引擎。 */
     fun setShizukuExecution(enabled: Boolean) {
         val draft = _state.value.settingsDraft ?: SettingsDraft.from(_state.value)
         applySettingsDraft(draft.copy(shizukuExecutionEnabled = enabled))
@@ -4223,13 +3415,7 @@ class WorkspaceViewModel(
         runCatching { engine.configure(engineOverrides()) }
     }
 
-    /**
-     * 执行一次手动联网动作，并把文本结果落成一张助手卡片。
-     *
-     * 先放一张"进行中"的卡片：网络请求可能要几秒，没有反馈用户会以为没反应。
-     * 结果出来后**原地替换**那张卡片，而不是追加一条——否则对话流里会留下
-     * 一个永远停在"正在搜索…"的死卡片。
-     */
+    /** 执行一次手动联网动作，并把文本结果落成一张助手卡片。 */
     private fun runWebAction(title: String, subject: String, action: suspend () -> Result<String>) {
         val cardId = nextId("web")
         _state.update {
@@ -4277,17 +3463,6 @@ class WorkspaceViewModel(
         )
     }
 
-    /**
-     * `/compact`：真正调用模型做语义压缩。
-     *
-     * 引擎侧是同步阻塞的（会走网络），所以放 IO 线程；期间给一条进行中提示，
-     * 因为大上下文压缩可能要几十秒，没有反馈用户会以为卡死了。
-     *
-     * ⚠️ 引擎**不保证**真的调用了模型：`compactContextSemantic` 在算不出可压缩区间时
-     * 会直接返回 [ENGINE_NOTHING_TO_COMPACT] 那句话（见其 `cut <= 0` 分支），
-     * 引擎自己的自动压缩也用同一个前缀判断。所以这里必须分流——
-     * 不加区分地宣称"已用模型生成摘要"就是在编造一次并不存在的模型调用。
-     */
     private fun compactContext(instructions: String) {
         if (engine.isBusy()) {
             appendInfo("上下文压缩", "任务正在运行，完成后再压缩上下文。")
@@ -4325,12 +3500,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * `/plan` 进入计划模式。
-     *
-     * 参考原版流程：先弹「计划目标」窗口问清楚要做哪件事，再产出计划。
-     * 直接把计划推给用户（旧行为）会跳过"目标澄清"这一步。
-     */
+    /** `/plan` 进入计划模式。 */
     private fun enterPlanMode(arg: String) {
         if (arg == "off" || arg == "exit") {
             runCatching { engine.cancelPlanModeFromUi("") }
@@ -4358,13 +3528,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 批准 / 退回计划。
-     *
-     * 回执必须发给引擎：`onPlanApprovalRequest` 对应的工具线程正阻塞在审批闩锁上，
-     * 只有 `respondPlanApproval` 才会让它继续。原版这个闩锁**故意没有超时**——
-     * 无人值守的请求永远不能变成"批准执行"。
-     */
+    /** 批准 / 退回计划。 */
     fun resolvePlan(approved: Boolean) {
         val plan = _state.value.planApproval ?: return
         engine.respondPlanApproval(
@@ -4396,13 +3560,7 @@ class WorkspaceViewModel(
 
     // ---------- API 配置 ----------
 
-    /**
-     * 打开 API 配置（列表页）。
-     *
-     * 顺带刷新 [WorkspaceUiState.profileName] / [WorkspaceUiState.modelLabel]：
-     * 这两个字段原来写死成演示值，现在它们是**真实生效的配置摘要**，
-     * 否则顶栏会显示一个跟实际请求无关的模型名。
-     */
+    /** 打开 API 配置（列表页）。 */
     fun openApiConfig() {
         // 见 hideSidebarForNavigation：侧栏里点进来的行必须先收起侧栏。
         hideSidebarForNavigation()
@@ -4509,23 +3667,6 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 模型面板底部的「添加 API」：**直接开一张空白表单页**。
-     *
-     * ## 与 `openApiConfig() + newApiProfile()` 的区别
-     *
-     * 那两个连用会推成 `[工作区, 设置, API列表, API表单]` —— 用户要按三次返回
-     * 才能回到模型面板，而他从哪进来的很清楚："我刚在挑模型，点了添加 API"。
-     * 所以这里：
-     *
-     * 1. **不设 `settingsOpen`** —— 设置主页不垫在底下，栈里只有这一页；
-     * 2. **不关模型面板** —— `state.modelPicker` 保持原样，于是返回（系统返回键
-     *    或顶栏返回）关掉这一页之后**直接落回模型面板**，正是用户要的；
-     * 3. `standalone = true` —— 页面只渲染表单、不渲染列表（见 `ApiConfigState`）。
-     *
-     * 顺带也省掉一次磁盘读：表单是空白的，不需要先读列表再点新增。
-     * 保存成功后由 `saveApiProfile` 关页并刷新模型面板的 tab 栏，见那里。
-     */
     fun openApiProfileFormFromModelPicker() {
         hideSidebarForNavigation()
         _state.update {
@@ -4544,11 +3685,7 @@ class WorkspaceViewModel(
 
     // ---------------------------------------------------------------- 搜索服务
 
-    /**
-     * 打开「搜索服务」页（形态对齐 RikkaHub：多服务列表 + 当前生效项）。
-     *
-     * 与 [openApiConfig] 同一套页面栈规矩：设置主页垫在底下，返回才有回退目标。
-     */
+    /** 打开「搜索服务」页（形态对齐 RikkaHub：多服务列表 + 当前生效项）。 */
     fun openSearchServices() {
         hideSidebarForNavigation()
         ZhiFrameTrace.begin("page:search")
@@ -4661,12 +3798,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把「当前生效的搜索服务」推给引擎。
-     *
-     * 与 [syncActiveProfile] 同一类操作：切换服务之后下一次请求就该走新服务，
-     * 而不是等用户再进一次设置。
-     */
+    /** 把「当前生效的搜索服务」推给引擎。 */
     private fun syncSearchServiceToEngine() {
         runCatching { engine.configure(engineOverrides()) }
     }
@@ -4691,12 +3823,7 @@ class WorkspaceViewModel(
         it.copy(apiConfig = it.apiConfig?.copy(form = null))
     }
 
-    /**
-     * 保存一条 API 配置。
-     *
-     * 密钥写入 AndroidKeyStore 加密存储；编辑已有记录时若密钥留空，
-     * 传 `replaceKey=false` 沿用原密钥，而不是把它清掉。
-     */
+    /** 保存一条 API 配置。 */
     fun saveApiProfile() {
         val form = _state.value.apiConfig?.form ?: return
         if (!form.saveable) return
@@ -4713,14 +3840,7 @@ class WorkspaceViewModel(
             val state = ApiConfigStore.read(getApplication())
             _state.update {
                 if (standalone) {
-                    /*
-                     * standalone：关掉配置页（回到工作区），模型面板原样还开着。
-                     *
-                     * 配置页整块置 null 而不是只清 form —— 这条链路没有列表页可回，
-                     * 留着页面壳会让用户看到一张空的表单。模型面板的 tab 栏由下面
-                     * `refreshModelPickerProfiles` 补上新记录，所以关页不会让人
-                     * "刚加的配置不见了"。
-                     */
+                    /* standalone：关掉配置页（回到工作区），模型面板原样还开着。 */
                     it.copy(apiConfig = null, message = "API 配置已保存")
                 } else {
                     it.copy(
@@ -4739,16 +3859,6 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把模型面板的 API tab 栏重新同步成磁盘上的最新记录。
-     *
-     * ## 为什么不用 `showModelPicker()`
-     *
-     * 那个函数会把 `query` 重置成当前生效的模型名，并**重新拉一次模型目录** ——
-     * 而我们只是刚加了一条配置，用户还没选它，把面板状态整个重建会平白闪一下、
-     * 还要多发一次网络请求。这里只更新 tab 栏那两项，
-     * 并把 `activeProfileId` 跟着磁盘对齐（新配置若被自动设为生效，tab 要跟过去）。
-     */
     fun applyApiPreset(preset: PiProviderPreset) = _state.update {
         val config = it.apiConfig ?: return@update it
         it.copy(apiConfig = config.copy(form = ApiProfileDraft.fromPreset(preset)))
@@ -4833,27 +3943,8 @@ class WorkspaceViewModel(
 
     // ---------- MCP 配置 ----------
 
-    /**
-     * 打开 MCP 服务器配置（列表页）。
-     *
-     * 与 API 配置一样共用"列表页 / 表单页"两态，`form` 非空即表单。
-     * 这里的读写是**同步**的：`McpConfigStore` 只读一个本地小 JSON，
-     * 没有网络也没有密钥解密，放 IO 线程反而让状态更新顺序更难推理。
-     */
-    /**
-     * `/mcp` 的子命令（对齐 IQ Code 0.30.4 的 `handleMcpSlash`）。
-     *
-     * | 命令 | 行为 |
-     * | --- | --- |
-     * | `/mcp` | 打开配置页 |
-     * | `/mcp list` | 在对话流里列出全部服务器（启用状态 / 类型 / 端点 / 作用域） |
-     * | `/mcp add` | 打开配置页并直接进入「添加」表单 |
-     * | `/mcp enable <名称>` / `disable <名称>` | 切换启用状态 |
-     * | `/mcp remove <名称>`（同 `delete`） | 删除那一条 |
-     *
-     * 打错的子命令**不会**变成一句"已执行"：它会列出支持的命令 ——
-     * 与其它斜杠指令的兜底策略一致（不做假回执）。
-     */
+    /** 打开 MCP 服务器配置（列表页）。 */
+    /** `/mcp` 的子命令（对齐 IQ Code 0.30.4 的 `handleMcpSlash`）。 */
     private fun handleMcpSlash(arg: String) {
         val a = arg.trim()
         if (a.isEmpty()) {
@@ -4924,10 +4015,7 @@ class WorkspaceViewModel(
     /** `/mcp add` 要等异步读盘结束后再打开表单（见 [handleMcpSlash]）。 */
     private var mcpOpenFormWhenReady = false
 
-    /**
-     * `/mcp list`：把服务器清单写进对话流（与 IQ Code 的 `showMcpSummary` 一样
-     * 落在对话里而不是弹窗里 —— 用户多半是"想看一眼再接着干活"）。
-     */
+    /** `/mcp list`：把服务器清单写进对话流（与 IQ Code 的 `showMcpSummary` 一样 */
     private fun showMcpSummary() {
         val servers = runCatching { McpStore.read().servers }.getOrDefault(emptyList())
         val body = buildString {
@@ -4985,13 +4073,7 @@ class WorkspaceViewModel(
         refreshExtensions()
     }
 
-    /**
-     * `/skills` 的子命令（对齐 IQ Code 0.30.4 的 `/skills`：
-     * 不带参数列清单，`<名称>` 直接把那份技能附加到下一条消息）。
-     *
-     * 之前这里**吞掉参数**直接开管理器 —— 敲 `/skills pdf` 的用户
-     * 期望的是"把 pdf 这个技能挂上"，而不是打开一个列表再自己找。
-     */
+    /** `/skills` 的子命令（对齐 IQ Code 0.30.4 的 `/skills` */
     private fun handleSkillsSlash(arg: String) {
         val name = arg.trim()
         if (name.isEmpty()) {
@@ -5018,10 +4100,7 @@ class WorkspaceViewModel(
         it.copy(mcpConfig = it.mcpConfig?.copy(form = McpServerDraft(originalName = null)))
     }
 
-    /**
-     * 编辑已有服务器：需要回读 `args` / `env` / `headers` 的原文，
-     * 因为列表模型只带了参数个数（这些内容可能很大，不该进列表状态）。
-     */
+    /** 编辑已有服务器：需要回读 `args` / `env` / `headers` 的原文 */
     fun editMcpServer(server: McpServer) {
         val raw = McpStore.rawOf(server.name)
         _state.update {
@@ -5095,22 +4174,6 @@ class WorkspaceViewModel(
         refreshExtensions()
     }
 
-    /**
-     * 「测试连接」：真的去连这台服务器，拿回它的工具清单。
-     *
-     * ## 为什么必须由用户动作触发
-     *
-     * `ZhiEngineController.mcpStatus()` 是**阻塞且昂贵**的：每台服务器都要起一次
-     * 子进程或发一轮 HTTP，单台超时 30 秒。如果在打开 MCP 页时自动跑一遍，
-     * "打开设置看一眼"就会变成"把每台服务器都启动一次" —— 在用户还没决定要改什么
-     * 之前就产生了副作用，而且页面会卡住。
-     *
-     * ## 为什么按名字单独测
-     *
-     * 引擎的接口是"列出所有启用的服务器"（没有单台的入口），所以这里测完之后
-     * **只把那台的结果**并进状态：把其它服务器的结果也一起刷新会让人以为
-     * "我只测了 A，为什么 B 的状态也变了"。
-     */
     fun testMcpServer(name: String) {
         viewModelScope.launch {
             _state.update { state ->
@@ -5156,16 +4219,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 「全部测试」：一次把**所有启用的**服务器都连一遍。
-     *
-     * 与逐台测试的关键差别：引擎的 `mcpStatus()` 本来就是"列全部启用的服务器"，
-     * 所以批量测试**只调用它一次**，而不是循环调 N 次 —— 后者会把每台服务器
-     * 重复启动 N 遍，代价是 N 倍，而且中间结果会互相覆盖。
-     *
-     * 结果整体替换 `status`（而不是并进旧的）：批量测试的语义就是"现在每台分别是什么状态"，
-     * 保留旧值会让停用/已删除的条目继续显示"已连接"。
-     */
+    /** 「全部测试」：一次把**所有启用的**服务器都连一遍。 */
     fun testAllMcpServers() {
         val config = _state.value.mcpConfig ?: return
         if (config.servers.none { it.enabled }) {
@@ -5207,9 +4261,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 打开「从 JSON 导入」对话框。
-     */
+    /** 打开「从 JSON 导入」对话框。 */
     fun openMcpImport() = _state.update {
         it.copy(
             mcpConfig = it.mcpConfig?.copy(importText = "", importError = null, form = null),
@@ -5224,10 +4276,7 @@ class WorkspaceViewModel(
         it.copy(mcpConfig = it.mcpConfig?.copy(importText = null, importError = null))
     }
 
-    /**
-     * 执行导入。同名**跳过不覆盖**（用户可能已经在本机改过那份配置），
-     * 认不出的条目也一并报出来 —— 只说"导入完成"会让用户以为全都进来了。
-     */
+    /** 执行导入。 */
     fun importMcpJson() = runBusy("mcp.import") {
         val text = _state.value.mcpConfig?.importText ?: return@runBusy
         val result = McpStore.importJson(text)
@@ -5262,13 +4311,6 @@ class WorkspaceViewModel(
         if (result.isSuccess) refreshExtensions()
     }
 
-    /**
-     * 写入某个工具的「启用 / 需要审批」。
-     *
-     * ⚠️ 写完之后必须把**状态里的那一行**也改掉：引擎侧的过滤要到下次
-     * `mcpStatus()` 才会生效，而用户点完开关立刻要看的就是那一行的变化。
-     * 只写磁盘不改状态的话，开关会弹回去 —— 看起来像"点了没反应"。
-     */
     fun setMcpToolOptions(serverName: String, toolName: String, enabled: Boolean, approval: Boolean) {
         val result = McpStore.setToolOptions(serverName, toolName, enabled, approval)
         _state.update { state ->
@@ -5294,11 +4336,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把当前生效的 API 配置同步到界面摘要，并让引擎重新读取。
-     *     * 必须让引擎重读：它内部持有配置副本，不重新下发的话
-     * 用户"保存了密钥却仍然报 API key is not configured"。
-     */
+    /** 把当前生效的 API 配置同步到界面摘要，并让引擎重新读取。 */
     private fun syncActiveProfile() {
         val active = ApiConfigStore.active(getApplication())
         val activeProfile = ApiConfigStore.activeProfile(getApplication())
@@ -5341,46 +4379,13 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把 **Compose 树之外**发生的事件写进对话流。
-     *
-     * 目前唯一的来源是 `MainActivity.onResume`：`AndroidIntentBridge.resumePendingApkInstall`
-     * 在用户从「安装未知应用」权限页返回后会继续 APK 安装，并可能返回错误
-     * （例如 APK 已损坏、系统安装器不可用）。这类结果必须落进对话流，
-     * 因为一次性的 Toast 很容易被漏掉，而失败恰恰是最不能漏的。
-     */
+    /** 把 **Compose 树之外**发生的事件写进对话流。 */
     fun reportExternalEvent(title: String, body: String) = appendInfo(title, body)
 
     // ---------- 输入器下拉（权限 / 推理）----------
 
-    /*
-     * 输入器页脚的权限 / 推理两个 chip 现在是**下拉菜单**
-     * （Miuix `OverlayDropdownPreference`），选中即生效 —— 不需要"选完再提交"
-     * 那一层，所以这里只有两个 setter。
-     *
-     * 副作用与旧实现保持一致：写状态 + 在对话里留一句可追溯的记录。
-     */
+    /* 输入器页脚的权限 / 推理两个 chip 现在是**下拉菜单** */
 
-    /**
-     * 把盘上存的**权限模式 / 推理档**读回界面状态。
-     *
-     * ## 为什么必须有这一步（用户：「权限在退出软件后恢复成原来的样子」）
-     *
-     * 这两项确实是 [SessionConfig] 的字段、也确实会被 `store.save()` 写盘 ——
-     * 但**界面状态从来不读回来**。于是形成一个固定回路：
-     *
-     * 1. 用户在输入器底排选了「跳过权限」→ 只有 `state.permissionMode` 变了；
-     * 2. 发送时 `configure(engineOverrides())` 把它写盘（这一步是对的）；
-     * 3. 重启 → `state.permissionMode` 又是默认的「每次询问」；
-     * 4. 启动路径里的 `syncActiveProfile()` → `configure()` 立刻**落盘**，
-     *    把界面那份默认值写回去 —— 盘上刚存的「跳过权限」就这样被冲掉。
-     *
-     * 前一步不做、第 4 步就会反向覆盖，所以这个函数读回来的不只是"显示"，
-     * 它还决定了盘上的值能不能活过一次启动。
-     *
-     * ⚠️ 调用时机：**必须在任何 `configure()` 之前**（见 [initSessionState]）。
-     * 读得晚一步，第 4 步已经把默认值写进盘里了，再读就只能读到刚被冲掉的那份。
-     */
     private suspend fun restoreRuntimeChoices() = withContext(Dispatchers.IO) {
         val o = readEngineSettings(ApiSettingsStore(getApplication())) ?: return@withContext
         val mode = engineModeToUi(o.permissionMode)
@@ -5444,19 +4449,6 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把**权限模式 / 推理档**立刻写回磁盘。
-     *
-     * 为什么不能只靠发送前那次 `configure()`：用户完全可能"选完就退出"。
-     * 那一刻盘上还是旧值，下次启动读回来的自然也是旧值 —— 表现与"设置记不住"一样。
-     *
-     * 走 `load()` + 改字段 + `save()` 而不是自己拼一份 `SessionConfig`：
-     * `save()` 会把整张表写下去，凭空构造的对象会把其它字段（含 API 密钥槽）
-     * 一起覆盖成空。
-     *
-     * 失败**不**上报：与 [persistTheme] 同一个约定 —— 这类界面偏好的写入
-     * 不该在输入器旁边弹一条错误，内存里的改动本来就是即时生效的。
-     */
     private fun persistRuntimeChoice(mode: PermissionMode? = null, effort: EffortLevel? = null) {
         if (mode == null && effort == null) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -5520,21 +4512,6 @@ class WorkspaceViewModel(
 
     // ---------- 附加项目文件（浏览器，不是搜索） ----------
 
-    /**
-     * 打开「附加项目文件」面板。
-     *
-     * ## 从**项目根**起，这件事本身就是一次修 bug
-     *
-     * 这里原先调的是 `FileSearch.search(projectPath, "")` —— 一次**递归搜索**。
-     * 而 `projectPath` 在 Termux 环境下就是 HOME，HOME 下有 Termux 的
-     * `storage/{pictures,dcim,downloads,…}` 软链（`FileSearch` 只按名字排除
-     * `build`/`node_modules` 这类构建目录），空查询的深度上限（2）又刚好够到
-     * `storage/pictures/`。于是**面板一打开、用户一个字都没敲**，列出来的是
-     * 一整屏 `storage/pictures/END…` 的设备截图，而不是项目文件。
-     *
-     * 现在改成**浏览一个目录**：一层一层走，永远不递归。那些软链只是
-     * "可以点进去的一个目录"。
-     */
     fun openAttachPicker() {
         val root = _state.value.projectPath
         _state.update {
@@ -5550,12 +4527,6 @@ class WorkspaceViewModel(
         it.copy(attachPickerOpen = false, attachBrowser = AttachBrowserState())
     }
 
-    /**
-     * 目录内过滤：**纯内存**，只筛已经列出来的那一层。
-     *
-     * ⚠️ 刻意不做"敲字就重扫磁盘的递归搜索"—— 那正是上面那个 bug 的成因，
-     * 而且每个字符都要遍历目录，在手机上会明显卡顿（这一条原代码也记过）。
-     */
     fun updateAttachFilter(filter: String) = _state.update {
         it.copy(attachBrowser = it.attachBrowser.copy(filter = filter))
     }
@@ -5568,13 +4539,7 @@ class WorkspaceViewModel(
         reloadAttachEntries(path)
     }
 
-    /**
-     * 上一级。
-     *
-     * 到根就**停住**（回到根，而不是继续往外走）—— 与文件面板 `navigateUp` 同一套规则：
-     * 换根是根切换条的活儿，不是"上一级"的活儿，否则在共享存储里点着点着会走到 `/`，
-     * 而那里什么都列不出来。
-     */
+    /** 上一级。 */
     fun attachUp() {
         val browser = _state.value.attachBrowser
         val root = attachRootPath(browser.root)
@@ -5602,13 +4567,6 @@ class WorkspaceViewModel(
         FileRoot.SHARED -> StorageLinks.EXTERNAL_ROOT
     }
 
-    /**
-     * 列出**一层**子项（`FileBrowser.children`，与文件面板同一个数据来源）。
-     *
-     * ⚠️ 结果异步回来，所以落回状态前必须确认回来的是**当前**那个目录：
-     * 用户点得快时会有多次列目录在飞，慢的那个回来会把新的覆盖掉
-     * （与「错误串台到新会话」是同一类竞态）。面板关掉后路径已被清空，也不会写回。
-     */
     private fun reloadAttachEntries(path: String) {
         viewModelScope.launch {
             val entries = withContext(Dispatchers.IO) { FileBrowser.children(path) }
@@ -5628,31 +4586,6 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把一个项目文件附加到下一条消息。
-     *
-     * 走**文本附件**路径（与 [attachSkill] 一样）：内容由 [buildPromptWithTextAttachments]
-     * 在发送时包进 `<attached_context>`，而不是灌进输入框 —— 输入框是用户的编辑区。
-     *
-     * 读取交给 [FileBrowser.readTextForAttachment]，它沿用界面预览那套 256 KB 截断与
-     * NUL 二进制判定。所以附加一个几 MB 的日志不会把界面拖死，附加一个 `.so`
-     * 也会被明确拒绝而不是塞一坨乱码进上下文。
-     *
-     * 附加**不关面板**：参考图的说明就是「可多次附加到下一条消息」。
-     *
-     * ## [relative] 由这里算，不由界面传
-     *
-     * 它只干两件事：**去重**（`detail == relative`）和**界面标签**。
-     * 提示词正文走 [Attachment.textBody]，`<attachment name="…">` 用的是文件名
-     * （见 [buildPromptWithTextAttachments]）—— 所以它不参与提示词格式，只要求唯一。
-     *
-     * 规则：文件在**项目根之下**时给项目相对路径（与旧行为一致、更短更好认），
-     * 否则给绝对路径。后者是需要的 —— 选择器现在能切到 HOME 与共享存储，
-     * 那两个根下面的文件本来就没有"项目相对路径"可言。
-     *
-     * ⚠️ 由 VM 算而不是让界面把 relative 一起传进来：界面不需要知道"项目根在哪"，
-     * 那是这一层的事。旧签名 `attachProjectFile(path, relative)` 把这条知识漏到了界面。
-     */
     fun attachProjectFile(path: String) {
         viewModelScope.launch {
             val name = File(path).name
@@ -5662,17 +4595,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 真正把一条文本附件放进状态。返回 false 表示这个文件不该/不能附加。
-     *
-     * <p>抽出来是因为现在有**三个**入口：附件面板点一行、选择模式批量附加、
-     * 系统文件管理器（SAF）挑文件。三处各写一遍的话，"截断到 256 KB、
-     * 二进制要拒绝、同一路径去重"这几条迟早只有一处生效。
-     *
-     * <p>[label] 单独传而不是从路径推：SAF 那条路上的路径是个 content URI，
-     * 它的末段是文档 id（一串数字），显示给用户毫无意义 —— 那种情况下要传
-     * 显示名。文件系统那条路上两者相同。
-     */
+    /** 真正把一条文本附件放进状态。 */
     private suspend fun attachPath(path: String, label: String, detail: String? = null): Boolean {
         val body = withContext(Dispatchers.IO) { FileBrowser.readTextForAttachment(path) } ?: return false
         val size = withContext(Dispatchers.IO) { runCatching { File(path).length() }.getOrDefault(0L) }
@@ -5707,23 +4630,6 @@ class WorkspaceViewModel(
         return true
     }
 
-    /**
-     * 系统文件管理器（SAF）挑来的文件直接附加。
-     *
-     * <h3>为什么不复制进项目目录</h3>
-     *
-     * 附件在引擎那边**本来就是内联文本**（见 [Attachment.textBody] 与
-     * `buildPromptWithTextAttachments`）：发送时内容被包进 `<attached_context>`，
-     * 不是把路径交给模型去读。所以"把文件复制到项目里"这一步对功能没有任何贡献，
-     * 只会往用户的工程里丢一份副本（而用户挑的多半是项目外的文档）。
-     *
-     * 于是**不需要任何存储权限**：SAF 给的是一次性的读授权，我们当场读、
-     * 读完就进内存。这也是为什么这条入口能work —— 直接去扫 `/sdcard` 反而要
-     * 「所有文件访问权限」。
-     *
-     * <p>⚠️ 不取 `takePersistableUriPermission`：授权只为"立刻读一次"服务，
-     * 读完内容就进了内存，不需要跨进程重启保留（与 SkillsOverlay 导入文件同一判断）。
-     */
     fun attachDocument(uri: android.net.Uri) {
         viewModelScope.launch {
             val context = getApplication<android.app.Application>()
@@ -5786,15 +4692,7 @@ class WorkspaceViewModel(
         return out.toByteArray()
     }
 
-    /**
-     * 打开模型选择面板。
-     *
-     * 面板先立起来（显示"正在获取"），目录拉取在 IO 线程后台跑；回来后再填列表。
-     * 原版就是这个顺序，否则网络慢时点按钮像没反应。
-     *
-     * 会话正在跑的时候换模型不会打断当前轮：模型写在配置记录里，下一轮 `configure`
-     * 自然带上（原版的"下一完整轮生效"）。
-     */
+    /** 打开模型选择面板。 */
     private fun ApiProfile.toPickerTab(): ModelProfileTab = ModelProfileTab(
         id = id,
         name = name,
@@ -5953,31 +4851,6 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 对话流里**单个工具**的 `⋯` 菜单里选中了一项 —— 执行它。
-     *
-     * ## 为什么这里只有"执行"，没有"弹菜单"
-     *
-     * 菜单由**那一行自己**渲染（Miuix 下拉菜单，与输入器底排同一个组件，
-     * 见 `ui/chat/MessageCards.kt` 的 `ToolRow`）。所以这一层不需要
-     * `choicePicker` 中转、也不需要"记住用户点的是哪一条"——
-     * 目标（组 id + 行 id）与文案一起从界面传进来，一进来就能执行。
-     *
-     * 之前这里是 `showToolActions(item, toolId)`：先把菜单塞进 `choicePicker`，
-     * 再由界面按 `anchorId` 认领。而 `ChoiceIntent.TOOL_ACTION` 不在
-     * `ChoicePickerState.isActionMenu` 的名单里，于是它退化成**屏幕中央的对话框** ——
-     * 一个只作用于某一行的动作，弹窗却出现在屏幕正中。
-     *
-     * ## 菜单内容仍然只由纯逻辑层决定
-     *
-     * 选项来自 [ToolActions.options]（表驱动、有单测），界面按同一份判据渲染。
-     * 这一层负责**分派**：文案 → 动作。文案是 [ToolActions] 里的常量，
-     * 所以两边不会各写一份。
-     *
-     * @param itemId 工具组那一条消息的 id（工具存在它下面）
-     * @param toolId 那一行工具的 id
-     * @param label  菜单文案（[ToolActions] 的常量）
-     */
     fun applyToolAction(itemId: String, toolId: String, label: String) {
         val target = _state.value.transcript.firstOrNull { it.id == itemId }
         if (target == null) {
@@ -6008,13 +4881,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * "复制参数"要复制的东西。
-     *
-     * 用界面上已经算好的 `summary`（命令类）或工具的展示名 —— 而不是再回到引擎的
-     * 原始入参去取：那个入参在本层已经没有保存（只有渲染需要的字段被留下来），
-     * 为了一个"复制"回头再加一份原始 JSON 的保留，代价大于收益。
-     */
+    /** "复制参数"要复制的东西。 */
     private fun toolActionInput(item: ChatItem, toolId: String): String {
         val tool = item.tools.firstOrNull { it.id == toolId }
         if (tool == null) return ""
@@ -6026,26 +4893,12 @@ class WorkspaceViewModel(
 
     // ---------- 剪贴板 ----------
 
-    /**
-     * 复制一条消息的可见文本。
-     *
-     * 复制的是用户**看得到的内容**：助手消息取正文（没有正文时退回思考内容），
-     * 工具组则是把各工具的标题拼起来——复制一个空串对用户毫无用处。
-     */
+    /** 复制一条消息的可见文本。 */
     fun copyMessage(item: ChatItem) {
         copyText(item.copyText(), "ZhiCode 消息")
     }
 
-    /**
-     * 一条消息对用户**可见的那份文本**。
-     *
-     * 「复制」与「自由复制」必须取同一份：前者直接写剪贴板，后者摊在抽屉里让人
-     * 自己划词。两处各写一份的话，总有一天会变成"复制的和看到的不一样"，
-     * 而那种偏差在界面上完全看不出来。
-     *
-     * 规则：助手消息取正文（没有正文时退回思考内容），工具组没有正文，
-     * 就把各工具的展示名与摘要拼起来——复制空串对用户没有任何用处。
-     */
+    /** 一条消息对用户**可见的那份文本**。 */
     private fun ChatItem.copyText(): String = when (kind) {
         ChatKind.ASSISTANT, ChatKind.ERROR -> body.ifBlank { thinking }
         ChatKind.TOOL_GROUP -> tools.joinToString("\n") { tool ->
@@ -6057,11 +4910,7 @@ class WorkspaceViewModel(
         else -> body
     }
 
-    /**
-     * 打开「自由复制」抽屉：把这条消息的原文摊开，让用户自己划词取一段。
-     *
-     * 见 [CopySheetState] 的说明：整条复制（[copyMessage]）解决不了"只要中间那三行"。
-     */
+    /** 打开「自由复制」抽屉：把这条消息的原文摊开，让用户自己划词取一段。 */
     fun openFreeCopy(item: ChatItem) {
         val text = item.copyText()
         if (text.isBlank()) {
@@ -6209,12 +5058,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 用户主动关闭当前选择器（「取消」按钮 / 点空白 / 返回键）。
-     *
-     * 与 [dismissChoicePicker] 的区别很重要：那个是**动画结束**时的通知，
-     * 可能晚于新状态写入；这个是用户明确的取消动作，必须无条件关闭。
-     */
+    /** 用户主动关闭当前选择器（「取消」按钮 / 点空白 / 返回键）。 */
     fun closeChoicePicker() {
         if (_state.value.choicePicker?.intent == ChoiceIntent.QUESTION) {
             cancelQuestions()
@@ -6231,21 +5075,6 @@ class WorkspaceViewModel(
             cancelQuestions()
             return
         }
-        /*
-         * ⚠️⚠️ 只清「仍是同一个选择器」的情况。
-         *
-         * 这个回调来自两处：用户主动取消，**以及**收起动画结束后的
-         * `onDismissRequest`。后者是异步的 —— 当用户在长按菜单里选「重命名」时，
-         * 菜单开始收起，而收起动画播完时 `choicePicker` 已经是新的
-         * `SESSION_RENAME`（`editSessionTitle` 刚写进去）。
-         * 无条件清空就会把它一起清掉，表现为「点重命名没有任何反应」。
-         *
-         * 实测日志（修复前）：
-         *   intent=SESSION_ACTION → intent=SESSION_RENAME → intent=null
-         * 最后那次 null 就是收起动画的 dismiss 覆盖掉的。
-         *
-         * 现在的做法：只有在**不是**这两个"菜单选完要接着弹对话框"的意图时才清。
-         */
         val current = _state.value.choicePicker?.intent
         if (current == ChoiceIntent.SESSION_RENAME ||
             current == ChoiceIntent.SESSION_DELETE_CONFIRM ||
@@ -6262,12 +5091,7 @@ class WorkspaceViewModel(
         _state.update { it.copy(choicePicker = null) }
     }
 
-    /**
-     * 提交选择器里选中的项。
-     *
-     * [indices] 是选中的下标列表：单选选择器只会有 0 或 1 个，
-     * 多选的提问流程会有多个。统一用列表是为了让两条路径共用一套 UI 回调。
-     */
+    /** 提交选择器里选中的项。 */
     fun onSubmitSelection(indices: List<Int>) {
         val picker = _state.value.choicePicker ?: return
         // 提问流程走自己的分步状态机，答案要按问题原文累积。
@@ -6399,13 +5223,7 @@ class WorkspaceViewModel(
                 // 单选回调真落到这里时按「跳过本步」处理，不要静默什么都不做。
                 advanceQuestion(null)
             }
-            /*
-             * 删除某条历史消息的确认。
-             *
-             * 目标从 `anchorId` 里取（这份选择器锚在那条消息旁），而不是像会话删除
-             * 那样用 `pendingSessionAction` —— 消息的 id 本身就是自足的定位信息，
-             * 多存一个字段反而会和"列表已经变了"打架。
-             */
+            /* 删除某条历史消息的确认。 */
             ChoiceIntent.MESSAGE_DELETE_CONFIRM -> {
                 val targetId = picker.anchorId
                 _state.update { it.copy(choicePicker = null) }
@@ -6432,11 +5250,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 选择窗口里的「其他回答…」提交：不走选项，直接把这段自由文本当作输入。
-     * 在计划模式下它等价于"自定义目标"，会作为提示词发给引擎；
-     * 在会话备注中它是备注正文；在重命名中它是新标题。
-     */
+    /** 选择窗口里的「其他回答…」提交：不走选项，直接把这段自由文本当作输入。 */
     fun onSubmitFreeForm(text: String) {
         val trimmed = text.trim()
         val picker = _state.value.choicePicker
@@ -6481,14 +5295,7 @@ class WorkspaceViewModel(
 
     // ---------- 会话 ----------
 
-    /**
-     * 新建会话。
-     *
-     * 这里只重置引擎的对话上下文（新 workflowId），**不**立即建会话：
-     * 引擎的 `SessionStore` 是在第一轮发消息时才创建的，提前建会留下
-     * 一堆"0 条消息"的空会话，侧栏会很快被垃圾填满。
-     * 所以界面上先插入一个占位条目，等第一轮结束后 [refreshSessions] 会用真实会话替换它。
-     */
+    /** 新建会话。 */
     fun newSession() {
         engine.resetConversation()
         discardStreamingAssistant()
@@ -6526,16 +5333,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 打开一条历史会话。
-     *
-     * 两件事都要做，缺一不可：
-     * 1. `engine.resumeConversation(sessionId)` —— 让**引擎**把历史装回 provider 上下文，
-     *    否则界面上看得到历史、模型却不知道，追问会答非所问；
-     * 2. 从同一个会话标识重建界面 transcript。
-     *
-     * 读取放 IO 线程：一次长会话可能有上千条消息，在主线程读会卡住界面。
-     */
+    /** 打开一条历史会话。 */
     fun openSession(session: SessionSummary) {
         if (session.id.isEmpty()) {
             _state.update { it.copy(message = "会话标识为空，无法打开", messageIsError = true) }
@@ -6653,12 +5451,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 往前补一页更早的历史（列表滚到顶时调用）。
-     *
-     * 三次进入都直接返回：正在加载、已经没有更早的、或者还没有打开会话。
-     * 它们是幂等的守卫 —— 列表滚动会连着触发很多次，不能每次都读一遍库。
-     */
+    /** 往前补一页更早的历史（列表滚到顶时调用）。 */
     fun loadOlderTranscript() {
         val snapshot = _state.value
         val sessionId = snapshot.activeSessionId
@@ -6707,20 +5500,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 回到最新：用**最新一页**替换常驻窗口，并把列表落到底。
-     *
-     * 这是"尾部被淘汰之后"唯一的回去路径（见 `UiModels.transcriptHasNewer`）。
-     * 之所以是**替换**而不是"再补一页"：替换不会把同一条消息灌两遍 ——
-     * 一轮回合结束后，同一条消息既在库里、也以实时条目留在内存里，
-     * 按 seq 往回补就会重复。
-     *
-     * <p><b>但实时条目必须留下。</b>库里那一页是"已经落盘的消息"，而正在流式输出的
-     * 气泡、正在跑的工具卡都还只在内存里。全部替换掉的话，用户点一下「回到最新」
-     * 就会看见自己的提问和正在回复的内容**凭空消失**。所以按既有的 id 约定
-     * （库读出来的 id 一律以 `session-` 开头，见 `SessionReader`）把实时条目摘出来，
-     * 接在库里那一页**后面** —— 它们本来就是最新的。
-     */
+    /** 回到最新：用**最新一页**替换常驻窗口，并把列表落到底。 */
     fun jumpToLatest() {
         val sessionId = _state.value.activeSessionId
         if (sessionId.isEmpty()) return
@@ -6749,30 +5529,9 @@ class WorkspaceViewModel(
     /** [trimResidentTail] 的结果。 */
     private class Trimmed(val items: List<ChatItem>, val trimmed: Boolean)
 
-    /**
-     * 常驻条数的上限。
-     *
-     * <p>取值理由：一屏看得见几条，600 条已经是几十屏的翻页量；而每一条的常驻成本
-     * 是正文 + 工具输出预览（正文不限、预览 8 KB），600 条量级在 10MB 以内 ——
-     * 相对 512MB 的堆完全可以忽略。上限存在的意义不是"省这一点"，而是**保证它不随
-     * 会话长度增长**。
-     */
+    /** 常驻条数的上限。 */
     private val maxResidentItems = 600
 
-    /**
-     * 超上限时从**尾部（最新那端）**淘汰。
-     *
-     * ## 为什么淘汰尾部而不是头部
-     *
-     * 用户会一路往上滚，所以被补进来的是头部；**离视口最远的那一端是尾部**。
-     * 淘汰头部等于把刚读进来的东西立刻扔掉（徒劳），淘汰尾部才是"把看不见的放掉"。
-     *
-     * ## 为什么"有回合在跑 / 有弹窗"时不动
-     *
-     * 权限询问、计划审批、选项选择、以及正在跑的工具，都靠 `id` 在 transcript 里
-     * 找回对应的那一条。淘汰掉那一条 = 弹窗点确认时找不到目标。所以这些状态下
-     * **宁可暂时超过上限**（上限不是硬保证，是稳态目标）。
-     */
     private fun trimResidentTail(items: List<ChatItem>, state: WorkspaceUiState): Trimmed {
         if (items.size <= maxResidentItems) return Trimmed(items, false)
         val busy = state.workingStatus != null || state.composerBusy ||
@@ -6785,16 +5544,7 @@ class WorkspaceViewModel(
         return Trimmed(ArrayList(items.subList(0, maxResidentItems)), true)
     }
 
-    /**
-     * 弹出「删除会话」的**二次确认**。
-     *
-     * 用户要求「删除会话也要加个 dialog，确认是否删除」——原来选中菜单项就直接
-     * 调 [doDeleteSession]，误触即不可恢复。
-     *
-     * 形态复用通用选择器（`ChoicePickerState`）：一个选项「确认删除」+ 取消按钮。
-     * 不用自由文本框、不设 `anchorId`（走居中对话框而不是贴行下拉菜单 ——
-     * 下拉菜单是"选一个动作"，而确认是"要不要执行"，两者不该长得一样）。
-     */
+    /** 弹出「删除会话」的**二次确认**。 */
     private fun confirmDeleteSession(session: SessionSummary) {
         pendingSessionAction = session
         _state.update {
@@ -6810,20 +5560,9 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 真正执行删除（不可撤销）。
-     *
-     * ⚠️ 分离于 [confirmDeleteSession]：确认框只负责"问"，这里负责"做"。
-     * 混在一起的话，任何一次误调确认函数都会连带删掉数据。
-     */
     private fun doDeleteSession(id: String) = deleteSession(id)
 
-    /**
-     * 删除会话。
-     *
-     * 删的是**存储里的会话**，不是列表里的一项 —— 只从列表移除的话，
-     * 下次启动它又会回来，用户会以为删除没生效。
-     */
+    /** 删除会话。 */
     fun deleteSession(id: String) {
         if (id.isEmpty()) {
             // 尚未落库的占位会话：直接清掉当前视图即可。
@@ -7061,25 +5800,6 @@ class WorkspaceViewModel(
     private fun cacheDir(): File = getApplication<Application>().cacheDir
     fun closeSidebar() = _state.update { it.copy(sidebarOpen = false) }
 
-    /**
-     * 侧栏里的每一行在打开目标页面之前都要调这个。
-     *
-     * ## 为什么它值得一个专门的函数
-     *
-     * 侧栏是画在内容**上层**的浮层（见 `AppScaffold` 的 Sidebar 分支），
-     * 而各个目标的 `openXxx()` 只负责把自己那面页推上来，谁也没管侧栏。
-     * 于是：点「设置」→ 设置页铺满，但**侧栏还盖在上面**；点「环境」同理；
-     * 点「ZhiCode 沙箱」更明显（那是个跨进程的 Activity）。
-     * 用户看到的是一层"点不动"的界面，得先返回一次才回到目标页 ——
-     * 症状是"点了没反应"，根因只是少关一层。
-     *
-     * 唯一例外是「新会话」：它本来就自己设了 `sidebarOpen = false`（见 [newSession]）。
-     *
-     * ## 为什么不写成"每个 openXxx 里各加一行"
-     *
-     * 那正是它坏掉的原因：四个入口各写一遍，加第五个时必然漏。
-     * 收口在这里之后，新增入口只有一条路可走。
-     */
     private fun hideSidebarForNavigation() {
         _state.update { it.copy(sidebarOpen = false) }
     }
@@ -7087,12 +5807,7 @@ class WorkspaceViewModel(
 
     // ---------- 工作区 ----------
 
-    /**
-     * 新 Activity 从启动器打开时回到对话页。
-     *
-     * 工作区页签不是会话内容，不应被旧 Activity/系统恢复成文件页；运行中的用户主动
-     * 切页仍由 [selectTab] 保留，不在每次 onResume 时强行打断。
-     */
+    /** 新 Activity 从启动器打开时回到对话页。 */
     fun resetTabForLaunch() {
         _state.update {
             it.copy(
@@ -7135,30 +5850,6 @@ class WorkspaceViewModel(
         persistTheme(next)
     }
 
-    /**
-     * 改主题设置。
-     *
-     * 只置状态、**不**立刻落盘：调用方是设置页里的滑杆与开关，拖动一次会触发几十次
-     * 回调，每次都 `commit()` 会把主线程按住。
-     *
-     * ## ⚠️ 但必须让 [flushSettings] 知道"有未落盘的改动"
-     *
-     * 这里原先**什么标记都不打**，而 `flushSettings()` 的第一句是
-     * `if (settingsPersistJob == null) return` —— 主题改动永远不会设置那个 job，
-     * 于是：
-     *
-     * · `closeSettings()` 调 `flushSettings()` → 直接返回；
-     * · `MainActivity.onStop` 调 `flushSettings()` → 直接返回；
-     * · 只有 `closeThemePage()` 那一处显式调了 `persistThemeSettings()` 才真写盘。
-     *
-     * 结果就是用户报的「设置不持久，重进就变回去」：在主题页里改完**直接按返回键
-     * 退回工作区**（不经过 `closeThemePage` 的那条路径，比如侧滑返回、或者从
-     * 设置 hub 一路退出去），那些改动只活在内存里；进程一被划掉就全没了。
-     *
-     * 修法不是"每次改都写盘"（那正是当初要避免的），而是把待落盘这件事**登记下来**：
-     * 挂一个已完成的占位 job，让 `flushSettings()` 的判据成立。
-     * 用同一个去抖窗口，语义与其它设置完全一致。
-     */
     fun updateThemeSettings(transform: (com.zhizhu.zhicode.compose.data.ThemeSettings) ->
         com.zhizhu.zhicode.compose.data.ThemeSettings) {
         _state.update { s ->
@@ -7166,25 +5857,6 @@ class WorkspaceViewModel(
             s.copy(
                 themeMode = next.mode,
                 themeSettings = next,
-                /*
-                 * ⚠️ `settingsDraft` 里的 `themeMode` **必须同步**，否则会被它盖回去。
-                 *
-                 * `SettingsDraft.applyTo()` 有这么两行：
-                 *
-                 *     themeMode = themeMode,
-                 *     themeSettings = state.themeSettings.copy(mode = themeMode),
-                 *
-                 * 也就是**draft 里的旧值会把 state 覆盖掉**。而 `applySettingsDraft()`
-                 * 的调用点很多（设置页里任何一个开关、以及若干不走设置页的入口），
-                 * 它们平时不碰主题，却会因为这两行把用户刚选好的深浅冲回旧值。
-                 *
-                 * 用户看到的就是「在主题页选好深浅 → 退出 → 滑动几下（触发了某次
-                 * `applySettingsDraft`）→ 又变回去了」，而且**再进设置页看到的是旧值**
-                 * —— 因为 state 确实被写回旧值了，不是显示层的问题。
-                 *
-                 * 这里顺手同步 draft 是从源头消除这种"两个真源"的分歧；
-                 * `applyTo` 那两行保持不动（它是给"设置页自己改深浅"用的）。
-                 */
                 settingsDraft = s.settingsDraft?.copy(themeMode = next.mode),
             )
         }
@@ -7194,11 +5866,7 @@ class WorkspaceViewModel(
         scheduleThemePersist()
     }
 
-    /**
-     * 安排一次主题落盘（与 [scheduleSettingsPersist] 同一套去抖语义，但走主题自己的
-     * 存储）。`settingsPersistJob` 是**共用**的登记位：`flushSettings()` 只需要知道
-     * "还有没有东西没写"，具体写什么由 `persistSettingsNow()` 一并负责。
-     */
+    /** 安排一次主题落盘（与 [scheduleSettingsPersist] 同一套去抖语义，但走主题自己的 */
     private fun scheduleThemePersist() {
         settingsPersistJob?.cancel()
         settingsPersistJob = viewModelScope.launch {
@@ -7218,13 +5886,6 @@ class WorkspaceViewModel(
 
     // ---------- 内置 Termux 运行环境 ----------
 
-    /**
-     * 追加「内置环境版本」一节到自检报告。
-     *
-     * 为什么要单独列出来：以前换 APK 之后 `usr` 会悄悄停在旧的那份，界面上完全看不出来
-     * （`isInstalled()` 只查文件在不在）。现在自检报告里能直接读到"已装哪版 / 内置哪版"，
-     * 不一致时还给出说明 —— 排障时一眼能定位。
-     */
     private fun bootstrapVersionSection(): String {
         val installed = runCatching { installer.installedVersion() }.getOrNull()
         val bundled = runCatching { installer.bundledVersion() }.getOrNull() ?: return ""
@@ -7240,12 +5901,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 生成自检报告。
-     *
-     * 刻意**绝不抛异常**：这是排障入口，它自己崩掉或什么都不显示，就等于把唯一的诊断手段也弄没了。
-     * 探测失败时把失败原因当作报告正文显示出来，至少还能看到是哪一项炸的。
-     */
+    /** 生成自检报告。 */
     private fun buildEnvironmentReport(): String = runCatching {
         EnvDoctor.report(getApplication()) + bootstrapVersionSection()
     }.getOrElse { error ->
@@ -7427,9 +6083,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 安装（或重新初始化）Ubuntu 24.04 + 内置 Node.js + Pi 环境。
-     */
+    /** 安装（或重新初始化）Ubuntu 24.04 + 内置 Node.js + Pi 环境。 */
     fun installRuntime() {
         if (_state.value.runtimeInstalling) return
         val mirror = UbuntuMirrorSource.findById(_state.value.ubuntuMirrorId)
@@ -7527,11 +6181,7 @@ class WorkspaceViewModel(
 
     // ---------- 设置 ----------
 
-    /**
-     * 打开设置弹窗：从当前 state 快照一份 draft。
-     *
-     * 之后的编辑全部落在 draft 上，「取消」丢弃 draft 即可，不需要回滚任何东西。
-     */
+    /** 打开设置弹窗：从当前 state 快照一份 draft。 */
     fun openSettings() {
         _state.update {
             it.copy(
@@ -7544,13 +6194,7 @@ class WorkspaceViewModel(
         refreshExtensions()
     }
 
-    /**
-     * 统计「扩展」组要显示的数量（MCP / 技能 / 角色卡）。
-     *
-     * 三个存储都在磁盘上：`mcp.json` 解析、技能目录 walk、角色卡列表读。
-     * 所以**只能在 IO 线程读一次**，不能在设置页里读（那会变成"每次重组读一次盘"）。
-     * 打开设置时算一次、从扩展页返回时再算一次就够 —— 这些数量不会在页面停留期间变。
-     */
+    /** 统计「扩展」组要显示的数量（MCP / 技能 / 角色卡）。 */
     fun refreshExtensions() {
         viewModelScope.launch(Dispatchers.IO) {
             val projectPath = _state.value.projectPath
@@ -7576,13 +6220,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 设置落盘的去抖窗口。
-     *
-     * 400ms 是"打完最后一个字到写入"的延迟上限：短到用户察觉不到，
-     * 长到足以把连续输入合并成一次写。取值与 Miuix / Material 的
-     * `debounce` 惯例同档（300~500ms）。
-     */
+    /** 设置落盘的去抖窗口。 */
     private val SettingsPersistDebounceMs = 400L
 
     fun closeSettings() {
@@ -7592,12 +6230,7 @@ class WorkspaceViewModel(
         _state.update { it.copy(settingsDraft = null, settingsOpen = false) }
     }
 
-    /**
-     * 打开「UI 调试」整页（**仅 debug 构建**）。
-     *
-     * 刻意不动 [openSettings] 的 draft：从设置页进来时它已经垫在栈底，
-     * 返回时 draft 原样还在，所以调试完回到设置页不会丢未保存的改动。
-     */
+    /** 打开「UI 调试」整页（**仅 debug 构建**）。 */
     fun openUiDebug() {
         // 见 hideSidebarForNavigation。
         hideSidebarForNavigation()
@@ -7607,20 +6240,10 @@ class WorkspaceViewModel(
     /** 关闭 UI 调试页。若它是由设置页打开的，设置主页会随之露出来（栈自动回退一层）。 */
     fun closeUiDebug() = _state.update { it.copy(uiDebugOpen = false) }
 
-    /**
-     * 重置 UI 调试页的样例数据。
-     *
-     * 只递增令牌：页面用 `remember(token)` 重建自己那份样例（含秒表状态）。
-     * 样例数据是纯调试物，不进持久化状态，也不该让 ViewModel 认识它的结构。
-     */
+    /** 重置 UI 调试页的样例数据。 */
     fun requestUiDebugReset() = _state.update { it.copy(uiDebugResetToken = it.uiDebugResetToken + 1) }
 
-    /**
-     * 开关**全局调试浮层**。
-     *
-     * 打开时默认**展开**（用户按下开关就是要看东西，先给他面板），
-     * 关闭时把展开态一起复位，下次打开仍是展开 —— 免得留下"上次收起"的隐式记忆。
-     */
+    /** 开关**全局调试浮层**。 */
     fun setDebugOverlayEnabled(enabled: Boolean) = _state.update {
         it.copy(debugOverlayEnabled = enabled, debugOverlayExpanded = enabled)
     }
@@ -7630,17 +6253,7 @@ class WorkspaceViewModel(
         it.copy(debugOverlayExpanded = expanded)
     }
 
-    /**
-     * 开关**主体调试模式**：真实界面就地显示调试信息（不另开页面）。
-     *
-     * 同时把当前 API 配置切到「调试 · 本地模拟」**并记住原来那条**：
-     * 这条配置的协议是脚本化传输（不发网络、按脚本产回复、工具照常真实执行），
-     * 于是"发一句话就能走完整条对话流"——包括流式正文、思考、工具行、
-     * 权限确认、计划审批、任务卡。关掉时切回原来那条。
-     *
-     * 之所以要真的切配置而不是在引擎里加开关：引擎读的就是"当前生效的那条配置"，
-     * 走真实链路才能保证调试出来的行为与真正用起来一致（见 [DebugApiProfile]）。
-     */
+    /** 开关**主体调试模式**：真实界面就地显示调试信息（不另开页面）。 */
     fun setDebugAppMode(enabled: Boolean) {
         // 双保险：开关本身在 debug 独有页面里，但这里再挡一道 ——
         // 发布包绝不该因为某处误接线而切到脚本化传输。
@@ -7686,28 +6299,10 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 设置页的**唯一**改动入口：既更新 draft（页面显示的来源），又立刻写回 state。
-     *
-     * 设置页改成自动保存后就不再需要「保存 / 取消」两个按钮：改动即时生效，
-     * 返回只是关页面。draft 仍然保留 —— 页面用它做显示源，
-     * 某些字段（如项目目录留空）的「未改动」语义也靠它。
-     *
-     * ⚠️ 这里**必须**走 [SettingsDraft.applyTo] 而不是各自 `copy`：`applyTo` 里有
-     * `clampWebResults` / `projectPath.ifBlank` 这些归一化，绕过它就等于把用户
-     * 原始输入直接塞进引擎配置。
-     */
     fun applySettingsDraft(draft: SettingsDraft) {
         val previous = _state.value.settingsDraft
         _state.update { draft.applyTo(it, keepDraft = true) }
-        /*
-         * 「强制后台保活」必须**立刻**落到真正的服务上。
-         *
-         * 这个开关原先只写进 SessionConfig 下发给引擎，而 `KeepAliveService`
-         * 从没有任何调用点 —— 于是开关点了、值也落了盘，但前台服务从未启动，
-         * 表现就是「这个功能没做」。这里按「值变了才动」触发，
-         * 避免每改一个别的设置就 start/stop 一次服务。
-         */
+        /* 「强制后台保活」必须**立刻**落到真正的服务上。 */
         if (previous == null || previous.forcedKeepAliveEnabled != draft.forcedKeepAliveEnabled) {
             syncKeepAlive(draft.forcedKeepAliveEnabled)
         }
@@ -7722,13 +6317,7 @@ class WorkspaceViewModel(
         scheduleSettingsPersist(debounce = typingOnly)
     }
 
-    /**
-     * 把「强制后台保活」开关同步到真正的服务。
-     *
-     * <p>root 参数取自当前设置：带了才会让服务去调 `RootKeepAliveController`
-     * 加强系统后台策略（电池白名单 + appops）。不带时服务会主动 `revoke`，
-     * 撤掉上一次的加强 —— 这是"用户关掉了 Agent Root"时必须做的事。
-     */
+    /** 把「强制后台保活」开关同步到真正的服务。 */
     private fun syncKeepAlive(enabled: Boolean) {
         val context = getApplication<Application>()
         if (enabled) {
@@ -7738,28 +6327,14 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 回到前台时按**当前状态**补一次保活。
-     *
-     * <p>两类场景需要它：
-     * <ul>
-     *   <li>应用被杀后重启：保活开关是持久化的，服务要跟着恢复；</li>
-     *   <li>用户从常驻通知里点了「停止保活」：那条路径会把设置写回 false，
-     *       下次回到前台要以磁盘上的真实值为准。</li>
-     * </ul>
-     *
-     * <p>只在为真时启动、为假时**什么都不做** —— 每次回到前台都去 stop 一次，
-     * 会在用户手动停掉之后又发出一条 startForegroundService，白白闪一下通知。
-     */
+    /** 回到前台时按**当前状态**补一次保活。 */
     fun resumeKeepAliveIfEnabled() {
         if (_state.value.settings.forcedKeepAliveEnabled) {
             syncKeepAlive(true)
         }
     }
 
-    /**
-     * `/keepalive on|off|check` —— 与 IQ-Code-Android 的 `handleKeepAliveSlash` 同一套取值。
-     */
+    /** `/keepalive on|off|check` —— 与 IQ-Code-Android 的 `handleKeepAliveSlash` 同一套取值。 */
     private fun handleKeepAliveSlash(arg: String) {
         when (arg.lowercase(Locale.US)) {
             "on", "enable" -> {
@@ -7795,13 +6370,7 @@ class WorkspaceViewModel(
         applySettingsDraft(draft.copy(forcedKeepAliveEnabled = enabled))
     }
 
-    /**
-     * `/root on|off|check` —— Agent Root 开关。
-     *
-     * <p>保活依赖它：关掉 root 时如果保活开着，要**重新下发一次**
-     * `KeepAliveService.start(context, false)`，让服务撤掉之前加的
-     * 电池白名单与 appops 放宽（参考实现就是这么做的）。
-     */
+    /** `/root on|off|check` —— Agent Root 开关。 */
     private fun handleRootSlash(arg: String) {
         val current = _state.value.settings.rootExecutionEnabled
         when (arg.lowercase(Locale.US)) {
@@ -7830,15 +6399,7 @@ class WorkspaceViewModel(
         if (_state.value.settings.forcedKeepAliveEnabled) syncKeepAlive(true)
     }
 
-    /**
-     * 两次草稿是否**只**在自由文本字段上不同。
-     *
-     * 只有这种情况才值得去抖：其余字段都是一次性动作（点开关、选下拉），
-     * 改动即最终值，没有"还在输入中"的中间态，也就没有理由延后落盘。
-     *
-     * 名单要跟着设置页的自由文本输入框走（`SettingsTextField` / `SettingsIntField`
-     * 的那几处）：提示词、项目目录，以及支持 `1.5m` 这种写法的数字框 —— 它们也是文本输入。
-     */
+    /** 两次草稿是否**只**在自由文本字段上不同。 */
     private fun differsOnlyInFreeText(a: SettingsDraft, b: SettingsDraft): Boolean =
         a.copy(
             customSystemPrompt = b.customSystemPrompt,
@@ -7852,12 +6413,7 @@ class WorkspaceViewModel(
             autoCompactPercent = b.autoCompactPercent,
         ) == b
 
-    /**
-     * 安排一次设置落盘。
-     *
-     * [debounce] 为真时等 [SettingsPersistDebounceMs] 再写（输入中）；为假时立刻写。
-     * 无论哪条路径，最终都走 [persistSettingsNow]，而它是**同步落盘**的。
-     */
+    /** 安排一次设置落盘。 */
     private fun scheduleSettingsPersist(debounce: Boolean) {
         settingsPersistJob?.cancel()
         if (!debounce) {
@@ -7871,29 +6427,6 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 立刻兑现去抖窗口里那次设置改动（不等剩下那几百毫秒）。
-     *
-     * 两个调用点，缺一都会让"改完就走"丢改动：
-     * - [closeSettings]：用户关掉设置页；
-     * - `MainActivity.onStop`：应用退到后台（包括「直接大退」前那一下）。
-     *
-     * 没有待兑现的改动时**什么都不做**：`onStop` 每次都会调它，
-     * 不能让它变成一个"每次切后台都全量写盘"的热路径。
-     *
-     * ## ⚠️ 主题设置也必须在这里兑现
-     *
-     * 主题存在 `ThemeStore`（**另一份** SharedPreferences），与 `SettingsDraft`
-     * 不是同一份数据。只调 `persistSettingsNow()` 写不到它。
-     *
-     * 而这条以前是坏的：`updateThemeSettings()` 只置状态、不打任何"待落盘"标记，
-     * 于是 `if (settingsPersistJob == null) return` 直接返回，主题永远不在这里落盘。
-     * 用户从主题页**侧滑返回**（不走 `closeThemePage` 那条显式持久化的路径）时，
-     * 改动只活在内存里 —— 这正是「设置不持久，重进就变回去」。
-     *
-     * 现在 `updateThemeSettings` 会通过 [scheduleThemePersist] 登记那个 job，
-     * 所以这里能一并对上。
-     */
     fun flushSettings() {
         if (settingsPersistJob == null) return
         settingsPersistJob?.cancel()
@@ -7903,32 +6436,6 @@ class WorkspaceViewModel(
         persistSettingsNow()
     }
 
-    /**
-     * 把当前生效的设置写回磁盘。
-     *
-     * ## 为什么必须**同步**落盘（`saveDurable`）
-     *
-     * `SharedPreferences.apply()` 只保证内存可见，磁盘写是异步的；从最近任务里
-     * 划掉应用时进程被杀，**没人等那个后台写** —— 这就是
-     * 「直接大退软件，这些保存恢复到未修改的样子」。本类此前 14 处写入全是
-     * `apply()`、一处 `commit()` 都没有，所以补上"调用点"并不够（上一轮就只补了
-     * 调用点，于是设置照丢）。用户设置一律走 `commit()`。
-     *
-     * ## 为什么复用 `engineOverrides()`
-     *
-     * 落盘那份必须与**发送时实际生效**的那份逐字段相同，否则会出现
-     * "界面上是 A、发出去的也是 A、但重启回来变成 B"。两者共用
-     * [applyEngineOverrides] 同一段映射（见其注释），从根上排除漂移。
-     *
-     * ## 三条刻意的约束
-     *
-     * 1. **先 `store.load()` 再改**，不凭空 `SessionConfig()`：`save()` 是整表覆盖，
-     *    凭空构造会把 API 密钥槽这类本函数不管的字段一起清空。
-     * 2. **不调 `engine.configure()`**：那样会顺带创建引擎实例，而这里只想要落盘；
-     *    引擎实例的创建目前是单线程假设（`engine()` 非同步），从 IO 线程碰它有竞争风险。
-     *    下一次发消息时 `configure()` 自会把新值推给引擎。
-     * 3. **在 IO 线程上**：`commit()` 会阻塞到磁盘写完，压在点击那一帧上就是一次卡顿。
-     */
     private fun persistSettingsNow() {
         val snapshot = _state.value
         val overrides = engineOverrides()
@@ -7955,12 +6462,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把主题写回磁盘。
-     *
-     * 主题是纯界面概念，但它「选完重启就丢」与设置不落盘是同一件事 ——
-     * 用户的感受是「这个软件的设置根本记不住」。
-     */
+    /** 把主题写回磁盘。 */
     private fun persistTheme(mode: ThemeMode) {
         runCatching { ApiSettingsStore.setThemeMode(getApplication(), mode.name.lowercase()) }
         // 同一份语义住在两处存储里：`theme_mode` 是深浅三态（老键，编辑器 Activity
@@ -7977,14 +6479,7 @@ class WorkspaceViewModel(
         runCatching { ApiSettingsStore.setWebSearchKey(getApplication(), provider.name.lowercase(), key) }
     }
 
-    /**
-     * 分类页里的「入口类」条目：先关掉设置弹窗，再把对应目标打开。
-     *
-     * 这里只接**真的有实现**的目标。原来还给 `canvas` / `other` 留了分支，
-     * 但它们分别指向"未移植的运行时画布"和"自定义头部提示词的第二个入口"，
-     * 现在画布入口已撤、提示词并入「上下文与项目」，两条分支一并删掉——
-     * 留着只会让后来的人以为这里有功能。
-     */
+    /** 分类页里的「入口类」条目：先关掉设置弹窗，再把对应目标打开。 */
     fun navigateFromSettings(target: String) {
         // rikkahub 式导航：hub 保留在下层，子页盖上来；返回回 hub 时 draft 原样。
         // 「保存」只在 hub 顶栏点（draft 语义不变）。
@@ -8032,17 +6527,7 @@ class WorkspaceViewModel(
         if (willExpand) loadFullToolOutput(id)
     }
 
-    /**
-     * 展开一条工具时把**完整输出**取回来。
-     *
-     * <p>列表里那份是截断过的预览（见 `SessionReader.OUTPUT_PREVIEW_CHARS`）——
-     * 一条会话里几百条工具的完整输出全部常驻内存，正是打开长会话 OOM 的主因。
-     * 所以全文按需取：命中 `content_blocks(session_id, tool_use_id)` 索引只读一行，
-     * 取回来后替换掉预览（`outputTruncated` 置回 false，之后不会再重复取）。
-     *
-     * <p>取失败（会话已删、记录里本来就只有预览）时什么都不做：保持预览，
-     * 而不是把输出清空 —— 后者看起来像"这条工具没有输出"。
-     */
+    /** 展开一条工具时把**完整输出**取回来。 */
     private fun loadFullToolOutput(toolUseId: String) {
         if (toolUseId.isEmpty()) return
         val sessionId = _state.value.activeSessionId
@@ -8072,16 +6557,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 把某一条工具的展开状态设成**指定值**（不是取反）。
-     *
-     * 工具菜单里给的是"展开输出 / 折叠输出"这种**目标状态**的文案，所以必须能直接设值：
-     * 用取反的话，用户点"展开输出"时如果状态在这期间已经变了（比如刚跑完自动展开），
-     * 就会得到与文案相反的结果。
-     *
-     * 按 `(itemId, toolId)` 定位而不是只按 toolId：调用方手上就有这两个值，
-     * 而只按 toolId 遍历时，同一 id 若出现在多条条目里会一起被改。
-     */
+    /** 把某一条工具的展开状态设成**指定值**（不是取反）。 */
     private fun setToolExpanded(itemId: String, toolId: String, expanded: Boolean) {
         _state.update { s ->
             s.copy(
@@ -8098,18 +6574,6 @@ class WorkspaceViewModel(
         if (expanded) loadFullToolOutput(toolId)
     }
 
-    /**
-     * 展开/收起一个**折叠组**。
-     *
-     * @param id       工具批次那一条消息的 id
-     * @param groupKey 组键 = 组内首成员的 toolId（见 [ToolGrouping.Segment.Group.key]）
-     *
-     * 记的是 [ChatItem.expandedGroups] 这份集合，而**不是**把组里每个成员的
-     * `expanded` 置真/置假 —— 成员的 `expanded` 是"这条工具的输出展开"，
-     * 两件事共用一个标志位时，点开一条工具的输出会连带把整组摊开。
-     *
-     * 组键由界面按 toolId 推导后传进来，所以这一层不需要知道"哪几条属于哪一组"。
-     */
     fun toggleGroupExpanded(id: String, groupKey: String) {
         if (groupKey.isEmpty()) return
         _state.update { s ->
@@ -8175,14 +6639,7 @@ class WorkspaceViewModel(
         navigateTo(parent)
     }
 
-    /**
-     * 点开一条列表项：目录就进去，文件就交给**编辑器那个独立 Activity**。
-     *
-     * 这里只往状态里放一个「待打开路径」，真正 `startActivity` 的是界面层
-     * （`ZhiCodeScreen` 里那个 `rememberLauncherForActivityResult`）：
-     * ViewModel 不该拿 Context 去启动界面，而且启动结果要回调到界面上
-     * 才能决定“回来了要不要刷新文件列表”。
-     */
+    /** 点开一条列表项：目录就进去，文件就交给**编辑器那个独立 Activity**。 */
     fun openFile(entry: FileEntry) {
         if (entry.directory) {
             openDirectory(entry)
@@ -8198,12 +6655,7 @@ class WorkspaceViewModel(
     fun consumePendingEditorOpen() = _state.update { it.copy(pendingEditorOpen = null) }
 
     /** 文件面板的根路径（内置 Termux home 不存在时回退到应用私有目录）。 */
-    /**
-     * 文件面板当前的根，取决于用户在界面上选的 [FileRoot]。
-     *
-     * 原先这里恒等于 `projectPath`，于是面板被关在项目里 —— HOME 与共享存储
-     * 都走不到（面包屑点不出去，「上一级」也会被弹回来）。
-     */
+    /** 文件面板当前的根，取决于用户在界面上选的 [FileRoot]。 */
     private fun rootPath(): String = when (_state.value.fileRoot) {
         FileRoot.HOME -> TermuxConstants.TERMUX_HOME_DIR_PATH
         FileRoot.SHARED -> StorageLinks.EXTERNAL_ROOT
@@ -8258,10 +6710,7 @@ class WorkspaceViewModel(
         updateFileSort(current.sortKey, !current.descending)
     }
 
-    /**
-     * 文件管理器式排序：目录永远在文件之前，正序/倒序只改变每组内部顺序。
-     * 不能对完整列表直接调用 reversed()，否则倒序会把文件夹整体翻到文件后面。
-     */
+    /** 文件管理器式排序：目录永远在文件之前，正序/倒序只改变每组内部顺序。 */
     private fun fileComparator(options: FileListOptions): Comparator<FileEntry> {
         val inside = when (options.sortKey) {
             FileSortKey.NAME -> compareBy<FileEntry> { it.name.lowercase() }
@@ -8297,18 +6746,7 @@ class WorkspaceViewModel(
 
     // ---------- 文件：新建 / 重命名 / 删除 ----------
 
-    /**
-     * 打开「新建」表单。
-     *
-     * <p>**没有 `directory` 参数**：建文件还是建文件夹是弹窗上两个按钮的选择，
-     * 只有点下去那一刻才知道。原先这里按扩展名猜（`name.contains('.')`）——
-     * 那是"两个入口各建一种"时代的产物，而它会把 `Makefile`、`LICENSE`、
-     * `.gitignore` 这类**没有扩展名的文件**建成目录，用户点完「文件」得到一个文件夹。
-     *
-     * <p>名字框**留空**（占位符提示"名称"）。原先预填 `新建文件.txt` / `新建文件夹`，
-     * 现在两种可能并存，预填哪一个都会让另一个按钮建出用户没想要的名字
-     * （点「文件夹」得到一个叫 `新建文件.txt` 的文件夹）。
-     */
+    /** 打开「新建」表单。 */
     fun newFileForm() {
         _state.update { it.copy(fileNameForm = FileNameForm(title = "新建", draft = "")) }
     }
@@ -8328,18 +6766,7 @@ class WorkspaceViewModel(
 
     fun cancelFileNameForm() = _state.update { it.copy(fileNameForm = null) }
 
-    /**
-     * 提交「新建 / 重命名」。
-     *
-     * <p>[directory] 来自弹窗上被点的那一个按钮（重命名时无意义，走 target 那一支）。
-     *
-     * <p>新建之后**立刻打开它**（文件）或**走进去**（目录）—— 「新建了个文件然后还要自己找出来」
-     * 是一步没必要的操作。重命名则刷新列表即可（当前内容还开着，路径没变）。
-     *
-     * <p>失败**回填进表单**（`failure`）而不是写 `message`：`MessageBar` 是 `ChatArea`
-     * 的孩子，在文件页上提交失败时界面上什么都看不见（弹窗还会照常关掉，
-     * 看起来像"建成功了但列表里没有"）。
-     */
+    /** 提交「新建 / 重命名」。 */
     fun submitFileNameForm(directory: Boolean = false) {
         val form = _state.value.fileNameForm ?: return
         val dir = File(_state.value.filePath)
@@ -8421,12 +6848,7 @@ class WorkspaceViewModel(
 
     // ---------- 文件：选择模式（长按多选） ----------
 
-    /**
-     * 长按一行：**进入选择模式并选中它**。
-     *
-     * <p>已经在选择模式里时长按＝切换这一条（与小米一致：选择模式下长按和点击
-     * 都是勾/取消勾，不会突然又"进入一次"）。
-     */
+    /** 长按一行：**进入选择模式并选中它**。 */
     fun longPressFileEntry(entry: FileEntry) {
         _state.update { state ->
             val selection = if (state.fileSelectionMode && entry.path in state.fileSelection) {
@@ -8444,12 +6866,7 @@ class WorkspaceViewModel(
         }
     }
 
-    /**
-     * 点一行。
-     *
-     * <p>选择模式下是"勾/取消勾"，而不是打开 —— 这一条与长按共用同一份切换逻辑，
-     * 分成两套的话迟早出现"长按进去了、一点又跳出去"。
-     */
+    /** 点一行。 */
     fun toggleFileSelection(entry: FileEntry) {
         _state.update { s ->
             s.copy(
@@ -8464,13 +6881,6 @@ class WorkspaceViewModel(
 
     fun clearFileSelection() = _state.update { it.copy(fileSelection = emptySet(), fileSelectionMode = false) }
 
-    /**
-     * 「全选」/「取消全选」。
-     *
-     * <p>判据是"当前这一层的**全部**条目是否都选中了"，而不是另存一个布尔：
-     * 另存的话，用户全选之后又手动取消一条，按钮还写着「取消全选」，
-     * 点下去却什么都不会变（或者更糟 —— 变成"选全部"）。
-     */
     fun toggleSelectAllFiles() {
         val all = _state.value.fileEntries.map { it.path }.toSet()
         _state.update { s ->
@@ -8556,15 +6966,7 @@ class WorkspaceViewModel(
         openDeletePrompt(entries)
     }
 
-    /**
-     * 把选中的文件附加到下一条消息。
-     *
-     * <p>这是选择模式里最有用的一个动作：一次挑好几个文件丢进输入器，
-     * 比在附件面板里一个一个点快得多（那个面板一次只能附加一个）。
-     *
-     * <p>读文本可能有失败（二进制、太大），失败的**逐条说清**、成功的照样进去，
-     * 而不是整批失败 —— 用户挑了五个文件，其中一个是图片，不该整批白干。
-     */
+    /** 把选中的文件附加到下一条消息。 */
     fun attachSelectedEntries() {
         val entries = selectedEntries()
         // 附加的语义是读取文件正文；目录或文件夹/文件混选时明确置灰，避免
@@ -8628,12 +7030,7 @@ class WorkspaceViewModel(
     // **一点反应都没有**。现在由 `ui/MessageBar.kt` 在悬浮输入器**上方**内联显示 ——
     // 既不遮输入器，也不再是死代码。
 
-    /**
-     * 手动关掉当前提示（点提示条本身，或自动超时）。
-     *
-     * <p>要判空再更新，而不是无条件 `copy(message = null)`：否则一次无关的点击会把
-     * 刚刚弹出的**新**提示也抹掉（点旧位置、提示刚换成新的那种竞态）。
-     */
+    /** 手动关掉当前提示（点提示条本身，或自动超时）。 */
     fun clearMessage(text: String? = null) {
         _state.update { current ->
             if (text != null && current.message != text) current
@@ -8655,14 +7052,7 @@ class WorkspaceViewModel(
             if (value >= 100f || value % 1f == 0f) String.format(Locale.US, "%.0f", value)
             else String.format(Locale.US, "%.1f", value)
 
-        /**
-         * SAF 文档附加的字节上限。
-         *
-         * 与 `FileBrowser.MAX_PREVIEW_BYTES` **同一个数**：附件在引擎那边是内联文本，
-         * 它进的是模型上下文，256 KB 已经很大了。这里写死常量而不是把
-         * `FileBrowser` 的那个 private 常量公开，是因为两者服务的不是同一个上限来源
-         * —— 但 256 KB 这个数必须一致，改一个另一个也要改（guard 里钉着）。
-         */
+        /** SAF 文档附加的字节上限。 */
         private const val DocumentAttachLimit = 256 * 1024
 
         /** 思考预览保留的尾部字符数（原版 `liveThinking` 上限 1200）。 */
@@ -8671,33 +7061,16 @@ class WorkspaceViewModel(
         /** 单条工具实时输出的上限（原版 `liveOutput` 上限 40000）。 */
         private const val LIVE_OUTPUT_LIMIT = 40_000
 
-        /**
-         * 内置环境安装日志保留的行数。
-         *
-         * `~/.zhicode/runtime.log` 是排障用的滚动日志，不是审计记录 ——
-         * 自动重装这条路径是静默的，不写日志就完全无法判断它走到了哪一步。
-         */
+        /** 内置环境安装日志保留的行数。 */
         private const val RUNTIME_LOG_MAX_LINES = 200
 
         /** 工具实时输出落盘间隔：每条进程输出都改一次 StateFlow 会把界面拖垮。 */
         private const val PROGRESS_FLUSH_MS = 200L
 
-        /**
-         * 按下停止之后，等多久去问一次"到底停了没有"（第一档）。
-         *
-         * 3 秒是**兜底**而不是常态：正常收尾是毫秒级，`onEngineTurnComplete` 一到
-         * 看门狗就被取消了。设太短会在快速停止时刷出一句多余的提示。
-         */
+        /** 按下停止之后，等多久去问一次"到底停了没有"（第一档）。 */
         private const val STOP_CONFIRM_MS = 3_000L
 
-        /**
-         * 第一档之后仍未确认时，再等多久就解锁输入框（第二档）。
-         *
-         * 取值依据是"哪些东西会拖这么久"：MCP / HTTP 这类不可中断的读，
-         * 单次超时是 30 秒；Bash 侧最长的是包管理器（1 小时下限）。
-         * 等到 9 秒还没确认，基本可以断定这不是"再等一下就好"，
-         * 与其把界面锁死，不如让用户能继续打字、同时保留停止键。
-         */
+        /** 第一档之后仍未确认时，再等多久就解锁输入框（第二档）。 */
         private const val STOP_UNLOCK_MS = 9_000L
 
         /** 助手气泡上保留的过程步骤条数上限（原版 12）。 */
@@ -8706,35 +7079,16 @@ class WorkspaceViewModel(
         /** 压缩摘要回显上限：摘要是给人看要点的，整段贴进对话会把记录淹掉。 */
         private const val COMPACT_SUMMARY_LIMIT = 600
 
-        /**
-         * 引擎"没什么可压缩"时返回的前缀。
-         *
-         * 这不是我发明的约定：`ZhiCodeEngine.compactContextSemantic` 用这句话作为
-         * 未调用模型的信号，引擎自己的自动压缩分支也用 `startsWith` 判断它。
-         * 引擎没有给出结构化返回值，所以只能照它的契约来。
-         */
+        /** 引擎"没什么可压缩"时返回的前缀。 */
         private const val ENGINE_NOTHING_TO_COMPACT = "上下文已经足够精简"
 
         /** 文本附件（技能）拼进提示词的长度上限，与原版一致。 */
         private const val TEXT_ATTACHMENT_LIMIT = 60_000
 
-        /**
-         * 图片导出一次最多几条。
-         *
-         * `BitmapComposer` 在主线程做测量与布局，且导出图是一张**单幅 PNG** ——
-         * 条数再多会两头受罪：主线程明显卡顿，而超高的图片也会被解码方拒绝。
-         */
+        /** 图片导出一次最多几条。 */
         private const val MaxExportItems = 50
 
-        /**
-         * `/init` 的指令**搬走了**。
-         *
-         * <p>它现在住在 `model/PromptSlots.kt` 的 [PromptSlot.INIT.defaultValue] ——
-         * 因为这一项已经可以在设置里改，默认值必须有**唯一**的来源：
-         * 留一份在这里，用户点「恢复默认」就会恢复成另一份文案。
-         *
-         * <p>调用点是 `PromptSlot.INIT.resolve(state.settings.initPrompt)`。
-         */
+        /** `/init` 的指令**搬走了**。 */
 
     }
 }
