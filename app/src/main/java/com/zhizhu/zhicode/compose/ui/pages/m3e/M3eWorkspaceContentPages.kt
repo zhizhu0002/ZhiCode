@@ -34,62 +34,8 @@ import com.zhizhu.zhicode.compose.model.FileEntry
 import com.zhizhu.zhicode.compose.model.WorkspaceUiState
 import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
-import com.zhizhu.zhicode.compose.ui.pages.miuix.FilesPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.TerminalPage
 import com.zhizhu.zhicode.compose.ui.chat.rememberAutoFollow
-
-/**
- * M3E 文件区。
- *
- * 列表本体沿用共享 [FilesPage]：它的行高、圆角与底色已由页面组 token 驱动，
- * 且 40+ 个业务回调只在这里接线一次。
- */
-@Composable
-internal fun M3eFilesContent(
-    state: WorkspaceUiState,
-    viewModel: WorkspaceViewModel,
-    modifier: Modifier,
-) {
-    FilesPage(
-        filePath = state.filePath,
-        entries = state.fileEntries,
-        emptyNote = state.fileNote,
-        listOptions = state.fileListOptions,
-        onQueryChange = viewModel::updateFileQuery,
-        onSortChange = viewModel::updateFileSort,
-        onToggleSortDirection = viewModel::toggleFileSortDirection,
-        onOpen = viewModel::openFile,
-        onNavigate = viewModel::navigateTo,
-        root = state.fileRoot,
-        onSwitchRoot = viewModel::switchFileRoot,
-        nameForm = state.fileNameForm,
-        onNewEntry = viewModel::newFileForm,
-        onRename = viewModel::renameForm,
-        onNameDraftChange = viewModel::updateFileNameDraft,
-        onSubmitName = viewModel::submitFileNameForm,
-        onCancelName = viewModel::cancelFileNameForm,
-        deletePrompt = state.fileDeletePrompt,
-        onConfirmDelete = viewModel::confirmDelete,
-        onCancelDelete = viewModel::cancelDelete,
-        sharedStorageGranted = state.sharedStorageGranted,
-        onGrantSharedStorage = viewModel::openSharedStorageSettings,
-        selection = state.fileSelection,
-        selectionMode = state.fileSelectionMode,
-        fileClipboardCount = state.fileClipboard.size,
-        fileClipboardMove = state.fileClipboardMove,
-        onPasteFiles = viewModel::pasteFilesIntoCurrentDirectory,
-        onLongPressEntry = viewModel::longPressFileEntry,
-        onToggleEntry = viewModel::toggleFileSelection,
-        onSetSelection = viewModel::setFileSelection,
-        onToggleSelectAll = viewModel::toggleSelectAllFiles,
-        onClearSelection = viewModel::clearFileSelection,
-        onRenameSelected = viewModel::renameSelectedEntry,
-        onDeleteSelected = viewModel::deleteSelectedEntries,
-        onAttachSelected = viewModel::attachSelectedEntries,
-        active = state.tab == com.zhizhu.zhicode.compose.model.WorkspaceTab.FILES,
-        modifier = modifier,
-    )
-}
 
 /**
  * M3E 终端区。
@@ -164,7 +110,7 @@ private fun M3eTerminalPlaceholder(
                     painter = ZhiIcons.terminal,
                     contentDescription = null,
                     tint = scheme.primary,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(M3eDimens.IconSmall),
                 )
                 Column(
                     modifier = Modifier

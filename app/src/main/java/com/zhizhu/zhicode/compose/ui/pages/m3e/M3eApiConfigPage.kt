@@ -190,7 +190,7 @@ private fun M3eApiProfileList(
                     .padding(horizontal = M3eDimens.RowPaddingH, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                LoadingIndicator(modifier = Modifier.size(20.dp))
+                LoadingIndicator(modifier = Modifier.size(M3eDimens.IconSmall))
                 Text(
                     text = "正在加载…",
                     style = MaterialTheme.typography.bodyMedium,
@@ -412,7 +412,7 @@ private fun M3ePresetPickerStep(
                     painter = ZhiIcons.tune,
                     contentDescription = null,
                     tint = scheme.onPrimaryContainer,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(M3eDimens.IconSmall),
                 )
                 Column(
                     modifier = Modifier
@@ -458,7 +458,7 @@ private fun M3ePresetPickerStep(
                     Icon(
                         painter = ZhiIcons.close,
                         contentDescription = "清空搜索",
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(M3eDimens.IconSmall),
                     )
                 }
             }
@@ -880,7 +880,7 @@ private fun M3eApiProfileForm(
                             painter = if (isExpanded) ZhiIcons.collapse else ZhiIcons.expand,
                             contentDescription = "展开或收起",
                             tint = scheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(M3eDimens.IconSmall),
                         )
                         Column(
                             modifier = Modifier
@@ -906,7 +906,7 @@ private fun M3eApiProfileForm(
                                 Icon(
                                     painter = ZhiIcons.check,
                                     contentDescription = "设为默认模型",
-                                    modifier = Modifier.size(16.dp),
+                                    modifier = Modifier.size(M3eDimens.IconSmall),
                                 )
                             }
                         }
@@ -927,7 +927,7 @@ private fun M3eApiProfileForm(
                                 painter = ZhiIcons.delete,
                                 contentDescription = "删除模型",
                                 tint = scheme.error,
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(M3eDimens.IconSmall),
                             )
                         }
                     }
@@ -1035,7 +1035,7 @@ private fun M3eApiProfileForm(
                                     painter = if (added) ZhiIcons.check else ZhiIcons.add,
                                     contentDescription = if (added) "已添加" else "添加到列表",
                                     tint = if (added) scheme.primary else scheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp),
+                                    modifier = Modifier.size(M3eDimens.IconSmall),
                                 )
                             }
                         }
@@ -1278,7 +1278,7 @@ private fun M3ePiModelCardEditor(
                                 Icon(
                                     painter = ZhiIcons.add,
                                     contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
+                                    modifier = Modifier.size(M3eDimens.IconSmall),
                                 )
                                 Text("添加推理档位", modifier = Modifier.padding(start = 6.dp))
                             }
@@ -1349,7 +1349,7 @@ private fun M3eThinkingLevelRow(
                 Icon(
                     painter = ZhiIcons.close,
                     contentDescription = "移除档位",
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(M3eDimens.IconSmall),
                 )
             }
         }
@@ -1432,7 +1432,7 @@ private fun M3eRequestHeadersEditor(
                     Icon(
                         painter = ZhiIcons.close,
                         contentDescription = "删除请求头",
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(M3eDimens.IconSmall),
                     )
                 }
             }

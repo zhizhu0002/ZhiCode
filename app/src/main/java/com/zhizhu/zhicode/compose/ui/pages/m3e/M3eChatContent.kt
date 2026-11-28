@@ -212,7 +212,7 @@ private fun M3eAgentStatusCard(
                         painter = ZhiIcons.skill,
                         contentDescription = null,
                         tint = scheme.primary,
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(M3eDimens.IconSmall),
                     )
                     Text(
                         text = "任务进度 $doneCount / $taskCount",

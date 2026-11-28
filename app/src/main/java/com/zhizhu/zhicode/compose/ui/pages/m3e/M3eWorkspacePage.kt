@@ -100,7 +100,7 @@ import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiOverlayHost
 import com.zhizhu.zhicode.compose.ui.brandSignatureMarquee
 import com.zhizhu.zhicode.compose.ui.iconForTab
-import com.zhizhu.zhicode.compose.ui.pages.miuix.FileSelectionToolbar
+
 import com.zhizhu.zhicode.compose.ui.pages.miuix.navBarHideOnVerticalDrag
 import com.zhizhu.zhicode.compose.ui.pages.miuix.overlays.ZhiDebugHud
 
@@ -252,7 +252,7 @@ internal fun M3eWorkspacePage(
                                                     Icon(
                                                         painter = iconForTab(tab),
                                                         contentDescription = null,
-                                                        modifier = Modifier.size(18.dp),
+                                                        modifier = Modifier.size(M3eDimens.IconSmall),
                                                     )
                                                 },
                                                 label = { Text(tab.label, maxLines = 1) },
@@ -273,11 +273,10 @@ internal fun M3eWorkspacePage(
                                     .background(scheme.surfaceContainer)
                                     .padding(bottom = navBarBottomInsetDp),
                             ) {
-                                FileSelectionToolbar(
+                                M3eFileSelectionToolbar(
                                     visible = true,
                                     entries = state.fileEntries,
                                     selection = state.fileSelection,
-                                    glass = glassMain,
                                     onAttach = viewModel::attachSelectedEntries,
                                     onRename = viewModel::renameSelectedEntry,
                                     onDelete = viewModel::deleteSelectedEntries,
@@ -301,7 +300,7 @@ internal fun M3eWorkspacePage(
                                             Icon(
                                                 painter = iconForTab(tab),
                                                 contentDescription = tab.label,
-                                                modifier = Modifier.size(22.dp),
+                                                modifier = Modifier.size(M3eDimens.IconDefault),
                                             )
                                         },
                                         label = { Text(tab.label) },
@@ -401,11 +400,10 @@ internal fun M3eWorkspacePage(
                             contentAlignment = Alignment.Center,
                         ) {
                             if (fileSelectionActive) {
-                                FileSelectionToolbar(
+                                M3eFileSelectionToolbar(
                                     visible = true,
                                     entries = state.fileEntries,
                                     selection = state.fileSelection,
-                                    glass = glassMain,
                                     onAttach = viewModel::attachSelectedEntries,
                                     onRename = viewModel::renameSelectedEntry,
                                     onDelete = viewModel::deleteSelectedEntries,

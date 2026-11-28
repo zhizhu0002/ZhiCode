@@ -317,7 +317,7 @@ private fun M3eSkillListBody(
                     .padding(horizontal = M3eDimens.RowPaddingH, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                LoadingIndicator(modifier = Modifier.size(20.dp))
+                LoadingIndicator(modifier = Modifier.size(M3eDimens.IconSmall))
                 Text(
                     text = "正在加载…",
                     style = MaterialTheme.typography.bodyMedium,
@@ -338,7 +338,7 @@ private fun M3eSkillListBody(
                         Icon(
                             painter = ZhiIcons.search,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(M3eDimens.IconSmall),
                         )
                     },
                     modifier = Modifier
@@ -457,7 +457,7 @@ private fun M3eSkillRowBody(
             painter = ZhiIcons.skill,
             contentDescription = null,
             tint = scheme.primary,
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(M3eDimens.IconSmall),
         )
         Column(
             modifier = Modifier
@@ -496,7 +496,7 @@ private fun M3eSkillRowBody(
                     Icon(
                         painter = ZhiIcons.more,
                         contentDescription = "更多操作",
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(M3eDimens.IconSmall),
                     )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -705,14 +705,14 @@ private fun M3eDirNodeRow(
                 painter = if (expanded) ZhiIcons.collapse else ZhiIcons.expand,
                 contentDescription = null,
                 tint = scheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(M3eDimens.IconSmall),
             )
             Icon(
                 painter = ZhiIcons.directory,
                 contentDescription = null,
                 tint = scheme.primary,
                 modifier = Modifier
-                    .size(18.dp)
+                    .size(M3eDimens.IconSmall)
                     .padding(start = 6.dp),
             )
             androidx.compose.foundation.layout.Spacer(Modifier.padding(start = 10.dp))
@@ -766,7 +766,7 @@ private fun M3eFileNodeRow(
             painter = ZhiIcons.file,
             contentDescription = null,
             tint = if (file.primary) scheme.primary else scheme.onSurfaceVariant,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(M3eDimens.IconSmall),
         )
         Column(
             modifier = Modifier
@@ -905,7 +905,7 @@ private fun M3eSkillUrlDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(top = 12.dp),
                     ) {
-                        LoadingIndicator(modifier = Modifier.size(16.dp))
+                        LoadingIndicator(modifier = Modifier.size(M3eDimens.IconSmall))
                         Text(
                             text = "正在下载…",
                             style = MaterialTheme.typography.bodyMedium,

@@ -449,7 +449,7 @@ private fun M3ePresetPaletteCard(
                                         painter = ZhiIcons.check,
                                         contentDescription = null,
                                         tint = Color.White,
-                                        modifier = Modifier.size(18.dp),
+                                        modifier = Modifier.size(M3eDimens.IconSmall),
                                     )
                                 }
                             }

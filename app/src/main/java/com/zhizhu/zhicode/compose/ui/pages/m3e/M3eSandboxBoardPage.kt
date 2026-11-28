@@ -329,7 +329,7 @@ internal fun M3eSandboxBoardPage(onExit: () -> Unit) {
                     Icon(
                         painter = ZhiIcons.add,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(M3eDimens.IconSmall),
                     )
                     Spacer(Modifier.width(8.dp))
                     Text("导入 APK")
@@ -672,7 +672,7 @@ private fun M3eSandboxAppCard(
                         Icon(
                             painter = ZhiIcons.more,
                             contentDescription = "更多操作",
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(M3eDimens.IconSmall),
                         )
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -710,7 +710,7 @@ private fun M3eSandboxAppCard(
                     Button(onClick = onLaunch, enabled = !busy) { Text("运行") }
                 }
                 if (busy) {
-                    LoadingIndicator(modifier = Modifier.size(20.dp))
+                    LoadingIndicator(modifier = Modifier.size(M3eDimens.IconSmall))
                 }
             }
 
@@ -735,7 +735,7 @@ private fun M3eSandboxAppCard(
                     modifier = Modifier.padding(top = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    LoadingIndicator(modifier = Modifier.size(14.dp))
+                    LoadingIndicator(modifier = Modifier.size(M3eDimens.IconSmall))
                     Text(
                         text = "正在截图…",
                         style = MaterialTheme.typography.labelSmall,

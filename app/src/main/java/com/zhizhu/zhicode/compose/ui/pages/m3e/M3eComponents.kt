@@ -173,8 +173,6 @@ internal object M3eDimens {
     /** 图标块边长（视觉尺寸）。 */
     val IconBadge = 40.dp
 
-    /** 图标块里的字形。 */
-    val IconGlyph = 20.dp
 
     /** 列表项上下留白。 */
     val RowSpaceV = 10.dp
@@ -196,6 +194,24 @@ internal object M3eDimens {
 
     /** 分段列表项按下时的圆角。 */
     val SegmentPressed = 16.dp
+
+    /**
+     * 图标尺寸档位，取自 `XSmall/Small/Medium/Large/XLargeIconButtonTokens.IconSize`。
+     *
+     * M3E 只有这五档（20 / 24 / 24 / 32 / 40），**没有 14、16、18**。
+     */
+    val IconSmall = 20.dp
+
+    val IconDefault = 24.dp
+
+    val IconLarge = 32.dp
+
+    val IconXLarge = 40.dp
+
+    /** 图标按钮的容器档位，取自 `*IconButtonTokens.ContainerHeight`。 */
+    val IconButtonXSmall = 32.dp
+
+    val IconButtonSmall = 40.dp
 }
 
 /** 分组小标题，与分段卡片的左边界对齐。 */
@@ -326,7 +342,7 @@ internal fun M3eIconBadge(
             Icon(
                 painter = painter,
                 contentDescription = null,
-                modifier = Modifier.size(M3eDimens.IconGlyph),
+                modifier = Modifier.size(M3eDimens.IconSmall),
             )
         }
     }
@@ -390,7 +406,7 @@ internal fun M3eNavigationRow(
                     painter = ZhiIcons.arrowRight,
                     contentDescription = null,
                     tint = scheme.onSurfaceVariant,
-                    modifier = Modifier.size(M3eDimens.IconGlyph),
+                    modifier = Modifier.size(M3eDimens.IconSmall),
                 )
             }
         }

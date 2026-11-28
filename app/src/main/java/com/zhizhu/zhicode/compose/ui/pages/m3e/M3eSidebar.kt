@@ -210,7 +210,7 @@ private fun M3eSidebar(
                             painter = ZhiIcons.tune,
                             contentDescription = "视图选项",
                             tint = scheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(M3eDimens.IconSmall),
                         )
                     }
                     DropdownMenu(
@@ -445,7 +445,7 @@ private fun M3eSidebar(
                                         painter = ZhiIcons.back,
                                         contentDescription = "上一级",
                                         tint = scheme.onSecondaryContainer,
-                                        modifier = Modifier.size(14.dp),
+                                        modifier = Modifier.size(M3eDimens.IconSmall),
                                     )
                                     Text("上一级", color = scheme.onSecondaryContainer, style = MaterialTheme.typography.labelSmall)
                                 }
@@ -518,7 +518,7 @@ private fun M3eSidebar(
                                             painter = ZhiIcons.directory,
                                             contentDescription = null,
                                             tint = scheme.primary,
-                                            modifier = Modifier.size(18.dp),
+                                            modifier = Modifier.size(M3eDimens.IconSmall),
                                         )
                                         Text(
                                             text = entry.name,
@@ -532,7 +532,7 @@ private fun M3eSidebar(
                                             painter = ZhiIcons.arrowRight,
                                             contentDescription = null,
                                             tint = scheme.onSurfaceVariant,
-                                            modifier = Modifier.size(16.dp),
+                                            modifier = Modifier.size(M3eDimens.IconSmall),
                                         )
                                     }
                                 }
@@ -606,9 +606,9 @@ private fun SidebarIconButton(
 @Composable
 private fun SidebarMenuCheck(checked: Boolean) {
     if (checked) {
-        Icon(painter = ZhiIcons.check, contentDescription = null, modifier = Modifier.size(18.dp))
+        Icon(painter = ZhiIcons.check, contentDescription = null, modifier = Modifier.size(M3eDimens.IconSmall))
     } else {
-        Spacer(Modifier.size(18.dp))
+        Spacer(Modifier.size(M3eDimens.IconSmall))
     }
 }
 
@@ -632,7 +632,7 @@ private fun SidebarSearchField(
                 painter = ZhiIcons.search,
                 contentDescription = null,
                 tint = scheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(M3eDimens.IconSmall),
             )
             Box(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
                 if (query.isEmpty()) {
@@ -648,12 +648,12 @@ private fun SidebarSearchField(
                 )
             }
             if (query.isNotEmpty()) {
-                IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(28.dp)) {
+                IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(M3eDimens.IconButtonXSmall)) {
                     Icon(
                         painter = ZhiIcons.close,
                         contentDescription = "清除搜索",
                         tint = scheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(M3eDimens.IconSmall),
                     )
                 }
             }
@@ -707,7 +707,7 @@ private fun WorkspaceHeaderRow(
                     painter = ZhiIcons.expand,
                     contentDescription = if (group.expanded) "收起" else "展开",
                     tint = scheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp).graphicsLayer { rotationZ = arrowRotation },
+                    modifier = Modifier.size(M3eDimens.IconSmall).graphicsLayer { rotationZ = arrowRotation },
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(

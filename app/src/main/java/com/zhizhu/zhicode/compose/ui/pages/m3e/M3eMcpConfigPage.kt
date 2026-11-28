@@ -238,7 +238,7 @@ private fun M3eServerList(
                     .padding(horizontal = M3eDimens.RowPaddingH, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                LoadingIndicator(modifier = Modifier.size(20.dp))
+                LoadingIndicator(modifier = Modifier.size(M3eDimens.IconSmall))
                 Text(
                     text = "正在加载…",
                     style = MaterialTheme.typography.bodyMedium,
@@ -284,7 +284,7 @@ private fun M3eServerList(
                         Icon(
                             painter = ZhiIcons.search,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(M3eDimens.IconSmall),
                         )
                     },
                     modifier = Modifier
@@ -388,26 +388,26 @@ private fun McpServerCard(
                 .padding(start = M3eDimens.RowPaddingH, end = 4.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.size(M3eDimens.IconSmall), contentAlignment = Alignment.Center) {
                 when {
-                    testing -> LoadingIndicator(modifier = Modifier.size(16.dp))
+                    testing -> LoadingIndicator(modifier = Modifier.size(M3eDimens.IconSmall))
                     status?.connected == true -> Icon(
                         painter = ZhiIcons.done,
                         contentDescription = "已连接",
                         tint = scheme.primary,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(M3eDimens.IconSmall),
                     )
                     status != null -> Icon(
                         painter = ZhiIcons.failed,
                         contentDescription = "连接失败",
                         tint = scheme.error,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(M3eDimens.IconSmall),
                     )
                     else -> Icon(
                         painter = ZhiIcons.sandbox,
                         contentDescription = "未测试",
                         tint = scheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(M3eDimens.IconSmall),
                     )
                 }
             }
@@ -455,7 +455,7 @@ private fun McpServerCard(
                     Icon(
                         painter = ZhiIcons.more,
                         contentDescription = "更多操作",
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(M3eDimens.IconSmall),
                     )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -711,7 +711,7 @@ private fun M3eToolsTab(
                     .padding(horizontal = M3eDimens.RowPaddingH, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                LoadingIndicator(modifier = Modifier.size(15.dp))
+                LoadingIndicator(modifier = Modifier.size(M3eDimens.IconSmall))
                 Text(
                     text = "正在连接服务器，读取工具清单…",
                     style = MaterialTheme.typography.bodyMedium,
@@ -833,7 +833,7 @@ private fun McpToolRow(
                     painter = if (expanded) ZhiIcons.collapse else ZhiIcons.expand,
                     contentDescription = null,
                     tint = scheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(M3eDimens.IconSmall),
                 )
                 Column(
                     modifier = Modifier
@@ -1087,7 +1087,7 @@ private fun McpKeyValueEditor(
                     Icon(
                         painter = ZhiIcons.close,
                         contentDescription = "删除这一条",
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(M3eDimens.IconSmall),
                     )
                 }
             }
