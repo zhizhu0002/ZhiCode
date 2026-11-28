@@ -16,10 +16,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 fun PaneHeader(
@@ -34,7 +34,7 @@ fun PaneHeader(
     /** 行尾的多个动作。 */
     actions: (@Composable RowScope.() -> Unit)? = null,
 ) {
-    val scheme = MiuixTheme.colorScheme
+    val scheme = MaterialTheme.colorScheme
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
             // 面板头不跟列表行走同一个 token：列表行是 52dp（Mochi iOS 26 基准）
@@ -49,15 +49,15 @@ fun PaneHeader(
             }
             Text(
                 text = title,
-                color = scheme.onBackground,
-                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                color = scheme.onSurface,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
             if (subtitle != null) {
                 Text(
                     text = subtitle,
-                    color = scheme.onSurfaceVariantSummary,
-                    fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                    color = scheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(start = ZhiSpace.s),
                 )
             }
