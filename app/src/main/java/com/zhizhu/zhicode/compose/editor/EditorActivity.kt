@@ -12,7 +12,7 @@ import com.zhizhu.zhicode.compose.data.ThemeSettings
 import com.zhizhu.zhicode.compose.data.ThemeStore
 import com.zhizhu.zhicode.compose.theme.ZhiAppTheme
 import com.zhizhu.zhicode.compose.theme.ZhiThemeMode
-import com.zhizhu.zhicode.compose.ui.pages.miuix.EditorPage
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
 
 class EditorActivity : ComponentActivity() {
 
@@ -46,7 +46,7 @@ class EditorActivity : ComponentActivity() {
         setContent {
             // 与主界面同一个主题栈（ZhiThemeMode 是深浅的唯一判定处）。
             ZhiAppTheme(theme = themeSettings) {
-                EditorPage(viewModel = viewModel, onExit = { finishWithResult() })
+                LocalZhiPageSet.current.Editor(viewModel = viewModel, onExit = { finishWithResult() })
             }
         }
     }

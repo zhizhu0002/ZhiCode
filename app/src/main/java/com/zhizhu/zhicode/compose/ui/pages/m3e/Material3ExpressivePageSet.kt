@@ -1,8 +1,14 @@
 package com.zhizhu.zhicode.compose.ui.pages.m3e
 
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.data.ThemeSettings
+import com.zhizhu.zhicode.compose.editor.EditorViewModel
 import com.zhizhu.zhicode.compose.model.ExtensionSummary
 import com.zhizhu.zhicode.compose.model.MemoryState
 import com.zhizhu.zhicode.compose.model.RoleCardsState
@@ -21,6 +27,16 @@ object Material3ExpressivePageSet : ZhiPageSet {
     override val id: String = "m3_expressive"
 
     override val name: String = "MD3 Expressive"
+
+    /** M3E 的卡片圆角取 `ShapeTokens.CornerExtraLarge`。 */
+    override val cardCorner: Dp = 28.dp
+
+    /** 内嵌块取 `CornerLarge`，与 28 − 16 内边距的同心值一致。 */
+    override val innerCorner: Dp = 16.dp
+
+    /** 卡片底色取 M3E 的容器角色，而不是麻薯组的定值。 */
+    @Composable
+    override fun cardSurface(): Color = MaterialTheme.colorScheme.surfaceContainer
 
     @Composable
     override fun Workspace(
@@ -222,8 +238,70 @@ object Material3ExpressivePageSet : ZhiPageSet {
     }
 
     @Composable
+    override fun WideTopBar(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        onOpenSidebar: () -> Unit,
+        onSettings: () -> Unit,
+        modifier: Modifier,
+    ) {
+        M3eWideTopBar(
+            state = state,
+            viewModel = viewModel,
+            onOpenSidebar = onOpenSidebar,
+            onSettings = onSettings,
+            modifier = modifier,
+        )
+    }
+
+    @Composable
     override fun Oobe(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
         M3eOobePage(state = state, viewModel = viewModel)
+    }
+
+    @Composable
+    override fun ChatContent(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        wide: Boolean,
+        modifier: Modifier,
+        glass: Glass,
+    ) {
+        M3eChatContent(
+            state = state,
+            viewModel = viewModel,
+            wide = wide,
+            modifier = modifier,
+            glass = glass,
+        )
+    }
+
+    @Composable
+    override fun FilesContent(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        modifier: Modifier,
+    ) {
+        M3eFilesContent(state = state, viewModel = viewModel, modifier = modifier)
+    }
+
+    @Composable
+    override fun TerminalContent(
+        state: WorkspaceUiState,
+        viewModel: WorkspaceViewModel,
+        modifier: Modifier,
+    ) {
+        M3eTerminalContent(state = state, viewModel = viewModel, modifier = modifier)
+    }
+
+    @Composable
+    override fun SandboxBoard(onExit: () -> Unit) {
+        M3eSandboxBoardPage(onExit = onExit)
+    }
+
+    @Composable
+    override fun Editor(viewModel: EditorViewModel, onExit: () -> Unit) {
+        M3eEditorPage(viewModel = viewModel, onExit = onExit)
     }
 
     @Composable

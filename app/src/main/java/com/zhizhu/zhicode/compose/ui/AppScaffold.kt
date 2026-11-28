@@ -1,6 +1,7 @@
 package com.zhizhu.zhicode.compose.ui
 
 import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
+import com.zhizhu.zhicode.compose.ui.pages.m3e.M3eNavTransition
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -247,7 +248,11 @@ private fun ZhiCodeScreen(
     NavDisplay(
         backStack = nav.backStack,
         modifier = Modifier.fillMaxSize(),
-        transition = NavTransitions.MiuixDefault,
+        transition = if (LocalZhiPageSet.current.id == "m3_expressive") {
+            M3eNavTransition.transition
+        } else {
+            NavTransitions.MiuixDefault
+        },
         effects = navEffects,
         onBack = {
             // 系统返回：按当前栈顶逐级回退，并同步关掉 VM 的对应状态。

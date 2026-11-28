@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
 import com.zhizhu.zhicode.pi.PiModelConfig
 import com.zhizhu.zhicode.compose.theme.ZhiRadius
 import com.zhizhu.zhicode.compose.model.Attachment
@@ -91,7 +92,7 @@ import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.Icon
+import androidx.compose.material3.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
@@ -532,7 +533,7 @@ private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
         // 横向排布所以是**定宽**。160dp 是"一行放两个半"的折中：
         // 文件名能显示 8~10 个汉字，再窄就只剩图标；超过就横滑（见调用点）。
         modifier = Modifier.width(AttachmentChipWidth),
-        cornerRadius = ZhiRadius.inner,
+        cornerRadius = LocalZhiPageSet.current.innerCorner,
         insideMargin = PaddingValues(start = 6.dp, end = 2.dp, top = 5.dp, bottom = 5.dp),
         colors = CardDefaults.defaultColors(
             color = scheme.surfaceContainerHigh,
@@ -543,7 +544,7 @@ private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
             Box(
                 modifier = Modifier
                     .size(30.dp)
-                    .clip(ZhiSquircle(ZhiRadius.inner))
+                    .clip(ZhiSquircle(LocalZhiPageSet.current.innerCorner))
                     .background(scheme.secondaryContainer),
                 contentAlignment = Alignment.Center,
             ) {

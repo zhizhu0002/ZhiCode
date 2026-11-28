@@ -17,6 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
 import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -75,7 +76,7 @@ import top.yukonga.miuix.kmp.anim.SinOutEasing
 import top.yukonga.miuix.kmp.basic.Badge
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
-import top.yukonga.miuix.kmp.basic.Icon
+import androidx.compose.material3.Icon
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
@@ -187,7 +188,7 @@ fun JumpToLatest(onJumpToLatest: () -> Unit) {
             onClick = onJumpToLatest,
             color = scheme.surfaceContainerHigh,
             contentColor = scheme.primary,
-            shape = ZhiSquircle(ZhiRadius.inner),
+            shape = ZhiSquircle(LocalZhiPageSet.current.innerCorner),
         ) {
             Text(
                 text = "回到最新",
@@ -267,12 +268,12 @@ fun AssistantCard(
     Card(
         onLongPress = onLongPress,
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 2.dp),
-        cornerRadius = ZhiRadius.card,
+        cornerRadius = LocalZhiPageSet.current.cardCorner,
         insideMargin = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
         // 助手正文使用极轻的容器底，保留阅读连续性，同时与用户气泡形成清晰层级。
         colors = CardDefaults.defaultColors(
             // 使用当前主题的独立容器层，不再把浅色 surface 以低 alpha 叠在背板上。
-            color = ZhiColors.cardSurface(),
+            color = LocalZhiPageSet.current.cardSurface(),
             contentColor = scheme.onSurface,
         ),
         pressFeedbackType = PressFeedbackType.None,
@@ -507,10 +508,10 @@ fun ToolBatch(
                     key(tool.id) {
                         Card(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
-                            cornerRadius = ZhiRadius.card,
+                            cornerRadius = LocalZhiPageSet.current.cardCorner,
                             insideMargin = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
                             colors = CardDefaults.defaultColors(
-                                color = ZhiColors.cardSurface(),
+                                color = LocalZhiPageSet.current.cardSurface(),
                                 contentColor = scheme.onSurface,
                             ),
                         ) {
@@ -585,10 +586,10 @@ private fun ToolGroupCard(
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
-        cornerRadius = ZhiRadius.card,
+        cornerRadius = LocalZhiPageSet.current.cardCorner,
         insideMargin = PaddingValues(horizontal = 6.dp, vertical = 5.dp),
         colors = CardDefaults.defaultColors(
-            color = ZhiColors.cardSurface(),
+            color = LocalZhiPageSet.current.cardSurface(),
             contentColor = scheme.onSurface,
         ),
     ) {
@@ -840,7 +841,7 @@ private fun ToolRow(
                         Card(
                             modifier = Modifier.padding(start = 23.dp, top = 5.dp),
                             // 反编译版这里用的是 `round(TERMINAL_BG, 10)` —— `ZhiRadius.inner` 正是 10dp
-                            cornerRadius = ZhiRadius.inner,
+                            cornerRadius = LocalZhiPageSet.current.innerCorner,
                             insideMargin = PaddingValues(vertical = 6.dp),
                             colors = CardDefaults.defaultColors(
                                 color = ZhiColors.terminalSurface(),
@@ -853,7 +854,7 @@ private fun ToolRow(
                     if (activity.output.isNotBlank()) {
                         Card(
                             modifier = Modifier.padding(start = 23.dp, top = 5.dp),
-                            cornerRadius = ZhiRadius.inner,
+                            cornerRadius = LocalZhiPageSet.current.innerCorner,
                             insideMargin = PaddingValues(8.dp),
                             colors = CardDefaults.defaultColors(
                                 color = ZhiColors.terminalSurface(),
@@ -891,7 +892,7 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
             if (live.isNotEmpty()) {
                 Card(
                     modifier = Modifier.padding(top = 3.dp, bottom = 3.dp),
-                    cornerRadius = ZhiRadius.inner,
+                    cornerRadius = LocalZhiPageSet.current.innerCorner,
                     insideMargin = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                     colors = CardDefaults.defaultColors(
                         color = ZhiColors.terminalSurface(),
@@ -915,7 +916,7 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
     Card(
         // margins(23, 4, 0, 4)
         modifier = Modifier.padding(start = 23.dp, top = 4.dp, bottom = 4.dp),
-        cornerRadius = ZhiRadius.inner,
+        cornerRadius = LocalZhiPageSet.current.innerCorner,
         // padding(10, 7, 10, 8)
         insideMargin = PaddingValues(start = 10.dp, top = 7.dp, end = 10.dp, bottom = 8.dp),
         colors = CardDefaults.defaultColors(

@@ -6813,6 +6813,9 @@ class WorkspaceViewModel(
                 current.copy(
                     fileClipboard = if (snapshot.fileClipboardMove) remainingMovePaths else current.fileClipboard,
                     fileClipboardMove = if (snapshot.fileClipboardMove && remainingMovePaths.isEmpty()) false else current.fileClipboardMove,
+                    // 粘贴完退出选择态：否则点条目仍是"切换选中"，看起来像进不去文件夹。
+                    fileSelection = emptySet(),
+                    fileSelectionMode = false,
                     message = if (allSucceeded) {
                         if (snapshot.fileClipboardMove) "已移动 $completed 项" else "已复制 $completed 项"
                     } else "已完成 $completed 项，${failures.size} 项失败：${failures.joinToString("；")}",

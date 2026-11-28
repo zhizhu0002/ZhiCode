@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.zhizhu.zhicode.TermuxTerminalPane
 import com.zhizhu.zhicode.compose.theme.ZhiColors
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
@@ -82,7 +83,7 @@ private fun chrome(): Chrome {
     val scheme = MiuixTheme.colorScheme
     return Chrome(
         bar = scheme.surface,
-        keyBg = ZhiColors.cardSurface(),
+        keyBg = LocalZhiPageSet.current.cardSurface(),
         drawer = ZhiColors.panelSurface(),
         divider = scheme.dividerLine,
         selected = ZhiColors.cardInnerSurface(),

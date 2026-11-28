@@ -142,7 +142,7 @@ internal fun M3eChoiceOverlay(
                             if (picker.multiSelect) Checkbox(checked, onCheckedChange = null) else RadioButton(checked, onClick = null)
                             Column(Modifier.weight(1f).padding(start = 8.dp)) {
                                 Text(option.label)
-                                if (option.detail.isNotBlank()) Text(option.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (option.detail.isNotBlank()) Text(option.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -223,7 +223,7 @@ internal fun M3eEnvironmentOverlay(
                         RadioButton(selected == mirror, onClick = null)
                         Column(Modifier.padding(start = 8.dp)) {
                             Text(mirror.displayName)
-                            Text(mirror.summary, style = MaterialTheme.typography.bodySmall)
+                            Text(mirror.summary, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }

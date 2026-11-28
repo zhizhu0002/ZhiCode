@@ -80,7 +80,6 @@ import com.zhizhu.zhicode.compose.state.WorkspaceViewModel
 import com.zhizhu.zhicode.compose.theme.ZhiColors
 import com.zhizhu.zhicode.compose.ui.SidebarState
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
-import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.settings.rememberLastNonNull
 import java.io.File
 import androidx.compose.ui.unit.Dp
@@ -190,7 +189,7 @@ private fun M3eSidebar(
             ) {
                 Text(
                     text = "工作区",
-                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp),
+                    style = MaterialTheme.typography.bodyLarge,
                     color = scheme.onSurfaceVariant,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f),
@@ -211,7 +210,7 @@ private fun M3eSidebar(
                             painter = ZhiIcons.tune,
                             contentDescription = "视图选项",
                             tint = scheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(M3eDimens.IconSmall),
                         )
                     }
                     DropdownMenu(
@@ -446,7 +445,7 @@ private fun M3eSidebar(
                                         painter = ZhiIcons.back,
                                         contentDescription = "上一级",
                                         tint = scheme.onSecondaryContainer,
-                                        modifier = Modifier.size(14.dp),
+                                        modifier = Modifier.size(M3eDimens.IconSmall),
                                     )
                                     Text("上一级", color = scheme.onSecondaryContainer, style = MaterialTheme.typography.labelSmall)
                                 }
@@ -519,12 +518,12 @@ private fun M3eSidebar(
                                             painter = ZhiIcons.directory,
                                             contentDescription = null,
                                             tint = scheme.primary,
-                                            modifier = Modifier.size(18.dp),
+                                            modifier = Modifier.size(M3eDimens.IconSmall),
                                         )
                                         Text(
                                             text = entry.name,
                                             color = scheme.onSurface,
-                                            style = MaterialTheme.typography.bodySmall,
+                                            style = MaterialTheme.typography.bodyMedium,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                             modifier = Modifier.weight(1f),
@@ -533,7 +532,7 @@ private fun M3eSidebar(
                                             painter = ZhiIcons.arrowRight,
                                             contentDescription = null,
                                             tint = scheme.onSurfaceVariant,
-                                            modifier = Modifier.size(16.dp),
+                                            modifier = Modifier.size(M3eDimens.IconSmall),
                                         )
                                     }
                                 }
@@ -607,9 +606,9 @@ private fun SidebarIconButton(
 @Composable
 private fun SidebarMenuCheck(checked: Boolean) {
     if (checked) {
-        Icon(painter = ZhiIcons.check, contentDescription = null, modifier = Modifier.size(18.dp))
+        Icon(painter = ZhiIcons.check, contentDescription = null, modifier = Modifier.size(M3eDimens.IconSmall))
     } else {
-        Spacer(Modifier.size(18.dp))
+        Spacer(Modifier.size(M3eDimens.IconSmall))
     }
 }
 
@@ -621,7 +620,7 @@ private fun SidebarSearchField(
 ) {
     val scheme = MaterialTheme.colorScheme
     Surface(
-        modifier = modifier.heightIn(min = 44.dp),
+        modifier = modifier.heightIn(min = M3eDimens.ControlHeight),
         shape = RoundedCornerShape(12.dp),
         color = scheme.surfaceContainer,
     ) {
@@ -633,7 +632,7 @@ private fun SidebarSearchField(
                 painter = ZhiIcons.search,
                 contentDescription = null,
                 tint = scheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(M3eDimens.IconSmall),
             )
             Box(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
                 if (query.isEmpty()) {
@@ -649,12 +648,12 @@ private fun SidebarSearchField(
                 )
             }
             if (query.isNotEmpty()) {
-                IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(28.dp)) {
+                IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(M3eDimens.IconButtonXSmall)) {
                     Icon(
                         painter = ZhiIcons.close,
                         contentDescription = "清除搜索",
                         tint = scheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(M3eDimens.IconSmall),
                     )
                 }
             }
@@ -679,7 +678,7 @@ private fun WorkspaceHeaderRow(
     val scheme = MaterialTheme.colorScheme
     val titleColor by animateColorAsState(
         targetValue = if (group.containsActive) scheme.primary else scheme.onSurfaceVariant,
-        animationSpec = ZhiSidebarMotion,
+        animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
         label = "workspaceHeaderColor",
     )
     val arrowRotation by animateFloatAsState(
@@ -708,7 +707,7 @@ private fun WorkspaceHeaderRow(
                     painter = ZhiIcons.expand,
                     contentDescription = if (group.expanded) "收起" else "展开",
                     tint = scheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp).graphicsLayer { rotationZ = arrowRotation },
+                    modifier = Modifier.size(M3eDimens.IconSmall).graphicsLayer { rotationZ = arrowRotation },
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
@@ -717,14 +716,14 @@ private fun WorkspaceHeaderRow(
                         withStyle(
                             SpanStyle(
                                 color = scheme.onSurfaceVariant.copy(alpha = 0.78f),
-                                fontSize = 11.sp,
+
                                 fontWeight = FontWeight.Normal,
                             ),
                         ) {
                             append(" (${group.path})")
                         }
                     },
-                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp),
+                    style = MaterialTheme.typography.bodyLarge,
                     color = titleColor,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -824,7 +823,7 @@ private fun SidebarRow(
         }
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp),
+            style = MaterialTheme.typography.bodyLarge,
             color = foreground,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -847,7 +846,7 @@ private fun SessionRow(
     val scheme = MaterialTheme.colorScheme
     val background by animateColorAsState(
         targetValue = if (active) scheme.secondaryContainer.copy(alpha = 0.78f) else Color.Transparent,
-        animationSpec = ZhiSidebarMotion,
+        animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
         label = "sessionRowBackground",
     )
     val titleColor = when {
@@ -882,7 +881,7 @@ private fun SessionRow(
                 }
                 Text(
                     text = session.title,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp),
+                    style = MaterialTheme.typography.bodyLarge,
                     color = titleColor,
                     fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
                     maxLines = 1,
@@ -931,9 +930,8 @@ private fun SessionActionMenu(
 
 private val SidebarInset = 12.dp
 private val SidebarRowInsideMargin = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 4.dp)
-private val SidebarRowMinHeight = 44.dp
-private val SessionRowMinHeight = 40.dp
+private val SidebarRowMinHeight = M3eDimens.RowSingle
+private val SessionRowMinHeight = M3eDimens.RowSingle
 private val SidebarRowIconSize = 20.dp
 private val SidebarRowCorner = 12.dp
 private val SessionRowSpacing = 2.dp
-private val ZhiSidebarMotion = ZhiMotion.colorSpec
