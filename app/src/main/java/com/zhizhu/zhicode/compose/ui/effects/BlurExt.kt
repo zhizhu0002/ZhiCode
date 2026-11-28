@@ -20,26 +20,6 @@ import top.yukonga.miuix.kmp.shader.isRenderEffectSupported
 import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 整页顶栏的模糊背板（移植自 Miuix 官方 example 的 `rememberBlurBackdrop`）。
- *
- * ## 与 `Glass` 的关系
- *
- * `ui/Glass.kt` 里的 `rememberGlass()` 是**悬浮层**用的（输入器、底部栏），
- * 它自己持有一份 backdrop 并成对提供 `capture` / `blur`。这里是**整页**用：
- * 背景由 `BgEffectBackground` 绘制，顶栏只需要在它之上取样，所以返回一个裸
- * `LayerBackdrop?`，调用方自己决定挂在哪一层。
- *
- * ## 两道门控
- *
- * - `isRenderEffectSupported()`：`layerBackdrop` 捕获背景内容走的是 RenderEffect；
- * - `isRuntimeShaderSupported()`：`textureBlur` 本身是 RuntimeShader（Android 需 API 33+）。
- *
- * 缺一不可：只判后者、在不支持 RenderEffect 的平台上仍会去建 layer。
- *
- * 关掉模糊（「主题设置 → 显示 → 模糊」）时返回 null，调用方据此走不透明底色分支 ——
- * 这条路径同时也避免了在 API < 33 上执行到 RuntimeShader 代码而崩。
- */
 @Composable
 fun rememberPageBlurBackdrop(): LayerBackdrop? {
     val enabled = LocalThemeSettings.current.blurEnabled
@@ -52,12 +32,7 @@ fun rememberPageBlurBackdrop(): LayerBackdrop? {
     }
 }
 
-/**
- * 顶栏的模糊壳（移植自 example 的 `BlurredBar`）。
- *
- * [blurActive] 为假或没有 backdrop 时是恒等包装 —— 滚动到顶部、背景还没被内容盖住时
- * 不做无意义的采样。
- */
+/** 顶栏的模糊壳（移植自 example 的 `BlurredBar`）。 */
 @Composable
 fun PageBlurBar(
     backdrop: LayerBackdrop?,
@@ -88,21 +63,6 @@ fun PageBlurBar(
     }
 }
 
-/**
- * 让内容变成"模糊渐变的遮罩"（`contentBlendMode = DstIn`）。
- *
- * 效果的实质：把背板采样、模糊后，再用**内容自身的 alpha** 当遮罩画出来。
- * 所以文字的颜色不重要，字形才是形状。
- *
- * ## [brightness] / [saturation] 为什么要能调
- *
- * 采样源就是字的颜色 —— 背板偏暗时，字形会跟着变暗到几乎看不见
- * （实测：深蓝渐变上的深蓝字）。KSU Style 的做法是在混合时把采到的像素提亮，
- * 于是字形比底色亮、能读。经验值：整页深色渐变配 `brightness ≈ 0.35f`。
- *
- * [backdrop] 为 null 时是**恒等**修饰符 —— 关掉模糊、或 API < 33 时调用方
- * 不需要写分支，文字照常以正常颜色显示。
- */
 @Composable
 fun Modifier.foregroundBlur(
     backdrop: LayerBackdrop?,

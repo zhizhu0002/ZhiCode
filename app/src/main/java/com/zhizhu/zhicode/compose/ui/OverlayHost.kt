@@ -20,18 +20,7 @@ import com.zhizhu.zhicode.compose.ui.pages.m3e.M3ePlanApprovalOverlay
 import com.zhizhu.zhicode.compose.ui.pages.m3e.M3eOverlayHost
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 
-/**
- * 弹窗挂载宿主：从 `ZhiCodeScreen` 原地拆出，内容逐字未改。
- *
- * ---- Overlay 系列：必须位于 Scaffold 内容里才能找到 popupHost ----
- * 弹窗打开时，先铺一层「模糊背景」：
- * Miuix 的 blur 只能在**同一个窗口**内采样背景（LayerBackdrop 录的是本窗口
- * 的 GraphicsLayer），所以没法在弹窗自己的窗口里做模糊 —— 改成在主窗口里
- * 把整个工作区糊掉，弹窗再画在它上面。视觉效果与 MIUI 的模态背景一致。
- * 长按动作菜单由**被长按的那一项**自己渲染（贴它弹出），不是居中对话框。
- * 所以它既不该进 modalOpen（那会给整个工作区再加一层背景模糊，而弹层
- * 自己已经带窗口变暗），也不该再走 ChoicePickerOverlay。
- */
+/** 弹窗挂载宿主：从 `ZhiCodeScreen` 原地拆出，内容逐字未改。 */
 @Composable
 internal fun ZhiOverlayHost(
     state: WorkspaceUiState,

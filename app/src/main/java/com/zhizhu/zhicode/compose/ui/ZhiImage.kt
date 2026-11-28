@@ -53,39 +53,8 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 图片解码与显示。
- *
- * ## 为什么是 BitmapFactory 而不是图片加载库
- *
- * 工程没有 coil / glide 依赖，而构建走 `--offline`（不能临时拉新依赖），
- * 所以这里用平台自带的 `BitmapFactory`。对我们面对的场景——**用户自己刚发过的
- * 那几张图，字节已经在内存/会话文件里**——加载库的核心价值（网络、磁盘缓存、
- * 生命周期取消）都用不上，真正需要的是「别 OOM」。
- *
- * ## 三个必须自己处理的点
- *
- * 1. **降采样**：一张 4000×3000 的手机截图按原尺寸解码是 48 MB 的 ARGB_8888，
- *    而缩略图只要 200dp。`inSampleSize` 必须在解码**前**算好，所以先用
- *    `inJustDecodeBounds` 量一遍尺寸（这一步不分配像素）。
- * 2. **缓存**：`LazyColumn` 里滚出屏幕的项会被回收，`remember` 随之丢失；
- *    没有跨项缓存的话每次滚回来都要重解码（base64 → 字节 → 位图）。
- * 3. **失败要看得见**：解码失败时**回退成文件名**，而不是留一块空白 ——
- *    空白无法与"还在解码"区分，用户只会以为又坏了。
- */
 
-/**
- * 目标边长与降采样倍数。
- *
- * 抽成**纯 Int 函数**是因为这是整条链路唯一真正会算错的地方，而它算错的两种后果
- * （倍数太小 → OOM；太大 → 图糊成马赛克）都只能靠肉眼发现。纯函数可以用单测钉死。
- *
- * 规则（与 Android 官方 `BitmapFactory` 文档的"高效加载大图"一致）：
- * 取**不超过目标的 2 的幂**。不用"四舍五入到最近的 2 的幂"，因为向下取整才是
- * 安全方向——宁可多留一点像素，也不能让解码结果比目标还小。
- *
- * @return 至少为 1；尺寸未知（<= 0）或目标为 0 时也返回 1
- */
+/** 目标边长与降采样倍数。 */
 internal fun sampleSizeFor(sourceWidth: Int, sourceHeight: Int, targetWidth: Int, targetHeight: Int): Int {
     if (sourceWidth <= 0 || sourceHeight <= 0) return 1
     if (targetWidth <= 0 || targetHeight <= 0) return 1
@@ -97,17 +66,6 @@ internal fun sampleSizeFor(sourceWidth: Int, sourceHeight: Int, targetWidth: Int
     return sample
 }
 
-/**
- * 一次解码的产物：位图 + **原图尺寸**。
- *
- * <p>为什么要连原图尺寸一起带出来：缩略图要"同高不等宽"（见 [ZhiImageThumb]），
- * 而宽度必须由**原图长宽比**算出来 —— 只看解码后的位图是做不到的，因为
- * 降采样后的位图在还没解出来时不存在，而且它自己的尺寸是"降到多少就是多少"。
- * 长宽比只有 `inJustDecodeBounds` 那一遍能拿到。
- *
- * <p>尺寸在**头解析成功**时就有值，即使随后真正解码失败（例如内存不够）也拿得到 ——
- * 所以占位框从一开始就能按正确比例留好，不会等图出来再"跳"一下宽度。
- */
 private class Decoded(val bitmap: ImageBitmap?, val sourceWidth: Int, val sourceHeight: Int) {
     /** 长宽比；尺寸未知时为 null。 */
     val aspect: Float?
@@ -135,24 +93,6 @@ private fun decode(base64: String, reqWidth: Int, reqHeight: Int): Decoded {
     return Decoded(bitmap?.asImageBitmap(), bounds.outWidth, bounds.outHeight)
 }
 
-/**
- * 跨重组、跨列表项的图片缓存。
- *
- * 用**字节数**做上限而不是条数：一张缩略图可能 20 KB，也可能 2 MB，
- * 按条数限制在两种极端的图上都会做出错误决定。
- *
- * <h3>容量为什么按堆算，而不是写死 8MB</h3>
- * 原先写死 `8 * 1024 * 1024`，而记账用的是 4 字节/像素。真机日志给出的实际尺寸是
- * **540×1200**（一张竖屏截图经 `sampleSizeFor(1080,2400,520,280)` 降采样后的结果）——
- * 一项就是 `540*1200*4 = 2.47MB`，**8MB 只装得下 3.24 项**。
- *
- * 于是滚动时：第 4 张图进来就把第 1 张挤出去，滚回去又要重新解码一次
- * （`Base64.decode` 约 1.4MB + 位图 1.24MB 的瞬时分配）。日志里
- * 「18 秒 24 次 GC、分配速率约 33MB/s」的抖动，这条路径贡献了一份。
- *
- * 现在按可用堆定容：`largeHeap` 之后上限是 512MB，取 1/12 约 42MB，
- * 足以留住十几张缩略图；同时封顶 48MB，免得在超大堆设备上无限膨胀。
- */
 private val imageCache = object : LruCache<String, Decoded>(imageCacheBudgetBytes()) {
     override fun sizeOf(key: String, value: Decoded): Int {
         // 没有位图的条目（解码失败 / 只量到尺寸）没有真实内存占用，
@@ -178,51 +118,26 @@ private fun imageCacheBudgetBytes(): Int {
 private fun cacheKey(data: String, reqWidth: Int, reqHeight: Int): String =
     "${data.hashCode()}:${data.length}:${reqWidth}x$reqHeight"
 
-/**
- * 缓存键：**按图的位置**，而不是按它的字节。
- *
- * 历史图片的内存里没有字节（见 [ChatImage.origin]），所以哈希一个不存在的字符串
- * 是没意义的；位置本身就是全局唯一的，而且比 base64 短得多。
- *
- * 尺寸仍然进 key：同一张图在缩略图和放大查看里是两个不同的位图。
- */
+/** 缓存键：**按图的位置**，而不是按它的字节。 */
 private fun cacheKeyFor(image: ChatImage, reqWidth: Int, reqHeight: Int): String {
     val origin = image.origin
     return if (origin == null) cacheKey(image.data, reqWidth, reqHeight)
     else "img:${origin.sessionId}:${origin.messageSeq}:${origin.ordinal}:${reqWidth}x$reqHeight"
 }
 
-/**
- * 拿到这张图真正要解码的字节。
- *
- * 历史图片的 base64 留在库里，只在真要画这一张时取一次 —— 这一步会读文件并解码，
- * 所以由调用方放在 `Dispatchers.Default` 上跑。缓存命中、滚动经过都不走这里。
- */
+/** 拿到这张图真正要解码的字节。 */
 private suspend fun resolveImageData(image: ChatImage): String {
     if (image.data.isNotEmpty()) return image.data
     val origin = image.origin ?: return ""
     return withContext(Dispatchers.Default) { SessionReader.imageData(origin) }
 }
 
-/**
- * 解码一张图（带缓存与降采样）。
- *
- * @param reqWidth 期望宽（px）；给 0 表示按原尺寸解码
- * @return null 表示解码失败或还在解 —— 调用方要能区分这两者时用 [rememberDecodeState]
- */
+/** 解码一张图（带缓存与降采样）。 */
 @Composable
 internal fun rememberDecodedImage(image: ChatImage, reqWidth: Int, reqHeight: Int): ImageBitmap? =
     rememberDecodeState(image, reqWidth, reqHeight).bitmap
 
-/**
- * 解码状态。
- *
- * 之所以要把"失败"与"还在解"分开：两者都表现为没有位图，但**该显示的东西不同**
- * —— 还在解时留一块占位，失败时显示文件名。只看 `ImageBitmap?` 是分不出来的。
- *
- * [sourceWidth] / [sourceHeight] 是**原图**尺寸（不是解码结果），
- * 供缩略图按长宽比定宽用；还量不到时为 0。
- */
+/** 解码状态。 */
 internal class DecodeState(
     val bitmap: ImageBitmap?,
     val failed: Boolean,
@@ -261,20 +176,7 @@ internal fun rememberDecodeState(image: ChatImage, reqWidth: Int, reqHeight: Int
 
 // ------------------------------------------------------------------ 组件
 
-/**
- * 由统一高度和原图长宽比算出这一张的宽度。
- *
- * 抽成纯函数有两个理由：
- *
- * 1. **`coerceIn` 在 min > max 时会抛 IllegalArgumentException**。调用点有两个
- *    （气泡行、待发方框），待发那个把上下限都钉在 56dp，气泡那个是 72..260 ——
- *    一旦有人改错顺序就是"打开对话直接崩"。这里先把上下限排好，把崩溃面消掉。
- * 2. 夹取是这段代码里唯一能算错的部分（算错的表现是全景图占满整屏、或长截图细成
- *    一条线），而这两种都只能靠肉眼发现，正适合用单测钉死。
- *
- * @param aspect 原图 宽/高；未知（null 或非正）时返回一个正方形占位宽度
- * @return 已夹进 `[min(minWidth,maxWidth), max(minWidth,maxWidth)]` 的宽度
- */
+/** 由统一高度和原图长宽比算出这一张的宽度。 */
 internal fun thumbWidthFor(height: Float, aspect: Float?, minWidth: Float, maxWidth: Float): Float {
     if (aspect == null || aspect <= 0f || !aspect.isFinite()) return height
     val low = minOf(minWidth, maxWidth)
@@ -282,33 +184,6 @@ internal fun thumbWidthFor(height: Float, aspect: Float?, minWidth: Float, maxWi
     return (height * aspect).coerceIn(low, high)
 }
 
-/**
- * 缩略图：**同高、宽度随长宽比**。
- *
- * ## 为什么要固定高度
- *
- * 早先这里是「框一个上限，图按自己的比例缩进去」，结果一排缩略图宽度高度全不一样，
- * 看着参差不齐 —— 用户的原话是"不能同高吗，写的好丑"。照片墙的常规做法就是
- * **统一高度、宽度按比例**，一行读起来才像一条带子。
- *
- * 宽度由 `原图长宽比 × 高度` 算出（见 [thumbWidthFor]），再夹进
- * [minWidth]..[maxWidth]：极宽的图（全景）会被夹住，否则一张图就占满整屏；
- * 极窄的图（长截图）也要夹住，否则会细成一条线看不出内容。
- *
- * ## 被夹住时用 Crop
- *
- * 比例算出的宽度**没被夹**时，框的长宽比与原图完全一致，`Crop` 与 `Fit` 结果相同
- * （都不裁）。被夹住时才真的裁 —— 此时宁可裁掉一点也要保证**视觉高度一致**：
- * 一排放下来高度参差正是要修的问题。极端长宽比（全景/长截图）裁中间，
- * 也仍然认得出是哪张图。
- *
- * > 这里与"缩略图一律不裁剪"的早期决定**相反**，是有意的：那条决定服务于
- * > "确认这张图是不是我发的那张"，而用户明确要求同一行同高 —— 同高与不裁剪
- * > 在极端长宽比下不可兼得，取同高。
- *
- * @param height 统一的缩略图高度（同一行里所有图共用）
- * @param maxWidth / @param minWidth 宽度夹取范围
- */
 @Composable
 internal fun ZhiImageThumb(
     image: ChatImage,
@@ -381,16 +256,7 @@ private fun FallbackLabel(name: String, failed: Boolean, maxWidth: Dp, modifier:
 
 // ------------------------------------------------------------------ 输入器里的附件缩略图
 
-/**
- * 输入器里的待发图片：缩略图 + 右上角圆形删除键。
- *
- * 参考图里就是这个形态（图片本身就是那个"芯片"，X 叠在右上角），
- * 而工程原来的 `AttachmentChip` 是「图标 + 文件名」，图片和文件长得一样 ——
- * 选了三四张截图之后，根本认不出哪张是哪张，只能靠文件名猜。
- *
- * 尺寸固定成小方块：删除键要压在图片**上面**，图片自适应大小的话，
- * X 的位置会随图变形，看起来像没对齐。
- */
+/** 输入器里的待发图片：缩略图 + 右上角圆形删除键。 */
 @Composable
 internal fun ZhiPendingImageChip(
     image: ChatImage,
@@ -429,24 +295,7 @@ private val PendingImageSize = 56.dp
 
 // ------------------------------------------------------------------ 放大查看
 
-/**
- * 点缩略图后的放大查看。
- *
- * <p>形态照搬原版 `showFullImage()`：**全屏黑底 + `FIT_CENTER` + 右上角 ×**。
- * 之前是一个 `maxWidth = 320dp` 的普通弹窗，问题有两个：
- *
- * <p>1. `Image(fillMaxWidth) + ContentScale.Fit` 只约束了宽，**高没有约束** ——
- *    而手机上的 Miuix 弹窗对内容高是不设上限的（`heightIn(max)` 只在
- *    `isLargeScreen` 分支生效，核过 0.9.4 的 `DialogContentLayout`）。
- *    于是竖屏截图按比例撑到六七百 dp 高，直接越过屏幕，"显示过大"。
- * <p>2. 弹窗自带圆角、内边距与 `squircleSurface` 底，一张截图被包在一张
- *    小卡片里，四周留着一圈弹窗底色 —— 就是"预览做得很奇怪"。
- *
- * <p>仍然走 [OverlayDialog]（工程约定：模态一律 Miuix overlay），但把
- * 外边距 / 内边距 / 圆角全部清零、背景给纯黑，让弹窗本身退成一个全屏层；
- * 图片按 `ContentScale.Fit` 塞满整屏 —— 与原版 `FrameLayout(-1,-1) + FIT_CENTER`
- * 的观感一致。点按任意处或按返回都关闭。
- */
+/** 点缩略图后的放大查看。 */
 @Composable
 internal fun ZhiImageViewer(image: ChatImage?, onDismiss: () -> Unit) {
     // 退场时 `image` 已经是 null，内容不能跟着空掉（见 rememberLastNonNull）。
@@ -514,30 +363,11 @@ internal fun ZhiImageViewer(image: ChatImage?, onDismiss: () -> Unit) {
 /** 全屏查看层的尺寸上限（够大，实际都会被屏幕夹住）。 */
 private val ViewerMaxDimension = 4096.dp
 
-/**
- * 全屏查看层的边距/内边距清零。不写 `DpSize(0.dp, 0.dp)` 字面量是刻意的：
- * 弹窗外边距统一走 DialogWideOutsideMargin 是工程约定（LayoutConsistencyTest
- * 守着），而这里本来就不是"弹窗边距"——是全屏层的 0，单独起名两不误。
- */
+/** 全屏查看层的边距/内边距清零。 */
 private val ViewerZeroInsets = DpSize(0.dp, 0.dp)
 
 // ------------------------------------------------------------------ 气泡里的图片行
 
-/**
- * 气泡里的一行图片缩略图：**横向可滑动**。
- *
- * ## 为什么是可滑动而不是"最多 N 张 + K"
- *
- * 这里原先写的是 `take(4)` 加一个「+K」角标。它的问题不是不好看，而是**看不全**：
- * 第 5 张起只能看到"还有 3 张"，想确认自己到底发了哪几张就得退出应用去看相册。
- * 用户发的往往就是一串对比截图，恰恰需要左右翻着比对。
- *
- * ## 横向滚动会不会抢走"滚对话"的手势
- *
- * 不会，这是两个轴：Compose 的 `horizontalScroll` 只消费横向拖拽，竖向拖拽会穿透到
- * 外层的 `LazyColumn`。所以当初"怕和对话滚动打架"那个顾虑是不成立的 ——
- * 唯一要守的是别在**同一轴**上再套一层滚动。
- */
 @Composable
 internal fun ZhiImageRow(images: List<ChatImage>, onOpen: (ChatImage) -> Unit, modifier: Modifier = Modifier) {
     if (images.isEmpty()) return
@@ -559,25 +389,6 @@ internal fun ZhiImageRow(images: List<ChatImage>, onOpen: (ChatImage) -> Unit, m
     }
 }
 
-/**
- * 气泡里的**文件**附件卡：图标 + 文件名 + 体积。
- *
- * ## 与图片是两种东西，刻意不共用一条
- *
- * 图片靠**画面**辨认（缩略图的内容本身就是信息），文件只能靠**名字 + 体积**辨认。
- * 早先两者挤在同一条横向滚动条里、长相几乎一样，于是：
- * - 靠屏幕右侧那张卡片被裁掉一半（第二张「控制布…」只露出半个字）；
- * - 选了三四张之后认不出哪张是哪张。
- *
- * 现在文件走这一张张**独立卡片**，并且这一行**允许换行**（见 [ZhiAttachmentRow]），
- * 不再有"横向滚出去被裁掉"这回事。
- *
- * ## 为什么显示体积
- *
- * 体积以前只出现在底部提示条那句「已附加：xxx（125KB）」里，消息一发出去就没了 ——
- * 回头翻历史时只剩一个文件名，看不出当初发的是哪个版本（同名文件很常见）。
- * 现在它跟着附件卡一起进对话流（`ChatAttachment.detail`）。
- */
 @Composable
 internal fun ZhiAttachmentCard(
     attachment: ChatAttachment,
@@ -631,22 +442,6 @@ internal fun ZhiAttachmentCard(
     }
 }
 
-/**
- * 气泡里的附件区：**先文件、后图片**，各占自己的行。
- *
- * ## 为什么要分开两行、且文件行不滚动
- *
- * 用户报的两个问题都出在"两者混在一条横向滚动条里"：
- * 1. 文件卡被右边缘裁掉（截图里第二张只露出半个）；
- * 2. 图片和文件长得太像，认不出哪个是哪个。
- *
- * 所以：文件行**不滚动**，靠 `padding` 让它们自然收进气泡宽度内；
- * 图片行保留横向滚动（图片同一行同高、横向铺开本来就是对的）。
- *
- * 顺序是文件在前、图片在后：图片是这一条的**主体**（点开就能看），
- * 文件是附属说明，放下面不抢视线 —— 而"图在上、文字在下"与 [UserBubble] 里
- * 正文在图片之下的排法一致。
- */
 @Composable
 internal fun ZhiAttachmentRow(
     attachments: List<ChatAttachment>,
@@ -678,26 +473,11 @@ internal fun ZhiAttachmentRow(
     }
 }
 
-/**
- * 气泡里缩略图的**统一高度**。
- *
- * 140dp 是为了**长截图**：再高的话一张竖屏长图就把整条对话顶出屏幕。
- * 同一行里所有图共用这个高度，宽度按各自长宽比算 —— 这才是一条整齐的图片带。
- */
+/** 气泡里缩略图的**统一高度**。 */
 private val BubbleImageHeight = 140.dp
 
-/**
- * 单张缩略图的宽度上限。
- *
- * 全景图按比例算出来可能有四五百 dp，一张就占满整屏、后面的图全被推到屏幕外，
- * 横向滑动就失去意义了。夹到 260dp 之后一行至少能看到一张半。
- */
+/** 单张缩略图的宽度上限。 */
 private val BubbleImageMaxWidth = 260.dp
 
-/**
- * 单张缩略图的宽度下限。
- *
- * 长截图（例如 1:4）按比例算出来只有 35dp 宽，细成一条线看不出内容。
- * 夹到 72dp 至少能认出是哪张，配合 `Crop` 也仍然同高。
- */
+/** 单张缩略图的宽度下限。 */
 private val ThumbMinWidth = 72.dp

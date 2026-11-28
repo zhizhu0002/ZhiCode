@@ -20,41 +20,12 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.math.roundToInt
 
-/**
- * 把任意 `@Composable` 内容离线渲染成一张 Bitmap。
- *
- * ## 为什么需要它
- *
- * 「导出成图片」不能截屏：截屏拿到的是**当前视口**，装不下滚出屏幕的内容，
- * 而且会带上顶栏、输入框、悬浮卡片这些不属于对话本身的东西。
- *
- * 做法是临时建一个 `ComposeView`（**不可见**）、挂到 Activity 的 DecorView 上，
- * 让它自己测量布局，再 `drawToBitmap()` 抽出来。这样能渲染任意高度，
- * 且内容完全由我们控制。
- *
- * ## 为什么必须 postDelayed 再测一次
- *
- * 第一次 `measure`/`layout` 时，`ZhiMarkdown` 里的代码高亮、图片解码这些
- * **异步**内容还没完成，量到的高度偏小。等 ~100ms 后再测一次，高度才是最终的。
- * 只测一次会得到一张底部被裁掉的图 —— 而那种 bug 在缩略图里看不出来。
- *
- * ## 资源释放
- *
- * 容器必须在 `finally` 里从 DecorView 上移除：它是加在**窗口层级**上的，
- * 忘记移除等于 Activity 里常驻一个不可见 View（而且它握着整个 composition）。
- *
- * 对应参考实现：rikkahub 的 `ui/components/BitmapComposer.kt`。
- */
 object BitmapComposer {
 
     private val MaxWidth = 10_000.dp
     private val MaxHeight = 10_000.dp
 
-    /**
-     * @param width   期望宽度（dp）。导出图固定宽度排版，所以这个值总要给。
-     * @param height  期望高度（dp）。给 `null` 表示"由内容决定"，用 `AT_MOST` 测量。
-     * @param scope   必须是 **Main 作用域**：测量与布局只能在主线程做。
-     */
+    /** @param width   期望宽度（dp）。 */
     suspend fun composableToBitmap(
         activity: Activity,
         width: Dp? = null,
@@ -125,12 +96,7 @@ object BitmapComposer {
         }
     }
 
-    /**
-     * 兜底位图：尺寸对、全透明。
-     *
-     * 宁可给调用方一张能正常压缩保存的空图，也不要抛出去让整个导出流程中断 ——
-     * 用户看到"导出失败"时无法自行恢复，而空白图至少能重试。
-     */
+    /** 兜底位图：尺寸对、全透明。 */
     private fun createFallbackBitmap(widthPx: Int): Bitmap =
         Bitmap.createBitmap(widthPx.coerceAtLeast(1), 1, Bitmap.Config.ARGB_8888)
 }

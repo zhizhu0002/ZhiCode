@@ -16,23 +16,6 @@ import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 悬浮层的「玻璃」效果（背景虚化 + 半透明底），带运行时门控。
- *
- * ## 为什么要门控
- * Miuix 的模糊是 `miuix-blur` 里的 `Modifier.textureBlur`，底层是 **RuntimeShader**，
- * **Android 上要求 API 33+**（官方文档明确写了这是整个库的硬下限）。
- * 工程 `minSdk = 24`，所以低版本设备必须整条路径跳过，否则会崩。
- * 判定用 Miuix 自己的能力检查 `isRuntimeShaderSupported()`，
- * 而不是自己判断 `Build.VERSION.SDK_INT`，这样非 Android 目标也能正确返回 true。
- *
- * ## 用法（两步）
- * 1. 在**被压住的内容**那层调用 [capture]，让它把背景内容录进 layer；
- * 2. 在**悬浮层**上调用 [blur] + [surfaceColor]。
- *
- * 不支持模糊时两个方法都是恒等变换（[surfaceColor] 返回原色），
- * 所以调用点不需要写任何 `if`。
- */
 @Composable
 fun rememberGlass(): Glass {
     val isDark = ZhiColors.isDark()
@@ -70,34 +53,13 @@ fun rememberGlass(): Glass {
     }
 }
 
-/**
- * 一个「没有背板」的 [Glass]：所有方法都是恒等变换。
- *
- * ## 为什么需要它
- *
- * `layerBackdrop` 把一棵子树录进一张图层，`textureBlur` 再去采样那张图层。
- * **如果采样的节点正好位于被录制的子树内部**，HWUI 就得到一个自引用的
- * RenderNode —— `RenderNode::prepareTreeImpl` 递归到 RenderThread 栈溢出
- * （实测崩溃日志：`Cause: stack pointer is not in a rw map; likely due to
- * stack overflow`，`prepareTreeImpl` / `SkiaDisplayList::prepareListAndChildren`
- * 重复几百层）。
- *
- * 所以凡是「已经处在某个 capture 内部、又需要一块不透明面板」的地方
- * （宽屏顶栏、调试浮层、文件选择工具条等），必须显式用 [NoGlass] 切断采样，
- * 而不是把外层的 [Glass] 继续往下传。
- */
 internal val NoGlass: Glass = Glass(null, false, false)
 
 /** 由 [rememberGlass] 创建，集中承载门控逻辑。 */
 class Glass internal constructor(
     internal val backdrop: LayerBackdrop?,
     private val dark: Boolean,
-    /**
-     * 是否启用「液态玻璃」观感：更透 + 描边更亮。
-     *
-     * <p>它**只在能虚化时才有意义**：不虚化却把底压实，露出来的是下面那层内容本身，
-     * 读起来就是"面板没画完"。所以 [surfaceColor] 里它仍受 [supported] 门控。
-     */
+    /** 是否启用「液态玻璃」观感：更透 + 描边更亮。 */
     private val liquid: Boolean,
 ) {
     /** 当前设备/Runtime 是否支持 RuntimeShader 模糊。 */
@@ -116,12 +78,7 @@ class Glass internal constructor(
             modifier
         }
 
-    /**
-     * 悬浮层的底色。
-     *
-     * 能模糊时压低不透明度，否则模糊会被不透明底色完全挡住、白做；
-     * 不支持时保持原来的不透明底色，观感与改动前一致。
-     */
+    /** 悬浮层的底色。 */
     @Composable
     fun surfaceColor(color: Color): Color =
         if (backdrop != null) {
@@ -136,12 +93,7 @@ class Glass internal constructor(
             color.copy(alpha = alpha)
         } else color
 
-    /**
-     * 悬浮层的描边高光。
-     *
-     * 与 [surfaceColor] 用同一个开关：玻璃的边缘高光与"更透"是同一件事的两面，
-     * 只改其中一个会得到"很透但边缘发死"或者"不透却有一圈亮边"。
-     */
+    /** 悬浮层的描边高光。 */
     @Composable
     fun edgeHighlight(): Color {
         val alpha = when {

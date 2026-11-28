@@ -7,16 +7,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsAnimationCompat
 
-/**
- * Activity 级 IME 运动状态。
- *
- * 这里故意分成两份：
- * - [currentLiftPx] 只给布局阶段的 `Modifier.offset {}` 读取，跟着键盘动画逐帧变化；
- * - [settledLiftPx] 只在动画结束后更新，给列表底部留白和一次性吸底事件使用。
- *
- * 如果把两份合成一个 Compose 参数，键盘动画每一帧都会重组 ChatArea/ChatList，
- * 同时列表滚动协程还会被不断取消。这正是旧实现"输入框会上移但对话不稳定吸底"的根源。
- */
+/** Activity 级 IME 运动状态。 */
 class ImeMotionState {
     var currentLiftPx by mutableIntStateOf(0)
         private set
@@ -36,16 +27,6 @@ class ImeMotionState {
     var openGeneration by mutableIntStateOf(0)
         private set
 
-    /**
-     * 键盘是否**可见**（包括正在弹出/收起的过程中）。
-     *
-     * ⚠️ 不能用 [currentLiftPx] > 0 代替：那个值在动画期间**每帧**都变，
-     * 在组合期读它会让整个工作区每帧重组。也不能用 [settledLiftPx] > 0：
-     * 那个要等到动画**结束**才翻转 —— 于是“键盘动画期间让位量还是旧值”，
-     * 用户看到的就是扩展键栏与键盘之间裂开一条缝。
-     *
-     * 这个值只在**动画开始**与**动画结束**各变一次，频率极低，可以安全地在组合期读。
-     */
     var imeVisible by androidx.compose.runtime.mutableStateOf(false)
         private set
 

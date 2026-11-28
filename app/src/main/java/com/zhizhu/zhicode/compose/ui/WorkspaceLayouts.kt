@@ -115,13 +115,7 @@ internal fun CompactWorkspace(
     viewModel: WorkspaceViewModel,
     isDark: Boolean,
     glass: Glass,
-    /**
-     * Pager 状态由**调用方**持有。
-     *
-     * 提到上层是为了让顶栏的标签高亮也能读到它（见 `WorkspaceTabs.pagerPage`）：
-     * 高亮要跟着弹簧动画连续移动，就必须和 Pager 共用一个 `currentPage`，
-     * 而不能等业务状态在动画结束后才更新。
-     */
+    /** Pager 状态由**调用方**持有。 */
     pagerState: PagerState,
     onPageSelected: (WorkspaceTab) -> Unit = {},
 ) {
@@ -140,10 +134,7 @@ internal fun CompactWorkspace(
     )
 }
 
-/**
- * 工作区内容页：与 Miuix 官方示例的布局板块相同，TabRow 只负责选择，
- * HorizontalPager 负责页面跟手、点击后的弹簧吸附和拖动后的 fling。
- */
+/** 工作区内容页：与 Miuix 官方示例的布局板块相同，TabRow 只负责选择 */
 @Composable
 private fun WorkspacePager(
     tabs: List<WorkspaceTab>,
@@ -229,23 +220,6 @@ internal fun WorkspaceTabs(
     selected: WorkspaceTab,
     onSelect: (WorkspaceTab) -> Unit,
     modifier: Modifier = Modifier,
-    /**
-     * 由 Pager 驱动的当前页。非 null 时**高亮源**换成它，而不是 [selected]。
-     *
-     * ## 为什么需要这个参数
-     *
-     * 模型选择面板（`ModelPickerOverlay`）的做法是：tab 的高亮取
-     * `pagerState.currentPage`，而**不是**业务状态。这两者在弹簧动画期间是不同的：
-     *
-     * - 取业务状态（`state.tab` / `picker.activeProfileIndex`）：那要等 Pager
-     *   **停稳**之后才更新，所以点击 tab 后高亮是"跳"过去的，弹簧动画在没人看；
-     * - 取 `currentPage`：Compose 在弹簧过程中持续更新它，于是高亮**跟着手指/动画
-     *   连续滑过去**，与页面的位移同步。
-     *
-     * 用户要的是后者（「主页 tab 栏切换动画用跟选择模型的 bottomsheet 的 tab 切换逻辑」）。
-     * 业务状态仍然只在 settle 后写回（见 `WorkspacePager` 里那条 `snapshotFlow`），
-     * 两条路各管一件事，不会互相打架。
-     */
     pagerPage: Int? = null,
 ) {
     val fromBusiness = tabs.indexOf(selected).coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
@@ -263,12 +237,7 @@ internal fun WorkspaceTabs(
     )
 }
 
-/**
- * 工作区标签 → 图标。顶栏（TopBar.kt）与宽屏按键组共用，所以是 internal。
- *
- * `@Composable`：图标改成 `Painter` 之后要经 `painterResource` 解析，
- * 而那一步只能发生在组合里（它读 `LocalContext` 并按 id 缓存）。见 [ZhiIcons]。
- */
+/** 工作区标签 → 图标。 */
 @Composable
 internal fun iconForTab(tab: WorkspaceTab): Painter = when (tab) {
     WorkspaceTab.CHAT -> ZhiIcons.chat
@@ -282,36 +251,12 @@ internal val TopBarTitleRowHeight = 48.dp
 /** 归顺到顶栏的 Tab 行上下留白（`ZhiTopBar` 里 `padding(vertical = 6.dp)` 的两倍）。 */
 internal val TopBarTabRowPadding = 12.dp
 
-/**
- * 悬浮头部的占位高度：宽屏只有标题行，窄屏还要加上归顺进来的 Tab 行。
- *
- * 这三个数字必须和 `ZhiTopBar` 里的实际尺寸严格对齐，否则面板的首行
- * （尤其是标题栏右侧的动作图标）会被悬浮头部压掉一半。
- */
+/** 悬浮头部的占位高度：宽屏只有标题行，窄屏还要加上归顺进来的 Tab 行。 */
 // SmallTopAppBar 官方 CollapsedHeight = 52dp；窄屏 Tab 行在 bottomContent 槽位。
 // S1 之后顶栏占布局高度、内容不再重叠 —— 但顶栏 blur 需要内容从底下滚过，
 // 所以 Scaffold 内容层不再吃 padding.top，各面板用这两个常量自己留出可见区起点。
 internal val TopBarInset = 56.dp
 
-/**
- * 顶栏**自己消费掉的窗口 inset**（就是状态栏那一条）。
- *
- * ## 为什么这个偏移量必须来自窗口，不能写成常量
- *
- * `MainActivity` 调了 `enableEdgeToEdge()`，内容从屏幕 y=0 起排（Miuix Scaffold 的
- * `bodyContentPlaceable.place(0, 0)`）；而 `SmallTopAppBar` 内部是
- * **无条件** `.windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top))`
- * ——注意 `defaultWindowInsetsPadding = false` 只关掉**横向**的挖孔与导航栏，
- * 纵向那一条关不掉（见 Miuix `TopAppBar.kt` 的 `SmallTopAppBarLayout`）。
- *
- * 于是顶栏真实高度 = 状态栏高度 + 52 + Tab 行。这里原先是
- * `52.dp + WorkspaceTabRowHeight + TopBarTabRowPadding` —— **漏了状态栏**，
- * 所有"自己顶开顶栏"的面板都因此短了一截：滚到最顶上时，第一行内容
- * （对话的首条消息、终端的首行、文件面板的标题）正好被顶栏盖住，
- * 表现就是用户说的「划到最顶上，顶部栏把这些东西全部遮盖了」。
- *
- * 各家状态栏高度并不相同（挖孔屏更高），所以只能实测。
- */
 @Composable
 private fun topBarWindowInset(): Dp =
     with(LocalDensity.current) {

@@ -47,16 +47,7 @@ import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
 import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
 import top.yukonga.miuix.kmp.nav.transition.NavTransitions
 
-/**
- * 取（或创建）主 ViewModel。
- *
- * 不能用默认的 `viewModel()`：反射工厂需要精确的 `(Application)` 构造器，而
- * `WorkspaceViewModel` 的构造器带默认参数，Kotlin 不会生成那个重载，会直接抛
- * `NoSuchMethodException` 并让界面白屏。详见 [WorkspaceViewModelFactory]。
- *
- * 工厂里再注入 `WorkspaceRepository`。注意它现在只剩「终端占位横幅」一项：
- * 对话流、工具执行、会话文件都已由真实引擎负责，不再是模拟实现。
- */
+/** 取（或创建）主 ViewModel。 */
 @Composable
 private fun rememberWorkspaceViewModel(): WorkspaceViewModel {
     val application = LocalContext.current.applicationContext as Application
@@ -78,22 +69,7 @@ fun ZhiCodeApp(viewModel: WorkspaceViewModel = rememberWorkspaceViewModel()) {
     // 主题栈只有一处（theme/ZhiAppTheme.kt）：编辑器那个独立 Activity 用的是同一个，
     // 所以"应用内切主题后两屏颜色不一致"这类问题不会再出现。
     ZhiAppTheme(theme = state.themeSettings) {
-        /*
-         * MIUIX 的 `WindowNavigationEventBridge()` **不挂**。
-         *
-         * 它原本挂在 `if (themeSettings.predictiveBack)` 里，配着一个设置开关。
-         * 但那个 composable 在主窗口里的第一句有效逻辑就是：
-         *
-         *     if (windowDispatcher === inheritedDispatcher) return
-         *
-         * 主窗口里两者必然是同一个 dispatcher，所以它进来就返回 —— 挂与不挂
-         * 完全等价。那个开关因此是个**什么都不做**的开关，已经连同字段一起删除
-         * （见 `ThemeStore` 的类头注释）。
-         *
-         * 要真正打开预测性返回，需要装配 `OnBackInvokedDefaultInput`
-         * 并把 `targetSdk` 提到 33+；后者会连带改变存储权限、前台服务类型、
-         * 通知权限与返回键路径的语义，不是一次修补能承受的。
-         */
+        /* MIUIX 的 `WindowNavigationEventBridge()` **不挂**。 */
         // 这里**不再**挂常开的帧泵。
         //
         // 原来这里是 `ZhiFrameTraceHost()`，内部是
@@ -220,12 +196,7 @@ private fun ZhiCodeScreen(
     val glassMain = rememberGlass()
     val glass = rememberGlass()
 
-    /*
-     * 页面组的解析必须落在每个 NavDisplay entry 的内部（读取 `LocalZhiPageSet.current`），
-     * 不能像以前那样在 NavDisplay 外面提前抓成局部变量 `val pages = LocalZhiPageSet.current`：
-     * NavDisplay 会按 key 缓存/复用 entry provider，提前捕获会导致用户在主题页切换
-     * `pageSetId` 后，栈上的页面仍停留在旧的 MiuixPageSet 上，看似切换无效。
-     */
+    /* 页面组的解析必须落在每个 NavDisplay entry 的内部（读取 `LocalZhiPageSet.current`） */
 
     // UI 重构（S1/S2）：顶栏迁入官方 `topBar` 槽位（与 Miuix example 的
     // BlurredBar + TopAppBar 同一结构）。此前顶栏是 Scaffold 内容里手排的
@@ -277,9 +248,7 @@ private fun ZhiCodeScreen(
                 }
                 if (state.promptsOpen) add(SettingsKey.Prompts)
             }
-            /*
-             * 「关于 / 许可 / 隐私」必须**串在设置分支之后**，不能放在它前面。
-             */
+            /* 「关于 / 许可 / 隐私」必须**串在设置分支之后**，不能放在它前面。 */
             if (state.aboutOpen) {
                 add(AppKey.About)
                 if (state.licensesOpen) add(AppKey.Licenses)
@@ -388,17 +357,6 @@ private fun ZhiCodeScreen(
             LocalZhiPageSet.current.Oobe(state = state, viewModel = viewModel)
         }
         entry<AppKey.Workspace> {
-            /*
-             * 页面栈**只认接口，不认具体页面**（`ZhiPageSet`）。
-             *
-             * 这是「一个主题 = 一组 page.kt」的接线点：默认组 `MiuixPageSet`
-             * 是空实现、全部回落，所以这一行的行为与之前直接调 `WorkspacePage`
-             * 完全一致 —— 换组时只换 `LocalZhiPageSet` 的值，这里不动。
-             *
-             * ⚠️ 参数里 `isDark` / `wide` / `glass` / `glassMain` 仍然由本层算，
-             * 因为它们是**外壳的职责**（窗口尺寸、玻璃捕获节点不能包含自己），
-             * 不该让每个主题组各算一遍 —— 那会出现两组玻璃对象互相看不到对方。
-             */
             LocalZhiPageSet.current.Workspace(
                 state = state,
                 viewModel = viewModel,
@@ -476,13 +434,7 @@ private fun ZhiCodeScreen(
 
 // ------------------------------------------------------------------ 页面栈 key
 
-/**
- * 应用根页。整页栈的 root = 工作区（顶栏/Tab/面板/输入器），
- * 设置与它的二级页作为栈上更深的一层压在上面。
- *
- * 用 [navBackStackOf] 建栈（内存态，不跨进程持久化），所以 key 不需要
- * `@Serializable` —— 栈的真源仍是 ViewModel 状态，这里只是把它渲染出来。
- */
+/** 应用根页。 */
 private sealed interface AppKey : NavKey {
     data object Oobe : AppKey
     data object Workspace : AppKey
@@ -490,26 +442,14 @@ private sealed interface AppKey : NavKey {
     /** UI 调试整页（debug 构建的设置页里有入口）。 */
     data object UiDebug : AppKey
 
-    /**
-     * 关于页与第三方许可页。
-     *
-     * <p>放在 [AppKey] 而不是 [SettingsKey]：它们的入口在侧栏也有一个，
-     * 从侧栏进来时设置页并没有打开。放进 [SettingsKey] 会让"返回"落到一个
-     * 用户从没打开过的设置主页上。
-     */
+    /** 关于页与第三方许可页。 */
     data object About : AppKey
     data object Licenses : AppKey
 
     /** 隐私政策。与 [Licenses] 平级：都从关于页进，压在关于之上。 */
     data object Privacy : AppKey
 
-    /**
-     * 「检查更新」。
-     *
-     * <p>与 [Licenses] / [Privacy] 一样是「关于」的子页，所以串在
-     * `aboutOpen` 分支里。入口有两个：关于页 Hero 里那个大 ZhiCode 字（常驻），
-     * 以及关于页卡片里的「有新版本 x.y.z」那一行（只在真有新版本时出现）。
-     */
+    /** 「检查更新」。 */
     data object Update : AppKey
 }
 
@@ -525,13 +465,7 @@ private sealed interface SettingsKey : NavKey {
     data object Prompts : SettingsKey
     data object Theme : SettingsKey
 
-    /**
-     * 聊天显示（自定义字体 + 正文字号）。
-     *
-     * 与 [Theme] 分开而不是并进主题页：主题页回答的是"整个应用长什么样"，
-     * 这一页回答的是"聊天正文读起来舒不舒服"。混在一页会让主题页长到要滚三屏，
-     * 而两者的改动目的也不同（一个是调色板，一个是字形与字号）。
-     */
+    /** 聊天显示（自定义字体 + 正文字号）。 */
     data object ChatDisplay : SettingsKey
 }
 

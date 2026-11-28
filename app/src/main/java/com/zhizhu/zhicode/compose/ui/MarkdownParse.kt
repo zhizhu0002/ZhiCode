@@ -1,39 +1,5 @@
 package com.zhizhu.zhicode.compose.ui
 
-/**
- * Markdown 的**纯 Kotlin 解析层**。
- *
- * ## 为什么和渲染层分开
- *
- * 这个文件刻意**不引用任何 Compose 类型**（只用 Kotlin 标准库），因此可以脱离
- * Android / Compose，直接用 `kotlinc` 编译并跑测试来验证解析正确性 —— 标记解析的
- * 边界情况很多（未闭合围栏、嵌套列表、`*` 的歧义、表格分隔行…），光靠肉眼看界面
- * 很容易漏。渲染层见同目录的 `Markdown.kt`。
- *
- * ## 支持的语法
- *
- * 块级：
- * | 语法 | 说明 |
- * | --- | --- |
- * | `# 标题` ~ `###### 标题` | ATX 标题 |
- * | `标题` + `===` / `---` | Setext 标题（1 / 2 级） |
- * | ` ``` ` 或 `~~~` 围栏 | 代码块，info string 记为语言 |
- * | `- ` `* ` `+ ` | 无序列表（按缩进嵌套） |
- * | `1. ` / `1) ` | 有序列表（保留原编号） |
- * | `- [ ]` / `- [x]` | 任务项 |
- * | `> ` | 引用块（内部**递归解析**，块中可再有块） |
- * | `---` `***` `___` | 分隔线 |
- * | `\| a \| b \|` + `\|---\|---\|` | 表格 |
- *
- * 行内：转义、`` `行内代码` ``、`[文字](链接)`、`![替代](链接)`、`<自动链接>`、
- * 裸 `https://…`、`**粗体**`（或 `__`）、`*斜体*`（或 `_`）、`***粗斜体***`、
- * `~~删除线~~`。
- *
- * ## 有意不支持的
- *
- * 内联 HTML、脚注、定义列表、引用式链接（`[x][1]`）—— 模型回复里几乎不出现，
- * 而解析规则会显著增加复杂度。遇到时按普通文本原样显示，**不会丢字符**。
- */
 
 // ------------------------------------------------------------------ 数据模型
 
@@ -43,12 +9,7 @@ internal sealed interface MdBlock {
 
     data class Paragraph(val text: String) : MdBlock
 
-    /**
-     * 列表项。
-     *
-     * [depth] 是嵌套层级（0 起）；[task] 非空表示任务项，值即勾选状态
-     * （`- [ ]` → false，`- [x]` → true）；[marker] 是无序列表的圆点或有序列表的原编号。
-     */
+    /** 列表项。 */
     data class Bullet(
         val marker: String,
         val text: String,
@@ -72,12 +33,7 @@ internal sealed interface MdBlock {
 /** 行内片段样式。 */
 internal enum class MdStyle { PLAIN, BOLD, ITALIC, BOLD_ITALIC, CODE, STRIKE, LINK }
 
-/**
- * 一段行内文本。
- *
- * [href] 仅在 [style] == [MdStyle.LINK] 时非空。自动链接与裸 URL 的
- * [text] 与 [href] 相同。
- */
+/** 一段行内文本。 */
 internal data class MdSpan(
     val text: String,
     val style: MdStyle = MdStyle.PLAIN,
@@ -182,11 +138,7 @@ private fun indentOf(line: String): Int {
     return n
 }
 
-/**
- * 解析整篇 Markdown。
- *
- * 单遍扫描 + 少量前视（表格与 Setext 需要看相邻行）。递归只发生在引用块。
- */
+/** 解析整篇 Markdown。 */
 internal fun parseMarkdown(source: String, depth: Int = 0): List<MdBlock> {
     val blocks = mutableListOf<MdBlock>()
     val paragraph = StringBuilder()
@@ -399,36 +351,6 @@ internal fun parseMarkdown(source: String, depth: Int = 0): List<MdBlock> {
 
 // ------------------------------------------------------ 流式：已完结前缀的长度
 
-/**
- * 在 [source] 里找出「最后一个块边界之后」的位置，用作流式渲染的切点。
- *
- * ## 为什么需要它
- *
- * 流式回复时正文每个 delta 变一次（`ZhiEngineController.DELTA_MERGE_MS = 32`，即每秒约 31 次），
- * 而渲染层原本是 `remember(source) { parseMarkdown(source) }` —— 于是**整篇累积文本**每秒被
- * 完整重解析 31 次：3 遍全串扫描 + `split('\n')` 建出所有行的数组 + 每个 block 一个对象。
- * 一条 20 KB 的回复（约 600 行）累计是 O(n²) 的字符串与对象分配，
- * 在 API 26~28 的老设备上就是 GC 抖动与掉帧。
- *
- * 切成「已完结前缀（settled）+ 在写尾部（tail）」之后，只有**跨过块边界**时才需要重解析
- * 前缀（一条回复通常几十次），尾部用一个行内 `Text` 跟着走。
- *
- * ## 切在哪，以及为什么这是安全的
- *
- * 切点取「**不在围栏代码块内部**的空行」之后。空行是块级边界，所以前缀一定由**完整的块**
- * 组成 —— 对它单独跑 [parseMarkdown]，结果与跑整篇时那一段的产出相同，不会出现
- * 「半个表格」「半段引用」。围栏内部不看空行，否则代码块会被从中间切开。
- *
- * 围栏的开启/闭合判据与 [parseMarkdown] 内联循环**保持一致**：关闭围栏必须是同字符
- * 且长度不短于开启围栏（见 `parseMarkdown` 里 `f2.second >= len`）；不一致会导致
- * 「@@ 认为在围栏内、解析器认为在外」，切点就落到代码块中间了。
- *
- * 本函数**只做扫描，不做任何 substring**（行内容靠下标判断），所以每次 delta 调用的成本
- * 是一次 O(n) 的字符遍历，没有分配。返回值是「尾部起点」，也是前缀的长度；
- * 调用方保证 `source.substring(0, 返回) + source.substring(返回) == source`。
- *
- * 没有可切的位置（还没出现过块边界的空行）时返回 0 —— 调用方据此退回整段解析。
- */
 internal fun settledPrefixLength(source: String): Int {
     val n = source.length
     if (n == 0) return 0
@@ -489,13 +411,7 @@ internal fun settledPrefixLength(source: String): Int {
     return cut
 }
 
-/**
- * 判断区间 `[s, e)` 是不是围栏行，是则返回「字符 + 连续个数」。
- *
- * 与 [fenceInfo] 的判据相同（首字符是 ` 或 ~、连续 ≥3 个），区别是不建 String：
- * 本函数在流式热路径上每行都会被调用一次，`substring` 会把省下来的分配又花回去。
- * 不是围栏行时返回 null（不分配）。
- */
+/** 判断区间 `[s, e)` 是不是围栏行，是则返回「字符 + 连续个数」。 */
 private fun fenceRunAt(source: String, s: Int, e: Int): Pair<Char, Int>? {
     if (e - s < 3) return null
     val ch = source[s]
@@ -535,12 +451,7 @@ private class Emphasis(
     val style: MdStyle,
 )
 
-/**
- * 在 [i] 处尝试匹配强调标记。
- *
- * 顺序很关键：`***` 必须排在 `**` 前、`**` 排在 `*` 前，否则 `**粗体**` 会被
- * 当成"一个 `*` + 内容 + 一个 `*`"。`_` 系列额外要求词边界，避免 `snake_case` 变斜体。
- */
+/** 在 [i] 处尝试匹配强调标记。 */
 private fun tryEmphasis(text: String, i: Int): Emphasis? {
     val candidates = listOf(
         "***" to MdStyle.BOLD_ITALIC,
@@ -574,14 +485,7 @@ private fun tryEmphasis(text: String, i: Int): Emphasis? {
     return null
 }
 
-/**
- * 解析一段行内文本为片段序列。
- *
- * 规则（有意简化，非严格 CommonMark）：
- *  · 行内代码优先级最高，其内部不再解析；
- *  · 强调必须"开标记后非空白、闭标记前非空白"，避免把 `2 * 3 * 4` 当强调；
- *  · 未闭合的标记按普通字符原样输出，**不丢字符**。
- */
+/** 解析一段行内文本为片段序列。 */
 internal fun parseInline(text: String, depth: Int = 0): List<MdSpan> {
     if (depth > MAX_INLINE_DEPTH) return listOf(MdSpan(text))
 

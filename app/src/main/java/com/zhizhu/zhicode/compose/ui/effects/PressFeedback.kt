@@ -22,48 +22,11 @@ import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.platform.LocalView
 import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 
-/**
- * 按压高光（`InteractiveHighlight` 的**安全封装**）。
- *
- * ## 为什么不直接用搬进来的 `InteractiveHighlight`
- *
- * ksu-style（以及它拷自的 Miuix example）用 `android.graphics.RuntimeShader` 画一团
- * 跟随手指的径向高光，源码里标了 `@SuppressLint("NewApi")` —— 也就是**它自己就承认**
- * 这段代码要求 API 33+，而 ksu-style 的 `minSdk` 本就在那之上，可以直接用。
- *
- * 本工程 `minSdk = 24`，把那个类原样挂到按钮上会让低版本设备**一碰就崩**
- * （`RuntimeShader` 类不存在，不是"效果不生效"）。所以这里做两件事：
- *
- * 1. 用 `isRuntimeShaderSupported()` 门控，不支持时直接返回原 Modifier（零开销、零风险）；
- * 2. 支持时也**不用 shader**，改用一层跟手位置的径向 `Brush` ——
- *    Compose 自己的 `radialGradient` 已经能表达"按下处最亮、向外衰减"，
- *    而它走的是普通绘制路径，没有 RuntimeShader 的版本门槛与编译期失败风险。
- *
- * 视觉上两者几乎一致（都是一团 6%~12% 白色的柔光），差别在第 2 条换来的是
- * **低版本设备也能有按压反馈**，而不是"高版本才有、低版本什么都没有"。
- *
- * ## 用法
- *
- * ```kotlin
- * val source = remember { MutableInteractionSource() }
- * Box(
- *     Modifier
- *         .pressHighlight(source, shape = RoundedCornerShape(8.dp))
- *         .clickable(interactionSource = source, indication = null) { … }
- * )
- * ```
- *
- * 必须把**同一个** [interactionSource] 同时交给这个 Modifier 与 `clickable`，
- * 否则高光永远不会亮（它靠那个 source 的 `Press` 事件驱动）。
- */
 @Composable
 fun Modifier.pressHighlight(
     interactionSource: MutableInteractionSource,
     shape: Shape? = null,
-    /**
-     * 高光半径相对短边的比例。1.2 取自 example 的 `size.minDimension * 1.2f` ——
-     * 比控件本身还大一圈，按下时看起来是"整个面被点亮"，而不是"一个亮点"。
-     */
+    /** 高光半径相对短边的比例。 */
     radiusFactor: Float = 1.2f,
     /** 峰值白色透明度。example 是 0.06（整面）+ 0.12（径向），这里合成一个数。 */
     peakAlpha: Float = 0.12f,
@@ -106,14 +69,7 @@ fun Modifier.pressHighlight(
     )
 }
 
-/**
- * 按压时的轻微下沉（`PressFeedbackType.Sink` 的自绘版本）。
- *
- * Miuix 的 `Card` 自带 `pressFeedbackType = PressFeedbackType.Sink`，但
- * `Box` / 自定义容器没有。这个 Modifier 给它们补上：按下时缩到 0.97，
- * 松开弹回。用 `graphicsLayer` 的 `scaleX/scaleY` —— 只影响绘制阶段，
- * 不触发重新测量（`animateDpAsState` 改尺寸会）。
- */
+/** 按压时的轻微下沉（`PressFeedbackType.Sink` 的自绘版本）。 */
 @Composable
 fun Modifier.pressSink(
     interactionSource: MutableInteractionSource,
@@ -129,23 +85,6 @@ fun Modifier.pressSink(
     )
 }
 
-/**
- * 自持有交互源的按压下沉。
- *
- * ## 为什么还需要这一个
- *
- * [pressSink] 要求调用方把 `clickable` 的 `interactionSource` 交进来。
- * 但 `ZhiFilledIconButton` 底下是 Miuix 的 `IconButton`，而它的签名里
- * **没有 `interactionSource` 参数**（核过 `iconbutton.md`；这是 Miuix 有意收窄的 ——
- * 它自己在内部管理按压态与配色）。所以调用方拿不到那个 source。
- *
- * 这个版本自己 new 一个 source 挂上去。代价是它感知不到"内部的"按压，
- * 只有在**外层**套一层 `clickable` 时才会亮 —— 所以它配合的参数是
- * `pointerInput` 里的 `detectTapGestures(onPress)`，改由手指的按下/抬起驱动。
- *
- * 两者按场景选：[pressSink] 用于"我自己接 `clickable`"的容器，
- * 这个用于"组件内部自己处理点击、我只想补个下沉"的情形。
- */
 @Composable
 fun Modifier.selfPressSink(pressedScale: Float = 0.97f): Modifier {
     var pressed by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }

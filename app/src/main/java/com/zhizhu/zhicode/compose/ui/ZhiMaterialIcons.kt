@@ -7,155 +7,6 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.group
 import androidx.compose.ui.unit.dp
 
-/**
- * 全局图标集的字形数据：**Material Symbols（Rounded, Fill1）**。
- *
- * ## 为什么是这一套
- *
- * 用户的说法是：
- *
- * > 算了和，还是把扁平化（不是线条）和 rikka 等 md3 图标结合起来，沙盒的有点不太好看，MCP 也是
- *
- * 这一段里其实有三件事，各自都可以查证：
- *
- * 1. **「rikka 等 md3 图标」指的是 rikkahub。** 去它的源码取证：它用的是
- *    `me.rerere.hugeicons.stroke.*`（400+ 处）与 `com.composables.icons.lucide`（10 处），
- *    也就是 HugeIcons 与 Lucide —— **两套都是 24×24 的线条集**。
- *    所以「直接抄 rikka 那套」正好落到用户明确排除的「线条」上，不能用。
- * 2. **「扁平化（不是线条）」= 实心填充**。rikkahub 用的那一族里满足这一点的只有
- *    **Material 3 / Material Symbols**（Android 自己的设置页就是这套字形）。
- * 3. **「沙盒的有点不太好看，MCP 也是」** 指上一轮的两个自绘字形
- *    （`ZhiVectorIcons.Cube` 与 `ZhiVectorIcons.Wrench` 那一批）。自绘的东西即使把
- *    包围盒铺到同一个网格上，曲率与圆角也很难跟整套一致 —— 这一版把它们全部
- *    换成上游字形，自绘文件整个删掉了。
- *
- * 于是定为 `Material Symbols Rounded, Fill1`（实心圆角版），上游是
- * `google/material-design-icons`，Apache-2.0。
- *
- * ## 为什么是「把路径数据拷进来」而不是「加一个 Gradle 依赖」
- *
- * 三个候选都查过：
- *
- * | 方案 | 问题 |
- * |---|---|
- * | `androidx.compose.material:material-icons-extended` | 上游已把它标为 deprecated，而且那是 **Material（M2）** 字形、不是 Symbols（形状是老的直角版本） |
- * | rikkahub 的 `me.rerere.hugeicons:stroke` / `com.composables:icons-lucide` | 都是**线条**集，与「不是线条」直接冲突 |
- * | 把上游 SVG 的 `d` 拷进来（**采用**） | 无新依赖；数据逐字来自上游；出处可以用 `tools/material-symbols-fetch.sh` 重跑核对 |
- *
- * 本工程有一条约束是「除 `androidx.profileinstaller` 外不再加新依赖」，
- * 而它在这一轮**依然成立** —— 下面每个字形只是一段字符串。
- *
- * ## 数据是怎么变成 `ImageVector` 的
- *
- * 上游 SVG 的 `viewBox` 是 `0 -960 960 960`：y 轴向上、值域 `[-960, 0]`。
- * Compose 的视口是 y 轴向下、值域 `[0, 24]`。换算是一次缩放 + 一次平移：
- *
- * ```
- * x_comp = x_svg / 40        y_comp = y_svg / 40 + 24
- * ```
- *
- * 落在 `group(scaleX = VIEWPORT_SCALE, scaleY = VIEWPORT_SCALE, translationY = VIEWPORT_FLIP)`
- * 里（`VectorGroup` 的变换是「先 scale 后 translate」，pivot 取 0）。
- * **不要**把它写成 `scaleY = -1f`：那是 Miuix 那边的坐标约定，两边相反。
- *
- * 路径字符串交给 Compose 自己的 `PathParser`（`ui-graphics` 的公开 API）解析，
- * 所以这里**没有第二套解析器**，也不存在"抄错一个数字"的可能 ——
- * 抄错了要么在解析时就炸，要么被 `MaterialSymbolGeometryTest` 量出来。
- *
- * ## 为什么字形以属性而不是 `object` 分组
- *
- * 与 [ZhiIcons] 一样产出 `ImageVector`，由 `ZhiIcons.vector()` 统一转成 `Painter`
- * （那是两种来源合流的唯一通道，见那边的说明）。这里的名字沿用**上游的英文名**，
- * 因为语义名在 [ZhiIcons] 那边（它维护着「哪一行该用哪个字形」的映射表）。
- *
- * ## 只许填充，不许描边
- *
- * 整个文件**不得出现** `stroke` / `strokeLineWidth`：这一集是实心字形，混进一个
- * 描边字形就会在一排实心块里显得像没画完。`IconSetTest` 会逐字检查这一条。
- *
- * ⚠️ **本文件由 `tools/material-symbols-fetch.sh` 生成。**
- * 手改这里的路径数据会在下一次重跑时被覆盖，而且会让"与上游逐字一致"这句话失效。
- * 要换字形，请改脚本里的映射表再重跑。
- *
- * ## 字形清单
- *
- * 下面这张表是**全集**：`ZhiMaterialIcons` 里有多少个字形，它就有多少行。
- * `IconSetTest` 两头都查 —— 表里少一行、或者多出一个没人用的字形，都会失败。
- * 第二条尤其要紧：没人引用的字形说明 [ZhiIcons] 那边的映射改了名字，
- * 留着它只会让人以为"这个字形还在用"。
- *
- * | Kotlin 名 | 上游字形 | 上游路径 |
- * |---|---|---|
- * | [Menu] | `menu` | `symbols/web/menu/materialsymbolsrounded/menu_fill1_24px.svg` |
- * | [Contrast] | `contrast` | `symbols/web/contrast/materialsymbolsrounded/contrast_fill1_24px.svg` |
- * | [Circle] | `circle` | `symbols/web/circle/materialsymbolsrounded/circle_fill1_24px.svg` |
- * | [Settings] | `settings` | `symbols/web/settings/materialsymbolsrounded/settings_fill1_24px.svg` |
- * | [ChatBubble] | `chat_bubble` | `symbols/web/chat_bubble/materialsymbolsrounded/chat_bubble_fill1_24px.svg` |
- * | [Difference] | `difference` | `symbols/web/difference/materialsymbolsrounded/difference_fill1_24px.svg` |
- * | [Terminal] | `terminal` | `symbols/web/terminal/materialsymbolsrounded/terminal_fill1_24px.svg` |
- * | [Folder] | `folder` | `symbols/web/folder/materialsymbolsrounded/folder_fill1_24px.svg` |
- * | [AddCircle] | `add_circle` | `symbols/web/add_circle/materialsymbolsrounded/add_circle_fill1_24px.svg` |
- * | [History] | `history` | `symbols/web/history/materialsymbolsrounded/history_fill1_24px.svg` |
- * | [Home] | `home` | `symbols/web/home/materialsymbolsrounded/home_fill1_24px.svg` |
- * | [Person] | `person` | `symbols/web/person/materialsymbolsrounded/person_fill1_24px.svg` |
- * | [Extension] | `extension` | `symbols/web/extension/materialsymbolsrounded/extension_fill1_24px.svg` |
- * | [DeployedCode] | `deployed_code` | `symbols/web/deployed_code/materialsymbolsrounded/deployed_code_fill1_24px.svg` |
- * | [Build] | `build` | `symbols/web/build/materialsymbolsrounded/build_fill1_24px.svg` |
- * | [Add] | `add` | `symbols/web/add/materialsymbolsrounded/add_fill1_24px.svg` |
- * | [Send] | `send` | `symbols/web/send/materialsymbolsrounded/send_fill1_24px.svg` |
- * | [ArrowUpward] | `arrow_upward` | `symbols/web/arrow_upward/materialsymbolsrounded/arrow_upward_fill1_24px.svg` |
- * | [Stop] | `stop` | `symbols/web/stop/materialsymbolsrounded/stop_fill1_24px.svg` |
- * | [Pause] | `pause` | `symbols/web/pause/materialsymbolsrounded/pause_fill1_24px.svg` |
- * | [ChevronRight] | `chevron_right` | `symbols/web/chevron_right/materialsymbolsrounded/chevron_right_fill1_24px.svg` |
- * | [ExpandMore] | `expand_more` | `symbols/web/expand_more/materialsymbolsrounded/expand_more_fill1_24px.svg` |
- * | [Close] | `close` | `symbols/web/close/materialsymbolsrounded/close_fill1_24px.svg` |
- * | [Edit] | `edit` | `symbols/web/edit/materialsymbolsrounded/edit_fill1_24px.svg` |
- * | [Refresh] | `refresh` | `symbols/web/refresh/materialsymbolsrounded/refresh_fill1_24px.svg` |
- * | [Info] | `info` | `symbols/web/info/materialsymbolsrounded/info_fill1_24px.svg` |
- * | [InkEraser] | `ink_eraser` | `symbols/web/ink_eraser/materialsymbolsrounded/ink_eraser_fill1_24px.svg` |
- * | [ArrowBack] | `arrow_back` | `symbols/web/arrow_back/materialsymbolsrounded/arrow_back_fill1_24px.svg` |
- * | [MoreHoriz] | `more_horiz` | `symbols/web/more_horiz/materialsymbolsrounded/more_horiz_fill1_24px.svg` |
- * | [MoreVert] | `more_vert` | `symbols/web/more_vert/materialsymbolsrounded/more_vert_fill1_24px.svg` |
- * | [Search] | `search` | `symbols/web/search/materialsymbolsrounded/search_fill1_24px.svg` |
- * | [Save] | `save` | `symbols/web/save/materialsymbolsrounded/save_fill1_24px.svg` |
- * | [ContentCopy] | `content_copy` | `symbols/web/content_copy/materialsymbolsrounded/content_copy_fill1_24px.svg` |
- * | [ContentPaste] | `content_paste` | `symbols/web/content_paste/materialsymbolsrounded/content_paste_fill1_24px.svg` |
- * | [WrapText] | `wrap_text` | `symbols/web/wrap_text/materialsymbolsrounded/wrap_text_fill1_24px.svg` |
- * | [GridView] | `grid_view` | `symbols/web/grid_view/materialsymbolsrounded/grid_view_fill1_24px.svg` |
- * | [Sort] | `sort` | `symbols/web/sort/materialsymbolsrounded/sort_fill1_24px.svg` |
- * | [CheckCircle] | `check_circle` | `symbols/web/check_circle/materialsymbolsrounded/check_circle_fill1_24px.svg` |
- * | [Check] | `check` | `symbols/web/check/materialsymbolsrounded/check_fill1_24px.svg` |
- * | [Error] | `error` | `symbols/web/error/materialsymbolsrounded/error_fill1_24px.svg` |
- * | [RadioButtonUnchecked] | `radio_button_unchecked` | `symbols/web/radio_button_unchecked/materialsymbolsrounded/radio_button_unchecked_fill1_24px.svg` |
- * | [Help] | `help` | `symbols/web/help/materialsymbolsrounded/help_fill1_24px.svg` |
- * | [FolderOpen] | `folder_open` | `symbols/web/folder_open/materialsymbolsrounded/folder_open_fill1_24px.svg` |
- * | [DriveFileMove] | `drive_file_move` | `symbols/web/drive_file_move/materialsymbolsrounded/drive_file_move_fill1_24px.svg` |
- * | [Description] | `description` | `symbols/web/description/materialsymbolsrounded/description_fill1_24px.svg` |
- * | [Delete] | `delete` | `symbols/web/delete/materialsymbolsrounded/delete_fill1_24px.svg` |
- * | [Image] | `image` | `symbols/web/image/materialsymbolsrounded/image_fill1_24px.svg` |
- * | [Cloud] | `cloud` | `symbols/web/cloud/materialsymbolsrounded/cloud_fill1_24px.svg` |
- * | [List] | `list` | `symbols/web/list/materialsymbolsrounded/list_fill1_24px.svg` |
- * | [Timer] | `timer` | `symbols/web/timer/materialsymbolsrounded/timer_fill1_24px.svg` |
- * | [Link] | `link` | `symbols/web/link/materialsymbolsrounded/link_fill1_24px.svg` |
- * | [Tune] | `tune` | `symbols/web/tune/materialsymbolsrounded/tune_fill1_24px.svg` |
- * | [Lock] | `lock` | `symbols/web/lock/materialsymbolsrounded/lock_fill1_24px.svg` |
- * | [Compress] | `compress` | `symbols/web/compress/materialsymbolsrounded/compress_fill1_24px.svg` |
- * | [Keyboard] | `keyboard` | `symbols/web/keyboard/materialsymbolsrounded/keyboard_fill1_24px.svg` |
- * | [Hub] | `hub` | `symbols/web/hub/materialsymbolsrounded/hub_fill1_24px.svg` |
- * | [Layers] | `layers` | `symbols/web/layers/materialsymbolsrounded/layers_fill1_24px.svg` |
- * | [Code] | `code` | `symbols/web/code/materialsymbolsrounded/code_fill1_24px.svg` |
- * | [PlayArrow] | `play_arrow` | `symbols/web/play_arrow/materialsymbolsrounded/play_arrow_fill1_24px.svg` |
- * | [StopCircle] | `stop_circle` | `symbols/web/stop_circle/materialsymbolsrounded/stop_circle_fill1_24px.svg` |
- * | [ExpandLess] | `expand_less` | `symbols/web/expand_less/materialsymbolsrounded/expand_less_fill1_24px.svg` |
- * | [BugReport] | `bug_report` | `symbols/web/bug_report/materialsymbolsrounded/bug_report_fill1_24px.svg` |
- * | [Memory] | `memory` | `symbols/web/memory/materialsymbolsrounded/memory_fill1_24px.svg` |
- * | [CleaningServices] | `cleaning_services` | `symbols/web/cleaning_services/materialsymbolsrounded/cleaning_services_fill1_24px.svg` |
- * | [DeleteSweep] | `delete_sweep` | `symbols/web/delete_sweep/materialsymbolsrounded/delete_sweep_fill1_24px.svg` |
- * | [Apps] | `apps` | `symbols/web/apps/materialsymbolsrounded/apps_fill1_24px.svg` |
- * | [PowerSettingsNew] | `power_settings_new` | `symbols/web/power_settings_new/materialsymbolsrounded/power_settings_new_fill1_24px.svg` |
- *
- * 取用日期：见 git 首次提交本文件的时间；重新取用请跑 `bash tools/material-symbols-fetch.sh`。
- */
 internal object ZhiMaterialIcons {
 
     /** 上游 `Menu`（materialsymbolsrounded / fill1）。 */
@@ -360,23 +211,13 @@ internal object ZhiMaterialIcons {
     val PowerSettingsNew: ImageVector by lazy { material("PowerSettingsNew", "M440-480v-320q0-17 11.5-28.5T480-840q17 0 28.5 11.5T520-800v320q0 17-11.5 28.5T480-440q-17 0-28.5-11.5T440-480Zm40 360q-74 0-139.5-28.5T226-226q-49-49-77.5-114.5T120-480q0-69 25-131t70-112q12-14 29.5-14.5T275-725q11 11 10 27.5T273-668q-35 38-54 86t-19 102q0 116 82 198t198 82q117 0 198.5-82T760-480q0-54-18.5-102T688-668q-12-13-13-29.5t10-27.5q13-13 31-12.5t30 14.5q45 50 69.5 112T840-480q0 74-28.5 139.5t-77 114.5q-48.5 49-114 77.5T480-120Z") }
 }
 
-/**
- * 上游 svg 的 `viewBox` 边长的一半的倒数：960 → 24 就是除以 40。
- *
- * `VectorGroup` 的变换顺序是「先 scale 后 translate」，pivot 取 0。
- */
+/** 上游 svg 的 `viewBox` 边长的一半的倒数：960 → 24 就是除以 40。 */
 private const val VIEWPORT_SCALE = 0.025f
 
 /** 把上游 `[-960, 0]` 的 y 轴搬到 Compose 的 `[0, 24]`（y 轴方向也一并翻正）。 */
 private const val VIEWPORT_FLIP = 24f
 
-/**
- * 把上游 SVG 的一段 `d` 变成 `ImageVector`。
- *
- * 这是本文件里唯一的构造入口。做成一个函数（而不是每个字形各写一遍
- * `ImageVector.Builder(...)`）的理由是：视口换算只写一次，
- * 改它的时候不可能只改一半 —— 那正是"这个图标和其它不一样大"的来源。
- */
+/** 把上游 SVG 的一段 `d` 变成 `ImageVector`。 */
 private fun material(name: String, pathData: String): ImageVector =
     ImageVector.Builder(
         name = name,

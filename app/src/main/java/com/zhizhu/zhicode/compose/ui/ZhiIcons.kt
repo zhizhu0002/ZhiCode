@@ -6,79 +6,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import com.zhizhu.zhicode.compose.model.ToolKind
 
-/**
- * 全局图标集：**语义名 → 字形**的唯一映射表。
- *
- * ## 来源：Material Symbols（Rounded, Fill1）
- *
- * 每个属性都指向 [ZhiMaterialIcons] 里的一个字形，那里面存的是
- * `google/material-design-icons` 上游 SVG 的路径数据（Apache-2.0）。
- * 为什么是这一套、为什么把数据拷进来而不是加依赖，写在
- * `ZhiMaterialIcons.kt` 的文件头 —— 那里是字形，这里是**语义**。
- *
- * ## 三轮反馈的落点
- *
- * 这一份映射表被用户打回过三次，每一次的结论都留在下面，因为
- * "为什么不能用某个看着很像的字形"是最容易在下次重构里丢掉的信息：
- *
- * ### 第一轮：原版 IQ Code 的图标不对
- *
- * 原版把"跑命令"挂成待办清单、把"运行环境"挂成对勾、失败与关闭共用一个字形。
- * 于是本表确立了两条规矩，至今仍是它存在的理由：
- *
- * 1. **一个字形只能属于一个语义**（`IconSetTest` 第 4 节逐对检查）；
- * 2. **名字要按"这一行要表达的意思"取，不按字形取**（所以有 `runtime` 而不是 `Wrench`）。
- *
- * ### 第二轮：`miuix-icons` 里"名字对、形状不对"
- *
- * 曾经整集换成 `top.yukonga.miuix.kmp.icon.MiuixIcons.*`。逐个读那份源码的
- * `PathNode` 之后发现三处：
- *
- * - `MiuixIcons.More` 是**竖排**三点（三个圆心的 x 全是 521），旧代码用
- *   `Modifier.rotate(90f)` 把它掰成横排 —— 属于用变换掩盖选错了字形；
- * - `MiuixIcons.ExpandMore` / `ExpandLess` 是「L 形框 + 圆点 + L 形框」，
- *   **不是箭头**（这就是用户说的"怪怪的框"）；
- * - `MiuixIcons.Theme` 是「横长圆角块 + 上方小块」的滚筒形状，不是明暗切换。
- *
- * 这三处当时只能自绘。现在它们在 Material Symbols 里都有直系字形
- * （`more_horiz` / `expand_more` / `contrast`），所以自绘文件整个删掉了。
- *
- * ### 第三轮：换成本集
- *
- * > 算了和，还是把扁平化（不是线条）和 rikka 等 md3 图标结合起来，沙盒的有点不太好看，MCP 也是
- *
- * - 「扁平化（不是线条）」：本集是**实心**字形（`fill1`）。曾经差点走错 ——
- *   rikkahub 实际用的 HugeIcons / Lucide **两套都是线条**，
- *   直接抄过来正好是用户明确排除的那一种。
- * - 「沙盒的有点不太好看」：`sandbox` 从自绘的线框箱子换成 `deployed_code`
- *   （圆角实心箱 + `</>`，也正是"能装代码的箱子"）。
- * - 「MCP 也是」：`mindMap` 从自绘的扳手形状换成 `hub`（中心节点 + 四向连线）。
- *
- * ## 为什么属性是 `@Composable get()`
- *
- * [rememberVectorPainter] 是 `@Composable` 的（它要 `remember` 住结果），
- * 所以取图标这件事天然只能发生在组合里。写成
- * `val menu: Painter @Composable get() = vector(ZhiMaterialIcons.Menu)` 之后：
- *
- * - 调用点是 `Icon(painter = ZhiIcons.menu, ...)`，取图标只发生在组合中 ——
- *   这正是我们想要的约束（图标不该在任何后台线程或纯逻辑里被解析）；
- * - 字形那一层与语义这一层经过同一个 [vector] 适配，调用点看不出区别，
- *   换整套字形时也只需要改这一个文件。
- *
- * ## 与 `Icon` 的配合
- *
- * `Icon` 的 `painter` 重载会给 painter 套一层 `ColorFilter.tint(tint)`，
- * 默认 `SrcIn` 混合 —— 也就是**整体替换**成 tint 颜色。所以 `ImageVector` 里
- * 写死的 `SolidColor(Color.Black)` 只是占位，换主题、换语义色都不需要改字形。
- */
 object ZhiIcons {
 
-    /**
-     * [ImageVector] → `Painter` 的唯一通道。
-     *
-     * 字形那一层（[ZhiMaterialIcons]）与语义这一层都从这里过，
-     * 于是"图标是怎么来的"在类型上只剩一个入口。
-     */
     @Composable
     private fun vector(imageVector: ImageVector): Painter = rememberVectorPainter(imageVector)
 
@@ -100,12 +29,7 @@ object ZhiIcons {
     /** 对话：气泡。 */
     val chat: Painter @Composable get() = vector(ZhiMaterialIcons.ChatBubble)
 
-    /**
-     * 变更 / diff：一个方框，里面上 `+` 下 `−`。
-     *
-     * `difference` 正是这个形状。不要退回去用"文档 + 铅笔"那类：那一族读起来是
-     * "编辑文件"，与"这一轮改了哪些文件"不是一件事。
-     */
+    /** 变更 / diff：一个方框，里面上 `+` 下 `−`。 */
     val changes: Painter @Composable get() = vector(ZhiMaterialIcons.Difference)
 
     /** 终端：窗口 + 提示符 + 光标横杠。 */
@@ -128,21 +52,9 @@ object ZhiIcons {
     /** 角色卡：人像。 */
     val roleCard: Painter @Composable get() = vector(ZhiMaterialIcons.Person)
 
-    /**
-     * 技能：拼图块（`extension` 就是拼图）。
-     *
-     * 旧代码拿待办清单顶过，于是"技能"和"跑命令"在界面上长得一模一样 ——
-     * 这正是"一个字形只能属于一个语义"这条规矩要消灭的那类错误。
-     */
+    /** 技能：拼图块（`extension` 就是拼图）。 */
     val skill: Painter @Composable get() = vector(ZhiMaterialIcons.Extension)
 
-    /**
-     * 沙箱：圆角实心箱 + `</>`（`deployed_code`）。
-     *
-     * ⚠️ 上一版是**自绘的线框箱子**，用户看过之后的原话是「沙盒的有点不太好看」。
-     * 自绘曲线很难与整套实心字形同调，所以换成上游字形。
-     * 备选是 `inventory_2`（纯箱子，没有代码标记）—— 如果觉得 `</>` 太抢眼可以换它。
-     */
     val sandbox: Painter @Composable get() = vector(ZhiMaterialIcons.DeployedCode)
 
     /** 运行环境：扳手（侧栏那一行是"内置 Termux 环境就绪"）。 */
@@ -153,25 +65,8 @@ object ZhiIcons {
     /** 附件：裸 `+`。 */
     val attach: Painter @Composable get() = vector(ZhiMaterialIcons.Add)
 
-    /**
-     * 发送：向上的箭头。
-     *
-     * ⚠️ 这一项**曾经是纸飞机**（`Send`）。换掉的理由：本工程的输入器是对话形态，
-     * 送出去的是"说一句话"而不是"发一封邮件"，纸飞机偏后者；而且 `Send` 是斜向字形，
-     * 放在方角按键里重心偏移，看起来比按钮的边还抢眼。
-     *
-     * 现在用 `ArrowUpward`，与输入框里那个 `↑` 字符是同一个语义 —— 但它是**矢量字形**，
-     * 不会因为系统字体缺字而变成方块。
-     */
     val send: Painter @Composable get() = vector(ZhiMaterialIcons.ArrowUpward)
 
-    /**
-     * 停止生成：暂停键（两条竖杠）。
-     *
-     * ⚠️ 这一项**曾经是实心方块**（`Stop`）。方块在这一栏里读起来像"停止播放 / 关闭"，
-     * 而本工程的停止其实是**中断当前回合**：对话与上下文都还在，用户可以接着发。
-     * 暂停键表达的就是这个语义，方块不是。
-     */
     val stop: Painter @Composable get() = vector(ZhiMaterialIcons.Pause)
 
     /** 向右的小箭头（"查看全部"这类跳转）。与 [expand] 同源，都是同一个 `›`。 */
@@ -184,47 +79,15 @@ object ZhiIcons {
     /** 编辑：铅笔。 */
     val edit: Painter @Composable get() = vector(ZhiMaterialIcons.Edit)
 
-    /**
-     * 折叠控制的一对：折叠态 `›`（点了展开）↔ 展开态 `⌄`（点了收起）。
-     *
-     * ⚠️ 这一对**只留给确实需要指示方向的表头**（思考过程、MCP、技能列表）。
-     * 工具行与工具组表头**不**显示箭头：那一整行本身就是可点的展开/收起开关，
-     * 再挂一个箭头等于用图标重复表达同一件事（用户的原话：「可以去掉」）。
-     *
-     * 上游没有 `chevron_down` 这个字形 —— 向下的箭头就叫 `expand_more`。
-     * 两个方向都来自同一族，所以并排切换时笔画粗细与长短是一致的。
-     */
     val expand: Painter @Composable get() = vector(ZhiMaterialIcons.ChevronRight)
     val collapse: Painter @Composable get() = vector(ZhiMaterialIcons.ExpandMore)
 
-    /**
-     * **向上**的折叠箭头（`⌃`）—— 写着「收起」的那个按钮用它。
-     *
-     * ⚠️ 与 [collapse] 的区别是**方向语义**，不是形状偏好：
-     * [collapse] 是"往下展开更多内容"（表头折叠态），而这里是"内容已经展开、
-     * 点了把它收上去"。两者在沙箱卡片上并排出现 ——
-     * 一个按钮写着「收起进程信息」却配 `⌄`（向下），方向是反的。
-     */
     val collapseUp: Painter @Composable get() = vector(ZhiMaterialIcons.ExpandLess)
 
     // ── 沙箱动作专用（语义 ≠ 通用那一档）────────────────────────────────────
 
-    /**
-     * 启动一个虚拟应用。
-     *
-     * ⚠️ **不能**复用 [send]（`ArrowUpward`）。那是"把消息发出去"的语义，
-     * 挂在"运行 APK"上等于说"把这个应用发上去" —— 沙箱页最初就是这么写的，
-     * 于是那一排按钮的图标与操作完全对不上（用户的原话：「图标风格不统一」）。
-     */
     val play: Painter @Composable get() = vector(ZhiMaterialIcons.PlayArrow)
 
-    /**
-     * 强制停止一个虚拟应用（进程被结束，不是"暂停一会儿"）。
-     *
-     * ⚠️ **不能**复用 [stop]（`Pause` 两条竖杠）。那是聊天里的"中断当前回合"
-     * —— 回合结束后还能接着发。而这里是把 guest 进程**杀掉**，是不可逆的。
-     * 圆框里的实心方块 `StopCircle` 才是系统里表达"终止"的字形。
-     */
     val forceStop: Painter @Composable get() = vector(ZhiMaterialIcons.StopCircle)
 
     /** 清空一个应用的数据（对应"清扫"，不是"删除记录"）。 */
@@ -245,12 +108,7 @@ object ZhiIcons {
     val refresh: Painter @Composable get() = vector(ZhiMaterialIcons.Refresh)
     val info: Painter @Composable get() = vector(ZhiMaterialIcons.Info)
 
-    /**
-     * 清屏：橡皮擦（`ink_eraser`）。
-     *
-     * 这里先后换过两次：自绘的三条递减横杠 → Miuix 的 `Clear`（橡皮擦 + 底线）→
-     * 本集的 `ink_eraser`。**橡皮擦**才是"擦掉"最直接的隐喻，三条横杠只是"列表"。
-     */
+    /** 清屏：橡皮擦（`ink_eraser`）。 */
     val clear: Painter @Composable get() = vector(ZhiMaterialIcons.InkEraser)
 
     /** 返回 / 返回上一级：左箭头。 */
@@ -264,23 +122,6 @@ object ZhiIcons {
 
     val search: Painter @Composable get() = vector(ZhiMaterialIcons.Search)
 
-    /**
-     * 「新建」：裸 `+`。
-     *
-     * 与 [attach] **共用同一个字形**（`Add`），但语义名分开。
-     *
-     * 为什么不去另找一个字形：`+` 就是"新建"这件事最短的表达，而小米文件管理器的
-     * 那一行也只有一个 `+`（`res/layout/phone_file_explorer_list.xml` 的
-     * `@id/action_create`）。换一个"文档 + 加号"之类的字形反而会让这一行更挤。
-     *
-     * 为什么名字要分开：`IconSetTest` 的两两撞脸检查是**按语义名**比字形的，
-     * 而这里两者本来就该是同一个字形。真按字形判重的话，
-     * 就会为了"通过检查"把它换成某个更差的形状 —— 那条检查的注释里
-     * （`terminal` 与 `tool(COMMAND)`）已经写过这层意思：
-     * **同一个字形可以用在两个语义上，只要它表达的确实是同一件事**。
-     * 而"附件"与"新建"在界面上从不同屏出现（一个在输入器、一个在文件面板），
-     * 不存在"让人分不清"的场景。
-     */
     val add: Painter @Composable get() = vector(ZhiMaterialIcons.Add)
 
     /** 新建：带圆环的加号，和附件动作区分开。 */
@@ -361,12 +202,6 @@ object ZhiIcons {
     /** 终端字符模式输入（开关）：键盘。 */
     val keyboard: Painter @Composable get() = vector(ZhiMaterialIcons.Keyboard)
 
-    /**
-     * MCP 服务器配置（入口行）：中心节点 + 四向连线（`hub`）。
-     *
-     * ⚠️ 上一版是自绘的"工具关系网"（`ZhiVectorIcons.Wrench` 那一族的形状），
-     * 用户看过之后的原话是「MCP 也是」（不好看）。
-     */
     val mindMap: Painter @Composable get() = vector(ZhiMaterialIcons.Hub)
 
     /** UI 调试页（入口行）：组件分层陈列。 */
@@ -374,16 +209,6 @@ object ZhiIcons {
 
     // ── 工具类别的图标 ──────────────────────────────────────────────────────
 
-    /**
-     * 工具卡片图标，按工具类别映射。
-     *
-     * ⚠️ `COMMAND` 必须是**终端**：旧代码挂待办清单，
-     * 于是"跑了一条命令"和"任务清单"在界面上是同一个图标。
-     *
-     * ⚠️ `OTHER` 用**代码括号**，不能用扳手 —— 扳手已经给了 [runtime]
-     * （"运行环境"= 构建/环境），两个不同的东西共用一个字形正是要消灭的问题
-     * （见 `IconSetTest` 的第 4 节：两两不许撞脸）。
-     */
     @Composable
     fun tool(kind: ToolKind): Painter = when (kind) {
         ToolKind.SEARCH -> vector(ZhiMaterialIcons.Search)

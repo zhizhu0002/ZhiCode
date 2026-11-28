@@ -62,46 +62,13 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import java.util.LinkedHashMap
 
-/**
- * Markdown 渲染层。语法解析在 `MarkdownParse.kt`（纯 Kotlin、可独立测试），
- * 本文件只负责把那份 AST 画成 Miuix 组件。
- *
- * ## 为什么不用三方库
- *
- * 这个工程跑在受限的 Termux 环境里，多引一个依赖就多一份版本冲突与离线解析风险；
- * 而 Markdown 的常用子集并不大，且必须复用 Miuix 配色。自写反而更可控。
- *
- * ## 与解析层的约定
- *
- * 解析层**保证不丢字符**：未闭合的围栏、未闭合的强调都会原样输出。
- * 这条对流式输出很关键 —— 模型正在写 `**粗` 的那一刻，不能把半截标记吃掉。
- *
- * ## 链接
- *
- * 用 Compose 1.7+ 的 [LinkAnnotation.Url]，是**真正可点击**的链接（不是只换个颜色）。
- * 本工程 Compose UI 1.12.0，满足要求。
- */
 @Composable
 fun ZhiMarkdown(
     source: String,
     modifier: Modifier = Modifier,
     bodyFontSize: TextUnit = 12.sp,
-    /**
-     * 这段文本是不是**正在流式写入**。
-     *
-     * 传 true 时才启用「已完结前缀 + 在写尾部」的分段渲染（见 [settledPrefixLength]）；
-     * 默认 false 走整段解析 —— 已定稿的消息不该有任何理由拆开解析。
-     *
-     * ⚠️ 调用方必须在流式结束时把它翻回 false：尾部是按**行内**渲染的（不做块级解析），
-     * 只有整段重解析一次，最后那一段的标题/列表/代码块才会拿到正确的块级样式。
-     */
     streaming: Boolean = false,
-    /**
-     * 正文字体族。为空时沿用 Compose 默认字体。
-     *
-     * 只作用于**正文与标题**，不作用于代码块：代码块永远是等宽（见下面 `FontFamily.Monospace`
-     * 那几处）—— 用衬线体渲染代码会让对齐彻底失去意义。
-     */
+    /** 正文字体族。 */
     bodyFontFamily: FontFamily? = null,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -163,38 +130,12 @@ fun ZhiMarkdown(
     }
 }
 
-/**
- * 流式渲染的切分结果。
- *
- * 用 `remember(source, streaming)` 一次性算出，**不要**在组合里各算各的：
- * `settled` 只在跨块时变（几十次），`tail` 每个 delta 都变（短），
- * 于是 `parseMarkdown` 的 key 也只在跨块时失效 —— 这正是这次优化的全部意义。
- */
+/** 流式渲染的切分结果。 */
 private class MdStreamSplit(val settled: String, val tail: String)
 
-/**
- * 定稿 Markdown 的跨组合缓存。
- *
- * `remember(source)` 只覆盖当前组合树：LazyColumn 回收一条历史消息后，下一次滚回来
- * 仍会重新做整篇块解析。这里缓存的是不含主题/字号的纯 AST，因此可以安全地跨消息、
- * 跨主题和跨组合复用；行内 `AnnotatedString` 仍由各自的 [InlineStyles] 缓存，避免把
- * 主题色对象带进全局缓存。
- *
- * 只缓存定稿正文，并限制条数与源文本总量。流式文本每个 delta 都是新 key，放进这里
- * 会把有限缓存变成“只进不命中”的队列；超长正文也宁可交给组合级 remember，避免
- * 一个很大的回复长期占住进程级缓存。
- */
+/** 定稿 Markdown 的跨组合缓存。 */
 private object MarkdownBlockCache {
-    /**
-     * 缓存多少条**定稿正文**的块解析结果。
-     *
-     * <p>原先只有 12。`LazyColumn` 会回收组合，滚回去一条历史消息就要重新整篇解析 ——
-     * 而解析会分配整棵块 AST 与跨段 `AnnotatedString`。真机日志里滑动长会话的分配速率
-     * 约 33MB/s、单次 GC 总耗时最高 794ms，这条路径贡献了一份。
-     *
-     * <p>抬到 48 是安全的：真正的内存闸门是下面的 [MaxSourceChars]（源文本总字符数），
-     * 条数只是"能记住几条"的上限。短消息多了不会撑爆缓存，长消息仍会按字符数被挤出去。
-     */
+    /** 缓存多少条**定稿正文**的块解析结果。 */
     private const val MaxEntries = 48
     private const val MaxSourceChars = 512 * 1024
     private const val MaxCacheableSourceChars = 128 * 1024
@@ -230,13 +171,7 @@ private object MarkdownBlockCache {
     }
 }
 
-/**
- * 短于这个长度就不切。
- *
- * 两个理由：一是短文本整段解析本来就比「切一次 + 建两个对象」更划算；
- * 二是不切就没有「尾部按行内渲染」这回事，短消息在流式期间与最终形态**完全一致**，
- * 不会出现"先看着像纯文本、定稿后突然多出标题样式"的跳变。
- */
+/** 短于这个长度就不切。 */
 private const val MinSettledChars = 512
 
 private fun splitForStreaming(source: String, streaming: Boolean): MdStreamSplit {
@@ -410,27 +345,6 @@ private fun BulletRow(block: MdBlock.Bullet, fontSize: TextUnit, styles: InlineS
     }
 }
 
-/**
- * 代码块。三项显示行为都由 `ThemeSettings` 的开关驱动（见「聊天显示 → 代码显示」）：
- *
- * | 开关 | 关闭（默认） | 打开 |
- * |---|---|---|
- * | `codeWrap` | 横向滚动，缩进与对齐保持原样 | 软换行，长行折到下一行 |
- * | `codeCollapse` | 全展开 | 超过 [CodeCollapseLines] 行时先折叠 |
- * | `codeLineNumbers` | 无行号 | 左侧等宽行号槽 |
- *
- * 默认全关是有意的：代码块的第一用途是**看清缩进结构**，而软换行会破坏它；
- * 行号对"读一段示例"没用，只对"报告第 42 行"有用。要的人自己开。
- *
- * ## 行号为什么并进同一段文本
- *
- * 另一种写法是左侧一列 `Text`、右侧一列 `Text`。那样在 [codeWrap] 打开时**必然错位** ——
- * 折行后左右两列的行边界不再对应。把行号作为带样式的字符并进同一段文本，
- * 等宽字体 + `tnum` 保证列对齐，折行时也只是"续行顶格"，与 `cat -n` 的行为一致。
- *
- * 复制按钮给的仍然是**不带行号的原文**（`block.body`）：行号是显示层的装饰，
- * 不该被粘进别人的编辑器里。
- */
 @Composable
 private fun CodeBlock(block: MdBlock.Code, fontSize: TextUnit) {
     val scheme = MiuixTheme.colorScheme
@@ -581,17 +495,6 @@ private const val CodeCollapseLines = 12
 /** 「已复制」保留多久（参考实现 `MarkdownRenderer` 用的是 520ms）。 */
 private const val CopyFeedbackMs = 520L
 
-/**
- * 行内公式的段落渲染。
- *
- * Compose 的 `Text` 支持把任意 Composable 嵌进文本流（[androidx.compose.foundation.text.InlineTextContent]）：
- * 文本里留一个占位符，`inlineContent` 表里给出那个占位符对应的组件与尺寸。
- * 这样公式图片就会像一个大号字符一样参与换行与基线对齐，而不是把整段拆成多个 `Text` ——
- * 拆开的话换行、两端对齐、行高都会各算各的，读起来是断的。
- *
- * ⚠️ 占位符必须用 `\uFFFC`（OBJECT REPLACEMENT CHARACTER）：它是 Unicode 里专门表示
- * "这里有一个对象"的字符，测量宽度为 0，所以不会在公式两侧多出空隙。
- */
 @Composable
 private fun InlineLatexText(
     segments: List<com.zhizhu.zhicode.compose.ui.math.LatexSegment>,
@@ -673,27 +576,6 @@ private fun InlineLatexText(
 /** 行内公式占位符的 id 前缀。带前缀是为了不与未来其它内嵌内容撞号。 */
 private const val FormulaIdPrefix = "latex:"
 
-/**
- * `AnnotatedString.Builder.appendInlineContent` 的等价实现。
- *
- * ## 为什么不直接调那个函数
- *
- * 它在当前钉住的 Compose UI 版本（1.12.0）里**不是** `AnnotatedString.Builder` 的成员，
- * 也不在 `androidx.compose.ui.text.AnnotatedStringKt` 里（反编译核过：那个类只有
- * `withStyle` / `withLink` / `withAnnotation` 等）。直接调会得到
- * "Unresolved reference"。
- *
- * ## 它本来做的事
- *
- * 只有两步，都很简单，所以这里照做而不是换方案：
- * 1. 在当前长度位置打一条字符串注解，tag 是 foundation 约定的那个常量，
- *    value 是无障碍朗读用的替代文本；
- * 2. 追加一个 `\uFFFC`（OBJECT REPLACEMENT CHARACTER）—— 它测量宽度为 0，
- *    渲染时会被 `inlineContent` 表里对应的 Composable 替换掉。
- *
- * tag 字符串必须与 `androidx.compose.foundation.text` 内部用的完全一致，
- * 否则 `Text` 找不到那个占位符、会把它当普通字符画出一个缺字方块。
- */
 private fun androidx.compose.ui.text.AnnotatedString.Builder.appendFormula(
     id: String,
     alternate: String,
@@ -710,13 +592,7 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendFormula(
 /** ⚠️ 字面量必须与 foundation 内部常量逐字一致，不要"顺手改个更好看的名字"。 */
 private const val FormulaInlineContentTag = "androidx.compose.foundation.text.inlineContent"
 
-/**
- * 表格。
- *
- * 列宽用 `weight` **等分**而不是按内容自适应：Compose 没有跨行测量，
- * 要做到真正的内容自适应需要自己两趟测量，代价远大于收益；等分在
- * 模型输出的小表格上观感已经足够，且不会因为某一列内容特别长而挤爆布局。
- */
+/** 表格。 */
 @Composable
 private fun MdTableView(table: MdBlock.Table, fontSize: TextUnit, styles: InlineStyles) {
     val scheme = MiuixTheme.colorScheme
@@ -807,150 +683,25 @@ private fun rememberInlineStyles(fontSize: TextUnit): InlineStyles {
     }
 }
 
-/**
- * [inline] 的 `remember` 包装。
- *
- * 每一步都值得：`inline` 会跑一遍 [parseInline]（逐字符扫描 + 大量 substring），
- * 再 `buildAnnotatedString` 建一份带 span 副本的对象。而 `MdBlockView` 的调用点原本是
- * 直接 `inline(block.text, styles)` —— 只要**任何**一次重组（父级状态变化、滚动时
- * 复用、主题切换）就会把每个段落的行内解析重跑一遍。
- *
- * key 用 `(文本, 样式)`：`InlineStyles` 没有 `equals`，靠 [rememberInlineStyles] 返回的
- * 同一个实例保证恒等；它在主题/字号不变时不会换新，所以不会破坏缓存。
- */
+/** [inline] 的 `remember` 包装。 */
 @Composable
 private fun rememberInline(text: String, styles: InlineStyles): AnnotatedString =
     remember(text, styles) { inline(text, styles) }
 
-/**
- * 流式正文的「前沿淡入」：**最末尾 [TailFadeChars] 个字按离末尾的距离给一个透明度斜坡**。
- *
- * ## 为什么是"空间斜坡"而不是"定时器逐字揭示"
- *
- * 常见的打字机做法是起一个定时器（官方 20ms/字、GetStream 30ms/词），每 tick 把
- * "可见字数" +1。那条路在 Compose 里有三个代价，本工程都实测过：
- *
- *  1. **每秒多 20~50 次重组。** 本轮刚把 `ChatArea` 从 69 次/秒压到 2 次/秒
- *     （见 ChatArea 的说明），定时器等于把这个量在正文节点上再引回来。
- *  2. **会追不上。** 揭示速率写死的话，模型出字快于它时就积压；正文越长越明显
- *     —— 官方自己都得按长度把间隔从 20ms 退化到 32/48ms，正是这个病的症状。
- *  3. **它是"事后补动画"**：文字其实早就到了，只是被压着不放，等于给用户**加延迟**。
- *
- * 空间斜坡把这三条一起解决：透明度是**位置**的函数，不是时间的函数。
- * 于是：
- *
- *  · **零额外帧。** 不需要动画、不需要定时器 —— 斜坡只在文本内容变化时重算一次
- *    （而文本本来就每个 delta 变一次，这是流式的固有成本，不是这里加的）。
- *  · **速率自适应，恒不落后。** 一个字符从末尾往前"走"出斜坡所花的时间是
- *    `斜坡宽度 / 到达速率`：出字快就淡得快，出字慢就淡得慢。永远没有队列。
- *  · **不加延迟。** 文字到达即显示，只是末尾那几个还浅着、随后变实。
- *
- * ## ⚠️⚠️ 斜坡宽度必须按**时间**给，不能按**字数**给（第一版就是这里错了）
- *
- * 第一版把宽度写死成 8 个字，结果**用户完全看不到**。原因不是没生效，是物理：
- *
- *     可见时长 = 斜坡宽度 ÷ 到达速率
- *
- * 8 个字在 30 字/秒下是 265ms（勉强），在 100 字/秒下只有 **80ms**；
- * 而真实的流式每个 delta 常常一次带进好几个字符 —— 最新那 8 个字往往
- * **同一帧内就来齐了**，于是斜坡瞬间走完，再叠加一个很浅的下限（0.52），
- * 就是"什么都看不见"。
- *
- * 所以宽度改成 [TailFadeRate] 实测出来的结果：目标时长固定 [TailFadeMillis]，
- * 宽度 = 到达速率 × 目标时长，只受 [TailFadeMinChars] 下限约束。
- * 于是**快模型和慢模型看到的是同样长的一段淡入**。
- *
- * ⚠️ 这一点仍然是零定时器：速率只用"这次比上次多几个字 / 隔了多少纳秒"估计，
- * 而那两个量在每次 delta 组合时本来就拿得到（文本变了才会有这一次组合）。
- * 没有额外的帧、没有额外的状态写入。
- *
- * ## ⚠️⚠️ 宽度上限**不能**卡在"一行左右"（第二版就是这里错了）
- *
- * 第二版把上限设成 28 个字，用户反馈「输出太快会导致动画不明显」。
- * 原因还是同一个公式：
- *
- *     可见时长 = 斜坡宽度 ÷ 到达速率
- *
- * 上限一卡，**超过 `上限 ÷ 目标时长` 字/秒之后时长就又开始变短**：
- *
- *     40 字/秒 → 17 字        → 420ms   ✅ 目标内
- *    100 字/秒 → 28 字（截断） → 280ms   ❌
- *    273 字/秒 → 28 字（截断） → 103ms   ❌ 几乎看不见
- *
- * （273 字/秒不是假想值：本工程的「调试 · 本地模拟」provider 是 22ms/6 字，
- *   正好就是这个速率 —— 也就是说**调试模式下必然撞到这个上限**。）
- *
- * 所以 [TailFadeMaxChars] 取 120：420ms 一直守到 **285 字/秒**，
- * 覆盖真实模型的全部常见区间与调试 provider。
- *
- * 上限仍然存在，只为一件事兜底：极端突发（一次几百字）不该让斜坡宽到几屏。
- *
- * ## ⚠️ 它不完美的地方（写在这里免得被当成 bug）
- *
- * 流**中途停顿**时（模型在思考）末尾那一截会停在斜坡上、达不到全不透明。
- * 这是刻意的取舍：换成定时器方案停顿时会淡完，但代价是上面那三条。
- * 停顿期间被"停住"的那一截最长就是 [TailFadeMaxChars]（约 3 行），
- * 且下限是 [TailFadeFloor]（不是 0），所以观感是"末尾几行渐变着变浅"，仍然读得清。
- * 流式一结束就不再有斜坡（`streaming` 翻假 → 不再走这条路），所以**定稿后一律全实**。
- */
 
 /** 一个字从最浅走到全实的目标时长。想更明显就调大它（斜坡会变宽）。 */
 private const val TailFadeMillis = 420f
 
-/**
- * 斜坡宽度的下限。
- *
- * 不能太小：小到几个字就又回到"看不见"。12 个字在 30 字/秒下 ≈ 400ms，够看见。
- */
+/** 斜坡宽度的下限。 */
 private const val TailFadeMinChars = 12
 
-/**
- * 斜坡宽度的上限。
- *
- * ⚠️ 这个值**不是**用来"把停顿时的半透明那一截压短"的 —— 那样做会顺带把
- * 高到达速率下的时长也压短（见类文档里的算式）。它只为一件事兜底：
- * 极端突发（一次几百字）不该让斜坡宽到几屏。
- *
- * 120 字 ≈ 3 行，同时保证 [TailFadeMillis] 一直守到 285 字/秒。
- */
 private const val TailFadeMaxChars = 120
 
-/**
- * 两次采样之间的最大间隔（秒）。超过它就不更新速率估计。
- *
- * ## 为什么需要这个
- *
- * 模型"思考"时会停顿几秒。停顿结束后第一个 delta 的间隔里**大部分是思考时间**，
- * 拿它算速率会得出一个很低的数（几字/秒），于是斜坡塌到下限、接下来几个 delta
- * 才慢慢被 EMA 拉回来 —— 观感就是"刚恢复输出那一下，淡入突然变窄又变宽"。
- *
- * 那个样本说的其实不是"流式节奏"，而是"模型想了多久"，所以直接不要它。
- * 0.5s 定得比较宽松：正常流式的 delta 间隔是 20~50ms，差一个量级，
- * 不会把真正"出字变慢"的情形误判成停顿。
- *
- * 早退发生在**已经写回 lastLength / lastAt 之后**，所以下一次采样照常按新时刻算。
- */
 private const val TailFadeMaxGapSeconds = 0.5f
 
-/**
- * 斜坡最浅处的透明度。
- *
- * 0.30 —— 比第一版的 0.52 深得多（那半档变化本来就看不出来），
- * 又留得够读：停顿期间最末那个字是 0.30，往前一个字比一个字实。
- */
+/** 斜坡最浅处的透明度。 */
 private const val TailFadeFloor = 0.30f
 
-/**
- * 到达速率的估计器：把"斜坡宽度"从**字数**换算成**时间**。
- *
- * ⚠️ 字段全部是**普通字段，不是 snapshot state** —— 这一点是刻意的：
- * 写 state 会让它自己触发重组，变成"写 → 重组 → 再写"的回路
- * （本工程在 FrameTrace 里记过这个坑）。这里的写只发生在组合期间，
- * 不会让任何东西失效。
- *
- * ⚠️ 同一份文本重复组合时（`length` 没变）必须**原样返回、不更新估计**：
- * 否则 dLen = 0 → 速率被 EMA 拉向 0 → 斜坡莫名缩短。
- */
 private class TailFadeRate {
     private var lastLength = 0
     private var lastAtNanos = 0L
@@ -985,12 +736,7 @@ private class TailFadeRate {
     }
 }
 
-/**
- * [inline] + 可选的前沿淡入。
- *
- * [fade] 为假时**完全等于** [rememberInline]（同一个 key 组合、同一个结果），
- * 所以定稿消息与历史消息一分钱都不多付。
- */
+/** [inline] + 可选的前沿淡入。 */
 @Composable
 private fun rememberInlineFading(
     text: String,
@@ -1003,13 +749,6 @@ private fun rememberInlineFading(
     if (fade) fadeTailOf(annotated, base, ramp) else annotated
 }
 
-/**
- * 给末尾 [ramp] 个字叠一层透明度。
- *
- * ⚠️ **跳过已经有自己颜色的字符**（`代码` 的 primary 色、链接色、行内高亮的底色）。
- * 不跳的话，斜坡的颜色会盖掉它们的语法色 —— 末尾那半行里的代码会**短暂掉色**，
- * 看起来像闪了一下，比不淡还糟。宁可让那几个字不淡，也不要颜色乱跳。
- */
 private fun fadeTailOf(source: AnnotatedString, base: Color, ramp: Int): AnnotatedString {
     val length = source.text.length
     if (length == 0) return source
@@ -1032,17 +771,6 @@ private fun fadeTailOf(source: AnnotatedString, base: Color, ramp: Int): Annotat
     return if (touched) builder.toAnnotatedString() else source
 }
 
-/**
- * 第 [index] 个字的透明度：离末尾越远越实，超过斜坡宽度 [ramp] 就是全实。
- *
- * 线性就够 —— 起点和终点之间的跨度最多 [TailFadeMaxChars] 个字，看不出曲线差别，
- * 而线性少一次 pow、少一个要调的参数。
- *
- * ⚠️ 分母是 `ramp - 1`（不是 `ramp`），这样**末尾那个字正好落在 [TailFadeFloor]**、
- * 往前第 ramp 个字正好全实。写成除以 `ramp` 的话两端都够不到：
- * 末尾那个字够不到下限、最前一个也到不了 1（那个 bug 会让注释与代码对不上，
- * 而且"下限"这个可调参数就失去意义了）。第一版真写出过这个 bug。
- */
 private fun fadeAlpha(index: Int, length: Int, ramp: Int): Float {
     if (ramp <= 1) return 1f
     val fromEnd = length - index // 末尾那个字是 1
@@ -1051,12 +779,7 @@ private fun fadeAlpha(index: Int, length: Int, ramp: Int): Float {
     return (TailFadeFloor + (1f - TailFadeFloor) * t).coerceAtMost(1f)
 }
 
-/**
- * [MdSpan] 列表 → [AnnotatedString]。
- *
- * 链接走 [withLink] + [LinkAnnotation.Url]，由 Compose 自己处理点击与
- * 按下高亮，不需要手动 `clickable` 或 `LocalUriHandler`。
- */
+/** [MdSpan] 列表 → [AnnotatedString]。 */
 private fun inline(text: String, styles: InlineStyles): AnnotatedString {
     val spans = parseInline(text)
     return buildAnnotatedString {

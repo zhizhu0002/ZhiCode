@@ -23,27 +23,6 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /** 导出图的固定宽度。540dp 在手机上按 3x 出图约 1620px，足够清晰而不至于几 MB。 */
 internal val ExportImageWidth = 540.dp
 
-/**
- * 导出的对话图片。
- *
- * ## ⚠️ 为什么这里必须自己包一层 `ZhiAppTheme`
- *
- * 这段内容由 `BitmapComposer` 放进一个**独立的 `ComposeView`** 里渲染 ——
- * 那是一个**全新的 composition**，拿不到主界面那棵树上的任何 `CompositionLocal`
- * （`MiuixTheme`、`LocalThemeSettings`、`LocalZhiDark` 全都读不到）。
- *
- * 不自己包一层的话，所有 `MiuixTheme.colorScheme.*` 都会取到库的**默认值**：
- * 深色主题下导出的是一张白底黑字的图，与界面完全两回事。
- *
- * 所以调用点必须把当前 `ThemeSettings` 传进来（见 `ImageExportLauncher`），
- * 而不是指望"跟随系统"。
- *
- * ## 内容取舍
- *
- * - 只导出**正文**与工具摘要；
- * - **不**导出思考过程：它往往比正文长几倍，导出图高度会失控；
- * - 不画卡片阴影/玻璃/模糊：导出图没有背景可采样，那些效果只会变成灰块。
- */
 @Composable
 internal fun ExportedChatImage(
     items: List<ChatItem>,
@@ -118,12 +97,7 @@ private fun ExportMessage(
                 )
             }
         }
-        /*
-         * 思考过程：按面板上的两个开关决定"画不画"与"展不展开"。
-         *
-         * 默认折叠成一行标记：思考常常比正文长好几倍，全画出来会让图片主体
-         * 变成推理过程而不是回答本身。
-         */
+        /* 思考过程：按面板上的两个开关决定"画不画"与"展不展开"。 */
         if (includeReasoning && item.thinking.isNotBlank()) {
             val thinking = item.thinking.take(if (expandReasoning) 4000 else 0)
             Text(

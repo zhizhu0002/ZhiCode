@@ -1,11 +1,6 @@
 package com.zhizhu.zhicode.compose.ui.math
 
-/**
- * 一段正文切出来的片段：普通文本，或一段数学公式。
- *
- * 之所以做成纯数据 + 纯函数，是因为**切分规则**本身是最容易出错、也最值得写单测的部分
- * （定界符、转义、代码跨度里的 `$`、流式时未闭合的那一半），而它不该依赖 Compose。
- */
+/** 一段正文切出来的片段：普通文本，或一段数学公式。 */
 sealed interface LatexSegment {
     data class Plain(val text: String) : LatexSegment
 
@@ -16,34 +11,6 @@ sealed interface LatexSegment {
     data class Formula(val latex: String, val display: Boolean) : LatexSegment
 }
 
-/**
- * 把正文切成 [LatexSegment] 序列。
- *
- * ## 支持的定界符
- *
- * | 写法 | 含义 | 来源习惯 |
- * |---|---|---|
- * | `$…$` | 行内公式 | 通用 Markdown / TeX |
- * | `$$…$$` | 独立公式 | 通用 Markdown / TeX |
- * | `\(…\)` | 行内公式 | 原生 LaTeX |
- * | `\[…\]` | 独立公式 | 原生 LaTeX |
- *
- * 四种都要认：模型输出里这四种都常见，只认 `$` 会让相当一部分回答变成一堆反斜杠。
- *
- * ## 三条硬规则
- *
- * 1. **代码跨度里的 `$` 不算公式**。`` `awk '{print $1}'` `` 里的 `$1` 是字段引用，
- *    把它当公式会渲染成乱码；而且这类内容在工具输出里极其常见。
- * 2. **`\$` 是转义的字面美元号**。否则「价格 \$5 到 \$10」会被当成一段公式。
- * 3. **流式时未闭合的定界符原样保留**。模型正在写 `$x^2` 的那一刻，不能把半截吃掉；
- *    等它写出收尾的 `$` 才切换成公式。这条与解析层"保证不丢字符"的约定一致。
- *
- * ## 已知的取舍
- *
- * 跨公式的强调不生效：`**粗 $x$ 体**` 里的 `**` 会被切成三段的边界吃掉，
- * 表现为 `**粗 ` 与 ` 体**` 各自按字面显示。这是刻意的——把行内强调解析搬到
- * 切分之前，就要在公式两侧重建 span，复杂度远大于收益（这种写法在回答里几乎不出现）。
- */
 fun splitLatex(source: String): List<LatexSegment> {
     if (source.isEmpty()) return emptyList()
     // 快速退出：绝大多数段落里没有任何定界符，不必走扫描。
@@ -155,12 +122,7 @@ fun splitLatex(source: String): List<LatexSegment> {
     return out
 }
 
-/**
- * 从 [from] 开始找一个**可作为行内公式收尾**的 `$`。
- *
- * 跳过被转义的 `\$` 与代码跨度里的反引号段；遇到换行就放弃 —— 行内公式不跨行，
- * 跨行的 `$` 极可能是两处独立的字面美元号（如价格列表）。
- */
+/** 从 [from] 开始找一个**可作为行内公式收尾**的 `$`。 */
 private fun findInlineDollarClose(source: String, from: Int): Int {
     var i = from
     while (i < source.length) {
@@ -179,13 +141,7 @@ private fun findInlineDollarClose(source: String, from: Int): Int {
     return -1
 }
 
-/**
- * 整段是否**恰好**是一个独立公式。是则返回公式内容，否则返回 null。
- *
- * 独立公式在 Markdown 里通常自成一个段落（前后空行），所以"整段只有一个公式"是最常见
- * 的显示形态。这种情形要居中、且不与正文行高混排；而夹在句子中间的 `$$…$$`
- * （少见但合法）走行内路径即可。
- */
+/** 整段是否**恰好**是一个独立公式。 */
 fun aloneDisplayFormula(text: String): String? {
     val trimmed = text.trim()
     val body = when {
