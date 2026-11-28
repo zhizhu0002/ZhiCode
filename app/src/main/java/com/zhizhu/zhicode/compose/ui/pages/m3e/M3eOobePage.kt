@@ -6,7 +6,11 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,12 +34,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -193,6 +200,8 @@ internal fun M3eOobePage(state: WorkspaceUiState, viewModel: WorkspaceViewModel)
                     )
                 }
             }
+            // 换步骤时整块重进：滑入 + 淡入，与 ZL2 的 WelcomeScreen 同一手法。
+            Box(modifier = Modifier.m3eStepEntrance(step)) {
             when (step) {
                 OobeStep.PERMISSIONS -> {
                     M3eSectionHeader("基础权限")
@@ -286,7 +295,24 @@ internal fun M3eOobePage(state: WorkspaceUiState, viewModel: WorkspaceViewModel)
                     }
                 }
             }
+            }
         }
+    }
+}
+
+/** 步骤内容进场：从右侧滑入并淡入，缓动沿用 ZL2 的 (0.05, 0.7, 0.1, 1)。 */
+@Composable
+private fun Modifier.m3eStepEntrance(step: OobeStep): Modifier {
+    var appeared by remember(step) { mutableStateOf(false) }
+    LaunchedEffect(step) { appeared = true }
+    val progress by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = tween(durationMillis = 380, easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)),
+        label = "oobeStepEntrance",
+    )
+    return this.graphicsLayer {
+        translationX = 48.dp.toPx() * (1f - progress)
+        alpha = progress
     }
 }
 
