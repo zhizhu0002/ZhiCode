@@ -51,55 +51,9 @@ import top.yukonga.miuix.kmp.nav.transition.NavTransitions
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 
-/**
- * 二级页内部的一页。
- *
- * [id] 是页面栈里的路由键（它同时是状态保留的键），[depth] 只用来给调用方排序，
- * 转场方向由 Miuix 的 nav 自己按栈深算。用数据类而不是让每个页面各定义一个
- * sealed 层级：页面之间没有共享字段，各自定义只会让五个调用点各写一遍样板。
- *
- * 必须是**值相等的 data class**：Miuix 用 key 实例做 entry 的 `contentKey`
- * （页面状态的存档标识），`toString()` 必须由值派生，否则进程重启后状态会静默重置。
- */
+/** 二级页内部的一页。 */
 internal data class SettingsPageKey(val id: String, val depth: Int) : NavKey
 
-/**
- * 二级页内部的**页面栈**。
- *
- * ## 为什么需要它
- *
- * 二级页（API 配置 / MCP / 技能 / 角色卡 / 记忆）各自有好几态：列表 → 新建表单 →
- * 编辑器。这些态以前是调用方一个 `when {}` 里的内容**硬切** —— 而
- * `AppScaffold` 的页面栈只反映「哪一页开着」（`state.skills != null`），
- * 栈深度不变，外层 `NavDisplay` 就无事可做，于是**一点动画都没有**。
- * 用户报的「三级窗口动画非常不完整」就是这个。
- *
- * ## 为什么用 Miuix 自己的 `NavDisplay`，而不是 `AnimatedContent`
- *
- * 第一版是手搓的 `AnimatedContent` + `slideInHorizontally` / `slideOutHorizontally`，
- * 用户实测后报**两个毛病**，两个都出在它身上：
- *
- * 1. **卡**：`slideInHorizontally` 是**布局**型动画（改的是 `Modifier.offset`），
- *    整屏 `Scaffold` + `LazyColumn` 每帧都要重新测量与布局。Miuix 自己的转场走
- *    graphicsLayer，它的源码里明确写着这样 "cost zero recomposition"。
- * 2. **奇怪**：进入用的是 spring（`folmeSpring(0.9f, 0.3f)`，会过冲），退出用的是
- *    `tween(200)` —— 两条曲线时长不匹配；而且没有 Miuix 转场自带的 dim 与
- *    **跟随屏幕圆角的裁剪**，所以看着不像系统转场。
- *
- * 所以现在**逐字复用与外层 `AppScaffold` 相同的参数**：同一个 [NavTransitions.MiuixDefault]、
- * 同一套 [NavDisplayEffects]。内层与外层是同一套组件、同一套数值，手感自然一致。
- *
- * ## 与外层的关系
- *
- * - **边缘滑动返回：内层也开了**（`entry(swipeDismiss = swipeBack)`，方向随
- *   `LocalLayoutDirection`，与外层同一套写法）。之前没开是怕"内外两层在边缘上打架"，
- *   读了 miuix-nav 的实现（`NavDisplay.kt` 600 行附近的注释）之后确认不会：滑动识别器
- *   挂在**容器**上，但认领手势前会等所有后代跑完 Main pass —— 三级页上内层识别器先拿到、
- *   弹三级页；内层在栈底（`enabled = topIndex > 0` 为假）时它不认领，外层才接手弹二级页。
- *   也就是说"谁弹谁"由"内层还有没有得弹"自然决定，不需要人为分工。
- * - **`BackHandler` 只在 `depth > 0` 时生效**：最外层那一页的返回要交给外层
- *   `NavDisplay`（关掉整个二级页），这里不能抢。
- */
 @Composable
 internal fun SettingsPageStack(
     path: List<SettingsPageKey>,
@@ -162,18 +116,6 @@ internal fun SettingsPageStack(
     }
 }
 
-/**
- * 记住「最后一次非空的页面数据」。
- *
- * ## 为什么必须有它
- *
- * `AnimatedContent` 的退出动画期间**离场页仍在绘制**，而那时外部的当前状态已经变空
- * （退回列表 → `form` 被置 null）。若离场页直接读当前状态，它要么渲染成空白、
- * 要么在 `!!` 上崩掉 —— 动画越"完整"，这个问题越容易暴露。
- *
- * `AppScaffold` 对每个二级页都用了同一个策略（`lastApiConfig` / `lastSkills` …），
- * 这里把那套写法收成一个原语，免得五个二级页各写一遍。
- */
 @Composable
 internal fun <T : Any> rememberLastNonNull(value: T?): T? {
     var last by remember { mutableStateOf<T?>(null) }
@@ -181,139 +123,27 @@ internal fun <T : Any> rememberLastNonNull(value: T?): T? {
     return last
 }
 
-/**
- * 设置的二级整页（API 配置 / MCP / 技能 / 角色卡 / 记忆），与设置主页同款骨架：
- * Miuix 原生 Scaffold + SmallTopAppBar（返回键 = `ZhiIcons.back`）+ LazyColumn 滚动。
- *
- * 以前这些页面是 OverlayDialog 弹窗壳（DialogShell + 底部按钮排），和整页设置
- * 并存时观感割裂 —— 弹窗宽度封顶、滚动高度受限、按钮位置和整页不一致。
- * 收敛到一个壳之后，二级页和主页只有标题与动作差异。
- *
- * [action]（如「新增 / 保存」）放顶栏 TextButton。设置主页的顶栏**没有**动作按钮
- * （那一屏是自动保存，见 SettingsDialog 顶部说明），但二级页的动作是真的要提交一次
- * 的操作（新增一条 API 配置、保存一张角色卡），所以仍留在右上角。
- *
- * 页面内若有多态，外面要套 [SettingsPageStack] —— 只写多个 `SettingsSubPage`
- * 分支的话它们会被硬切，没有转场动画。
- */
+/** 设置的二级整页（API 配置 / MCP / 技能 / 角色卡 / 记忆），与设置主页同款骨架 */
 @Composable
 internal fun SettingsSubPage(
     title: String,
     onBack: () -> Unit,
-    /**
-     * 标题下方的第二行说明。
-     *
-     * <p>为 **null 时不渲染任何额外节点** —— 其余二级页（API 配置 / MCP / 技能 /
-     * 角色卡 / 记忆 / 搜索服务）的布局与折叠高度都不受影响。用 null 而不是空串
-     * 表达"没有副标题"：空串会让下面那个 `Column` 多画一个有行高但没内容的
-     * `Text`，折叠态顶栏凭空高出一截。
-     *
-     * <p>为什么需要它：沙盒页的标题是「沙箱」，但"沙箱"这个词在本应用里
-     * 同时指内置 Termux 与 BlackBox 运行时。第二行 `虚拟安卓运行环境 · BlackBox`
-     * 是那一屏唯一说清"这是哪一个沙箱"的地方，塞进状态卡里反而会被当成状态。
-     */
     subtitle: String? = null,
     action: Pair<String, (() -> Unit)?>? = null,
-    /**
-     * 右下角的悬浮操作按钮。
-     *
-     * ⚠️ 必须走 Miuix [Scaffold] 的这个**原生槽位**，不要在页面里套一层 `Box` +
-     * `Modifier.align(BottomEnd)` 把 FAB 盖上去：那样 FAB 的**点击与布局都不归
-     * Scaffold 管** —— 槽位里的 FAB 由 Scaffold 亲自摆放（还带 `FabPosition` /
-     * `FabSpacing` 与 insets 处理），而手搓的那一层只是画在内容上面，
-     * 位置、层级、点击都会被内容层影响。Miuix 官方 example 用的就是这个槽位
-     * （`AppContent.kt` 的 `Scaffold(floatingActionButton = { FloatingActionButton(...) })`）。
-     */
     floatingActionButton: (@Composable () -> Unit)? = null,
-    /**
-     * 向下滚动时把 FAB 收起来（参考实现的详情页就是这么做的）。
-     *
-     * 默认 false：其它二级页的 FAB 是**主操作**（比如「添加技能」），
-     * 滚下去就消失会让人以为按钮坏了。技能详情页那个 FAB 不一样 ——
-     * 它是"往当前技能里加文件"，而列表越长越说明用户正在读文件、不是在加文件，
-     * 这时让它让开视线（也少挡住最后几行）是合理的。
-     *
-     * 收/放用 `AnimatedVisibility`（缩放 + 淡入淡出），不是直接换布局：
-     * 直接切会让 FAB"啪"地闪一下。方向由 [listState] 的滚动增量判定 ——
-     * 往上滑（delta < 0）就放出来，往下滑就收起来。用
-     * `firstVisibleItemIndex * 大常数 + offset` 拼成一个单调的滚动量：
-     * LazyColumn 里只取 offset 的话，跨列表项时会误判方向。
-     */
+    /** 向下滚动时把 FAB 收起来（参考实现的详情页就是这么做的）。 */
     hideFabOnScrollDown: Boolean = false,
-    /**
-     * 这一页的**整屏浮层**（bottom sheet / 对话框）挂载点。
-     *
-     * ⚠️ 浮层必须挂在这里，不能写在调用方的顶层。
-     *
-     * Miuix 的弹层不是随便画在哪都行的：`DialogLayout` 只是把一个 `DialogState`
-     * 注册进 **Scaffold 提供的**那个列表（`LocalDialogStates` / `LocalRootDialogStates`，
-     * 见 `Scaffold.kt` 的 `CompositionLocalProvider`），真正的绘制由该 Scaffold 的
-     * `MiuixPopupHost` 负责。所以浮层必须处在**某个 Scaffold 的 composition 之内**。
-     *
-     * 二级页（技能 / API 配置 / MCP …）是 `NavDisplay` 的 entry，与工作区那个
-     * Scaffold 是**兄弟**关系 —— 它们在自己的层级上**没有任何 Scaffold**。
-     * 用户报的「skill 的加号点不了」就是这个：`OverlayBottomSheet` 写在二级页的顶层，
-     * 那里既没有 local 也没有 root 宿主，浮层根本没有地方可以挂，于是点了没反应。
-     *
-     * 挂在这里还顺带解决两件事：
-     * 1. 它在本页 Scaffold 的 composition 里 → 宿主找得到；
-     * 2. 它在 `LazyColumn` **之外**（下方那个 `Box` 直接是 Scaffold content）
-     *    → 不会因为列表项滚出可视区被销毁而把浮层一起关掉。
-     */
     overlay: (@Composable () -> Unit)? = null,
-    /**
-     * 顶栏动作是否可点。动作在飞（保存 / 导入）时置 false，避免重复提交 ——
-     * 判定来自 `LocalActionBusy`，页面不该自己维护第二份"正在保存"。
-     */
+    /** 顶栏动作是否可点。 */
     actionEnabled: Boolean = true,
-    /**
-     * 顶栏与滚动区之间的**固定**内容（目前只有 MCP 表单的 TAB 栏用）。
-     *
-     * ⚠️ 它和 [content] 的区别是「会不会被滚走」：header 不随内容滚动，
-     * 所以放在里面的是**切换控件**（TAB 栏）—— 切到「工具」那页往下滚了几屏之后
-     * 还得能切回「基本设置」，而切不回去的 TAB 栏等于没有。
-     *
-     * ⚠️ 它必须自己吃掉顶栏的高度（见实现里的 `padding.calculateTopPadding()`）：
-     * Miuix 的 Scaffold 把 body 放在 (0,0)、顶栏画在它**上面**
-     * （`Scaffold.kt` 的 `bodyContentPlaceable.place(0, 0)` 之后才 place TopBar），
-     * 所以 body 里 y=0 的东西是**被顶栏盖住**的。滚动区的做法是把顶栏高度算进
-     * `contentPadding`，固定内容没有那层 padding，只能自己补。
-     */
     header: (@Composable () -> Unit)? = null,
-    /**
-     * 顶栏要不要走模糊采样。
-     *
-     * <p>默认 true（本工程其余二级页的行为）。**唯一置 false 的是沙箱页**，
-     * 理由是那一页的刷新频率与别的页面不是一个量级，而 [PageBlurBar] 采样的是
-     * **内容层**：内容一脏，背板就要重采一次。
-     *
-     * <p>沙箱页每次点按钮都改 `inFlight`／`notice`，而且有一条每 2 秒跑一次的
-     * 轮询在换 `apps` 列表 —— 两者都会让内容层变脏。于是顶栏每隔一小会儿就要
-     * 重新采样一次，采样那一帧它会掉成纯色，看起来就是"点了按钮，上方整块没了"。
-     * 关掉之后顶栏回落为不透明 [MiuixTheme.colorScheme].surface（与模糊不可用时
-     * 同一条分支），闪屏在结构上不可能再发生。
-     *
-     * <p>代价只是这一页顶栏没有毛玻璃 —— 而它是本工程里唯一一页"内容在持续
-     * 自我刷新"的页面，模糊本来也是最先在这儿崩掉的。
-     */
+    /** 顶栏要不要走模糊采样。 */
     blurTopBar: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
     val listState = rememberLazyListState()
     val topAppBarScrollBehavior = MiuixScrollBehavior()
-    /*
-     * ⚠️ 二级页**不用** `layerBackdrop` + `PageBlurBar`（`blurTopBar` 因此不再生效，
-     * 保留参数只为调用点兼容）。
-     *
-     * 与设置主页同一个 bug 的两个症状：
-     *
-     * 1. **卡**：整页录进离屏层、滚动时每帧重录。二级页里有 MCP 表单、技能编辑器、
-     *    提示词长文本框，重录代价比主页还大。
-     * 2. **文字重叠**：顶栏 `Color.Transparent`，模糊没跟上时下面的正文直接从顶栏透出来。
-     *
-     * 顶栏改纯色 `surface`，两条一起消失（参考实现 rikkahub 的二级页同样不捕获）。
-     */
     val backdrop: top.yukonga.miuix.kmp.blur.LayerBackdrop? = null
 
     // FAB 的收放判定。`previousScroll` 用 IntArray(1) 避免在 derivedStateOf 求值期间写 Snapshot State。
@@ -328,27 +158,8 @@ internal fun SettingsSubPage(
     }
 
     Scaffold(
-        /*
-         * ⚠️ `containerColor` **不要传**，用 Miuix 的默认值（`MiuixTheme.colorScheme.surface`）。
-         *
-         * 这一条是踩过的坑：为了修"提示词编辑页文字穿透"，这里曾经写成
-         * `containerColor = scheme.background`，结果页面底板变成了偏灰的 surface
-         * 系以外的一块色 —— 与 Miuix 其余页面（设置主页、关于页）不一致，
-         * 用户一眼就看出"底板不是黑的"。
-         *
-         * 而穿透的**真正**原因不在这里：那是 `SettingsPageStack` 的嵌套 `NavDisplay`
-         * 在转场期间同时绘制两页。提示词页已经改成状态直切（见 `PromptSlotsPage`），
-         * 只剩一页存在，穿透在原理上不会发生 —— 不需要靠改底色去遮。
-         */
         topBar = {
-            /*
-             * 顶栏底色 `scheme.surface` **纯色**，不再包 `PageBlurBar`。
-             *
-             * 之前包着是为了对 `layerBackdrop` 取样做毛玻璃，而整页捕获已经去掉
-             * （见上面 `backdrop` 的说明）：没有背板可取样，包着只剩一层恒等的 Box。
-             * 以前「顶栏有的是毛玻璃有的是一块实色」的不一致，现在统一成实色 ——
-             * 与设置主页、rikkahub 的二级页一致。
-             */
+            /* 顶栏底色 `scheme.surface` **纯色**，不再包 `PageBlurBar`。 */
             run {
                 // 与设置主页同款顶栏：Miuix TopAppBar 自带 largeTitle（大标题随滚动折叠），
                 // 对应 rikkahub 二级页的 LargeFlexibleTopAppBar —— 主页与二级页的
@@ -427,19 +238,6 @@ internal fun SettingsSubPage(
                 ) { header() }
             }
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                /*
-                 * ⚠️ 回到 `LazyColumn` —— 与 Miuix 官方 example 和本工程设置主页一致。
-                 *
-                 * 中间有一版改成 `Column + verticalScroll`，理由是"修提示词页穿透"。
-                 * 那个因果判断是**错的**：穿透的真正原因是嵌套 `NavDisplay` 转场期间
-                 * 同时绘制两页（提示词页已改成状态直切，见 `PromptSlotsPage`），
-                 * 与滚动容器无关。
-                 *
-                 * 而 `LazyColumn` 才是 Miuix 设置页的既定形态（主页、官方 example 都是它），
-                 * 保留 `overScrollVertical` / `nestedScroll` 这套与顶栏联动的滚动行为；
-                 * 换成普通 `verticalScroll` 会丢掉 `LazyListState` 语义，
-                 * 让依赖它做判定的地方（如 FAB 收放）各写一套像素算术。
-                 */
                 LazyColumn(
                     state = listState,
                     modifier = Modifier

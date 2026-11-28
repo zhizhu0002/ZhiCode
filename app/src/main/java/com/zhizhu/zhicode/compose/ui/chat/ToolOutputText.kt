@@ -22,13 +22,7 @@ import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 工具输出的有界、懒渲染文本视图。
- *
- * 工具卡本身位于对话流的 LazyColumn item 内，因此不能把 300,000 字符直接交给一个
- * Text，也不能把全部行拆成几万个 Compose 节点。这里把原文只建立一次行偏移索引，
- * 再用第二层有界 LazyColumn 按小窗口取行；视口外的行不会组合或布局。
- */
+/** 工具输出的有界、懒渲染文本视图。 */
 
 /** 默认预览最多显示多少行；原文仍保留在 ToolActivity 中。 */
 internal const val MaxRenderedLines = 300
@@ -147,10 +141,7 @@ private fun MoreLinesRow(hidden: Int, onClick: () -> Unit) {
     }
 }
 
-/**
- * 原文的轻量行索引。只保存每行起点，不预先 split 字符串；展示时只为可见行创建
- * substring。对 300,000 字符的单行输出也只产生一个受 MaxRenderedChars 约束的 Text。
- */
+/** 原文的轻量行索引。 */
 private object ToolTextIndexCache {
     private val entries = LinkedHashMap<String, TextLayoutIndex>(MaxCachedIndexes, 0.75f, true)
     private var sourceChars = 0
@@ -245,10 +236,7 @@ private data class RenderedWindow(
     val hiddenLines: Int,
 )
 
-/**
- * 兼容旧的纯函数调用点：只保留前 [max] 行，不在 Compose 中创建行数组。
- * `ToolOutputText` 的 UI 路径使用上面的索引窗口；这个函数保留给已有逻辑复用。
- */
+/** 兼容旧的纯函数调用点：只保留前 [max] 行，不在 Compose 中创建行数组。 */
 internal class LimitedLines(val text: String, val hidden: Int)
 
 internal fun limitLines(text: String, max: Int): LimitedLines {

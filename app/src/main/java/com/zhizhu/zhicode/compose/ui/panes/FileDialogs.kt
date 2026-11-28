@@ -24,39 +24,6 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 文件面板自己的三个弹窗：新建 / 重命名 / 删除确认。
- *
- * ## 为什么从「行内卡片」改成弹窗
- *
- * 这三个表单原先画在文件列表**里面**（`FileNameFormCard` / `FileDeleteCard`，
- * 都是列表上方的一张卡）。那样有三个毛病，用户给的截图里都能看到：
- *
- *  1. **列表被推下去**：弹层出现时下面的文件整体下移，点击的那一条跑到屏幕外，
- *     关掉之后又弹回来 —— 在滚动过的长目录里尤其明显（列表跳两次）。
- *  2. **"新建"有两个入口却都不对**：面包屑行上并排放着「新建文件」「新建文件夹」
- *     两个图标，占地方又看不出区别；而小米文件管理器那一行只有**一个** `+`
- *     （`res/layout/phone_file_explorer_list.xml` 里就是单个 `@id/action_create`，
- *     `contentDescription` 是 `@string/create_folder`＝「新建」）。
- *  3. **失败无处显示**：提交失败原本只写 `state.message`，而 `MessageBar` 挂在
- *     `ChatArea` 里 —— 在文件页上提交失败时界面上**什么都没有**，弹层还照常关掉，
- *     看起来像"建成功了但列表里没有"。小米的 `textinput_dialog.xml` 是
- *     「标题 + 一个输入框 + 一行默认 `gone` 的错误行」，错误就地在弹窗里报。
- *
- * 所以收成弹窗，并且错误行**留在弹窗内**（[ZhiFieldError] 渲染 `FileNameForm.error`）。
- *
- * ## 为什么放在 `ui/panes/` 而不是 `ui/dialogs/`
- *
- * 与 `TerminalDialogs.kt` 同一约定：**某个面板自己的弹窗跟着那个面板走**。
- * `ui/dialogs/` 里放的是跨面板共用的那些（授权、计划审批、通用选择器）。
- *
- * ## 错误行的时机：用 `touched` 而不是"永远显示"
- *
- * `ZhiFieldError(message, touched)` 在 `!touched` 时**不渲染**（见 `FieldErrorAlignmentTest`）。
- * 新建弹窗一打开名字框是空的，如果无条件显示错误行，用户还没开始填就被一句
- * 「名字不能为空」指责 —— 那正是那张测试守着的"一打开表单就一片红字"。
- * 判据因此是：**打过字（draft 非空）或者上一次提交失败过（failure 非空）才飘红**。
- */
 @Composable
 internal fun NewEntryDialog(
     form: FileNameForm?,
@@ -145,10 +112,6 @@ internal fun RenameEntryDialog(
     }
 }
 
-/**
- * 名字输入 + 错误行。新建与重命名共用 —— 两处的校验规则、错误行时机、
- * 输入框样式必须一模一样（[FileNameForm] 的注释里已经说了为什么合成一个模型）。
- */
 @Composable
 private fun NameField(
     form: FileNameForm,
@@ -170,14 +133,7 @@ private fun NameField(
     }
 }
 
-/**
- * 删除确认。
- *
- * <p>逐字说清代价：删一个目录会带走里面的全部内容，而「确定删除 sub 吗？」
- * 等于没告诉用户这件事。条数来自 `FileOps.countForDelete`（不跟符号链接），
- * 多选时按条累加 —— 所以文案里的数字与"被删的条数"**不是一回事**，
- * 这一点原来那版也是这么写的（[FileDeletePrompt.destructive]）。
- */
+/** 删除确认。 */
 @Composable
 internal fun DeleteConfirmDialog(
     prompt: FileDeletePrompt?,

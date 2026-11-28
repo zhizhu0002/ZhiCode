@@ -30,12 +30,7 @@ private data class LanguageSpec(
     val fallback: Boolean = false,
 )
 
-/**
- * TextMate/Sora 注册表。
- *
- * 语言识别集中在 [languageCatalog]，所以新增一种格式只需要增加一条目录记录，
- * 不再同时修改 grammar 注册、扩展名 map 和特殊文件名 map。
- */
+/** TextMate/Sora 注册表。 */
 internal object SoraEditorHost {
     private const val GRAMMAR_DIR = "sora/textmate/grammars"
     private const val THEME_DIR = "sora/textmate/themes"
@@ -48,13 +43,7 @@ internal object SoraEditorHost {
     private val languageCache = ConcurrentHashMap<String, TextMateLanguage>()
     private val schemeCache = ConcurrentHashMap<Boolean, EditorColorScheme>()
 
-    /**
-     * 语言目录。
-     *
-     * 现有 ZL2/VS Code grammar 使用专用高亮；没有独立 grammar 的格式使用最后的
-     * source.generic 基础 grammar。这样扩展名覆盖可以很广，但不会把 fallback
-     * 冒充成完整语义分析。
-     */
+    /** 语言目录。 */
     private val languageCatalog = listOf(
         LanguageSpec(
             name = "C",
@@ -216,11 +205,7 @@ internal object SoraEditorHost {
     private var darkThemeLoaded = false
     private var lightThemeLoaded = false
 
-    /**
-     * 不再用一组容易随 jcodings 版本变化的内部类名关闭整个 TextMate。
-     * tm4e/joni 会在真正解析 grammar 时报告缺失依赖；此时只让当前 grammar
-     * 降级，不能让 XML、JS、HTML、Log 等所有语言一起变成纯文本。
-     */
+    /** 不再用一组容易随 jcodings 版本变化的内部类名关闭整个 TextMate。 */
     private suspend fun ensureLoaded(context: Context) = withContext(Dispatchers.IO) {
         lock.withLock {
             if (loaded) return@withLock

@@ -107,32 +107,15 @@ import top.yukonga.miuix.kmp.basic.TextFieldDefaults
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 输入器，对应原版 buildComposer()：
- * 斜杠面板 / 附件条 / 多行输入 / 三个 chip + 发送与停止。
- *
- * 外观做成**悬浮输入条**：整个输入器是一块带阴影的圆角面板，浮在对话之上
- * （不再是贴底的普通卡片）。相比原版把 `minLines` 收到 1、页脚压到 34dp，
- * 整体更矮更紧凑。
- */
+/** 输入器，对应原版 buildComposer() */
 @Composable
 fun Composer(
     state: WorkspaceUiState,
     wide: Boolean,
     glass: Glass,
-    /**
-     * 输入框文字的所有权在这里（见 [ComposerTextState] 的说明）。
-     *
-     * 传对象而不是 `String + onValueChange` 是**性能要求**：后者每按一个键都要把
-     * 文字写回 `WorkspaceUiState`（内含整份 transcript），于是整个对话流跟着重组。
-     */
+    /** 输入框文字的所有权在这里（见 [ComposerTextState] 的说明）。 */
     textState: ComposerTextState,
-    /**
-     * 斜杠查询变化时通知状态层（它要算匹配列表、决定面板显不显示）。
-     *
-     * 只在「以 `/` 开头且还没打空格」这种真正需要面板的时候调用，
-     * 普通打字一次都不走状态层。
-     */
+    /** 斜杠查询变化时通知状态层（它要算匹配列表、决定面板显不显示）。 */
     onSlashQueryChanged: (String?) -> Unit,
     /** `@` 文件引用查询变化（`@` 之后的那一段；`null` = 不在引用态）。 */
     onFileQueryChanged: (String?) -> Unit,
@@ -151,22 +134,9 @@ fun Composer(
     // ---- `+` 菜单的动作 ----
     onAttachFile: () -> Unit,
     onPickImage: () -> Unit,
-    /**
-     * 走**系统文件管理器**（SAF）挑文件附加，可多选。
-     *
-     * <p>与 [onAttachFile] 的分工：那个是**项目目录内**的浏览器（快，但只覆盖项目里
-     * 的东西），这个是系统范围（能挑到下载目录、别的 App 的文档），代价是每次都要
-     * 经过系统那个选择器。两条路都留着 —— 只留系统那条的话"附加一个项目里的文件"
-     * 要翻半个手机去找。
-     */
+    /** 走**系统文件管理器**（SAF）挑文件附加，可多选。 */
     onPickSystemFiles: () -> Unit,
-    /**
-     * 取某个待发附件的图片（输入器里的缩略图）。
-     *
-     * 走回调而不是把字节放进 `WorkspaceUiState`：几 MB 的 base64 跟着每次 `copy()`
-     * 走、还要参与 Compose 的状态比较，是纯粹的浪费（见 ViewModel 里
-     * `AttachmentPayload` 的注释）。附件列表本身在 state 里，它一变重组就会重新调用。
-     */
+    /** 取某个待发附件的图片（输入器里的缩略图）。 */
     onAttachmentImage: (String) -> ChatImage?,
     // ---- 页脚三个下拉 ----
     onPermissionSelected: (PermissionMode) -> Unit,
@@ -190,36 +160,13 @@ fun Composer(
     val scheme = MiuixTheme.colorScheme
     var contextDetailOpen by remember { mutableStateOf(false) }
 
-    /*
-     * 发送键可用性：从输入框状态派生，只在"空/非空"翻转时让读它的地方失效。
-     *
-     * 不要改成在组合期直接 `textState.field.text.isNotBlank()`：那会让整块 Composer
-     * 每个按键都重组一次，而这里本来正是要消灭那个开销。
-     */
+    /* 发送键可用性：从输入框状态派生，只在"空/非空"翻转时让读它的地方失效。 */
     val canSend by remember(textState) {
         derivedStateOf { textState.field.text.isNotBlank() }
     }
 
-    /*
-     * 这里曾经有一个 `noop: () -> Unit = remember { { } }`，用于"内层按钮只负责画、
-     * 点击交给外层 combinedClickable"。**那个设计是错的**，已删除：
-     * Miuix `IconButton` 自带 clickable 且在内层，子节点优先会把点击吃掉，
-     * 外层永远收不到 —— 症状是发送键点了毫无反应。
-     * 现在点击直接接在 `ZhiFilledIconButton(onClick = onSend)` 上。
-     */
 
-    /*
-     * 输入触发：`/` 命令 与 `@` 文件引用。
-     *
-     * 以前只有斜杠，而且是"每个字符都 `copy()` 一次整个状态"。现在把两种触发
-     * 压成同一条 `snapshotFlow`，并且用 `distinctUntilChanged` 之后，
-     * **普通打字一次都不发射** —— 状态层完全不知道用户在写正文。
-     *
-     * 判定规则（与主流编码 Agent 一致）：
-     *  · `/` 在**开头**且还没打空格 → 斜杠命令查询；
-     *  · `@` 在**任意位置**、且最后一个 `@` 之后还没有空格 → 文件引用查询。
-     * 两者互斥：同一时刻只会有一个非空（前者要求整段以 `/` 起头）。
-     */
+    /* 输入触发：`/` 命令 与 `@` 文件引用。 */
     LaunchedEffect(textState) {
         snapshotFlow { textState.field.text.toString() }
             .map { text ->
@@ -241,13 +188,7 @@ fun Composer(
             }
     }
 
-    /*
-     * 外部动作写入输入框：「编辑后发送」「恢复草稿」「设置目标」等。
-     *
-     * 靠 `composerTextEpoch` 而不是"文字变了"来驱动 —— 用户打字不会回写那个字段，
-     * 所以字段值可能连续几次外部写入都相同（连着点两次"编辑后发送"同一条），
-     * 观察值就不会触发。版本号每次都 +1，见 `WorkspaceUiState.composerTextEpoch`。
-     */
+    /* 外部动作写入输入框：「编辑后发送」「恢复草稿」「设置目标」等。 */
     var lastAppliedEpoch by remember { mutableStateOf(state.composerTextEpoch) }
     LaunchedEffect(state.composerTextEpoch) {
         if (state.composerTextEpoch == lastAppliedEpoch) return@LaunchedEffect
@@ -263,15 +204,7 @@ fun Composer(
             .padding(top = 4.dp, bottom = 10.dp),
     ) {
 
-        /*
-         * 排队中的预输入。
-         *
-         * 预输入的实现是「气泡立刻进对话流 + 文字排队等引擎」。如果没有这个面板，
-         * 用户排了两条之后既看不到队列、也无法取消 —— 只能等它们发出去。
-         *
-         * 放在输入卡片**上方**（与斜杠/文件面板同一位置）：三块都是"与输入相关
-         * 的附加信息"，位置统一才不会让人找不到。
-         */
+        /* 排队中的预输入。 */
         AnimatedVisibility(
             visible = state.pendingInputs.isNotEmpty(),
             enter = fadeIn() + expandVertically(),
@@ -306,13 +239,7 @@ fun Composer(
             SlashPalette(matches = state.slashMatches, onPick = onPickSlash)
         }
 
-        /*
-         * `@` 文件引用面板。
-         *
-         * 与斜杠面板**互斥**：`/` 只能出现在开头，`@` 出现在任意位置，
-         * 但两者不会同时有查询串（见上面那条 `snapshotFlow` 的判定）。
-         * 所以这里用 `fileQuery != null` 单独控制，不会两个面板同时弹出来。
-         */
+        /* `@` 文件引用面板。 */
         AnimatedVisibility(
             visible = state.fileQuery != null,
             enter = fadeIn() + expandVertically(),
@@ -344,21 +271,6 @@ fun Composer(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically(),
             ) {
-                /*
-                 * ⚠️ 附件条**分两段**：文件在上、图片在下，两段都各自独占整行。
-                 *
-                 * 早先是"所有附件混在一条横向滚动条里"，两个真问题都出在这儿：
-                 *
-                 * 1. **文件卡被裁掉**。横向滚动条里每张卡按自身宽度排，屏幕右边那张
-                 *    只露出一半（用户截图里第二张「控制布…」就是这样），看起来像渲染坏了；
-                 * 2. **认不出谁是谁**。图片缩略图和文件卡紧挨着、尺寸相当，
-                 *    选了三四张之后根本分不清哪个是文件、哪个是图。
-                 *
-                 * 现在按类型分段：
-                 *  · 文件段**不滚动**、卡片占满整行 —— 名字再长也只会省略号，不会被切掉；
-                 *  · 图片段保留横向滚动（同一行同高、横向铺开，本来就是图片带的正确形态），
-                 *    并保留 `.take(4)` 被删掉后那条约束：**每一张都必须可达、可删**。
-                 */
                 val pendingImages = state.attachments.filter { it.isImage }
                     .mapNotNull { attachment -> onAttachmentImage(attachment.id)?.let { attachment to it } }
                 val pendingFiles = state.attachments.filter { !it.isImage }
@@ -445,21 +357,7 @@ fun Composer(
                         .onFocusChanged { onFocusChanged(it.isFocused) },
                 )
 
-                /*
-                 * 暂停键：**只在会话运行时出现**，位置在发送键左边（即输入框右侧）。
-                 *
-                 * 进入/退出用 `AnimatedVisibility` + 横向收缩：
-                 * `expandHorizontally` / `shrinkHorizontally` 用的是 `ZhiMotion.sizeSpec`
-                 * （与"展开/收起替换区""折叠卡片"同一条曲线），于是它出现时
-                 * 输入框是**平滑变窄**，而不是被瞬移挤掉一截。
-                 *
-                 * 淡入淡出叠在收缩之上：纯宽度变化在 36dp 这种小尺寸上不容易被察觉，
-                 * 叠一层透明度才读得出"一个控件出现了"。
-                 *
-                 * 可见性取 `composerBusy || stopping`：停止指令发出后引擎还要收尾
-                 * （子进程等 pid 与超时，可能到分钟级），这段时间它必须留着 ——
-                 * 那是用户唯一能重发中断的入口。
-                 */
+                /* 暂停键：**只在会话运行时出现**，位置在发送键左边（即输入框右侧）。 */
                 AnimatedVisibility(
                     visible = state.composerBusy || state.stopping,
                     enter = fadeIn(ZhiMotion.fadeInSpec) + expandHorizontally(ZhiMotion.sizeSpec),
@@ -482,39 +380,10 @@ fun Composer(
                     )
                 }
 
-                /*
-                 * 发送键。
-                 *
-                 * ⚠️ 这里**不**做"生成中变成取消"。
-                 *
-                 * 曾经加过那条：生成中且输入为空时把发送键画成红色停止键。
-                 * 结果是画面上出现**两个暂停键**（左边那个是原本就有的停止键），
-                 * 用户截图一眼就看出来了 —— 原来那个红色停止键本来就在生成中显示，
-                 * 再让发送键也变成停止，就是重复。
-                 *
-                 * 现在回到原来的分工：
-                 *  · 生成中 → 左边那个红色停止键负责停止（见上面的 AnimatedVisibility）；
-                 *  · 发送键永远只负责发送，输入为空时置灰。
-                 *
-                 * 保留的增强只有一处：**长按** = 只发进对话流、不触发模型。
-                 * 它不新增按钮，也不改变任何既有行为。
-                 */
                 Box(
                     modifier = Modifier
                         .padding(start = 6.dp, bottom = 2.dp)
                         .selfPressSink()
-                        /*
-                         * 外层**只负责长按**，不接点击。
-                         *
-                         * 🔴 这里踩过一次：曾经把 `onClick = onSend` 放在这一层、
-                         * 内层 `IconButton` 传空 lambda，指望"外层接管点击"。
-                         * 结果**发送键完全没反应**。
-                         *
-                         * 原因是 Compose 的手势分发**子节点优先**：Miuix `IconButton`
-                         * 自带 `clickable`，它注册在更内层，会先把点击消费掉，
-                         * 外层 `combinedClickable` 永远收不到那个事件。
-                         * 长按不受影响 —— `IconButton` 只声明了 tap，没有 long-press。
-                         */
                         .combinedClickable(
                             enabled = canSend,
                             onClick = {},
@@ -617,20 +486,6 @@ fun Composer(
                 // 三者在同一张菜单里并排出现，必须一眼分得开。
                 val systemFileIcon = ZhiIcons.directory
                 ZhiIconDropdownMenu(
-                    /*
-                     * ⚠️ 这份 `listOf` 必须 `remember`。
-                     *
-                     * `ZhiIconDropdownMenu` 内部按 `remember(items, ...)` 缓存整份
-                     * `DropdownEntry`（含每个条目的 icon 可组合 lambda）。而 `listOf(...)`
-                     * 写在参数位置上，**每次重组都是一个新的 List 实例** —— 身份不等，
-                     * 那份缓存就永远命中不了，等于没做。输入器随 `state.composerText`
-                     * 每敲一个字重组一次，账单按字符数付。
-                     *
-                     * key 取三个图标加三个回调：菜单的文案是常量，唯一会变的就是
-                     * 图标实例与动作本身。回调在 `ChatArea` 里是方法引用与不捕获变量的
-                     * lambda，Compose 的 lambda 记忆化让它们跨重组保持同一实例，
-                     * 所以这个 `remember` 是真的会命中。
-                     */
                     items = remember(
                         attachFileIcon, photoIcon, systemFileIcon,
                         onAttachFile, onPickImage, onPickSystemFiles,
@@ -759,25 +614,6 @@ fun Composer(
 }
 }
 
-/**
- * 待发区里的**文件**附件卡：图标 + 文件名 + 体积，占满整行。
- *
- * ## 为什么从"窄条"改成"整行卡片"
- *
- * 早先它是一个 `height(26.dp)`、名字写死 `width(112.dp)` 的窄条，然后一堆窄条
- * 塞进横向滚动条 —— 于是屏幕右边那张**只露出半个**（用户截图里第二张
- * 「控制布…」就是），而且名字长了也读不出是哪个文件。
- *
- * 现在它占满整行：名字用 `weight(1f)` 吃剩余宽度、超长才省略号，
- * 永远不会被屏幕边缘裁掉。体积也从"只出现在底部提示条里"搬到了卡片上，
- * 这样翻历史时还看得出当初发的是哪个版本。
- *
- * ## 图标给一个自己的底色块
- *
- * 参考图里图标是坐在一块浅色圆角方块里的，而不是直接浮在卡片底上。
- * 一是让"这是一份文件"在扫视时更快认出来，二是卡片变高之后
- * 一个孤立的小图标会显得很轻。
- */
 @Composable
 private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
@@ -843,29 +679,13 @@ private fun AttachmentChip(attachment: Attachment, onRemove: () -> Unit) {
     }
 }
 
-/**
- * 待发文件卡片的固定宽度。
- *
- * 横向排布（见调用点）：一行放得下两个半，超过就横滑。
- * 定宽是必要的 —— 让卡片按内容自适应的话，"123.json" 三个字会缩成一小块、
- * "chat-export-2026-11-15…" 又会撑到整屏，一列卡片宽度全不一样。
- */
+/** 待发文件卡片的固定宽度。 */
 private val AttachmentChipWidth = 160.dp
 
 private fun shorten(value: String, max: Int): String =
     if (value.length <= max) value else value.substring(0, max - 1) + "…"
 
-/**
- * 底排「发送 / 停止」两个动作键的边长。
- *
- * 用一个常量而不是各写一个数字：这两个键占据同一个 ActionBar 位置、
- * 由 `AnimatedVisibility` 互换，尺寸不同就会看到按钮在切换时**跳一下**。
- * 之前是 34 与 36 两个值，视觉上就是没对齐。
- *
- * 30dp 比 48dp 的无障碍最小点击区小，这是**有意的**：它与这一排其它元素
- * （页脚 chip 26dp、附件芯片 26dp）同一量级，且外面还有输入器的内边距；
- * 前身 34/36 本来也不满足 48dp，这次只是把它统一并再收小一档。
- */
+/** 底排「发送 / 停止」两个动作键的边长。 */
 private val ComposerActionSize = 30.dp
 
 @Composable

@@ -1,11 +1,4 @@
-/*
- * Zalith Launcher 2
- * Copyright (C) 2025 MovTery <movtery228@qq.com> and contributors
- *
- * This file is adapted from ZalithLauncher2's ui/code_editor/SoraEditor.kt.
- * It keeps the original AndroidView lifecycle and deliberately does not add an
- * application-side IME show/hide bridge.
- */
+/* Zalith Launcher 2 */
 package com.zhizhu.zhicode.compose.ui.panes
 
 import android.graphics.Typeface
@@ -34,13 +27,7 @@ import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
 import io.github.rosemoe.sora.widget.schemes.SchemeGitHub
 
-/**
- * ZL2 同款的单一 Sora AndroidView 包装。
- *
- * 关键点是把 ViewModel 中的 Content 实例直接交给 CodeEditor。编辑过程中
- * 不把整篇字符串回写到 Compose，也不在编辑页主动 hide/show 输入法；这让
- * Sora 的焦点和 InputConnection 成为唯一的键盘路径。
- */
+/** ZL2 同款的单一 Sora AndroidView 包装。 */
 @Composable
 internal fun SoraEditor(
     modifier: Modifier = Modifier,

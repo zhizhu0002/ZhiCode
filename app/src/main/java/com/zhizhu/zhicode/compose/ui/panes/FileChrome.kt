@@ -143,25 +143,6 @@ internal fun FileListRow(
         )
     }
     if (selectionMode) {
-        /*
-         * 选择模式用官方 `CheckboxPreference`，勾选圈放**行尾**。
-         *
-         * ## 为什么现在能用它（此前这里明确写着"不能用"）
-         *
-         * 早先的结论是：它的勾选圈是 Miuix `Checkbox`，内部 `requiredSize(26.dp)`
-         * 且排在调用方 modifier 之后 —— 外部 `size()` 压不动，只能 `graphicsLayer`
-         * 缩放，而 `CheckboxPreference` 不暴露勾选圈自己的 modifier。
-         *
-         * **那条限制只在"要把它缩小"时才成立。** 勾选圈放行尾就不需要缩小：
-         * 行尾本来就是行内容自然结束的地方，26dp 的原始尺寸放得下，
-         * 也不需要再用负 padding／`offset` 去抵内部留白（那段补正代码一并删了）。
-         *
-         * ## 为什么文件图标走 `startAction`
-         *
-         * 行首让给图标（它是这一行的主体识别物），勾选圈在 `End` ——
-         * 于是"图标 + 名称/副标题 + 勾选框"的顺序由组件自己排版，
-         * 点击语义也统一到一处（点整行 = 切换选中），和别的 preference 行一致。
-         */
         CheckboxPreference(
             title = entry.name,
             summary = info.ifEmpty { null },

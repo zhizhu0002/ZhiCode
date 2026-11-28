@@ -63,27 +63,6 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/**
- * 终端面板的外壳：工具栏、会话抽屉、两行扩展键，以及「环境未就绪 / PTY 起不来」两种占位。
- *
- * <h3>它替换掉了什么</h3>
- * 这些以前全是 Java 手拼 `LinearLayout`（`TermuxTerminalPane` 里六百多行的界面代码）。
- * 现在由 Compose 画，PTY 与 Termux 上游 `TerminalView` 仍留在
- * [TermuxTerminalPane]（它作为 `AndroidView` 被挂在本文件中间那一格）。
- *
- * <h3>配色</h3>
- * 终端**外壳**（工具栏 / 会话抽屉 / 扩展键 / 两个占位）的配色全部取自应用主题
- * （[chrome] 用的是 MiuixTheme + [ZhiColors]），所以外壳本来就跟随深浅色。
- *
- * ⚠️ 这里以前写着"刻意沿用原来那一套、直接用 Miuix 主题色会让深色档也跟着变" ——
- * 那句话说的是改动之前的计划，**与现在的实现已经不符**（[chrome] 早就整张走主题色了）。
- * 留着它的代价是下一个人会照着它去"恢复旧色表"。
- *
- * 真正不适配深浅色的**不是外壳，是终端正文**：ANSI 调色板原先写死深色档，
- * 所以浅色模式下终端里还是黑底白字。那一处在宿主 [TermuxTerminalPane]
- * （见它的 `applyTerminalPalette` / `setDarkTheme`），不在本文件。
- * 判定深浅统一用 [ZhiColors.isDark]，它读 `LocalZhiDark`，与全应用一致。
- */
 
 /** 终端外壳的一套配色。取值来自原 `applyPaletteValues` 的深/浅两档。 */
 private class Chrome(
@@ -120,15 +99,7 @@ internal val TerminalDrawerWidth = 286.dp
 /** 抽屉背后遮罩的不透明度。原实现是 `Color.argb(150, 0, 0, 0)`。 */
 private const val ScrimAlpha = 150f / 255f
 
-/**
- * 把一个 [TermuxTerminalPane] 的状态接成 Compose 可观察的值。
- *
- * 宿主是 Java，用的是「快照 + 回调」而不是 `StateFlow`（理由见宿主类注释）；
- * 这里把回调折成一个 [State]，这样调用点写起来和别的 Compose 状态没有区别。
- *
- * 进入组合时先**主动读一次**：宿主的合法状态变化都可能发生在登记回调之前
- * （例如构造时就起了第一个会话），不读这一次会显示一份空快照。
- */
+/** 把一个 [TermuxTerminalPane] 的状态接成 Compose 可观察的值。 */
 @Composable
 internal fun rememberTerminalState(host: TermuxTerminalPane): State<TermuxTerminalPane.State> {
     val holder: MutableState<TermuxTerminalPane.State> = remember(host) { mutableStateOf(host.state()) }
@@ -147,19 +118,7 @@ internal fun toast(context: Context, message: String?) {
     Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
 }
 
-/**
- * 终端面板头部右侧的三个动作：☰ 会话列表、⌨ 切键盘、⋮ 快捷动作。
- *
- * <h3>它替换掉了什么</h3>
- * 原来这里是一个**整条工具栏**（`TerminalToolbar`，硬编码 42dp 高，自带背景色），
- * 它被画在 [PaneHeader] 的**下面** —— 于是切到终端时顶部有两行标题
- * （「终端 · 项目名」+「☰ 会话标题 ⌨ ⋮」），而文件面板只有一行。
- * 三个面板的头部形态不一致，且那 42dp 是手写死的（工程里的统一行高是
- * [com.zhizhu.zhicode.compose.theme.ZhiRow.height]）。
- *
- * 现在只留一个 [PaneHeader]：面板标题与副标题（当前会话名）由它统一负责，
- * 这三个动作走它的 `actions` 槽。行高、分隔线、左右留白因此与另两个面板逐像素同款。
- */
+/** 终端面板头部右侧的三个动作：☰ 会话列表、⌨ 切键盘、⋮ 快捷动作。 */
 @Composable
 internal fun RowScope.TerminalHeaderActions(
     onKeyboard: () -> Unit,
@@ -177,13 +136,7 @@ internal fun RowScope.TerminalHeaderActions(
     )
 }
 
-/**
- * 文字字形按钮（⌨ 这类 Miuix 图标库里没有的键）。
- *
- * 走 Miuix [IconButton] 而不是自己拼 `Box + clickable`：按压反馈由组件负责，
- * 与工具栏上另外两个图标按钮一致。字形本身就是它可被读到的文案
- * （`dump_ui` 里能直接看到 ⌨），不需要额外的 contentDescription。
- */
+/** 文字字形按钮（⌨ 这类 Miuix 图标库里没有的键）。 */
 @Composable
 private fun GlyphButton(
     glyph: String,
@@ -208,12 +161,6 @@ private fun GlyphButton(
     }
 }
 
-/**
- * 两行扩展键。
- *
- * 高度按原实现随横竖屏切换（68/82dp）。键盘弹起时整块被系统 resize 推上去，
- * 不需要自己算偏移 —— 原实现那个 `setKeyboardOffset` 其实没有任何调用方。
- */
 @Composable
 internal fun TerminalExtraKeys(
     state: TermuxTerminalPane.State,
@@ -303,15 +250,6 @@ private fun keyIsLatched(state: TermuxTerminalPane.State, action: String): Boole
         else -> false
     }
 
-/**
- * 会话抽屉。
- *
- * 宽度、遮罩不透明度、行高、两端的三个动作都与原实现一致（`Termux sessions`
- * 标题、`＋  New session`、`⌨  Toggle keyboard`、`↻  Reload properties`）。
- *
- * 遮罩用 `detectTapGestures` 而不是 `clickable`：遮罩上出现涟漪会让人以为
- * 它是一块可交互内容，而它的作用只是"点空白处关掉抽屉"。
- */
 @Composable
 internal fun BoxScope.TerminalDrawer(
     open: Boolean,
@@ -448,12 +386,6 @@ private fun DrawerAction(label: String, palette: Chrome, onClick: () -> Unit) {
     )
 }
 
-/**
- * 环境未就绪的占位。
- *
- * 文案由宿主给出（见 `TermuxTerminalPane` 里的 `RUNTIME_NOTICE`）：刻意说明**为什么**
- * 不能输入、去哪里打开，而不是"正在准备中"——后者会让人干等一件没在发生的事。
- */
 @Composable
 internal fun TerminalRuntimeNotice(text: String) {
     val palette = chrome()
@@ -475,11 +407,7 @@ internal fun TerminalRuntimeNotice(text: String) {
     }
 }
 
-/**
- * PTY 起不来的占位：标题 + 等宽详情（可选中，方便复制去搜）+ 重试按钮。
- *
- * 关键是**不崩**：任何 JNI/attach 失败都落在这里，用户至少能把错误读出来。
- */
+/** PTY 起不来的占位：标题 + 等宽详情（可选中，方便复制去搜）+ 重试按钮。 */
 @Composable
 internal fun TerminalFailure(detail: String, onRetry: () -> Unit) {
     val palette = chrome()

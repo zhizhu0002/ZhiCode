@@ -13,23 +13,6 @@ import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.shizuku.ShizukuBridge
 import rikka.shizuku.Shizuku
 
-/**
- * Shizuku 授权行：显示当前走到哪一步，点一下就去把它走完。
- *
- * <h3>为什么是「一行 + 一个开关」，而不是一个开关搞定</h3>
- * 这里其实是**两件独立的事**：
- * <ol>
- *   <li>设置里的开关（`shizukuExecutionEnabled`）决定**模型能不能看到**这个工具；</li>
- *   <li>Shizuku 授权决定**命令能不能真的跑**（服务在不在、用户答不答应）。</li>
- * </ol>
- * 把它们合成一个开关，就会出现「开关打开了，但一调用就报授权错误」这种
- * 用户无法自查的状态。所以这一行专门负责后半件事，并把状态原样说出来。
- *
- * <h3>为什么状态要自己订阅，而不是由上层传进来</h3>
- * 授权结果来自**另一个进程**：用户可能在 Shizuku 管理端里授权完再切回来，
- * 也可能服务中途被杀。这两种变化都不会经过 ViewModel 的任何一个 setter，
- * 所以只能挂 Shizuku 自己的监听（绑定/解绑 + 授权结果），在回调里刷新。
- */
 @Composable
 internal fun ShizukuAccessRow() {
     val context = LocalContext.current
@@ -107,10 +90,5 @@ internal fun ShizukuAccessRow() {
     )
 }
 
-/**
- * 授权请求码。
- *
- * <p>值本身没有含义，只要与回调里比较的那一个相同即可 ——
- * 整个应用只有一个申请入口，所以不需要再区分来源。
- */
+/** 授权请求码。 */
 private const val SHIZUKU_REQUEST_CODE = 4271

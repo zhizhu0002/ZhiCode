@@ -28,12 +28,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
-/**
- * "/" 命令面板，对应原版 updateSlashPalette()。
- * 内联在输入卡片上方，按前缀过滤，最多显示 5 条。
- *
- * 外层与每一行都用 Miuix `Card`，行直接吃 `onClick` 的按压反馈。
- */
+/** "/" 命令面板，对应原版 updateSlashPalette()。 */
 @Composable
 fun SlashPalette(
     matches: List<SlashCommand>,
@@ -119,15 +114,7 @@ fun SlashPalette(
     }
 }
 
-/**
- * "@" 文件引用面板。
- *
- * 与 [SlashPalette] 刻意保持**同一套视觉**（同一个 Card 外壳、同样的表头、
- * 同样的最多 5 条）：两者都是"在输入框上方弹出的补全列表"，如果长得不一样，
- * 用户会以为其中一个坏掉了。
- *
- * 区别只在内容：这里是路径字符串，选中后写回文字，而不是执行一个动作。
- */
+/** "@" 文件引用面板。 */
 @Composable
 fun FilePalette(
     query: String,
@@ -196,15 +183,7 @@ fun FilePalette(
     }
 }
 
-/**
- * 排队中的预输入列表。
- *
- * 每条给两个动作：**取回**（编辑后再发）与**取消**。这两个是预输入最容易出问题
- * 的地方 —— 没有它们，用户排错一条就只能等它真的发出去，而那时已经进了会话。
- *
- * 视觉与斜杠/文件面板同源（同一个 Card 外壳与表头行），三块在输入框上方
- * 因此看起来是"同一类东西"。
- */
+/** 排队中的预输入列表。 */
 @Composable
 fun QueuedPromptPanel(
     items: List<com.zhizhu.zhicode.compose.model.QueuedPrompt>,

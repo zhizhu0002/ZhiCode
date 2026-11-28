@@ -35,18 +35,6 @@ import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
-/**
- * 取最多 [max] 条「当前相关」的任务：
- * 跳过已完成的，从第一条未完成（通常是运行中）开始；若全部完成则回退到最后 [max] 条。
- * 条数受限后卡片高度可控，配合"悬浮卡 + 列表底部留白"避免遮挡对话。
- *
- * ⚠️ [max] **必须为正**。这里出过一次事故：有人用 `0` 表示"全部"，
- * 而当时的调用点又按"空"去渲染（`if (!compact)`），两边理解相反，
- * 结果悬浮任务卡既不画任务行、也算不出"还有 N 条"（因为 `size - size == 0`），
- * 界面上只剩「任务进度 3 / 7」和一根进度条 —— 用户看到的就是"任务怎么没显现出来"。
- * 现在 `max <= 0` 明确返回**空列表**：宁可让"还有 N 条 · 点按查看全部"兜住，
- * 也不要静默地把内容吞掉。
- */
 internal fun List<AgentTask>.currentWindow(max: Int): List<AgentTask> {
     if (max <= 0) return emptyList()
     if (size <= max) return this
@@ -55,13 +43,7 @@ internal fun List<AgentTask>.currentWindow(max: Int): List<AgentTask> {
     return drop(firstUnfinished).take(max)
 }
 
-/**
- * Agent 进度卡，对应原版 AgentProgressView：任务清单 + 计划状态 + 当前阶段三段。
- *
- * [tasks] 来自 state（不再写死在卡片里）；[onExpand] 是点卡片查看**全部**任务的入口。
- * [maxTasks] 限制同时展示的条数（悬浮形态下最多 2 条，避免卡片过高遮住对话），
- * 总进度仍由标题右侧的 `已完成 / 总数` 表达。
- */
+/** Agent 进度卡，对应原版 AgentProgressView：任务清单 + 计划状态 + 当前阶段三段。 */
 @Composable
 fun AgentProgressCard(
     status: String,
@@ -226,13 +208,7 @@ internal fun TaskState.contentDescription(): String = when (this) {
     TaskState.PENDING -> "待开始"
 }
 
-/**
- * 任务状态指示器，任务卡与任务详情窗口共用。
- *
- * 状态不再用文字字形（`✓ ◐ ○`）表达：字形取决于字体是否有这些字符，
- * 缺字就是方块，而且拿不到主题色。"进行中"用 Miuix 不确定进度指示器，
- * 静止的字符本来也看不出"正在进行"。
- */
+/** 任务状态指示器，任务卡与任务详情窗口共用。 */
 @Composable
 internal fun TaskStatusIndicator(state: TaskState, size: Dp = 13.dp) {
     val scheme = MiuixTheme.colorScheme

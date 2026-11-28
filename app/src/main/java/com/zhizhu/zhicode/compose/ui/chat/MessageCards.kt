@@ -82,33 +82,15 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
-/**
- * 对话流里的卡片全部改用 Miuix [Card]：
- * 圆角、按压下沉(pressFeedbackType)、按下态与主题色解析都交给 Miuix，
- * 不再手写 `Box + clip + background + pressScale`。
- *
- * 用 Card 的地方**不要**再叠按压缩放修饰符，否则会和 Miuix 的按压反馈打架。
- */
+/** 对话流里的卡片全部改用 Miuix [Card] */
 private val BubbleMargin = PaddingValues(horizontal = 10.dp, vertical = 5.dp)
 private val MessageMargin = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
 /** Markdown above this size is previewed first; the full body remains in the model. */
 private const val MaxInitialMarkdownChars = 120_000
 
-/**
- * 用户气泡宽度占可用宽的比例（**上限**，不是固定值）。
- *
- * 用 `widthIn(max = …)` 而不是 `fillMaxWidth(0.86f)`：后者是**强制**占 86%，
- * 于是内容只有「1」这种短消息也会被撑成几乎整行宽的蓝条，看起来像一条色带
- * 而不是一个气泡。改成上限之后，短消息收成合适宽度、长消息仍然封顶。
- */
+/** 用户气泡宽度占可用宽的比例（**上限**，不是固定值）。 */
 private val BubbleMaxWidthFraction = 0.86f
-/**
- * 折叠组表头的内边距。
- *
- * 反编译版 `addCollapsedToolActivity` 的组头是 `setPadding(dp(7), dp(3), dp(4), dp(3))`，
- * 而且**整块没有任何背景** —— 它就是"图标 + 粗体标签 + ⌄"一行，层级靠成员缩进
- * 与 `⎿` 副行体现。这里取同量级。
- */
+/** 折叠组表头的内边距。 */
 private val GroupMargin = PaddingValues(start = 7.dp, top = 3.dp, end = 4.dp, bottom = 3.dp)
 private val RowMargin = PaddingValues(horizontal = 9.dp, vertical = 7.dp)
 
@@ -135,13 +117,7 @@ fun EmptyState() {
     }
 }
 
-/**
- * 会话正在载入时的占位。
- *
- * 与 [EmptyState] 的区别只在文案与"有没有进度感"：此时列表里还没有任何消息，
- * 用户需要知道"内容在路上"，而不是"这条会话是空的"。所以这里不写
- * 「想让 ZhiCode 做什么？」（那会引导用户重新输入），而是明确说正在读。
- */
+/** 会话正在载入时的占位。 */
 @Composable
 fun TranscriptLoadingState() {
     val scheme = MiuixTheme.colorScheme
@@ -163,14 +139,7 @@ fun TranscriptLoadingState() {
     }
 }
 
-/**
- * 列表顶部「上面还有更早的历史」的占位。
- *
- * 恢复一条会话时只读最近 [com.zhizhu.zhicode.compose.data.SessionReader.PAGE_MESSAGES] 条，
- * 往下有两种补页方式：**顶部下拉**（Miuix `PullToRefresh`，见 `ChatList`）与
- * **滚到顶自动补**。这一条既是提示（上面不是没有内容，而是还没取），也是状态
- * （正在取），否则用户滚到顶只会看到内容突然停住，像是记录缺了一块。
- */
+/** 列表顶部「上面还有更早的历史」的占位。 */
 @Composable
 fun OlderLoader(loading: Boolean) {
     val scheme = MiuixTheme.colorScheme
@@ -190,12 +159,7 @@ fun OlderLoader(loading: Boolean) {
     }
 }
 
-/**
- * 「已经到会话开头」的终点提示。
- *
- * 没有它时，用户滚到顶会看到 `OlderLoader` **消失**——而那与「这一页刚好到头」
- * 长得一模一样，于是会反复下拉确认。一条两行的终点说明比"什么都没有"便宜得多。
- */
+/** 「已经到会话开头」的终点提示。 */
 @Composable
 fun TranscriptStartHint() {
     val scheme = MiuixTheme.colorScheme
@@ -211,17 +175,7 @@ fun TranscriptStartHint() {
     }
 }
 
-/**
- * 列表末尾的「回到最新」。
- *
- * 常驻窗口有上限（`WorkspaceViewModel.maxResidentItems`），往上翻到一定深度之后
- * **最新那一段会被淘汰出内存**。这时列表的"最后一条"已经不是最新消息了，
- * 所以需要一个明确的返回入口 —— 没有它，用户往下滚只会滚到历史中间，
- * 看起来像"后面的消息丢了"。
- *
- * 放在列表**末尾**而不是做悬浮按钮：末尾正好是用户滚到底时看到的位置，
- * 而悬浮按钮会和输入器上方的悬浮任务卡抢同一块地方。
- */
+/** 列表末尾的「回到最新」。 */
 @Composable
 fun JumpToLatest(onJumpToLatest: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
@@ -275,17 +229,7 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
             cornerRadius = ZhiRadius.floating,
             insideMargin = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             colors = CardDefaults.defaultColors(
-                /*
-                 * 用户气泡：**蓝底白字**（用户明确要求）。
-                 *
-                 * 原来用 `primaryContainer` / `onPrimaryContainer` —— 那是"容器"语义，
-                 * 深色下是深蓝底 + 低对比的浅蓝字（`onPrimaryContainer` 按 Miuix 的
-                 * 容器规则只有约 55% 明度），看起来发灰、不像"我说的话"。
-                 *
-                 * 换成 `primary` / `onPrimary` 这一对**实心强调色**：深浅两套方案里
-                 * 它们本来就是保证对比度的搭档（白字压在强调色上），语义也对 ——
-                 * 用户发言是这个界面里"最该被一眼认出"的那一列。
-                 */
+                /* 用户气泡：**蓝底白字**（用户明确要求）。 */
                 color = scheme.primary,
                 contentColor = scheme.onPrimary,
             ),
@@ -323,15 +267,7 @@ fun UserBubble(item: ChatItem, onLongPress: () -> Unit) {
     ZhiImageViewer(image = viewing, onDismiss = { viewing = null })
 }
 
-/**
- * 助手消息：与用户气泡一样套一层卡片底色，占满宽度、配色中性。
- *
- * 结构（自上而下）：思考面板 → 正文 → 上下文页脚。
- *
- * 原版 `renderAssistant` 只给用户气泡和工具行上底色，这里是**有意偏离**：
- * 只有一方有框时，AI 的消息看起来像没有归属的裸文本。操作入口是整块卡片的
- * 长按（原先那个独占一行的 ⋯ 已移除，见函数内注释）。
- */
+/** 助手消息：与用户气泡一样套一层卡片底色，占满宽度、配色中性。 */
 @Composable
 fun AssistantCard(
     item: ChatItem,
@@ -489,13 +425,7 @@ fun AssistantCard(
                         .graphicsLayer { alpha = cursorAlpha.value },
                 )
             }
-            /*
-             * 元信息行：耗时 · 改动文件。
-             *
-             * 只在**这一轮已经结束**时出现（流式期间耗时还在涨，显示出来是噪音）。
-             * `elapsedMs < 0` 表示未知（历史消息读不回来），那时整行都不画 ——
-             * 编一个"看起来合理"的耗时比不显示更糟。
-             */
+            /* 元信息行：耗时 · 改动文件。 */
             val hasMeta = !item.streaming && (item.elapsedMs >= 0 || item.editedFiles.isNotEmpty())
             if (hasMeta) {
                 Row(
@@ -544,10 +474,7 @@ fun AssistantCard(
     }
 }
 
-/**
- * 上下文页脚，复刻原版 `addContextFooter`（`MainActivity.java:2152-2166`）：
- * `上下文 X / Y · 剩余 N%`，等宽小字，并按占用率换色（≥90% 红 / ≥72% 强调色）。
- */
+/** 上下文页脚，复刻原版 `addContextFooter`（`MainActivity.java:2152-2166`） */
 @Composable
 private fun ContextFooter(tokens: Int, window: Int) {
     val scheme = MiuixTheme.colorScheme
@@ -651,39 +578,12 @@ private fun ThinkingPanel(item: ChatItem, onToggle: () -> Unit) {
     }
 }
 
-/**
- * 一个**工具批次**在对话流里的样子。
- *
- * ## 一个批次不是一张卡片
- *
- * 之前这里是"每个批次套一张「已运行 N 个工具」卡片"，于是单独一条 `Bash` 也被包进
- * 一张**带标题、带子标签、带计数徽章**的大卡里 —— 那三点是与参考实现不一致的地方
- * （IQ Code 的组标题直接说干了什么，而且只有"连续的 read/search 且 ≥2"才有组）。
- *
- * 现在的分工：
- * - 一个批次先按 [ToolGrouping] 切成若干段；
- * - **单条工具**各自一张卡（视觉上仍是一个框），但**没有标题行、没有子标签、没有徽章**
- *   —— 卡片只负责"这一条工具自成一块"，不冒充整批的汇总；
- * - **连续的 read/search 且 ≥2** → 折成一张卡，标题是
- *   「正在搜索 2 个模式、读取 3 个文件」这种**说明干了什么**的话。
- */
 @Composable
 fun ToolBatch(
     item: ChatItem,
     onToggleTool: (String) -> Unit,
     /** 参数是**那一组**的 groupKey（首成员 toolId）。 */
     onToggleGroup: (String) -> Unit,
-    /**
-     * 某一行的 `⋯` 菜单里**选中了一项**。两个参数：那一行的 toolId + 菜单文案。
-     *
-     * 这里以前是 `onActions: () -> Unit`，来自整组那一层 —— 于是点单个工具的 `⋯`
-     * 弹出的是整组菜单，而且回调里根本不知道用户点的是哪一行。
-     * 单个工具的动作（复制命令 / 复制输出 / 展开这一条）都作用在某一行上，
-     * 所以行号必须传出去。
-     *
-     * 菜单**本身**由这一行自己画（Miuix 下拉菜单，见 [ToolRow]），这里只负责
-     * 把"选中了哪一行的哪一项"交给上层去执行。
-     */
     onToolAction: (String, String) -> Unit,
 ) {
     val scheme = MiuixTheme.colorScheme
@@ -692,20 +592,7 @@ fun ToolBatch(
         ToolGrouping.group(item.tools.map { it.toGroupingEntry() })
     }
 
-    /*
-     * 运行中的秒表。
-     *
-     * `elapsedMs` 是跟着输出块推过来的（引擎按 chunk 回调进度），所以一个跑很久
-     * 都不吐字的命令，标签会冻在最后一次进度的值上，看起来像卡死。
-     * 这里按 500ms 续走一次（与参考实现的 `scheduleToolElapsedTicker` 同频），
-     * 取「起点至今」与「引擎推送值」的**较大者**（见 `ToolActions.displayElapsedMs`，
-     * 规则本身在纯逻辑层、有单测）。
-     *
-     * 整个批次共用同一个 `nowMs` 而不是每行各起一个 ticker：一次重组足够，而且同屏里
-     * 各行的秒数不会因为 ticker 相位不同而看起来错开。
-     *
-     * **没有运行中的工具时 ticker 不排队** —— 否则一个后台死循环会一直持有重组。
-     */
+    /* 运行中的秒表。 */
     val runningClock = rememberRunningClock(item.tools.any { !it.completed })
 
     // 放大查看的当前图。
@@ -800,11 +687,7 @@ private fun ToolActivity.toGroupingEntry(): ToolGrouping.Entry = ToolGrouping.En
     failed = failed,
 )
 
-/**
- * 折叠组卡片，对应原版 `addCollapsedToolActivity()` + `collapsedActivityLabel()`。
- *
- * 只由 [ToolBatch] 在"连续的 read/search 且 ≥2"时调用 —— 单条工具绝不走这里。
- */
+/** 折叠组卡片，对应原版 `addCollapsedToolActivity()` + `collapsedActivityLabel()`。 */
 @Composable
 private fun ToolGroupCard(
     members: List<ToolActivity>,
@@ -971,19 +854,7 @@ private fun ToolGroupCard(
     } // Card
 }
 
-/**
- * 单个工具行，复刻原版 `addToolCard()`（`MainActivity.java:2344-2430`）。
- *
- * 与原版一致的要点：
- * - 整行左缩进 20dp、行高 25dp；
- * - 行首是**状态字形**：`✓`(完成) / `×`(失败) / `●`(运行中) / `○`(等待授权)；
- * - 名称 11.5sp 粗体；摘要 10.5sp 等宽、单行省略、`weight(1f)`；
- * - `+N` / `−N` 是**纯文字着色**（9.5sp 等宽），不套底色胶囊；
- * - 右端 `⋯` 打开操作菜单（**Miuix 下拉菜单**，与输入器底排同一组件），
- *   `⌄` / `⌃` 折叠展开（仅完成且有详情时出现）；
- * - Bash 的命令**不放标题行**（原版注释：否则命令会出现两次），改为独立下一行；
- * - 折叠态只显示 `⎿ 摘要`（等宽、缩进 23dp），展开态才渲染全量输出。
- */
+/** 单个工具行，复刻原版 `addToolCard()`（`MainActivity.java:2344-2430`）。 */
 @Composable
 private fun ToolRow(
     activity: ToolActivity,
@@ -1005,17 +876,6 @@ private fun ToolRow(
     val hasDetails = activity.output.isNotBlank() || hasDiff || activity.previews.isNotEmpty()
     val showChevron = activity.completed && hasDetails
 
-    /*
-     * 这两个都是 O(输出长度) 的扫描（展开输出上限 40 000 字符，见
-     * `WorkspaceViewModel.LIVE_OUTPUT_LIMIT`），而这一行每次重组都要用它们 ——
-     * 状态切换、滚动复用、展开/收起都会触发。所以先算一次并缓存。
-     *
-     * ⚠️ key **不能**用 `activity` 整体：它带 `elapsedMs`，运行中每秒都在变，
-     * 那样等于每秒白算一次。key 只取真正参与计算的那几个字段。
-     *
-     * 输出字符串没变时 `remember` 的相等判断走的是同一实例的 `String.equals`
-     * 快路径（O(1)）；真变了才付一次 memcmp —— 都比重新 split 一遍便宜。
-     */
     val isFileDiff = remember(activity.toolName, activity.output) {
         activity.isFileDiff()
     }
@@ -1287,37 +1147,6 @@ private fun ToolRow(
     } // Surface(onClick)
 }
 
-/**
- * 运行中那一块 —— **终端井**。
- *
- * 对照反编译版 `addToolCard` 的运行分支（`~/.iqcode/.../MainActivity.java`）：
- *
- * ```java
- * // 命令类
- * LinearLayout panel = vbox();
- * panel.setPadding(dp(10), dp(7), dp(10), dp(8));
- * panel.setBackground(round(TERMINAL_BG, 10));
- * panel.setLayoutParams(margins(dp(23), dp(4), 0, dp(4)));
- *   ├─ 7×7 圆点（awaitingPermission ? MUTED_2 : ACCENT）
- *   ├─ "bash" 标签 10.5f 等宽
- *   ├─ [弹性]
- *   ├─ runningToolLabel（右对齐、单行）
- *   ├─ 命令行（未展开 → truncateCommand）
- *   ├─ dividerHorizontal()
- *   └─ liveOutputPreview(7000, 7 | 10 行)  或  "等待程序输出…"
- *
- * // 非命令类
- * runningToolLabel（一行）
- * + 输出尾部 5000 字符，padding(8,6,8,6)、round(TERMINAL_BG, 10)、margins(23,3,0,3)
- * ```
- *
- * 为什么值得做成"一口井"而不只是一行字：这几行是**程序自己的原始输出**，
- * 与上方"应用渲染出来的说明文字"是两种东西，底色方向（比页面更暗）就是这个区分本身。
- *
- * 增量刷新：反编译版只对 `liveOutputView.setText(...)` 做替换、不重建这张卡；
- * 这边由 Compose 的重组承担（`remember` 的 key 只取真正会变的那两个字段，
- * 不会因为 `elapsedMs` 每 500ms 变化而白算一遍）。
- */
 @Composable
 private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean) {
     val scheme = MiuixTheme.colorScheme
@@ -1471,19 +1300,10 @@ private fun RunningPanel(activity: ToolActivity, nowMs: Long, isCommand: Boolean
     }
 }
 
-/**
- * 这条工具的输出该不该按 diff 渲染。 *
- * <p>判据在 [ToolText.isFileDiff]（纯函数、有单测）：既要工具是写文件的，
- * **也要**输出真的是 diff —— 写入失败时输出是一行错误文本，
- * 按工具名着色会把那行错误画成 diff 配色，比不着色更误导。
- */
+/** 这条工具的输出该不该按 diff 渲染。 */
 private fun ToolActivity.isFileDiff(): Boolean = ToolText.isFileDiff(toolName, output)
 
-/**
- * 行首状态字形，复刻原版 `addToolCard()` 的 `statusGlyph`：
- * 完成 `✓`（绿）/ 失败 `×`（红）/ 等待授权 `○`（强调色）/ 运行中 `●`（强调色）。
- * 固定 23dp 宽保证多行左对齐。
- */
+/** 行首状态字形，复刻原版 `addToolCard()` 的 `statusGlyph` */
 @Composable
 private fun ToolStatusGlyph(activity: ToolActivity) {
     val scheme = MiuixTheme.colorScheme
@@ -1516,17 +1336,7 @@ private fun ToolStatusGlyph(activity: ToolActivity) {
 }
 
 /** 运行中/等待授权的说明文字，对应原版 `runningToolLabel()`。 */
-/**
- * 运行中/等待授权的说明文字，对应原版 `runningToolLabel()`。
- *
- * `nowMs` 是界面侧时钟（见 [rememberRunningClock]）。耗时取「起点至今」与「引擎推送值」
- * 的较大者 —— 引擎那个值只在有输出时更新，光用它会让长时间不吐字的命令看起来卡死。
- * 取值规则在 [ToolActions.displayElapsedMs]（纯逻辑、有单测）。
- *
- * 命令类工具额外报出**输出体量**（`实时 00:12 · 标准输出 12.3 KB · 错误输出 0 B · 进程运行中`）：
- * 字符数是单调递增的，即使屏幕上那几行没变，这一项也在动 —— 它同时回答了
- * "到底有没有在产出"和"错误输出是不是在涨"。
- */
+/** 运行中/等待授权的说明文字，对应原版 `runningToolLabel()`。 */
 private fun runningToolLabel(activity: ToolActivity, nowMs: Long): String {
     if (activity.awaitingPermission) return "等待授权…"
     val display = ToolActions.displayElapsedMs(activity.elapsedMs, activity.startedAtMs, nowMs)
@@ -1539,21 +1349,7 @@ private fun runningToolLabel(activity: ToolActivity, nowMs: Long): String {
     }
 }
 
-/**
- * 运行中要在行内摊出来的实时输出。
- *
- * 两种取法对应参考实现的两个函数（`MainActivity.liveOutputPreview` / `liveOutputTail`）：
- * - **命令类**（Bash / Root）按"最后 7 行、最多 7000 字符"取 —— 命令的输出是**行**结构，
- *   按行取才看得出跑到哪一步了；
- * - **其他工具**按"尾部 5000 字符"取 —— 它们多数只吐一段文本（读到的片段、搜索结果），
- *   没有"行"的概念，硬按行裁会把内容切碎。
- *
- * 参考实现在宽屏下按 10 行取。这里固定 7 行：`wide` 要一路从 `ChatArea` 穿过
- * `ChatList` / `ToolGroupCard` / `ToolRow` 四层，而差别只是横屏多三行 ——
- * 横向空间的价值在别处，不值得为它铺一条参数通道。
- *
- * 裁剪与"省略提示"都在 [LiveOutput]（纯逻辑、有单测）。
- */
+/** 运行中要在行内摊出来的实时输出。 */
 private fun liveOutputPreview(activity: ToolActivity): String {
     val text = activity.output
     if (text.isEmpty()) return ""
@@ -1564,13 +1360,7 @@ private fun liveOutputPreview(activity: ToolActivity): String {
     }
 }
 
-/**
- * 运行中的刷新时钟：每 [periodMs] 返回一个新的「现在」。
- *
- * [active] 为 false 时**不排队下一次** —— 参考实现也是这么做的
- * （`refreshToolElapsed` 只有在仍存在未完成工具时才重新 post），
- * 否则一个常驻的定时器会一直触发重组。
- */
+/** 运行中的刷新时钟：每 [periodMs] 返回一个新的「现在」。 */
 @Composable
 private fun rememberRunningClock(active: Boolean, periodMs: Long = 500L): Long {
     var now by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
@@ -1586,12 +1376,7 @@ private fun rememberRunningClock(active: Boolean, periodMs: Long = 500L): Long {
     return now
 }
 
-/**
- * 工具行状态区（Crossfade 的目标态）：运行中 / 折叠摘要 / 展开输出 / 无内容。
- *
- * 收敛成枚举而不是拿布尔组合当 key：运行中的 `elapsedMs` 每秒都在变，
- * 但只要 completed/expanded 没翻转，region 就不变 —— Crossfade 不会被打断重放。
- */
+/** 工具行状态区（Crossfade 的目标态）：运行中 / 折叠摘要 / 展开输出 / 无内容。 */
 private enum class ToolStatusRegion { RUNNING, COLLAPSED, EXPANDED, QUIET }
 
 private fun toolStatusRegion(activity: ToolActivity): ToolStatusRegion = when {
@@ -1604,14 +1389,7 @@ private fun toolStatusRegion(activity: ToolActivity): ToolStatusRegion = when {
     else -> ToolStatusRegion.COLLAPSED
 }
 
-/**
- * 折叠态的紧凑结果摘要，复刻原版 `compactResult()`（`MainActivity.java:2764-2776`）
- * 与 `addToolCard()` 里 diff 优先的分支：
- * - 有 diff → `N 行已修改 · 点按展开`
- * - 命令类失败 → `退出码 N · 原因 · 点按展开`
- * - 命令类成功 → `N 行 · 点按展开`
- * - 其他工具：单行且够短就直接显示，否则 `N 行 · 点按展开`
- */
+/** 折叠态的紧凑结果摘要，复刻原版 `compactResult()`（`MainActivity.java:2764-2776`） */
 private fun compactToolSummary(activity: ToolActivity): String {
     // 预览图**优先**说。沙箱截图那类工具的自述是一大段 JSON，若走到下面的行数分支
     // 会显示成"28 行 · 点按展开" —— 用户完全看不出这里有一张截图可看，
@@ -1675,18 +1453,6 @@ private fun DiffCount(label: String, color: Color) {
     )
 }
 
-/**
- * 错误卡片。
- *
- * ## 外观与沙箱页的后端错误同款
- *
- * 原来是「左边一根 3dp 红竖条 + 红标题 + 正文」，而沙箱页那处是「深灰卡片配红字」，
- * 输入器上方那处又是「带投影的浮动工具栏」—— 同一件"出错了"三种长相。
- * 现在三处都走 [ZhiNoticeBar] 的通知条（整宽红底、无阴影、小圆角）。
- *
- * 正文仍然走 [ZhiMarkdown]：`ToolText.friendlyError` 会输出带 `代码` 与列表的
- * 可操作建议，与回复正文保持一致 —— 这一条是功能，不因为换外观而丢。
- */
 @Composable
 fun ErrorCard(item: ChatItem) {
     ZhiNoticeBar(
@@ -1705,25 +1471,6 @@ fun ErrorCard(item: ChatItem) {
     )
 }
 
-/**
- * 提示卡片（斜杠命令输出、计划审批结果、`/help`、上下文压缩状态等）。
- *
- * 与 [ErrorCard] 共用同一个通知条分量，只有配色不同 —— 它和错误是同一层级的
- * 信息块，形状本就该一致。
- *
- * ## 为什么是 [ZhiNoticeTone.INFO] 而**不是** WARN
- *
- * 这一档原来传的是 WARN（琥珀底）。当时的分工是"错误=红、提示=琥珀"，
- * 看起来合理，实际后果是：这个应用里**绝大多数** INFO 消息（`/help` 输出、
- * MCP 列表、压缩进度、帧耗时探针）都走这一条路径，于是整屏都是土黄块。
- *
- * 判定信息不该用**颜色**去加重：真正需要用户注意的内容会单独走 [ErrorCard]
- * 或琥珀色的状态字形。普通提示只要"和正文有区别"就够了 —— 一个中性底
- * （`surfaceContainer`）配正常正文色即可，这也正是 Miuix `Card` 的层级做法。
- *
- * ⚠️ 真正需要琥珀时，直接给 `ZhiNoticeBar(tone = ZhiNoticeTone.WARN)`，
- * 那对色已按 ≥5:1 调过（见 `ZhiColors.warnFill`）。
- */
 @Composable
 fun InfoCard(item: ChatItem) {
     ZhiNoticeBar(
@@ -1750,12 +1497,7 @@ fun InfoCard(item: ChatItem) {
 // 耗时显示统一走 `ToolText.formatElapsed`，不再留第二份实现。
 
 
-/**
- * 把毫秒数格式化成"1.2s" / "3m 4s" 这种人读的短串。
- *
- * 只保留一位小数：耗时精确到毫秒没有意义（模型调用的抖动远大于此），
- * 而多出来的位数会让元信息行显眼到抢戏。
- */
+/** 把毫秒数格式化成"1.2s" / "3m 4s" 这种人读的短串。 */
 private fun formatElapsed(ms: Long): String = when {
     ms < 1000 -> "${ms}ms"
     ms < 60_000 -> String.format(java.util.Locale.US, "%.1fs", ms / 1000.0)

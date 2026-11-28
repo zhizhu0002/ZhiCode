@@ -96,16 +96,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
-/**
- * 对话内容的指纹。
- *
- * 用 `snapshotFlow` 观察它时，只要它没变就不会重复触发吸底 ——
- * 所以它必须覆盖所有会让**末尾那一项变高**的信号：条数、正文长度、
- * 思考长度、工具条数，以及切会话与工作状态。
- *
- * 做成 `data class` 是为了让 `snapshotFlow` 能用 `equals` 判重，
- * 否则每次发射都会当成新值。
- */
+/** 对话内容的指纹。 */
 private data class ContentStamp(
     val size: Int,
     val body: Int,
@@ -113,14 +104,7 @@ private data class ContentStamp(
     val tools: Int,
     val session: String,
     val status: String?,
-    /**
-     * 往前补过多少页（见 `WorkspaceUiState.transcriptPrependRevision`）。
-     *
-     * 用它区分「**前面**补了历史」与「后面来了新内容」：两者都会让列表变长，
-     * 但只有后者该吸底 —— 前者吸底会把用户刚滚上去的历史一把甩掉。
-     *
-     * 不靠"首项变了"去猜：重新打开同一条会话时首项也会变，而那次是该吸底的。
-     */
+    /** 往前补过多少页（见 `WorkspaceUiState.transcriptPrependRevision`）。 */
     val prepend: Int,
 )
 
@@ -130,62 +114,20 @@ private fun requestScrollToBottom(listState: androidx.compose.foundation.lazy.La
     if (total > 0) listState.requestScrollToItem(total - 1)
 }
 
-/**
- * 判定「内容是否还有没露出来的部分」。
- *
- * ## ⚠️ 为什么**不**像 rikkahub 那样再扣一次输入器高度
- *
- * 参考实现（rikkahub `ChatList.kt:263-270`）的算法是：
- * `末项底边 <= viewportEndOffset - 输入器高度 - 8`。
- *
- * 但那是**针对它的布局**：它的输入器是浮在列表上的 overlay，而列表的
- * `contentPadding` 里**没有**为它留地方 —— 所以它必须在判据里手工扣。
- *
- * 我们的布局不一样：`LazyColumn` 的 `contentPadding.bottom = bottomInset`，
- * 而 `bottomInset` 正是输入器/任务卡/悬浮胶囊的实测高度（见 `ChatPage` 里
- * 那段带实测数据的注释）。也就是说，滚到底时 `LazyColumn` **已经**把最后一项
- * 摆在"悬浮层上沿"，`canScrollForward` 为假就是"全部内容都露出来了"。
- *
- * 照抄那个减法会**重复扣减**：等于要求"内容末端再往上抬一整个输入器的高度"，
- * 而这个条件在滚到底之后永远不成立 —— 表现就是「回到底部」按钮点完不消失，
- * 形成死锁。这个 bug 在实测中出现过（截图确认），别再改回去。
- *
- * 所以这里直接用 `canScrollForward`：它由 `contentPadding` 参与计算，
- * 已经是准确的。
- */
 private fun androidx.compose.foundation.lazy.LazyListState.hasHiddenContent(): Boolean = canScrollForward
 
 @Composable
 fun ChatList(
     state: WorkspaceUiState,
     onToggleTool: (String) -> Unit,
-    /**
-     * 展开/收起**一个折叠组**。第二个参数是那一组的 groupKey（首成员 toolId）。
-     *
-     * 以前传的是"目标状态 + 整批的成员列表"，因为展开态记在成员的 `expanded` 上；
-     * 现在分组由界面按 `ToolGrouping` 推导、展开态记在 `ChatItem.expandedGroups` 上，
-     * 所以这一层只需要说清"哪一组"。
-     */
     onToggleGroup: (String, String) -> Unit,
     onToggleThinking: (String) -> Unit,
     onMessageActions: (ChatItem) -> Unit,
-    /**
-     * 某一行的 `⋯` 菜单里选中了一项。参数：**哪一组**、**哪一行**、菜单文案。
-     *
-     * 与 [onMessageActions] 分开：后者只知道"哪一组"，做不了"展开这一条"这类动作。
-     *
-     * 菜单本身由那一行自己画（Miuix 下拉菜单），这里只转发"选中了什么" —— 所以
-     * 不需要手指位置，也不需要把菜单状态放进 ViewModel。
-     */
+    /** 某一行的 `⋯` 菜单里选中了一项。 */
     onToolAction: (ChatItem, String, String) -> Unit,
     /** 多选模式下切换某条消息的勾选状态。 */
     onToggleSelect: (String) -> Unit,
-    /**
-     * 多选模式下**一次性替换**整个选中集合（拖动对选用）。
-     *
-     * 与 [onToggleSelect] 分开：拖动是"从起点到当前手指"的区间整体重算，
-     * 用 toggle 会变成反复加减、最终状态取决于调用次数，完全不可控。
-     */
+    /** 多选模式下**一次性替换**整个选中集合（拖动对选用）。 */
     onRangeSelect: (Set<String>) -> Unit,
     /** 多选模式下取消整次选择。 */
     onCancelSelect: () -> Unit,
@@ -193,34 +135,14 @@ fun ChatList(
     onExportSelect: () -> Unit,
     /** 全选 / 取消全选。 */
     onToggleSelectAll: () -> Unit,
-    /**
-     * 长按动作菜单的宿主插槽。在**每一项自己的布局里**调用，菜单就会贴那一项弹出
-     * （见 `ZhiAnchoredActionMenu`）。
-     *
-     * 第二个参数是**手指位置**（相对该项）：非空时菜单从那一点长出来，
-     * 而不是固定贴条目的边。
-     */
+    /** 长按动作菜单的宿主插槽。 */
     anchoredMenu: @Composable (String, DpOffset?) -> Unit,
-    /**
-     * 列表滚到顶、而上面还有没读进来的历史时调用一次。
-     *
-     * 恢复历史是分页的（见 `SessionReader.PAGE_MESSAGES`），所以"顶上还有"这件事
-     * 只有列表自己知道（它才知道用户滚到了哪）。重复调用是安全的：ViewModel 里
-     * 有「正在加载 / 已经没有更早的」两道守卫。
-     */
+    /** 列表滚到顶、而上面还有没读进来的历史时调用一次。 */
     onLoadOlder: () -> Unit = {},
-    /**
-     * 「回到最新」：常驻窗口的尾部被淘汰过、最新消息不在内存里时调用。
-     *
-     * 由两处触发：列表底部的 chip，以及"发送时人还在历史里"（见上面滚动令牌那段）。
-     * ViewModel 侧会用**最新一页替换**整份 transcript，所以这里不需要游标。
-     */
+    /** 「回到最新」：常驻窗口的尾部被淘汰过、最新消息不在内存里时调用。 */
     onLoadLatest: () -> Unit = {},
     modifier: Modifier = Modifier,
-    /**
-     * 列表底部预留的高度。悬浮的任务/状态卡会盖住列表下部，
-     * 用它把内容顶到卡片上方，保证被遮住的对话仍能滑出来看到。
-     */
+    /** 列表底部预留的高度。 */
     bottomInset: Dp = 0.dp,
     occupiedBottomPx: Int = 0,
     suppressImeResize: Boolean = false,
@@ -230,31 +152,9 @@ fun ChatList(
     composerFocused: Boolean = false,
     /** 顶部预留高度：顶栏改成悬浮层后，内容要能滚到它下面。 */
     topInset: Dp = 0.dp,
-    /**
-     * **主体调试模式**：在真实消息上就地加调试信息（不另开页面）。
-     *
-     * 打开后每条消息上方多一行 `类型 · id · 正文/思考长度 · 工具数`，并给一个
-     * 「源码」开关把原始文本摊出来；**并且把细节默认全展开**：
-     *
-     * - 思考面板按展开渲染（不改 state，只改这一次渲染的输入）；
-     * - 工具组里的每条工具都摊开全量输出；
-     * - 处理步骤（`processSteps`）也显示出来；
-     * - 对话流末尾**内联**一份完整任务清单（不是悬浮卡那片截断视图）。
-     *
-     * 目的只有一个：**没有藏起来的东西**。排版问题（折行、行高、卡片间距、长文本溢出）
-     * 只在内容全都铺开、且处于真实滚动容器与真实宽度下才看得出来。
-     *
-     * 之所以做在**真实列表**里而不是另开一页：另开一页用的是样例数据，
-     * 长文本长度、工具输出体量、附件数量都与真实不符，测不出真实排版。
-     */
+    /** **主体调试模式**：在真实消息上就地加调试信息（不另开页面）。 */
     debugMode: Boolean = false,
-    /**
-     * 与 [debugMode] 配套：对话流末尾内联的任务清单。
-     *
-     * 悬浮任务卡只显示前 `maxTasks` 条（多了会盖住对话），完整清单原本只在
-     * 「任务清单」窗口里。调试模式把它**摊进对话流本身**，于是"任务与消息的对应关系"
-     * 一眼可见，也不必再开一个窗口。
-     */
+    /** 与 [debugMode] 配套：对话流末尾内联的任务清单。 */
     debugTasks: List<AgentTask> = emptyList(),
 ) {
     ZhiFrameTrace.countRecompose("ChatList")
@@ -269,23 +169,6 @@ fun ChatList(
     // 顶部下拉的刷新指示器状态。`remember` 一次即可：它只在内部驱动那圈动画。
     val pullToRefreshState = rememberPullToRefreshState()
 
-    /*
-     * 是否跟随最新内容（吸底）。
-     *
-     * 判定挪进了 [rememberAutoFollow]（纯逻辑在 [AutoFollowPolicy]，有单测）：
-     *
-     * - **一开始滚动就立刻暂停** —— 否则用户按住往上拖的时候流式内容还会把他
-     *   拽回底部，手感是"手指和自动滚动在抢"。
-     * - **停手时按位置决定，带 8dp 滞回** —— 停在底部（或拖动过程中到过底部）
-     *   就恢复跟随，往旧内容方向拖过阈值就不跟。
-     *
-     * ⚠️ 不能用「可见的末项是不是最后一项」来判断：内容增长本身就会把末项
-     * 顶出屏幕，于是在我们来得及滚动之前条件就已经变成 false —— 表现是
-     * 回复长过一屏之后跟随就断了，得手动往下滑。
-     *
-     * ⚠️ `isScrollInProgress` 在这里只反映用户拖动 / 惯性滚动：我们用的是
-     * `requestScrollToItem`，它不走挂起滚动、也不占滚动互斥锁，不会把它置真。
-     */
     // 长驻 effect 读取 State 的最新值，不能冻结首次组合时的 Boolean。
     val autoFollowState = rememberAutoFollowHandle(listState, forceFollowToken = state.scrollToBottomToken)
 
@@ -299,23 +182,6 @@ fun ChatList(
     // "这一屏根本不能滚"的情况，两者写同一个进度值、方向一致，不会打架。
     com.zhizhu.zhicode.compose.ui.reportNavBarScroll(listState)
 
-    /*
-     * 发消息 → 立刻滚到底（并恢复跟随）。
-     *
-     * 与下面的吸底 effect 分开，因为触发条件完全不同：吸底是"内容变了且用户在跟随"，
-     * 而这条是"用户按了发送" —— 此刻即使他正在翻历史也要把他带回来。原版
-     * `scrollChat()` 也是无条件 `chatAutoFollow = true` + 滚到底。
-     *
-     * ⚠️ 判据是"令牌**变了**"，不是"令牌非零"。
-     *
-     * 原先写的是 `if (state.scrollToBottomToken == 0L) return` —— 只挡住了首次组合
-     * （令牌还是 0）那一次。问题是 `LaunchedEffect` 在**每次重新进入组合**时都会重跑：
-     * 切走页签再切回来，面板被重建、这个 effect 重启，而令牌此时早就 > 0，
-     * 于是又滚了一次底 —— 用户刚翻到的位置白翻。用户的原话：
-     * 「切换页面，对话老是回到最低端」。
-     *
-     * 记下已处理过的令牌，只有它真的变化（= 用户按了发送）才滚。
-     */
     var lastScrollToken by remember { mutableStateOf(state.scrollToBottomToken) }
     LaunchedEffect(state.scrollToBottomToken) {
         if (state.scrollToBottomToken == lastScrollToken) return@LaunchedEffect
@@ -327,116 +193,28 @@ fun ChatList(
         if (currentState.transcriptHasNewer) onLoadLatestState() else requestScrollToBottom(listState)
     }
 
-    /*
-     * 上一次已处理的会话 id。
-     *
-     * 切会话 / 新会话时要**无条件**回到底部（新打开的会话应该从底部看起），
-     * 而流式过程中只在用户本来就贴底时才跟随。
-     * 两者用同一个标记区分：`activeSessionId` 变了就是“换会话了”，无条件滚。
-     */
+    /* 上一次已处理的会话 id。 */
     var lastSessionId by remember { mutableStateOf(state.activeSessionId) }
 
-    /*
-     * 上一次看到的"往前补历史"计数。与 [lastSessionId] 配套：会话没变而计数变了，
-     * 说明这次变长是**前面**补的，不是来了新消息。见 [ContentStamp.prepend]。
-     */
+    /* 上一次看到的"往前补历史"计数。 */
     var lastPrepend by remember { mutableStateOf(state.transcriptPrependRevision) }
     /** 锚定 effect 专用的版本号，与吸底 effect 的 `lastPrepend` **互不干扰**（见那段注释）。 */
-    /**
-     * 锚定 effect 专用的版本号，与吸底 effect 的 `lastPrepend` **互不干扰**（见那段注释）。
-     *
-     * 初值取**当前的** revision 而不是 `Int.MIN_VALUE`：后者会让 `LaunchedEffect`
-     * 在首次组合时就认为自己"错过了一次前插"，白跑一遍并打出一条
-     * `prependAnchor NO-KEY rev=0` —— 真机日志里这种噪音一共出现了 4 次，
-     * 会掩盖真正的锚定失败。首次组合本来就没有"上一次"可锚。
-     */
+    /** 锚定 effect 专用的版本号，与吸底 effect 的 `lastPrepend` **互不干扰**（见那段注释）。 */
     var lastAnchoredPrepend by remember { mutableStateOf(state.transcriptPrependRevision) }
-    /*
-     * 记录触发"加载更早消息"前的视口锚点；必须在 ViewModel 异步更新状态之前保存。
-     *
-     * ⚠️ 锚点记的是**消息 id**，不是 `LazyColumn` 的 item key。
-     *
-     * 上一版记的是 key，而 key 正是前插时会被钉/会变的那个东西 ——
-     * 等于用一个"可能变了的值"去查一个"需要它没变才查得到"的位置。
-     * 消息 id 在前插后是**恒定**的（历史消息本来就是同一条），
-     * 所以按 id 一定找得回原来那一块（见 `TurnLayout.containsMessage`）。
-     *
-     * 一个回合可能包含多条消息，前插条数与新增 item 数并不相等，
-     * 所以也不能拿 transcript 条数当 LazyColumn 下标。
-     */
     var prependAnchorId by remember { mutableStateOf<String?>(null) }
     /** key 只作兜底：按 id 找不到时才用它（例如那一块的消息被尾部淘汰了）。 */
     var prependAnchorKey by remember { mutableStateOf<Any?>(null) }
     var prependAnchorOffset by remember { mutableStateOf(0) }
 
-    /*
-     * 切块表的草稿缓存。
-     *
-     * ⚠️ 用普通字段而不是 `mutableStateOf`：它只在"下一次算块表"时被读，
-     * 没有任何界面因为它变化而重组。写成 state 并在组合期更新会触发
-     * 「写 → 失效 → 重跑 → 再写」的循环，流式输出时每帧都跑一遍。
-     *
-     * 声明在这一层（而不是下面算块表的地方）是因为 `loadOlderWithAnchor`
-     * 要读 `previous` 当"当前块表"：那个 lambda 在下面几行就创建了，
-     * 拿不到更后面的局部变量。
-     */
     val blockCache = remember { BlockCache() }
 
-    /**
-     * 「该落到底」的待办标记。
-     *
-     * 切会话时置真，**真正贴到底之后**才由观察 `canScrollForward` 的那条 effect 清掉。
-     * 用它而不是"切会话时滚一次"的原因见下面 `collect` 里的长注释：
-     * 切会话那一帧列表还是空的，一次性的滚动会落空且永不重试。
-     */
+    /** 「该落到底」的待办标记。 */
     var pendingBottom by remember { mutableStateOf(false) }
 
-    /**
-     * 刚进入组合的第一轮。
-     *
-     * 页面切换时 `ChatList` 会被 `SaveableStateHolder` 恢复，而 `autoFollowState`
-     * 是 `remember` —— 残留的 true 会让"恢复后第一次数据变化"误判成
-     * "用户要继续跟随"，于是主动置底。见下面吸底 effect 里的守卫说明。
-     */
+    /** 刚进入组合的第一轮。 */
     var justRecomposed by remember { mutableStateOf(true) }
 
-    /*
-     * 往前补历史时**视口一动不动**（像聊天软件那样）。
-     *
-     * ## 两条腿，缺一不可
-     *
-     * 1. **块的 key 必须稳定**：`TurnLayout.Block.Turn.key` 取"这一轮首成员"的 id，
-     *    前插时新消息会并入第一个 Turn 并成为新首成员 → key 变 → 对 `LazyColumn`
-     *    来说那是一块全新的 item，锚点作废。`pinForPrepend` 把旧 key 钉回去解决这层。
-     * 2. **手动纠正视口**：光有稳定 key 还不够 —— 这条路径同时会从尾部淘汰
-     *    （`trimResidentTail`），前插 + 后删一起发生时自动锚定会失准。
-     *
-     * ## ⚠️ 为什么用"算下标"而不是"查可见项"
-     *
-     * 前两版都在 `visibleItemsInfo` 里按 key 找锚点。那有个致命前提：
-     * **锚点必须仍然可见**。而一次前插 30 条消息之后，原来的锚点被推到视口**下方**
-     * 好几十项之外 —— `visibleItemsInfo` 里根本没有它，于是：
-     *
-     *  · 要么什么都找不到，循环空转到超时（`GAVE-UP`）；
-     *  · 要么找到的是列表被夹到顶部后的另一项，纠正到错误位置。
-     *
-     * 用户看到的永远是"加载完跳到最上面"。
-     *
-     * 现在改成**按块表算下标**：`blocks` 就在同一个组合作用域里，按 key 查它在
-     * 块表里的位置是 O(n) 一次性计算，不依赖可见性。再加上列表头部那个恒定 1 项
-     * （`older-loader` / `transcript-start`，见下面 `LazyColumn` 的顶部分支），
-     * 就得到 `LazyColumn` 的绝对下标 —— 无论锚点在哪都能精确跳过去。
-     */
-    /*
-     * 「回到最新」之后显式落底。
-     *
-     * 单独一条 effect，因为它是**替换**：整份 transcript 换掉之后，刚才的滚动位置
-     * 指向的那个条目已经不在列表里了，LazyColumn 会把位置夹到某一项上 ——
-     * 落底必须显式做，不能靠吸底那条路顺手带（那条路会被"这次是往前补"的判据挡掉）。
-     *
-     * 只在**回到底部**之后才做，否则列表还没测出高度，`requestScrollToItem(total-1)`
-     * 拿到的 total 可能是 0 或旧值。
-     */
+    /* 「回到最新」之后显式落底。 */
     var lastJump by remember { mutableStateOf(state.transcriptJumpRevision) }
     LaunchedEffect(state.transcriptJumpRevision) {
         if (state.transcriptJumpRevision == lastJump) return@LaunchedEffect
@@ -447,55 +225,8 @@ fun ChatList(
         requestScrollToBottom(listState)
     }
 
-    /*
-     * 滚到顶部就往前补一页历史。
-     *
-     * 判据是 `(贴顶, 上面还有, 正在加载, 本次贴顶还没补过)`。
-     *
-     *  · 只贴顶不算数 —— 上方本来就没有更早的内容时贴顶是常态；
-     *  · 正在加载时不算数 —— 否则滚动会连着触发很多次，每次都读一遍库；
-     *  · **一次到达顶端只补一页**（`loadedAtTop`）—— 这一条是保险丝，不是优化。
-     *
-     * 为什么要那根保险丝：`LazyColumn` 在头部插入内容之后会把滚动锚点重新定位到
-     * 原来那条上（它按 `key` 找回第一可见项的下标），于是列表通常**不再贴顶**，
-     * 用户往上看时自然会再触发一次 —— 这正是想要的节奏。
-     * 但如果某个版本/某个状态下锚点没有移动，`贴顶` 会一直是真，
-     * 而"补完一页"又把 `loading` 从 true 变回 false（三元组变值 → 再触发），
-     * 结果就是**一口气把整条会话从库里读一遍**：内存不会涨（尾部会淘汰），
-     * 但读者是白读的，一万条的会话要多花几百毫秒。
-     * 加了它之后最坏情况是"要再滚一下才能继续往前翻"，代价可以接受。
-     *
-     * ⚠️ 不要把它放宽成"只要贴顶就补"：那就是"打开会话就自动把整条历史读回来"，
-     * 正是这一轮要消灭的东西。
-     */
     var loadedAtTop by remember { mutableStateOf(false) }
 
-    /*
-     * 补一页更早的历史，**先记下视口锚点**。
-     *
-     * ⚠️ 这个函数是两条入口的共用路径，别让任何一条绕过它。
-     *
-     * 之前下拉刷新那条（`PullToRefresh` 的 `onRefresh`）直接调了 `onLoadOlder`，
-     * 没有记录 `prependAnchorKey/Offset`。后果分两种，都很难查：
-     *
-     *   · 从来没滚到过顶 → 锚点是 null → 补完后不还原，交给 `LazyColumn`
-     *     按 key 自己夹位置。多数情况下能对，但前插 + 尾部淘汰同时发生时就会漂；
-     *   · 之前滚到过顶 → 锚点是**上一次的陈旧值** → 补完后
-     *     `requestScrollToItem(旧下标, 旧偏移)` 把视口拽到与当前内容无关的位置。
-     *
-     * 用户看到的现象就是「下拉加载更早的消息，列表乱跳」，而滚到顶自动补那条
-     * 却正常 —— 因为只有它记了锚点。
-     *
-     * 锚点取「第一个 index > 0 的可见项」：index 0 是那条 `OlderLoader`
-     * 占位，前插后它会被顶走，用它当锚点等于没锚。
-     *
-     * 记两样东西：
-     *  · `prependAnchorId` —— 那一块里**第一条消息的 id**（主锚点，前插后恒定）；
-     *  · `prependAnchorOffset` —— 它当时在视口里的偏移。
-     *
-     * ⚠️ 块的 key 只作兜底。前插时 key 会因为"新内容并入第一轮"而变化（或因为
-     * `pinForPrepend` 被钉回旧值），两种情况都不可靠 —— 而消息 id 一定还在。
-     */
     val loadOlderWithAnchor: () -> Unit = remember(listState) {
         {
             val anchor = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index > 0 }
@@ -534,44 +265,6 @@ fun ChatList(
             }
     }
 
-    /*
-     * 自动吸底。
-     *
-     * 原实现有两个叠在一起的问题，合起来就是“不及时”：
-     *
-     * 1. 用 `LaunchedEffect(内容长度…)` + `scrollToItem`。
-     *    `scrollToItem` 是**挂起**函数，而流式输出下内容长度几乎每帧都在变 ——
-     *    LaunchedEffect 于是不停地取消并重启协程，滚动经常在真正生效之前就被
-     *    取消掉，只能等某个空档才追上，看起来就是“滚一下停一下”。
-     *    改用 `requestScrollToItem`：**非挂起**，只登记一个目标下标，
-     *    在**下一次测量**里生效，取消不掉。
-     *
-     * 2. 用“可见末项”算贴底（见 [autoFollow] 的注释）。
-     *
-     * 另外改成一个**长驻**的 effect + `snapshotFlow` 观察内容指纹，
-     * 而不是把内容长度当 `LaunchedEffect` 的 key —— 后者每个 token 都要
-     * 重建一次协程，这些开销完全没有必要。
-     *
-     * 日志输出时不用 `animateScrollToItem`：内容连续增长时每一步都起动画
-     * 会互相打断，反而更抖。
-     */
-    /*
-     * 键盘跟随：**逐帧增量**补偿，不是"弹完再跳一下"。
-     *
-     * 这里原本是「IME 打开代数变了 → 等一帧 → `scrollToItem(最后一条)`」，两个毛病：
-     *
-     *  · 等待那一帧时键盘还在长，落点已经过时；
-     *  · `scrollToItem` 是瞬间定位，所以表现为内容先被顶掉、再"啪"地弹回来。
-     *
-     * 现在交给 [ImeLazyListAutoScroller]：记上一次的键盘高度，每次变化就
-     * `scrollBy(增量)`。键盘长多少、列表就让多少，中间是连续的。
-     *
-     * ⚠️ `composerFocused` 这个守卫必须留着：`WindowInsets.ime` 是**窗口级**的，
-     * 侧栏抽屉的搜索框弹键盘时它一样会变，那种情况下对话流不该跟着动。
-     * 顺带说明为什么 `imeOpenGeneration` 参数还在：`ChatPage` 用它做
-     * "这次键盘是不是输入器提起来的"的代数记账，本文件不再需要它驱动滚动，
-     * 但仍保留参数以免调用点改动 —— 真正生效的是下面的 `enabled`。
-     */
     val imeMotion = LocalImeMotion.current
     val imeShrinkPx = {
         if (suppressImeResize) 0 else (imeMotion.imeBottomPx - occupiedBottomPx).coerceAtLeast(0)
@@ -631,27 +324,6 @@ fun ChatList(
                 return@collect
             }
 
-            /*
-             * 跟随吸底。
-             *
-             * ⚠️ `!justRecomposed` 这个守卫是修「打开设置页再返回，对话流被置底」的。
-             *
-             * 页面切换时 `ChatList` 会被 `MochiNavHost` 的 `SaveableStateHolder`
-             * **保存并恢复**，而 `autoFollowState` 是 `remember`（不跨进程、跨页面
-             * 也不保证重置）。于是回来后：
-             *
-             *  · `transcriptStamp` 因为 `prepend` / `jump` 这些版本号归零而**变了一次**
-             *    （它们本来就该变，那是数据真实变化）；
-             *  · 这条 `collect` 于是重跑；
-             *  · `autoFollowState.state.value` 残留为 true → `requestScrollToBottom`
-             *    → 把用户正在读的历史顶到最上面。
-             *
-             * 用户的原话是「切换设置页面对话流置底」。它**不是**吸底逻辑写错了，
-             * 而是"刚回到组合的那一次"不该算作用户要继续跟随。
-             *
-             * `justRecomposed` 在进入组合后的第一轮为 true，之后翻假 ——
-             * 所以真正的内容变化（流式输出、新消息）仍然正常跟随。
-             */
             if (justRecomposed) {
                 justRecomposed = false
                 // 恢复后第一轮：只重新判定一次跟随意图，不主动滚动。
@@ -662,56 +334,7 @@ fun ChatList(
         }
     }
 
-    /*
-     * 布局驱动的贴底校正 —— 补上「内容指纹漏判」的那一类漂移。
-     *
-     * ## 上面那条指纹 effect 漏了什么
-     *
-     * [ContentStamp] 只看**数据**：条数、末条正文/思考长度、工具数、会话、状态。
-     * 但列表会**因为非数据原因变高或移位**：
-     *
-     *  · Markdown 异步渲染完成（代码块高亮、表格、公式）比纯文本高出一截；
-     *  · 图片/附件解码完成后从占位高度换成真实高度；
-     *  · 折叠面板、工具输出的行高变化；
-     *  · `bottomInset` 本身变化（任务卡出现、输入器长高）。
-     *
-     * 这些都不改指纹，所以上面那条 effect **一次都不会触发**。结果就是：流式输出
-     * 到一半时最后一段被顶到悬浮层底下，用户得自己往下滑一下才看得到 ——
-     * 也就是"跟随断了"，但不是逻辑错，是没人去校正。
-     *
-     * ## 为什么用 `visibleItemsInfo` 而不是把更多字段塞进指纹
-     *
-     * 往指纹里加字段是在**猜**哪些变化会让布局动；而 `visibleItemsInfo` 是布局结果的
-     * 直接产物 —— 只要布局真的变了它就发射，不需要枚举原因。参考实现
-     * （rikkahub `ChatList.kt:302-314`）也是观察它。
-     *
-     * ## 为什么判据是「跟随中且不在底部」而不是 rikkahub 那句 `isAtBottom()`
-     *
-     * rikkahub 的写法是「只有**已经**贴底才滚」，靠每次布局重发请求来收敛。
-     * 那有个前提：相邻两次布局之间内容增长不能超过它的 8px 余量，否则一帧之内
-     * 就不再贴底、跟随会自己断掉。这里改用我们已有的 [autoFollowState]（用户
-     * 意图，带滞回、拖动期间暂停），它本来就是为这件事设计的：
-     *
-     *   · `autoFollow == true`  = 用户想看最新内容；
-     *   · `!isScrollInProgress` = 手指/惯性没在动，不跟他抢。
-     *
-     * 于是「内容长高把他顶出去了」这种情况会被**拉回来**（这是对的，他本来在跟随），
-     * 而"他主动往上翻"时 `autoFollow` 已经是 false，不会被拽回。
-     *
-     * ## 不会死循环
-     *
-     * 每次布局最多发一次请求，`requestScrollToItem` 非挂起、只登记目标。
-     * 滚到位之后 `isAtBottom` 变真，就不再发。内容持续增长时确实是每帧一次，
-     * 但那正是"跟随"该有的行为（与上面那条指纹 effect 同频，且请求是幂等的）。
-     */
-    /*
-     * 「下面还有没露出来的内容吗」——给悬浮的"回到底部"按钮用。
-     *
-     * 用 `derivedStateOf` 而不是直接在组合里读：`canScrollForward` 背后的
-     * `layoutInfo` 在滚动时**每个像素**都变，直接读会让整个 ChatList 每帧重组。
-     * `derivedStateOf` 只在**结果布尔值**翻转时才让读它的地方失效，
-     * 也就是"从能看到底变成看不到底"那一次。
-     */
+    /* 「下面还有没露出来的内容吗」——给悬浮的"回到底部"按钮用。 */
     val atBottom by remember {
         derivedStateOf { !listState.hasHiddenContent() }
     }
@@ -732,27 +355,6 @@ fun ChatList(
         }
     }
 
-    /*
-     * 底部留白变化后重新贴底。
-     *
-     * 留白（[bottomInset]）不是常量：任务进度卡出现/消失、输入器长高、悬浮胶囊切换
-     * 都会让它变。而 LazyColumn 在 `contentPadding` 变化后**只重新测量、不重新贴底**：
-     * 滚动位置按"第一条可见项"保持，留白变大就等于把最后几条往下推、推到悬浮层底下。
-     *
-     * 实测现象（截图为证）：任务进度卡浮起后，最后一条「帧耗时」消息的第二行被它的
-     * 上沿切掉。内容观察器救不了这种情况 —— 留白变化**不在** [ContentStamp] 里，
-     * 内容没变就不会触发吸底。
-     *
-     * ## 为什么是「多帧重试」而不是只滚一次
-     *
-     * 留白与测量在**同一帧**变化：`scrollToItem` 一次之后，紧随的那次测量会按
-     * 旧位置重新摆放，把刚滚到的位置又推回去一点；卡片有自己的进场动画
-     * （`AnimatedVisibility` + `slideInVertically`），高度是在几帧里长到位的。
-     * 所以要在动画期间连续校正，`canScrollForward` 为假就提前收工。
-     *
-     * 只在用户本来就在跟随最新内容时做（[autoFollowState]）：否则会把人从正在
-     * 读的历史里拽走 —— 那是本文件里反复强调过的、绝不能破坏的行为。
-     */
     LaunchedEffect(listState, bottomInset) {
         if (!autoFollowState.state.value) return@LaunchedEffect
         repeat(4) {
@@ -763,21 +365,6 @@ fun ChatList(
             listState.scrollToItem(total - 1)
         }
     }
-    /*
-     * 待办落底的收尾：真正贴到底之后才清标记。
-     *
-     * 单独一条 effect 观察"是否已贴底"，而不是在登记那一帧清 —— 见上面 pendingBottom 处。
-     *
-     * ⚠️ 但它有个**跨页面泄漏**的坑：打开设置页时工作区被移出组合，这条 effect
-     * 不跑，而 `pendingBottom` 属于 `rememberSaveable` 之外的状态 —— 它会被
-     * `MochiNavHost` 的 `SaveableStateHolder` 连同整个 ChatList 的状态一起留住。
-     * 于是"切会话 → 立刻打开设置 → 返回"时，标记仍是 true，回来就**强制置底**，
-     * 把用户在读的历史顶走（用户报的「打开设置等页面，对话流会置底」）。
-     *
-     * 修法：贴底超时也给一个上限。列表在**可见**状态下正常几百毫秒内必然贴底；
-     * 若被打断（页面切走、内容还没测量），标记不该无限期留着 —— 它服务的是
-     * "这次切会话的第一屏"，不是"以后任何一次回来都要落底"。
-     */
     LaunchedEffect(listState) {
         snapshotFlow {
             val info = listState.layoutInfo
@@ -786,15 +373,7 @@ fun ChatList(
             .distinctUntilChanged()
             .collect { atBottom -> if (atBottom) pendingBottom = false }
     }
-    /*
-     * `pendingBottom` 的**超时清除**。
-     *
-     * 标记置真之后最多保留 [PendingBottomTtlMillis]；期间没贴到底（页面被切走、
-     * 内容还没灌进来）就直接丢掉。见上面那段说明里的"跨页面泄漏"。
-     *
-     * 用 `snapshotFlow` 观察标记本身而不是在置真处起协程：置真发生在 collect 里，
-     * 那里起协程会让"每次内容变化"都新建一个协程。
-     */
+    /* `pendingBottom` 的**超时清除**。 */
     LaunchedEffect(listState) {
         snapshotFlow { pendingBottom }
             .distinctUntilChanged()
@@ -862,27 +441,6 @@ fun ChatList(
         session = state.activeSessionId,
         revision = state.transcriptRevision,
     )
-    /*
-     * 块表的 `remember` key：**只看结构，不看正文长度**。
-     *
-     * ⚠️ 这是「对话流卡顿」的直接修复点，别把 `lastBodyLength` 加回来。
-     *
-     * `blocks` 的 key 原来是 [TranscriptStamp]，而那个指纹含 `lastBodyLength`
-     * 与 `lastToolCount` —— 流式输出每 32ms 让正文长度变一次，于是**每个 token**
-     * 都要：`transcript.map` 分配一份 O(n) 的 `Entry` 列表，再把整表切一遍块。
-     * 一万条消息的会话里，这是每帧几百微秒到毫秒级的主线程分配 + 遍历，
-     * 而它换来的结果与上一帧**完全一样**（追加正文不改块结构）。
-     *
-     * 真正会改变块结构的变化只有这些：
-     *  · 加/删消息 → [size] / [firstId] / [lastId]；
-     *  · 末尾多了一条工具行 → 同一个回合多了个成员，但块还是那一块 ——
-     *    不过成员列表要跟着变，所以 [lastToolCount] 留着（它只在**新增工具**时变，
-     *    工具输出增长只改文本，不改条数）；
-     *  · 前插 / 回到最新 / 原地替换 → [prepend] / [jump] / [revision] / [session]。
-     *
-     * `lastBodyLength` 只影响**内容**渲染，而内容的刷新由 LazyColumn 各 item
-     * 自己的重组负责（它们读的是 `transcriptById`，那份索引由本指纹驱动）。
-     */
     val structureStamp = StructureStamp(
         size = transcript.size,
         firstId = transcript.firstOrNull()?.id,
@@ -915,19 +473,6 @@ fun ChatList(
         next
     }
     LaunchedEffect(state.transcriptPrependRevision) {
-        /*
-         * ⚠️ 这里**不能**用 `lastPrepend`。
-         *
-         * 它被下面的吸底 effect（`ContentStamp` 那个 `collect`）用作"这次是不是前插"的
-         * 判据，而那个 collect 与这个 effect 都在组合后启动 —— 谁先跑不保证。
-         * 实测它先跑，并且已经把 `lastPrepend` 推进到当前值，于是这里的判据
-         * `state.transcriptPrependRevision == lastPrepend` 立刻为真、直接 return：
-         *
-         * **锚定逻辑一次都没执行过**（真机日志里 `prependAnchor` 零条），
-         * 用户看到的就是"加载完永远跳到最上面"。
-         *
-         * 用一个**只属于这里**的变量记住上次处理过的版本号，两者互不干扰。
-         */
         if (state.transcriptPrependRevision == lastAnchoredPrepend) return@LaunchedEffect
         lastAnchoredPrepend = state.transcriptPrependRevision
         val anchorId = prependAnchorId
@@ -940,13 +485,7 @@ fun ChatList(
         // 头部恒定 1 项：`transcriptHasOlder` 为真时是 `older-loader`，
         // 否则（非空会话）是 `transcript-start`。两者都占一个 LazyColumn item。
         val headerCount = if (state.transcript.isEmpty()) 0 else 1
-        /*
-         * 先按**消息 id** 找那一块，找不到再退回按 key 找。
-         *
-         * id 是主锚点：前插之后它一定还在（历史消息本来就是同一条），
-         * 而块的 key 会因为"新内容并入第一轮"或 `pinForPrepend` 而变化。
-         * 用一个会变的值当锚点，正是「加载完跳到最上面」这一类问题的来源。
-         */
+        /* 先按**消息 id** 找那一块，找不到再退回按 key 找。 */
         val blockIndex = anchorId?.let { id ->
             blocks.indexOfFirst { TurnLayout.containsMessage(it, id) }
         }?.takeIf { it >= 0 }
@@ -1088,28 +627,6 @@ fun ChatList(
                     .padding(start = 14.dp)
                     .overScrollVertical()
                     .scrollEndHaptic()
-                    /*
-                     * 拖动对选（多选模式专用）。
-                     *
-                     * ## 为什么用 `detectDragGesturesAfterLongPress`
-                     *
-                     * 前两版是手写的 `awaitEachGesture`（先 Initial pass、后改 Main pass），
-                     * 两次都有同一个毛病：**它和列表滚动抢手势**。手写版本要在长按超时
-                     * 之前逐帧盯着指针判断"有没有超过 touchSlop"，这段观察期本身就与
-                     * `LazyColumn` 的滚动识别重叠 —— 手指稍一停顿就被判成长按，
-                     * 表现是「想滚动却勾上了几条」。
-                     *
-                     * 这个官方手势识别器专为"长按后拖动"设计，行为正好是我们要的：
-                     * **长按成立之前它一个事件都不消费**，滚动完全归列表；
-                     * 长按成立之后才接管，并自动消费后续的 `change`。
-                     * 不用我们自己判断 pass、也不用自己等超时。
-                     *
-                     * ⚠️ `pointerInput` 的 key 带 `multiSelectMode`：
-                     * 关掉多选后这个手势节点要**被丢弃重建**，否则它会一直挂在链路上
-                     * 吃掉长按事件（消息菜单就再也弹不出来了）。
-                     *
-                     * ⚠️ 也**只有**多选模式里才装：普通模式下长按要留给消息菜单。
-                     */
                     .pointerInput(state.multiSelectMode, blocks, state.transcript.isEmpty(), state.transcriptHasOlder) {
                         if (!state.multiSelectMode || blocks.isEmpty()) return@pointerInput
                         // 块 → 成员 id。手势里要用它把一个块下标翻译成"要选哪些消息"。
@@ -1129,26 +646,13 @@ fun ChatList(
                             ?.takeIf { it in blockIds.indices }
                             ?: -1
 
-                        /*
-                         * 这几个是**普通变量**，不是 State：它们只在手势协程内部读写，
-                         * 放 State 会让每一帧拖动都触发一遍 ChatList 重组。
-                         */
+                        /* 这几个是**普通变量**，不是 State：它们只在手势协程内部读写 */
                         var anchor = -1
                         var base: Set<String> = emptySet()
                         var selecting = false
                         var lastY = 0f
                         var dragging = false
 
-                        /*
-                         * 边缘自动滚动：拖到列表上下 48dp 以内时按距离加速滚动，
-                         * 滚出来的回合继续纳入区间。
-                         *
-                         * 常驻一条协程（只在 `dragging` 为真时干活），而不是在
-                         * `onDrag` 里启动 —— 后者每帧都会重启，反而滚不匀。
-                         *
-                         * ⚠️ `pointerInput` 的块是 suspend 但**不是** CoroutineScope，
-                         * 所以要 `coroutineScope { }` 包一层才能 `launch`。
-                         */
                         coroutineScope {
                         val scroller = launch {
                             val edge = 48.dp.toPx()
@@ -1343,27 +847,13 @@ fun ChatList(
                                     },
                                 ) {
                                 Box(modifier = Modifier.fillMaxWidth().then(finger.modifier)) {
-                                    /*
-                                     * 多选模式下，每个成员左侧多一个勾选框，整行点击切换勾选，
-                                     * 长按菜单**让位**（那时点按语义已经变成"选/不选"，
-                                     * 再弹菜单会让人以为选错了）。
-                                     *
-                                     * 用 `Row` 而不是给卡片加 padding：勾选框要独立于卡片左缘，
-                                     * 而卡片自己是满宽的 —— 加 padding 会把卡片挤窄，视觉上跟
-                                     * 非多选模式不一样。
-                                     */
+                                    /* 多选模式下，每个成员左侧多一个勾选框，整行点击切换勾选 */
                                     val selecting = state.multiSelectMode
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .then(
-                                                /*
-                                                 * 多选模式下**整行可点**（切换勾选）。
-                                                 *
-                                                 * 只让那个小方框可点是不够的：消息卡很高，
-                                                 * 用户会自然地想"点这条消息就选中它"，结果点正文
-                                                 * 毫无反应 —— 看起来像多选坏了。
-                                                 */
+                                                /* 多选模式下**整行可点**（切换勾选）。 */
                                                 if (selecting) {
                                                     Modifier.clickable { onToggleSelect(item.id) }
                                                 } else {
@@ -1465,16 +955,7 @@ fun ChatList(
         }
         // Miuix 滚动条：自动淡入淡出、可拖拽，比自绘指示条更贴近 HyperOS
 
-        /*
-         * 多选模式的顶部操作条。
-         *
-         * 放在顶部而不是底部：底部那一块已经被输入器、任务卡、悬浮胶囊占满了，
-         * 再塞一条会和它们抢位置。而多选是"俯视整个对话挑几条"的动作，
-         * 眼睛本来就在往上扫。
-         *
-         * 贴 `topInset` 下沿：那个值就是顶栏让出来的高度（见 ChatPage 的传参），
-         * 于是这条正好落在顶栏下面，不遮住它。
-         */
+        /* 多选模式的顶部操作条。 */
         AnimatedVisibility(
             visible = state.multiSelectMode,
             enter = fadeIn(ZhiMotion.fadeInSpec) + slideInVertically(ZhiMotion.enterSpec) { -it },
@@ -1482,15 +963,6 @@ fun ChatList(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = topInset + 6.dp, start = 14.dp, end = 14.dp)
-                /*
-                 * ⚠️ 必须吃掉这一块上的所有点击。
-                 *
-                 * 这条操作条是叠在 `LazyColumn` **之上**的（同一个 Box 的后画子项），
-                 * 而列表那边挂着多选专用的 `pointerInput`（拖动手势，走 Initial pass）。
-                 * 不给操作条加这层拦截的话，点「导出」「图片」时事件会**同时**传到列表上，
-                 * 于是"点一下导出，顺手又勾上了底下那条消息" —— 实测过，一次点击
-                 * 把已选从 7 变成 8。
-                 */
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -1506,23 +978,6 @@ fun ChatList(
             )
         }
 
-        /*
-         * 悬浮的「回到底部」。
-         *
-         * 上面那个 `JumpToLatest` 是**列表末尾的一项**，只有滚到末尾才看得见 ——
-         * 而"用户正卡在中间、想回到最新"恰恰是看不到它的时候。所以这里补一个
-         * 常驻的悬浮入口。
-         *
-         * 显示条件只有「不在底部」：`atBottom` 是 `derivedStateOf`，滚动时不会让
-         * 这一层每帧重组，只在翻转时失效。
-         *
-         * 两种语义分开处理：
-         *  · 尾部被淘汰（`transcriptHasNewer`）→ 必须整份替换，走 `onLoadLatest`；
-         *  · 只是往上翻了 → 本地滚到底即可，顺手恢复跟随（否则下一条回复又不跟了）。
-         *
-         * 位置：`bottomInset` 已经把输入器/任务卡/悬浮胶囊的占位算好了
-         * （见 ChatPage 里那段实测注释），所以贴它往上抬 8dp 就正好落在它们上沿。
-         */
         AnimatedVisibility(
             visible = !atBottom && state.transcript.isNotEmpty(),
             enter = fadeIn(ZhiMotion.fadeInSpec) + scaleIn(ZhiMotion.scaleEnterSpec, initialScale = 0.85f),
@@ -1546,13 +1001,7 @@ fun ChatList(
     }
 }
 
-/**
- * 悬浮的「回到底部」胶囊。
- *
- * 与列表末尾那个 [JumpToLatest] 用同一套视觉语言（Miuix `Surface` + 主题色），
- * 但文案不同：那个是「回到最新」（会**替换整份 transcript**），这个可能只是
- * 「回到底部」（本地滚动）。两者语义不同，文案就不能一样。
- */
+/** 悬浮的「回到底部」胶囊。 */
 @Composable
 private fun ScrollToBottomPill(onClick: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
@@ -1571,16 +1020,6 @@ private fun ScrollToBottomPill(onClick: () -> Unit) {
     }
 }
 
-/**
- * 主体调试模式下每条消息上方的**调试条**。
- *
- * 内容刻意全是"一眼能对上号"的元信息：类型、id、正文/思考字数、工具数与各状态计数、
- * 上下文脚注。它的用途是回答"这条为什么长这样"——比如卡片高度异常时，先看
- * `1200/3400`（正文/思考）就能立刻分清是正文太长还是思考面板展开着。
- *
- * 「源码」是一个**开关**而不是常显：源码往往比渲染结果长好几倍，
- * 常显会把真实排版挤走 —— 而这一模式的价值恰恰是看真实排版。
- */
 @Composable
 private fun MessageDebugStrip(item: ChatItem) {
     val scheme = MiuixTheme.colorScheme
@@ -1658,15 +1097,7 @@ private fun MessageDebugStrip(item: ChatItem) {
     }
 }
 
-/**
- * 调试模式下的"全展开"视图。
- *
- * **只改这一次渲染的输入，不动 state**：思考面板按展开渲染、工具组里每条工具都摊开输出。
- * 这样调试视图与用户自己折叠/展开的状态互不干扰 —— 关掉调试模式，看到的就是用户原本的状态。
- *
- * 之所以不直接把 state 改掉（例如"打开调试时把所有 thinking 置为展开"）：
- * 那会在关掉调试模式后留下一个被改过的界面，而用户并没有点过任何折叠按钮。
- */
+/** 调试模式下的"全展开"视图。 */
 private fun ChatItem.fullyExpanded(): ChatItem = when (kind) {
     ChatKind.ASSISTANT -> copy(thinkingExpanded = true, streaming = streaming)
     ChatKind.TOOL_GROUP -> copy(
@@ -1689,12 +1120,7 @@ private fun ChatItem.fullyExpanded(): ChatItem = when (kind) {
     else -> this
 }
 
-/**
- * 内联的**完整**任务清单（调试模式专用）。
- *
- * 与悬浮任务卡的区别：不过滤条数、不打折信息 —— 每条任务都显示状态、标题与详情。
- * 它是"没有藏起来的东西"这条要求里最直接的一块：任务清单原本只存在于另一个窗口里。
- */
+/** 内联的**完整**任务清单（调试模式专用）。 */
 @Composable
 private fun InlineTaskList(tasks: List<AgentTask>) {
     val scheme = MiuixTheme.colorScheme
@@ -1766,41 +1192,11 @@ private fun InlineTaskList(tasks: List<AgentTask>) {
     }
 }
 
-/**
- * 「已经见过」的消息 id —— 判断某个成员是**本次新出现**的还是历史。
- *
- * ## 为什么是文件级，而不是 `ChatList` 里的 `remember`
- *
- * 见调用点的说明：`remember` 只活到那层组合被丢弃为止，而重建组合时它会拿**当前的**
- * transcript 重新播种，把刚到的消息也算成"历史" —— 动画就这么静默消失了。
- * 放在文件级之后，集合的寿命等于进程，重建组合不会误登记。
- *
- * ## 代价（写清楚，别当成没想过）
- *
- *  · 只增不减，随一次会话的消息数增长。一条消息一个字符串，量级可忽略；
- *    换会话时不会清空，但 id 是唯一的，误判不会发生。
- *  · 只读主线程（组合期），所以不需要加锁。
- *
- * ⚠️ 上面那条"量级可忽略"的前提是**同一时刻只有一条会话被浏览**。真机上实测过
- * 一万条会话的用法之后，这个前提要补一句：**换会话时必须换一份集合**，
- * 否则跨会话累计的字符串是随"用过的会话数 × 每条的条数"增长的 ——
- * 那是唯一还在无界增长的容器，而它没有任何功能上的理由要跨会话保留
- * （`add` 的语义只是"这一条在本会话里以前见过吗"）。
- */
 private var seenMessageIds = HashSet<String>()
 
 /** 上一次播种 [seenMessageIds] 的会话 id；`null` = 还没有播种过。 */
 private var seenSeededSession: String? = null
 
-/**
- * 取「已经见过」的集合，必要时先播种。
- *
- * 播种 = 把**当时的** transcript 全部登记为已见过（它们是历史，不该补播动画）。
- * ⚠️ 只在会话**变了**的时候播种；同一个会话下反复调用只会把已有集合还回来 ——
- * 这一点正是上面那个 bug 的修复点。
- *
- * 换会话时**整个换掉**集合（而不是继续往同一个里加）：见 `seenMessageIds` 的说明。
- */
 private fun seenIdsFor(
     sessionId: String?,
     transcript: List<ChatItem>,
@@ -1816,68 +1212,9 @@ private fun seenIdsFor(
     return seenMessageIds
 }
 
-/**
- * 新成员进入时上移的距离。
- *
- * 取 8dp：够看出"它是从下面滑上来的"，又不会让整块内容看起来在跳。
- * 位移与淡入用同一条 [ZhiMotion.FADE_IN_MILLIS]（300ms + SinOut）——
- * 与 Miuix 的 `PopupDimEnter` 同一个量纲，跟全应用的"出现"节奏一致。
- */
+/** 新成员进入时上移的距离。 */
 private val MemberEnterRise = 8.dp
 
-/**
- * 一条成员（消息 / 工具卡）的**一次性**进入动画：淡入 + 轻微上移。
- *
- * ## 为什么是"一次性"而不是普通的 AnimatedVisibility
- *
- * [animate] 传的是"**本次新出现**"，由调用点的 `seenIds` 决定（见那里的说明）。
- * 一旦为 true 就不再翻转 —— 而 [animate] 为 false 时本组件直接原样输出内容，
- * **连 layer 都不建**。于是：
- *
- *  · 历史消息（含滚动回来重新进入组合的）走零开销的那条路；
- *  · 只有真正新到的那一条才付一次动画与一个 graphicsLayer。
- *
- * 这也是为什么不写成 `AnimatedVisibility`：那个组件管的是"出现/消失"，
- * 而这里要的是"新出现的补一段位移"，两者语义不同。
- *
- * ## 为什么动画跑完就把 layer 摘掉
- *
- * `graphicsLayer` 会让这一条**各自单独成层**；消息列表里每条都常驻一层是没必要的
- * 开销（外面还套着模糊的捕获层），所以只在动画期间挂着，进度到 1 之后返回裸
- * `Modifier`。摘掉 modifier 节点不会重建内容，也不会丢掉子级的 `remember`。
- *
- * ## ⚠️⚠️ 进度必须在**绘制期**读，不能在组合期读
- *
- * 先看写错会怎样 —— 这是本工程真实踩过的坑，和 `AssistantCard` 里那个流式光标
- * 是**同一个错**（见 MessageCards.kt 的说明）。错误写法是：
- *
- *     val p = progress.value              // ← 组合期读
- *     ...
- *     Modifier.graphicsLayer { alpha = p }   // 值早就被读死了，这里读的只是局部变量
- *
- * `progress.value` 在组合里被读 → 这个动画的**每一帧**都让本组件重组一次。
- * 本组件是消息列表的**成员包装**，它重组就会把 `content()` 整条重新求值 ——
- * 也就是说，为了让一条消息淡入，整条消息（含 Markdown 正文）每帧重建。
- * 外面还有逐帧的列表布局在跑，两边叠起来就是"动画看不出来、只看到卡"。
- *
- * 正确写法是把读数放进 `graphicsLayer` 的 lambda：
- *
- *     Modifier.graphicsLayer {
- *         val v = progress.value          // ← 绘制期读，只让这一层重绘
- *         alpha = v
- *         translationY = (1f - v) * rise
- *     }
- *
- * `graphicsLayer { }` 的 lambda 在**绘制阶段**求值，读到的状态只登记在绘制作用域上，
- * 所以整个动画期间**组合一次都不跑**（只有放进/结束各一次）。
- *
- * ## 那 `done` 这个标志是干什么的
- *
- * 上面说"进度到 1 就摘 layer"，而摘不摘是**组合期**的决定。如果写成
- * `if (progress.value >= 1f) Modifier else …`，为了做这个判断又得在组合里读一次 ——
- * 等于把刚省下来的开销又请回来。所以改用一次性翻牌：动画 `animateTo` 返回之后
- * 才把 `done` 置真，**整个动画期间组合只跑首尾两次**。
- */
 @Composable
 private fun AnimatedMember(
     animate: Boolean,
@@ -1915,27 +1252,6 @@ private fun AnimatedMember(
     }
 }
 
-/**
- * 对话流的**结构指纹**：只覆盖"块表会发生什么变化"，不含正文长度。
- *
- * ## 为什么它与 [TranscriptStamp] 必须分开
- *
- * 两者原来是一个指纹，于是 `blocks` 的 `remember` key 里带着 `lastBodyLength` ——
- * 流式输出每 32ms 让正文长度变一次，就**每个 token 重算一遍块表**：
- * `transcript.map { Entry(...) }` 分配一份 O(n) 的列表，再按"用户发言断开回合"
- * 切一遍。结果与上一帧一模一样 —— 追加正文根本不改变块结构。
- *
- * 长会话下这一项足以把主线程吃满，而它换来的收益是零。所以按用途拆开：
- *
- * | 指纹 | 用在哪 | 含正文长度 |
- * | --- | --- | --- |
- * | 本类 | `blocks`（切块、块 key、多选手势的块下标） | ✗ |
- * | [TranscriptStamp] | `transcriptById`（id → `ChatItem` 实例）+ 吸底判据 | ✓ |
- *
- * ⚠️ 漏判的后果是**界面不更新**（块表不重建 = 列表少一条），所以这里保留
- * `lastToolCount`：新增一条工具行会让那个回合多一个成员，块表要跟着变。
- * 而工具**输出增长**只改文本、不改条数，不会误触发。
- */
 private data class StructureStamp(
     val size: Int,
     val firstId: String?,
@@ -1947,34 +1263,6 @@ private data class StructureStamp(
     val revision: Int,
 )
 
-/**
- * 对话流的**结构指纹**：用来替代「拿整份 `List<ChatItem>` 当 `remember` 的 key」。
- *
- * ## 它解决的是什么
- *
- * `remember(state.transcript)` 看起来是"只在列表变了才重算"，但 Compose 判等用的是
- * `equals()` —— 对 `List<ChatItem>` 就是**逐元素深比较**，每个元素又含
- * `body: String` 与 `tools: List<ToolActivity>`。而流式输出每 32ms 就换一次 list，
- * 于是每帧都要在 O(n·m) 个字符上比一遍。长会话里这一项足以把主线程吃满。
- *
- * 这个数据类只有 8 个原始类型/字符串字段，判等是常数时间。
- *
- * ## 为什么是这几个字段
- *
- * | 字段 | 覆盖的变化 |
- * | --- | --- |
- * | [size] | 追加/删除消息 |
- * | [firstId] / [lastId] | 换会话、整份替换 |
- * | [lastBodyLength] | 流式追加 token |
- * | [lastToolCount] | 追加/移除工具行 |
- * | [prepend] / [jump] | 补页与"回到最新"是**原地替换**，条数可能恰好不变 |
- * | [session] | 切会话时列表可能长度相同、首尾 id 也相同（同一个会话的两次快照） |
- * | [revision] | 展开工具/分组/思考、补回输出全文：条数与首尾**都不变**，只有某一条的内容原地变 |
- *
- * ⚠️ 漏判的后果是**界面不更新**（而不是崩），所以加字段比省字段安全。
- * 反过来说，任何时候如果出现"某条消息的内容变了但界面没动"，
- * 第一个要看的就是这里漏了哪种变化。
- */
 private data class TranscriptStamp(
     val size: Int,
     val firstId: String?,
@@ -1984,23 +1272,10 @@ private data class TranscriptStamp(
     val prepend: Int,
     val jump: Int,
     val session: String,
-    /**
-     * 就地修改计数（[com.zhizhu.zhicode.compose.model.WorkspaceUiState.transcriptRevision]）。
-     *
-     * ⚠️ 这一项是**弹出来的 bug 的修复点**：没有它时，点一个工具卡（展开）不改条数、
-     * 不改首尾 id、不改最后一条的正文长度与工具数（被点的那条往往不是最后一条），
-     * 指纹一模一样 → 下面那份 `id → ChatItem` 索引仍然指向**旧实例**
-     * （`expanded = false`）→ 界面看起来就是「点了没反应」。
-     */
     val revision: Int,
 )
 
-/**
- * 多选模式下每条消息左侧的勾选框。
- *
- * 只画框、不接手势：点击由整行负责（见 ChatList 里那层 Row 的说明）。
- * 这样点消息正文也能切换勾选，而不是必须精确点到那个小方块。
- */
+/** 多选模式下每条消息左侧的勾选框。 */
 @Composable
 private fun SelectionCheckbox(checked: Boolean, onToggle: () -> Unit) {
     val scheme = MiuixTheme.colorScheme
@@ -2026,11 +1301,7 @@ private fun SelectionCheckbox(checked: Boolean, onToggle: () -> Unit) {
     }
 }
 
-/**
- * 多选模式的顶部操作条。
- *
- * 三个元素：已选计数、取消、导出。导出在没有勾选时置灰 —— 点了没反应比置灰更困惑。
- */
+/** 多选模式的顶部操作条。 */
 @Composable
 private fun SelectionBar(
     count: Int,
@@ -2088,33 +1359,15 @@ private fun SelectionBar(
     }
 }
 
-/**
- * 前插锚定最多校验多少帧。
- *
- * 一次补 30 条消息时 `LazyColumn` 要好几帧才测量完，而每次重新测量都可能
- * 把滚动位置夹回去。60 帧（约 1 秒）足够覆盖这个窗口；再长就没意义了 ——
- * 用户在那一秒之后已经在自己滑动，继续纠正就是跟他的手抢。
- */
+/** 前插锚定最多校验多少帧。 */
 private const val PrependAnchorMaxFrames = 60
 
-/**
- * 切块表的草稿缓存（见 `blocks` 那段注释）。
- *
- * 用普通字段而不是 `mutableStateOf`：它只在"下一次算块表"时被读，
- * 没有任何界面因为它变化而重组。写成 state 并在组合期更新会触发
- * 「写 → 失效 → 重跑 → 再写」的循环，流式输出时每帧都跑一遍。
- */
+/** 切块表的草稿缓存（见 `blocks` 那段注释）。 */
 private class BlockCache {
     var previous: List<TurnLayout.Block> = emptyList()
     var lastPrepend: Int = Int.MIN_VALUE
     var lastSession: String = ""
 }
 
-/**
- * `pendingBottom` 的最长存活时间。
- *
- * 列表在可见状态下几百毫秒内必然贴底，所以这个值只要"比正常贴底慢一些"就够。
- * 1.2 秒足以覆盖"消息还在灌 + 图片解码撑高"的那几帧，又短到不会把
- * 「打开设置页再回来」也判成待落底（用户在那来回通常超过这个时间）。
- */
+/** `pendingBottom` 的最长存活时间。 */
 private const val PendingBottomTtlMillis = 1200L
