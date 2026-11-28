@@ -80,6 +80,7 @@ import top.yukonga.miuix.kmp.blur.textureBlur
 import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
+import top.yukonga.miuix.kmp.utils.overScrollVertical
 import androidx.compose.ui.graphics.BlendMode as ComposeBlendMode
 
 @Composable
@@ -354,6 +355,7 @@ private fun AboutContent(
             state = lazyListState,
             modifier = Modifier
                 .fillMaxSize()
+                .overScrollVertical()
                 .nestedScroll(topAppBarScrollBehavior.nestedScrollConnection),
             contentPadding = scrollPadding,
             overscrollEffect = null,

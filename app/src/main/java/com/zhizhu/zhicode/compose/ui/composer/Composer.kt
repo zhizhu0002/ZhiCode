@@ -79,15 +79,15 @@ import com.zhizhu.zhicode.compose.ui.FloatingBottomShell
 import com.zhizhu.zhicode.compose.ui.ZhiPendingImageChip
 import com.zhizhu.zhicode.compose.ui.ZhiHorizontalDivider
 import com.zhizhu.zhicode.compose.ui.ZhiIconButton
-import com.zhizhu.zhicode.compose.ui.ZhiIconDropdownMenu
 import com.zhizhu.zhicode.compose.ui.ZhiIcons
 import com.zhizhu.zhicode.compose.ui.ZhiMarkdown
-import com.zhizhu.zhicode.compose.ui.ZhiMenuItem
 import com.zhizhu.zhicode.compose.ui.ZhiMotion
 import com.zhizhu.zhicode.compose.ui.ZhiSmallPill
 import com.zhizhu.zhicode.compose.ui.ZhiTextField
 import com.zhizhu.zhicode.compose.ui.effects.ZhiSquircle
 import com.zhizhu.zhicode.compose.ui.debug.ZhiFrameTrace
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
+import com.zhizhu.zhicode.compose.ui.pages.m3e.Material3ExpressivePageSet
 import com.zhizhu.zhicode.compose.model.formatTokenCountShort
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Card
@@ -419,44 +419,11 @@ fun Composer(
                 modifier = Modifier.fillMaxWidth().height(40.dp).padding(top = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val attachFileIcon = ZhiIcons.file
-                val photoIcon = ZhiIcons.image
-                // 「从系统文件管理器选」用**打开的文件夹**（`directory`）
-                val systemFileIcon = ZhiIcons.directory
-                ZhiIconDropdownMenu(
-                    items = remember(
-                        attachFileIcon, photoIcon, systemFileIcon,
-                        onAttachFile, onPickImage, onPickSystemFiles,
-                    ) {
-                        listOf(
-                            ZhiMenuItem(
-                                text = "附加项目文件",
-                                summary = "浏览项目目录",
-                                icon = attachFileIcon,
-                                onClick = onAttachFile,
-                            ),
-                            ZhiMenuItem(
-                                text = "文件管理器",
-                                summary = "从系统里挑，可多选",
-                                icon = systemFileIcon,
-                                onClick = onPickSystemFiles,
-                            ),
-                            ZhiMenuItem(
-                                text = "上传照片",
-                                summary = "作为视觉输入",
-                                icon = photoIcon,
-                                onClick = onPickImage,
-                            ),
-                        )
-                    },
-                ) {
-                    Icon(
-                        painter = ZhiIcons.attach,
-                        contentDescription = "添加附件",
-                        tint = scheme.onBackgroundVariant,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
+                AttachMenuPicker(
+                    onAttachFile = onAttachFile,
+                    onPickSystemFiles = onPickSystemFiles,
+                    onPickImage = onPickImage,
+                )
 
                 PermissionModePicker(mode = state.permissionMode, onSelect = onPermissionSelected)
                 val keyboard = LocalSoftwareKeyboardController.current
@@ -601,7 +568,7 @@ private fun shorten(value: String, max: Int): String =
 private val ComposerActionSize = 30.dp
 
 @Composable
-private fun ContextProgressRing(
+internal fun ContextProgressRing(
     fraction: Float,
     ringSize: Dp,
     strokeWidth: Dp,
@@ -689,13 +656,28 @@ private fun ContextDetailsDialog(
     onCompact: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val scheme = MiuixTheme.colorScheme
     val used = state.contextTokens.coerceAtLeast(0)
     val window = state.contextWindow.coerceAtLeast(0)
     val remaining = if (window > 0) (window - used).coerceAtLeast(0) else 0
     val fraction = if (window > 0) (used.toFloat() / window).coerceIn(0f, 1f) else 0f
     val pct = (fraction * 100f).roundToInt().coerceIn(0, 100)
     val pctLabel = formatContextPercentLabel(used, window)
+    if (LocalZhiPageSet.current === Material3ExpressivePageSet) {
+        ExpressiveContextDetailsDialog(
+            show = show,
+            state = state,
+            used = used,
+            window = window,
+            remaining = remaining,
+            fraction = fraction,
+            pct = pct,
+            pctLabel = pctLabel,
+            onCompact = onCompact,
+            onDismiss = onDismiss,
+        )
+        return
+    }
+    val scheme = MiuixTheme.colorScheme
     val accent = when {
         pct >= 90 -> scheme.error
         pct >= 72 -> ZhiColors.amber()

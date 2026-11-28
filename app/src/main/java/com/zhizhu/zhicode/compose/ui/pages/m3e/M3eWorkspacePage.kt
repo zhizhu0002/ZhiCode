@@ -465,6 +465,7 @@ internal fun M3eWorkspacePage(
             val drawerWidth = (LocalConfiguration.current.screenWidthDp.dp * 0.78f).coerceAtMost(320.dp)
             ModalNavigationDrawer(
                 drawerState = drawerState,
+                gesturesEnabled = state.sidebarOpen || drawerState.isOpen,
                 drawerContent = {
                     ModalDrawerSheet(
                         modifier = Modifier.width(drawerWidth),
