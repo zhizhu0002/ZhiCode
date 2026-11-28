@@ -10,103 +10,26 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
 
-/**
- * 当前是否深色主题。
- *
- * 由 `ZhiCodeApp` 提供。存在的理由是 [ZhiColors] 里的层级色必须知道深浅，
- * 而它不能去读 `MiuixTheme.colorScheme.background`（那个值已被本工程覆盖，会形成循环）。
- */
+/** 当前是否深色主题。 */
 val LocalZhiDark = compositionLocalOf { false }
 
-/**
- * 全局统一圆角。
- *
- * 之前每个文件各自写 `RoundedCornerShape(7.dp/8.dp/9.dp/11.dp/13.dp/16.dp…)`，
- * 一屏里能出现十种不同的圆角，看起来就是"没设计过"。现在收敛成四级：
- *
- *  · [floating] 悬浮层（顶栏 / 侧栏抽屉 / 输入器 / 任务卡）
- *  · [card]     卡片、面板、弹窗、列表行 —— 绝大多数容器
- *  · [inner]    卡片内部再嵌一层的小块（代码块、详情框、分段控件的选中胶囊）
- *  · [square]   近乎方角，只给用户明确要求"方形"的输入器
- *
- * 正圆（图标按钮、chip pill）不在这里：它们按高度取 `height / 2`，
- * 写死半径在高度变化时就不再是正圆了。
- */
+/** 全局统一圆角。 */
 object ZhiRadius {
     val floating = MochiBaseline.cornerLargeIncreased
 
-    /**
-     * 文字按钮（`Button` / `TextButton`）—— 12dp，等于 Mochi 的 `medium`。
-     *
-     * 不能沿用 [floating]（20dp）：按钮高度 48dp 时 20dp 半径已接近半高、偏胶囊；
-     * 12 / 48 = 0.25 是不顶满的圆角矩形。
-     *
-     * 图标按钮不用这个值：图标按钮是正圆，见 `ZhiFilledIconButton`。
-     */
+    /** 文字按钮（`Button` / `TextButton`）—— 12dp，等于 Mochi 的 `medium`。 */
     val button = MochiBaseline.cornerMedium
 
-    /**
-     * 卡片、面板、弹窗、列表行 —— **16dp**，等于 Mochi 的 `large`。
-     *
-     * 这是全应用**唯一**的卡片圆角来源：`ZhiMetrics.card`、`MochiSkin` 的 `large`、
-     * 以及各处 `cornerRadius = ZhiRadius.card` 都指向这里，改这一个值即全局生效。
-     *
-     * 沿革：14dp → 28dp（照抄 Mochi `extraLarge`）→ **16dp**。
-     * 28dp 的问题：它比 Miuix 自己的 `CardDefaults.CornerRadius`（16dp）大得多，
-     * 于是同一个应用里并存两种卡片圆角 —— 设置页 28、弹窗与下拉 16，摆在一起
-     * 像两套设计。统一到 16 之后与 Miuix 原生组件天然一致。
-     */
+    /** 卡片、面板、弹窗、列表行 —— **16dp**，等于 Mochi 的 `large`。 */
     val card = MochiBaseline.cornerLarge
 
-    /**
-     * 卡片内部再嵌一层的小块 —— **12dp**。
-     *
-     * ⚠️ 这里**不能**再用同心公式 `card − rowTextInset`：card 降到 16 之后
-     * `16 − 16 = 0`，内嵌块会变成直角，比外卡片还硬。所以退回显式的 `medium` 档。
-     * 12 与 16 只差 4dp，视觉上仍是"里层比外层略方一点"的正常嵌套关系。
-     */
     val inner = MochiBaseline.cornerMedium
 
     val square = MochiBaseline.cornerExtraSmall
 
-    /**
-     * 输入器底部「发送 / 停止」这类 30dp 小方键的圆角。
-     *
-     * ## 为什么要单独一个值
-     *
-     * 方角的观感取决于**圆角/边长这个比例**，不是圆角的绝对值：
-     *
-     * | 圆角 | 除以 30dp 边长 | 观感 |
-     * | --- | --- | --- |
-     * | [square] 4dp | 0.13 | 硬邦邦的方块（试过，用户反馈"太方了"） |
-     * | 8dp（本值） | 0.27 | 圆角方键，有圆润感但明确是"方"的 |
-     * | [inner] 10dp | 0.33 | 已经偏胶囊（配 30dp 时用户反馈"两个键像一块被劈成两半"） |
-     *
-     * 同一个 10dp 放在 40dp 的按钮上只有 0.25、还算方，所以**不是** [inner] 变了，
-     * 是按钮变小之后必须跟着换档。写死一个绝对值给两种尺寸用，必然有一边不对 ——
-     * 这也是为什么它值得单独一个 token，而不是继续复用 [inner] 或 [square]。
-     */
     val actionKey = MochiBaseline.cornerSmall
 }
 
-/**
- * 间距与触控热区令牌（对齐 Miuix / HyperOS 的自适应设计基准）。
- *
- * ## 为什么单独一个对象，而不是继续散在 `padding(horizontal = 12.dp)` 里
- *
- * 改版前页面级水平边距是 **12dp 与 16dp 混用**（设置页 16、关于页 12、
- * 许可页 18…）。同一个应用里三种页面边距，翻页时左右边缘会"跳"——
- * 这是最容易被看出来、又最容易被归因成"没对齐"的一类问题。
- *
- * HYPEROS 的自适应设计基准给手机单手场景的防误触边距是 **16px**（≈16dp），
- * 所以页面级统一取 16dp，折叠屏/平板再按 [pageMarginWide] 放宽。
- *
- * ## 边界：这**不是**组件内部内边距的替代品
- *
- * Miuix 的 `Card` / `Preference` / `BasicComponent` 内部有自己的 padding，
- * 规范明确要求**不要**去覆盖它们。所以本对象只管"页面与屏幕边缘之间"、
- * "页面内一级区块之间"这两类间距；卡片内部的 12dp 不动。
- */
 object ZhiSpacing {
 
     /** 页面级水平边距（手机单手场景）。 */
@@ -115,22 +38,10 @@ object ZhiSpacing {
     /** 页面级水平边距（折叠屏 / 平板，双手持或平放）。 */
     val pageMarginWide = 24.dp
 
-    /**
-     * 最小触控热区边长（Android 无障碍规范 48dp）。
-     *
-     * Miuix `IconButtonDefaults` 实测是 `MinWidth = MinHeight = 40dp` ——
-     * 也就是**库的默认值本身就不满足 48dp**。所以凡是本工程自己接的
-     * 图标按钮 / 行内可点区域，都要显式抬到这个值，而不是依赖库默认。
-     */
+    /** 最小触控热区边长（Android 无障碍规范 48dp）。 */
     val minTouchTarget = 48.dp
 
-    /**
-     * 密集工具行里的触控热区下限。
-     *
-     * 顶栏总高 48dp，里面再塞 48dp 的按钮盒会把图标挤到贴边；这里退一档到 40dp
-     * （与 Miuix 默认一致）。这一档**只允许**出现在高度受限的栏内，
-     * 且必须与相邻可点元素保持 ≥8dp 间距。
-     */
+    /** 密集工具行里的触控热区下限。 */
     val compactTouchTarget = 40.dp
 
     /** 相邻可点元素之间的最小间距（规范要求 ≥8dp，否则会误触）。 */
@@ -145,13 +56,7 @@ object ZhiSpacing {
 
 /** 布局尺度常量，取自上游原版 IQ Code 的 dp() 用量。 */
 object Dimens {
-    /**
-     * 页面级水平边距。
-     *
-     * 值转发自 [ZhiSpacing.pageMargin]（16dp）：旧值 12dp 是上游原版的用量，
-     * 按设计基准（手机单手防误触 16dp）抬了一档。留着这个别名是因为它被当作
-     * "页面边距"读了很多年，改名反而会让调用点对不上号。
-     */
+    /** 页面级水平边距。 */
     val screenPadding = ZhiSpacing.pageMargin
 
     val topBarHeight = 48.dp
@@ -167,20 +72,6 @@ object Dimens {
     val bubbleMaxWidthFraction = 0.82f
 }
 
-/**
- * 语义色：Miuix 原生色板里没有 diff 用的绿/红/琥珀，这里补上。
- *
- * ## 为什么是 `@Composable` 函数而不是 `val`
- *
- * 这些色**必须**随深浅色切换，否则浅色模式直接坏掉：同一个 `#34C759` 放在
- * 深色底上是合适的亮绿，放到白底上对比度只有约 1.9:1（几乎看不清）。
- * 所以每个色给一对值（深色底用亮色、浅色底用暗色），并在取值时读一次
- * `MiuixTheme.colorScheme.background` 的亮度来决定用哪一边。
- *
- * 这样调用点不需要各自透传 `isDark`：直接写 `ZhiColors.green()` 即可，
- * 深/浅由当前主题决定。写成函数而不是 `val` 是因为 Kotlin 不允许同名的
- * 属性与函数共存，而 `val` 又无法在取值时读 CompositionLocal。
- */
 object ZhiColors {
     // ---- 深色底上的取值（亮色系） ----
     private val greenOnDark = Color(0xFF34C759)
@@ -197,41 +88,12 @@ object ZhiColors {
     private val redContainerDark = Color(0xFF3A1A1C)
     private val redContainerLight = Color(0xFFFBE0E0)
 
-    /*
-     * 警示档（通知条 WARN）的**底 + 字**，深浅各一对。
-     *
-     * ## 为什么不再用「琥珀 16% 叠在表面色上」
-     *
-     * 那个写法看起来"自适应"，实测在浅色下得到的是一块 **#E8DFCF 的土黄**：
-     * 比页面 `#F7F7F7` 暗一档、又带明显暖色相，铺满整屏时读到的是"脏"而不是
-     * "提示"。对话流里每一条 INFO 消息都走 WARN 档（见 `InfoCard`），于是整屏
-     * 都是土黄块 —— 这正是「浅色模式 message card 显得很黑」里面积最大的那一块。
-     *
-     * 现在改成**实色淡琥珀 + 深琥珀字**，且不依赖 alpha：
-     *
-     * | | 底色 | 文字 | 对比度 |
-     * | --- | --- | --- | --- |
-     * | 浅色 | `#F8F1E6` | `#8A5A00` | 5.28:1 |
-     * | 深色 | `#433B2F` | `#F0B860` | 6.16:1 |
-     *
-     * ⚠️ 用**不透明**色而不是 `Color.copy(alpha = …)`：半透明会与底下那层混出
-     * 不确定的结果（同一条通知落在页面底色上和落在卡片上颜色不同），
-     * 与 [SummaryDark] 的取舍是同一条理由。
-     */
     private val WarnFillLight = Color(0xFFF8F1E6)
     private val WarnFillDark = Color(0xFF433B2F)
     private val WarnTextLight = Color(0xFF8A5A00)
     private val WarnTextDark = Color(0xFFF0B860)
 
-    /**
-     * 当前是否深色主题。
-     *
-     * **不能**用 `MiuixTheme.colorScheme.background.luminance()` 判定：
-     * 本工程会把主题的 `background` 覆盖成 [backdrop]，那样就形成了循环依赖 ——
-     * 在 `darkColorScheme` 下求值时会读到 Miuix 的*默认*（浅色）方案，
-     * 于是深色模式整套层级色都取到浅色分支（面板变白、卡片变浅灰）。
-     * 所以改由 [LocalZhiDark] 显式提供。
-     */
+    /** 当前是否深色主题。 */
     @Composable
     @ReadOnlyComposable
     fun isDark(): Boolean = LocalZhiDark.current
@@ -264,15 +126,7 @@ object ZhiColors {
 
     // ---------------------------------------------------------------- 层级色
 
-    /**
-     * 主背板（窗口最底层整片颜色）。
-     *
-     * 深色 `#28282A`（比面板略亮，保留 HyperOS 的柔和层次）；
-     * 浅色 `#F1F1F3`。
-     *
-     * 与 [panelSurface] 的关系是：**背板退后、板块站出来**。
-     * 背板只负责托住工作区，不与内容卡片争夺注意力。
-     */
+    /** 主背板（窗口最底层整片颜色）。 */
     @Composable
     fun backdrop(): Color = when {
         // Miuix 的普通深色背板不是纯黑；Sheet、页面缝隙和模糊背板
@@ -281,29 +135,13 @@ object ZhiColors {
         else -> PanelLight
     }
 
-    /**
-     * 侧栏 / 二级页面（设置、MCP、技能…）的底色。
-     *
-     * 深色下用 [PanelDark]（`#1C1C1E`）而**不是**纯黑 —— 这是 Miuix 的层级规矩：
-     * 背板（[backdrop]）最暗、面板亮一档、卡片再亮一档。三级拉开了，
-     * 分组边界才会自然出现。
-     *
-     * ⚠️ 曾经这里被改成 `Color.Black`，结果是设置页、MCP 页这类二级页面整块发黑，
-     * 与顶部 `SmallTopAppBar` 的 `surface` 之间出现一道明显断层，卡片也闷在背景里。
-     * 纯黑只用于 **AMOLED**（见 [backdrop]）与**侧栏抽屉**这种刻意的产品选择。
-     */
     @Composable
     fun panelSurface(): Color = when {
         isDark() -> PanelDark
         else -> Color.White
     }
 
-    /**
-     * 面板里的卡片底。
-     *
-     * 深色：比柔黑面板**亮**一档（`#323235`），让分组边界自然出现；
-     * 浅色：比纯白面板**暗**一档（`#FAFAFC`）。
-     */
+    /** 面板里的卡片底。 */
     @Composable
     fun cardSurface(): Color = when {
         isDark() -> DarkCard
@@ -334,88 +172,18 @@ object ZhiColors {
     val plateRed = Color(0xFFF2453D)
     val platePurple = Color(0xFF7A5AF8)
     val plateGray = Color(0xFF8A9099)
-    /**
-     * **终端井**：工具输出、diff、运行中的实时输出都画在它上面。
-     *
-     * 判据只有一条（用户原话：「底色比其他地方要黑的就是我说的预览框」）：
-     * **它必须比页面底色更暗**。IQ Code 反编译版（`~/.iqcode/.../MainActivity.java`
-     * 的 `TERMINAL_BG`）三套调色板都遵守这条：
-     *
-     * | 调色板 | 页面 `BG` | 终端井 `TERMINAL_BG` |
-     * | --- | --- | --- |
-     * | 暖黑（默认深色） | `#12110F` | `#0A0B0C` ← 更暗 |
-     * | 霓虹 | `#060D1C` | `#040914` ← 更暗 |
-     * | 亮色 | `#F7F6F2` | `#F1EFE8` ← 更暗 |
-     *
-     * 而不是像 [cardInnerSurface] 那样"深色下比卡片亮一档"（Miuix 的
-     * `surfaceContainerHighest`）—— 那是**卡片**的层级语义，方向恰好相反。
-     * 方向不是配色偏好：井表示"这是程序吐出来的原始字节"，卡片表示"这是应用渲染的内容"。
-     *
-     * 取值按同一关系落到本工程的页面底色上，但**方向在深色下必须改**：
-     *
-     * | | 页面 | 卡片 | 终端井 | 井的判据 |
-     * | --- | --- | --- | --- | --- |
-     * | 浅色 | `#F7F7F7` | `#FAFAFC` | **`#EAEAEE`** | 比页面暗一档 |
-     * | 深色 | `#000000` | `#2D2D2D` | **`#17171A`** | 比**卡片**暗、比页面亮 |
-     *
-     * ## 深色为什么不能照抄 IQ Code 的 `#0A0B0C`
-     *
-     * 那个值成立的前提是 IQ Code 的深色页面**不是纯黑**（`#12110F`）。本工程的
-     * 深色页面是 Miuix 的 `surface` = 纯黑（见下面的三级色阶），于是在纯黑上再画
-     * 一个 `#0A0B0C` 的井，两者对比度只有 **1.07:1** —— 井的边界完全看不出来，
-     * 工具输出像是直接贴在页面上的裸文本，卡片里的层次也消失了。
-     * 这就是「深色模式也有点问题」里最直接的一条。
-     *
-     * 纯黑之下已经没有更暗的档，所以深色侧改用**夹在页面与卡片之间**的一档：
-     * `#17171A`（对纯黑 1.23:1、对卡片 `#2D2D2D` 1.24:1）。它读起来仍然是"凹进去的
-     * 一块"，因为它比**所在的卡片**暗，而工具输出永远在卡片里。
-     *
-     * ## 浅色为什么不再是暖米色
-     *
-     * 旧值 `#E7E5DE` 是照 IQ Code「暖黑」调色板取的**暖米色**，而本工程其余中性色
-     * 都是冷灰（页面 `#F7F7F7`、卡片 `#FAFAFC`）。一块暖米色夹在冷灰里，在浅色下
-     * 就是"发脏、发黄的那一块"（与 WARN 通知条同一个病）。改成中性灰 `#EAEAEE`
-     * 之后仍然比页面暗一档，但色相与整屏一致。
-     */
     @Composable
     fun terminalSurface(): Color = if (isDark()) TerminalDark else TerminalLight
 
     private val TerminalDark = Color(0xFF17171A)
     private val TerminalLight = Color(0xFFEAEAEE)
 
-    /*
-     * 深色三级色阶 —— 数值全部取自 Miuix `darkColorScheme`（
-     * `miuix-ui/.../theme/Colors.kt:451`），不是自己调的。
-     *
-     * | 层 | Miuix 槽位 | 值 |
-     * | --- | --- | --- |
-     * | 页面背板 | `surface`（`Scaffold.containerColor` 的默认值） | **纯黑 `#000000`** |
-     * | 面板（侧栏 / 二级页底） | `background` | `#242424` |
-     * | 卡片 / 分组 | `surfaceContainerHighest` | `#2D2D2D` |
-     *
-     * ⚠️ 这里曾经把背板写成 `#28282A`、把面板压到 `#1C1C1E`，理由是"纯黑太像
-     * AMOLED"。但 Miuix 的深色页面**本来就是纯黑**：`Scaffold` 不给
-     * `containerColor` 时用 `colorScheme.surface`，而深色 `surface = Color.Black`。
-     * 真正的层级感来自"纯黑页面 + `#242424` 卡片"，而不是把页面提亮 ——
-     * 把页面提亮到 `#28282A` 之后，页面与卡片只差一档，反而糊成一片。
-     *
-     * 浮层不受影响：`BottomSheetDefaults.backgroundColor()` 与
-     * `OverlayDialog` 取的是 `background`（`#242424`），不是 `surface`。
-     */
     private val DarkBackdrop = Color.Black
     private val PanelDark = Color(0xFF242424)
     private val DarkCard = Color(0xFF2D2D2D)
 
 
-    /**
-     * 浅色中性阶。
-     *
-     * 这几个值**不只本工程自己取**：[ZhiAppTheme] 会拿它们覆写 Miuix 浅色方案里
-     * 那几个更脏的灰（`surfaceContainerHigh` / `surfaceContainerHighest` = `#E8E8E8`、
-     * `secondary` = `#E6E6E6`、`secondaryVariant` / `secondaryContainer` = `#F0F0F0`）。
-     * 所以它们是**浅色模式唯一的中性色来源**，改这里即可全局生效，不要再去各调用点
-     * 逐个换色 —— 那样只会得到第二套灰。
-     */
+    /** 浅色中性阶。 */
     internal val PanelLight = Color(0xFFF1F1F3)
     internal val CardLight = Color(0xFFFAFAFC)
     internal val CardInnerLight = Color(0xFFF7F7F8)
@@ -423,91 +191,20 @@ object ZhiColors {
     /** 浅色的次级填充（对应 Miuix 的 `secondary` / `secondaryVariant` / `secondaryContainer`）。 */
     internal val SoftFillLight = Color(0xFFF2F2F4)
 
-    /**
-     * 浅色的弱化文字 / 图标色（对应 Miuix 的 `onBackgroundVariant`）。
-     *
-     * Miuix 浅色给的是 `#8C93B0` —— 一个**带蓝味**的灰。整个浅色方案里其余中性色都是
-     * 纯灰，只有它是蓝灰：铺在白底上既显得脏，对比度也只有约 2.9:1。换成中性灰后
-     * 对比度约 5.3:1，且与 [PanelLight] / [CardLight] 同一族。
-     */
+    /** 浅色的弱化文字 / 图标色（对应 Miuix 的 `onBackgroundVariant`）。 */
     internal val MutedLight = Color(0xFF6E6E76)
 
-    /**
-     * **深色**的弱化文字 / 图标色（对应 Miuix 的 `onBackgroundVariant`）。
-     *
-     * ## 为什么必须也覆盖
-     *
-     * Miuix 深色给的是 `#787E96` —— 与浅色那个 `#8C93B0` 一样是**蓝灰**。
-     * 之前这里只覆盖了浅色，于是深色模式下整屏图标与次级文字都蒙着一层灰蓝，
-     * 配彩色图标块（`SettingsIconPlate`）时尤其明显。用户的原话是
-     * 「深浅色模式的大部分图标要么发灰」。
-     *
-     * 取值依据：在 [PanelDark] `#242424` 上需要 ≥4.5:1 的对比度，
-     * 同时**不带色相**（三通道相等）—— 它表达的是"弱一档"，不是"另一种颜色"。
-     * `#9A9AA2` 在 `#242424` 上约 5.4:1，在卡片 [DarkCard] `#2D2D2D` 上约 4.7:1。
-     */
     internal val MutedDark = Color(0xFF9A9AA2)
 
-    /**
-     * 深色的"摘要"文字色（对应 Miuix 的 `onSurfaceVariantSummary`）。
-     *
-     * Miuix 原值是 `#80FFFFFF`（50% 白）。50% 白压在卡片 [DarkCard] `#2D2D2D` 上
-     * 只有约 4.1:1，工具卡摘要、设置行副标题这类**要读的**文字就偏灰了。
-     * 提到 62% 白（`#9EFFFFFF` 的等效实色）后约 5.6:1，仍是"弱一档"但可读。
-     *
-     * ⚠️ 用**不透明**色而不是 `Color.White.copy(alpha = …)`：半透明白会与底下的
-     * 卡片色混出不确定结果（同一段文字在页面底色上和在卡片上颜色不同），
-     * 那正是"有些地方灰得不一样"的来源。
-     */
     internal val SummaryDark = Color(0xFF9E9EA6)
 
-    /**
-     * 深色下**容器/选中底上**的正文色（对应 Miuix 的 `onSecondaryContainer` 与
-     * `onSurfaceContainerVariant`）。
-     *
-     * 比 [SummaryDark] 再亮一档，因为这两个槽位所在的两块底比其他容器更亮：
-     * `secondaryContainer` 深色是 `#434343`（比卡片 `#2D2D2D` 还亮），
-     * 而 Miuix 给它的文字是中灰 `#7C7C7C` —— 只有 **2.37:1**，选中的那一行
-     * 反而比没选中的更难读。
-     *
-     * `#B0B0B8` 在 `#434343` 上 4.59:1、在 `#2D2D2D` 上 5.3:1，仍然是"弱一档"，
-     * 但可读。与 [MutedDark] 一样**三通道近似相等**：它表达的是明度差，不是色相。
-     */
+    /** 深色下**容器/选中底上**的正文色（对应 Miuix 的 `onSecondaryContainer` 与 */
     internal val SecondaryDark = Color(0xFFB0B0B8)
 }
 
-/**
- * 给**非 Compose**的界面取色：注入到 guest 里的沙箱控制栏与它的日志面板。
- *
- * ## 为什么需要它
- *
- * 那两处是纯 `View`（`SandboxOverlay`），不是 Compose 树，所以拿不到
- * `MiuixTheme.colorScheme`。它原来自己维护了一套配色 —— 读的是 IQ Code 时代的
- * `ui_theme` 键（`day` / `neon-purple` / `custom` / `classic`），那套键跟现在的应用主题
- * **毫无关系**，于是那个悬浮窗一直是"IQ Code 的颜色"而不是 Miuix 的。
- *
- * 这里把"深浅"（[ZhiThemeMode]）与"Miuix 的语义色"（[darkColorScheme] /
- * [lightColorScheme]）接起来，返回一串 ARGB，颜色**没有第二份来源**。
- *
- * ## 为什么返回 int 而不是 `ColorScheme`
- *
- * `androidx.compose.ui.graphics.Color` 是 `@JvmInline value class`，从 Java 侧看到的是
- * `long`，还得再走名字被 mangle 掉的 `toArgb`。直接给 int 让 Java 调用点一行就能用。
- *
- * ## 为什么可以做在 Compose 之外
- *
- * [darkColorScheme] / [lightColorScheme] 是**普通函数**（带默认参数的色板构造器），
- * 不是 `@Composable`；[ZhiThemeMode.stored] / [ZhiThemeMode.systemDark] 同样不依赖组合。
- * 所以这里不需要任何 Compose 运行时就能求值 —— 这正是 guest 进程里唯一可行的做法。
- */
 object ZhiOverlayPalette {
 
-    /**
-     * 当前主题下的一组 ARGB。
-     *
-     * 字段是 `@JvmField`：Java 调用点写 `palette.surface` 而不是 `palette.getSurface()`，
-     * 与 `SandboxOverlay` 里那些 `View` 代码的读法一致。
-     */
+    /** 当前主题下的一组 ARGB。 */
     class Snapshot(
         /** 面板/对话框的底色。 */
         @JvmField val surface: Int,
@@ -523,12 +220,7 @@ object ZhiOverlayPalette {
         @JvmField val light: Boolean,
     )
 
-    /**
-     * 解析当前主题。
-     *
-     * `context` 只用来读用户选的深浅模式；读不到就跟随系统（[ZhiThemeMode.stored] 的语义），
-     * 再读不到就按深色 —— 悬浮窗压在任何 guest 界面上，深色底白字是唯一"在什么背景上都读得清"的选择。
-     */
+    /** 解析当前主题。 */
     @JvmStatic
     fun resolve(context: android.content.Context?): Snapshot {
         val dark = if (context == null) {

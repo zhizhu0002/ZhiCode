@@ -4,21 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 
-/**
- * 把用户选中的图片读进内存。
- *
- * ## 为什么必须有大小上限
- *
- * 图片会被 base64 之后塞进请求体。10 MB 的图片 base64 后约 13.3 MB，加上 JSON 包装
- * 会明显超过多数网关的单请求上限，而且编码过程本身要再复制一份内存。
- * 原版上限同样是 10 MB（先允许读到 12 MB 再拒绝），这里保持一致的量级。
- *
- * ## 为什么读字节而不是拿 Uri
- *
- * `content://` 的读取授权可能只在这个 Activity 生命周期内有效，而请求是异步发的；
- * 更关键的是**转发给引擎的必须是字节**：引擎要 base64 编码后写进请求，
- * 它拿到 Uri 就得自己再申请一次读权限。所以在这里一次性读成字节，边界更清楚。
- */
 internal object AttachmentReader {
 
     /** 单张图片上限。 */
@@ -58,16 +43,7 @@ internal object AttachmentReader {
         Image(name = displayName(context, uri), mimeType = resolveMimeType(detected, bytes), bytes = bytes)
     }
 
-    /**
-     * 定出真实的 MIME 类型。
-     *
-     * 不能只信 `ContentResolver.getType`：`file://` 这类来源根本没有类型信息，
-     * 一些文件提供方也会返回 `null` 或 `application/octet-stream`（相册里的 HEIC 常见）。
-     *
-     * 这里的**关键点**是不能随便回退成 `image/jpeg`：这个值会被当作 `media_type`
-     * 发给模型 API，用 jpeg 标注 PNG 字节会被服务端直接拒绝（400）。
-     * 所以回退顺序是：内容声明 → 魔数嗅探 → 最后才用 jpeg 兜底。
-     */
+    /** 定出真实的 MIME 类型。 */
     private fun resolveMimeType(declared: String?, bytes: ByteArray): String {
         if (!declared.isNullOrBlank() && declared.startsWith("image/")) return declared
         return sniffMimeType(bytes) ?: "image/jpeg"
@@ -95,12 +71,7 @@ internal object AttachmentReader {
         }
     }
 
-    /**
-     * 取显示名。
-     *
-     * `OpenableColumns.DISPLAY_NAME` 是唯一稳定的来源——`uri.lastPathSegment`
-     * 对 `content://` 常常是一串数字 ID，显示给用户毫无意义。
-     */
+    /** 取显示名。 */
     private fun displayName(context: Context, uri: Uri): String {
         runCatching {
             context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->

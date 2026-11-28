@@ -11,18 +11,7 @@ import com.zhizhu.zhicode.pi.sanitizePiProviderKey
 import com.termux.app.zhicode.model.ApiProfile as EngineProfile
 import com.termux.app.zhicode.storage.ApiSettingsStore
 
-/**
- * API 配置的读写适配层。
- *
- * 存在的意义：引擎侧的 [ApiSettingsStore] 用的是 Java 模型（`protocol` 是字符串、
- * 模型字段叫 `defaultModel`），界面侧用的是 Kotlin 模型（`ApiProtocol` 枚举、
- * 字段叫 `model`）。两边都不该为对方改形状，所以在中间做一次翻译。
- *
- * 密钥不经过这里返回：界面永远拿不到已保存的密钥明文（[ApiProfile.apiKey] 恒为空串）。
- * 只有 [save] 会把用户新输入的密钥写进 AndroidKeyStore 加密存储。
- * 编辑已有记录时密钥框留空 = **沿用原密钥**（`replaceKey=false`），
- * 而不是把密钥清空 —— 后者会让人"改个模型名就把密钥弄丢了"。
- */
+/** API 配置的读写适配层。 */
 internal object ApiConfigStore {
 
     fun read(context: Context): ApiConfigState {
@@ -100,11 +89,6 @@ internal object ApiConfigStore {
         ApiSettingsStore(context).deleteProfile(profileId)
     }
 
-    /**
-     * 当前生效的配置摘要，用于设置页显示与「为什么调不通」的排查。
-     *
-     * `hasKey` 是这里唯一需要知道的密钥信息：只说"配没配"，不暴露内容。
-     */
     data class Active(val profileId: String, val name: String, val model: String, val baseUrl: String, val protocol: String, val hasKey: Boolean)
 
     fun active(context: Context): Active? = runCatching {

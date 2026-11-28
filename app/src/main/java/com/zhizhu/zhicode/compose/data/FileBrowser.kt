@@ -5,18 +5,7 @@ import com.zhizhu.zhicode.compose.model.OpenFile
 import com.termux.shared.termux.TermuxConstants
 import java.io.File
 
-/**
- * 真实文件系统读取。
- *
- * 设计取舍：
- * - **不缓存**。文件面板是"看一眼"的场景，缓存反而会在 Agent 改了文件之后显示旧内容；
- *   目录深度只有一层，`File.listFiles()` 足够快。
- * - **正文由编辑页负责写入**。这里仍只做文件系统读取；保存统一经 ViewModel → FileOps，
- *   避免列表、编辑页和 Agent 各自维护一套写路径。
- * - **大文件截断**。打开一个几 MB 的日志会把界面拖死，所以超过 [MAX_PREVIEW_BYTES]
- *   只读前一段并明确标注"已截断"，而不是假装完整。
- * - **二进制不显示**。用 NUL 字节判断：显示乱码比显示"这是一个二进制文件"更没用。
- */
+/** 真实文件系统读取。 */
 internal object FileBrowser {
 
     /** 单次预览的上限。超出部分截断并标注。 */
@@ -25,23 +14,13 @@ internal object FileBrowser {
     /** 预览时按字节读取的块大小。 */
     private const val READ_CHUNK = 64 * 1024
 
-    /**
-     * 项目的根目录。
-     *
-     * 内置 Termux 环境没装时 home 目录还不存在，此时回退到应用私有目录 ——
-     * 让面板至少有个能打开的地方，而不是报"路径不存在"。
-     */
+    /** 项目的根目录。 */
     fun projectRoot(): String {
         val home = File(TermuxConstants.TERMUX_HOME_DIR_PATH)
         return if (home.isDirectory) home.absolutePath else TermuxConstants.TERMUX_FILES_DIR_PATH
     }
 
-    /**
-     * 列出一层子项。
-     *
-     * 排序：目录在前，然后按名称不区分大小写 —— 与常见文件管理器一致。
-     * 读不到的项（权限、符号链接指向不存在的位置）直接跳过，不让整个列表失败。
-     */
+    /** 列出一层子项。 */
     fun children(path: String): List<FileEntry> {
         val dir = File(path)
         val listed = if (dir.isDirectory) dir.listFiles() else null
@@ -65,14 +44,6 @@ internal object FileBrowser {
             .toList()
     }
 
-    /**
-     * 读取文本文件用于预览。默认 UTF-8；编辑页可传入用户选择的编码。
-     *
-     * ⚠️ **编辑器不用它了**：`compose/editor/EditorFileIo` 另有一套更完整的读盘
-     * （BOM 判定 → 严格 UTF-8 → 回退 GBK、尺寸上限、二进制拒绝），因为编辑器要
-     * “按真正识别出的编码写回”，而这里的 `charsetName` 是调用方猜的。
-     * 本函数现在只服务于文件列表侧的只读预演。
-     */
     fun read(path: String, charsetName: String = "UTF-8"): OpenFile {
         val file = File(path)
         val name = file.name
@@ -110,17 +81,6 @@ internal object FileBrowser {
         )
     }
 
-    /**
-     * 为「附加到消息」读取文本内容。读不出来、或判定是二进制时返回 `null`。
-     *
-     * 为什么单独开一个函数而不是让调用方用 [read]：
-     * [read] 对二进制返回的是「（二进制文件，N 字节，不在界面中显示）」这句**给人看的提示**。
-     * 如果直接把它当正文附加，模型会收到一句毫无意义的说明 —— 所以要能区分
-     * 「读到了文本」和「这根本不该附加」，[read] 的返回值表达不了这个区别。
-     *
-     * 截断与二进制判定都沿用 [read] 的那一套（[MAX_PREVIEW_BYTES] + NUL 检测），
-     * 不另起一份，免得两处口径不一致。
-     */
     fun readTextForAttachment(path: String): String? {
         val file = File(path)
         if (!file.isFile) return null

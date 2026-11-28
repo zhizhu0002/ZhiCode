@@ -7,25 +7,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-/**
- * 角色卡的读写。
- *
- * ## 存储在哪（以及为什么不自己存）
- *
- * 角色卡列表与"当前启用项"由引擎侧 [ApiSettingsStore] 持久化
- * （`getRoleCards()` / `saveRoleCards(cards, activeId)` / `getActiveRoleCardId()`），
- * 而**内容**是通过 `SessionConfig.roleCard` 生效的：引擎的 `SystemPromptBuilder`
- * 把它包成 `<role_card>` 块拼进系统提示词。
- *
- * 所以这里不新建存储，只做两件事：把 JSON 翻成界面模型、把选中项的内容
- * 交给调用方去灌进会话配置。
- *
- * ## 为什么内容会重复存一份
- *
- * `saveRoleCards` 存的是"卡片清单"，`SessionConfig.roleCard` 存的是"当前生效内容"。
- * 这两份必须同步——原版在选中/停用时两个都写。不同步的现象是：
- * 列表里明明勾着某张卡，但实际请求里没有它（或反过来，停用了却还在生效）。
- */
 internal object RoleCardStore {
 
     fun list(context: Context): List<RoleCard> = runCatching {
@@ -51,11 +32,7 @@ internal object RoleCardStore {
         return list(context).firstOrNull { it.id == id }?.content.orEmpty()
     }
 
-    /**
-     * 保存卡片清单与启用项。
-     *
-     * 空 id 表示"停用"。选择与停用都走这一个入口，避免出现两条写法不一致的路径。
-     */
+    /** 保存卡片清单与启用项。 */
     fun save(context: Context, cards: List<RoleCard>, activeId: String): Result<Unit> = runCatching {
         val array = JSONArray()
         cards.forEach { card ->

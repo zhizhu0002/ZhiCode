@@ -11,29 +11,6 @@ import com.zhizhu.zhicode.compose.model.WebSearchProvider
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * 搜索服务的读写适配层（形态对齐 RikkaHub 的「搜索服务」页）。
- *
- * ## 与 API 配置页是同一套骨架
- *
- * 列表 + 当前生效项 + 编辑表单 + 密钥单独加密存放 —— `ApiConfigStore` 已经跑通了，
- * 所以这里**照抄结构**而不是另发明一套：用户在两个页面看到的交互应当一致
- * （点卡片设为当前、右上角添加、编辑页可删）。Context 也是显式传参，同一个理由。
- *
- * ## 密钥为什么不进 config
- *
- * [SearchService.config] 是普通字段（实例地址、深度、主题…），落在 prefs；
- * 密钥走 [ApiSettingsStore.setSearchServiceKey] 的**加密槽**，按 service id 分槽。
- * 读回时**不回填**到表单（[SearchServiceDraft.from] 给空串）——
- * 与 API 配置同一条规矩：界面上不该出现已保存的密钥明文。
- *
- * ## 老配置迁移
- *
- * 上一版只有一个 `WebSearchProvider` 枚举 + 一个 Key。首次启动把它转成一条
- * [SearchService]，让老用户的配置不至于白填。迁移**只做一次**并打标记 ——
- * 否则用户删掉那条之后又会被"迁移"回来。
- * 迁移的输入由调用方显式传入（老配置存在引擎侧），这里不做二次读取。
- */
 internal object SearchServiceStore {
 
     fun read(context: Context): SearchServicesState {
@@ -59,14 +36,7 @@ internal object SearchServiceStore {
         )
     }
 
-    /**
-     * 首次进入时种下的两条预设。
-     *
-     * 选它们而不是 Tavily/Exa：那两家要密钥，而"打开设置就看到一个必须先去注册才能用的空框"
-     * 是这条链路以前劝退用户的地方。DuckDuckGo 与 Bing RSS 都是免费公开入口，
-     * 种下去就能直接搜 —— Bing 那条**停用**是因为它只是限流时的备份，
-     * 两条都启用会让"当前使用"看起来有歧义。
-     */
+    /** 首次进入时种下的两条预设。 */
     private val SEED_SERVICES: List<SearchService> = listOf(
         SearchService(
             id = "search-duckduckgo",
@@ -83,11 +53,7 @@ internal object SearchServiceStore {
 
     private const val SEED_ACTIVE_ID = "search-duckduckgo"
 
-    /**
-     * 保存（新增或按 [SearchServiceDraft.id] 覆盖）。
-     *
-     * 校验在模型层（[SearchServiceDraft.saveable]），这里只负责落盘与密钥槽。
-     */
+    /** 保存（新增或按 [SearchServiceDraft.id] 覆盖）。 */
     fun save(context: Context, draft: SearchServiceDraft): Result<String> = runCatching {
         require(draft.saveable) {
             draft.nameError ?: draft.fieldError ?: draft.keyError ?: "配置有误"
@@ -142,12 +108,7 @@ internal object SearchServiceStore {
         return state.services.firstOrNull { it.id == state.activeId && it.enabled }
     }
 
-    /**
-     * 首次启动时把老版「单个 provider + 单个 Key」迁成一条服务。
-     *
-     * [provider] / [searxngUrl] / [apiKey] 都由调用方从老配置里读好传进来 ——
-     * 那些值存在引擎侧（SessionConfig 与密钥槽），适配层不该反向依赖引擎。
-     */
+    /** 首次启动时把老版「单个 provider + 单个 Key」迁成一条服务。 */
     fun migrateLegacyIfNeeded(
         context: Context,
         provider: WebSearchProvider,

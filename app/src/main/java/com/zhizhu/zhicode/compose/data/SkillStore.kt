@@ -7,25 +7,6 @@ import com.zhizhu.zhicode.compose.model.SkillScope
 import com.termux.shared.termux.TermuxConstants
 import java.io.File
 
-/**
- * Skill 的读写。
- *
- * ## 目录约定（必须与引擎一致）
- *
- * 引擎的 `SkillTool` 在这两个位置找 `SKILL.md`：
- * - 项目级：`<projectDirectory>/.zhicode/skills/<name>/SKILL.md`
- * - 用户级：`$HOME/.zhicode/skills/<name>/SKILL.md`
- *
- * 所以这里**不能**自己发明目录结构，否则界面上建好的技能 Agent 根本找不到
- * （`SkillTool` 会返回 `Skill not found: <name>`）。
- * 两边的根目录都取自 `TermuxConstants.dataDirIn`，是同一个来源。
- *
- * ## 命名约束
- *
- * 名字直接当目录名用，所以必须限制字符集：`SkillTool` 会拒绝含 `/` 或 `..` 的名字，
- * 界面这边更要在**创建时**就挡住——让非法名字连目录都建不出来，
- * 好过建完之后 Agent 拒绝加载（那种错误信息离用户很远）。
- */
 internal object SkillStore {
 
     /** 名字规则与引擎侧一致：字母、数字、`.`、`_`、`-`，长度 1–64。 */
@@ -34,39 +15,16 @@ internal object SkillStore {
     private const val FILE_NAME = "SKILL.md"
     private const val SKILLS_DIR = "skills"
 
-    /**
-     * 详情页文件树的深度上限与节点总数上限。
-     *
-     * 都不是"优化"：技能目录是用户（或 Agent）可写的，`walkTopDown()` 遇到目录符号
-     * 链接会跟着走，一个循环链接就能让递归停不下来；而几千个文件一次性渲染会直接
-     * 卡住详情页。宁可少列几层，也不能让界面卡死。
-     */
+    /** 详情页文件树的深度上限与节点总数上限。 */
     private const val TREE_MAX_DEPTH = 4
     private const val TREE_MAX_FILES = 400
 
     fun isValidName(name: String): Boolean = NAME_PATTERN.matches(name)
 
-    /**
-     * 技能目录内**附加文件**的名字规则。
-     *
-     * 与技能名同一套字符集，但额外挡掉 `.` 与 `..` —— 正则里的 `.` 是字面点，
-     * 所以 `..` 本身能通过 `matches`，必须单独拒绝。
-     *
-     * ⚠️ 这个函数**不是**安全边界：它只挡掉明显的写法。真正的兜底是
-     * [fileInSkillDir] 里的 `canonicalPath` 前缀比对 —— 名字是由界面文本直接驱动的，
-     * 只靠字符集校验的代码在遇到新写法时很容易失效。
-     */
     fun isValidFileName(name: String): Boolean =
         NAME_PATTERN.matches(name) && name != "." && name != ".."
 
-    /**
-     * 解析技能目录里的一个文件，并确认它**没有跑出技能目录**。
-     *
-     * 两道防线：
-     * 1. [isValidFileName] 挡掉 `/`、`\`、`.`、`..` 这些明显写法；
-     * 2. `canonicalPath` 前缀比对 —— 防的是第 1 步被绕过，以及符号链接把路径引出目录。
-     *    这一步是安全边界，不能删。
-     */
+    /** 解析技能目录里的一个文件，并确认它**没有跑出技能目录**。 */
     private fun fileInSkillDir(dir: File, fileName: String): File {
         require(isValidFileName(fileName)) { "文件名只能包含字母、数字、. _ -（1–64 个字符）" }
         val target = File(dir, fileName)
@@ -75,14 +33,7 @@ internal object SkillStore {
         return target
     }
 
-    /**
-     * 解析技能目录里的一个**相对路径**（允许 `sub/doc.md` 这种子目录）。
-     *
-     * 关键点：**逐段**过 [fileInSkillDir]，不是把整串 `sub/doc.md` 直接 resolve。
-     * 直接 resolve 的话 `../x.md` 会绕过"单段名字"那道校验（它只在整串里找一个
-     * `..` 是分不开的），于是能写到技能目录外面去。逐段校验则每一段都必须是一个
-     * 普通名字，且每一段都重新做一次 canonicalPath 前缀比对。
-     */
+    /** 解析技能目录里的一个**相对路径**（允许 `sub/doc.md` 这种子目录）。 */
     private fun fileInSkillDirByPath(dir: File, relativePath: String): File {
         require(relativePath.isNotBlank()) { "文件名不能为空" }
         var target = dir
@@ -109,18 +60,6 @@ internal object SkillStore {
     fun fileOf(projectPath: String, scope: SkillScope, name: String): File =
         File(directoryOf(projectPath, scope, name), FILE_NAME)
 
-    /**
-     * 列出所有技能。
-     *
-     * 项目级与用户级都会扫；两层里同名时两份都保留并标明作用域
-     * ——用户可能故意在项目里放一个覆盖版本，悄悄隐藏用户级那一条会让人以为它被删了。
-     *
-     * ⚠️ **但两个根目录是同一个目录时只列一次**。默认项目目录就是 `$HOME`
-     * （用户级技能也在 `$HOME/.zhicode/skills`），这时两层指向同一个文件夹，
-     * 不去重的话同一个技能会被列成两条（「项目级」+「用户级」），
-     * 而磁盘上只有一个文件 —— 删除其中一条会把另一条也一起弄没。
-     * 这是实际在界面上观察到的现象，不是理论问题。
-     */
     fun list(projectPath: String): List<SkillEntry> {
         val out = mutableListOf<SkillEntry>()
         // 按**规范路径**去重（不是名字）：软链接指到同一个目录也算同一个。
@@ -147,12 +86,7 @@ internal object SkillStore {
         return out
     }
 
-    /**
-     * 取 SKILL.md 的 `description` 作为列表副标题。
-     *
-     * 只读文件开头若干行：技能文件可能很长，为了列表显示把整个文件读进来不值得。
-     * 读不到就明确说"未写说明"，而不是显示空串让人以为是加载失败。
-     */
+    /** 取 SKILL.md 的 `description` 作为列表副标题。 */
     private fun describe(file: File): String = runCatching {
         val head = file.bufferedReader().use { reader ->
             val lines = mutableListOf<String>()
@@ -168,12 +102,7 @@ internal object SkillStore {
         description?.takeIf { it.isNotBlank() } ?: "未写说明"
     }.getOrElse { "无法读取：${it.message ?: "未知原因"}" }
 
-    /**
-     * 从 YAML 前置元数据里取一个字段。
-     *
-     * 只做最朴素的 `key: value` 匹配，不引 YAML 解析器：技能头部就那两三行，
-     * 而且用户手写的内容各种不规范，严格解析反而更容易整个失败。
-     */
+    /** 从 YAML 前置元数据里取一个字段。 */
     private fun frontMatterValue(text: String, key: String): String? {
         text.lineSequence().forEach { line ->
             val trimmed = line.trim()
@@ -182,13 +111,6 @@ internal object SkillStore {
         return null
     }
 
-    /**
-     * 取 YAML 前置元数据块（首个 `---` 行到下一个 `---` 行之间）。
-     *
-     * **只在这个块里找键**，不全文扫描。正文里出现 `name: xxx` 是很常见的
-     * （代码示例、说明文字都会），全文扫描会把那种行当成技能名，
-     * 于是目录名和内容对不上，而用户完全看不出为什么。
-     */
     private fun frontMatterBlock(content: String): String? {
         val lines = content.lineSequence().toList()
         val start = lines.indexOfFirst { it.trim() == "---" }
@@ -211,49 +133,17 @@ internal object SkillStore {
         return text
     }
 
-    /**
-     * 从**粘贴进来的 SKILL.md 内容**里解析技能名。
-     *
-     * 这是「手动添加」的入口：用户直接粘一整份 SKILL.md，名字由内容的
-     * frontmatter 决定，不再单独问一遍 —— 与参考实现（rikkahub 的添加技能对话框）一致。
-     *
-     * 解析不出来返回 null，由调用方**报错并禁用提交**，而不是回退到某个默认名：
-     * 拿不到名字时猜一个（比如取文件名、取第一行）会建出一个用户没打算建的目录。
-     *
-     * 引擎侧（`SkillTool`）并不解析 frontmatter，它只是把整份文件当文本加载 ——
-     * 所以这个解析只服务于"目录叫什么"，不影响 Agent 能不能用这个技能。
-     */
+    /** 从**粘贴进来的 SKILL.md 内容**里解析技能名。 */
     fun nameFromContent(content: String): String? =
         frontMatterBlock(content)?.let { bareValue(frontMatterValue(it, "name").orEmpty()) }
             ?.takeIf { it.isNotBlank() }
 
-    /**
-     * 技能目录里的文件**树**（详情页用）。
-     *
-     * 为什么是树而不是平铺一层：技能可以带子目录 —— 参考文档、脚本、示例按目录分组
-     * 是很常见的分发形态（参考实现的详情页就是递归树）。平铺会把 `reference/api.md`
-     * 显示成 `api.md`，用户看不出它在哪一层，也没法在界面上重建同样的结构。
-     *
-     * 排序：目录在前、文件在后；文件里 `SKILL.md` 排最前 —— 它是技能本体，
-     * 按字母序混排会让本体淹没在附件里。
-     *
-     * 深度与文件数都有上限，见 [TREE_MAX_DEPTH] / [TREE_MAX_FILES]。
-     */
     fun listTree(projectPath: String, scope: SkillScope, skillName: String): List<SkillFileNode> {
         val dir = directoryOf(projectPath, scope, skillName)
         if (!dir.isDirectory) return emptyList()
         return buildNodes(dir, prefix = "", depth = 0, seen = intArrayOf(0))
     }
 
-    /**
-     * 递归建树。
-     *
-     * ⚠️ 两个上限都不是"优化"，是**必要条件**：
-     * - 不用 `walkTopDown()`：它会跟着目录符号链接走，一个循环链接就能让界面
-     *   无限递归（而且是在主线程上）。这里只走真实目录，且限制深度。
-     * - `seen` 统计已列出的节点数，到顶就停 —— 技能目录是用户可写的，
-     *   往里面扔几千个文件是完全可能的，一次性全部渲染会直接卡住详情页。
-     */
     private fun buildNodes(dir: File, prefix: String, depth: Int, seen: IntArray): List<SkillFileNode> {
         val children = dir.listFiles().orEmpty()
         val dirs = mutableListOf<SkillFileNode>()
@@ -287,28 +177,13 @@ internal object SkillStore {
         return dirs + sortedFiles.map { SkillFileNode.FileNode(it) }
     }
 
-    /**
-     * 检查 `SKILL.md` 里声明的 `name` 与**目录名**是否一致。
-     *
-     * 一致返回 null，否则返回可以原样展示给用户的原因。
-     *
-     * 为什么必须有这道校验：技能目录名才是引擎 `SkillTool` 用来定位技能的键
-     * （`skills/<name>/SKILL.md`），而内容里的 `name` 只是文本。改成不一致之后，
-     * 界面上技能叫 A、内容说自己是 B —— Agent 按名字加载时找一个不存在的目录，
-     * 而用户完全看不出为什么。参考实现（rikkahub 的 `SkillDetailVM.saveFile`）
-     * 也是这么挡的：`name != skillName` 直接拒绝保存。
-     */
     fun nameConflict(skillName: String, content: String): String? = when (val declared = nameFromContent(content)) {
         null -> "SKILL.md 的 frontmatter 里必须有一行 name: $skillName"
         skillName -> null
         else -> "name 必须是「$skillName」，现在写的是「$declared」；要改名请新建技能"
     }
 
-    /**
-     * 列出技能目录里的文件（扁平，含子目录里的文件）。
-     *
-     * 界面上用的是 [listTree]；这里是给"附加整个技能"这类需要全部文件的调用方准备的。
-     */
+    /** 列出技能目录里的文件（扁平，含子目录里的文件）。 */
     fun listFiles(projectPath: String, scope: SkillScope, skillName: String): List<SkillFile> =
         flatten(listTree(projectPath, scope, skillName))
 
@@ -328,14 +203,7 @@ internal object SkillStore {
             file.readText()
         }
 
-    /**
-     * 写技能目录里的一个文件（不存在则创建，子目录会自动建）。
-     *
-     * 路径先过 [fileInSkillDirByPath] 的两道校验 —— 这条路径是**由界面输入框直接驱动**的，
-     * 没有校验的话 `../` 能写到技能目录外面去。
-     *
-     * 写 `SKILL.md` 时额外过 [nameConflict]：内容里的 `name` 必须还是这个技能的名字。
-     */
+    /** 写技能目录里的一个文件（不存在则创建，子目录会自动建）。 */
     fun writeFile(
         projectPath: String,
         scope: SkillScope,
@@ -354,13 +222,7 @@ internal object SkillStore {
         Unit
     }
 
-    /**
-     * 删除技能目录里的一个文件。
-     *
-     * `SKILL.md` **不能**用这个入口删：它是技能本体，删掉目录还在，列表里就会出现
-     * 一个"看得见但打不开"的技能（`SkillStore.list` 会跳过没有 SKILL.md 的目录，
-     * 于是那个目录变成幽灵）。要删就走 [delete] 整个技能一起删。
-     */
+    /** 删除技能目录里的一个文件。 */
     fun deleteFile(projectPath: String, scope: SkillScope, skillName: String, relativePath: String): Result<Unit> =
         runCatching {
             require(relativePath != FILE_NAME) { "SKILL.md 是技能本体，不能单独删除；要删请删整个技能" }
@@ -378,16 +240,7 @@ internal object SkillStore {
     fun read(projectPath: String, scope: SkillScope, name: String): Result<String> =
         readFile(projectPath, scope, name, FILE_NAME)
 
-    /**
-     * 新建技能。
-     *
-     * [content] 为 null 时写一份空模板；「手动添加」会把自己粘贴的整份 SKILL.md 传进来。
-     * 注意 [name] **不由这里从内容里推断**：目录名必须与用户在界面上确认过的名字一致
-     * （界面已经用 [nameFromContent] 解析并在提交前给了用户反馈）。
-     *
-     * 若目录已存在**不覆盖**：用户可能已经写了内容，静默覆盖等于丢数据。
-     * 返回 true 表示"新建了文件"，false 表示"已存在，直接打开编辑"。
-     */
+    /** 新建技能。 */
     fun create(
         projectPath: String,
         scope: SkillScope,
@@ -407,12 +260,7 @@ internal object SkillStore {
         true
     }
 
-    /**
-     * 删除技能。
-     *
-     * 用递归删除：技能目录里可能还有参考文档等附加文件，
-     * 只删 `SKILL.md` 会留下一个空壳目录，列表里看起来像"技能还在但打不开"。
-     */
+    /** 删除技能。 */
     fun delete(projectPath: String, scope: SkillScope, name: String): Result<Unit> = runCatching {
         val dir = directoryOf(projectPath, scope, name)
         if (!dir.isDirectory) throw IllegalArgumentException("找不到技能目录：${dir.absolutePath}")
@@ -433,17 +281,6 @@ internal object SkillStore {
         |
     """.trimMargin()
 
-    /**
-     * 「手动添加」对话框里预填的**示例**内容。
-     *
-     * 直接进输入框（而不是在框下面另起一块示例），用户改一改就能存：
-     * 手上有的是"某个技能的说明文字"，未必知道 frontmatter 那两行是必须的，
-     * 把必需形状摆在光标底下比任何提示都短。
-     *
-     * ⚠️ 名字刻意是个**占位符**（含 `<>` 与中文，过不了 [isValidName]）：
-     * 这样一打开对话框时「保存」是**禁用**的，用户必须先把它换成自己的名字 ——
-     * 若这里填一个合法默认名，点两下就会建出一个用户没打算建的技能。
-     */
     val starterTemplate: String = """
         |---
         |name: <技能名，只能用字母、数字、. _ ->

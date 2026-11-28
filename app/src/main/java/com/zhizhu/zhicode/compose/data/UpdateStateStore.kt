@@ -6,33 +6,6 @@ import com.zhizhu.zhicode.compose.model.UpdateReleaseInfo
 import com.zhizhu.zhicode.compose.model.UpdateUiState
 import org.json.JSONObject
 
-/**
- * 「检查更新」结果的**磁盘缓存**。
- *
- * ## 为什么需要它
- *
- * `UpdateUiState` 原来是纯内存的（`WorkspaceUiState` 的字段，默认 `Idle`）。
- * 于是只要**进程被回收**，再进来就回到「还没检查过」，得重新联网问一次 GitHub
- * —— 用户的原话是「有时候退出后台再次进入，这个更新页面会重置」。
- *
- * 后台被回收不是异常，是这个应用的常态：它 `largeHeap` + 常驻 Termux 用户空间，
- * 内存压力大，系统很容易在切后台之后把进程收掉。所以任何"用户已经看到过的结果"
- * 都不该只活在内存里。
- *
- * ## 只缓存**结论**，不缓存过程
- *
- * 存的是「上次查到的版本号 / 页面 / 体积」与阶段（`UpToDate` / `NoReleases` /
- * `Available`），**不存** `Checking` / `Downloading` —— 那两个阶段跨进程没有意义，
- * 恢复出来的应当是"上一次稳定的结论"，而不是一个永远转圈的进度条。
- *
- * `Failed` 也不恢复：错误是**针对某一次请求**的，重新打开时不该继续显示
- * 一句可能是昨天的失败原因。恢复成 `Idle` 让它重新查。
- *
- * ## 为什么不复用 `UpdateChecker.Release`
- *
- * 那是 `data` 层的解析结果（带 `org.json` 与网络语义）。缓存要能跨版本读，
- * 只该依赖 `model` 层的 `UpdateReleaseInfo`。
- */
 internal object UpdateStateStore {
 
     private const val PREFS = "zhicode_update"
@@ -118,13 +91,7 @@ internal object UpdateStateStore {
         }
     }
 
-    /**
-     * 阶段 ↔ 名字。`UpdatePhase` 是 **sealed interface 而不是 enum**（它没有
-     * `entries`，因为每个阶段还带着自己的语义），所以这里手写一层映射。
-     *
-     * 只列**会落盘**的四档：`Checking` / `Downloading` / `Failed` / `Idle`
-     * 跨进程没有意义（见类头说明），写进去也不会被读回来。
-     */
+    /** 阶段 ↔ 名字。 */
     private fun phaseName(phase: UpdatePhase): String = when (phase) {
         UpdatePhase.UpToDate -> "UpToDate"
         UpdatePhase.NoReleases -> "NoReleases"

@@ -9,28 +9,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 
-/**
- * 沙盒管理页的数据层。
- *
- * ## 为什么页面不该直接调 `SandboxHostClient`
- *
- * 那个类是 Java + `org.json` 的同步 IPC：每次调用都是一次 Binder 往返，
- * 失败时返回 `{ok:false, error:"…"}` 而不是抛异常。让 Compose 直接用它会有两个后果：
- *
- * 1. **在主线程做 Binder**。`ContentResolver.call` 在引擎初始化时要等最多 12 秒
- *    （`SandboxControlProvider.dispatch` 的 `awaitReady`），放在组合里就是 ANR。
- * 2. **"成功"的判定散落在界面里**。是否 `ok`、错误文案怎么取，会在每个按钮里
- *    各写一遍，然后总有一个漏判 —— 于是失败的时候界面显示成功。
- *
- * 这一层把两件事收干净：**一律在 IO 线程**、**一律返回 `Result`**。
- *
- * ## "运行中"是怎么算出来的
- *
- * 引擎的 `list` 只回包名，`process_list` 才回 PID。界面要显示"运行中"，
- * 必须把两者合起来 —— 这就是 [SandboxApp.running] 的来源。
- * 没有为此给引擎加一个新动作：那两个动作**各自都有别的使用者**
- * （Agent 的 `Sandbox list` / `Debug process_list`），合并只服务于这一页。
- */
 class SandboxRepository(context: Context) {
 
     private val app = context.applicationContext
@@ -75,13 +53,6 @@ class SandboxRepository(context: Context) {
         }
     }
 
-    /**
-     * 让引擎把每个已装应用的图标导出成 PNG，返回「包名 → 本地路径」。
-     *
-     * 图标**必须在引擎进程里解析**：只有那边才拿得到 guest 的真实 `sourceDir`，
-     * 而主界面进程去读 guest 的 APK 会撞上 BlackBox 的路径虚拟化。
-     * 这一层只负责把路径搬到界面，不去理解它怎么来的。
-     */
     private fun iconPaths(): Map<String, String> {
         val r = SandboxHostClient.call(app, "app_icons", JSONObject())
         if (!r.optBoolean("ok", false)) return emptyMap()
@@ -94,46 +65,8 @@ class SandboxRepository(context: Context) {
         return out
     }
 
-    /**
-     * 从系统文件选择器拿到的 URI 导入一个 APK。
-     *
-     * ## 为什么必须先把字节拷出来
-     *
-     * `ACTION_OPEN_DOCUMENT` 给的是 `content://`，而引擎要的是一个**真实路径**
-     * （`BlackBoxCore.installPackageAsUser(File, userId)`）。两者之间只能落一次盘。
-     * 目标选 `cacheDir` 而不是 `filesDir`：装完就没用了，缓存可以被系统回收。
-     *
-     * ## 为什么先在本地校验包名
-     *
-     * 引擎的安装失败文案是 BlackBox 的通用错误（"解析失败"），
-     * 而这里能给出精确原因：不是 APK / 不能装宿主自己 / 读不到文件。
-     * 更早失败、更准的话。
-     *
-     * ⚠️ 在**沙箱里**运行时，`openInputStream` 可能因为 provider 不可达而失败
-     * （与导出的 `No content provider` 同一个根因）。那种情况下给出的错误会
-     * 指明"从文件选择器读不到"，而不是让 BlackBox 去报一个更含糊的解析错误。
-     */
     suspend fun importApk(uri: Uri): Result<String> = io {
-        /*
-         * 落在 `cacheDir/sandbox-import/`。
-         *
-         * ⚠️ 这里曾经改成 `filesDir/sandbox/import/`，理由是"cacheDir 可能被系统清理"，
-         * 结果**装不上**（引擎报 `parser apk error`）。所以改回原版 IQ-Code-Android
-         * 用的 `cacheDir` —— 那条路是被验证过能装的。
-         *
-         * 教训：这类"看起来更稳妥"的改动必须有实测支撑。cacheDir 被清理是
-         * 一个**理论风险**，而引擎能读到文件是**已证事实**；用一个理论风险去换掉
-         * 一个已证事实，代价就是这个功能完全不可用。
-         */
         val dir = File(app.cacheDir, "sandbox-import").apply { mkdirs() }
-        /*
-         * 文件名保留原样（前面加时间戳去重），与原版 IQ-Code-Android 一致：
-         *   `<ts>-<原文件名>`，非 [A-Za-z0-9._-] 的字符替换成 `_`。
-         *
-         * 为什么连这个都照抄：BlackBox 的解析器理论上不该看文件名，
-         * 但这是最后一处**尚未验证**的移植差异。在"第三方 APK 装不上"
-         * 还没定位到真因之前，把已知差异清零比留着一个"应该没影响"更划算。
-         */
         val sourceName = (uri.lastPathSegment ?: "import.apk")
             .substringAfterLast('/')
             .replace(Regex("[^A-Za-z0-9._-]"), "_")
@@ -147,21 +80,6 @@ class SandboxRepository(context: Context) {
             }
             if (target.length() <= 0L) error("所选文件是空的")
 
-            /*
-             * 先用系统 PackageManager 解析一次，**解析不了就直接拒绝**。
-             *
-             * 🔴 这里曾经写成"解析为 null 就放行给引擎"，那是错的：
-             * 一个连系统 `PackageManager.getPackageArchiveInfo` 都读不出包名的文件，
-             * BlackBox 更不可能解析 —— 放行的结果就是用户看到引擎吐出
-             * 一句 `parser apk error`（英文、无上下文、不可行动）。
-             *
-             * 原版 IQ-Code-Android 正是硬失败（`if (pi == null || pi.packageName == null) throw`），
-             * 这里跟它一致。
-             *
-             * 已知会发生的情况：ZhiCode 自己的 Release 包经 R8 全量混淆 + 资源压缩后，
-             * 部分 ROM 上 `getPackageArchiveInfo` 会返回 null。那恰好也是**我们最想拦住**
-             * 的那个文件（不能把宿主装进自己的沙箱），所以"拒绝"在两个方向上都是对的。
-             */
             val info = runCatching {
                 app.packageManager.getPackageArchiveInfo(
                     target.absolutePath,
@@ -197,10 +115,7 @@ class SandboxRepository(context: Context) {
             if (!r.optBoolean("ok", false)) error(r.optString("error", r.toString()))
             if (!r.optBoolean("success", false)) {
                 val msg = r.optString("message", "").ifEmpty { "沙箱安装失败" }
-                /*
-                 * 引擎侧的失败要补上下文：BlackBox 的原始报错不告诉用户
-                 * "哪个文件、多大、什么包名" —— 而这三样正是排查的全部线索。
-                 */
+                /* 引擎侧的失败要补上下文：BlackBox 的原始报错不告诉用户 */
                 val sizeMb = target.length() / (1024.0 * 1024.0)
                 error(
                     "$msg\n文件: ${uri.lastPathSegment ?: target.name}"
@@ -235,42 +150,6 @@ class SandboxRepository(context: Context) {
         if (!r.optBoolean("ok", false)) error(r.optString("error", r.toString()))
     }
 
-    /**
-     * 引擎侧的诊断快照（事件流 + BlackBox 的 startup-stage + logcat）。
-     *
-     * ## 为什么必须走 provider，而不是本地直接读
-     *
-     * `SandboxDebugLog.snapshot()` 里最有价值的两段是**引擎进程**才知道的事：
-     * `attach` / `create` 走到哪一步、BlackBox 自己写的 `startup-stage.txt`、
-     * 以及 guest 的 logcat。在主进程调用它读到的是主进程的日志 ——
-     * 那份日志里没有引擎启动的任何痕迹，看起来像"什么都没发生"。
-     *
-     * ## 为什么要限长
-     *
-     * `snapshot()` 的上限是 42 万字符，而里面还夹着一次 `logcat -d` 子进程调用。
-     * 全量文本交给 Compose 去测量与排版时，一帧要处理几十万个字符 ——
-     * 表现就是"点开诊断要卡一两秒"。这里按需截断：诊断看的是**最近发生的事情**，
-     * 所以保留尾部（最新的）而不是开头。
-     */
-    /**
-     * 引擎侧的诊断快照（事件流 + BlackBox 的 startup-stage + 可选 logcat）。
-     *
-     * ## 为什么必须走 provider，而不是本地直接读
-     *
-     * `SandboxDebugLog.snapshot()` 里最有价值的两段是**引擎进程**才知道的事：
-     * `attach` / `create` 走到哪一步、BlackBox 自己写的 `startup-stage.txt`。
-     * 在主进程调用它读到的是主进程的日志 —— 那里没有引擎启动的任何痕迹，
-     * 看起来像"什么都没发生"。
-     *
-     * ## 为什么默认不带 logcat
-     *
-     * 读 logcat 要起一个子进程并等它 dump 完，而它恰恰是**最慢、信息密度最低**
-     * 的一段。诊断要看的是"引擎走到哪一步"，那是事件流与 startup-stage 的答案。
-     * 界面路径默认关掉它 —— 这是"点开诊断很卡"的一半原因（另一半在
-     * `SandboxDebugLog.readLogcat` 的 `-t` 限行里）。
-     *
-     * @param includeLogcat Agent 想要完整日志时传 true。
-     */
     suspend fun readSnapshot(
         maxChars: Int = 60_000,
         includeLogcat: Boolean = false,
@@ -296,12 +175,7 @@ class SandboxRepository(context: Context) {
         if (!r.optBoolean("ok", false)) error(r.optString("error", r.toString()))
     }
 
-    /**
-     * Frida Gadget 状态。
-     *
-     * 返回 `installed` / `version` / `size`。**未安装不是错误** ——
-     * 它是一个正常状态，界面据此显示「未安装」并给出一键安装。
-     */
+    /** Frida Gadget 状态。 */
     suspend fun readFrida(): Result<FridaStatus> = io {
         val r = SandboxHostClient.call(app, "frida_status", JSONObject())
         if (!r.optBoolean("ok", false)) error(r.optString("error", r.toString()))
@@ -313,12 +187,7 @@ class SandboxRepository(context: Context) {
         )
     }
 
-    /**
-     * 下载并安装 Frida Gadget。
-     *
-     * 这条动作**会联网**（走内置 Termux 的 curl）并做 SHA-256 校验，
-     * 所以超时给得比别的动作长：远端是 GitHub Releases，手机上可能几十秒。
-     */
+    /** 下载并安装 Frida Gadget。 */
     suspend fun installFrida(): Result<FridaStatus> = io {
         val r = SandboxHostClient.call(app, "frida_install", JSONObject())
         if (!r.optBoolean("ok", false)) error(r.optString("error", r.toString()))
@@ -330,14 +199,7 @@ class SandboxRepository(context: Context) {
         )
     }
 
-    /**
-     * 该包的进程清单。
-     *
-     * 这里只取进程（`process_list`），**不**去读 `/proc/<pid>/maps`：
-     * 后者是 guest 侧的能力（`Debug scope=sandbox action=modules`）。
-     * 在宿主进程里读 guest 的 maps 拿不到 —— 那不是同一个进程。
-     * 所以这一屏给的是"有哪些进程、PID 是多少"，想看模块再让 Agent 用 Debug。
-     */
+    /** 该包的进程清单。 */
     suspend fun processes(pkg: String): Result<String> = io {
         val r = SandboxHostClient.call(app, "process_list", JSONObject().put("package", pkg))
         if (!r.optBoolean("ok", false)) error(r.optString("error", r.toString()))
@@ -354,24 +216,6 @@ class SandboxRepository(context: Context) {
         }
     }
 
-    /**
-     * 一个包当前的运行实况：进程清单 + 每个进程的可加载模块基址。
-     *
-     * ## 为什么合成一次调用，而不是让界面自己串两次
-     *
-     * 界面要展示的是一张**实时**的表：pid / 进程名 / uid / 模块数 / 基址。
-     * 让界面去串 `process_list` + 每个 pid 一次 `proc_modules` 的话：
-     *  · 那些调用是同步 IPC，界面得自己管线程与错误合并；
-     *  · 轮询时两次调用之间进程可能已经退出了，拿到的是自相矛盾的两截数据。
-     *
-     * 放在这里一次取完，界面拿到的永远是**同一时刻**的一份快照。
-     *
-     * ## 模块拿不到不算失败
-     *
-     * `proc_modules` 要那个 guest 进程还活着并在跑我们的桥。进程刚好退出的瞬间
-     * 就会失败 —— 那时仍然返回进程清单（只是 modules 为空），
-     * 因为"有进程但模块读不到"本身就是有用的信息。
-     */
     suspend fun inspect(pkg: String): Result<SandboxInspection> = io {
         val r = SandboxHostClient.call(app, "process_list", JSONObject().put("package", pkg))
         if (!r.optBoolean("ok", false)) error(r.optString("error", r.toString()))
@@ -396,14 +240,7 @@ class SandboxRepository(context: Context) {
         SandboxInspection(packageName = pkg, processes = processes)
     }
 
-    /**
-     * 某个 guest 进程的模块基址。
-     *
-     * 走的是 guest 侧的 `proc_modules` —— 它在 guest 自己的进程里读自己的
-     * `/proc/self/maps`，所以拿得到真实基址。宿主进程做不到这件事。
-     *
-     * 失败返回空表而不是抛：轮询时进程刚好退出是常态。
-     */
+    /** 某个 guest 进程的模块基址。 */
     private fun loadModules(pkg: String, pid: Int): List<SandboxModule> = runCatching {
         val r = com.zhizhu.zhicode.sandbox.SandboxAgentBridge.request(
             app, "proc_modules", pkg, pid, JSONObject().put("pid", pid), 6000,
@@ -427,17 +264,6 @@ class SandboxRepository(context: Context) {
         }
     }.getOrDefault(emptyList())
 
-    /**
-     * 轻量刷新：只问引擎状态与进程列表，**不碰图标与 Frida**。
-     *
-     * ## 为什么要单独一个方法
-     *
-     * 界面要**定时**刷新"哪个应用在跑"。而 `readApps()` 会顺带导一遍图标
-     * （一次 IPC + 每个包一次 PNG 解码），`readFrida()` 又是一次 IPC ——
-     * 轮询时带上它们等于每隔几秒做一遍重活，反而让界面更卡。
-     *
-     * 图标只在应用**装/卸**时才会变，那种时刻由动作自己触发完整重读。
-     */
     suspend fun pollRuntime(): Result<RuntimeSnapshot> = io {
         val statusResult = SandboxHostClient.call(app, "status", JSONObject())
         val running = runCatching { runningPackages() }.getOrDefault(emptySet())
@@ -466,12 +292,7 @@ class SandboxRepository(context: Context) {
         path
     }
 
-    /**
-     * 该包当前**可见的模块基址**。
-     *
-     * 走的是 guest 侧的 `proc_modules` —— 它在 guest 自己的进程里读自己的
-     * `/proc/self/maps`，所以拿得到真实基址。宿主进程做不到这件事。
-     */
+    /** 该包当前**可见的模块基址**。 */
     suspend fun modules(pkg: String): Result<String> = io {
         val pid = firstPid(pkg) ?: error("$pkg 没有正在运行的进程")
         val payload = JSONObject().put("pid", pid)
@@ -549,10 +370,7 @@ data class FridaStatus(
 data class SandboxApp(
     val packageName: String,
     val running: Boolean,
-    /**
-     * 引擎导出的图标 PNG 路径。**可能为 null** —— 解析失败时界面回落到
-     * 首字母方块，那比整行报错好。空值不是错误状态，是一种正常降级。
-     */
+    /** 引擎导出的图标 PNG 路径。 */
     val iconPath: String? = null,
 )
 
@@ -576,13 +394,7 @@ data class SandboxModule(
     val shortName: String get() = path.substringAfterLast('/').ifEmpty { path }
 }
 
-/**
- * 一个包在**某一时刻**的运行实况。
- *
- * 之所以把进程与模块打成一包返回，而不是让界面分两次问：轮询时两次调用之间
- * 进程可能已经退出，界面就会拿到自相矛盾的两截数据（比如"有 2 个进程"但
- * "模块表是上一次那个进程的"）。一次取完就永远是一致的快照。
- */
+/** 一个包在**某一时刻**的运行实况。 */
 data class SandboxInspection(
     val packageName: String,
     val processes: List<SandboxProcess>,
