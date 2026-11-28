@@ -41,6 +41,9 @@ import com.zhizhu.zhicode.compose.ui.pages.miuix.SettingsPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.SkillsPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ThemePage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.ThirdPartyLicensesPage
+import com.zhizhu.zhicode.compose.editor.EditorViewModel
+import com.zhizhu.zhicode.compose.ui.pages.miuix.EditorPage
+import com.zhizhu.zhicode.compose.ui.pages.miuix.SandboxBoardPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.UiDebugPage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.UpdatePage
 import com.zhizhu.zhicode.compose.ui.pages.miuix.WorkspacePage
@@ -314,6 +317,20 @@ interface ZhiPageSet {
             onOpenApiConfig = viewModel::openApiConfigFromOobe,
             onSkipOrFinish = viewModel::completeOobe,
         )
+    }
+
+    // ------------------------------------------------------------------ 独立页面
+
+    /** 沙箱看板（独立 Activity）。 */
+    @Composable
+    fun SandboxBoard(onExit: () -> Unit) {
+        SandboxBoardPage(onExit = onExit)
+    }
+
+    /** 文件编辑器（独立 Activity）。 */
+    @Composable
+    fun Editor(viewModel: EditorViewModel, onExit: () -> Unit) {
+        EditorPage(viewModel = viewModel, onExit = onExit)
     }
 
     // ------------------------------------------------------------------ 调试

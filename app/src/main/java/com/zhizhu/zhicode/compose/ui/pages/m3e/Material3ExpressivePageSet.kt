@@ -7,6 +7,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.zhizhu.zhicode.compose.theme.LocalThemeSettings
 import com.zhizhu.zhicode.compose.data.ThemeSettings
+import com.zhizhu.zhicode.compose.editor.EditorViewModel
 import com.zhizhu.zhicode.compose.model.ExtensionSummary
 import com.zhizhu.zhicode.compose.model.MemoryState
 import com.zhizhu.zhicode.compose.model.RoleCardsState
@@ -257,6 +258,16 @@ object Material3ExpressivePageSet : ZhiPageSet {
     @Composable
     override fun Oobe(state: WorkspaceUiState, viewModel: WorkspaceViewModel) {
         M3eOobePage(state = state, viewModel = viewModel)
+    }
+
+    @Composable
+    override fun SandboxBoard(onExit: () -> Unit) {
+        M3eSandboxBoardPage(onExit = onExit)
+    }
+
+    @Composable
+    override fun Editor(viewModel: EditorViewModel, onExit: () -> Unit) {
+        M3eEditorPage(viewModel = viewModel, onExit = onExit)
     }
 
     @Composable

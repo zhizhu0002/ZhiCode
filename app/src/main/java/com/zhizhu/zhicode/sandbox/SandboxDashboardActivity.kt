@@ -9,7 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import com.zhizhu.zhicode.compose.data.ThemeSettings
 import com.zhizhu.zhicode.compose.data.ThemeStore
 import com.zhizhu.zhicode.compose.theme.ZhiAppTheme
-import com.zhizhu.zhicode.compose.ui.pages.miuix.SandboxBoardPage
+import com.zhizhu.zhicode.compose.ui.pages.LocalZhiPageSet
 
 class SandboxDashboardActivity : ComponentActivity() {
 
@@ -33,7 +33,7 @@ class SandboxDashboardActivity : ComponentActivity() {
             .getOrDefault(ThemeSettings())
         setContent {
             ZhiAppTheme(theme = themeSettings) {
-                SandboxBoardPage(onExit = { finish() })
+                LocalZhiPageSet.current.SandboxBoard(onExit = { finish() })
             }
         }
     }
