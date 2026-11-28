@@ -190,7 +190,7 @@ private fun M3eSidebar(
             ) {
                 Text(
                     text = "工作区",
-                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp),
+                    style = MaterialTheme.typography.bodyLarge,
                     color = scheme.onSurfaceVariant,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f),
@@ -717,14 +717,14 @@ private fun WorkspaceHeaderRow(
                         withStyle(
                             SpanStyle(
                                 color = scheme.onSurfaceVariant.copy(alpha = 0.78f),
-                                fontSize = 11.sp,
+
                                 fontWeight = FontWeight.Normal,
                             ),
                         ) {
                             append(" (${group.path})")
                         }
                     },
-                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp),
+                    style = MaterialTheme.typography.bodyLarge,
                     color = titleColor,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -824,7 +824,7 @@ private fun SidebarRow(
         }
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp),
+            style = MaterialTheme.typography.bodyLarge,
             color = foreground,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -882,7 +882,7 @@ private fun SessionRow(
                 }
                 Text(
                     text = session.title,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp),
+                    style = MaterialTheme.typography.bodyLarge,
                     color = titleColor,
                     fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
                     maxLines = 1,

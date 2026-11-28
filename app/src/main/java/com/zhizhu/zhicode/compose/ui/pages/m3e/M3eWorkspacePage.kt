@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -47,6 +48,9 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.ToggleButton
+import androidx.compose.material3.ToggleButtonDefaults
+import androidx.compose.material3.ToggleButtonShapes
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
@@ -419,29 +423,23 @@ internal fun M3eWorkspacePage(
                                     colors = FloatingToolbarDefaults.vibrantFloatingToolbarColors(),
                                 ) {
                                     compactTabs.forEach { tab ->
-                                        val selected = state.tab == tab
-                                        Surface(
-                                            onClick = { if (!imeOpen) viewModel.selectTab(tab) },
-                                            shape = CircleShape,
-                                            color = if (selected) scheme.surface else Color.Transparent,
-                                            contentColor = if (selected) scheme.primary else scheme.onPrimaryContainer,
+                                        ToggleButton(
+                                            checked = state.tab == tab,
+                                            onCheckedChange = { if (!imeOpen) viewModel.selectTab(tab) },
+                                            shapes = ToggleButtonShapes(CircleShape, CircleShape, CircleShape),
+                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
                                         ) {
-                                            Row(
-                                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                            ) {
-                                                Icon(
-                                                    painter = iconForTab(tab),
-                                                    contentDescription = tab.label,
-                                                    modifier = Modifier.size(18.dp),
-                                                )
-                                                Spacer(Modifier.width(6.dp))
-                                                Text(
-                                                    text = tab.label,
-                                                    style = MaterialTheme.typography.labelLarge,
-                                                    maxLines = 1,
-                                                )
-                                            }
+                                            Icon(
+                                                painter = iconForTab(tab),
+                                                contentDescription = null,
+                                                modifier = Modifier.size(ToggleButtonDefaults.IconSize),
+                                            )
+                                            Spacer(Modifier.width(6.dp))
+                                            Text(
+                                                text = tab.label,
+                                                style = MaterialTheme.typography.labelLarge,
+                                                maxLines = 1,
+                                            )
                                         }
                                     }
                                 }
